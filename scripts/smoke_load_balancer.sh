@@ -101,6 +101,8 @@ daemon = false
 pid_file = "$TMP_DIR/fluxheim.pid"
 upgrade_sock = "$TMP_DIR/fluxheim-upgrade.sock"
 certificate_reload_sock = "$TMP_DIR/fluxheim-cert-reload.sock"
+grace_period_seconds = 1
+graceful_shutdown_timeout_seconds = 2
 
 [admin]
 enabled = true
@@ -128,6 +130,7 @@ upstream_tls = false
 [vhosts.proxy.load_balance]
 max_iterations = 256
 all_down_status = 503
+runtime_state_file = "$TMP_DIR/vhost-lb-state.json"
 
 [vhosts.proxy.load_balance.health_check]
 enabled = true
@@ -163,6 +166,7 @@ upstream_tls = false
 selection = "round-robin"
 max_iterations = 256
 all_down_status = 503
+runtime_state_file = "$TMP_DIR/sticky-lb-state.json"
 
 [vhosts.routes.proxy.load_balance.persistence]
 enabled = true
@@ -226,12 +230,30 @@ wait_http "http://127.0.0.1:$ORIGIN_TWO_PORT/"
     cargo build --quiet --no-default-features --features proxy,load-balancer,metrics
 )
 export FLUXHEIM_ADMIN_TOKEN="smoke-token"
-"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" >"$TMP_DIR/fluxheim.log" 2>&1 &
-FLUXHEIM_PID=$!
 
-wait_http "http://127.0.0.1:$FLUXHEIM_PORT/smoke"
-wait_http "http://127.0.0.1:$ADMIN_PORT/_fluxheim/health"
-wait_http "http://127.0.0.1:$METRICS_PORT/metrics"
+start_fluxheim() {
+    "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" >"$TMP_DIR/fluxheim.log" 2>&1 &
+    FLUXHEIM_PID=$!
+
+    wait_http "http://127.0.0.1:$FLUXHEIM_PORT/smoke"
+    wait_http "http://127.0.0.1:$ADMIN_PORT/_fluxheim/health"
+    wait_http "http://127.0.0.1:$METRICS_PORT/metrics"
+}
+
+stop_fluxheim() {
+    if [ -n "$FLUXHEIM_PID" ]; then
+        kill "$FLUXHEIM_PID" 2>/dev/null || true
+        wait "$FLUXHEIM_PID" 2>/dev/null || true
+        FLUXHEIM_PID=
+    fi
+}
+
+restart_fluxheim() {
+    stop_fluxheim
+    start_fluxheim
+}
+
+start_fluxheim
 
 RESPONSES="$TMP_DIR/responses.txt"
 : > "$RESPONSES"
@@ -303,6 +325,28 @@ if ! grep -q '"alias":"origin-one"' "$TMP_DIR/load-balancer-status-weighted.json
     exit 1
 fi
 
+curl -fsS "http://127.0.0.1:$METRICS_PORT/metrics" > "$TMP_DIR/metrics-after-member-weight.txt"
+if ! grep -q 'fluxheim_load_balancer_events_total{event="member_weight",route="",scope="vhost",upstream="origin-one",vhost="smoke"} 1' "$TMP_DIR/metrics-after-member-weight.txt"; then
+    echo "load balancer metrics missed member_weight event" >&2
+    cat "$TMP_DIR/metrics-after-member-weight.txt" >&2
+    exit 1
+fi
+
+restart_fluxheim
+
+curl -fsS \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/status" \
+    > "$TMP_DIR/load-balancer-status-weighted-restored.json"
+
+if ! grep -q '"alias":"origin-one"' "$TMP_DIR/load-balancer-status-weighted-restored.json" \
+    || ! grep -q '"effective_weight":4' "$TMP_DIR/load-balancer-status-weighted-restored.json" \
+    || ! grep -q '"runtime_weight_override":4' "$TMP_DIR/load-balancer-status-weighted-restored.json"; then
+    echo "load balancer runtime state file did not restore runtime weight override" >&2
+    cat "$TMP_DIR/load-balancer-status-weighted-restored.json" >&2
+    exit 1
+fi
+
 WEIGHTED_RESPONSES="$TMP_DIR/weighted-responses.txt"
 : > "$WEIGHTED_RESPONSES"
 for _ in 1 2 3 4 5; do
@@ -326,11 +370,10 @@ if [ "$maglev_weight_status" != "400" ]; then
     exit 1
 fi
 
-curl -fsS "http://127.0.0.1:$METRICS_PORT/metrics" > "$TMP_DIR/metrics-after-member-weight.txt"
-if ! grep -q 'fluxheim_load_balancer_events_total{event="member_weight",route="",scope="vhost",upstream="origin-one",vhost="smoke"} 1' "$TMP_DIR/metrics-after-member-weight.txt" \
-    || ! grep -q 'fluxheim_load_balancer_events_total{event="member_weight_invalid",route="maglev",scope="route",upstream="origin-one",vhost="smoke"} 1' "$TMP_DIR/metrics-after-member-weight.txt"; then
-    echo "load balancer metrics missed member_weight events" >&2
-    cat "$TMP_DIR/metrics-after-member-weight.txt" >&2
+curl -fsS "http://127.0.0.1:$METRICS_PORT/metrics" > "$TMP_DIR/metrics-after-member-weight-invalid.txt"
+if ! grep -q 'fluxheim_load_balancer_events_total{event="member_weight_invalid",route="maglev",scope="route",upstream="origin-one",vhost="smoke"} 1' "$TMP_DIR/metrics-after-member-weight-invalid.txt"; then
+    echo "load balancer metrics missed member_weight_invalid event" >&2
+    cat "$TMP_DIR/metrics-after-member-weight-invalid.txt" >&2
     exit 1
 fi
 
@@ -408,6 +451,31 @@ if ! grep -q '"name":"sticky"' "$TMP_DIR/load-balancer-status-sticky.json" \
     exit 1
 fi
 
+restart_fluxheim
+
+curl -fsS \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/status" \
+    > "$TMP_DIR/load-balancer-status-sticky-restored.json"
+
+if ! grep -q '"name":"sticky"' "$TMP_DIR/load-balancer-status-sticky-restored.json" \
+    || ! grep -q '"entry_count":1' "$TMP_DIR/load-balancer-status-sticky-restored.json"; then
+    echo "load balancer runtime state file did not restore route persistence entry" >&2
+    cat "$TMP_DIR/load-balancer-status-sticky-restored.json" >&2
+    exit 1
+fi
+
+curl -fsS \
+    -H "x-sticky-session: smoke-session" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/sticky/session" > "$TMP_DIR/sticky-restored.txt"
+sed -n '1p' "$STICKY_RESPONSES" > "$TMP_DIR/sticky-expected.txt"
+if ! cmp -s "$TMP_DIR/sticky-expected.txt" "$TMP_DIR/sticky-restored.txt"; then
+    echo "load balancer runtime state file did not keep sticky header session pinned after restart" >&2
+    cat "$STICKY_RESPONSES" >&2
+    cat "$TMP_DIR/sticky-restored.txt" >&2
+    exit 1
+fi
+
 curl -fsS -X POST \
     -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
     "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/persistence/clear?vhost=smoke&route=sticky" \
@@ -443,6 +511,21 @@ if ! grep -q '"alias":"origin-two"' "$TMP_DIR/load-balancer-status-disabled.json
     || ! grep -q '"runtime_state_override":"disabled"' "$TMP_DIR/load-balancer-status-disabled.json"; then
     echo "load balancer status endpoint did not report disabled runtime override" >&2
     cat "$TMP_DIR/load-balancer-status-disabled.json" >&2
+    cat "$TMP_DIR/member-disable.json" >&2
+    exit 1
+fi
+
+restart_fluxheim
+
+curl -fsS \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/status" \
+    > "$TMP_DIR/load-balancer-status-disabled-restored.json"
+
+if ! grep -q '"alias":"origin-two"' "$TMP_DIR/load-balancer-status-disabled-restored.json" \
+    || ! grep -q '"runtime_state_override":"disabled"' "$TMP_DIR/load-balancer-status-disabled-restored.json"; then
+    echo "load balancer runtime state file did not restore disabled runtime override" >&2
+    cat "$TMP_DIR/load-balancer-status-disabled-restored.json" >&2
     cat "$TMP_DIR/member-disable.json" >&2
     exit 1
 fi
