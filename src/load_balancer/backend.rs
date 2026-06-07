@@ -194,15 +194,15 @@ impl FluxLoadBalancerRuntime {
                 "load balancer member is already configured in this pool",
             ));
         }
-
-        let mut next_backends = (*snapshot.backends).clone();
-        next_backends.insert(backend);
-        if next_backends.len() > MAX_RUNTIME_BACKEND_COUNT {
+        if snapshot.backends.len() >= MAX_RUNTIME_BACKEND_COUNT {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "load balancer backend-set size limit reached; remove a member before adding another",
             ));
         }
+
+        let mut next_backends = (*snapshot.backends).clone();
+        next_backends.insert(backend);
         let mut next_health = (*snapshot.health).clone();
         next_health.entry(key).or_default();
         let backend_count = next_backends.len();
