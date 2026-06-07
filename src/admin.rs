@@ -3821,7 +3821,9 @@ mod tests {
     use crate::config_route::RouteConfig;
     use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
     use crate::snapshot::SnapshotStore;
-    use crate::test_support::{safe_child_path, unique_temp_path};
+    #[cfg(feature = "load-balancer")]
+    use crate::test_support::safe_child_path;
+    use crate::test_support::unique_temp_path;
     #[cfg(unix)]
     use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
 
