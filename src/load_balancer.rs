@@ -2029,6 +2029,51 @@ mod tests {
     }
 
     #[test]
+    fn runtime_backend_set_mutation_rejects_dynamic_discovery_pools() {
+        install_test_crypto_provider();
+        let root = unique_temp_path("lb-runtime-mutation-dynamic-file");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("upstreams.txt");
+        std::fs::write(&path, "127.0.0.1:3000\n127.0.0.1:3001\n").unwrap();
+        let file_balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstream: None,
+            upstreams_file: Some(path),
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let error = file_balancer
+            .add_runtime_backend_member("127.0.0.1:3002", 1)
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("static upstream pools"));
+
+        let dns_balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstream: None,
+            upstreams: vec!["localhost:3000".to_owned()],
+            upstream_dns_refresh_secs: Some(2),
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let error = dns_balancer
+            .add_runtime_backend_member("127.0.0.1:3002", 1)
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("static upstream pools"));
+    }
+
+    #[test]
     fn source_ip_persistence_reuses_selected_backend() {
         install_test_crypto_provider();
         let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
