@@ -186,10 +186,12 @@ later `1.5.x` or future module lines.
   previous generation verification. Restart-persistent managed-cookie state,
   shared signing keys, and active-active cookie mirroring remain future HA work.
 - HA persistence/cookie mirroring is future cluster-state work. Persistence
-  tables, passive health, retry budgets, queue counters, and runtime overrides
-  are local to one Fluxheim process in the current `1.5.x` line; active-active
-  deployments must either accept independent local state or place another HA
-  layer in front.
+  tables and runtime member/weight overrides can be restart-persisted locally
+  with `proxy.load_balance.runtime_state_file`, but passive health, retry
+  budgets, queue counters, and managed-cookie signing keys remain local to one
+  Fluxheim process in the current `1.5.x` line. Active-active deployments must
+  either accept independent local state or place another HA layer in front until
+  cross-node synchronization lands.
 - In dynamic DNS/file discovery pools, stale runtime `drain` overrides may be
   reclaimed when a member leaves the live discovery set. Runtime `disable` and
   `forced_down` overrides are preserved across discovery churn until explicit

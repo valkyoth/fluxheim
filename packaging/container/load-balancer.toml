@@ -58,6 +58,9 @@ upstream_tls = false
 selection = "least-connections"
 all_down_status = 503
 max_iterations = 128
+# Optional local restart-persistent runtime state. Mount the parent directory
+# as a persistent volume before enabling this in containers.
+# runtime_state_file = "/var/lib/fluxheim/load-balancer/default.json"
 
 [vhosts.proxy.load_balance.health_check]
 enabled = true
