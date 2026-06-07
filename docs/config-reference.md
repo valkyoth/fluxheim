@@ -402,7 +402,12 @@ removes an existing configured address or alias. The backend set and health map
 are published as one atomic runtime snapshot, so status and selection do not
 observe a half-updated pool. Remove and address-update operations reject members
 with active in-flight connections; drain the member first, wait for it to reach
-zero in-flight requests, then remove or retarget it.
+zero in-flight requests, then remove or retarget it. The in-flight check is a
+best-effort ordering gate at mutation time; a very narrow race can still allow
+one already-selected request to complete against the old member after removal
+or retarget, and Fluxheim emits a load-balancer warning if that is observed.
+Runtime backend sets are capped at 256 members in this release; remove a member
+before adding another when the cap is reached.
 
 Runtime backend-set mutation is available only for static upstream pools in
 this release. It is rejected for DNS/file-discovery pools because discovery

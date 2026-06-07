@@ -164,11 +164,14 @@ with `address`/`new_member` to retarget a non-aliased member. Aliased members
 can be weight-updated but need a config reload for address changes because the
 alias is part of the static backend identity. Use `member-remove` after the
 member has drained to zero in-flight requests. These backend-set mutations are
-local in-memory changes in the current release. Runtime-added or retargeted
-members carry address and configured weight only; aliases, tags, backup
-membership, priority groups, locality metadata, and per-upstream caps remain
-static-config fields. DNS/file-discovery pools and Maglev selectors reject
-runtime backend-set mutation.
+local in-memory changes in the current release. Runtime backend sets are capped
+at 256 members, and the zero in-flight check is a best-effort mutation-time
+gate; Fluxheim warns if a narrow race leaves a request completing against a
+removed or retargeted address. Runtime-added or retargeted members carry
+address and configured weight only; aliases, tags, backup membership, priority
+groups, locality metadata, and per-upstream caps remain static-config fields.
+DNS/file-discovery pools and Maglev selectors reject runtime backend-set
+mutation.
 
 The load-balancer-only status view is available without parsing the full admin
 status body:

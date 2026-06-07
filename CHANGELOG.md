@@ -39,6 +39,13 @@ behavior when the change improves security or project direction.
   same address starts from clean runtime state.
 - Start retargeted backend addresses with fresh readiness state instead of
   carrying the previous address's health-check state across the key change.
+- Move the "at least one backend remains" remove guard under the runtime
+  backend-set mutation lock and cap runtime backend sets at 256 members.
+- Save new backend-set mutations through the background runtime-state save path
+  and warn if a narrow post-check race leaves a request completing against a
+  removed or retargeted address.
+- Normalize backend-set mutation `member` fields to the resolved backend
+  address while keeping configured aliases in the separate `alias` field.
 
 ## 1.5.9 - 2026-06-07
 

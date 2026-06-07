@@ -1071,7 +1071,7 @@ impl UpstreamLoadBalancer {
         let backend = runtime_backend_from_member(member, weight)?;
         let key = backend_key(&backend);
         let backend_count = self.inner.add_runtime_backend(backend.clone())?;
-        self.save_runtime_state_if_configured("member_add");
+        self.save_runtime_state_if_configured_in_background("member_add");
         Ok(LoadBalancerRuntimeBackendSetMutation {
             member: backend.addr.to_string(),
             operation: LoadBalancerRuntimeBackendSetOperation::Added,
@@ -1097,12 +1097,6 @@ impl UpstreamLoadBalancer {
         let backend = self
             .inner
             .backend_by_member(member, &self.backend_aliases)?;
-        if self.inner.backend_count() <= 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "load balancer member cannot be removed because at least one backend must remain",
-            ));
-        }
         if self.counters.count(&backend) > 0 {
             return Err(io::Error::new(
                 io::ErrorKind::WouldBlock,
@@ -1115,11 +1109,19 @@ impl UpstreamLoadBalancer {
             .get(&key)
             .map(|alias| alias.to_string());
         let backend_count = self.inner.remove_runtime_backend(&backend)?;
+        let post_remove_in_flight = self.counters.count(&backend);
+        if post_remove_in_flight > 0 {
+            log::warn!(
+                target: "fluxheim::load_balancer",
+                "load balancer member removed after zero-count gate but now has in-flight requests count={}",
+                post_remove_in_flight
+            );
+        }
         self.clear_removed_backend_state(key);
         self.prune_stale_backend_state();
-        self.save_runtime_state_if_configured("member_remove");
+        self.save_runtime_state_if_configured_in_background("member_remove");
         Ok(LoadBalancerRuntimeBackendSetMutation {
-            member: member.trim().to_owned(),
+            member: backend.addr.to_string(),
             operation: LoadBalancerRuntimeBackendSetOperation::Removed,
             configured_weight: backend.weight,
             backend_count,
@@ -1177,12 +1179,20 @@ impl UpstreamLoadBalancer {
             .inner
             .update_runtime_backend(&current, updated.clone())?;
         if current_key != updated_key {
+            let post_update_in_flight = self.counters.count(&current);
+            if post_update_in_flight > 0 {
+                log::warn!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member retargeted after zero-count gate but previous address now has in-flight requests count={}",
+                    post_update_in_flight
+                );
+            }
             self.clear_removed_backend_state(current_key);
         }
         self.prune_stale_backend_state();
-        self.save_runtime_state_if_configured("member_update");
+        self.save_runtime_state_if_configured_in_background("member_update");
         Ok(LoadBalancerRuntimeBackendSetMutation {
-            member: member.trim().to_owned(),
+            member: current.addr.to_string(),
             operation: LoadBalancerRuntimeBackendSetOperation::Updated,
             configured_weight: updated.weight,
             backend_count,
@@ -1986,6 +1996,7 @@ mod tests {
         let updated = balancer
             .update_runtime_backend_member("origin-a", None, Some(3))
             .unwrap();
+        assert_eq!(updated.member, "127.0.0.1:3000");
         assert_eq!(updated.alias.as_deref(), Some("origin-a"));
         assert_eq!(updated.configured_weight, 3);
 
@@ -1994,6 +2005,31 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert!(error.to_string().contains("aliased"));
+    }
+
+    #[test]
+    fn runtime_backend_set_remove_reports_resolved_member_address_for_alias() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_aliases: vec!["origin-a".to_owned(), "origin-b".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let removed = balancer.remove_runtime_backend_member("origin-a").unwrap();
+
+        assert_eq!(removed.member, "127.0.0.1:3000");
+        assert_eq!(removed.alias.as_deref(), Some("origin-a"));
+        assert_eq!(
+            removed.operation,
+            LoadBalancerRuntimeBackendSetOperation::Removed
+        );
     }
 
     #[test]

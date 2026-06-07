@@ -18,6 +18,8 @@ use pingora::services::ServiceReadyNotifier;
 
 pub(super) type RuntimeBackend = Backend;
 
+pub(super) const MAX_RUNTIME_BACKEND_COUNT: usize = 256;
+
 #[async_trait]
 pub(super) trait FluxBackendDiscovery: Send + Sync + 'static {
     async fn discover_flux_backends(&self) -> FluxResult<FluxBackendSet>;
@@ -195,6 +197,12 @@ impl FluxLoadBalancerRuntime {
 
         let mut next_backends = (*snapshot.backends).clone();
         next_backends.insert(backend);
+        if next_backends.len() > MAX_RUNTIME_BACKEND_COUNT {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer backend-set size limit reached; remove a member before adding another",
+            ));
+        }
         let mut next_health = (*snapshot.health).clone();
         next_health.entry(key).or_default();
         let backend_count = next_backends.len();
@@ -218,6 +226,12 @@ impl FluxLoadBalancerRuntime {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let snapshot = self.snapshot.load_full();
         let key = backend_key(backend);
+        if snapshot.backends.len() <= 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer member cannot be removed because at least one backend must remain",
+            ));
+        }
         if !snapshot
             .backends
             .iter()
@@ -553,12 +567,14 @@ pub(super) fn backend_container_snapshot(
 
 #[cfg(test)]
 mod tests {
+    use std::io;
     use std::sync::Mutex;
 
     use async_trait::async_trait;
 
     use super::{
-        BackendIdentity, FluxBackend, FluxBackendDiscovery, FluxBackendSet, FluxLoadBalancerRuntime,
+        BackendIdentity, FluxBackend, FluxBackendDiscovery, FluxBackendSet,
+        FluxLoadBalancerRuntime, MAX_RUNTIME_BACKEND_COUNT,
     };
     use crate::flux_error::FluxResult;
 
@@ -655,5 +671,46 @@ mod tests {
         assert!(snapshot.backends.contains(&replacement));
         assert!(!snapshot.health.contains_key(&current_key));
         assert!(snapshot.health.get(&updated_key).unwrap().ready());
+    }
+
+    #[tokio::test]
+    async fn runtime_remove_rejects_last_backend_inside_mutation_lock() {
+        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
+        let mut set = FluxBackendSet::default();
+        set.insert(backend.clone());
+        let runtime = FluxLoadBalancerRuntime::new(Box::new(TestDiscovery::new(set)));
+
+        runtime.update().await.unwrap();
+        let pingora_backend = backend.to_pingora_backend().unwrap();
+        let error = runtime
+            .remove_runtime_backend(&pingora_backend)
+            .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("at least one backend"));
+        assert_eq!(runtime.snapshot.load().backends.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn runtime_add_rejects_backend_set_over_limit() {
+        let mut set = FluxBackendSet::default();
+        for port in 10_000..10_000 + MAX_RUNTIME_BACKEND_COUNT {
+            set.insert(FluxBackend::new(&format!("127.0.0.1:{port}")).unwrap());
+        }
+        let runtime = FluxLoadBalancerRuntime::new(Box::new(TestDiscovery::new(set)));
+
+        runtime.update().await.unwrap();
+        let extra = FluxBackend::new("127.0.0.1:20000")
+            .unwrap()
+            .to_pingora_backend()
+            .unwrap();
+        let error = runtime.add_runtime_backend(extra).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("size limit"));
+        assert_eq!(
+            runtime.snapshot.load().backends.len(),
+            MAX_RUNTIME_BACKEND_COUNT
+        );
     }
 }

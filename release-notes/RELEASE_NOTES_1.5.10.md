@@ -30,6 +30,11 @@ Fluxheim 1.5.10 starts the runtime backend-set mutation line.
   runtime overrides and passive-health state for the old backend key.
 - Retargeted backend addresses start with fresh readiness state rather than
   inheriting health-check state from the previous address.
+- Runtime backend-set mutations enforce the "at least one backend remains"
+  invariant under the mutation lock, cap runtime backend sets at 256 members,
+  save runtime state through the background save path, and warn if a narrow
+  post-check race leaves a request completing against a removed or retargeted
+  address.
 
 ## Notes
 
@@ -42,6 +47,10 @@ backend membership.
 Runtime-added or retargeted members carry address and configured weight only.
 Aliases, tags, backup membership, priority groups, locality metadata, and
 per-upstream caps remain static-config fields and need a reload.
+
+Mutation response `member` fields use the resolved backend address consistently;
+configured aliases remain available through the separate `alias` field when
+present.
 
 ## Stop Line
 
