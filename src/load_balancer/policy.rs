@@ -232,6 +232,10 @@ impl HealthDerivedWeights {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(percent) = percent.filter(|percent| (1..100).contains(percent)) {
             if weights.len() >= MAX_HEALTH_DERIVED_WEIGHT_ENTRIES && !weights.contains_key(&key) {
+                log::warn!(
+                    target: "fluxheim::security",
+                    "health-weight map at capacity ({MAX_HEALTH_DERIVED_WEIGHT_ENTRIES}); degradation signal dropped for backend key {key:#x}"
+                );
                 return;
             }
             weights.insert(key, percent);
@@ -240,7 +244,7 @@ impl HealthDerivedWeights {
         }
     }
 
-    fn weight_percent(&self, key: u64) -> Option<u8> {
+    pub(super) fn weight_percent(&self, key: u64) -> Option<u8> {
         self.weights
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())

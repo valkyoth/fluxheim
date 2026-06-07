@@ -3655,10 +3655,14 @@ the exception while the cache server is being completed as a focused sequence:
   session-bound `Storage`, `HandleHit`, and `HandleMiss` types. Keep the
   existing memory, disk, encrypted disk, tiered, predictor, stale, purge,
   range/slice, and cache-lock behavior unchanged, and provide a narrow adapter
-  for the current Pingora HTTP proxy path. Do not rewrite the cache format,
-  change cache policy semantics, add cross-node cache replication, add UDP/GSLB,
-  WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
-  release.
+  for the current Pingora HTTP proxy path. Also design, but do not silently
+  enable, a future `privacy-cache` mode for explicitly public assets: no
+  client-IP cache keys, no `Cookie`/`Authorization` admission, no per-user
+  variants, no private/no-store/Set-Cookie storage, strict query-string
+  defaults, and preferably memory or encrypted short-TTL disk storage. Do not
+  rewrite the cache format, change normal cache policy semantics, add
+  cross-node cache replication, add UDP/GSLB, WAF, VPN/firewall appliance
+  behavior, or Wasm/iRules/Lua scripting in this release.
 - `v1.5.14`: local exec and agent health-check line. Stop at opt-in, bounded
   local command/agent checks for cases that cannot be represented by TCP, TLS,
   HTTP, gRPC, JSON, or database protocol probes. Require absolute allow-listed

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +16,7 @@ const LB_HEALTH_CHECK_MAX_REQUEST_HEADERS: usize = 16;
 const LB_HEALTH_CHECK_MAX_REQUEST_HEADER_VALUE_BYTES: usize = 1024;
 const MIN_BOUNDED_LOAD_FACTOR_PER_MILLE: u16 = 1000;
 const MAX_BOUNDED_LOAD_FACTOR_PER_MILLE: u16 = 10000;
+const DEFAULT_LB_HEALTH_WEIGHT_MIN_PERCENT: u8 = 25;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -270,6 +272,8 @@ pub struct LoadBalanceHealthCheckConfig {
     pub expected_body_contains: Vec<String>,
     #[serde(default)]
     pub expected_body_json: Vec<LoadBalanceHealthCheckExpectedJson>,
+    #[serde(default = "default_lb_health_weight_min_percent")]
+    pub health_weight_min_percent: u8,
     #[serde(default)]
     pub reuse_connection: bool,
     #[serde(default)]
@@ -287,11 +291,21 @@ pub struct LoadBalanceHealthCheckExpectedHeader {
     pub value: String,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LoadBalanceHealthCheckRequestHeader {
     pub name: String,
+    #[serde(skip_serializing)]
     pub value: String,
+}
+
+impl fmt::Debug for LoadBalanceHealthCheckRequestHeader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoadBalanceHealthCheckRequestHeader")
+            .field("name", &self.name)
+            .field("value", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -327,6 +341,7 @@ impl Default for LoadBalanceHealthCheckConfig {
             expected_headers: Vec::new(),
             expected_body_contains: Vec::new(),
             expected_body_json: Vec::new(),
+            health_weight_min_percent: default_lb_health_weight_min_percent(),
             reuse_connection: false,
             port_override: None,
             connect_timeout_secs: None,
@@ -496,6 +511,11 @@ impl LoadBalanceHealthCheckConfig {
                     field: "proxy.load_balance.health_check.expected_body_json",
                 });
             }
+        }
+        if !(1..=100).contains(&self.health_weight_min_percent) {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.health_weight_min_percent",
+            });
         }
         if self.port_override.is_some_and(|port| port == 0) {
             return Err(ConfigError::InvalidLoadBalanceHealthCheck {
@@ -1079,6 +1099,10 @@ fn default_lb_health_check_method() -> String {
 
 fn default_lb_health_check_path() -> String {
     "/".to_owned()
+}
+
+fn default_lb_health_weight_min_percent() -> u8 {
+    DEFAULT_LB_HEALTH_WEIGHT_MIN_PERCENT
 }
 
 fn valid_health_check_method(method: &str) -> bool {

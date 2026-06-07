@@ -1146,7 +1146,8 @@ Request headers are valid only for HTTP and gRPC health checks, are capped at
 16 entries and 1024 bytes per value, reject duplicate names
 case-insensitively, and reserve hop-by-hop headers plus `Host`. Use
 `host = "app.internal"` for the HTTP Host header. Header values are not exposed
-in metrics labels or runtime status.
+in metrics labels or runtime status, and are redacted from serialized config
+views.
 Set `protocol = "grpc"` to run the standard gRPC Health Checking Protocol over
 HTTP/2. Fluxheim sends `POST /grpc.health.v1.Health/Check` with a bounded
 hand-encoded request body and expects HTTP `200`, `content-type:
@@ -1173,9 +1174,11 @@ HTTP and gRPC health responses may include `X-Health-Weight: N`, where `N` is
 an integer from `1` through `100`. Values below `100` reduce the backend's
 effective selection weight to that percentage of its configured/admin runtime
 weight while the backend remains healthy; `100` or an absent header clears the
-health-derived override. Invalid values fail the health check. Runtime status
-exposes this as `health_weight_percent` separately from configured weight and
-admin runtime weight overrides.
+health-derived override. `health_weight_min_percent` defaults to `25`, so a
+backend cannot self-report below 25% of its base weight unless the operator
+explicitly lowers that floor. Invalid values fail the health check. Runtime
+status exposes this as `health_weight_percent` separately from configured
+weight and admin runtime weight overrides.
 `expected_headers` can require exact response header values:
 `expected_headers = [{ name = "x-fluxheim-health", value = "ready" }]`.
 `expected_body_contains = ["ready"]` requires each configured byte substring

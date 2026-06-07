@@ -100,6 +100,7 @@ struct FluxHttpHealthCheck {
     expected_body_json: Arc<[LoadBalanceHealthCheckExpectedJson]>,
     request_body: Option<Bytes>,
     grpc_response: bool,
+    health_weight_min_percent: u8,
     health_weights: Arc<HealthDerivedWeights>,
 }
 
@@ -169,8 +170,13 @@ impl FluxHealthCheck for FluxHttpHealthCheck {
             &self.expected_headers,
         )
         .map_err(HttpHealthCheckError::into_flux)?;
-        record_health_weight(response, backend_key(target), &self.health_weights)
-            .map_err(HttpHealthCheckError::into_flux)?;
+        record_health_weight(
+            response,
+            backend_key(target),
+            self.health_weight_min_percent,
+            &self.health_weights,
+        )
+        .map_err(HttpHealthCheckError::into_flux)?;
 
         if self.grpc_response {
             validate_grpc_health_response_header(response)
@@ -323,6 +329,7 @@ fn configured_http_health_check(
             ))
         }),
         grpc_response: grpc,
+        health_weight_min_percent: config.load_balance.health_check.health_weight_min_percent,
         health_weights,
     }))
 }
@@ -491,6 +498,7 @@ fn json_path_value<'a>(json: &'a Value, path: &str) -> Option<&'a Value> {
 fn record_health_weight(
     response: &ResponseHeader,
     key: u64,
+    min_percent: u8,
     health_weights: &HealthDerivedWeights,
 ) -> Result<(), HttpHealthCheckError> {
     let Some(value) = response.headers.get(HEALTH_WEIGHT_HEADER) else {
@@ -515,6 +523,7 @@ fn record_health_weight(
             "invalid HTTP health check degraded weight header",
         ));
     }
+    let percent = percent.max(min_percent);
     health_weights.set_percent(key, (percent < 100).then_some(percent));
     Ok(())
 }
@@ -626,6 +635,18 @@ fn decode_grpc_health_status(message: &[u8]) -> Result<u64, HttpHealthCheckError
                     return Err(invalid_grpc_response());
                 }
             }
+            (_, 1) => {
+                offset = offset.checked_add(8).ok_or_else(invalid_grpc_response)?;
+                if offset > message.len() {
+                    return Err(invalid_grpc_response());
+                }
+            }
+            (_, 5) => {
+                offset = offset.checked_add(4).ok_or_else(invalid_grpc_response)?;
+                if offset > message.len() {
+                    return Err(invalid_grpc_response());
+                }
+            }
             _ => return Err(invalid_grpc_response()),
         }
     }
@@ -686,7 +707,7 @@ mod tests {
 
     use super::HealthDerivedWeights;
     use super::{
-        configured_http_health_check, grpc_frame, grpc_health_request_body,
+        configured_http_health_check, grpc_frame, grpc_health_request_body, record_health_weight,
         validate_grpc_health_response_body, validate_grpc_health_response_header,
         validate_http_health_response, validate_http_health_response_body,
         validate_http_health_response_body_json,
@@ -917,5 +938,31 @@ mod tests {
             .append_header("content-type", "text/plain")
             .unwrap();
         assert!(validate_grpc_health_response_header(&wrong_type).is_err());
+    }
+
+    #[test]
+    fn grpc_health_response_skips_unknown_fixed_width_fields() {
+        let mut response = vec![0x11];
+        response.extend_from_slice(&[0u8; 8]);
+        response.push(0x1d);
+        response.extend_from_slice(&[0u8; 4]);
+        response.extend_from_slice(&[0x08, 0x01]);
+
+        assert!(validate_grpc_health_response_body(&grpc_frame(&response)).is_ok());
+    }
+
+    #[test]
+    fn health_weight_signal_is_clamped_to_configured_floor() {
+        let weights = HealthDerivedWeights::default();
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response.append_header("x-health-weight", "1").unwrap();
+
+        assert!(record_health_weight(&response, 42, 25, &weights).is_ok());
+        assert_eq!(weights.weight_percent(42), Some(25));
+
+        let mut recovered = ResponseHeader::build(200, None).unwrap();
+        recovered.append_header("x-health-weight", "100").unwrap();
+        assert!(record_health_weight(&recovered, 42, 25, &weights).is_ok());
+        assert_eq!(weights.weight_percent(42), None);
     }
 }

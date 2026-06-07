@@ -24,7 +24,8 @@ name = "Authorization"
   dot-separated object paths.
 - `X-Health-Weight: N` on a successful HTTP or gRPC health response lowers the
   backend's effective selection weight to `N` percent while it remains healthy.
-  `100` or an absent header clears the health-derived override.
+  `100` or an absent header clears the health-derived override. The new
+  `health_weight_min_percent` floor defaults to `25`.
 
 ## Security And Bounds
 
@@ -36,14 +37,16 @@ name = "Authorization"
 - Hop-by-hop and proxy-control headers such as `Connection`,
   `Transfer-Encoding`, `Upgrade`, and proxy auth headers are rejected.
 - Header values are not emitted in load-balancer metrics labels or runtime
-  status output.
+  status output, and serialized config views redact configured request-header
+  values.
 - gRPC health checks use fixed standard request/response semantics and reject
   conflicting HTTP status/header/body matcher config.
 - JSON health matchers are exact scalar checks only; no JSONPath, arrays,
   expressions, regexes, or scripts are evaluated.
 - Health-derived weights are bounded to `1..=100`, stored separately from
-  configured/admin runtime weights, pruned with backend state, and exposed in
-  status as `health_weight_percent`.
+  configured/admin runtime weights, clamped by `health_weight_min_percent`,
+  pruned with backend state, logged when the bounded map is full, and exposed
+  in status as `health_weight_percent`.
 
 ## Stop Line
 

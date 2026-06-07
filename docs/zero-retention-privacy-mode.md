@@ -90,6 +90,17 @@ Use `examples/privacy.toml` as the baseline runtime config for this profile.
 It disables Fluxheim access logging, request ID generation, metrics, cache, and
 client-IP forwarding headers.
 
+## Future Privacy Cache
+
+Normal `cache` remains incompatible with `privacy-mode` because shared HTTP
+cache can persist response bodies, paths, query strings, `Vary` dimensions,
+cookies, and upstream privacy mistakes. A future `privacy-cache` design is
+planned as a separate, restricted public-asset cache rather than normal cache in
+privacy builds. The intended boundary is: no client-IP cache keys, no
+`Cookie`/`Authorization` admission, no per-user variants, no
+`private`/`no-store`/`Set-Cookie` storage, strict query-string defaults, and
+memory or encrypted short-TTL disk storage as the preferred shape.
+
 Implemented incompatible features:
 
 - `metrics`

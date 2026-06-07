@@ -490,6 +490,11 @@ These are realistic additions to implement across the stable core and early
      client-identifying fields. Initial compile/test coverage exists for
      `proxy,web,tls-rustls,privacy-mode`; exporter absence checks remain future
      work once logging exporters exist.
+   - Plan a separate `privacy-cache` design after the Fluxheim-owned cache
+     interface work: public assets only, no client-IP cache keys, no
+     `Cookie`/`Authorization` admission, no per-user variants, no
+     `private`/`no-store`/`Set-Cookie` storage, strict query defaults, and
+     memory or encrypted short-TTL disk storage as the preferred shape.
 
 ## Configuration Model
 

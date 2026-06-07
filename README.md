@@ -379,6 +379,10 @@ default build.
 Because `cache` is part of the default build, privacy builds must use
 `--no-default-features` through `profile-privacy` or an explicit manual feature
 set. Combining `privacy-mode` with `cache` or `metrics` fails at compile time.
+A future `privacy-cache` line is planned for explicitly public assets only,
+with no client-IP cache keys, no per-user variants, no `Cookie`/`Authorization`
+admission, and strict shared-cache safety rules; normal cache remains outside
+the current privacy build promise.
 
 Small manual builds:
 

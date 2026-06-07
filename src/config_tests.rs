@@ -546,6 +546,7 @@ fn parses_proxy_upstream_pool() {
                 { path = "status", equals = "ready" },
                 { path = "database.connected", equals = "true" },
             ]
+            health_weight_min_percent = 30
             reuse_connection = true
             port_override = 8081
             connect_timeout_secs = 1
@@ -704,6 +705,18 @@ fn parses_proxy_upstream_pool() {
         config.proxy.load_balance.health_check.request_headers[0].value,
         "Bearer health-token"
     );
+    let serialized_request_header =
+        toml::to_string(&config.proxy.load_balance.health_check.request_headers[0]).unwrap();
+    assert!(serialized_request_header.contains("Authorization"));
+    assert!(!serialized_request_header.contains("Bearer health-token"));
+    assert!(!serialized_request_header.contains("value"));
+    assert!(
+        format!(
+            "{:?}",
+            config.proxy.load_balance.health_check.request_headers[0]
+        )
+        .contains("[REDACTED]")
+    );
     assert_eq!(
         config.proxy.load_balance.health_check.expected_statuses,
         vec![200, 204]
@@ -731,6 +744,14 @@ fn parses_proxy_upstream_pool() {
     assert_eq!(
         config.proxy.load_balance.health_check.expected_body_json[1].equals,
         "true"
+    );
+    assert_eq!(
+        config
+            .proxy
+            .load_balance
+            .health_check
+            .health_weight_min_percent,
+        30
     );
     assert_eq!(
         config
@@ -3099,6 +3120,21 @@ fn rejects_invalid_http_load_balance_health_check() {
         invalid_json_matcher.validate(),
         Err(ConfigError::InvalidLoadBalanceHealthCheck {
             field: "proxy.load_balance.health_check.expected_body_json"
+        })
+    );
+
+    let invalid_health_weight_floor: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "http"
+            health_weight_min_percent = 0
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_health_weight_floor.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.health_weight_min_percent"
         })
     );
 
