@@ -7,6 +7,19 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.10 - 2026-06-07
+
+### Changed
+
+- Start the runtime backend-set mutation line. The stop line is authenticated
+  add, remove, and update operations for configured load-balancer pool members
+  through atomic backend-set swaps.
+- Keep the explicit boundary for this release: runtime mutations must include
+  validation, audit events, status and metrics visibility, drain behavior, and
+  clear selector limitations for hash, ring, Maglev, and power-of-two policies.
+  This release does not add xDS/Kubernetes/Consul discovery, UDP/GSLB, WAF,
+  VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting.
+
 ## 1.5.9 - 2026-06-07
 
 ### Changed

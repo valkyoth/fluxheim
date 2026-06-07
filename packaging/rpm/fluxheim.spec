@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.9
+Version:        1.5.10
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,10 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jun 07 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.10-1
+- Start the runtime backend-set mutation line for authenticated add, remove,
+  and update operations through atomic backend-set swaps.
+
 * Sun Jun 07 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.9-1
 - Start the restart-persistent load-balancer state line for versioned,
   size-limited, atomically written local runtime state with fail-closed rebuild
