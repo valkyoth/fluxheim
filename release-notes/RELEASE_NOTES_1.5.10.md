@@ -26,6 +26,8 @@ Fluxheim 1.5.10 starts the runtime backend-set mutation line.
 - Privacy-mode mutation responses, logs, and metrics avoid raw backend member
   addresses; they use configured aliases when available and `redacted` for
   response/log member fields otherwise.
+- Explicit remove and address-retarget operations clear stale per-backend
+  runtime overrides and passive-health state for the old backend key.
 
 ## Notes
 

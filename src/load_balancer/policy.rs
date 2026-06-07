@@ -233,6 +233,11 @@ impl BackendSelectionPolicy {
         self.health_weights.prune_stale(live_keys);
     }
 
+    pub(super) fn clear_runtime_key(&self, key: u64) {
+        self.runtime.clear_key(key);
+        self.health_weights.clear_key(key);
+    }
+
     pub(crate) fn runtime_snapshot(&self) -> RuntimeBackendPolicySnapshot {
         self.runtime.snapshot()
     }
@@ -306,6 +311,13 @@ impl HealthDerivedWeights {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .retain(|key, _| live_keys.contains(key));
+    }
+
+    fn clear_key(&self, key: u64) {
+        self.weights
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&key);
     }
 }
 
@@ -453,6 +465,19 @@ impl RuntimeBackendPolicyOverrides {
         state
             .weight_changed_at_unix_secs
             .retain(|key, _| live_keys.contains(key) || retained_override_keys.contains(key));
+    }
+
+    fn clear_key(&self, key: u64) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.drain.remove(&key);
+        state.disabled.remove(&key);
+        state.forced_down.remove(&key);
+        state.weights.remove(&key);
+        state.weight_changed_at_unix_secs.remove(&key);
+        state.changed_at_unix_secs.remove(&key);
     }
 
     fn snapshot(&self) -> RuntimeBackendPolicySnapshot {

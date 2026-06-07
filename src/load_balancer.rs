@@ -1115,6 +1115,7 @@ impl UpstreamLoadBalancer {
             .get(&key)
             .map(|alias| alias.to_string());
         let backend_count = self.inner.remove_runtime_backend(&backend)?;
+        self.clear_removed_backend_state(key);
         self.prune_stale_backend_state();
         self.save_runtime_state_if_configured("member_remove");
         Ok(LoadBalancerRuntimeBackendSetMutation {
@@ -1175,6 +1176,9 @@ impl UpstreamLoadBalancer {
         let backend_count = self
             .inner
             .update_runtime_backend(&current, updated.clone())?;
+        if current_key != updated_key {
+            self.clear_removed_backend_state(current_key);
+        }
         self.prune_stale_backend_state();
         self.save_runtime_state_if_configured("member_update");
         Ok(LoadBalancerRuntimeBackendSetMutation {
@@ -1204,6 +1208,13 @@ impl UpstreamLoadBalancer {
             self.save_runtime_state_if_configured("persistence_clear");
         }
         cleared
+    }
+
+    fn clear_removed_backend_state(&self, key: u64) {
+        self.backend_policy.clear_runtime_key(key);
+        if let Some(passive_health) = &self.passive_health {
+            passive_health.clear_key(key);
+        }
     }
 
     pub fn runtime_state_snapshot(&self) -> LoadBalancerRuntimeStateSnapshot {
@@ -2038,6 +2049,43 @@ mod tests {
             LoadBalancerRuntimeBackendSetOperation::Removed
         );
         assert_eq!(balancer.runtime_stats().persistence.entry_count, 0);
+    }
+
+    #[test]
+    fn runtime_backend_set_remove_clears_runtime_override_state() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+        balancer
+            .set_runtime_backend_state(
+                "127.0.0.1:3001",
+                LoadBalancerRuntimeBackendState::ForcedDown,
+            )
+            .unwrap();
+        assert_eq!(
+            balancer.runtime_stats().runtime_forced_down_backend_count,
+            1
+        );
+
+        balancer
+            .remove_runtime_backend_member("127.0.0.1:3001")
+            .unwrap();
+        balancer
+            .add_runtime_backend_member("127.0.0.1:3001", 1)
+            .unwrap();
+
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.runtime_overridden_backend_count, 0);
+        assert_eq!(stats.runtime_forced_down_backend_count, 0);
+        assert_eq!(stats.primary_available_backend_count, 2);
     }
 
     #[test]

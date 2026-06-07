@@ -34,6 +34,9 @@ behavior when the change improves security or project direction.
 - Document that runtime-added or retargeted members carry address and
   configured weight only; aliases, tags, backup/locality/priority metadata, and
   per-upstream caps remain static-config fields.
+- Clear per-backend runtime overrides and passive-health state when an admin
+  explicitly removes or retargets a runtime backend member, so re-adding the
+  same address starts from clean runtime state.
 
 ## 1.5.9 - 2026-06-07
 
