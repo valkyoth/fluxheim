@@ -18,6 +18,10 @@ Fluxheim 1.5.9 starts the restart-persistent load-balancer state line.
 - Restore validation for snapshot version, entry limits, duplicate keys,
   persistent runtime states, runtime weights, persistence key sizes, TTLs, and
   live backend membership before current runtime state is replaced.
+- Optional `proxy.load_balance.runtime_state_file` local restart persistence.
+  Fluxheim loads the file best-effort at pool construction and writes it
+  atomically after runtime member-state, runtime weight, persistence-table, and
+  persistence-clear changes.
 
 ## Stop Line
 

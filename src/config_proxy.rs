@@ -259,6 +259,11 @@ impl ProxyConfig {
         {
             *path = base_dir.join(&path);
         }
+        if let Some(path) = &mut self.load_balance.runtime_state_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
         if let Some(path) = &mut self.upstream_client_cert_path
             && path.is_relative()
         {

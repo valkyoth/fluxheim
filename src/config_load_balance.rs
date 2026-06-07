@@ -1,11 +1,13 @@
 use std::collections::HashSet;
 use std::fmt;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ConfigError, valid_http_token, validate_optional_timeout_secs};
 use crate::config_header::valid_http_header_name;
 use crate::config_net::normalize_host;
+use crate::config_path::{validate_non_world_writable_parent, validate_path};
 
 pub(crate) const LB_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
 const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRINGS: usize = 8;
@@ -44,6 +46,8 @@ pub struct LoadBalanceConfig {
     #[serde(default)]
     pub persistence: LoadBalancePersistenceConfig,
     #[serde(default)]
+    pub runtime_state_file: Option<PathBuf>,
+    #[serde(default)]
     pub queue: LoadBalanceQueueConfig,
 }
 
@@ -61,6 +65,7 @@ impl Default for LoadBalanceConfig {
             slow_start: LoadBalanceSlowStartConfig::default(),
             retry: LoadBalanceRetryConfig::default(),
             persistence: LoadBalancePersistenceConfig::default(),
+            runtime_state_file: None,
             queue: LoadBalanceQueueConfig::default(),
         }
     }
@@ -134,6 +139,13 @@ impl LoadBalanceConfig {
         self.slow_start.validate()?;
         self.retry.validate()?;
         self.persistence.validate()?;
+        if let Some(path) = &self.runtime_state_file {
+            validate_path("proxy.load_balance.runtime_state_file", Some(path))?;
+            validate_non_world_writable_parent(
+                "proxy.load_balance.runtime_state_file",
+                Some(path),
+            )?;
+        }
         self.queue.validate()?;
         Ok(())
     }

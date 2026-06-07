@@ -23,6 +23,11 @@ behavior when the change improves security or project direction.
   overrides and local persistence tables. Snapshot restore validates version,
   entry limits, duplicate keys, override states, runtime weights, persistence
   key size, TTLs, and live backend membership before replacing current state.
+- Add optional `proxy.load_balance.runtime_state_file` for local
+  restart-persistent load-balancer state. The file is loaded best-effort,
+  ignored on corrupt/incompatible input, and written atomically after runtime
+  member-state, runtime weight, persistence-table, and persistence-clear
+  changes.
 
 ## 1.5.8 - 2026-06-07
 

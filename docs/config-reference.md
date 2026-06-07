@@ -875,6 +875,9 @@ downstream_min_send_rate_bytes_per_sec = 8192
 selection = "round-robin"
 max_iterations = 256
 all_down_status = 502
+# Optional local restart-persistent runtime state file for load-balancer member
+# overrides and local persistence tables.
+# runtime_state_file = "/var/lib/fluxheim/load-balancer/default.json"
 
 [proxy.load_balance.health_check]
 enabled = true
@@ -1254,13 +1257,21 @@ drained/disabled/forced-down, not passively ejected, and below their in-flight
 cap. If the stored backend is no longer selectable, Fluxheim falls back to the
 normal load-balancing algorithm and refreshes the table with the new backend.
 `table_max_entries` bounds memory use; expired entries are pruned and the oldest
-expiry is evicted when the table is full. Persistence is local to one Fluxheim
-process in the current `1.5.x` line and is reset by process restart, runtime
-rebuild, or the authenticated persistence-clear admin operation. It is rejected
-in `privacy-mode` builds because persistence retains client-derived identifiers.
+expiry is evicted when the table is full. Without
+`proxy.load_balance.runtime_state_file`, persistence is local to one Fluxheim
+process and is reset by process restart, runtime rebuild, or the authenticated
+persistence-clear admin operation. It is rejected in `privacy-mode` builds
+because persistence retains client-derived identifiers.
 
-The current `1.5.x` load-balancer line does not persist load-balancer
-persistence/runtime override state across restarts, add/remove pool members at
+`proxy.load_balance.runtime_state_file` enables local restart persistence for
+runtime member-state overrides, runtime weight overrides, and bounded local
+persistence-table entries. The state file is JSON, versioned, size-limited,
+written atomically with a private file mode, and read with symlink checks.
+Corrupt, oversized, incompatible, or stale state is ignored and rebuilt instead
+of poisoning the pool. The file is local to one Fluxheim process and does not
+share managed-cookie signing keys across nodes.
+
+The current `1.5.x` load-balancer line does not add/remove pool members at
 runtime, apply runtime weights to hash/ring selectors, share managed-cookie
 signing keys across nodes, or synchronize load-balancer state across
 active-active Fluxheim nodes. Managed-cookie HA mirroring is tracked separately
