@@ -265,6 +265,7 @@ pub struct LoadBalancerBackendRuntimeStats {
     pub tags: Vec<String>,
     pub weight: usize,
     pub effective_weight: usize,
+    pub health_weight_percent: Option<u8>,
     pub runtime_weight_override: Option<usize>,
     pub runtime_weight_changed_at_unix_secs: Option<u64>,
     pub locality: Option<String>,
@@ -309,36 +310,40 @@ impl Debug for UpstreamLoadBalancer {
 
 impl UpstreamLoadBalancer {
     pub fn from_proxy_config(config: &ProxyConfig) -> io::Result<Option<Self>> {
+        let backend_policy = BackendSelectionPolicy::from_config(config);
         match config.load_balance.selection {
             LoadBalanceSelection::RoundRobin => {
-                let Some(inner) = configured_load_balancer(config)? else {
+                let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::RoundRobin(Arc::new(inner)),
                     config,
+                    backend_policy,
                 )))
             }
             LoadBalanceSelection::LeastConnections => {
-                let Some(inner) = configured_load_balancer(config)? else {
+                let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::LeastConnections(Arc::new(inner)),
                     config,
+                    backend_policy,
                 )))
             }
             LoadBalanceSelection::LeastSessions => {
-                let Some(inner) = configured_load_balancer(config)? else {
+                let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::LeastSessions(Arc::new(inner)),
                     config,
+                    backend_policy,
                 )))
             }
             LoadBalanceSelection::LeastTime => {
-                let Some(inner) = configured_load_balancer(config)? else {
+                let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -347,46 +352,50 @@ impl UpstreamLoadBalancer {
                         latency: Arc::new(BackendLatencyState::default()),
                     },
                     config,
+                    backend_policy,
                 )))
             }
             LoadBalanceSelection::PowerOfTwo => {
-                let Some(inner) = configured_load_balancer(config)? else {
+                let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::PowerOfTwo(Arc::new(inner)),
                     config,
+                    backend_policy,
                 )))
             }
             LoadBalanceSelection::SourceHash
             | LoadBalanceSelection::UriHash
             | LoadBalanceSelection::HeaderHash
             | LoadBalanceSelection::CookieHash => {
-                let Some(inner) = configured_load_balancer(config)? else {
+                let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::FnvHash(Arc::new(inner)),
                     config,
+                    backend_policy,
                 )))
             }
             LoadBalanceSelection::ConsistentSourceHash
             | LoadBalanceSelection::ConsistentUriHash
             | LoadBalanceSelection::ConsistentHeaderHash
             | LoadBalanceSelection::ConsistentCookieHash => {
-                let Some(inner) = configured_load_balancer(config)? else {
+                let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::ConsistentHash(Arc::new(inner)),
                     config,
+                    backend_policy,
                 )))
             }
             LoadBalanceSelection::BoundedLoadConsistentSourceHash
             | LoadBalanceSelection::BoundedLoadConsistentUriHash
             | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
             | LoadBalanceSelection::BoundedLoadConsistentCookieHash => {
-                let Some(inner) = configured_load_balancer(config)? else {
+                let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -395,13 +404,14 @@ impl UpstreamLoadBalancer {
                         factor_per_mille: config.load_balance.bounded_load_factor_per_mille,
                     },
                     config,
+                    backend_policy,
                 )))
             }
             LoadBalanceSelection::MaglevSourceHash
             | LoadBalanceSelection::MaglevUriHash
             | LoadBalanceSelection::MaglevHeaderHash
             | LoadBalanceSelection::MaglevCookieHash => {
-                let Some(inner) = configured_load_balancer(config)? else {
+                let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
                     return Ok(None);
                 };
                 let table = Arc::new(configured_maglev_table(config)?);
@@ -411,6 +421,7 @@ impl UpstreamLoadBalancer {
                         table,
                     },
                     config,
+                    backend_policy,
                 )))
             }
         }
@@ -692,7 +703,11 @@ impl UpstreamLoadBalancer {
             && !self.backend_policy.drained(key)
     }
 
-    fn from_inner(inner: UpstreamLoadBalancerInner, config: &ProxyConfig) -> Self {
+    fn from_inner(
+        inner: UpstreamLoadBalancerInner,
+        config: &ProxyConfig,
+        backend_policy: BackendSelectionPolicy,
+    ) -> Self {
         Self {
             inner,
             selection: config.load_balance.selection,
@@ -721,7 +736,7 @@ impl UpstreamLoadBalancer {
             round_robin_cursor: Arc::new(AtomicUsize::new(0)),
             state_prune_counter: Arc::new(AtomicUsize::new(0)),
             counters: Arc::new(BackendConnectionCounters::default()),
-            backend_policy: BackendSelectionPolicy::from_config(config),
+            backend_policy,
             max_iterations: config.load_balance.max_iterations,
             all_down_status: config.load_balance.all_down_status,
             retry: LoadBalancerRetryRuntimeStats::from_config(&config.load_balance.retry),

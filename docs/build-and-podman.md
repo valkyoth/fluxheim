@@ -456,15 +456,15 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.5.7-wolfi`, `v1.5.7-alpine`, `v1.5.7-suse-micro`, `v1.5.7-debian`
+- `v1.5.8-wolfi`, `v1.5.8-alpine`, `v1.5.8-suse-micro`, `v1.5.8-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.5.7`
-- `v1.5.7-base`
+- `v1.5.8`
+- `v1.5.8-base`
 - `latest`
 - `latest-base`
 
@@ -473,21 +473,21 @@ automation. They point at the full/default image profile.
 
 The focused image profiles publish tags with a profile segment:
 
-- `v1.5.7-cache-wolfi`, `v1.5.7-cache-alpine`,
-  `v1.5.7-cache-suse-micro`, `v1.5.7-cache-debian`
-- `v1.5.7-proxy-wolfi`, `v1.5.7-proxy-alpine`,
-  `v1.5.7-proxy-suse-micro`, `v1.5.7-proxy-debian`
-- `v1.5.7-load-balancer-wolfi`, `v1.5.7-load-balancer-alpine`,
-  `v1.5.7-load-balancer-suse-micro`, `v1.5.7-load-balancer-debian`
-- `v1.5.7-php-wolfi`, `v1.5.7-php-alpine`,
-  `v1.5.7-php-suse-micro`, `v1.5.7-php-debian`
+- `v1.5.8-cache-wolfi`, `v1.5.8-cache-alpine`,
+  `v1.5.8-cache-suse-micro`, `v1.5.8-cache-debian`
+- `v1.5.8-proxy-wolfi`, `v1.5.8-proxy-alpine`,
+  `v1.5.8-proxy-suse-micro`, `v1.5.8-proxy-debian`
+- `v1.5.8-load-balancer-wolfi`, `v1.5.8-load-balancer-alpine`,
+  `v1.5.8-load-balancer-suse-micro`, `v1.5.8-load-balancer-debian`
+- `v1.5.8-php-wolfi`, `v1.5.8-php-alpine`,
+  `v1.5.8-php-suse-micro`, `v1.5.8-php-debian`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-load-balancer-wolfi`, `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`,
   `latest-load-balancer-wolfi`, `latest-php-wolfi`, etc. when run from the
   default branch
-- Wolfi short aliases: `v1.5.7-cache`, `v1.5.7-proxy`,
-  `v1.5.7-load-balancer`, `v1.5.7-php`, `latest-cache`, `latest-proxy`,
+- Wolfi short aliases: `v1.5.8-cache`, `v1.5.8-proxy`,
+  `v1.5.8-load-balancer`, `v1.5.8-php`, `latest-cache`, `latest-proxy`,
   `latest-load-balancer`, and `latest-php`
 
 Starting with `v1.5.0`, the load-balancer image profile is part of normal tag

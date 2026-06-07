@@ -7,6 +7,33 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.8 - 2026-06-07
+
+### Added
+
+- Add bounded custom request headers for HTTP active health checks. Operators
+  can now check authenticated or tenant-scoped health endpoints with
+  `proxy.load_balance.health_check.request_headers`.
+- Add standard gRPC active health checks with optional
+  `proxy.load_balance.health_check.grpc_service`.
+- Add bounded `expected_body_json` scalar matching for JSON HTTP health
+  responses.
+- Add health-derived degraded backend weights through `X-Health-Weight`, exposed
+  as `health_weight_percent` in runtime status and kept separate from
+  configured/admin runtime weights.
+
+### Security
+
+- Validate HTTP health-check request headers at config load time: headers are
+  HTTP/gRPC-only, capped at 16 entries and 1024 bytes per value, duplicate
+  names are rejected case-insensitively, `Host` stays controlled by the
+  existing `host` setting, and hop-by-hop/proxy-control headers are rejected.
+- Keep configured health-check request header values out of metrics labels and
+  runtime status surfaces.
+- Keep gRPC health checks strict: Fluxheim sends the standard HTTP/2 request and
+  rejects conflicting HTTP status/header/body matcher config for gRPC protocol
+  checks.
+
 ## 1.5.7 - 2026-06-06
 
 ### Changed

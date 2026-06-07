@@ -16,11 +16,13 @@ use crate::flux_error::{FluxError, FluxResult};
 
 use super::backend::{FluxBackend, FluxBackendDiscovery, FluxBackendSet, FluxLoadBalancerRuntime};
 use super::health::configured_health_check;
+use super::policy::BackendSelectionPolicy;
 use super::selection::MaglevTable;
 use super::{UpstreamLoadBalancer, UpstreamLoadBalancerInner, UpstreamLoadBalancerService};
 
 pub(super) fn configured_load_balancer(
     config: &ProxyConfig,
+    backend_policy: &BackendSelectionPolicy,
 ) -> io::Result<Option<FluxLoadBalancerRuntime>> {
     if config.upstreams.len() < 2
         && config.upstreams_file.is_none()
@@ -44,7 +46,7 @@ pub(super) fn configured_load_balancer(
         .map_err(FluxError::into_io)?;
     apply_disabled_backend_enablement(&load_balancer, config);
     if config.load_balance.health_check.enabled {
-        let health_check = configured_health_check(config)?;
+        let health_check = configured_health_check(config, backend_policy.health_weights())?;
         load_balancer.set_health_check(health_check);
         load_balancer.set_health_check_frequency(Some(Duration::from_secs(
             config.load_balance.health_check.interval_secs,
@@ -165,12 +167,14 @@ pub(super) fn background_service_for<F>(
 where
     F: FnOnce(Arc<FluxLoadBalancerRuntime>) -> UpstreamLoadBalancerInner,
 {
-    let Some(inner) = configured_load_balancer(config)? else {
+    let backend_policy = BackendSelectionPolicy::from_config(config);
+    let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
         return Ok(None);
     };
 
     let service = FluxLoadBalancerBackgroundService::new(format!("LB {name}"), inner);
-    let load_balancer = UpstreamLoadBalancer::from_inner(wrap(service.task()), config);
+    let load_balancer =
+        UpstreamLoadBalancer::from_inner(wrap(service.task()), config, backend_policy);
     Ok(Some((load_balancer, Box::new(service))))
 }
 
@@ -178,7 +182,8 @@ pub(super) fn background_maglev_service_for(
     name: &str,
     config: &ProxyConfig,
 ) -> io::Result<Option<(UpstreamLoadBalancer, UpstreamLoadBalancerService)>> {
-    let Some(inner) = configured_load_balancer(config)? else {
+    let backend_policy = BackendSelectionPolicy::from_config(config);
+    let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
         return Ok(None);
     };
     let table = Arc::new(configured_maglev_table(config)?);
@@ -189,6 +194,7 @@ pub(super) fn background_maglev_service_for(
             table,
         },
         config,
+        backend_policy,
     );
     Ok(Some((load_balancer, Box::new(service))))
 }

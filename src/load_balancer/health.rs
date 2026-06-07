@@ -3,15 +3,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use pingora::connectors::http::Connector as HttpConnector;
 use pingora::lb::health_check::{HealthCheck as PingoraHealthCheck, TcpHealthCheck};
 use pingora::protocols::http::client::HttpSession;
 use pingora::upstreams::peer::{HttpPeer, Peer};
 use pingora::{Error, ErrorType};
+use serde_json::Value;
 
 use crate::config::{
-    LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedStatusRange,
-    LoadBalanceHealthCheckProtocol, ProxyConfig,
+    LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedJson,
+    LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol, ProxyConfig,
 };
 use crate::flux_error::{FluxError, FluxResult};
 use crate::http_types::{
@@ -19,11 +21,17 @@ use crate::http_types::{
 };
 
 use super::backend::{FluxHealthCheck, RuntimeBackend as Backend};
+use super::key::backend_key;
+use super::policy::HealthDerivedWeights;
 
 const HTTP_HEALTH_CHECK_MAX_BODY_BYTES: usize = 64 * 1024;
+const GRPC_HEALTH_CHECK_PATH: &[u8] = b"/grpc.health.v1.Health/Check";
+const GRPC_SERVING_STATUS: u64 = 1;
+const HEALTH_WEIGHT_HEADER: &str = "x-health-weight";
 
 pub(super) fn configured_health_check(
     config: &ProxyConfig,
+    health_weights: Arc<HealthDerivedWeights>,
 ) -> io::Result<Box<dyn FluxHealthCheck>> {
     match config.load_balance.health_check.protocol {
         LoadBalanceHealthCheckProtocol::Tcp => {
@@ -43,9 +51,11 @@ pub(super) fn configured_health_check(
                 inner: health_check,
             }))
         }
-        LoadBalanceHealthCheckProtocol::Http => configured_http_health_check(config)
-            .map_err(FluxError::into_io)
-            .map(|check| check as Box<dyn FluxHealthCheck>),
+        LoadBalanceHealthCheckProtocol::Http | LoadBalanceHealthCheckProtocol::Grpc => {
+            configured_http_health_check(config, health_weights)
+                .map_err(FluxError::into_io)
+                .map(|check| check as Box<dyn FluxHealthCheck>)
+        }
     }
 }
 
@@ -87,6 +97,10 @@ struct FluxHttpHealthCheck {
     expected_status_ranges: Arc<[LoadBalanceHealthCheckExpectedStatusRange]>,
     expected_headers: Arc<[LoadBalanceHealthCheckExpectedHeader]>,
     expected_body_contains: Arc<[String]>,
+    expected_body_json: Arc<[LoadBalanceHealthCheckExpectedJson]>,
+    request_body: Option<Bytes>,
+    grpc_response: bool,
+    health_weights: Arc<HealthDerivedWeights>,
 }
 
 #[async_trait]
@@ -117,12 +131,19 @@ impl FluxHealthCheck for FluxHttpHealthCheck {
             .map_err(pingora_health_error(
                 "write HTTP health check request header",
             ))?;
-        session
-            .finish_request_body()
-            .await
-            .map_err(pingora_health_error(
-                "finish HTTP health check request body",
-            ))?;
+        if let Some(body) = &self.request_body {
+            session
+                .write_request_body(body.clone(), true)
+                .await
+                .map_err(pingora_health_error("write HTTP health check request body"))?;
+        } else {
+            session
+                .finish_request_body()
+                .await
+                .map_err(pingora_health_error(
+                    "finish HTTP health check request body",
+                ))?;
+        }
 
         if let Some(read_timeout) = peer.options.read_timeout {
             session.set_read_timeout(Some(read_timeout));
@@ -148,12 +169,21 @@ impl FluxHealthCheck for FluxHttpHealthCheck {
             &self.expected_headers,
         )
         .map_err(HttpHealthCheckError::into_flux)?;
+        record_health_weight(response, backend_key(target), &self.health_weights)
+            .map_err(HttpHealthCheckError::into_flux)?;
 
-        if self.expected_body_contains.is_empty() {
+        if self.grpc_response {
+            validate_grpc_health_response_header(response)
+                .map_err(HttpHealthCheckError::into_flux)?;
+            let body = read_http_health_response_body(&mut session).await?;
+            validate_grpc_health_response_body(&body).map_err(HttpHealthCheckError::into_flux)?;
+        } else if self.expected_body_contains.is_empty() && self.expected_body_json.is_empty() {
             drain_http_health_response_body(&mut session).await?;
         } else {
             let body = read_http_health_response_body(&mut session).await?;
             validate_http_health_response_body(&body, &self.expected_body_contains)
+                .map_err(HttpHealthCheckError::into_flux)?;
+            validate_http_health_response_body_json(&body, &self.expected_body_json)
                 .map_err(HttpHealthCheckError::into_flux)?;
         }
 
@@ -168,19 +198,28 @@ impl FluxHealthCheck for FluxHttpHealthCheck {
     }
 }
 
-fn configured_http_health_check(config: &ProxyConfig) -> FluxResult<Box<FluxHttpHealthCheck>> {
+fn configured_http_health_check(
+    config: &ProxyConfig,
+    health_weights: Arc<HealthDerivedWeights>,
+) -> FluxResult<Box<FluxHttpHealthCheck>> {
+    let grpc = config.load_balance.health_check.protocol == LoadBalanceHealthCheckProtocol::Grpc;
     let host = config
         .load_balance
         .health_check
         .host
         .clone()
         .unwrap_or_else(|| config.upstream_sni());
-    let mut request = RequestHeader::build(
-        config.load_balance.health_check.method.as_str(),
-        config.load_balance.health_check.path.as_bytes(),
-        None,
-    )
-    .map_err(|error| {
+    let method = if grpc {
+        "POST"
+    } else {
+        config.load_balance.health_check.method.as_str()
+    };
+    let path = if grpc {
+        GRPC_HEALTH_CHECK_PATH
+    } else {
+        config.load_balance.health_check.path.as_bytes()
+    };
+    let mut request = RequestHeader::build(method, path, None).map_err(|error| {
         FluxError::io(
             "build HTTP health check request header",
             io::Error::other(error.to_string()),
@@ -192,6 +231,32 @@ fn configured_http_health_check(config: &ProxyConfig) -> FluxResult<Box<FluxHttp
             io::Error::other(error.to_string()),
         )
     })?;
+    for header in &config.load_balance.health_check.request_headers {
+        request
+            .append_header(header.name.clone(), header.value.clone())
+            .map_err(|error| {
+                FluxError::io(
+                    "append HTTP health check request header",
+                    io::Error::other(error.to_string()),
+                )
+            })?;
+    }
+    if grpc {
+        request
+            .append_header("Content-Type", "application/grpc")
+            .map_err(|error| {
+                FluxError::io(
+                    "append gRPC health check content type",
+                    io::Error::other(error.to_string()),
+                )
+            })?;
+        request.append_header("TE", "trailers").map_err(|error| {
+            FluxError::io(
+                "append gRPC health check trailers header",
+                io::Error::other(error.to_string()),
+            )
+        })?;
+    }
 
     let sni = if config.upstream_tls {
         host.clone()
@@ -199,6 +264,13 @@ fn configured_http_health_check(config: &ProxyConfig) -> FluxResult<Box<FluxHttp
         String::new()
     };
     let mut peer_template = HttpPeer::new("0.0.0.0:1", config.upstream_tls, sni);
+    if grpc {
+        peer_template.options.set_http_version(2, 2);
+        peer_template.options.max_h2_streams = config.upstream_h2_max_streams.unwrap_or(64);
+        peer_template.options.h2_ping_interval = config
+            .upstream_h2_ping_interval_secs
+            .map(Duration::from_secs);
+    }
     peer_template.options.connection_timeout = Some(Duration::from_secs(1));
     peer_template.options.read_timeout = Some(Duration::from_secs(1));
     apply_health_check_peer_timeouts(
@@ -239,6 +311,19 @@ fn configured_http_health_check(config: &ProxyConfig) -> FluxResult<Box<FluxHttp
             .expected_body_contains
             .clone()
             .into(),
+        expected_body_json: config
+            .load_balance
+            .health_check
+            .expected_body_json
+            .clone()
+            .into(),
+        request_body: grpc.then(|| {
+            Bytes::from(grpc_health_request_body(
+                config.load_balance.health_check.grpc_service.as_deref(),
+            ))
+        }),
+        grpc_response: grpc,
+        health_weights,
     }))
 }
 
@@ -365,6 +450,210 @@ fn validate_http_health_response_body(
     Ok(())
 }
 
+fn validate_http_health_response_body_json(
+    body: &[u8],
+    expected_body_json: &[LoadBalanceHealthCheckExpectedJson],
+) -> Result<(), HttpHealthCheckError> {
+    if expected_body_json.is_empty() {
+        return Ok(());
+    }
+    let json: Value = serde_json::from_slice(body).map_err(|_| {
+        HttpHealthCheckError::new(
+            ErrorType::ReadError,
+            "invalid HTTP health check JSON response body",
+        )
+    })?;
+    for expected in expected_body_json {
+        let Some(value) = json_path_value(&json, &expected.path) else {
+            return Err(HttpHealthCheckError::new(
+                ErrorType::ReadError,
+                "missing expected HTTP health check JSON field",
+            ));
+        };
+        if json_scalar_string(value).as_deref() != Some(expected.equals.as_str()) {
+            return Err(HttpHealthCheckError::new(
+                ErrorType::ReadError,
+                "unexpected HTTP health check JSON field value",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn json_path_value<'a>(json: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut value = json;
+    for segment in path.split('.') {
+        value = value.as_object()?.get(segment)?;
+    }
+    Some(value)
+}
+
+fn record_health_weight(
+    response: &ResponseHeader,
+    key: u64,
+    health_weights: &HealthDerivedWeights,
+) -> Result<(), HttpHealthCheckError> {
+    let Some(value) = response.headers.get(HEALTH_WEIGHT_HEADER) else {
+        health_weights.set_percent(key, None);
+        return Ok(());
+    };
+    let value = value.to_str().map_err(|_| {
+        HttpHealthCheckError::new(
+            ErrorType::InvalidHTTPHeader,
+            "invalid HTTP health check degraded weight header",
+        )
+    })?;
+    let percent = value.trim().parse::<u8>().map_err(|_| {
+        HttpHealthCheckError::new(
+            ErrorType::InvalidHTTPHeader,
+            "invalid HTTP health check degraded weight header",
+        )
+    })?;
+    if percent == 0 || percent > 100 {
+        return Err(HttpHealthCheckError::new(
+            ErrorType::InvalidHTTPHeader,
+            "invalid HTTP health check degraded weight header",
+        ));
+    }
+    health_weights.set_percent(key, (percent < 100).then_some(percent));
+    Ok(())
+}
+
+fn json_scalar_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Null => Some("null".to_owned()),
+        Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn grpc_health_request_body(service: Option<&str>) -> Vec<u8> {
+    let mut message = Vec::new();
+    if let Some(service) = service
+        && !service.is_empty()
+    {
+        message.push(0x0a);
+        encode_grpc_varint(service.len() as u64, &mut message);
+        message.extend_from_slice(service.as_bytes());
+    }
+    grpc_frame(&message)
+}
+
+fn grpc_frame(message: &[u8]) -> Vec<u8> {
+    let len = message.len() as u32;
+    let mut frame = Vec::with_capacity(5 + message.len());
+    frame.push(0);
+    frame.extend_from_slice(&len.to_be_bytes());
+    frame.extend_from_slice(message);
+    frame
+}
+
+fn encode_grpc_varint(mut value: u64, output: &mut Vec<u8>) {
+    while value >= 0x80 {
+        output.push((value as u8) | 0x80);
+        value >>= 7;
+    }
+    output.push(value as u8);
+}
+
+fn validate_grpc_health_response_header(
+    response: &ResponseHeader,
+) -> Result<(), HttpHealthCheckError> {
+    if response.status.as_u16() != 200 {
+        return Err(HttpHealthCheckError::new(
+            ErrorType::HTTPStatus(response.status.as_u16()),
+            "unexpected gRPC health check HTTP status",
+        ));
+    }
+    let content_type = response
+        .headers
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if !content_type
+        .to_ascii_lowercase()
+        .starts_with("application/grpc")
+    {
+        return Err(HttpHealthCheckError::new(
+            ErrorType::InvalidHTTPHeader,
+            "unexpected gRPC health check content type",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_grpc_health_response_body(body: &[u8]) -> Result<(), HttpHealthCheckError> {
+    if body.len() < 5 || body[0] != 0 {
+        return Err(HttpHealthCheckError::new(
+            ErrorType::ReadError,
+            "invalid gRPC health check response frame",
+        ));
+    }
+    let len = u32::from_be_bytes([body[1], body[2], body[3], body[4]]) as usize;
+    if body.len() != 5 + len {
+        return Err(HttpHealthCheckError::new(
+            ErrorType::ReadError,
+            "invalid gRPC health check response length",
+        ));
+    }
+    let status = decode_grpc_health_status(&body[5..])?;
+    if status != GRPC_SERVING_STATUS {
+        return Err(HttpHealthCheckError::new(
+            ErrorType::ReadError,
+            "gRPC health check response is not SERVING",
+        ));
+    }
+    Ok(())
+}
+
+fn decode_grpc_health_status(message: &[u8]) -> Result<u64, HttpHealthCheckError> {
+    let mut offset = 0usize;
+    while offset < message.len() {
+        let key = decode_grpc_varint(message, &mut offset)?;
+        let field = key >> 3;
+        let wire_type = key & 0x07;
+        match (field, wire_type) {
+            (1, 0) => return decode_grpc_varint(message, &mut offset),
+            (_, 0) => {
+                let _ = decode_grpc_varint(message, &mut offset)?;
+            }
+            (_, 2) => {
+                let len = decode_grpc_varint(message, &mut offset)? as usize;
+                offset = offset.checked_add(len).ok_or_else(invalid_grpc_response)?;
+                if offset > message.len() {
+                    return Err(invalid_grpc_response());
+                }
+            }
+            _ => return Err(invalid_grpc_response()),
+        }
+    }
+    Err(invalid_grpc_response())
+}
+
+fn decode_grpc_varint(message: &[u8], offset: &mut usize) -> Result<u64, HttpHealthCheckError> {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    while *offset < message.len() && shift < 64 {
+        let byte = message[*offset];
+        *offset += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Ok(value);
+        }
+        shift += 7;
+    }
+    Err(invalid_grpc_response())
+}
+
+fn invalid_grpc_response() -> HttpHealthCheckError {
+    HttpHealthCheckError::new(
+        ErrorType::ReadError,
+        "invalid gRPC health check response message",
+    )
+}
+
 struct HttpHealthCheckError {
     kind: ErrorType,
     error: FluxError,
@@ -392,15 +681,20 @@ fn pingora_health_error(context: &'static str) -> impl FnOnce(Box<Error>) -> Flu
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::time::Duration;
 
+    use super::HealthDerivedWeights;
     use super::{
-        configured_http_health_check, validate_http_health_response,
-        validate_http_health_response_body,
+        configured_http_health_check, grpc_frame, grpc_health_request_body,
+        validate_grpc_health_response_body, validate_grpc_health_response_header,
+        validate_http_health_response, validate_http_health_response_body,
+        validate_http_health_response_body_json,
     };
     use crate::config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
-        LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol, ProxyConfig,
+        LoadBalanceHealthCheckExpectedJson, LoadBalanceHealthCheckExpectedStatusRange,
+        LoadBalanceHealthCheckProtocol, LoadBalanceHealthCheckRequestHeader, ProxyConfig,
     };
     use crate::http_types::PingoraResponseHeader as ResponseHeader;
 
@@ -412,44 +706,63 @@ mod tests {
     #[test]
     fn configures_pingora_http_health_check() {
         install_test_crypto_provider();
-        let health_check = configured_http_health_check(&ProxyConfig {
-            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
-            connect_timeout_secs: Some(2),
-            read_timeout_secs: Some(4),
-            load_balance: LoadBalanceConfig {
-                health_check: LoadBalanceHealthCheckConfig {
-                    enabled: true,
-                    protocol: LoadBalanceHealthCheckProtocol::Http,
-                    consecutive_success: 2,
-                    consecutive_failure: 3,
-                    method: "HEAD".to_owned(),
-                    path: "/healthz".to_owned(),
-                    host: Some("origin.example.test".to_owned()),
-                    expected_statuses: vec![200, 204],
-                    expected_status_ranges: vec![LoadBalanceHealthCheckExpectedStatusRange {
-                        start: 300,
-                        end: 399,
-                    }],
-                    expected_headers: vec![LoadBalanceHealthCheckExpectedHeader {
-                        name: "x-fluxheim-health".to_owned(),
-                        value: "ready".to_owned(),
-                    }],
-                    expected_body_contains: vec!["ready".to_owned()],
-                    reuse_connection: true,
-                    port_override: Some(8081),
-                    connect_timeout_secs: Some(5),
-                    read_timeout_secs: Some(6),
-                    ..LoadBalanceHealthCheckConfig::default()
+        let health_check = configured_http_health_check(
+            &ProxyConfig {
+                upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+                connect_timeout_secs: Some(2),
+                read_timeout_secs: Some(4),
+                load_balance: LoadBalanceConfig {
+                    health_check: LoadBalanceHealthCheckConfig {
+                        enabled: true,
+                        protocol: LoadBalanceHealthCheckProtocol::Http,
+                        consecutive_success: 2,
+                        consecutive_failure: 3,
+                        method: "HEAD".to_owned(),
+                        path: "/healthz".to_owned(),
+                        host: Some("origin.example.test".to_owned()),
+                        request_headers: vec![LoadBalanceHealthCheckRequestHeader {
+                            name: "Authorization".to_owned(),
+                            value: "Bearer health-token".to_owned(),
+                        }],
+                        expected_statuses: vec![200, 204],
+                        expected_status_ranges: vec![LoadBalanceHealthCheckExpectedStatusRange {
+                            start: 300,
+                            end: 399,
+                        }],
+                        expected_headers: vec![LoadBalanceHealthCheckExpectedHeader {
+                            name: "x-fluxheim-health".to_owned(),
+                            value: "ready".to_owned(),
+                        }],
+                        expected_body_contains: vec!["ready".to_owned()],
+                        expected_body_json: vec![LoadBalanceHealthCheckExpectedJson {
+                            path: "status".to_owned(),
+                            equals: "ready".to_owned(),
+                        }],
+                        reuse_connection: true,
+                        port_override: Some(8081),
+                        connect_timeout_secs: Some(5),
+                        read_timeout_secs: Some(6),
+                        ..LoadBalanceHealthCheckConfig::default()
+                    },
+                    ..LoadBalanceConfig::default()
                 },
-                ..LoadBalanceConfig::default()
+                ..ProxyConfig::default()
             },
-            ..ProxyConfig::default()
-        })
+            Arc::new(HealthDerivedWeights::default()),
+        )
         .unwrap();
 
         assert_eq!(health_check.consecutive_success, 2);
         assert_eq!(health_check.consecutive_failure, 3);
         assert_eq!(health_check.req.method.as_str(), "HEAD");
+        assert_eq!(
+            health_check
+                .req
+                .headers
+                .get("Authorization")
+                .map(|value| value.as_bytes()),
+            Some("Bearer health-token".as_bytes())
+        );
         assert!(health_check.reuse_connection);
         assert_eq!(health_check.port_override, Some(8081));
         assert_eq!(
@@ -466,6 +779,7 @@ mod tests {
             health_check.expected_body_contains.as_ref(),
             ["ready".to_owned()]
         );
+        assert_eq!(health_check.expected_body_json[0].path, "status");
     }
 
     #[test]
@@ -513,5 +827,95 @@ mod tests {
         let expected = ["ready".to_owned(), "database=up".to_owned()];
         assert!(validate_http_health_response_body(b"ready database=up", &expected).is_ok());
         assert!(validate_http_health_response_body(b"ready database=down", &expected).is_err());
+    }
+
+    #[test]
+    fn validates_http_health_check_expected_body_json() {
+        let expected = [
+            LoadBalanceHealthCheckExpectedJson {
+                path: "status".to_owned(),
+                equals: "ok".to_owned(),
+            },
+            LoadBalanceHealthCheckExpectedJson {
+                path: "database.connected".to_owned(),
+                equals: "true".to_owned(),
+            },
+            LoadBalanceHealthCheckExpectedJson {
+                path: "queue_depth".to_owned(),
+                equals: "42".to_owned(),
+            },
+        ];
+        assert!(
+            validate_http_health_response_body_json(
+                br#"{"status":"ok","database":{"connected":true},"queue_depth":42}"#,
+                &expected
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_http_health_response_body_json(br#"{"status":"down"}"#, &expected).is_err()
+        );
+    }
+
+    #[test]
+    fn configures_grpc_health_check() {
+        install_test_crypto_provider();
+        let health_check = configured_http_health_check(
+            &ProxyConfig {
+                upstreams: vec!["127.0.0.1:50051".to_owned()],
+                upstream_tls: true,
+                upstream_sni: Some("grpc.example.test".to_owned()),
+                upstream_h2_max_streams: Some(32),
+                load_balance: LoadBalanceConfig {
+                    health_check: LoadBalanceHealthCheckConfig {
+                        protocol: LoadBalanceHealthCheckProtocol::Grpc,
+                        host: Some("grpc.example.test".to_owned()),
+                        grpc_service: Some("example.Health".to_owned()),
+                        ..LoadBalanceHealthCheckConfig::default()
+                    },
+                    ..LoadBalanceConfig::default()
+                },
+                ..ProxyConfig::default()
+            },
+            Arc::new(HealthDerivedWeights::default()),
+        )
+        .unwrap();
+
+        assert_eq!(health_check.req.method.as_str(), "POST");
+        assert_eq!(health_check.req.uri.path(), "/grpc.health.v1.Health/Check");
+        assert!(health_check.grpc_response);
+        assert_eq!(health_check.peer_template.options.max_h2_streams, 32);
+        assert_eq!(
+            health_check
+                .req
+                .headers
+                .get("content-type")
+                .map(|value| value.as_bytes()),
+            Some("application/grpc".as_bytes())
+        );
+        assert_eq!(
+            health_check.request_body.as_deref(),
+            Some(grpc_health_request_body(Some("example.Health")).as_slice())
+        );
+    }
+
+    #[test]
+    fn validates_grpc_health_check_response() {
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response
+            .append_header("content-type", "application/grpc")
+            .unwrap();
+        let serving = grpc_frame(&[0x08, 0x01]);
+        assert!(validate_grpc_health_response_header(&response).is_ok());
+        assert!(validate_grpc_health_response_body(&serving).is_ok());
+
+        let not_serving = grpc_frame(&[0x08, 0x02]);
+        assert!(validate_grpc_health_response_body(&not_serving).is_err());
+
+        let mut wrong_type = ResponseHeader::build(200, None).unwrap();
+        wrong_type
+            .append_header("content-type", "text/plain")
+            .unwrap();
+        assert!(validate_grpc_health_response_header(&wrong_type).is_err());
     }
 }

@@ -56,7 +56,8 @@ use crate::config_http::{
 };
 pub use crate::config_load_balance::{
     LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
-    LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol,
+    LoadBalanceHealthCheckExpectedJson, LoadBalanceHealthCheckExpectedStatusRange,
+    LoadBalanceHealthCheckProtocol, LoadBalanceHealthCheckRequestHeader,
     LoadBalanceManagedCookieSameSite, LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig,
     LoadBalancePersistenceMode, LoadBalanceQueueConfig, LoadBalanceRetryConfig,
     LoadBalanceSelection, LoadBalanceSlowStartConfig,

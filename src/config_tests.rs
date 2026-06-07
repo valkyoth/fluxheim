@@ -542,10 +542,18 @@ fn parses_proxy_upstream_pool() {
             host = "app.internal"
             expected_statuses = [200, 204]
             expected_body_contains = ["ready"]
+            expected_body_json = [
+                { path = "status", equals = "ready" },
+                { path = "database.connected", equals = "true" },
+            ]
             reuse_connection = true
             port_override = 8081
             connect_timeout_secs = 1
             read_timeout_secs = 2
+
+            [[proxy.load_balance.health_check.request_headers]]
+            name = "Authorization"
+            value = "Bearer health-token"
 
             [[proxy.load_balance.health_check.expected_headers]]
             name = "x-fluxheim-health"
@@ -689,6 +697,14 @@ fn parses_proxy_upstream_pool() {
         Some("app.internal")
     );
     assert_eq!(
+        config.proxy.load_balance.health_check.request_headers[0].name,
+        "Authorization"
+    );
+    assert_eq!(
+        config.proxy.load_balance.health_check.request_headers[0].value,
+        "Bearer health-token"
+    );
+    assert_eq!(
         config.proxy.load_balance.health_check.expected_statuses,
         vec![200, 204]
     );
@@ -707,6 +723,14 @@ fn parses_proxy_upstream_pool() {
             .health_check
             .expected_body_contains,
         vec!["ready".to_owned()]
+    );
+    assert_eq!(
+        config.proxy.load_balance.health_check.expected_body_json[0].path,
+        "status"
+    );
+    assert_eq!(
+        config.proxy.load_balance.health_check.expected_body_json[1].equals,
+        "true"
     );
     assert_eq!(
         config
@@ -738,6 +762,34 @@ fn parses_proxy_upstream_pool() {
     assert_eq!(
         config.proxy.load_balance.health_check.read_timeout_secs,
         Some(2)
+    );
+
+    let grpc_config: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "grpc"
+            host = "grpc.internal"
+            grpc_service = "example.Health"
+
+            [[proxy.load_balance.health_check.request_headers]]
+            name = "Authorization"
+            value = "Bearer grpc-health"
+            "#,
+    )
+    .unwrap();
+    grpc_config.validate().unwrap();
+    assert_eq!(
+        grpc_config.proxy.load_balance.health_check.protocol,
+        LoadBalanceHealthCheckProtocol::Grpc
+    );
+    assert_eq!(
+        grpc_config
+            .proxy
+            .load_balance
+            .health_check
+            .grpc_service
+            .as_deref(),
+        Some("example.Health")
     );
     assert!(config.proxy.load_balance.slow_start.enabled);
     assert_eq!(config.proxy.load_balance.slow_start.duration_secs, 45);
@@ -2944,6 +2996,109 @@ fn rejects_invalid_http_load_balance_health_check() {
         lowercase_method.validate(),
         Err(ConfigError::InvalidLoadBalanceHealthCheck {
             field: "proxy.load_balance.health_check.method"
+        })
+    );
+
+    let request_header_on_tcp: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "tcp"
+
+            [[proxy.load_balance.health_check.request_headers]]
+            name = "Authorization"
+            value = "Bearer token"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        request_header_on_tcp.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.request_headers"
+        })
+    );
+
+    let reserved_request_header: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "http"
+
+            [[proxy.load_balance.health_check.request_headers]]
+            name = "Host"
+            value = "other.example.test"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        reserved_request_header.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.request_headers"
+        })
+    );
+
+    let duplicate_request_header: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "http"
+
+            [[proxy.load_balance.health_check.request_headers]]
+            name = "Authorization"
+            value = "Bearer token"
+
+            [[proxy.load_balance.health_check.request_headers]]
+            name = "authorization"
+            value = "Bearer other"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        duplicate_request_header.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.request_headers"
+        })
+    );
+
+    let invalid_grpc_service: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "grpc"
+            grpc_service = "../bad"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_grpc_service.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.grpc_service"
+        })
+    );
+
+    let grpc_with_http_matchers: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "grpc"
+            expected_body_contains = ["SERVING"]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        grpc_with_http_matchers.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.protocol"
+        })
+    );
+
+    let invalid_json_matcher: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "http"
+            expected_body_json = [{ path = "status..nested", equals = "ok" }]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_json_matcher.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.expected_body_json"
         })
     );
 

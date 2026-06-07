@@ -9,6 +9,10 @@ use crate::config_net::normalize_host;
 pub(crate) const LB_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
 const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRINGS: usize = 8;
 const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRING_BYTES: usize = 1024;
+const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_JSON_MATCHERS: usize = 8;
+const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_JSON_PATH_BYTES: usize = 256;
+const LB_HEALTH_CHECK_MAX_REQUEST_HEADERS: usize = 16;
+const LB_HEALTH_CHECK_MAX_REQUEST_HEADER_VALUE_BYTES: usize = 1024;
 const MIN_BOUNDED_LOAD_FACTOR_PER_MILLE: u16 = 1000;
 const MAX_BOUNDED_LOAD_FACTOR_PER_MILLE: u16 = 10000;
 
@@ -228,6 +232,7 @@ pub enum LoadBalanceHealthCheckProtocol {
     #[default]
     Tcp,
     Http,
+    Grpc,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -252,6 +257,10 @@ pub struct LoadBalanceHealthCheckConfig {
     #[serde(default)]
     pub host: Option<String>,
     #[serde(default)]
+    pub request_headers: Vec<LoadBalanceHealthCheckRequestHeader>,
+    #[serde(default)]
+    pub grpc_service: Option<String>,
+    #[serde(default)]
     pub expected_statuses: Vec<u16>,
     #[serde(default)]
     pub expected_status_ranges: Vec<LoadBalanceHealthCheckExpectedStatusRange>,
@@ -259,6 +268,8 @@ pub struct LoadBalanceHealthCheckConfig {
     pub expected_headers: Vec<LoadBalanceHealthCheckExpectedHeader>,
     #[serde(default)]
     pub expected_body_contains: Vec<String>,
+    #[serde(default)]
+    pub expected_body_json: Vec<LoadBalanceHealthCheckExpectedJson>,
     #[serde(default)]
     pub reuse_connection: bool,
     #[serde(default)]
@@ -274,6 +285,20 @@ pub struct LoadBalanceHealthCheckConfig {
 pub struct LoadBalanceHealthCheckExpectedHeader {
     pub name: String,
     pub value: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalanceHealthCheckRequestHeader {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalanceHealthCheckExpectedJson {
+    pub path: String,
+    pub equals: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -295,10 +320,13 @@ impl Default for LoadBalanceHealthCheckConfig {
             method: default_lb_health_check_method(),
             path: default_lb_health_check_path(),
             host: None,
+            request_headers: Vec::new(),
+            grpc_service: None,
             expected_statuses: Vec::new(),
             expected_status_ranges: Vec::new(),
             expected_headers: Vec::new(),
             expected_body_contains: Vec::new(),
+            expected_body_json: Vec::new(),
             reuse_connection: false,
             port_override: None,
             connect_timeout_secs: None,
@@ -339,6 +367,49 @@ impl LoadBalanceHealthCheckConfig {
         {
             return Err(ConfigError::InvalidLoadBalanceHealthCheck {
                 field: "proxy.load_balance.health_check.host",
+            });
+        }
+        if !self.request_headers.is_empty() && self.protocol == LoadBalanceHealthCheckProtocol::Tcp
+        {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.request_headers",
+            });
+        }
+        if self.request_headers.len() > LB_HEALTH_CHECK_MAX_REQUEST_HEADERS {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.request_headers",
+            });
+        }
+        let mut seen_request_headers = HashSet::new();
+        for header in &self.request_headers {
+            if !valid_health_check_request_header(&header.name, &header.value) {
+                return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                    field: "proxy.load_balance.health_check.request_headers",
+                });
+            }
+            if !seen_request_headers.insert(header.name.to_ascii_lowercase()) {
+                return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                    field: "proxy.load_balance.health_check.request_headers",
+                });
+            }
+        }
+        if let Some(service) = &self.grpc_service
+            && (self.protocol != LoadBalanceHealthCheckProtocol::Grpc
+                || !valid_health_check_grpc_service(service))
+        {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.grpc_service",
+            });
+        }
+        if self.protocol == LoadBalanceHealthCheckProtocol::Grpc
+            && (!self.expected_statuses.is_empty()
+                || !self.expected_status_ranges.is_empty()
+                || !self.expected_headers.is_empty()
+                || !self.expected_body_contains.is_empty()
+                || !self.expected_body_json.is_empty())
+        {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.protocol",
             });
         }
         if self.expected_statuses.len() > 32 {
@@ -405,6 +476,24 @@ impl LoadBalanceHealthCheckConfig {
             {
                 return Err(ConfigError::InvalidLoadBalanceHealthCheck {
                     field: "proxy.load_balance.health_check.expected_body_contains",
+                });
+            }
+        }
+        if self.expected_body_json.len() > LB_HEALTH_CHECK_MAX_EXPECTED_BODY_JSON_MATCHERS {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.expected_body_json",
+            });
+        }
+        let mut seen_json_paths = HashSet::new();
+        for expected in &self.expected_body_json {
+            if !valid_health_check_json_path(&expected.path)
+                || expected.equals.is_empty()
+                || expected.equals.len() > LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRING_BYTES
+                || expected.equals.chars().any(char::is_control)
+                || !seen_json_paths.insert(expected.path.as_str())
+            {
+                return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                    field: "proxy.load_balance.health_check.expected_body_json",
                 });
             }
         }
@@ -997,6 +1086,47 @@ fn valid_health_check_method(method: &str) -> bool {
         && method.len() <= 32
         && valid_http_token(method)
         && !method.chars().any(char::is_lowercase)
+}
+
+fn valid_health_check_request_header(name: &str, value: &str) -> bool {
+    valid_http_header_name(name)
+        && !reserved_health_check_request_header(name)
+        && value.len() <= LB_HEALTH_CHECK_MAX_REQUEST_HEADER_VALUE_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_health_check_grpc_service(service: &str) -> bool {
+    !service.is_empty()
+        && service.len() <= 256
+        && service
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn valid_health_check_json_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= LB_HEALTH_CHECK_MAX_EXPECTED_BODY_JSON_PATH_BYTES
+        && path.split('.').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        })
+}
+
+fn reserved_health_check_request_header(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "connection"
+            | "host"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+    )
 }
 
 fn valid_health_check_path(path: &str) -> bool {

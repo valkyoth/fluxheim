@@ -16,6 +16,7 @@ use super::{
 };
 
 const MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES: usize = 4096;
+const MAX_HEALTH_DERIVED_WEIGHT_ENTRIES: usize = 4096;
 
 fn unix_secs() -> u64 {
     SystemTime::now()
@@ -36,6 +37,12 @@ pub(super) struct BackendSelectionPolicy {
     max_in_flight: Arc<std::collections::HashMap<u64, usize>>,
     priority_groups: Arc<[u16]>,
     priority_group_min_active: usize,
+    health_weights: Arc<HealthDerivedWeights>,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct HealthDerivedWeights {
+    weights: Mutex<std::collections::HashMap<u64, u8>>,
 }
 
 #[derive(Debug, Default)]
@@ -74,7 +81,12 @@ impl BackendSelectionPolicy {
             max_in_flight: backend_max_in_flight(config).into(),
             priority_groups: priority_groups.into(),
             priority_group_min_active: config.upstream_priority_group_min_active,
+            health_weights: Arc::new(HealthDerivedWeights::default()),
         }
+    }
+
+    pub(super) fn health_weights(&self) -> Arc<HealthDerivedWeights> {
+        self.health_weights.clone()
     }
 
     pub(super) fn permits(
@@ -172,14 +184,27 @@ impl BackendSelectionPolicy {
     }
 
     pub(super) fn effective_weight(&self, backend: &impl BackendIdentity) -> usize {
-        self.runtime
-            .weight(backend_key(backend))
+        let key = backend_key(backend);
+        let base = self
+            .runtime
+            .weight(key)
             .unwrap_or_else(|| backend.weight())
+            .max(1);
+        self.health_weights
+            .weight_percent(key)
+            .map_or(base, |percent| {
+                base.saturating_mul(usize::from(percent)).saturating_add(99) / 100
+            })
             .max(1)
+    }
+
+    pub(super) fn health_weight_percent(&self, key: u64) -> Option<u8> {
+        self.health_weights.weight_percent(key)
     }
 
     pub(super) fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
         self.runtime.prune_stale(live_keys);
+        self.health_weights.prune_stale(live_keys);
     }
 
     fn runtime_backend_state(&self, key: u64) -> Option<LoadBalancerRuntimeBackendState> {
@@ -196,6 +221,38 @@ impl BackendSelectionPolicy {
 
     fn runtime_backend_weight_changed_at_unix_secs(&self, key: u64) -> Option<u64> {
         self.runtime.weight_changed_at_unix_secs(key)
+    }
+}
+
+impl HealthDerivedWeights {
+    pub(super) fn set_percent(&self, key: u64, percent: Option<u8>) {
+        let mut weights = self
+            .weights
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(percent) = percent.filter(|percent| (1..100).contains(percent)) {
+            if weights.len() >= MAX_HEALTH_DERIVED_WEIGHT_ENTRIES && !weights.contains_key(&key) {
+                return;
+            }
+            weights.insert(key, percent);
+        } else {
+            weights.remove(&key);
+        }
+    }
+
+    fn weight_percent(&self, key: u64) -> Option<u8> {
+        self.weights
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&key)
+            .copied()
+    }
+
+    fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
+        self.weights
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|key, _| live_keys.contains(key));
     }
 }
 
@@ -433,6 +490,26 @@ mod tests {
     }
 
     #[test]
+    fn health_derived_weight_reduces_effective_weight_and_prunes() {
+        let policy = BackendSelectionPolicy::default();
+        let backend = FluxBackend::new_with_weight("127.0.0.1:3000", 10).unwrap();
+        let key = backend_key(&backend);
+
+        assert_eq!(policy.effective_weight(&backend), 10);
+        policy.health_weights().set_percent(key, Some(40));
+        assert_eq!(policy.health_weight_percent(key), Some(40));
+        assert_eq!(policy.effective_weight(&backend), 4);
+
+        policy.health_weights().set_percent(key, Some(100));
+        assert_eq!(policy.health_weight_percent(key), None);
+        assert_eq!(policy.effective_weight(&backend), 10);
+
+        policy.health_weights().set_percent(key, Some(50));
+        policy.prune_stale(&std::collections::HashSet::new());
+        assert_eq!(policy.health_weight_percent(key), None);
+    }
+
+    #[test]
     fn runtime_backend_policy_keeps_weight_for_disabled_churned_backend() {
         let policy = BackendSelectionPolicy::default();
         assert!(policy.set_runtime_backend_state(1, LoadBalancerRuntimeBackendState::Disabled));
@@ -595,6 +672,7 @@ pub(super) fn load_balancer_backend_stats(
                 tags: inputs.backend_policy.tags(key),
                 weight: backend.weight(),
                 effective_weight: inputs.backend_policy.effective_weight(backend),
+                health_weight_percent: inputs.backend_policy.health_weight_percent(key),
                 runtime_weight_override: inputs.backend_policy.runtime_backend_weight(key),
                 runtime_weight_changed_at_unix_secs: inputs
                     .backend_policy

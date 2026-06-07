@@ -1133,6 +1133,49 @@ must be an uppercase HTTP token. By default only `200` passes, or
 `expected_statuses = [200, 204]` can define an explicit allow-list.
 `expected_status_ranges = [{ start = 200, end = 399 }]` accepts inclusive
 HTTP status ranges and can be combined with exact statuses.
+HTTP-family health checks may include bounded custom request headers for
+authenticated or tenant-scoped health endpoints:
+
+```toml
+[[proxy.load_balance.health_check.request_headers]]
+name = "Authorization"
+value = "Bearer health-check-token"
+```
+
+Request headers are valid only for HTTP and gRPC health checks, are capped at
+16 entries and 1024 bytes per value, reject duplicate names
+case-insensitively, and reserve hop-by-hop headers plus `Host`. Use
+`host = "app.internal"` for the HTTP Host header. Header values are not exposed
+in metrics labels or runtime status.
+Set `protocol = "grpc"` to run the standard gRPC Health Checking Protocol over
+HTTP/2. Fluxheim sends `POST /grpc.health.v1.Health/Check` with a bounded
+hand-encoded request body and expects HTTP `200`, `content-type:
+application/grpc`, and a `SERVING` response message. `grpc_service =
+"package.Service"` optionally checks a specific gRPC service name. gRPC health
+checks may use `host`, `request_headers`, timeout fields, connection reuse, and
+`port_override`; HTTP status/header/body matchers are rejected because the
+standard gRPC health response has its own fixed semantics.
+`expected_body_json` performs bounded exact scalar matching against JSON health
+responses without JSONPath, array indexing, expressions, or regexes:
+
+```toml
+expected_body_json = [
+  { path = "status", equals = "ok" },
+  { path = "database.connected", equals = "true" },
+  { path = "queue_depth", equals = "42" },
+]
+```
+
+Paths are dot-separated object fields capped at 256 bytes; values are compared
+as strings after scalar JSON conversion. Object and array values are not
+matchable.
+HTTP and gRPC health responses may include `X-Health-Weight: N`, where `N` is
+an integer from `1` through `100`. Values below `100` reduce the backend's
+effective selection weight to that percentage of its configured/admin runtime
+weight while the backend remains healthy; `100` or an absent header clears the
+health-derived override. Invalid values fail the health check. Runtime status
+exposes this as `health_weight_percent` separately from configured weight and
+admin runtime weight overrides.
 `expected_headers` can require exact response header values:
 `expected_headers = [{ name = "x-fluxheim-health", value = "ready" }]`.
 `expected_body_contains = ["ready"]` requires each configured byte substring
