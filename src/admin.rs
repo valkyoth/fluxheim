@@ -4481,7 +4481,10 @@ mod tests {
         assert_eq!(body["member"], "app-a");
         assert_eq!(body["state"], "drained");
         assert_eq!(body["scope"], "vhost");
+        #[cfg(not(feature = "privacy-mode"))]
         assert_eq!(body["address"], "127.0.0.1:3001");
+        #[cfg(feature = "privacy-mode")]
+        assert_eq!(body["address"], Value::Null);
         assert_eq!(body["alias"], "app-a");
         assert_eq!(body["persistent"], false);
 
@@ -4602,7 +4605,10 @@ mod tests {
         let body: Value = serde_json::from_slice(&added.body).unwrap();
         assert_eq!(body["status"], "ok");
         assert_eq!(body["operation"], "added");
+        #[cfg(not(feature = "privacy-mode"))]
         assert_eq!(body["member"], "127.0.0.1:3003");
+        #[cfg(feature = "privacy-mode")]
+        assert_eq!(body["member"], "redacted");
         assert_eq!(body["configured_weight"], 2);
         assert_eq!(body["backend_count"], 3);
         assert_eq!(body["persistent"], false);
@@ -4624,13 +4630,20 @@ mod tests {
         let body: Value = serde_json::from_slice(&status.body).unwrap();
         let pool = &body["load_balancer"]["vhosts"][0]["pool"];
         assert_eq!(pool["backend_count"], 3);
-        let added_backend = pool["backends"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|backend| backend["address"] == "127.0.0.1:3003")
-            .expect("added backend status");
-        assert_eq!(added_backend["weight"], 4);
+        #[cfg(not(feature = "privacy-mode"))]
+        {
+            let added_backend = pool["backends"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|backend| backend["address"] == "127.0.0.1:3003")
+                .expect("added backend status");
+            assert_eq!(added_backend["weight"], 4);
+        }
+        #[cfg(feature = "privacy-mode")]
+        assert!(pool["backends"].as_array().unwrap().iter().all(|backend| {
+            backend["address"].is_null() && backend["member"] != "127.0.0.1:3003"
+        }));
 
         let removed = app.handle(
             "POST",

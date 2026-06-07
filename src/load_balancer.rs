@@ -1663,15 +1663,16 @@ mod tests {
     };
     use crate::http_types::PingoraRequestHeader as RequestHeader;
 
+    #[cfg(not(feature = "privacy-mode"))]
+    use super::LoadBalancerCircuitState;
     use super::backend::{BackendIdentity, FluxBackend};
     use super::persistence::{MAX_PERSISTENCE_KEY_BYTES, cookie_key, request_header_key};
     use super::selection::{fnv1a64_with_seed, least_connections_score_is_lower};
     use super::state::PassiveBackendHealth;
     use super::{
-        LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
-        LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendSetOperation,
-        LoadBalancerRuntimeBackendState, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
-        backend_key,
+        LoadBalancedUpstreamReporter, LoadBalancerPersistenceOutcome, LoadBalancerQueueOutcome,
+        LoadBalancerRuntimeBackendSetOperation, LoadBalancerRuntimeBackendState,
+        PassiveHealthState, SlowStartState, UpstreamLoadBalancer, backend_key,
     };
     use crate::test_support::{safe_child_path, unique_temp_path};
 
@@ -2155,6 +2156,7 @@ mod tests {
         assert!(error.to_string().contains("static upstream pools"));
     }
 
+    #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn source_ip_persistence_reuses_selected_backend() {
         install_test_crypto_provider();
@@ -2280,6 +2282,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn runtime_state_snapshot_restores_overrides_and_persistence() {
         install_test_crypto_provider();
@@ -3316,6 +3319,7 @@ mod tests {
         assert!(!slow_start.permits(&backend));
     }
 
+    #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn passive_health_ejects_failed_backend() {
         install_test_crypto_provider();
@@ -3356,6 +3360,7 @@ mod tests {
         assert_ne!(failed_addr, next.backend.addr);
     }
 
+    #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn runtime_status_reports_passive_failure_count_before_ejection() {
         install_test_crypto_provider();
@@ -3710,6 +3715,7 @@ mod tests {
         assert_eq!(stats.runtime_forced_down_backend_count, 0);
     }
 
+    #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn manual_resume_clears_passive_ejection() {
         install_test_crypto_provider();
