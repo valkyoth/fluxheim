@@ -61,6 +61,11 @@ struct RuntimeBackendPolicyOverrideState {
     changed_at_unix_secs: std::collections::HashMap<u64, u64>,
 }
 
+#[derive(Debug)]
+pub(super) struct PreparedRuntimeBackendPolicySnapshot {
+    state: RuntimeBackendPolicyOverrideState,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub(crate) struct RuntimeBackendPolicySnapshot {
     pub(crate) states: Vec<RuntimeBackendPolicyStateSnapshot>,
@@ -232,11 +237,23 @@ impl BackendSelectionPolicy {
         self.runtime.snapshot()
     }
 
+    #[cfg(test)]
     pub(crate) fn restore_runtime_snapshot(
         &self,
         snapshot: &RuntimeBackendPolicySnapshot,
     ) -> Result<(), &'static str> {
         self.runtime.restore_snapshot(snapshot)
+    }
+
+    pub(super) fn prepare_runtime_snapshot(
+        &self,
+        snapshot: &RuntimeBackendPolicySnapshot,
+    ) -> Result<PreparedRuntimeBackendPolicySnapshot, &'static str> {
+        self.runtime.prepare_snapshot(snapshot)
+    }
+
+    pub(super) fn commit_runtime_snapshot(&self, prepared: PreparedRuntimeBackendPolicySnapshot) {
+        self.runtime.commit_snapshot(prepared);
     }
 
     fn runtime_backend_state(&self, key: u64) -> Option<LoadBalancerRuntimeBackendState> {
@@ -498,10 +515,20 @@ impl RuntimeBackendPolicyOverrides {
         RuntimeBackendPolicySnapshot { states, weights }
     }
 
+    #[cfg(test)]
     fn restore_snapshot(
         &self,
         snapshot: &RuntimeBackendPolicySnapshot,
     ) -> Result<(), &'static str> {
+        let prepared = self.prepare_snapshot(snapshot)?;
+        self.commit_snapshot(prepared);
+        Ok(())
+    }
+
+    fn prepare_snapshot(
+        &self,
+        snapshot: &RuntimeBackendPolicySnapshot,
+    ) -> Result<PreparedRuntimeBackendPolicySnapshot, &'static str> {
         if snapshot.states.len() > MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES
             || snapshot.weights.len() > MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES
         {
@@ -546,11 +573,14 @@ impl RuntimeBackendPolicyOverrides {
                 .insert(entry.key, entry.changed_at_unix_secs);
         }
 
+        Ok(PreparedRuntimeBackendPolicySnapshot { state: next })
+    }
+
+    fn commit_snapshot(&self, prepared: PreparedRuntimeBackendPolicySnapshot) {
         *self
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
-        Ok(())
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = prepared.state;
     }
 }
 

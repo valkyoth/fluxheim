@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Formatter};
 use std::io;
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -74,6 +74,7 @@ pub struct UpstreamLoadBalancer {
     queue_policy: LoadBalanceQueueConfig,
     queue_waiting: Arc<AtomicUsize>,
     runtime_state_file: Option<Arc<PathBuf>>,
+    runtime_state_save_lock: Arc<std::sync::Mutex<()>>,
     round_robin_cursor: Arc<AtomicUsize>,
     state_prune_counter: Arc<AtomicUsize>,
     counters: Arc<BackendConnectionCounters>,
@@ -663,12 +664,14 @@ impl UpstreamLoadBalancer {
         let selected = self.prepare_selected(selected, persistence_outcome)?;
         if let (Some(persistence), Some(key)) = (&self.persistence, persistence_key) {
             persistence.record(key, backend_key(&selected.backend));
-            self.save_runtime_state_if_configured("persistence_record");
+            self.save_runtime_state_if_configured_in_background("persistence_record");
         } else if let Some(persistence) = &self.persistence
             && let Some((key, cookie)) = persistence.new_managed_cookie()
         {
             persistence.record(&key, backend_key(&selected.backend));
-            self.save_runtime_state_if_configured("managed_cookie_persistence_record");
+            self.save_runtime_state_if_configured_in_background(
+                "managed_cookie_persistence_record",
+            );
             let mut selected = selected;
             selected.managed_affinity_cookie = Some(cookie);
             return Some(selected);
@@ -757,6 +760,7 @@ impl UpstreamLoadBalancer {
                 queue_policy: config.load_balance.queue.clone(),
                 queue_waiting: Arc::new(AtomicUsize::new(0)),
                 runtime_state_file: config.load_balance.runtime_state_file.clone().map(Arc::new),
+                runtime_state_save_lock: Arc::new(std::sync::Mutex::new(())),
                 round_robin_cursor: Arc::new(AtomicUsize::new(0)),
                 state_prune_counter: Arc::new(AtomicUsize::new(0)),
                 counters: Arc::new(BackendConnectionCounters::default()),
@@ -775,27 +779,23 @@ impl UpstreamLoadBalancer {
             return;
         }
         let backends = self.inner.backends();
-        let live_connection_keys = backends
+        let live_keys = backends
             .iter()
             .map(backend_key)
             .collect::<std::collections::HashSet<_>>();
-        let live_policy_keys = backends
-            .iter()
-            .map(backend_key)
-            .collect::<std::collections::HashSet<_>>();
-        self.counters.prune_stale(&live_connection_keys);
-        self.backend_policy.prune_stale(&live_policy_keys);
+        self.counters.prune_stale(&live_keys);
+        self.backend_policy.prune_stale(&live_keys);
         if let Some(persistence) = &self.persistence {
-            persistence.prune_stale_for_live_backends(&live_policy_keys);
+            persistence.prune_stale_for_live_backends(&live_keys);
         }
         if let Some(passive_health) = &self.passive_health {
-            passive_health.prune_stale(&live_connection_keys);
+            passive_health.prune_stale(&live_keys);
         }
         if let Some(slow_start) = &self.slow_start {
-            slow_start.prune_stale(&live_connection_keys);
+            slow_start.prune_stale(&live_keys);
         }
         if let Some(latency) = self.inner.latency_state() {
-            latency.prune_stale(&live_connection_keys);
+            latency.prune_stale(&live_keys);
         }
     }
 
@@ -1057,19 +1057,29 @@ impl UpstreamLoadBalancer {
                 "unsupported load balancer runtime state version",
             ));
         }
-        self.backend_policy
-            .restore_runtime_snapshot(&snapshot.runtime_overrides)
+        let prepared_policy = self
+            .backend_policy
+            .prepare_runtime_snapshot(&snapshot.runtime_overrides)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         let live_keys = self.live_backend_keys();
-        let persistence_entries = if let (Some(persistence), Some(snapshot)) =
+        let prepared_persistence = if let (Some(persistence), Some(snapshot)) =
             (&self.persistence, &snapshot.persistence)
         {
-            persistence
-                .restore_snapshot(snapshot, &live_keys)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+            Some(
+                persistence
+                    .prepare_snapshot(snapshot, &live_keys)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+            )
         } else {
-            0
+            None
         };
+        let persistence_entries = prepared_persistence
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.restored_entries());
+        self.backend_policy.commit_runtime_snapshot(prepared_policy);
+        if let (Some(persistence), Some(snapshot)) = (&self.persistence, prepared_persistence) {
+            persistence.commit_snapshot(snapshot);
+        }
         Ok(LoadBalancerRuntimeStateRestore {
             persistence_entries,
         })
@@ -1108,22 +1118,48 @@ impl UpstreamLoadBalancer {
         let Some(path) = &self.runtime_state_file else {
             return;
         };
+        let _guard = self
+            .runtime_state_save_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let snapshot = self.runtime_state_snapshot();
-        match write_runtime_state_file(path, &snapshot) {
-            Ok(()) => log::debug!(
-                target: "fluxheim::load_balancer",
-                "load balancer runtime state saved path={} reason={}",
-                path.display(),
-                reason
-            ),
-            Err(error) => log::warn!(
-                target: "fluxheim::security",
-                "load balancer runtime state save failed path={} reason={} error={}",
-                path.display(),
-                reason,
-                error
-            ),
+        write_runtime_state_snapshot(path, &snapshot, reason);
+    }
+
+    fn save_runtime_state_if_configured_in_background(&self, reason: &'static str) {
+        if self.runtime_state_file.is_none() {
+            return;
         }
+        let balancer = self.clone();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn_blocking(move || {
+                balancer.save_runtime_state_if_configured(reason);
+            });
+        } else {
+            self.save_runtime_state_if_configured(reason);
+        }
+    }
+}
+
+fn write_runtime_state_snapshot(
+    path: &Path,
+    snapshot: &LoadBalancerRuntimeStateSnapshot,
+    reason: &str,
+) {
+    match write_runtime_state_file(path, snapshot) {
+        Ok(()) => log::debug!(
+            target: "fluxheim::load_balancer",
+            "load balancer runtime state saved path={} reason={}",
+            path.display(),
+            reason
+        ),
+        Err(error) => log::warn!(
+            target: "fluxheim::security",
+            "load balancer runtime state save failed path={} reason={} error={}",
+            path.display(),
+            reason,
+            error
+        ),
     }
 }
 
@@ -1912,6 +1948,64 @@ mod tests {
             .unwrap();
         let selected = balancer.select(&request(), None).unwrap();
         assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3000");
+    }
+
+    #[test]
+    fn runtime_state_file_restore_is_all_or_nothing() {
+        install_test_crypto_provider();
+        let dir = unique_temp_path("lb-runtime-state-atomic-restore");
+        std::fs::create_dir_all(&dir).unwrap();
+        let state_file = safe_child_path(&dir, "lb-state.json");
+        let disabled_key = backend_key(&FluxBackend::new("127.0.0.1:3001").unwrap());
+        std::fs::write(
+            &state_file,
+            format!(
+                r#"{{
+  "version": 1,
+  "runtime_overrides": {{
+    "states": [
+      {{
+        "key": {disabled_key},
+        "state": "disabled",
+        "changed_at_unix_secs": 1
+      }}
+    ],
+    "weights": []
+  }},
+  "persistence": {{
+    "entries": [
+      {{
+        "key": [],
+        "backend_key": {disabled_key},
+        "ttl_remaining_secs": 60
+      }}
+    ]
+  }}
+}}"#
+            ),
+        )
+        .unwrap();
+        let config = ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                runtime_state_file: Some(state_file),
+                persistence: LoadBalancePersistenceConfig {
+                    enabled: true,
+                    ttl_secs: 60,
+                    table_max_entries: 16,
+                    ..LoadBalancePersistenceConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        };
+
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&config)
+            .unwrap()
+            .unwrap();
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.runtime_disabled_backend_count, 0);
+        assert_eq!(stats.persistence.entry_count, 0);
     }
 
     #[test]

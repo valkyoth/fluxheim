@@ -55,6 +55,17 @@ pub(crate) struct LoadBalancerPersistenceSnapshot {
     pub(crate) entries: Vec<LoadBalancerPersistenceEntrySnapshot>,
 }
 
+#[derive(Debug)]
+pub(super) struct PreparedLoadBalancerPersistenceSnapshot {
+    entries: std::collections::HashMap<Vec<u8>, LoadBalancerPersistenceEntry>,
+}
+
+impl PreparedLoadBalancerPersistenceSnapshot {
+    pub(super) fn restored_entries(&self) -> usize {
+        self.entries.len()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub(crate) struct LoadBalancerPersistenceEntrySnapshot {
     pub(crate) key: Vec<u8>,
@@ -236,11 +247,23 @@ impl LoadBalancerPersistenceState {
         LoadBalancerPersistenceSnapshot { entries }
     }
 
+    #[cfg(test)]
     pub(crate) fn restore_snapshot(
         &self,
         snapshot: &LoadBalancerPersistenceSnapshot,
         live_backend_keys: &std::collections::HashSet<u64>,
     ) -> Result<usize, &'static str> {
+        let prepared = self.prepare_snapshot(snapshot, live_backend_keys)?;
+        let restored = prepared.restored_entries();
+        self.commit_snapshot(prepared);
+        Ok(restored)
+    }
+
+    pub(super) fn prepare_snapshot(
+        &self,
+        snapshot: &LoadBalancerPersistenceSnapshot,
+        live_backend_keys: &std::collections::HashSet<u64>,
+    ) -> Result<PreparedLoadBalancerPersistenceSnapshot, &'static str> {
         if snapshot.entries.len() > self.table_max_entries {
             return Err("load balancer persistence snapshot exceeds table limit");
         }
@@ -269,12 +292,14 @@ impl LoadBalancerPersistenceState {
                 return Err("load balancer persistence snapshot has duplicate keys");
             }
         }
-        let restored = next.len();
+        Ok(PreparedLoadBalancerPersistenceSnapshot { entries: next })
+    }
+
+    pub(super) fn commit_snapshot(&self, prepared: PreparedLoadBalancerPersistenceSnapshot) {
         *self
             .table
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
-        Ok(restored)
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = prepared.entries;
     }
 
     pub(super) fn new_managed_cookie(&self) -> Option<(Vec<u8>, ManagedAffinityCookie)> {

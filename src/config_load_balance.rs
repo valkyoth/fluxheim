@@ -145,6 +145,25 @@ impl LoadBalanceConfig {
                 "proxy.load_balance.runtime_state_file",
                 Some(path),
             )?;
+            if self.persistence.enabled
+                && matches!(
+                    self.persistence.mode,
+                    LoadBalancePersistenceMode::Header | LoadBalancePersistenceMode::Cookie
+                )
+            {
+                let persistence_mode = match self.persistence.mode {
+                    LoadBalancePersistenceMode::Header => "header",
+                    LoadBalancePersistenceMode::Cookie => "cookie",
+                    LoadBalancePersistenceMode::SourceIp
+                    | LoadBalancePersistenceMode::ManagedCookie => unreachable!(),
+                };
+                log::warn!(
+                    target: "fluxheim::security",
+                    "proxy.load_balance.runtime_state_file is configured with raw {} persistence; client affinity identifiers are written to disk at {}. Use managed-cookie mode or an encrypted, access-restricted volume for session-bearing identifiers.",
+                    persistence_mode,
+                    path.display()
+                );
+            }
         }
         self.queue.validate()?;
         Ok(())

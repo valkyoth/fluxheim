@@ -70,7 +70,7 @@ fn write_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
         unique_sequence()
     ));
 
-    {
+    let result = (|| {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -81,17 +81,19 @@ fn write_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
         }
         let mut file = options.open(&temp_path)?;
         #[cfg(unix)]
-        fs::set_permissions(
-            &temp_path,
-            fs::Permissions::from_mode(RUNTIME_STATE_FILE_MODE),
-        )?;
+        file.set_permissions(fs::Permissions::from_mode(RUNTIME_STATE_FILE_MODE))?;
         file.write_all(contents)?;
         file.write_all(b"\n")?;
         file.sync_all()?;
-    }
+        drop(file);
 
-    fs::rename(&temp_path, path)?;
-    sync_directory(parent)
+        fs::rename(&temp_path, path)?;
+        sync_directory(parent)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
 }
 
 fn unique_sequence() -> u64 {

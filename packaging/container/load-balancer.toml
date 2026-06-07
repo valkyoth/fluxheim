@@ -60,6 +60,9 @@ all_down_status = 503
 max_iterations = 128
 # Optional local restart-persistent runtime state. Mount the parent directory
 # as a persistent volume before enabling this in containers.
+# Header and cookie persistence modes write raw affinity identifiers to this
+# file; prefer managed-cookie mode or an encrypted volume for session-bearing
+# identifiers.
 # runtime_state_file = "/var/lib/fluxheim/load-balancer/default.json"
 
 [vhosts.proxy.load_balance.health_check]

@@ -26,6 +26,22 @@ Fluxheim 1.5.9 starts the restart-persistent load-balancer state line.
   has a runtime state file configured, and `persistent: false` for in-memory
   pools.
 
+## Hardened
+
+- Persistence-table state-file writes from request selection now run on the
+  blocking worker pool instead of performing synchronous fsync work on an async
+  executor thread.
+- Runtime state file writes now set Unix permissions on the already-open file
+  descriptor and remove temporary files when a write, sync, rename, or directory
+  sync fails.
+- Runtime state restore now validates policy overrides and persistence entries
+  before committing either half, preventing partial restore of a mixed-validity
+  state file.
+- Documentation and startup warnings now call out that raw `header` and
+  `cookie` persistence modes write client affinity identifiers to
+  `proxy.load_balance.runtime_state_file`; use `managed-cookie` or encrypted,
+  access-restricted storage for session-bearing identifiers.
+
 ## Stop Line
 
 This release does not add cross-node state sync, runtime add/remove-member,

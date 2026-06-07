@@ -32,6 +32,19 @@ behavior when the change improves security or project direction.
   pool has `proxy.load_balance.runtime_state_file` configured, and keep
   `persistent: false` for in-memory-only pools.
 
+### Security
+
+- Move request-path persistence state-file writes to the blocking worker pool
+  with serialized snapshot writes, while keeping admin mutation saves
+  synchronous and ordered.
+- Harden runtime state files with fd-based permission setting, temp-file
+  cleanup on failed writes, and all-or-nothing restore validation for mixed
+  policy/persistence state.
+- Document and warn when raw header or cookie persistence writes client affinity
+  identifiers to `proxy.load_balance.runtime_state_file`; prefer
+  `managed-cookie` or encrypted, access-restricted storage for session-bearing
+  identifiers.
+
 ## 1.5.8 - 2026-06-07
 
 ### Added
