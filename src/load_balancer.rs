@@ -2007,6 +2007,40 @@ mod tests {
     }
 
     #[test]
+    fn runtime_backend_set_remove_prunes_local_persistence() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                persistence: LoadBalancePersistenceConfig {
+                    enabled: true,
+                    ttl_secs: 60,
+                    table_max_entries: 16,
+                    ..LoadBalancePersistenceConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+        let selected = balancer
+            .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))))
+            .unwrap();
+        let member = selected.backend.addr.to_string();
+        assert_eq!(balancer.runtime_stats().persistence.entry_count, 1);
+
+        drop(selected);
+        let removed = balancer.remove_runtime_backend_member(&member).unwrap();
+        assert_eq!(
+            removed.operation,
+            LoadBalancerRuntimeBackendSetOperation::Removed
+        );
+        assert_eq!(balancer.runtime_stats().persistence.entry_count, 0);
+    }
+
+    #[test]
     fn runtime_backend_set_mutation_rejects_maglev_selection() {
         install_test_crypto_provider();
         let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
