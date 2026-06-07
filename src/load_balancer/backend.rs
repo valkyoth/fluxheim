@@ -85,11 +85,16 @@ impl FluxBackendHealth {
     }
 }
 
+#[derive(Default)]
+struct FluxBackendSnapshot {
+    backends: Arc<BTreeSet<Backend>>,
+    health: Arc<HashMap<u64, FluxBackendHealth>>,
+}
+
 pub(super) struct FluxLoadBalancerRuntime {
     discovery: Arc<dyn FluxBackendDiscovery>,
     health_check: Option<Arc<dyn FluxHealthCheck>>,
-    backends: ArcSwap<BTreeSet<Backend>>,
-    health: ArcSwap<HashMap<u64, FluxBackendHealth>>,
+    snapshot: ArcSwap<FluxBackendSnapshot>,
     update_frequency: Option<Duration>,
     health_check_frequency: Option<Duration>,
     parallel_health_check: bool,
@@ -100,8 +105,7 @@ impl FluxLoadBalancerRuntime {
         Self {
             discovery: discovery.into(),
             health_check: None,
-            backends: Default::default(),
-            health: Default::default(),
+            snapshot: Default::default(),
             update_frequency: None,
             health_check_frequency: None,
             parallel_health_check: false,
@@ -127,9 +131,9 @@ impl FluxLoadBalancerRuntime {
     pub(super) async fn update(&self) -> FluxResult<()> {
         let discovered = self.discovery.discover_flux_backends().await?;
         let (new_backends, enablement) = discovered.into_pingora_parts()?;
-        let current_backends = self.backends.load();
-        if **current_backends != new_backends {
-            let old_health = self.health.load();
+        let snapshot = self.snapshot.load();
+        if *snapshot.backends != new_backends {
+            let old_health = Arc::clone(&snapshot.health);
             let mut next_health = HashMap::with_capacity(new_backends.len());
             for backend in &new_backends {
                 let key = backend_key(backend);
@@ -139,12 +143,13 @@ impl FluxLoadBalancerRuntime {
                 }
                 next_health.insert(key, backend_health);
             }
-            self.backends.store(Arc::new(new_backends));
-            self.health.store(Arc::new(next_health));
+            self.snapshot.store(Arc::new(FluxBackendSnapshot {
+                backends: Arc::new(new_backends),
+                health: Arc::new(next_health),
+            }));
         } else {
-            let health = self.health.load();
             for (key, enabled) in enablement {
-                if let Some(backend_health) = health.get(&key) {
+                if let Some(backend_health) = snapshot.health.get(&key) {
                     backend_health.enable(enabled);
                 }
             }
@@ -153,7 +158,7 @@ impl FluxLoadBalancerRuntime {
     }
 
     pub(super) fn set_enable(&self, backend: &Backend, enabled: bool) {
-        if let Some(backend_health) = self.health.load().get(&backend_key(backend)) {
+        if let Some(backend_health) = self.snapshot.load().health.get(&backend_key(backend)) {
             backend_health.enable(enabled);
         }
     }
@@ -234,17 +239,19 @@ impl FluxLoadBalancerRuntime {
             return;
         };
 
-        let backends = self.backends.load();
+        let snapshot = self.snapshot.load_full();
         if parallel {
-            let health = self.health.load_full();
-            let jobs = backends.iter().cloned().map(|backend| {
-                tokio::spawn(check_one(backend, health_check.clone(), health.clone()))
+            let jobs = snapshot.backends.iter().cloned().map(|backend| {
+                tokio::spawn(check_one(
+                    backend,
+                    health_check.clone(),
+                    Arc::clone(&snapshot.health),
+                ))
             });
             let _ = future::join_all(jobs).await;
         } else {
-            let health = self.health.load_full();
-            for backend in backends.iter().cloned() {
-                check_one(backend, health_check.clone(), health.clone()).await;
+            for backend in snapshot.backends.iter().cloned() {
+                check_one(backend, health_check.clone(), Arc::clone(&snapshot.health)).await;
             }
         }
     }
@@ -370,12 +377,13 @@ pub(super) trait BackendContainer {
 
 impl BackendContainer for FluxLoadBalancerRuntime {
     fn backend_set(&self) -> Arc<BTreeSet<Backend>> {
-        self.backends.load_full()
+        Arc::clone(&self.snapshot.load().backends)
     }
 
     fn backend_ready(&self, backend: &Backend) -> bool {
-        self.health
-            .load()
+        let snapshot = self.snapshot.load();
+        snapshot
+            .health
             .get(&backend_key(backend))
             .map_or(self.health_check.is_none(), FluxBackendHealth::ready)
     }
@@ -407,7 +415,37 @@ pub(super) fn backend_container_ready(
 
 #[cfg(test)]
 mod tests {
-    use super::{BackendIdentity, FluxBackend, FluxBackendSet};
+    use std::sync::Mutex;
+
+    use async_trait::async_trait;
+
+    use super::{
+        BackendIdentity, FluxBackend, FluxBackendDiscovery, FluxBackendSet, FluxLoadBalancerRuntime,
+    };
+    use crate::flux_error::FluxResult;
+
+    struct TestDiscovery {
+        backends: Mutex<FluxBackendSet>,
+    }
+
+    impl TestDiscovery {
+        fn new(backends: FluxBackendSet) -> Self {
+            Self {
+                backends: Mutex::new(backends),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl FluxBackendDiscovery for TestDiscovery {
+        async fn discover_flux_backends(&self) -> FluxResult<FluxBackendSet> {
+            Ok(self
+                .backends
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone())
+        }
+    }
 
     #[test]
     fn flux_backend_preserves_authority_weight_and_key() {
@@ -435,5 +473,23 @@ mod tests {
             backends.iter().next().unwrap().addr.to_string(),
             "127.0.0.1:3000"
         );
+    }
+
+    #[tokio::test]
+    async fn update_publishes_backend_and_health_as_one_snapshot() {
+        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
+        let mut set = FluxBackendSet::default();
+        set.insert(backend.clone());
+        set.set_ready(&backend, false);
+        let runtime = FluxLoadBalancerRuntime::new(Box::new(TestDiscovery::new(set)));
+
+        runtime.update().await.unwrap();
+
+        let snapshot = runtime.snapshot.load();
+        let pingora_backend = backend.to_pingora_backend().unwrap();
+        let key = crate::load_balancer::backend_key(&pingora_backend);
+        assert!(snapshot.backends.contains(&pingora_backend));
+        assert!(snapshot.health.contains_key(&key));
+        assert!(!snapshot.health.get(&key).unwrap().ready());
     }
 }
