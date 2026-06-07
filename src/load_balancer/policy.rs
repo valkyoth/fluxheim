@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::ProxyConfig;
 
-use super::backend::{BackendContainer, backend_container_ready, backend_container_set};
+use super::backend::BackendContainerSnapshot;
 use super::backend::{BackendIdentity, FluxBackend};
 use super::key::backend_key;
 use super::selection::SelectionPass;
@@ -657,10 +657,11 @@ impl<'a> BackendStatsInputs<'a> {
 }
 
 pub(super) fn load_balancer_backend_stats(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     inputs: BackendStatsInputs<'_>,
 ) -> Vec<LoadBalancerBackendRuntimeStats> {
-    backend_container_set(inner)
+    snapshot
+        .backends()
         .iter()
         .map(|backend| {
             let key = backend_key(backend);
@@ -693,7 +694,7 @@ pub(super) fn load_balancer_backend_stats(
                             .contains(&locality)
                     },
                 ),
-                ready: backend_container_ready(inner, backend),
+                ready: snapshot.ready(backend),
                 backup: inputs.backend_policy.backup(key),
                 drained: inputs.backend_policy.drained(key),
                 disabled: inputs.backend_policy.disabled(key),

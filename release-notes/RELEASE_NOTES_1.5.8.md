@@ -47,6 +47,8 @@ name = "Authorization"
   configured/admin runtime weights, clamped by `health_weight_min_percent`,
   pruned with backend state, logged when the bounded map is full, and exposed
   in status as `health_weight_percent`.
+- Load-balancer selection and runtime status now evaluate backend membership
+  and readiness from one loaded backend/health snapshot per operation.
 
 ## Stop Line
 

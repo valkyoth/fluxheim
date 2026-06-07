@@ -33,6 +33,9 @@ behavior when the change improves security or project direction.
 - Keep gRPC health checks strict: Fluxheim sends the standard HTTP/2 request and
   rejects conflicting HTTP status/header/body matcher config for gRPC protocol
   checks.
+- Evaluate load-balancer selection and runtime status from one loaded
+  backend/health snapshot per operation, removing the remaining conservative
+  mismatch window between backend membership and readiness reads.
 
 ## 1.5.7 - 2026-06-06
 

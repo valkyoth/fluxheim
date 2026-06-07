@@ -28,7 +28,7 @@ mod state;
 use self::backend::BackendIdentity;
 use self::backend::FluxLoadBalancerRuntime;
 use self::backend::RuntimeBackend as Backend;
-use self::backend::{backend_container_ready, backend_container_set};
+use self::backend::backend_container_snapshot;
 use self::discovery::{
     background_maglev_service_for, background_service_for, configured_load_balancer,
     configured_maglev_table,
@@ -1104,7 +1104,9 @@ impl UpstreamLoadBalancerInner {
     }
 
     fn backend_count(&self) -> usize {
-        backend_container_set(self.container()).len()
+        backend_container_snapshot(self.container())
+            .backends()
+            .len()
     }
 
     fn backend_stats(
@@ -1125,10 +1127,11 @@ impl UpstreamLoadBalancerInner {
             persistence_entry_counts,
             latency: None,
         };
+        let snapshot = backend_container_snapshot(self.container());
         if let Self::LeastTime { latency, .. } = self {
-            load_balancer_backend_stats(self.container(), inputs.with_latency(latency))
+            load_balancer_backend_stats(&snapshot, inputs.with_latency(latency))
         } else {
-            load_balancer_backend_stats(self.container(), inputs)
+            load_balancer_backend_stats(&snapshot, inputs)
         }
     }
 
@@ -1207,11 +1210,12 @@ impl UpstreamLoadBalancerInner {
     }
 
     fn backend_ready(&self, backend: &Backend) -> bool {
-        backend_container_ready(self.container(), backend)
+        backend_container_snapshot(self.container()).ready(backend)
     }
 
     fn backends(&self) -> Vec<Backend> {
-        backend_container_set(self.container())
+        backend_container_snapshot(self.container())
+            .backends()
             .iter()
             .cloned()
             .collect()
@@ -1233,7 +1237,8 @@ impl SelectedUpstream {
 
 #[cfg(test)]
 fn backend_weights(inner: &FluxLoadBalancerRuntime) -> Vec<usize> {
-    backend_container_set(inner)
+    backend_container_snapshot(inner)
+        .backends()
         .iter()
         .map(|backend| backend.weight())
         .collect()

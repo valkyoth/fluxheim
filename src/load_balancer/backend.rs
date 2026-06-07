@@ -370,22 +370,15 @@ impl FluxBackendSet {
 }
 
 pub(super) trait BackendContainer {
-    fn backend_set(&self) -> Arc<BTreeSet<Backend>>;
-
-    fn backend_ready(&self, backend: &Backend) -> bool;
+    fn backend_snapshot(&self) -> BackendContainerSnapshot;
 }
 
 impl BackendContainer for FluxLoadBalancerRuntime {
-    fn backend_set(&self) -> Arc<BTreeSet<Backend>> {
-        Arc::clone(&self.snapshot.load().backends)
-    }
-
-    fn backend_ready(&self, backend: &Backend) -> bool {
-        let snapshot = self.snapshot.load();
-        snapshot
-            .health
-            .get(&backend_key(backend))
-            .map_or(self.health_check.is_none(), FluxBackendHealth::ready)
+    fn backend_snapshot(&self) -> BackendContainerSnapshot {
+        BackendContainerSnapshot {
+            snapshot: self.snapshot.load_full(),
+            health_check_enabled: self.health_check.is_some(),
+        }
     }
 }
 
@@ -393,24 +386,33 @@ impl<T> BackendContainer for Arc<T>
 where
     T: BackendContainer + ?Sized,
 {
-    fn backend_set(&self) -> Arc<BTreeSet<Backend>> {
-        (**self).backend_set()
-    }
-
-    fn backend_ready(&self, backend: &Backend) -> bool {
-        (**self).backend_ready(backend)
+    fn backend_snapshot(&self) -> BackendContainerSnapshot {
+        (**self).backend_snapshot()
     }
 }
 
-pub(super) fn backend_container_set(container: &impl BackendContainer) -> Arc<BTreeSet<Backend>> {
-    container.backend_set()
+pub(super) struct BackendContainerSnapshot {
+    snapshot: Arc<FluxBackendSnapshot>,
+    health_check_enabled: bool,
 }
 
-pub(super) fn backend_container_ready(
+impl BackendContainerSnapshot {
+    pub(super) fn backends(&self) -> &BTreeSet<Backend> {
+        &self.snapshot.backends
+    }
+
+    pub(super) fn ready(&self, backend: &Backend) -> bool {
+        self.snapshot
+            .health
+            .get(&backend_key(backend))
+            .map_or(!self.health_check_enabled, FluxBackendHealth::ready)
+    }
+}
+
+pub(super) fn backend_container_snapshot(
     container: &impl BackendContainer,
-    backend: &Backend,
-) -> bool {
-    container.backend_ready(backend)
+) -> BackendContainerSnapshot {
+    container.backend_snapshot()
 }
 
 #[cfg(test)]

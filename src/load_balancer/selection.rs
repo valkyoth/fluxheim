@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::SelectedUpstream;
-use super::backend::{BackendContainer, backend_container_ready, backend_container_set};
+use super::backend::{BackendContainer, BackendContainerSnapshot, backend_container_snapshot};
 use super::backend::{BackendIdentity, RuntimeBackend as Backend};
 use super::key::backend_key;
 use super::policy::BackendSelectionPolicy;
@@ -89,7 +89,7 @@ fn selection_passes(backend_policy: &BackendSelectionPolicy) -> Vec<SelectionPas
 }
 
 fn priority_activation_satisfied(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> bool {
@@ -102,10 +102,11 @@ fn priority_activation_satisfied(
         return true;
     }
 
-    backend_container_set(inner)
+    snapshot
+        .backends()
         .iter()
         .filter(|backend| {
-            backend_container_ready(inner, backend)
+            snapshot.ready(backend)
                 && context
                     .backend_policy
                     .permits(backend, pass, context.counters)
@@ -126,6 +127,7 @@ pub(super) fn select_weighted_round_robin(
     inner: &impl BackendContainer,
     inputs: LoadBalancerSelectInputs<'_>,
 ) -> Option<SelectedUpstream> {
+    let snapshot = backend_container_snapshot(inner);
     let context = SelectionContext {
         passive_health: inputs.passive_health,
         slow_start: inputs.slow_start,
@@ -133,11 +135,11 @@ pub(super) fn select_weighted_round_robin(
         backend_policy: inputs.backend_policy,
     };
     for pass in selection_passes(inputs.backend_policy) {
-        if !priority_activation_satisfied(inner, context, pass) {
+        if !priority_activation_satisfied(&snapshot, context, pass) {
             continue;
         }
         if let Some(selected) = select_weighted_round_robin_with_backup_policy(
-            inner,
+            &snapshot,
             inputs.round_robin_cursor,
             context,
             pass,
@@ -149,15 +151,15 @@ pub(super) fn select_weighted_round_robin(
 }
 
 fn select_weighted_round_robin_with_backup_policy(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     cursor: &AtomicUsize,
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut candidates = Vec::new();
     let mut total_weight = 0usize;
-    for backend in backend_container_set(inner).iter() {
-        if !backend_container_ready(inner, backend)
+    for backend in snapshot.backends().iter() {
+        if !snapshot.ready(backend)
             || !context
                 .backend_policy
                 .permits(backend, pass, context.counters)
@@ -195,6 +197,7 @@ pub(super) fn select_least_connections(
     slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
 ) -> Option<SelectedUpstream> {
+    let snapshot = backend_container_snapshot(inner);
     let context = SelectionContext {
         passive_health,
         slow_start,
@@ -202,11 +205,11 @@ pub(super) fn select_least_connections(
         backend_policy,
     };
     for pass in selection_passes(backend_policy) {
-        if !priority_activation_satisfied(inner, context, pass) {
+        if !priority_activation_satisfied(&snapshot, context, pass) {
             continue;
         }
         if let Some(selected) = select_least_connections_with_backup_policy(
-            inner,
+            &snapshot,
             counters,
             passive_health,
             slow_start,
@@ -220,7 +223,7 @@ pub(super) fn select_least_connections(
 }
 
 fn select_least_connections_with_backup_policy(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     counters: &BackendConnectionCounters,
     passive_health: Option<&PassiveHealthState>,
     slow_start: Option<&SlowStartState>,
@@ -228,8 +231,8 @@ fn select_least_connections_with_backup_policy(
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
-    for backend in backend_container_set(inner).iter() {
-        if !backend_container_ready(inner, backend)
+    for backend in snapshot.backends().iter() {
+        if !snapshot.ready(backend)
             || !backend_policy.permits(backend, pass, counters)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
             || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
@@ -263,6 +266,7 @@ pub(super) fn select_least_sessions(
     backend_policy: &BackendSelectionPolicy,
     persistence_entry_counts: &std::collections::HashMap<u64, usize>,
 ) -> Option<SelectedUpstream> {
+    let snapshot = backend_container_snapshot(inner);
     let context = SelectionContext {
         passive_health,
         slow_start,
@@ -270,11 +274,11 @@ pub(super) fn select_least_sessions(
         backend_policy,
     };
     for pass in selection_passes(backend_policy) {
-        if !priority_activation_satisfied(inner, context, pass) {
+        if !priority_activation_satisfied(&snapshot, context, pass) {
             continue;
         }
         if let Some(selected) = select_least_sessions_with_backup_policy(
-            inner,
+            &snapshot,
             counters,
             passive_health,
             slow_start,
@@ -289,7 +293,7 @@ pub(super) fn select_least_sessions(
 }
 
 fn select_least_sessions_with_backup_policy(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     counters: &BackendConnectionCounters,
     passive_health: Option<&PassiveHealthState>,
     slow_start: Option<&SlowStartState>,
@@ -298,8 +302,8 @@ fn select_least_sessions_with_backup_policy(
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
-    for backend in backend_container_set(inner).iter() {
-        if !backend_container_ready(inner, backend)
+    for backend in snapshot.backends().iter() {
+        if !snapshot.ready(backend)
             || !backend_policy.permits(backend, pass, counters)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
             || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
@@ -346,6 +350,7 @@ pub(super) fn select_least_time(
     slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
 ) -> Option<SelectedUpstream> {
+    let snapshot = backend_container_snapshot(inner);
     let context = SelectionContext {
         passive_health,
         slow_start,
@@ -353,11 +358,11 @@ pub(super) fn select_least_time(
         backend_policy,
     };
     for pass in selection_passes(backend_policy) {
-        if !priority_activation_satisfied(inner, context, pass) {
+        if !priority_activation_satisfied(&snapshot, context, pass) {
             continue;
         }
         if let Some(selected) = select_least_time_with_backup_policy(
-            inner,
+            &snapshot,
             counters,
             latency,
             passive_health,
@@ -372,7 +377,7 @@ pub(super) fn select_least_time(
 }
 
 fn select_least_time_with_backup_policy(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     counters: &BackendConnectionCounters,
     latency: &BackendLatencyState,
     passive_health: Option<&PassiveHealthState>,
@@ -381,8 +386,8 @@ fn select_least_time_with_backup_policy(
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
-    for backend in backend_container_set(inner).iter() {
-        if !backend_container_ready(inner, backend)
+    for backend in snapshot.backends().iter() {
+        if !snapshot.ready(backend)
             || !backend_policy.permits(backend, pass, counters)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
             || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
@@ -444,6 +449,7 @@ pub(super) fn select_power_of_two(
     slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
 ) -> Option<SelectedUpstream> {
+    let snapshot = backend_container_snapshot(inner);
     let context = SelectionContext {
         passive_health,
         slow_start,
@@ -451,11 +457,11 @@ pub(super) fn select_power_of_two(
         backend_policy,
     };
     for pass in selection_passes(backend_policy) {
-        if !priority_activation_satisfied(inner, context, pass) {
+        if !priority_activation_satisfied(&snapshot, context, pass) {
             continue;
         }
         if let Some(selected) =
-            select_power_of_two_with_backup_policy(inner, max_iterations, context, pass)
+            select_power_of_two_with_backup_policy(&snapshot, max_iterations, context, pass)
         {
             return Some(selected);
         }
@@ -464,15 +470,15 @@ pub(super) fn select_power_of_two(
 }
 
 fn select_power_of_two_with_backup_policy(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     max_iterations: usize,
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
-    let first = select_weighted_random_candidate(inner, max_iterations, context, pass, None)?;
+    let first = select_weighted_random_candidate(snapshot, max_iterations, context, pass, None)?;
     let first_key = backend_key(&first);
     let second =
-        select_weighted_random_candidate(inner, max_iterations, context, pass, Some(first_key))
+        select_weighted_random_candidate(snapshot, max_iterations, context, pass, Some(first_key))
             .unwrap_or_else(|| first.clone());
     let selected = if least_connections_score_is_lower(
         context.counters.count(&second),
@@ -488,13 +494,13 @@ fn select_power_of_two_with_backup_policy(
 }
 
 fn select_weighted_random_candidate(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     max_iterations: usize,
     context: SelectionContext<'_>,
     pass: SelectionPass,
     excluded_key: Option<u64>,
 ) -> Option<Backend> {
-    let backends: Vec<Backend> = backend_container_set(inner).iter().cloned().collect();
+    let backends: Vec<Backend> = snapshot.backends().iter().cloned().collect();
     if backends.is_empty() {
         return None;
     }
@@ -506,7 +512,7 @@ fn select_weighted_random_candidate(
 
     let weighted_candidate = &backends[weighted[random_u64() as usize % weighted.len()]];
     if random_candidate_allowed(
-        inner,
+        snapshot,
         weighted_candidate,
         context,
         pass,
@@ -519,7 +525,7 @@ fn select_weighted_random_candidate(
     let start = random_u64() as usize % backends.len();
     for offset in 0..max_iterations.max(1).min(backends.len()) {
         let candidate = &backends[(start + offset) % backends.len()];
-        if random_candidate_allowed(inner, candidate, context, pass, excluded_key, &mut seen) {
+        if random_candidate_allowed(snapshot, candidate, context, pass, excluded_key, &mut seen) {
             return Some(candidate.clone());
         }
     }
@@ -527,7 +533,7 @@ fn select_weighted_random_candidate(
 }
 
 fn random_candidate_allowed(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     candidate: &Backend,
     context: SelectionContext<'_>,
     pass: SelectionPass,
@@ -538,7 +544,7 @@ fn random_candidate_allowed(
     if excluded_key == Some(candidate_key) || !seen.insert(candidate_key) {
         return false;
     }
-    backend_candidate_allowed(inner, candidate, context, pass)
+    backend_candidate_allowed(snapshot, candidate, context, pass)
 }
 
 fn random_u64() -> u64 {
@@ -557,6 +563,7 @@ pub(super) fn select_fnv_hash(
     inner: &impl BackendContainer,
     inputs: LoadBalancerSelectInputs<'_>,
 ) -> Option<SelectedUpstream> {
+    let snapshot = backend_container_snapshot(inner);
     let context = SelectionContext {
         passive_health: inputs.passive_health,
         slow_start: inputs.slow_start,
@@ -564,11 +571,11 @@ pub(super) fn select_fnv_hash(
         backend_policy: inputs.backend_policy,
     };
     for pass in selection_passes(inputs.backend_policy) {
-        if !priority_activation_satisfied(inner, context, pass) {
+        if !priority_activation_satisfied(&snapshot, context, pass) {
             continue;
         }
         if let Some(backend) = select_fnv_hash_with_backup_policy(
-            inner,
+            &snapshot,
             inputs.key.unwrap_or_default(),
             inputs.max_iterations,
             context,
@@ -581,13 +588,13 @@ pub(super) fn select_fnv_hash(
 }
 
 fn select_fnv_hash_with_backup_policy(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     key: &[u8],
     max_iterations: usize,
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> Option<Backend> {
-    let backends: Vec<Backend> = backend_container_set(inner).iter().cloned().collect();
+    let backends: Vec<Backend> = snapshot.backends().iter().cloned().collect();
     if backends.is_empty() {
         return None;
     }
@@ -609,7 +616,7 @@ fn select_fnv_hash_with_backup_policy(
         if !seen.insert(backend_key(candidate)) {
             continue;
         }
-        if backend_candidate_allowed(inner, candidate, context, pass) {
+        if backend_candidate_allowed(snapshot, candidate, context, pass) {
             return Some(candidate.clone());
         }
     }
@@ -625,12 +632,12 @@ fn weighted_backend_indices(backends: &[Backend]) -> Vec<usize> {
 }
 
 fn backend_candidate_allowed(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     backend: &Backend,
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> bool {
-    backend_container_ready(inner, backend)
+    snapshot.ready(backend)
         && context
             .backend_policy
             .permits(backend, pass, context.counters)
@@ -647,6 +654,7 @@ pub(super) fn select_consistent_hash(
     inner: &impl BackendContainer,
     inputs: LoadBalancerSelectInputs<'_>,
 ) -> Option<SelectedUpstream> {
+    let snapshot = backend_container_snapshot(inner);
     let context = SelectionContext {
         passive_health: inputs.passive_health,
         slow_start: inputs.slow_start,
@@ -654,11 +662,11 @@ pub(super) fn select_consistent_hash(
         backend_policy: inputs.backend_policy,
     };
     for pass in selection_passes(inputs.backend_policy) {
-        if !priority_activation_satisfied(inner, context, pass) {
+        if !priority_activation_satisfied(&snapshot, context, pass) {
             continue;
         }
         if let Some(backend) = select_consistent_hash_with_backup_policy(
-            inner,
+            &snapshot,
             inputs.key.unwrap_or_default(),
             inputs.max_iterations,
             context,
@@ -676,6 +684,7 @@ pub(super) fn select_bounded_load_consistent(
     factor_per_mille: u16,
     inputs: LoadBalancerSelectInputs<'_>,
 ) -> Option<SelectedUpstream> {
+    let snapshot = backend_container_snapshot(inner);
     let context = SelectionContext {
         passive_health: inputs.passive_health,
         slow_start: inputs.slow_start,
@@ -683,11 +692,11 @@ pub(super) fn select_bounded_load_consistent(
         backend_policy: inputs.backend_policy,
     };
     for pass in selection_passes(inputs.backend_policy) {
-        if !priority_activation_satisfied(inner, context, pass) {
+        if !priority_activation_satisfied(&snapshot, context, pass) {
             continue;
         }
         if let Some(backend) = select_bounded_load_consistent_with_backup_policy(
-            inner,
+            &snapshot,
             inputs.key.unwrap_or_default(),
             inputs.max_iterations,
             context,
@@ -701,16 +710,16 @@ pub(super) fn select_bounded_load_consistent(
 }
 
 fn select_bounded_load_consistent_with_backup_policy(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     key: &[u8],
     max_iterations: usize,
     context: SelectionContext<'_>,
     pass: SelectionPass,
     factor_per_mille: u16,
 ) -> Option<Backend> {
-    let Some(bound) = bounded_load_snapshot(inner, context, pass, factor_per_mille) else {
+    let Some(bound) = bounded_load_snapshot(snapshot, context, pass, factor_per_mille) else {
         return select_consistent_hash_with_backup_policy(
-            inner,
+            snapshot,
             key,
             max_iterations,
             context,
@@ -719,7 +728,7 @@ fn select_bounded_load_consistent_with_backup_policy(
         );
     };
     select_consistent_hash_with_backup_policy(
-        inner,
+        snapshot,
         key,
         max_iterations,
         context,
@@ -727,7 +736,14 @@ fn select_bounded_load_consistent_with_backup_policy(
         Some(&bound),
     )
     .or_else(|| {
-        select_consistent_hash_with_backup_policy(inner, key, max_iterations, context, pass, None)
+        select_consistent_hash_with_backup_policy(
+            snapshot,
+            key,
+            max_iterations,
+            context,
+            pass,
+            None,
+        )
     })
 }
 
@@ -739,15 +755,15 @@ struct BoundedLoadSnapshot {
 }
 
 fn bounded_load_snapshot(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     context: SelectionContext<'_>,
     pass: SelectionPass,
     factor_per_mille: u16,
 ) -> Option<BoundedLoadSnapshot> {
     let mut total_connections = 0usize;
     let mut total_weight = 0usize;
-    for backend in backend_container_set(inner).iter() {
-        if !backend_container_ready(inner, backend)
+    for backend in snapshot.backends().iter() {
+        if !snapshot.ready(backend)
             || !context
                 .backend_policy
                 .permits(backend, pass, context.counters)
@@ -790,21 +806,21 @@ fn bounded_load_permits(
 }
 
 fn select_consistent_hash_with_backup_policy(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     key: &[u8],
     max_iterations: usize,
     context: SelectionContext<'_>,
     pass: SelectionPass,
     bound: Option<&BoundedLoadSnapshot>,
 ) -> Option<Backend> {
-    let candidates = consistent_hash_candidates(inner, key, context.backend_policy);
+    let candidates = consistent_hash_candidates(snapshot, key, context.backend_policy);
     let limit = max_iterations.max(1).min(candidates.len());
     candidates
         .into_iter()
         .take(limit)
         .map(|(_, _, backend)| backend)
         .find(|backend| {
-            backend_candidate_allowed(inner, backend, context, pass)
+            backend_candidate_allowed(snapshot, backend, context, pass)
                 && bound.is_none_or(|bound| {
                     bounded_load_permits(backend, context.counters, context.backend_policy, bound)
                 })
@@ -812,11 +828,12 @@ fn select_consistent_hash_with_backup_policy(
 }
 
 fn consistent_hash_candidates(
-    inner: &impl BackendContainer,
+    snapshot: &BackendContainerSnapshot,
     key: &[u8],
     backend_policy: &BackendSelectionPolicy,
 ) -> Vec<(u64, u64, Backend)> {
-    let mut candidates: Vec<_> = backend_container_set(inner)
+    let mut candidates: Vec<_> = snapshot
+        .backends()
         .iter()
         .cloned()
         .map(|backend| {
@@ -921,29 +938,28 @@ pub(super) fn select_maglev(
     table: &MaglevTable,
     inputs: LoadBalancerSelectInputs<'_>,
 ) -> Option<SelectedUpstream> {
-    let backend_by_key: std::collections::HashMap<u64, Backend> = backend_container_set(inner)
+    let snapshot = backend_container_snapshot(inner);
+    let backend_by_key: std::collections::HashMap<u64, Backend> = snapshot
+        .backends()
         .iter()
         .cloned()
         .map(|backend| (backend_key(&backend), backend))
         .collect();
+    let context = SelectionContext {
+        passive_health: inputs.passive_health,
+        slow_start: inputs.slow_start,
+        counters: inputs.counters,
+        backend_policy: inputs.backend_policy,
+    };
     for pass in selection_passes(inputs.backend_policy) {
-        if !priority_activation_satisfied(
-            inner,
-            SelectionContext {
-                passive_health: inputs.passive_health,
-                slow_start: inputs.slow_start,
-                counters: inputs.counters,
-                backend_policy: inputs.backend_policy,
-            },
-            pass,
-        ) {
+        if !priority_activation_satisfied(&snapshot, context, pass) {
             continue;
         }
         for key in table.candidate_keys(inputs.key.unwrap_or_default(), inputs.max_iterations) {
             let Some(backend) = backend_by_key.get(&key) else {
                 continue;
             };
-            if backend_container_ready(inner, backend)
+            if snapshot.ready(backend)
                 && inputs
                     .backend_policy
                     .permits(backend, pass, inputs.counters)
