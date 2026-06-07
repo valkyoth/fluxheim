@@ -7,6 +7,19 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.9 - 2026-06-07
+
+### Changed
+
+- Start the restart-persistent load-balancer state line. The stop line is
+  versioned, size-limited, atomically written, auditable local persistence for
+  selected runtime member overrides and bounded persistence tables after the
+  Fluxheim-native backend model stabilized in the `1.5.7` and `1.5.8` lines.
+- Keep the explicit boundary for this release: corrupt or incompatible
+  persisted state must be ignored and rebuilt, not poison a pool; this release
+  does not add cross-node state sync, runtime add/remove-member, dynamic
+  discovery control planes, UDP/GSLB, or Wasm/iRules/Lua scripting.
+
 ## 1.5.8 - 2026-06-07
 
 ### Added

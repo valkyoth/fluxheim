@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.8
+Version:        1.5.9
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jun 07 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.9-1
+- Start the restart-persistent load-balancer state line for versioned,
+  size-limited, atomically written local runtime state with fail-closed rebuild
+  semantics.
+
 * Sun Jun 07 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.8-1
 - Expand active health checks with bounded custom request headers, standard
   gRPC checks, exact JSON scalar body matching, and health-derived degraded
