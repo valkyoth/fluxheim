@@ -35,6 +35,10 @@ control-plane actions and return `"persistent": false`. The local
 overrides, runtime weight overrides, and local persistence tables, not mutated
 backend membership.
 
+Runtime-added or retargeted members carry address and configured weight only.
+Aliases, tags, backup membership, priority groups, locality metadata, and
+per-upstream caps remain static-config fields and need a reload.
+
 ## Stop Line
 
 This release does not add xDS/Kubernetes/Consul discovery, UDP/GSLB,

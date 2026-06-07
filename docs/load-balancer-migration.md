@@ -164,8 +164,11 @@ with `address`/`new_member` to retarget a non-aliased member. Aliased members
 can be weight-updated but need a config reload for address changes because the
 alias is part of the static backend identity. Use `member-remove` after the
 member has drained to zero in-flight requests. These backend-set mutations are
-local in-memory changes in the current release; DNS/file-discovery pools and
-Maglev selectors reject them.
+local in-memory changes in the current release. Runtime-added or retargeted
+members carry address and configured weight only; aliases, tags, backup
+membership, priority groups, locality metadata, and per-upstream caps remain
+static-config fields. DNS/file-discovery pools and Maglev selectors reject
+runtime backend-set mutation.
 
 The load-balancer-only status view is available without parsing the full admin
 status body:

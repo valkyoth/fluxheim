@@ -408,7 +408,10 @@ Runtime backend-set mutation is available only for static upstream pools in
 this release. It is rejected for DNS/file-discovery pools because discovery
 refresh would overwrite local admin changes. It is also rejected for Maglev
 selectors because Maglev requires a rebuilt lookup table; use a non-Maglev
-selector for runtime backend-set changes. Backend-set additions, removals, and
+selector for runtime backend-set changes. Runtime-added or retargeted members
+carry only address and configured weight; aliases, tags, backup membership,
+priority groups, locality metadata, and per-upstream caps still come from the
+static config and require reload. Backend-set additions, removals, and
 configured-weight updates are in-memory control-plane actions and are reported
 with `"persistent": false`; `proxy.load_balance.runtime_state_file` currently
 persists runtime member-state overrides, runtime weight overrides, and local
