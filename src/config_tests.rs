@@ -2624,6 +2624,47 @@ fn rejects_invalid_load_balance_max_iterations() {
 }
 
 #[test]
+fn validates_load_balance_runtime_state_file_path() {
+    let root = secure_test_dir("config-lb-runtime-state");
+    fs::create_dir_all(safe_child_path(&root, "state")).unwrap();
+    let config_path = safe_child_path(&root, "fluxheim.toml");
+    fs::write(
+        &config_path,
+        r#"
+            [proxy.load_balance]
+            runtime_state_file = "state/lb.json"
+            "#,
+    )
+    .unwrap();
+
+    let config = Config::load_without_runtime_paths(Some(&config_path)).unwrap();
+    let expected = root.join("state/lb.json");
+    assert_eq!(
+        config.proxy.load_balance.runtime_state_file.as_deref(),
+        Some(expected.as_path())
+    );
+
+    #[cfg(unix)]
+    {
+        let path = unique_world_writable_child("config-lb-runtime-world-writable", "lb.json");
+        let config: Config = toml::from_str(&format!(
+            r#"
+                [proxy.load_balance]
+                runtime_state_file = "{}"
+                "#,
+            path.display()
+        ))
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::UnsafePath { field, .. })
+                if field == "proxy.load_balance.runtime_state_file"
+        ));
+    }
+}
+
+#[test]
 fn validates_load_balance_hash_selection() {
     let config: Config = toml::from_str(
         r#"
