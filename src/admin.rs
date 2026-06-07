@@ -4768,6 +4768,62 @@ mod tests {
 
     #[cfg(feature = "load-balancer")]
     #[test]
+    fn load_balancer_member_set_endpoints_report_bad_requests() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let app = app_with_config(load_balancer_admin_config());
+        let missing_vhost = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-add",
+            Some("member=127.0.0.1:3003"),
+            &auth_headers(),
+        );
+        assert_eq!(missing_vhost.status, StatusCode::BAD_REQUEST);
+
+        let missing_member = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-add",
+            Some("vhost=one"),
+            &auth_headers(),
+        );
+        assert_eq!(missing_member.status, StatusCode::BAD_REQUEST);
+
+        let invalid_weight = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-add",
+            Some("vhost=one&member=127.0.0.1:3003&weight=reset"),
+            &auth_headers(),
+        );
+        assert_eq!(invalid_weight.status, StatusCode::BAD_REQUEST);
+
+        let duplicate = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-add",
+            Some("vhost=one&member=127.0.0.1:3001"),
+            &auth_headers(),
+        );
+        assert_eq!(duplicate.status, StatusCode::CONFLICT);
+
+        let unknown_remove = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-remove",
+            Some("vhost=one&member=127.0.0.1:3999"),
+            &auth_headers(),
+        );
+        assert_eq!(unknown_remove.status, StatusCode::NOT_FOUND);
+
+        let noop_update = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-update",
+            Some("vhost=one&member=127.0.0.1:3001"),
+            &auth_headers(),
+        );
+        assert_eq!(noop_update.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
     fn load_balancer_persistence_clear_endpoint_reports_scope() {
         #[cfg(feature = "tls-rustls-backend")]
         let _ = crate::tls::install_rustls_crypto_provider();
