@@ -7,6 +7,29 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.12 - 2026-06-08
+
+### Changed
+
+- Start the Fluxheim-native background task registry line. The stop line is
+  Fluxheim-owned background work only: cache runtime metrics, stale cache
+  purging, ACME renewal scheduling, admin self-healing watchdog work,
+  load-balancer refresh loops, and future discovery workers.
+- Add `src/background.rs` as a Fluxheim-owned background task adapter with
+  explicit shutdown and readiness tokens, so background task implementations no
+  longer depend directly on Pingora's generic `GenBackgroundService` helper or
+  raw `ShutdownWatch` handling.
+- Move cache metrics, stale cache purging, ACME renewal, and the admin
+  self-healing watchdog to the new `FluxBackgroundTask` interface while
+  preserving their previous startup and shutdown behavior.
+- Move load-balancer discovery/health refresh services through the shared
+  Fluxheim background adapter while preserving the existing readiness ordering:
+  the service marks ready only after its first discovery update has run.
+- Keep Pingora's service trait boundary only as the server registration adapter
+  for this release. HTTP proxy request handling, stream listener ownership,
+  cache interfaces, UDP/GSLB, WAF, VPN/firewall appliance behavior, and
+  Wasm/iRules/Lua scripting remain future-version work.
+
 ## 1.5.11 - 2026-06-08
 
 ### Changed

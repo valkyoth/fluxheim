@@ -13,6 +13,8 @@ pub mod acme_companion;
 pub mod admin;
 #[cfg(feature = "proxy")]
 mod auth_request;
+#[cfg(feature = "proxy")]
+mod background;
 #[cfg(feature = "cache")]
 pub mod cache;
 #[cfg(all(feature = "proxy", feature = "cache"))]

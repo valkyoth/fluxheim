@@ -15,7 +15,6 @@ use async_trait::async_trait;
 use http::{HeaderMap, Response, StatusCode, header};
 use pingora::apps::http_app::{HttpServer, ServeHttp};
 use pingora::protocols::http::ServerSession;
-use pingora::services::background::{BackgroundService, GenBackgroundService};
 use pingora::services::listening::Service;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -377,14 +376,14 @@ fn auth_source_label(source: Option<IpAddr>) -> String {
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
-pub struct AdminServices {
-    pub control_plane: Service<HttpServer<AdminApp>>,
+pub(crate) struct AdminServices {
+    pub(crate) control_plane: Service<HttpServer<AdminApp>>,
     #[cfg(unix)]
-    pub ops_socket: Option<Service<HttpServer<AdminOpsApp>>>,
-    pub watchdog: Option<GenBackgroundService<AdminApp>>,
+    pub(crate) ops_socket: Option<Service<HttpServer<AdminOpsApp>>>,
+    pub(crate) watchdog: Option<crate::background::FluxBackgroundService<AdminApp>>,
 }
 
-pub fn admin_services_from_config(
+pub(crate) fn admin_services_from_config(
     config: &Config,
     proxy: FluxProxy,
 ) -> Result<Option<AdminServices>, Box<dyn Error + Send + Sync>> {
@@ -394,9 +393,9 @@ pub fn admin_services_from_config(
 
     let app = AdminApp::from_config(config, proxy)?;
     let watchdog = if app.self_healing_enabled {
-        Some(GenBackgroundService::new(
-            "Fluxheim Self-Healing Watchdog".to_owned(),
-            Arc::new(app.clone()),
+        Some(crate::background::background_service(
+            "Fluxheim Self-Healing Watchdog",
+            app.clone(),
         ))
     } else {
         None
@@ -2806,29 +2805,31 @@ enum HealthSignalOutcome {
 }
 
 #[async_trait]
-impl BackgroundService for AdminApp {
-    async fn start(&self, mut shutdown: pingora::server::ShutdownWatch) {
+impl crate::background::FluxBackgroundTask for AdminApp {
+    async fn start(
+        &self,
+        mut shutdown: crate::background::FluxShutdown,
+        mut ready: crate::background::FluxBackgroundReady,
+    ) {
+        ready.notify_ready();
         let interval = Duration::from_secs(self.watchdog_interval_secs());
 
         loop {
-            if *shutdown.borrow() {
+            if shutdown.is_shutdown() {
                 break;
             }
 
-            match tokio::time::timeout(interval, shutdown.changed()).await {
-                Ok(Ok(())) => continue,
-                Ok(Err(_closed)) => break,
-                Err(_elapsed) => {
-                    if let Some(response) = self.enforce_self_healing_deadline() {
-                        if response.status.is_success() {
-                            log::warn!("self-healing watchdog applied expired validation rollback");
-                        } else {
-                            log::error!(
-                                "self-healing watchdog failed expired validation rollback: status={}",
-                                response.status
-                            );
-                        }
-                    }
+            if shutdown.sleep_or_shutdown(interval).await {
+                break;
+            }
+            if let Some(response) = self.enforce_self_healing_deadline() {
+                if response.status.is_success() {
+                    log::warn!("self-healing watchdog applied expired validation rollback");
+                } else {
+                    log::error!(
+                        "self-healing watchdog failed expired validation rollback: status={}",
+                        response.status
+                    );
                 }
             }
         }

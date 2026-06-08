@@ -14,10 +14,6 @@ use serde::Deserialize;
 use zeroize::Zeroizing;
 
 #[cfg(unix)]
-use pingora::server::ListenFds;
-use pingora::server::ShutdownWatch;
-use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
-#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
 use crate::config::ProxyConfig;
@@ -459,7 +455,7 @@ where
     };
     inner.set_metric_labels(metric_labels);
 
-    let service = FluxLoadBalancerBackgroundService::new(format!("LB {name}"), inner);
+    let service = crate::background::background_service(format!("LB {name}"), inner);
     let load_balancer =
         UpstreamLoadBalancer::from_inner(wrap(service.task()), config, backend_policy);
     Ok(Some((load_balancer, Box::new(service))))
@@ -476,7 +472,7 @@ pub(super) fn background_maglev_service_for(
     };
     inner.set_metric_labels(metric_labels);
     let table = Arc::new(configured_maglev_table(config)?);
-    let service = FluxLoadBalancerBackgroundService::new(format!("LB {name}"), inner);
+    let service = crate::background::background_service(format!("LB {name}"), inner);
     let load_balancer = UpstreamLoadBalancer::from_inner(
         UpstreamLoadBalancerInner::MaglevHash {
             inner: service.task(),
@@ -486,45 +482,6 @@ pub(super) fn background_maglev_service_for(
         backend_policy,
     );
     Ok(Some((load_balancer, Box::new(service))))
-}
-
-struct FluxLoadBalancerBackgroundService {
-    name: String,
-    task: Arc<FluxLoadBalancerRuntime>,
-}
-
-impl FluxLoadBalancerBackgroundService {
-    fn new(name: String, task: FluxLoadBalancerRuntime) -> Self {
-        Self {
-            name,
-            task: Arc::new(task),
-        }
-    }
-
-    fn task(&self) -> Arc<FluxLoadBalancerRuntime> {
-        self.task.clone()
-    }
-}
-
-#[async_trait]
-impl ServiceWithDependents for FluxLoadBalancerBackgroundService {
-    async fn start_service(
-        &mut self,
-        #[cfg(unix)] _fds: Option<ListenFds>,
-        shutdown: ShutdownWatch,
-        _listeners_per_fd: usize,
-        ready: ServiceReadyNotifier,
-    ) {
-        self.task.run(shutdown, Some(ready)).await;
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn threads(&self) -> Option<usize> {
-        Some(1)
-    }
 }
 
 fn configured_backends(config: &ProxyConfig) -> FluxResult<FluxBackendSet> {

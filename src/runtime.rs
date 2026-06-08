@@ -93,7 +93,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             config.cache_purger.limit,
             config.cache_purger.batches
         );
-        server.add_service(pingora::services::background::background_service(
+        server.add_service(crate::background::background_service(
             "Cache stale disk purger",
             CacheStalePurgerBackgroundService {
                 config: config.cache_purger.clone(),
@@ -149,7 +149,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         #[cfg(feature = "cache")]
         {
             record_cache_runtime_metrics(&metrics_proxy);
-            server.add_service(pingora::services::background::background_service(
+            server.add_service(crate::background::background_service(
                 "Cache runtime metrics",
                 CacheRuntimeMetricsBackgroundService {
                     proxy: metrics_proxy.clone(),
@@ -177,7 +177,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             "ACME renewal service enabled; interval={}s",
             config.tls.acme.renewal.check_interval_secs
         );
-        server.add_service(pingora::services::background::background_service(
+        server.add_service(crate::background::background_service(
             "ACME renewal",
             AcmeRenewalBackgroundService {
                 config: config.clone(),
@@ -379,21 +379,23 @@ struct CacheRuntimeMetricsBackgroundService {
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
 #[async_trait::async_trait]
-impl pingora::services::background::BackgroundService for CacheRuntimeMetricsBackgroundService {
-    async fn start(&self, mut shutdown: pingora::server::ShutdownWatch) {
+impl crate::background::FluxBackgroundTask for CacheRuntimeMetricsBackgroundService {
+    async fn start(
+        &self,
+        mut shutdown: crate::background::FluxShutdown,
+        mut ready: crate::background::FluxBackgroundReady,
+    ) {
+        ready.notify_ready();
         let interval = std::time::Duration::from_secs(CACHE_RUNTIME_METRICS_INTERVAL_SECS);
 
         loop {
-            if *shutdown.borrow() {
+            if shutdown.is_shutdown() {
                 break;
             }
 
             record_cache_runtime_metrics(&self.proxy);
-
-            match tokio::time::timeout(interval, shutdown.changed()).await {
-                Ok(Ok(())) => continue,
-                Ok(Err(_closed)) => break,
-                Err(_elapsed) => continue,
+            if shutdown.sleep_or_shutdown(interval).await {
+                break;
             }
         }
     }
@@ -421,21 +423,23 @@ struct CacheStalePurgerBackgroundService {
 
 #[cfg(all(feature = "proxy", feature = "cache"))]
 #[async_trait::async_trait]
-impl pingora::services::background::BackgroundService for CacheStalePurgerBackgroundService {
-    async fn start(&self, mut shutdown: pingora::server::ShutdownWatch) {
+impl crate::background::FluxBackgroundTask for CacheStalePurgerBackgroundService {
+    async fn start(
+        &self,
+        mut shutdown: crate::background::FluxShutdown,
+        mut ready: crate::background::FluxBackgroundReady,
+    ) {
+        ready.notify_ready();
         let interval = std::time::Duration::from_secs(self.config.interval_secs);
 
         loop {
-            if *shutdown.borrow() {
+            if shutdown.is_shutdown() {
                 break;
             }
 
             run_cache_stale_purge_tick(&self.config, &self.proxy);
-
-            match tokio::time::timeout(interval, shutdown.changed()).await {
-                Ok(Ok(())) => continue,
-                Ok(Err(_closed)) => break,
-                Err(_elapsed) => continue,
+            if shutdown.sleep_or_shutdown(interval).await {
+                break;
             }
         }
     }
@@ -528,22 +532,24 @@ struct AcmeRenewalBackgroundService {
 
 #[cfg(all(feature = "proxy", feature = "acme-client"))]
 #[async_trait::async_trait]
-impl pingora::services::background::BackgroundService for AcmeRenewalBackgroundService {
-    async fn start(&self, mut shutdown: pingora::server::ShutdownWatch) {
+impl crate::background::FluxBackgroundTask for AcmeRenewalBackgroundService {
+    async fn start(
+        &self,
+        mut shutdown: crate::background::FluxShutdown,
+        mut ready: crate::background::FluxBackgroundReady,
+    ) {
+        ready.notify_ready();
         let interval =
             std::time::Duration::from_secs(self.config.tls.acme.renewal.check_interval_secs);
 
         loop {
-            if *shutdown.borrow() {
+            if shutdown.is_shutdown() {
                 break;
             }
 
             run_acme_renewal_tick(&self.config, self.certificate_reloader.as_ref()).await;
-
-            match tokio::time::timeout(interval, shutdown.changed()).await {
-                Ok(Ok(())) => continue,
-                Ok(Err(_closed)) => break,
-                Err(_elapsed) => continue,
+            if shutdown.sleep_or_shutdown(interval).await {
+                break;
             }
         }
     }

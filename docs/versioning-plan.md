@@ -3639,16 +3639,18 @@ the exception while the cache server is being completed as a focused sequence:
   status, audit/metrics, and reload behavior. Do not add UDP/GSLB, WAF,
   VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.12`: Fluxheim-native background task registry line. Stop at replacing
-  Pingora `GenBackgroundService`, `ServiceWithDependents`,
-  `background_service()`, and `ShutdownWatch` usage for Fluxheim-owned
-  background work such as cache metrics, ACME renewal scheduling, stale purging,
-  load-balancer updates, and future discovery refresh loops. Use explicit Tokio
-  tasks plus a cancellation primitive such as `tokio-util`'s
-  `CancellationToken`, preserve graceful shutdown semantics, task ordering where
-  needed, status/metrics visibility, and release smoke coverage. Do not change
-  HTTP proxy request handling, add UDP/GSLB, WAF, VPN/firewall appliance
-  behavior, or Wasm/iRules/Lua scripting in this release.
+- `v1.5.12`: Fluxheim-native background task registry line. Stop at moving
+  Fluxheim-owned background implementations off Pingora's generic
+  `GenBackgroundService`, direct `background_service()` registration helper,
+  and raw `ShutdownWatch` handling for cache metrics, ACME renewal scheduling,
+  stale purging, admin watchdog work, load-balancer updates, and future
+  discovery refresh loops. Keep Pingora's `ServiceWithDependents` only as the
+  outer server-registration adapter until the later server-bootstrap line. Use
+  explicit Fluxheim shutdown/readiness tokens, preserve graceful shutdown
+  semantics, task ordering where needed, status/metrics visibility, and release
+  smoke coverage. Do not change HTTP proxy request handling, add UDP/GSLB, WAF,
+  VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
+  release.
 - `v1.5.13`: Fluxheim-owned cache interface line. Stop at defining and using a
   `FluxCacheStorage`-style interface that captures Fluxheim's existing cache
   hit/miss/admission/stale/purge semantics without depending on Pingora's

@@ -16,8 +16,6 @@ use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use futures::future;
 use pingora::lb::Backend;
-use pingora::server::ShutdownWatch;
-use pingora::services::ServiceReadyNotifier;
 
 pub(super) type RuntimeBackend = Backend;
 
@@ -408,8 +406,8 @@ impl FluxLoadBalancerRuntime {
 
     pub(super) async fn run(
         &self,
-        shutdown: ShutdownWatch,
-        mut ready: Option<ServiceReadyNotifier>,
+        mut shutdown: crate::background::FluxShutdown,
+        mut ready: crate::background::FluxBackgroundReady,
     ) {
         const NEVER: Duration = Duration::from_secs(u32::MAX as u64);
         let mut now = Instant::now();
@@ -417,7 +415,7 @@ impl FluxLoadBalancerRuntime {
         let mut next_health_check = now;
 
         loop {
-            if *shutdown.borrow() {
+            if shutdown.is_shutdown() {
                 return;
             }
 
@@ -428,9 +426,7 @@ impl FluxLoadBalancerRuntime {
                 next_update = checked_next_wake(now, self.update_frequency.unwrap_or(NEVER));
             }
 
-            if let Some(ready) = ready.take() {
-                ServiceReadyNotifier::notify_ready(ready);
-            }
+            ready.notify_ready();
 
             if next_health_check <= now {
                 self.run_health_check(self.parallel_health_check).await;
@@ -443,7 +439,9 @@ impl FluxLoadBalancerRuntime {
             }
 
             let wake_at = std::cmp::min(next_update, next_health_check);
-            tokio::time::sleep_until(wake_at.into()).await;
+            if sleep_until_or_shutdown(&mut shutdown, wake_at).await {
+                return;
+            }
             now = Instant::now();
         }
     }
@@ -498,6 +496,30 @@ impl FluxLoadBalancerRuntime {
             }
         }
     }
+}
+
+#[async_trait]
+impl crate::background::FluxBackgroundTask for FluxLoadBalancerRuntime {
+    async fn start(
+        &self,
+        shutdown: crate::background::FluxShutdown,
+        ready: crate::background::FluxBackgroundReady,
+    ) {
+        self.run(shutdown, ready).await;
+    }
+}
+
+async fn sleep_until_or_shutdown(
+    shutdown: &mut crate::background::FluxShutdown,
+    wake_at: Instant,
+) -> bool {
+    let now = Instant::now();
+    if wake_at <= now {
+        return false;
+    }
+    shutdown
+        .sleep_or_shutdown(wake_at.duration_since(now))
+        .await
 }
 
 fn checked_next_wake(now: Instant, delay: Duration) -> Instant {

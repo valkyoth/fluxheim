@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.11
+Version:        1.5.12
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Mon Jun 08 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.12-1
+- Start the Fluxheim-native background task registry line.
+- Move cache metrics, stale cache purging, ACME renewal, admin watchdog, and
+  load-balancer refresh work through the Fluxheim background task adapter while
+  preserving startup readiness and graceful shutdown behavior.
+
 * Mon Jun 08 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.11-1
 - Start the service-discovery and control-plane integration line.
 - Update Prometheus metrics dependencies to remove the protobuf advisory
