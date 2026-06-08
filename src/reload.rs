@@ -1,6 +1,8 @@
 use crate::config::Config;
 #[cfg(feature = "load-balancer")]
 use crate::config::{ProxyConfig, VhostConfig};
+#[cfg(feature = "load-balancer")]
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ReloadImpact {
@@ -141,9 +143,39 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
 }
 
 #[cfg(feature = "load-balancer")]
-fn load_balancer_service_signature(config: &Config) -> Vec<(String, Vec<String>, bool)> {
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct LoadBalancerServiceSignature {
+    vhost: String,
+    route: Option<String>,
+    source: LoadBalancerServiceSource,
+    health_check_enabled: bool,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum LoadBalancerServiceSource {
+    Static {
+        upstreams: Vec<String>,
+    },
+    File {
+        path: PathBuf,
+        refresh_secs: u64,
+    },
+    Http {
+        url: String,
+        refresh_secs: u64,
+        bearer_token_file: Option<PathBuf>,
+    },
+    Dns {
+        upstreams: Vec<String>,
+        refresh_secs: u64,
+    },
+}
+
+#[cfg(feature = "load-balancer")]
+fn load_balancer_service_signature(config: &Config) -> Vec<LoadBalancerServiceSignature> {
     if config.vhosts.is_empty() {
-        return proxy_load_balancer_signature("default", &config.proxy)
+        return proxy_load_balancer_signature("default", None, &config.proxy)
             .into_iter()
             .collect();
     }
@@ -151,29 +183,60 @@ fn load_balancer_service_signature(config: &Config) -> Vec<(String, Vec<String>,
     config
         .vhosts
         .iter()
-        .filter_map(vhost_load_balancer_signature)
+        .flat_map(vhost_load_balancer_signatures)
         .collect()
 }
 
 #[cfg(feature = "load-balancer")]
-fn vhost_load_balancer_signature(vhost: &VhostConfig) -> Option<(String, Vec<String>, bool)> {
-    proxy_load_balancer_signature(&vhost.name, &vhost.proxy)
+fn vhost_load_balancer_signatures(vhost: &VhostConfig) -> Vec<LoadBalancerServiceSignature> {
+    let mut signatures = Vec::new();
+    if let Some(signature) = proxy_load_balancer_signature(&vhost.name, None, &vhost.proxy) {
+        signatures.push(signature);
+    }
+    signatures.extend(vhost.routes.iter().filter_map(|route| {
+        route.proxy.as_ref().and_then(|proxy| {
+            proxy_load_balancer_signature(&vhost.name, Some(route.name.as_str()), proxy)
+        })
+    }));
+    signatures
 }
 
 #[cfg(feature = "load-balancer")]
 fn proxy_load_balancer_signature(
-    name: &str,
+    vhost: &str,
+    route: Option<&str>,
     proxy: &ProxyConfig,
-) -> Option<(String, Vec<String>, bool)> {
-    if proxy.upstreams.is_empty() {
+) -> Option<LoadBalancerServiceSignature> {
+    let source = if let Some(path) = &proxy.upstreams_file {
+        LoadBalancerServiceSource::File {
+            path: path.clone(),
+            refresh_secs: proxy.upstreams_file_refresh_secs,
+        }
+    } else if let Some(url) = &proxy.upstreams_http_url {
+        LoadBalancerServiceSource::Http {
+            url: url.clone(),
+            refresh_secs: proxy.upstreams_http_refresh_secs,
+            bearer_token_file: proxy.upstreams_http_bearer_token_file.clone(),
+        }
+    } else if let Some(refresh_secs) = proxy.upstream_dns_refresh_secs {
+        LoadBalancerServiceSource::Dns {
+            upstreams: proxy.upstreams.clone(),
+            refresh_secs,
+        }
+    } else if proxy.upstreams.len() >= 2 {
+        LoadBalancerServiceSource::Static {
+            upstreams: proxy.upstreams.clone(),
+        }
+    } else {
         return None;
-    }
+    };
 
-    Some((
-        name.to_owned(),
-        proxy.upstreams.clone(),
-        proxy.load_balance.health_check.enabled,
-    ))
+    Some(LoadBalancerServiceSignature {
+        vhost: vhost.to_owned(),
+        route: route.map(str::to_owned),
+        source,
+        health_check_enabled: proxy.load_balance.health_check.enabled,
+    })
 }
 
 #[cfg(test)]
@@ -567,12 +630,175 @@ mod tests {
         let old = Config::default();
         let new = Config {
             proxy: ProxyConfig {
-                upstreams: vec!["127.0.0.1:3001".to_owned()],
+                upstream: None,
+                upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
                 ..ProxyConfig::default()
             },
             ..Config::default()
         };
 
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::LoadBalancerServicesChanged]
+            }
+        );
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_dynamic_discovery_change_requires_process_upgrade() {
+        let old = Config {
+            proxy: ProxyConfig {
+                upstream: None,
+                upstreams_file: Some("/run/fluxheim/backends-a.txt".into()),
+                upstreams_file_refresh_secs: 5,
+                ..ProxyConfig::default()
+            },
+            ..Config::default()
+        };
+        let new = Config {
+            proxy: ProxyConfig {
+                upstream: None,
+                upstreams_file: Some("/run/fluxheim/backends-b.txt".into()),
+                upstreams_file_refresh_secs: 10,
+                ..ProxyConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::LoadBalancerServicesChanged]
+            }
+        );
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_http_discovery_change_requires_process_upgrade() {
+        let old = Config {
+            proxy: ProxyConfig {
+                upstream: None,
+                upstreams_http_url: Some("https://discovery.example.test/v1/upstreams".to_owned()),
+                upstreams_http_refresh_secs: 5,
+                upstreams_http_bearer_token_file: Some("/run/secrets/discovery-token-a".into()),
+                ..ProxyConfig::default()
+            },
+            ..Config::default()
+        };
+        let new = Config {
+            proxy: ProxyConfig {
+                upstream: None,
+                upstreams_http_url: Some("https://discovery.example.test/v2/upstreams".to_owned()),
+                upstreams_http_refresh_secs: 15,
+                upstreams_http_bearer_token_file: Some("/run/secrets/discovery-token-b".into()),
+                ..ProxyConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::LoadBalancerServicesChanged]
+            }
+        );
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_dns_refresh_change_requires_process_upgrade() {
+        let old = Config {
+            proxy: ProxyConfig {
+                upstream: None,
+                upstreams: vec!["app.service.local:8080".to_owned()],
+                upstream_dns_refresh_secs: Some(5),
+                ..ProxyConfig::default()
+            },
+            ..Config::default()
+        };
+        let new = Config {
+            proxy: ProxyConfig {
+                upstream: None,
+                upstreams: vec!["app.service.local:8080".to_owned()],
+                upstream_dns_refresh_secs: Some(30),
+                ..ProxyConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::LoadBalancerServicesChanged]
+            }
+        );
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn route_load_balancer_service_change_requires_process_upgrade() {
+        let mut old = Config {
+            vhosts: vec![VhostConfig {
+                name: "example".to_owned(),
+                hosts: vec!["example.test".to_owned()],
+                max_request_body_bytes: None,
+                access: Default::default(),
+                rate_limit: Default::default(),
+                concurrency: Default::default(),
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: crate::config::CacheConfig::default(),
+                compression: None,
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let mut new = old.clone();
+        new.vhosts[0].routes.push(crate::config::RouteConfig {
+            name: "api".to_owned(),
+            path_prefix: Some("/api/".to_owned()),
+            proxy: Some(ProxyConfig {
+                upstream: None,
+                upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
+                ..ProxyConfig::default()
+            }),
+            path_exact: None,
+            path_regex: None,
+            methods: Vec::new(),
+            fallback: false,
+            https_redirect_exempt: false,
+            strip_prefix: None,
+            rewrite_prefix: None,
+            rewrite_template: None,
+            max_request_body_bytes: None,
+            access: Default::default(),
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            grpc: crate::config::GrpcRouteConfig::default(),
+            redirect: None,
+            web: None,
+            php: None,
+            cache: None,
+            compression: None,
+            headers: crate::config::VhostHeaderPolicyConfig::default(),
+        });
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::LoadBalancerServicesChanged]
+            }
+        );
+        old.vhosts[0].routes = new.vhosts[0].routes.clone();
+        old.vhosts[0].routes[0].proxy.as_mut().unwrap().upstreams[1] = "127.0.0.1:3003".to_owned();
         assert_eq!(
             classify_reload(&old, &new),
             ReloadImpact::ProcessUpgrade {

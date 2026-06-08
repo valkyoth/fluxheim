@@ -1041,6 +1041,10 @@ control-plane sidecars. HTTP discovery is intentionally pull-only in this
 release: it does not watch Kubernetes, Consul, or xDS streams directly, and it
 cannot be combined with per-member static policy lists such as weights,
 localities, aliases, tags, backup, drain, disabled, or max-in-flight.
+Changing a load-balanced pool's discovery source, discovery refresh interval,
+HTTP bearer-token file, or route/vhost pool membership is classified as a
+process-upgrade change rather than a live snapshot reload because the refresh
+loop is registered with the process service set at startup.
 When `upstream_tls = true`, Fluxheim sends TLS to the origin. `upstream_sni`
 overrides the SNI name; if it is omitted, Fluxheim derives SNI from the primary
 upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default to

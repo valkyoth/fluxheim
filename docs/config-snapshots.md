@@ -199,6 +199,12 @@ metrics service, or startup-owned load-balancer service changes. Existing
 requests keep their old runtime snapshot; new requests use the freshly swapped
 proxy snapshot.
 
+Load-balancer service changes include adding or removing vhost/route pools and
+changing static pool members, file/DNS/HTTP discovery sources, discovery refresh
+intervals, or HTTP discovery bearer-token files. These refresh loops are
+registered at process startup, so use the normal supervisor/process-upgrade path
+for those changes.
+
 ## Self-Healing Guard
 
 When `admin.self_healing.enabled = true`, a successful live reload enters a

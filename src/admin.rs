@@ -4435,6 +4435,18 @@ mod tests {
             body["load_balancer"]["vhosts"][0]["pool"]["backend_count"],
             2
         );
+        assert_eq!(
+            body["load_balancer"]["vhosts"][0]["pool"]["discovery_mode"],
+            "static"
+        );
+        let discovery = &body["load_balancer"]["vhosts"][0]["pool"]["discovery"];
+        assert_eq!(discovery["mode"], "static");
+        assert_eq!(discovery["refresh_enabled"], false);
+        assert_eq!(discovery["success_count"], 1);
+        assert_eq!(discovery["failure_count"], 0);
+        assert!(discovery["last_success_unix_secs"].is_number());
+        assert_eq!(discovery["last_failure_unix_secs"], Value::Null);
+        assert_eq!(discovery["last_error"], Value::Null);
 
         let wrong_method = app.handle(
             "POST",

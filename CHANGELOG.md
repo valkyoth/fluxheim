@@ -37,6 +37,10 @@ behavior when the change improves security or project direction.
 - Emit bounded `fluxheim_load_balancer_events_total` events for background
   discovery refresh successes and failures using the existing vhost/route pool
   labels.
+- Harden reload classification for load-balancer discovery services: static
+  pool membership, route-local pools, file/DNS/HTTP discovery sources, refresh
+  intervals, and HTTP discovery bearer-token files now all require the
+  process-upgrade path because their refresh loops are registered at startup.
 
 ## 1.5.10 - 2026-06-07
 

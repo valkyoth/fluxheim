@@ -36,6 +36,10 @@ line.
   success/failure timestamps, and a bounded last-error field.
 - Added bounded load-balancer metric events for background discovery refresh
   success and failure, labeled with the existing vhost/route pool identity.
+- Hardened reload classification for load-balancer services so static pool
+  membership, route-local pools, file/DNS/HTTP discovery sources, refresh
+  intervals, and HTTP discovery bearer-token files require the process-upgrade
+  path instead of a live snapshot reload.
 
 ## Stop Line
 
