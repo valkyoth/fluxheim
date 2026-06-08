@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.10
+Version:        1.5.11
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Mon Jun 08 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.11-1
+- Start the service-discovery and control-plane integration line.
+- Update Prometheus metrics dependencies to remove the protobuf advisory
+  suppression while keeping the patched vendored Pingora core.
+
 * Sun Jun 07 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.10-1
 - Start the runtime backend-set mutation line for authenticated add, remove,
   and update operations through atomic backend-set swaps.

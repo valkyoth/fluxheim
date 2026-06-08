@@ -55,9 +55,7 @@ yanked = "deny"
 unmaintained = "workspace"
 unsound = "workspace"
 unused-ignored-advisory = "deny"
-ignore = [
-    { id = "RUSTSEC-2024-0437", reason = "Transitive through pingora-core -> prometheus 0.13.4 -> protobuf 2.28.0. Pingora's PrometheusHttpApp uses TextEncoder directly and ignores Accept negotiation, so Fluxheim does not expose protobuf parsing on /metrics. REVIEW: tracked by scripts/validate-release-metadata.sh; remove when Pingora moves to prometheus >=0.14 or drops protobuf. Next scheduled manual review before 2026-08-01." },
-]
+ignore = []
 
 [sources]
 unknown-registry = "deny"

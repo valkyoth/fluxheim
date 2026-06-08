@@ -7,6 +7,24 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.11 - 2026-06-08
+
+### Changed
+
+- Start the service-discovery and control-plane integration line. The stop line
+  is one or more bounded discovery adapters such as Kubernetes, Consul, or xDS
+  after local DNS/file discovery and runtime backend mutation are stable, with
+  authentication/trust boundaries, churn limits, safe fallback, status,
+  audit/metrics, and reload behavior.
+- Update Fluxheim and the vendored `pingora-core` metrics dependency from
+  Prometheus 0.13 to 0.14, which moves the transitive protobuf dependency from
+  vulnerable 2.x to 3.7.2.
+- Remove the obsolete `RUSTSEC-2024-0437` protobuf suppression and its release
+  metadata review gate now that the Prometheus/protobuf dependency path is
+  fixed.
+- Keep Pingora pinned at `=0.8.0` so routine dependency refreshes cannot bypass
+  Fluxheim's patched vendored Pingora core.
+
 ## 1.5.10 - 2026-06-07
 
 ### Changed

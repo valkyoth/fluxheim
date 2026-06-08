@@ -53,35 +53,6 @@ if ! grep -q "^## $cargo_version " CHANGELOG.md; then
     exit 1
 fi
 
-prometheus_version="$(
-    awk '
-        /^\[\[package\]\]$/ { in_package = 1; name = ""; version = ""; next }
-        in_package && /^name = "prometheus"$/ { name = "prometheus"; next }
-        in_package && /^version = / { version = $3; gsub(/"/, "", version); next }
-        in_package && /^dependencies = \[/ {
-            if (name == "prometheus") {
-                print version;
-                exit
-            }
-            in_package = 0
-        }
-    ' Cargo.lock
-)"
-
-if grep -q 'RUSTSEC-2024-0437' deny.toml .cargo/audit.toml \
-    && [ "$prometheus_version" != "0.13.4" ]; then
-    echo "release metadata: RUSTSEC-2024-0437 suppression must be reviewed because prometheus is $prometheus_version, expected 0.13.4" >&2
-    exit 1
-fi
-
-if grep -q 'RUSTSEC-2024-0437' deny.toml .cargo/audit.toml; then
-    current_utc_date="$(date -u +%Y%m%d)"
-    if [ "$current_utc_date" -ge 20260801 ]; then
-        echo "release metadata: RUSTSEC-2024-0437 suppression passed its scheduled manual review date 2026-08-01" >&2
-        exit 1
-    fi
-fi
-
 derivative_version="$(
     awk '
         /^\[\[package\]\]$/ { in_package = 1; name = ""; version = ""; next }
