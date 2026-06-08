@@ -3688,12 +3688,50 @@ the exception while the cache server is being completed as a focused sequence:
   turn this into a generic catchall UDP or authoritative-DNS platform, and do
   not add WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in
   this release.
+- `v1.5.17`: workspace and shared-crate foundation line. Stop at converting
+  Fluxheim to a Cargo workspace while keeping the published binary/package
+  behavior unchanged, and extracting only low-risk shared code into one or more
+  internal crates such as `crates/fluxheim-common` and optionally
+  `crates/fluxheim-protocol`. Good first candidates are `FluxError`, bounded
+  labels/strings, path-safety helpers, shared IDs, small telemetry event
+  shapes, and test support that does not depend on proxy runtime internals.
+  Keep all existing feature profiles, binaries, release scripts, RPM/container
+  builds, fuzz targets, and documentation paths working. Do not split proxy,
+  cache, load-balancer, config, admin, or runtime crates in this release.
+- `v1.5.18`: configuration crate extraction line. Stop at moving config
+  structs, parsing, validation, config-source loading, and config tests behind
+  `crates/fluxheim-config`, with the root `fluxheim` crate re-exporting the
+  same public config surface it uses today. Preserve all error messages,
+  relative-path behavior, safe-file validation, profile compatibility, reload
+  classification inputs, config tester behavior, and release metadata checks.
+  Do not change config syntax, migrate operator config files, or split runtime
+  behavior in this release.
+- `v1.5.19`: load-balancer crate extraction line. Stop at moving the
+  Fluxheim-owned load-balancer core into `crates/fluxheim-load-balancer`,
+  including backend snapshots, discovery adapters, health checks, selection
+  algorithms, runtime policy overrides, persistence, queue policy, state files,
+  and tests. The crate should depend only on `fluxheim-common`,
+  `fluxheim-config`, and reviewed external crates; it must not depend on proxy,
+  admin, cache, web, or PHP internals. The root `fluxheim` crate remains the
+  binary/orchestration crate and wires admin/proxy/runtime integration through
+  narrow APIs. Do not add new load-balancer features in this release.
+- `v1.5.20`: web, PHP-FPM, and cache boundary preparation line. Stop at
+  extracting the cleanest remaining subsystem crates without changing runtime
+  behavior: `crates/fluxheim-web` for static file planning/serving,
+  `crates/fluxheim-php-fpm` for managed PHP-FPM/FastCGI, and/or the first
+  `crates/fluxheim-cache` core boundary if the `1.5.13` cache-interface work is
+  stable enough. Keep Pingora-specific cache/proxy adapters separate from cache
+  core when possible. Do not move the main HTTP proxy orchestrator yet; it
+  should remain last because it still coordinates all subsystems.
 - `v1.6.0`: shared Wasm extensibility runtime line. Stop at one sandboxed,
   typed, resource-limited extension runtime for operator policy normally solved
   with F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-like cache
-  policy. Do not replace server bootstrap/listeners/TLS, or replace
-  `ProxyHttp`/`Session`, add generic UDP/GSLB platform behavior, or turn Wasm
-  into an unbounded scripting language in this release.
+  policy. Start it behind a dedicated crate boundary such as
+  `crates/fluxheim-wasm` with explicit ABI/versioning, fuel/time/memory limits,
+  deterministic host calls, redaction rules, and tests independent from the
+  proxy orchestrator where possible. Do not replace server bootstrap/listeners
+  or TLS, replace `ProxyHttp`/`Session`, add generic UDP/GSLB platform
+  behavior, or turn Wasm into an unbounded scripting language in this release.
 - `v1.6.1`: fixes for the shared Wasm extensibility runtime.
 - `v1.7.0`: Fluxheim-owned server bootstrap and listener/TLS runtime line.
   Stop at replacing or isolating Pingora `Server`, worker setup, service
