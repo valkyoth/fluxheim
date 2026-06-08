@@ -107,3 +107,52 @@ where
         Some(1)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{FluxBackgroundReady, FluxShutdown};
+    use pingora::services::ServiceReadyNotifier;
+    use std::time::Duration;
+    use tokio::sync::watch;
+
+    #[tokio::test]
+    async fn flux_shutdown_reports_shutdown_signal() {
+        let (sender, receiver) = watch::channel(false);
+        let mut shutdown = FluxShutdown::new(receiver);
+
+        assert!(!shutdown.is_shutdown());
+        sender.send(true).unwrap();
+
+        assert!(shutdown.sleep_or_shutdown(Duration::from_secs(10)).await);
+        assert!(shutdown.is_shutdown());
+    }
+
+    #[tokio::test]
+    async fn flux_shutdown_treats_closed_sender_as_shutdown() {
+        let (sender, receiver) = watch::channel(false);
+        let mut shutdown = FluxShutdown::new(receiver);
+
+        drop(sender);
+
+        assert!(shutdown.sleep_or_shutdown(Duration::from_secs(10)).await);
+    }
+
+    #[tokio::test]
+    async fn flux_shutdown_sleep_returns_false_when_delay_elapses() {
+        let (_sender, receiver) = watch::channel(false);
+        let mut shutdown = FluxShutdown::new(receiver);
+
+        assert!(!shutdown.sleep_or_shutdown(Duration::from_millis(1)).await);
+    }
+
+    #[test]
+    fn flux_background_ready_notifies_once() {
+        let (sender, receiver) = watch::channel(false);
+        let mut ready = FluxBackgroundReady::new(ServiceReadyNotifier::new(sender));
+
+        ready.notify_ready();
+        ready.notify_ready();
+
+        assert!(*receiver.borrow());
+    }
+}
