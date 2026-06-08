@@ -3723,6 +3723,16 @@ the exception while the cache server is being completed as a focused sequence:
   stable enough. Keep Pingora-specific cache/proxy adapters separate from cache
   core when possible. Do not move the main HTTP proxy orchestrator yet; it
   should remain last because it still coordinates all subsystems.
+
+Workspace rule after `v1.5.17`: once the workspace split starts, future release
+lines must treat crate boundaries as the default for substantial new
+subsystems. A later feature may still add small glue code to the root
+`fluxheim` binary/orchestration crate, but large domains should land in
+focused crates such as `fluxheim-wasm`, `fluxheim-runtime`,
+`fluxheim-server`, `fluxheim-proxy`, `fluxheim-http3`, `fluxheim-defense`, or
+other reviewed workspace members. This prevents `1.6`, `1.7`, `1.8`, `1.9`,
+and future ecosystem work from rebuilding the current single-crate sprawl.
+
 - `v1.6.0`: shared Wasm extensibility runtime line. Stop at one sandboxed,
   typed, resource-limited extension runtime for operator policy normally solved
   with F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-like cache
