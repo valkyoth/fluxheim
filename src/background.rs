@@ -6,13 +6,14 @@ use async_trait::async_trait;
 use pingora::server::ListenFds;
 use pingora::server::ShutdownWatch;
 use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
+use tokio::sync::watch;
 
 pub(crate) struct FluxShutdown {
-    inner: ShutdownWatch,
+    inner: watch::Receiver<bool>,
 }
 
 impl FluxShutdown {
-    fn new(inner: ShutdownWatch) -> Self {
+    fn new(inner: watch::Receiver<bool>) -> Self {
         Self { inner }
     }
 
@@ -30,17 +31,19 @@ impl FluxShutdown {
 }
 
 pub(crate) struct FluxBackgroundReady {
-    inner: Option<ServiceReadyNotifier>,
+    inner: Option<Box<dyn FnOnce() + Send + 'static>>,
 }
 
 impl FluxBackgroundReady {
-    fn new(inner: ServiceReadyNotifier) -> Self {
-        Self { inner: Some(inner) }
+    fn new(notify: impl FnOnce() + Send + 'static) -> Self {
+        Self {
+            inner: Some(Box::new(notify)),
+        }
     }
 
     pub(crate) fn notify_ready(&mut self) {
-        if let Some(ready) = self.inner.take() {
-            ServiceReadyNotifier::notify_ready(ready);
+        if let Some(notify) = self.inner.take() {
+            notify();
         }
     }
 }
@@ -95,7 +98,10 @@ where
         ready: ServiceReadyNotifier,
     ) {
         self.task
-            .start(FluxShutdown::new(shutdown), FluxBackgroundReady::new(ready))
+            .start(
+                FluxShutdown::new(shutdown),
+                FluxBackgroundReady::new(move || ready.notify_ready()),
+            )
             .await;
     }
 
@@ -111,7 +117,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::{FluxBackgroundReady, FluxShutdown};
-    use pingora::services::ServiceReadyNotifier;
     use std::time::Duration;
     use tokio::sync::watch;
 
@@ -148,7 +153,9 @@ mod tests {
     #[test]
     fn flux_background_ready_notifies_once() {
         let (sender, receiver) = watch::channel(false);
-        let mut ready = FluxBackgroundReady::new(ServiceReadyNotifier::new(sender));
+        let mut ready = FluxBackgroundReady::new(move || {
+            let _ = sender.send(true);
+        });
 
         ready.notify_ready();
         ready.notify_ready();
