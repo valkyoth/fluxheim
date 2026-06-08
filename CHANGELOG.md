@@ -47,6 +47,9 @@ behavior when the change improves security or project direction.
   before sending authorization headers.
 - Add `examples/load-balancer-http-discovery.toml` as a minimal
   control-plane-backed load-balancer example.
+- Refresh load-balancer migration boundary documentation so runtime
+  add/remove/update behavior, local runtime-state persistence, and HTTP
+  discovery limits match the current `1.5.x` implementation.
 
 ## 1.5.10 - 2026-06-07
 

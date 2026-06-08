@@ -46,6 +46,9 @@ line.
   constructing the Authorization header.
 - Added `examples/load-balancer-http-discovery.toml` as a minimal
   control-plane-backed load-balancer example.
+- Refreshed load-balancer migration boundary documentation so runtime
+  add/remove/update behavior, local runtime-state persistence, and HTTP
+  discovery limits match the current `1.5.x` implementation.
 
 ## Stop Line
 
