@@ -40,10 +40,10 @@ line.
   membership, route-local pools, file/DNS/HTTP discovery sources, refresh
   intervals, and HTTP discovery bearer-token files require the process-upgrade
   path instead of a live snapshot reload.
-- Hardened HTTP discovery fetches by advertising `Accept: application/json`,
-  rejecting non-JSON `Content-Type` values when present, and rejecting empty or
-  control-character-bearing bearer-token files before constructing the
-  Authorization header.
+- Hardened HTTP discovery fetches by advertising `Accept: application/json` and
+  `Cache-Control: no-store`, rejecting non-JSON `Content-Type` values when
+  present, and rejecting empty or whitespace-bearing bearer-token files before
+  constructing the Authorization header.
 
 ## Stop Line
 

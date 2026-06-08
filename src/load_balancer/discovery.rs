@@ -318,10 +318,10 @@ fn validate_http_discovery_bearer_token(token: &str) -> io::Result<()> {
             "HTTP discovery bearer token file is empty",
         ));
     }
-    if trimmed.bytes().any(|byte| byte.is_ascii_control()) {
+    if trimmed.bytes().any(|byte| byte.is_ascii_whitespace()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "HTTP discovery bearer token contains a control character",
+            "HTTP discovery bearer token contains whitespace",
         ));
     }
     Ok(())
@@ -564,9 +564,14 @@ fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Box<dyn Flux
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::sync::mpsc;
+
+    use crate::test_support::{safe_child_path, unique_temp_path};
+
     use super::{
-        parse_proxy_upstreams_http_body, validate_http_discovery_bearer_token,
-        validate_http_discovery_content_type,
+        fetch_proxy_upstreams_http, parse_proxy_upstreams_http_body,
+        validate_http_discovery_bearer_token, validate_http_discovery_content_type,
     };
 
     #[test]
@@ -643,7 +648,63 @@ mod tests {
             validate_http_discovery_bearer_token("secret\r\nother")
                 .unwrap_err()
                 .to_string()
-                .contains("control")
+                .contains("whitespace")
         );
+        assert!(
+            validate_http_discovery_bearer_token("secret other")
+                .unwrap_err()
+                .to_string()
+                .contains("whitespace")
+        );
+    }
+
+    #[test]
+    fn fetches_http_discovery_with_json_accept_and_bearer_token() {
+        let root = unique_temp_path("lb-http-discovery-token");
+        std::fs::create_dir_all(&root).unwrap();
+        let token_path = safe_child_path(&root, "token.txt");
+        std::fs::write(&token_path, "secret-token\n").unwrap();
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 512];
+            loop {
+                let read = stream.read(&mut buffer).unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8(request).unwrap();
+            sender.send(request).unwrap();
+            let body = br#"["127.0.0.1:3001","127.0.0.1:3002"]"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(body).unwrap();
+        });
+
+        let upstreams =
+            fetch_proxy_upstreams_http(&format!("http://{address}/v1/upstreams"), Some(token_path))
+                .unwrap();
+        handle.join().unwrap();
+        let request = receiver.recv().unwrap();
+
+        assert_eq!(upstreams, ["127.0.0.1:3001", "127.0.0.1:3002"]);
+        let lower_request = request.to_ascii_lowercase();
+        assert!(request.contains("GET /v1/upstreams HTTP/1.1"));
+        assert!(lower_request.contains("accept: application/json"));
+        assert!(lower_request.contains("cache-control: no-store"));
+        assert!(lower_request.contains("authorization: bearer secret-token"));
     }
 }
