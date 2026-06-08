@@ -6,6 +6,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use super::key::{backend_authority_key, backend_key};
 use crate::flux_error::{FluxError, FluxResult};
@@ -19,6 +21,7 @@ use pingora::services::ServiceReadyNotifier;
 pub(super) type RuntimeBackend = Backend;
 
 pub(super) const MAX_RUNTIME_BACKEND_COUNT: usize = 256;
+const MAX_DISCOVERY_ERROR_BYTES: usize = 256;
 
 #[async_trait]
 pub(super) trait FluxBackendDiscovery: Send + Sync + 'static {
@@ -93,10 +96,31 @@ struct FluxBackendSnapshot {
     health: Arc<HashMap<u64, FluxBackendHealth>>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct FluxBackendDiscoveryRuntimeStatus {
+    pub(super) refresh_enabled: bool,
+    pub(super) update_frequency_secs: Option<u64>,
+    pub(super) success_count: u64,
+    pub(super) failure_count: u64,
+    pub(super) last_success_unix_secs: Option<u64>,
+    pub(super) last_failure_unix_secs: Option<u64>,
+    pub(super) last_error: Option<String>,
+}
+
+#[derive(Default)]
+struct FluxBackendDiscoveryRuntimeState {
+    success_count: u64,
+    failure_count: u64,
+    last_success_unix_secs: Option<u64>,
+    last_failure_unix_secs: Option<u64>,
+    last_error: Option<String>,
+}
+
 pub(super) struct FluxLoadBalancerRuntime {
     discovery: Arc<dyn FluxBackendDiscovery>,
     health_check: Option<Arc<dyn FluxHealthCheck>>,
     snapshot: ArcSwap<FluxBackendSnapshot>,
+    discovery_state: Mutex<FluxBackendDiscoveryRuntimeState>,
     mutation_lock: Mutex<()>,
     update_frequency: Option<Duration>,
     health_check_frequency: Option<Duration>,
@@ -109,6 +133,7 @@ impl FluxLoadBalancerRuntime {
             discovery: discovery.into(),
             health_check: None,
             snapshot: Default::default(),
+            discovery_state: Mutex::new(FluxBackendDiscoveryRuntimeState::default()),
             mutation_lock: Mutex::new(()),
             update_frequency: None,
             health_check_frequency: None,
@@ -133,6 +158,12 @@ impl FluxLoadBalancerRuntime {
     }
 
     pub(super) async fn update(&self) -> FluxResult<()> {
+        let result = self.update_inner().await;
+        self.record_discovery_result(&result);
+        result
+    }
+
+    async fn update_inner(&self) -> FluxResult<()> {
         let discovered = self.discovery.discover_flux_backends().await?;
         let (new_backends, enablement) = discovered.into_pingora_parts()?;
         let snapshot = self.snapshot.load();
@@ -159,6 +190,42 @@ impl FluxLoadBalancerRuntime {
             }
         }
         Ok(())
+    }
+
+    fn record_discovery_result(&self, result: &FluxResult<()>) {
+        let now = unix_timestamp_secs();
+        let mut state = self
+            .discovery_state
+            .lock()
+            .unwrap_or_else(|_| process::abort());
+        match result {
+            Ok(()) => {
+                state.success_count = state.success_count.saturating_add(1);
+                state.last_success_unix_secs = Some(now);
+                state.last_error = None;
+            }
+            Err(error) => {
+                state.failure_count = state.failure_count.saturating_add(1);
+                state.last_failure_unix_secs = Some(now);
+                state.last_error = Some(bounded_discovery_error(error));
+            }
+        }
+    }
+
+    pub(super) fn discovery_runtime_status(&self) -> FluxBackendDiscoveryRuntimeStatus {
+        let state = self
+            .discovery_state
+            .lock()
+            .unwrap_or_else(|_| process::abort());
+        FluxBackendDiscoveryRuntimeStatus {
+            refresh_enabled: self.update_frequency.is_some(),
+            update_frequency_secs: self.update_frequency.map(|frequency| frequency.as_secs()),
+            success_count: state.success_count,
+            failure_count: state.failure_count,
+            last_success_unix_secs: state.last_success_unix_secs,
+            last_failure_unix_secs: state.last_failure_unix_secs,
+            last_error: state.last_error.clone(),
+        }
     }
 
     pub(super) fn set_enable(&self, backend: &Backend, enabled: bool) {
@@ -412,6 +479,26 @@ fn checked_next_wake(now: Instant, delay: Duration) -> Instant {
         .unwrap_or_else(|| now + Duration::from_secs(3600))
 }
 
+fn bounded_discovery_error(error: &FluxError) -> String {
+    let mut message = error.to_string();
+    if message.len() <= MAX_DISCOVERY_ERROR_BYTES {
+        return message;
+    }
+    let mut truncate_at = MAX_DISCOVERY_ERROR_BYTES;
+    while !message.is_char_boundary(truncate_at) {
+        truncate_at -= 1;
+    }
+    message.truncate(truncate_at);
+    message
+}
+
+fn unix_timestamp_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 pub(crate) trait BackendIdentity {
     fn authority(&self) -> String;
 
@@ -568,6 +655,7 @@ pub(super) fn backend_container_snapshot(
 #[cfg(test)]
 mod tests {
     use std::io;
+    use std::sync::Arc;
     use std::sync::Mutex;
 
     use async_trait::async_trait;
@@ -576,16 +664,18 @@ mod tests {
         BackendIdentity, FluxBackend, FluxBackendDiscovery, FluxBackendSet,
         FluxLoadBalancerRuntime, MAX_RUNTIME_BACKEND_COUNT,
     };
-    use crate::flux_error::FluxResult;
+    use crate::flux_error::{FluxError, FluxResult};
 
     struct TestDiscovery {
         backends: Mutex<FluxBackendSet>,
+        fail: Arc<Mutex<bool>>,
     }
 
     impl TestDiscovery {
         fn new(backends: FluxBackendSet) -> Self {
             Self {
                 backends: Mutex::new(backends),
+                fail: Arc::new(Mutex::new(false)),
             }
         }
     }
@@ -593,6 +683,13 @@ mod tests {
     #[async_trait]
     impl FluxBackendDiscovery for TestDiscovery {
         async fn discover_flux_backends(&self) -> FluxResult<FluxBackendSet> {
+            if *self
+                .fail
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+            {
+                return Err(FluxError::invalid_input("test discovery failure"));
+            }
             Ok(self
                 .backends
                 .lock()
@@ -671,6 +768,36 @@ mod tests {
         assert!(snapshot.backends.contains(&replacement));
         assert!(!snapshot.health.contains_key(&current_key));
         assert!(snapshot.health.get(&updated_key).unwrap().ready());
+    }
+
+    #[tokio::test]
+    async fn update_records_discovery_success_and_failure_status() {
+        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
+        let mut set = FluxBackendSet::default();
+        set.insert(backend);
+        let discovery = TestDiscovery::new(set);
+        let fail = discovery.fail.clone();
+        let runtime = FluxLoadBalancerRuntime::new(Box::new(discovery));
+
+        runtime.update().await.unwrap();
+        let success = runtime.discovery_runtime_status();
+        assert!(!success.refresh_enabled);
+        assert_eq!(success.success_count, 1);
+        assert_eq!(success.failure_count, 0);
+        assert!(success.last_success_unix_secs.is_some());
+        assert!(success.last_error.is_none());
+
+        *fail.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        let error = runtime.update().await.unwrap_err();
+        assert!(error.to_string().contains("test discovery failure"));
+        let failure = runtime.discovery_runtime_status();
+        assert_eq!(failure.success_count, 1);
+        assert_eq!(failure.failure_count, 1);
+        assert!(failure.last_failure_unix_secs.is_some());
+        assert_eq!(
+            failure.last_error.as_deref(),
+            Some("test discovery failure")
+        );
     }
 
     #[tokio::test]

@@ -321,7 +321,9 @@ state, ready and policy-available backend counts, primary/backup availability
 counts, drain/disabled/forced-down/ejected/saturated summary counts, runtime
 override counts, circuit-open counts, selection policy, max-iteration and
 all-down settings, discovery mode (`static`, `file`, `http`, or `dns`),
-health-check frequency and parallel mode, retry policy, passive-health
+discovery refresh status, update frequency, success/failure counters, last
+success/failure timestamps, bounded last discovery error, health-check
+frequency and parallel mode, retry policy, passive-health
 thresholds, slow-start duration, persistence policy and table size, queue policy
 and current waiting count, priority group, locality, tags, max in-flight cap,
 current in-flight count, passive failure count, passive ejection, passive

@@ -30,6 +30,7 @@ mod state_file;
 #[cfg(test)]
 use self::backend::BackendIdentity;
 use self::backend::FluxBackend;
+use self::backend::FluxBackendDiscoveryRuntimeStatus;
 use self::backend::FluxLoadBalancerRuntime;
 use self::backend::RuntimeBackend as Backend;
 use self::backend::backend_container_snapshot;
@@ -261,9 +262,28 @@ impl LoadBalancerDiscoveryMode {
     }
 }
 
+impl LoadBalancerDiscoveryRuntimeStats {
+    fn from_runtime_status(
+        mode: LoadBalancerDiscoveryMode,
+        status: FluxBackendDiscoveryRuntimeStatus,
+    ) -> Self {
+        Self {
+            mode,
+            refresh_enabled: status.refresh_enabled,
+            update_frequency_secs: status.update_frequency_secs,
+            success_count: status.success_count,
+            failure_count: status.failure_count,
+            last_success_unix_secs: status.last_success_unix_secs,
+            last_failure_unix_secs: status.last_failure_unix_secs,
+            last_error: status.last_error,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct LoadBalancerPoolRuntimeStats {
     pub discovery_mode: LoadBalancerDiscoveryMode,
+    pub discovery: LoadBalancerDiscoveryRuntimeStats,
     pub selection: LoadBalanceSelection,
     pub backend_count: usize,
     pub ready_backend_count: usize,
@@ -293,6 +313,18 @@ pub struct LoadBalancerPoolRuntimeStats {
     pub queue: LoadBalancerQueueRuntimeStats,
     pub retry: LoadBalancerRetryRuntimeStats,
     pub backends: Vec<LoadBalancerBackendRuntimeStats>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LoadBalancerDiscoveryRuntimeStats {
+    pub mode: LoadBalancerDiscoveryMode,
+    pub refresh_enabled: bool,
+    pub update_frequency_secs: Option<u64>,
+    pub success_count: u64,
+    pub failure_count: u64,
+    pub last_success_unix_secs: Option<u64>,
+    pub last_failure_unix_secs: Option<u64>,
+    pub last_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -937,8 +969,13 @@ impl UpstreamLoadBalancer {
                     .is_some_and(|limit| backend.in_flight >= limit)
             })
             .count();
+        let discovery = LoadBalancerDiscoveryRuntimeStats::from_runtime_status(
+            self.discovery_mode,
+            self.inner.discovery_runtime_status(),
+        );
         LoadBalancerPoolRuntimeStats {
             discovery_mode: self.discovery_mode,
+            discovery,
             selection: self.selection,
             backend_count: self.inner.backend_count(),
             ready_backend_count,
@@ -1545,6 +1582,10 @@ impl UpstreamLoadBalancerInner {
         self.container().health_check_frequency()
     }
 
+    fn discovery_runtime_status(&self) -> FluxBackendDiscoveryRuntimeStatus {
+        self.container().discovery_runtime_status()
+    }
+
     fn runtime_backend_set_mutable(&self) -> bool {
         self.container().runtime_backend_set_mutable()
     }
@@ -1844,6 +1885,11 @@ mod tests {
             balancer.runtime_stats().discovery_mode,
             LoadBalancerDiscoveryMode::Static
         );
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.discovery.mode, LoadBalancerDiscoveryMode::Static);
+        assert!(!stats.discovery.refresh_enabled);
+        assert_eq!(stats.discovery.success_count, 1);
+        assert_eq!(stats.discovery.failure_count, 0);
         assert!(balancer.select(&request(), None).is_some());
     }
 
@@ -2757,6 +2803,11 @@ mod tests {
             balancer.runtime_stats().discovery_mode,
             LoadBalancerDiscoveryMode::File
         );
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.discovery.mode, LoadBalancerDiscoveryMode::File);
+        assert!(stats.discovery.refresh_enabled);
+        assert_eq!(stats.discovery.update_frequency_secs, Some(5));
+        assert_eq!(stats.discovery.success_count, 1);
         assert!(balancer.select(&request(), None).is_some());
     }
 
@@ -2781,6 +2832,11 @@ mod tests {
             balancer.runtime_stats().discovery_mode,
             LoadBalancerDiscoveryMode::Dns
         );
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.discovery.mode, LoadBalancerDiscoveryMode::Dns);
+        assert!(stats.discovery.refresh_enabled);
+        assert_eq!(stats.discovery.update_frequency_secs, Some(2));
+        assert_eq!(stats.discovery.success_count, 1);
         assert!(balancer.select(&request(), None).is_some());
     }
 
