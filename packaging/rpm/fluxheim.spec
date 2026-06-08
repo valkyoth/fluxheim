@@ -158,6 +158,9 @@ fi
 - Start the service-discovery and control-plane integration line.
 - Update Prometheus metrics dependencies to remove the protobuf advisory
   suppression while keeping the patched vendored Pingora core.
+- Harden downstream HTTP/2 defaults against the HTTP/2 Bomb class.
+- Add bounded pull-based HTTP upstream discovery with status, metrics, reload
+  classification, request hardening, and a documented example config.
 
 * Sun Jun 07 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.10-1
 - Start the runtime backend-set mutation line for authenticated add, remove,
