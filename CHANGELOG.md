@@ -50,6 +50,9 @@ behavior when the change improves security or project direction.
 - Refresh load-balancer migration boundary documentation so runtime
   add/remove/update behavior, local runtime-state persistence, and HTTP
   discovery limits match the current `1.5.x` implementation.
+- Harden HTTP discovery bearer-token handling by zeroizing Fluxheim's formatted
+  Authorization header copy after request construction, and check the
+  discovered-upstream cap before allocating the rejected entry.
 
 ## 1.5.10 - 2026-06-07
 

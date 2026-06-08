@@ -234,7 +234,8 @@ fn fetch_proxy_upstreams_http(
         None
     };
     if let Some(token) = bearer_token.as_ref() {
-        request = request.header("authorization", format!("Bearer {}", token.trim()));
+        let header_value = Zeroizing::new(format!("Bearer {}", token.trim()));
+        request = request.header("authorization", header_value.as_str());
     }
     let mut response = request
         .call()
@@ -385,13 +386,13 @@ fn validate_http_discovery_upstreams(upstreams: Vec<String>) -> io::Result<Vec<S
                 "HTTP discovery response repeats an upstream",
             ));
         }
-        validated.push(value.to_owned());
-        if validated.len() > crate::config_proxy::MAX_PROXY_UPSTREAMS {
+        if validated.len() >= crate::config_proxy::MAX_PROXY_UPSTREAMS {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "HTTP discovery response contains too many upstreams",
             ));
         }
+        validated.push(value.to_owned());
     }
     if validated.len() < 2 {
         return Err(io::Error::new(
@@ -616,6 +617,22 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("authority")
+        );
+    }
+
+    #[test]
+    fn rejects_http_discovery_payload_over_upstream_cap() {
+        let upstreams = (0..=crate::config_proxy::MAX_PROXY_UPSTREAMS)
+            .map(|index| format!("\"127.0.0.1:{}\"", 3000 + index))
+            .collect::<Vec<_>>()
+            .join(",");
+        let body = format!("[{upstreams}]");
+
+        assert!(
+            parse_proxy_upstreams_http_body(body.as_bytes())
+                .unwrap_err()
+                .to_string()
+                .contains("too many")
         );
     }
 

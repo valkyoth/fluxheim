@@ -49,6 +49,9 @@ line.
 - Refreshed load-balancer migration boundary documentation so runtime
   add/remove/update behavior, local runtime-state persistence, and HTTP
   discovery limits match the current `1.5.x` implementation.
+- Hardened HTTP discovery bearer-token handling by zeroizing Fluxheim's
+  formatted Authorization header copy after request construction, and checked
+  the discovered-upstream cap before allocating the rejected entry.
 
 ## Stop Line
 
