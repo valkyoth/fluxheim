@@ -1773,11 +1773,13 @@ Stable scope:
   scheduler, and background update loop. Pingora remains the HTTP proxy
   transport/runtime while the load-balancer image becomes independent from
   `pingora-load-balancing`.
-- Background tasks should eventually use a Fluxheim-owned Tokio task registry
-  with explicit cancellation rather than Pingora `GenBackgroundService`,
-  `ServiceWithDependents`, and `ShutdownWatch` wrappers. This is mechanical
-  cleanup after native stream and native load-balancer tasks have reduced the
-  Pingora background-service surface.
+- Background tasks use the `1.5.12` Fluxheim adapter for Fluxheim-owned work:
+  cache metrics, stale purging, ACME renewal, admin watchdog, load-balancer
+  refresh loops, and future discovery workers see Fluxheim shutdown/readiness
+  handles rather than Pingora `GenBackgroundService`, `background_service()`,
+  raw `ShutdownWatch`, or `ServiceReadyNotifier` types. Keep
+  `ServiceWithDependents` only as the outer Pingora server-registration
+  adapter until the later server-bootstrap line.
 - Cache storage should grow a `FluxCacheStorage` interface owned by Fluxheim so
   memory, disk, encrypted disk, tiered storage, predictors, stale policy,
   purge/index behavior, and admission tests are no longer coupled to Pingora's
@@ -2029,11 +2031,14 @@ Beta scope:
   Preserve existing stream config, route selection, PROXY protocol, byte/idle
   limits, metrics, upstream TLS/mTLS behavior, and smoke coverage while using a
   direct Tokio listener loop and explicit TLS connector.
-- Fluxheim-native background task registry replacement for Pingora
-  `GenBackgroundService`, `ServiceWithDependents`, `background_service()`, and
-  `ShutdownWatch` usage. Use explicit Tokio tasks plus a cancellation primitive
-  such as `tokio-util`'s `CancellationToken`, preserve graceful shutdown
-  behavior, and keep task metrics/status visible.
+- Fluxheim-native background task registry replacement for Fluxheim-owned
+  background work. The `1.5.12` adapter removes task implementations from
+  Pingora `GenBackgroundService`, direct `background_service()` registration,
+  raw `ShutdownWatch`, and `ServiceReadyNotifier` handling by using a Tokio
+  watch-based shutdown handle and one-shot readiness callback. Keep
+  `ServiceWithDependents` only as the outer server-registration adapter until
+  the later server-bootstrap line; preserve graceful shutdown behavior and keep
+  task metrics/status visible.
 - Fluxheim-owned cache interface decoupling for Pingora cache `Storage`,
   `HandleHit`, and `HandleMiss` semantics. Preserve existing cache behavior and
   add an adapter for the Pingora HTTP path rather than rewriting the cache

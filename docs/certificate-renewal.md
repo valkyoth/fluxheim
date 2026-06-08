@@ -629,7 +629,7 @@ Process upgrade is required when:
 - listener addresses change
 - downstream TLS mode changes
 - the configured TLS backend changes
-- Pingora load-balancer background service ownership changes
+- load-balancer background service registration/ownership changes
 
 This keeps the hot-reload path conservative until Fluxheim has explicit runtime
 ownership for adding and removing background services after startup.
