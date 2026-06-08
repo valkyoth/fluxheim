@@ -188,7 +188,7 @@ moka = { version = "0.12.15", default-features = false, features = ["sync"], opt
 maxminddb = { version = "0.28.1", optional = true }
 openssl = { version = "0.10.80", optional = true }
 percent-encoding = { version = "2.3.2", optional = true }
-pingora = { version = "0.8.0", default-features = false, features = ["proxy"], optional = true }
+pingora = { version = "=0.8.0", default-features = false, features = ["proxy"], optional = true }
 prometheus = { version = "0.13.4", optional = true }
 rcgen = { version = "0.14.7", default-features = false, features = ["pem", "ring"], optional = true }
 regex = "1.12.3"
