@@ -12,10 +12,9 @@ use crate::config_http::{valid_http_base_url, valid_http_endpoint_url};
 use crate::config_load_balance::LB_SAFE_RETRY_METHODS;
 #[cfg(feature = "load-balancer")]
 use crate::config_loader::read_proxy_upstreams_file;
-use crate::config_net::{
-    http_authority_is_numeric_loopback, normalize_host, upstream_host, valid_authority,
-    valid_upstream_alias,
-};
+#[cfg(feature = "load-balancer")]
+use crate::config_net::http_authority_is_numeric_loopback;
+use crate::config_net::{normalize_host, upstream_host, valid_authority, valid_upstream_alias};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 use crate::config_route::validate_route_path;
 use crate::config_web::WebConfig;
