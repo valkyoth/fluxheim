@@ -23,6 +23,10 @@ line.
   `cargo deny`, and release metadata validation.
 - Kept Pingora pinned at `=0.8.0` so normal dependency refreshes cannot bypass
   Fluxheim's patched vendored Pingora core.
+- Hardened downstream HTTP/2 defaults against the HTTP/2 Bomb class by capping
+  decoded request header lists at 64 KiB per stream, capping remotely initiated
+  concurrent streams at 32 per connection, and defaulting downstream write
+  timeout to 30 seconds.
 
 ## Stop Line
 

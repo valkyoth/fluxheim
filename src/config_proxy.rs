@@ -163,6 +163,7 @@ const MAX_PROXY_UPSTREAM_H2_STREAMS: usize = 1024;
 const MAX_PROXY_UPSTREAM_TCP_KEEPALIVE_COUNT: usize = 128;
 const MAX_PROXY_UPSTREAM_TCP_RECV_BUFFER_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_PROXY_UPSTREAM_DSCP: u8 = 63;
+pub(crate) const DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS: u64 = 30;
 
 impl Default for ProxyConfig {
     fn default() -> Self {
@@ -210,7 +211,7 @@ impl Default for ProxyConfig {
             upstream_tcp_fast_open: false,
             read_timeout_secs: None,
             send_timeout_secs: None,
-            downstream_write_timeout_secs: None,
+            downstream_write_timeout_secs: Some(DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS),
             downstream_min_send_rate_bytes_per_sec: None,
             error_pages: Vec::new(),
             load_balance: LoadBalanceConfig::default(),

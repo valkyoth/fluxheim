@@ -29,6 +29,10 @@ use crate::config::{DownstreamProxyProtocol, LoggingFormat, LoggingTarget};
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
 const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
+#[cfg(feature = "proxy")]
+const DOWNSTREAM_H2_MAX_HEADER_LIST_SIZE: u32 = 64 * 1024;
+#[cfg(feature = "proxy")]
+const DOWNSTREAM_H2_MAX_CONCURRENT_STREAMS: u32 = 32;
 #[cfg(all(
     feature = "proxy",
     any(
@@ -79,6 +83,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(all(feature = "cache", feature = "metrics"))]
     let metrics_proxy = proxy.clone();
     let mut proxy_service = pingora::proxy::http_proxy_service(&server.configuration, proxy);
+    harden_proxy_service_http2_options(&mut proxy_service)?;
 
     #[cfg(feature = "cache")]
     if config.cache_purger.enabled {
@@ -183,6 +188,28 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     server.add_service(proxy_service);
     server.run_forever();
+}
+
+#[cfg(feature = "proxy")]
+fn hardened_downstream_h2_options() -> pingora::protocols::http::v2::server::H2Options {
+    let mut options = pingora::protocols::http::v2::server::H2Options::new();
+    options.max_header_list_size(DOWNSTREAM_H2_MAX_HEADER_LIST_SIZE);
+    options.max_concurrent_streams(DOWNSTREAM_H2_MAX_CONCURRENT_STREAMS);
+    options
+}
+
+#[cfg(feature = "proxy")]
+fn harden_proxy_service_http2_options<SV>(
+    service: &mut pingora::services::listening::Service<pingora::proxy::HttpProxy<SV>>,
+) -> Result<(), Box<dyn Error + Send + Sync>>
+where
+    SV: pingora::proxy::ProxyHttp,
+{
+    let Some(app) = service.app_logic_mut() else {
+        return Err(std::io::Error::other("proxy service app missing before registration").into());
+    };
+    app.h2_options = Some(hardened_downstream_h2_options());
+    Ok(())
 }
 
 #[cfg(feature = "proxy")]
@@ -772,7 +799,10 @@ fn json_escape(value: &str) -> String {
 
 #[cfg(all(test, feature = "proxy"))]
 mod tests {
-    use super::{json_escape, log_record_json, open_log_file, pingora_server_conf};
+    use super::{
+        harden_proxy_service_http2_options, json_escape, log_record_json, open_log_file,
+        pingora_server_conf,
+    };
     use crate::test_support::unique_temp_path;
 
     #[test]
@@ -836,6 +866,33 @@ mod tests {
         assert_eq!(pingora.max_retries, 8);
         assert_eq!(pingora.grace_period_seconds, Some(10));
         assert_eq!(pingora.graceful_shutdown_timeout_seconds, Some(30));
+    }
+
+    #[test]
+    fn proxy_service_installs_hardened_http2_options() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let config = crate::config::Config::default();
+        let proxy = crate::proxy::FluxProxy::from_config(&config).unwrap();
+        let pingora_conf = std::sync::Arc::new(pingora_server_conf(&config));
+        let mut service = pingora::proxy::http_proxy_service(&pingora_conf, proxy);
+
+        assert!(
+            service
+                .app_logic()
+                .and_then(|app| app.h2_options.as_ref())
+                .is_none()
+        );
+
+        harden_proxy_service_http2_options(&mut service).unwrap();
+
+        assert!(
+            service
+                .app_logic()
+                .and_then(|app| app.h2_options.as_ref())
+                .is_some()
+        );
     }
 
     #[cfg(feature = "acme-client")]

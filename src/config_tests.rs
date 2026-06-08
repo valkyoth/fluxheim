@@ -19,6 +19,7 @@ use super::{
 };
 #[cfg(feature = "cache")]
 use super::{CachePeerConfig, CachePeerFillConfig};
+use crate::config_proxy::DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS;
 use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
 #[cfg(unix)]
 use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
@@ -101,6 +102,10 @@ fn default_config_is_valid() {
     assert_eq!(Config::default().server.process.threads, 1);
     assert_eq!(Config::default().server.process.listener_tasks_per_fd, 1);
     assert_eq!(Config::default().server.process.max_retries, 16);
+    assert_eq!(
+        Config::default().proxy.downstream_write_timeout_secs,
+        Some(DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS)
+    );
     assert!(!Config::default().compression.enabled);
     assert!(Config::default().compression.gzip);
     assert!(!Config::default().compression.zstd);

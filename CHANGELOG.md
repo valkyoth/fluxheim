@@ -24,6 +24,9 @@ behavior when the change improves security or project direction.
   fixed.
 - Keep Pingora pinned at `=0.8.0` so routine dependency refreshes cannot bypass
   Fluxheim's patched vendored Pingora core.
+- Harden downstream HTTP/2 defaults against the HTTP/2 Bomb class by installing
+  bounded H2 handshake options and defaulting downstream write timeout to 30
+  seconds.
 
 ## 1.5.10 - 2026-06-07
 

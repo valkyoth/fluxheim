@@ -9220,6 +9220,9 @@ fn downstream_flow_control(proxy: &ProxyConfig) -> DownstreamFlowControl {
     DownstreamFlowControl {
         write_timeout: proxy
             .downstream_write_timeout_secs
+            .or(Some(
+                crate::config_proxy::DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS,
+            ))
             .map(std::time::Duration::from_secs),
         min_send_rate: proxy.downstream_min_send_rate_bytes_per_sec,
     }
@@ -13520,6 +13523,21 @@ mod tests {
                 write_timeout: Some(Duration::from_secs(20)),
                 min_send_rate: Some(8192),
             }
+        );
+    }
+
+    #[test]
+    fn proxy_downstream_flow_control_uses_secure_default_timeout() {
+        let proxy = ProxyConfig {
+            downstream_write_timeout_secs: None,
+            ..ProxyConfig::default()
+        };
+
+        assert_eq!(
+            super::downstream_flow_control(&proxy).write_timeout,
+            Some(Duration::from_secs(
+                crate::config_proxy::DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS
+            ))
         );
     }
 
