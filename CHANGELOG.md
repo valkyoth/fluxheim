@@ -15,16 +15,19 @@ behavior when the change improves security or project direction.
   Fluxheim-owned background work only: cache runtime metrics, stale cache
   purging, ACME renewal scheduling, admin self-healing watchdog work,
   load-balancer refresh loops, and future discovery workers.
-- Add `src/background.rs` as a Fluxheim-owned background task adapter with
-  explicit shutdown and readiness tokens, so background task implementations no
-  longer depend directly on Pingora's generic `GenBackgroundService` helper or
-  raw `ShutdownWatch` handling.
+- Add `src/background.rs` as a Fluxheim-owned background task adapter with a
+  Tokio watch-based shutdown handle and one-shot readiness callback, so
+  background task implementations no longer depend directly on Pingora's
+  generic `GenBackgroundService` helper, raw `ShutdownWatch` handling, or
+  `ServiceReadyNotifier`.
 - Move cache metrics, stale cache purging, ACME renewal, and the admin
   self-healing watchdog to the new `FluxBackgroundTask` interface while
   preserving their previous startup and shutdown behavior.
 - Move load-balancer discovery/health refresh services through the shared
   Fluxheim background adapter while preserving the existing readiness ordering:
   the service marks ready only after its first discovery update has run.
+- Add regression coverage for the Fluxheim background adapter shutdown/ready
+  behavior and load-balancer background-service readiness ordering.
 - Keep Pingora's service trait boundary only as the server registration adapter
   for this release. HTTP proxy request handling, stream listener ownership,
   cache interfaces, UDP/GSLB, WAF, VPN/firewall appliance behavior, and
