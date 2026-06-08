@@ -3725,6 +3725,14 @@ the exception while the cache server is being completed as a focused sequence:
   and mixed-protocol boundary tests. Do not add generic UDP proxying, DNS/GSLB,
   WAF, VPN/firewall appliance behavior, or new Wasm ABI scope in this release.
 
+## Long-Term Ecosystem
+
+Separate Fluxheim ecosystem crates and projects are tracked in
+[Fluxheim Ecosystem Idea](fluxheim-ecosystem-idea.md). The intended shape is to
+keep Fluxheim focused while allowing future `fluxheim-sdk`,
+`fluxheim-defense`, `fluxheim-router`, and shared `fluxheim-common` style
+packages to integrate through explicit APIs and release gates.
+
 ## Changelog Shape
 
 Every release should include:
