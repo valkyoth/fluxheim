@@ -1785,6 +1785,8 @@ mod tests {
         LoadBalanceQueueConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
     };
     use crate::http_types::PingoraRequestHeader as RequestHeader;
+    use pingora::services::ServiceReadyNotifier;
+    use tokio::sync::watch;
 
     #[cfg(not(feature = "privacy-mode"))]
     use super::LoadBalancerCircuitState;
@@ -4034,6 +4036,47 @@ mod tests {
 
         assert_eq!(balancer.backend_count(), 2);
         assert!(balancer.select(&request(), None).is_some());
+    }
+
+    #[tokio::test]
+    async fn load_balancer_background_service_notifies_ready_after_initial_update() {
+        install_test_crypto_provider();
+        let (_balancer, mut service) = UpstreamLoadBalancer::background_service_from_proxy_config(
+            "test",
+            "test",
+            None,
+            &ProxyConfig {
+                upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+                ..ProxyConfig::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+        let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+        let (ready_sender, mut ready_receiver) = watch::channel(false);
+        let service_task = tokio::spawn(async move {
+            service
+                .start_service(
+                    #[cfg(unix)]
+                    None,
+                    shutdown_receiver,
+                    1,
+                    ServiceReadyNotifier::new(ready_sender),
+                )
+                .await;
+        });
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !*ready_receiver.borrow_and_update() {
+                ready_receiver.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+
+        shutdown_sender.send(true).unwrap();
+        service_task.await.unwrap();
     }
 
     #[test]
