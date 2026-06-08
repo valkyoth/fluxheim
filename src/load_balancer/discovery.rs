@@ -27,7 +27,10 @@ use super::backend::{FluxBackend, FluxBackendDiscovery, FluxBackendSet, FluxLoad
 use super::health::configured_health_check;
 use super::policy::BackendSelectionPolicy;
 use super::selection::MaglevTable;
-use super::{UpstreamLoadBalancer, UpstreamLoadBalancerInner, UpstreamLoadBalancerService};
+use super::{
+    LoadBalancerMetricLabels, UpstreamLoadBalancer, UpstreamLoadBalancerInner,
+    UpstreamLoadBalancerService,
+};
 
 const MAX_HTTP_DISCOVERY_RESPONSE_BYTES: u64 = 64 * 1024;
 const MAX_HTTP_DISCOVERY_BEARER_TOKEN_BYTES: u64 = 4096;
@@ -396,6 +399,7 @@ async fn resolve_proxy_upstream_for_discovery(upstream: &str) -> FluxResult<Vec<
 
 pub(super) fn background_service_for<F>(
     name: &str,
+    metric_labels: LoadBalancerMetricLabels,
     config: &ProxyConfig,
     wrap: F,
 ) -> io::Result<Option<(UpstreamLoadBalancer, UpstreamLoadBalancerService)>>
@@ -403,9 +407,10 @@ where
     F: FnOnce(Arc<FluxLoadBalancerRuntime>) -> UpstreamLoadBalancerInner,
 {
     let backend_policy = BackendSelectionPolicy::from_config(config);
-    let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
+    let Some(mut inner) = configured_load_balancer(config, &backend_policy)? else {
         return Ok(None);
     };
+    inner.set_metric_labels(metric_labels);
 
     let service = FluxLoadBalancerBackgroundService::new(format!("LB {name}"), inner);
     let load_balancer =
@@ -415,12 +420,14 @@ where
 
 pub(super) fn background_maglev_service_for(
     name: &str,
+    metric_labels: LoadBalancerMetricLabels,
     config: &ProxyConfig,
 ) -> io::Result<Option<(UpstreamLoadBalancer, UpstreamLoadBalancerService)>> {
     let backend_policy = BackendSelectionPolicy::from_config(config);
-    let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
+    let Some(mut inner) = configured_load_balancer(config, &backend_policy)? else {
         return Ok(None);
     };
+    inner.set_metric_labels(metric_labels);
     let table = Arc::new(configured_maglev_table(config)?);
     let service = FluxLoadBalancerBackgroundService::new(format!("LB {name}"), inner);
     let load_balancer = UpstreamLoadBalancer::from_inner(

@@ -1662,6 +1662,8 @@ fn load_balancer_event_label(event: &str) -> &'static str {
         "queue_waited" => "queue_waited",
         "queue_full" => "queue_full",
         "queue_timeout" => "queue_timeout",
+        "discovery_success" => "discovery_success",
+        "discovery_failure" => "discovery_failure",
         _ => "other",
     }
 }
@@ -2104,6 +2106,8 @@ mod tests {
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "queue_waited");
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "queue_full");
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "queue_timeout");
+        record_load_balancer_event("lb-test", Some("api"), None, "discovery_success");
+        record_load_balancer_event("lb-test", Some("api"), None, "discovery_failure");
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "attacker-event");
         record_load_balancer_event("lb-test", Some("api"), Some("http://raw:3000"), "selected");
 
@@ -2138,6 +2142,8 @@ mod tests {
         assert!(output.contains(r#"event="queue_waited""#));
         assert!(output.contains(r#"event="queue_full""#));
         assert!(output.contains(r#"event="queue_timeout""#));
+        assert!(output.contains(r#"event="discovery_success""#));
+        assert!(output.contains(r#"event="discovery_failure""#));
         assert!(output.contains(r#"event="other""#));
         assert!(!output.contains("attacker-event"));
         assert!(!output.contains("http://raw:3000"));

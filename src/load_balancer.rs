@@ -62,6 +62,31 @@ pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
 const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
 pub const MAX_RUNTIME_BACKEND_WEIGHT: usize = 1000;
 
+#[derive(Clone, Debug)]
+pub(super) struct LoadBalancerMetricLabels {
+    vhost: Arc<str>,
+    route: Option<Arc<str>>,
+}
+
+impl LoadBalancerMetricLabels {
+    fn new(vhost: &str, route: Option<&str>) -> Self {
+        Self {
+            vhost: Arc::from(vhost),
+            route: route.map(Arc::from),
+        }
+    }
+
+    #[cfg(feature = "metrics")]
+    pub(super) fn vhost(&self) -> &str {
+        &self.vhost
+    }
+
+    #[cfg(feature = "metrics")]
+    pub(super) fn route(&self) -> Option<&str> {
+        self.route.as_deref()
+    }
+}
+
 #[derive(Clone)]
 pub struct UpstreamLoadBalancer {
     inner: UpstreamLoadBalancerInner,
@@ -543,47 +568,65 @@ impl UpstreamLoadBalancer {
 
     pub fn background_service_from_proxy_config(
         name: &str,
+        vhost: &str,
+        route: Option<&str>,
         config: &ProxyConfig,
     ) -> io::Result<Option<(Self, UpstreamLoadBalancerService)>> {
+        let metric_labels = LoadBalancerMetricLabels::new(vhost, route);
         match config.load_balance.selection {
-            LoadBalanceSelection::RoundRobin => {
-                background_service_for(name, config, UpstreamLoadBalancerInner::RoundRobin)
-            }
+            LoadBalanceSelection::RoundRobin => background_service_for(
+                name,
+                metric_labels,
+                config,
+                UpstreamLoadBalancerInner::RoundRobin,
+            ),
             LoadBalanceSelection::LeastConnections => {
-                background_service_for(name, config, |inner| {
+                background_service_for(name, metric_labels, config, |inner| {
                     UpstreamLoadBalancerInner::LeastConnections(inner)
                 })
             }
-            LoadBalanceSelection::LeastSessions => background_service_for(name, config, |inner| {
-                UpstreamLoadBalancerInner::LeastSessions(inner)
-            }),
-            LoadBalanceSelection::LeastTime => {
-                background_service_for(name, config, |inner| UpstreamLoadBalancerInner::LeastTime {
-                    inner,
-                    latency: Arc::new(BackendLatencyState::default()),
+            LoadBalanceSelection::LeastSessions => {
+                background_service_for(name, metric_labels, config, |inner| {
+                    UpstreamLoadBalancerInner::LeastSessions(inner)
                 })
             }
-            LoadBalanceSelection::PowerOfTwo => background_service_for(name, config, |inner| {
-                UpstreamLoadBalancerInner::PowerOfTwo(inner)
-            }),
+            LoadBalanceSelection::LeastTime => {
+                background_service_for(name, metric_labels, config, |inner| {
+                    UpstreamLoadBalancerInner::LeastTime {
+                        inner,
+                        latency: Arc::new(BackendLatencyState::default()),
+                    }
+                })
+            }
+            LoadBalanceSelection::PowerOfTwo => {
+                background_service_for(name, metric_labels, config, |inner| {
+                    UpstreamLoadBalancerInner::PowerOfTwo(inner)
+                })
+            }
             LoadBalanceSelection::SourceHash
             | LoadBalanceSelection::UriHash
             | LoadBalanceSelection::HeaderHash
-            | LoadBalanceSelection::CookieHash => {
-                background_service_for(name, config, UpstreamLoadBalancerInner::FnvHash)
-            }
+            | LoadBalanceSelection::CookieHash => background_service_for(
+                name,
+                metric_labels,
+                config,
+                UpstreamLoadBalancerInner::FnvHash,
+            ),
             LoadBalanceSelection::ConsistentSourceHash
             | LoadBalanceSelection::ConsistentUriHash
             | LoadBalanceSelection::ConsistentHeaderHash
-            | LoadBalanceSelection::ConsistentCookieHash => {
-                background_service_for(name, config, UpstreamLoadBalancerInner::ConsistentHash)
-            }
+            | LoadBalanceSelection::ConsistentCookieHash => background_service_for(
+                name,
+                metric_labels,
+                config,
+                UpstreamLoadBalancerInner::ConsistentHash,
+            ),
             LoadBalanceSelection::BoundedLoadConsistentSourceHash
             | LoadBalanceSelection::BoundedLoadConsistentUriHash
             | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
             | LoadBalanceSelection::BoundedLoadConsistentCookieHash => {
                 let factor_per_mille = config.load_balance.bounded_load_factor_per_mille;
-                background_service_for(name, config, move |inner| {
+                background_service_for(name, metric_labels, config, move |inner| {
                     UpstreamLoadBalancerInner::BoundedLoadConsistentHash {
                         inner,
                         factor_per_mille,
@@ -593,7 +636,9 @@ impl UpstreamLoadBalancer {
             LoadBalanceSelection::MaglevSourceHash
             | LoadBalanceSelection::MaglevUriHash
             | LoadBalanceSelection::MaglevHeaderHash
-            | LoadBalanceSelection::MaglevCookieHash => background_maglev_service_for(name, config),
+            | LoadBalanceSelection::MaglevCookieHash => {
+                background_maglev_service_for(name, metric_labels, config)
+            }
         }
     }
 
@@ -3977,6 +4022,8 @@ mod tests {
         install_test_crypto_provider();
         let (balancer, _service) = UpstreamLoadBalancer::background_service_from_proxy_config(
             "test",
+            "test",
+            None,
             &ProxyConfig {
                 upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
                 ..ProxyConfig::default()

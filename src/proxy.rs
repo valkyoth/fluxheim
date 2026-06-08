@@ -2457,7 +2457,7 @@ impl ProxyRuntimeState {
     fn from_config(config: &Config) -> io::Result<Self> {
         #[cfg(feature = "load-balancer")]
         {
-            Self::from_config_with_load_balancers(config, |_name, proxy| {
+            Self::from_config_with_load_balancers(config, |_name, _vhost, _route, proxy| {
                 UpstreamLoadBalancer::from_proxy_config(proxy)
             })
         }
@@ -2499,16 +2499,21 @@ impl FluxProxy {
         config: &Config,
     ) -> io::Result<(Self, Vec<UpstreamLoadBalancerService>)> {
         let mut services = Vec::new();
-        let state = ProxyRuntimeState::from_config_with_load_balancers(config, |name, proxy| {
-            let Some((load_balancer, service)) =
-                UpstreamLoadBalancer::background_service_from_proxy_config(name, proxy)?
-            else {
-                return Ok(None);
-            };
+        let state = ProxyRuntimeState::from_config_with_load_balancers(
+            config,
+            |name, vhost, route, proxy| {
+                let Some((load_balancer, service)) =
+                    UpstreamLoadBalancer::background_service_from_proxy_config(
+                        name, vhost, route, proxy,
+                    )?
+                else {
+                    return Ok(None);
+                };
 
-            services.push(service);
-            Ok(Some(load_balancer))
-        })?;
+                services.push(service);
+                Ok(Some(load_balancer))
+            },
+        )?;
         let proxy = Self {
             state: Arc::new(ArcSwap::from_pointee(state)),
             health_reporter: Arc::new(ArcSwapOption::empty()),
@@ -2522,7 +2527,12 @@ impl ProxyRuntimeState {
     #[cfg(feature = "load-balancer")]
     fn from_config_with_load_balancers<F>(config: &Config, mut load_balancer: F) -> io::Result<Self>
     where
-        F: FnMut(&str, &ProxyConfig) -> io::Result<Option<UpstreamLoadBalancer>>,
+        F: FnMut(
+            &str,
+            &str,
+            Option<&str>,
+            &ProxyConfig,
+        ) -> io::Result<Option<UpstreamLoadBalancer>>,
     {
         let mut vhosts = Vec::new();
         let mut host_index = HashMap::new();
@@ -2536,7 +2546,7 @@ impl ProxyRuntimeState {
                 config.compression.clone(),
                 config.headers.clone(),
                 config.web.clone(),
-                load_balancer("default", &config.proxy)?,
+                load_balancer("default", "default", None, &config.proxy)?,
             )
             .map_err(|error| {
                 io::Error::new(error.kind(), format!("default vhost runtime: {error}"))
@@ -2547,13 +2557,18 @@ impl ProxyRuntimeState {
                 let index = vhosts.len();
                 let route_load_balancers =
                     configured_route_load_balancers(configured, |route_name, proxy| {
-                        load_balancer(&format!("{} route {route_name}", configured.name), proxy)
+                        load_balancer(
+                            &format!("{} route {route_name}", configured.name),
+                            &configured.name,
+                            Some(route_name),
+                            proxy,
+                        )
                     })?;
                 let runtime = RuntimeVhost::from_config(
                     config,
                     configured,
                     &config.headers,
-                    load_balancer(&configured.name, &configured.proxy)?,
+                    load_balancer(&configured.name, &configured.name, None, &configured.proxy)?,
                     route_load_balancers,
                 )
                 .map_err(|error| {

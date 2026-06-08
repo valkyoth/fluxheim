@@ -34,6 +34,8 @@ line.
 - Added discovery runtime status to load-balancer admin and ops-socket output:
   mode, refresh enablement, update frequency, success/failure counters, last
   success/failure timestamps, and a bounded last-error field.
+- Added bounded load-balancer metric events for background discovery refresh
+  success and failure, labeled with the existing vhost/route pool identity.
 
 ## Stop Line
 

@@ -9,6 +9,7 @@ use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use super::LoadBalancerMetricLabels;
 use super::key::{backend_authority_key, backend_key};
 use crate::flux_error::{FluxError, FluxResult};
 use arc_swap::ArcSwap;
@@ -121,6 +122,7 @@ pub(super) struct FluxLoadBalancerRuntime {
     health_check: Option<Arc<dyn FluxHealthCheck>>,
     snapshot: ArcSwap<FluxBackendSnapshot>,
     discovery_state: Mutex<FluxBackendDiscoveryRuntimeState>,
+    metric_labels: Option<LoadBalancerMetricLabels>,
     mutation_lock: Mutex<()>,
     update_frequency: Option<Duration>,
     health_check_frequency: Option<Duration>,
@@ -134,6 +136,7 @@ impl FluxLoadBalancerRuntime {
             health_check: None,
             snapshot: Default::default(),
             discovery_state: Mutex::new(FluxBackendDiscoveryRuntimeState::default()),
+            metric_labels: None,
             mutation_lock: Mutex::new(()),
             update_frequency: None,
             health_check_frequency: None,
@@ -155,6 +158,10 @@ impl FluxLoadBalancerRuntime {
 
     pub(super) fn set_parallel_health_check(&mut self, parallel: bool) {
         self.parallel_health_check = parallel;
+    }
+
+    pub(super) fn set_metric_labels(&mut self, labels: LoadBalancerMetricLabels) {
+        self.metric_labels = Some(labels);
     }
 
     pub(super) async fn update(&self) -> FluxResult<()> {
@@ -194,21 +201,40 @@ impl FluxLoadBalancerRuntime {
 
     fn record_discovery_result(&self, result: &FluxResult<()>) {
         let now = unix_timestamp_secs();
-        let mut state = self
-            .discovery_state
-            .lock()
-            .unwrap_or_else(|_| process::abort());
-        match result {
-            Ok(()) => {
-                state.success_count = state.success_count.saturating_add(1);
-                state.last_success_unix_secs = Some(now);
-                state.last_error = None;
+        let event = {
+            let mut state = self
+                .discovery_state
+                .lock()
+                .unwrap_or_else(|_| process::abort());
+            match result {
+                Ok(()) => {
+                    state.success_count = state.success_count.saturating_add(1);
+                    state.last_success_unix_secs = Some(now);
+                    state.last_error = None;
+                    "discovery_success"
+                }
+                Err(error) => {
+                    state.failure_count = state.failure_count.saturating_add(1);
+                    state.last_failure_unix_secs = Some(now);
+                    state.last_error = Some(bounded_discovery_error(error));
+                    "discovery_failure"
+                }
             }
-            Err(error) => {
-                state.failure_count = state.failure_count.saturating_add(1);
-                state.last_failure_unix_secs = Some(now);
-                state.last_error = Some(bounded_discovery_error(error));
+        };
+        self.record_discovery_metric(event);
+    }
+
+    fn record_discovery_metric(&self, event: &str) {
+        #[cfg(feature = "metrics")]
+        if let Some(labels) = &self.metric_labels {
+            crate::metrics::record_load_balancer_event(labels.vhost(), labels.route(), None, event);
+        }
+        #[cfg(not(feature = "metrics"))]
+        {
+            if let Some(labels) = &self.metric_labels {
+                let _ = (&labels.vhost, &labels.route);
             }
+            let _ = event;
         }
     }
 

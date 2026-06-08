@@ -338,6 +338,11 @@ authenticated runtime member operation is active and
 manual transition time. In `privacy-mode`, backend addresses are omitted from
 this status object.
 
+Background discovery refresh loops also emit
+`fluxheim_load_balancer_events_total` with `event = "discovery_success"` or
+`event = "discovery_failure"` and the same vhost/route pool labels used by
+selection, retry, queue, and runtime mutation events.
+
 When compiled with `load-balancer`, authenticated admins can update the
 in-memory state of an existing configured pool member without reloading:
 

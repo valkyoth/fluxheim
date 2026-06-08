@@ -34,6 +34,9 @@ behavior when the change improves security or project direction.
 - Report each load-balancer pool's discovery mode and refresh status in runtime
   status, including update frequency, success/failure counters, last
   success/failure timestamps, and a bounded last-error field.
+- Emit bounded `fluxheim_load_balancer_events_total` events for background
+  discovery refresh successes and failures using the existing vhost/route pool
+  labels.
 
 ## 1.5.10 - 2026-06-07
 
