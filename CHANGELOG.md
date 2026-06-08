@@ -41,6 +41,10 @@ behavior when the change improves security or project direction.
   pool membership, route-local pools, file/DNS/HTTP discovery sources, refresh
   intervals, and HTTP discovery bearer-token files now all require the
   process-upgrade path because their refresh loops are registered at startup.
+- Harden HTTP upstream discovery by sending `Accept: application/json`,
+  rejecting non-JSON response `Content-Type` values when present, and rejecting
+  empty or control-character-bearing bearer-token files before sending
+  authorization headers.
 
 ## 1.5.10 - 2026-06-07
 

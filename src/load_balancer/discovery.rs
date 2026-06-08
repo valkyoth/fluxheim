@@ -224,7 +224,10 @@ fn fetch_proxy_upstreams_http(
         .http_status_as_error(false)
         .build()
         .into();
-    let mut request = agent.get(url).header("cache-control", "no-store");
+    let mut request = agent
+        .get(url)
+        .header("accept", "application/json")
+        .header("cache-control", "no-store");
     let bearer_token = if let Some(path) = bearer_token_file {
         Some(read_http_discovery_bearer_token(&path)?)
     } else {
@@ -245,6 +248,12 @@ fn fetch_proxy_upstreams_http(
             ),
         ));
     }
+    validate_http_discovery_content_type(
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+    )?;
     let body = response
         .body_mut()
         .with_config()
@@ -297,7 +306,44 @@ fn read_http_discovery_bearer_token(path: &Path) -> io::Result<Zeroizing<String>
             "HTTP discovery bearer token file changed while reading and became too large",
         ));
     }
+    validate_http_discovery_bearer_token(&token)?;
     Ok(token)
+}
+
+fn validate_http_discovery_bearer_token(token: &str) -> io::Result<()> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "HTTP discovery bearer token file is empty",
+        ));
+    }
+    if trimmed.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "HTTP discovery bearer token contains a control character",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_http_discovery_content_type(content_type: Option<&str>) -> io::Result<()> {
+    let Some(content_type) = content_type else {
+        return Ok(());
+    };
+    let media_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if media_type == "application/json" || media_type.ends_with("+json") {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "HTTP discovery response content-type is not JSON",
+    ))
 }
 
 #[derive(Deserialize)]
@@ -518,7 +564,10 @@ fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Box<dyn Flux
 
 #[cfg(test)]
 mod tests {
-    use super::parse_proxy_upstreams_http_body;
+    use super::{
+        parse_proxy_upstreams_http_body, validate_http_discovery_bearer_token,
+        validate_http_discovery_content_type,
+    };
 
     #[test]
     fn parses_http_discovery_list_payload() {
@@ -562,6 +611,39 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("authority")
+        );
+    }
+
+    #[test]
+    fn validates_http_discovery_json_content_types() {
+        validate_http_discovery_content_type(None).unwrap();
+        validate_http_discovery_content_type(Some("application/json")).unwrap();
+        validate_http_discovery_content_type(Some("application/json; charset=utf-8")).unwrap();
+        validate_http_discovery_content_type(Some("application/vnd.fluxheim.upstreams+json"))
+            .unwrap();
+
+        assert!(
+            validate_http_discovery_content_type(Some("text/plain"))
+                .unwrap_err()
+                .to_string()
+                .contains("content-type")
+        );
+    }
+
+    #[test]
+    fn rejects_empty_or_control_character_http_discovery_bearer_token() {
+        validate_http_discovery_bearer_token("secret-token\n").unwrap();
+        assert!(
+            validate_http_discovery_bearer_token(" \n\t ")
+                .unwrap_err()
+                .to_string()
+                .contains("empty")
+        );
+        assert!(
+            validate_http_discovery_bearer_token("secret\r\nother")
+                .unwrap_err()
+                .to_string()
+                .contains("control")
         );
     }
 }

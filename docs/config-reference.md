@@ -1035,8 +1035,12 @@ body is bounded to 64 KiB and must be JSON in either of these forms:
 must contain 2 through 64 unique `host:port` or `ip:port` authorities. The
 optional `upstreams_http_bearer_token_file` adds a `Bearer` token to the request;
 the token file is validated with the same safe-path and parent-permission checks
-used for other operator-controlled secret files. Discovery endpoints must use
-HTTPS unless they are numeric loopback `http://127.0.0.1` or `http://[::1]`
+used for other operator-controlled secret files, must not be empty, and must not
+contain control characters after trimming surrounding whitespace. Fluxheim sends
+`Accept: application/json` and rejects non-JSON `Content-Type` values when the
+discovery endpoint includes that header; missing `Content-Type` is accepted so
+small internal sidecars can stay simple. Discovery endpoints must use HTTPS
+unless they are numeric loopback `http://127.0.0.1` or `http://[::1]`
 control-plane sidecars. HTTP discovery is intentionally pull-only in this
 release: it does not watch Kubernetes, Consul, or xDS streams directly, and it
 cannot be combined with per-member static policy lists such as weights,
