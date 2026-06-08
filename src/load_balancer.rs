@@ -67,6 +67,7 @@ pub struct UpstreamLoadBalancer {
     selection: LoadBalanceSelection,
     key_source: LoadBalanceKeySource,
     backend_aliases: Arc<std::collections::HashMap<u64, Arc<str>>>,
+    discovery_mode: LoadBalancerDiscoveryMode,
     passive_health: Option<Arc<PassiveHealthState>>,
     slow_start: Option<Arc<SlowStartState>>,
     persistence: Option<Arc<LoadBalancerPersistenceState>>,
@@ -237,8 +238,32 @@ pub enum LoadBalancerCircuitState {
     Open,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadBalancerDiscoveryMode {
+    Static,
+    File,
+    Http,
+    Dns,
+}
+
+impl LoadBalancerDiscoveryMode {
+    fn from_config(config: &ProxyConfig) -> Self {
+        if config.upstreams_file.is_some() {
+            Self::File
+        } else if config.upstreams_http_url.is_some() {
+            Self::Http
+        } else if config.upstream_dns_refresh_secs.is_some() {
+            Self::Dns
+        } else {
+            Self::Static
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct LoadBalancerPoolRuntimeStats {
+    pub discovery_mode: LoadBalancerDiscoveryMode,
     pub selection: LoadBalanceSelection,
     pub backend_count: usize,
     pub ready_backend_count: usize,
@@ -775,6 +800,7 @@ impl UpstreamLoadBalancer {
                 selection: config.load_balance.selection,
                 key_source: LoadBalanceKeySource::from_config(config),
                 backend_aliases: Arc::new(backend_aliases(config)),
+                discovery_mode: LoadBalancerDiscoveryMode::from_config(config),
                 passive_health: config.load_balance.passive_health.enabled.then(|| {
                     Arc::new(PassiveHealthState::from_config(
                         &config.load_balance.passive_health,
@@ -912,6 +938,7 @@ impl UpstreamLoadBalancer {
             })
             .count();
         LoadBalancerPoolRuntimeStats {
+            discovery_mode: self.discovery_mode,
             selection: self.selection,
             backend_count: self.inner.backend_count(),
             ready_backend_count,
@@ -1680,9 +1707,10 @@ mod tests {
     use super::selection::{fnv1a64_with_seed, least_connections_score_is_lower};
     use super::state::PassiveBackendHealth;
     use super::{
-        LoadBalancedUpstreamReporter, LoadBalancerPersistenceOutcome, LoadBalancerQueueOutcome,
-        LoadBalancerRuntimeBackendSetOperation, LoadBalancerRuntimeBackendState,
-        PassiveHealthState, SlowStartState, UpstreamLoadBalancer, backend_key,
+        LoadBalancedUpstreamReporter, LoadBalancerDiscoveryMode, LoadBalancerPersistenceOutcome,
+        LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendSetOperation,
+        LoadBalancerRuntimeBackendState, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
+        backend_key,
     };
     use crate::test_support::{safe_child_path, unique_temp_path};
 
@@ -1812,6 +1840,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(balancer.backend_count(), 2);
+        assert_eq!(
+            balancer.runtime_stats().discovery_mode,
+            LoadBalancerDiscoveryMode::Static
+        );
         assert!(balancer.select(&request(), None).is_some());
     }
 
@@ -2721,6 +2753,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(balancer.backend_count(), 2);
+        assert_eq!(
+            balancer.runtime_stats().discovery_mode,
+            LoadBalancerDiscoveryMode::File
+        );
         assert!(balancer.select(&request(), None).is_some());
     }
 
@@ -2741,6 +2777,10 @@ mod tests {
         .unwrap();
 
         assert!(balancer.backend_count() >= 1);
+        assert_eq!(
+            balancer.runtime_stats().discovery_mode,
+            LoadBalancerDiscoveryMode::Dns
+        );
         assert!(balancer.select(&request(), None).is_some());
     }
 

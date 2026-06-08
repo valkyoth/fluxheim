@@ -320,15 +320,16 @@ read-only and reports backend readiness, aliases, weights, backup/drain/disabled
 state, ready and policy-available backend counts, primary/backup availability
 counts, drain/disabled/forced-down/ejected/saturated summary counts, runtime
 override counts, circuit-open counts, selection policy, max-iteration and
-all-down settings, health-check frequency and parallel mode, retry policy,
-passive-health thresholds, slow-start duration, persistence policy and table
-size, queue policy and current waiting count, priority group, locality, tags, max
-in-flight cap, current in-flight count, passive failure count, passive ejection,
-passive ejection remaining seconds, circuit state, slow-start allowance,
-persistence entries currently pinned to each backend, and least-time latency
-state where available. In the current `1.5.x` line, `circuit_state = "open"`
-is the runtime status view for a backend currently ejected by passive health;
-`"closed"` means the backend is not passively ejected. Per-backend rows include
+all-down settings, discovery mode (`static`, `file`, `http`, or `dns`),
+health-check frequency and parallel mode, retry policy, passive-health
+thresholds, slow-start duration, persistence policy and table size, queue policy
+and current waiting count, priority group, locality, tags, max in-flight cap,
+current in-flight count, passive failure count, passive ejection, passive
+ejection remaining seconds, circuit state, slow-start allowance, persistence
+entries currently pinned to each backend, and least-time latency state where
+available. In the current `1.5.x` line, `circuit_state = "open"` is the runtime
+status view for a backend currently ejected by passive health; `"closed"` means
+the backend is not passively ejected. Per-backend rows include
 `runtime_state_override` when an
 authenticated runtime member operation is active and
 `runtime_state_changed_at_unix_secs` when that override currently has a recorded
@@ -363,7 +364,7 @@ backend addresses just like status output. Member fields use configured aliases
 when present and `redacted` otherwise. Successful and rejected mutation metrics
 keep member attribution in normal builds and use configured aliases only in
 privacy-mode.
-For dynamic DNS/file-discovery pools, Fluxheim may reclaim stale runtime
+For dynamic DNS/file/HTTP-discovery pools, Fluxheim may reclaim stale runtime
 `drain` overrides after a member disappears from the live discovery set.
 Runtime `disable` and `forced_down` overrides are retained across discovery
 churn and are cleared only by explicit `normal` or `manual_resume` admin action.
@@ -410,10 +411,10 @@ Runtime backend sets are capped at 256 members in this release; remove a member
 before adding another when the cap is reached.
 
 Runtime backend-set mutation is available only for static upstream pools in
-this release. It is rejected for DNS/file-discovery pools because discovery
-refresh would overwrite local admin changes. It is also rejected for Maglev
-selectors because Maglev requires a rebuilt lookup table; use a non-Maglev
-selector for runtime backend-set changes. Runtime-added or retargeted members
+this release. It is rejected for DNS/file/HTTP-discovery pools because
+discovery refresh would overwrite local admin changes. It is also rejected for
+Maglev selectors because Maglev requires a rebuilt lookup table; use a
+non-Maglev selector for runtime backend-set changes. Runtime-added or retargeted members
 carry only address and configured weight; aliases, tags, backup membership,
 priority groups, locality metadata, and per-upstream caps still come from the
 static config and require reload. Backend-set additions, removals, and
@@ -437,7 +438,7 @@ runtime override and return to the configured `upstream_weights` value. Runtime
 weights are bounded to `1..=1000`, are local/in-memory like runtime member
 state, and are returned in backend status as `effective_weight`,
 `runtime_weight_override`, and `runtime_weight_changed_at_unix_secs`.
-For dynamic DNS/file-discovery pools, runtime weight overrides are retained
+For dynamic DNS/file/HTTP-discovery pools, runtime weight overrides are retained
 while the same backend is explicitly `disable`d or `forced_down`, and are
 otherwise reclaimed after the backend leaves the live discovery set.
 Successful and rejected weight operations are counted as `member_weight`,

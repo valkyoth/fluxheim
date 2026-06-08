@@ -31,6 +31,8 @@ line.
   `proxy.upstreams_http_url`, optional bearer-token authentication, 64 KiB
   response limits, 2-64 unique authority validation, and 1-300 second refresh
   intervals.
+- Added `discovery_mode` to load-balancer runtime status so static, file, HTTP,
+  and DNS-discovered pools are visible in admin and ops-socket output.
 
 ## Stop Line
 
