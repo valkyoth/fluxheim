@@ -44,6 +44,8 @@ line.
   `Cache-Control: no-store`, rejecting non-JSON `Content-Type` values when
   present, and rejecting empty or whitespace-bearing bearer-token files before
   constructing the Authorization header.
+- Added `examples/load-balancer-http-discovery.toml` as a minimal
+  control-plane-backed load-balancer example.
 
 ## Stop Line
 

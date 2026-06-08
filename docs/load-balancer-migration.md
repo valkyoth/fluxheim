@@ -3,6 +3,8 @@
 Fluxheim `1.5.x` focuses on HTTP/TCP edge load-balancer operations that map
 cleanly from HAProxy, nginx, Envoy, and F5 LTM-style pools. The validated
 starting fixture is `examples/load-balancer-enterprise.toml`.
+For pull-based control-plane upstream lists, use
+`examples/load-balancer-http-discovery.toml`.
 
 This is a migration guide for pool behavior, not a claim that Fluxheim clones
 every product module. UDP, GSLB/DNS steering, WAF policy, VPN/firewall

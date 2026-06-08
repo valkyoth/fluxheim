@@ -45,6 +45,8 @@ behavior when the change improves security or project direction.
   `Cache-Control: no-store`, rejecting non-JSON response `Content-Type` values
   when present, and rejecting empty or whitespace-bearing bearer-token files
   before sending authorization headers.
+- Add `examples/load-balancer-http-discovery.toml` as a minimal
+  control-plane-backed load-balancer example.
 
 ## 1.5.10 - 2026-06-07
 

@@ -1,0 +1,80 @@
+[server]
+# Minimal pull-based HTTP discovery example.
+#
+# The control-plane endpoint must return either:
+#   ["10.0.0.10:8080","10.0.0.11:8080"]
+# or:
+#   {"upstreams":["10.0.0.10:8080","10.0.0.11:8080"]}
+#
+# Fluxheim fetches this URL at startup, so `--validate-config` also requires the
+# endpoint and optional token file below to be reachable in the validation
+# environment.
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+
+[server.process]
+pid_file = ".fluxheim-dev/fluxheim.pid"
+upgrade_sock = ".fluxheim-dev/fluxheim-upgrade.sock"
+certificate_reload_sock = ".fluxheim-dev/fluxheim-cert-reload.sock"
+
+[admin]
+enabled = false
+listen = "127.0.0.1:9090"
+require_loopback = true
+
+[metrics]
+enabled = true
+listen = "127.0.0.1:9091"
+require_loopback = true
+
+[logging]
+level = "info"
+format = "json"
+target = "stderr"
+
+[proxy]
+upstreams_http_url = "https://control-plane.example.test/v1/fluxheim/upstreams/app"
+upstreams_http_refresh_secs = 5
+upstreams_http_bearer_token_file = "/run/secrets/fluxheim-discovery-token"
+connect_timeout_secs = 3
+read_timeout_secs = 30
+send_timeout_secs = 30
+downstream_write_timeout_secs = 30
+
+[proxy.load_balance]
+selection = "least-connections"
+max_iterations = 256
+all_down_status = 503
+
+[proxy.load_balance.health_check]
+enabled = true
+protocol = "http"
+interval_secs = 2
+consecutive_success = 2
+consecutive_failure = 3
+parallel = true
+method = "GET"
+path = "/healthz"
+expected_status_ranges = [{ start = 200, end = 299 }]
+connect_timeout_secs = 1
+read_timeout_secs = 2
+
+[proxy.load_balance.passive_health]
+enabled = true
+consecutive_failure = 3
+ejection_secs = 30
+failure_status_ranges = [{ start = 500, end = 599 }]
+max_latency_ms = 2000
+
+[proxy.load_balance.retry]
+enabled = true
+max_retries = 2
+methods = ["GET", "HEAD", "OPTIONS"]
+statuses = [500, 502, 503]
+budget_per_window = 1000
+budget_window_secs = 1
+
+[proxy.load_balance.queue]
+max_waiting = 256
+timeout_ms = 250
+retry_interval_ms = 10

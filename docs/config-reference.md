@@ -1046,6 +1046,9 @@ intentionally pull-only in this
 release: it does not watch Kubernetes, Consul, or xDS streams directly, and it
 cannot be combined with per-member static policy lists such as weights,
 localities, aliases, tags, backup, drain, disabled, or max-in-flight.
+`examples/load-balancer-http-discovery.toml` contains a complete minimal
+control-plane-backed load-balancer pool, including health checks, passive
+health, retries, and queue policy.
 Changing a load-balanced pool's discovery source, discovery refresh interval,
 HTTP bearer-token file, or route/vhost pool membership is classified as a
 process-upgrade change rather than a live snapshot reload because the refresh
