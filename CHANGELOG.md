@@ -27,6 +27,10 @@ behavior when the change improves security or project direction.
 - Harden downstream HTTP/2 defaults against the HTTP/2 Bomb class by installing
   bounded H2 handshake options and defaulting downstream write timeout to 30
   seconds.
+- Add bounded pull-based HTTP upstream discovery for load-balancer pools through
+  `proxy.upstreams_http_url`, with optional bearer-token authentication, 64 KiB
+  response limits, 2-64 unique authority validation, and 1-300 second refresh
+  intervals.
 
 ## 1.5.10 - 2026-06-07
 

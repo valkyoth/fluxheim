@@ -1016,6 +1016,23 @@ mutually exclusive with `upstream`, `upstreams_file`, `upstream_weights`,
 `upstream_tags`, `backup_upstreams`, `drain_upstreams`, and
 `disabled_upstreams`; use the
 static pool form when those richer backend policies are required.
+For pull-based control-plane discovery, load-balancer builds can set
+`upstreams_http_url = "https://control-plane.example.test/v1/upstreams"` instead
+of `upstream`, `upstreams`, or `upstreams_file`. Fluxheim fetches the endpoint at
+startup and refreshes it every `upstreams_http_refresh_secs` seconds, with a
+default of 5 seconds and a bounded range of 1 through 300 seconds. The response
+body is bounded to 64 KiB and must be JSON in either of these forms:
+`["10.0.0.10:8080","10.0.0.11:8080"]` or
+`{"upstreams":["10.0.0.10:8080","10.0.0.11:8080"]}`. The parsed upstream list
+must contain 2 through 64 unique `host:port` or `ip:port` authorities. The
+optional `upstreams_http_bearer_token_file` adds a `Bearer` token to the request;
+the token file is validated with the same safe-path and parent-permission checks
+used for other operator-controlled secret files. Discovery endpoints must use
+HTTPS unless they are numeric loopback `http://127.0.0.1` or `http://[::1]`
+control-plane sidecars. HTTP discovery is intentionally pull-only in this
+release: it does not watch Kubernetes, Consul, or xDS streams directly, and it
+cannot be combined with per-member static policy lists such as weights,
+localities, aliases, tags, backup, drain, disabled, or max-in-flight.
 When `upstream_tls = true`, Fluxheim sends TLS to the origin. `upstream_sni`
 overrides the SNI name; if it is omitted, Fluxheim derives SNI from the primary
 upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default to

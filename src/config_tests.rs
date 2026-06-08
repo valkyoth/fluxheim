@@ -889,6 +889,82 @@ fn parses_proxy_upstream_dns_refresh() {
 
 #[cfg(feature = "load-balancer")]
 #[test]
+fn parses_proxy_upstreams_http_discovery() {
+    let root = secure_test_dir("config-proxy-upstreams-http");
+    let token_file = root.join("discovery-token");
+    fs::write(&token_file, "secret-token\n").unwrap();
+    let config: Config = toml::from_str(&format!(
+        r#"
+            [proxy]
+            upstreams_http_url = "https://discovery.example.test/v1/upstreams"
+            upstreams_http_refresh_secs = 2
+            upstreams_http_bearer_token_file = "{}"
+            "#,
+        token_file.display()
+    ))
+    .unwrap();
+
+    assert_eq!(
+        config.proxy.upstreams_http_url.as_deref(),
+        Some("https://discovery.example.test/v1/upstreams")
+    );
+    assert_eq!(config.proxy.upstreams_http_refresh_secs, 2);
+    assert_eq!(
+        config.proxy.upstreams_http_bearer_token_file.as_deref(),
+        Some(token_file.as_path())
+    );
+    config.validate().unwrap();
+}
+
+#[cfg(feature = "load-balancer")]
+#[test]
+fn rejects_invalid_proxy_upstreams_http_discovery() {
+    let config: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams_http_url = "https://discovery.example.test/v1/upstreams?env=prod"
+            "#,
+    )
+    .unwrap();
+
+    let error = config.validate().unwrap_err().to_string();
+    assert!(error.contains("proxy.upstreams_http_url"), "{error}");
+
+    let plaintext_remote: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams_http_url = "http://discovery.example.test/v1/upstreams"
+            "#,
+    )
+    .unwrap();
+    let error = plaintext_remote.validate().unwrap_err().to_string();
+    assert!(error.contains("numeric loopback"), "{error}");
+
+    let plaintext_loopback: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams_http_url = "http://127.0.0.1:8500/v1/upstreams"
+            "#,
+    )
+    .unwrap();
+    plaintext_loopback.validate().unwrap();
+
+    let token_only: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams_http_bearer_token_file = "/run/secrets/discovery-token"
+            "#,
+    )
+    .unwrap();
+    let error = token_only.validate().unwrap_err().to_string();
+    assert!(
+        error.contains("proxy.upstreams_http_bearer_token_file"),
+        "{error}"
+    );
+}
+
+#[cfg(feature = "load-balancer")]
+#[test]
 fn rejects_invalid_proxy_upstreams_file_contents() {
     let root = secure_test_dir("config-proxy-upstreams-file-invalid");
     let upstreams_file = root.join("upstreams.txt");

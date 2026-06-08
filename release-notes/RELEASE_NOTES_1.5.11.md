@@ -27,8 +27,14 @@ line.
   decoded request header lists at 64 KiB per stream, capping remotely initiated
   concurrent streams at 32 per connection, and defaulting downstream write
   timeout to 30 seconds.
+- Added bounded pull-based HTTP upstream discovery for load-balancer pools using
+  `proxy.upstreams_http_url`, optional bearer-token authentication, 64 KiB
+  response limits, 2-64 unique authority validation, and 1-300 second refresh
+  intervals.
 
 ## Stop Line
 
 This release does not add UDP/GSLB, WAF, VPN/firewall appliance behavior, or
-Wasm/iRules/Lua scripting.
+Wasm/iRules/Lua scripting. HTTP discovery is pull-based and does not implement
+native Kubernetes watches, Consul blocking queries, or xDS streams in this
+release.

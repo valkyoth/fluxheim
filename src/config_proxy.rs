@@ -12,7 +12,10 @@ use crate::config_http::{valid_http_base_url, valid_http_endpoint_url};
 use crate::config_load_balance::LB_SAFE_RETRY_METHODS;
 #[cfg(feature = "load-balancer")]
 use crate::config_loader::read_proxy_upstreams_file;
-use crate::config_net::{normalize_host, upstream_host, valid_authority, valid_upstream_alias};
+use crate::config_net::{
+    http_authority_is_numeric_loopback, normalize_host, upstream_host, valid_authority,
+    valid_upstream_alias,
+};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 use crate::config_route::validate_route_path;
 use crate::config_web::WebConfig;
@@ -40,6 +43,12 @@ pub struct ProxyConfig {
     pub upstreams_file: Option<PathBuf>,
     #[serde(default = "default_proxy_upstreams_file_refresh_secs")]
     pub upstreams_file_refresh_secs: u64,
+    #[serde(default)]
+    pub upstreams_http_url: Option<String>,
+    #[serde(default = "default_proxy_upstreams_http_refresh_secs")]
+    pub upstreams_http_refresh_secs: u64,
+    #[serde(default)]
+    pub upstreams_http_bearer_token_file: Option<PathBuf>,
     #[serde(default)]
     pub upstream_dns_refresh_secs: Option<u64>,
     #[serde(default)]
@@ -172,6 +181,9 @@ impl Default for ProxyConfig {
             upstreams: Vec::new(),
             upstreams_file: None,
             upstreams_file_refresh_secs: default_proxy_upstreams_file_refresh_secs(),
+            upstreams_http_url: None,
+            upstreams_http_refresh_secs: default_proxy_upstreams_http_refresh_secs(),
+            upstreams_http_bearer_token_file: None,
             upstream_dns_refresh_secs: None,
             upstream_weights: Vec::new(),
             upstream_priority_groups: Vec::new(),
@@ -228,7 +240,10 @@ impl ProxyConfig {
     }
 
     pub fn has_configured_upstream(&self) -> bool {
-        self.upstream.is_some() || !self.upstreams.is_empty() || self.upstreams_file.is_some()
+        self.upstream.is_some()
+            || !self.upstreams.is_empty()
+            || self.upstreams_file.is_some()
+            || self.upstreams_http_url.is_some()
     }
 
     pub fn configured_primary_upstream(&self) -> Option<&str> {
@@ -260,6 +275,11 @@ impl ProxyConfig {
         {
             *path = base_dir.join(&path);
         }
+        if let Some(path) = &mut self.upstreams_http_bearer_token_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
         if let Some(path) = &mut self.load_balance.runtime_state_file
             && path.is_relative()
         {
@@ -281,8 +301,15 @@ impl ProxyConfig {
     }
 
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
-        if self.upstream.is_some() && (!self.upstreams.is_empty() || self.upstreams_file.is_some())
-            || !self.upstreams.is_empty() && self.upstreams_file.is_some()
+        let dynamic_discovery_count = usize::from(self.upstreams_file.is_some())
+            + usize::from(self.upstreams_http_url.is_some());
+        if self.upstream.is_some()
+            && (!self.upstreams.is_empty()
+                || self.upstreams_file.is_some()
+                || self.upstreams_http_url.is_some())
+            || !self.upstreams.is_empty()
+                && (self.upstreams_file.is_some() || self.upstreams_http_url.is_some())
+            || dynamic_discovery_count > 1
         {
             return Err(ConfigError::ConflictingProxyUpstreams);
         }
@@ -345,6 +372,77 @@ impl ProxyConfig {
                 reason: "must be between 1 and 300 seconds",
             });
         }
+        if let Some(url) = &self.upstreams_http_url {
+            #[cfg(not(feature = "load-balancer"))]
+            {
+                let _ = url;
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstreams_http_url",
+                    reason: "requires the load-balancer feature",
+                });
+            }
+            #[cfg(feature = "load-balancer")]
+            {
+                if !valid_http_endpoint_url(url) {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstreams_http_url",
+                        reason: "must be an http:// or https:// endpoint URL without credentials, query, or fragment",
+                    });
+                }
+                if let Some(rest) = url.strip_prefix("http://") {
+                    let authority = rest.split('/').next().unwrap_or_default();
+                    if !http_authority_is_numeric_loopback(authority) {
+                        return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                            field: "proxy.upstreams_http_url",
+                            reason: "must use https:// unless the endpoint is numeric loopback http://",
+                        });
+                    }
+                }
+                if !(MIN_PROXY_UPSTREAMS_FILE_REFRESH_SECS..=MAX_PROXY_UPSTREAMS_FILE_REFRESH_SECS)
+                    .contains(&self.upstreams_http_refresh_secs)
+                {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstreams_http_refresh_secs",
+                        reason: "must be between 1 and 300 seconds",
+                    });
+                }
+                if let Some(path) = &self.upstreams_http_bearer_token_file {
+                    validate_path("proxy.upstreams_http_bearer_token_file", Some(path))?;
+                    validate_non_world_writable_parent(
+                        "proxy.upstreams_http_bearer_token_file",
+                        Some(path),
+                    )?;
+                }
+                if !self.upstream_weights.is_empty()
+                    || !self.upstream_priority_groups.is_empty()
+                    || self.upstream_priority_group_min_active
+                        != default_upstream_priority_group_min_active()
+                    || !self.upstream_localities.is_empty()
+                    || !self.preferred_upstream_localities.is_empty()
+                    || !self.upstream_max_in_flight.is_empty()
+                    || !self.upstream_aliases.is_empty()
+                    || !self.upstream_tags.is_empty()
+                    || !self.backup_upstreams.is_empty()
+                    || !self.drain_upstreams.is_empty()
+                    || !self.disabled_upstreams.is_empty()
+                {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstreams_http_url",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_localities, preferred_upstream_localities, upstream_max_in_flight, upstream_aliases, upstream_tags, backup_upstreams, drain_upstreams, or disabled_upstreams in this release",
+                    });
+                }
+                if self.upstream_tls && self.upstream_sni.is_none() {
+                    return Err(ConfigError::InvalidProxyTlsPolicy {
+                        reason: "upstreams_http_url with upstream_tls requires explicit upstream_sni",
+                    });
+                }
+            }
+        } else if self.upstreams_http_bearer_token_file.is_some() {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstreams_http_bearer_token_file",
+                reason: "requires proxy.upstreams_http_url",
+            });
+        }
         if let Some(refresh_secs) = self.upstream_dns_refresh_secs {
             #[cfg(not(feature = "load-balancer"))]
             {
@@ -367,10 +465,11 @@ impl ProxyConfig {
                 if self.upstream.is_some()
                     || self.upstreams.is_empty()
                     || self.upstreams_file.is_some()
+                    || self.upstreams_http_url.is_some()
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstream_dns_refresh_secs",
-                        reason: "requires proxy.upstreams and cannot be used with proxy.upstream or proxy.upstreams_file",
+                        reason: "requires proxy.upstreams and cannot be used with proxy.upstream, proxy.upstreams_file, or proxy.upstreams_http_url",
                     });
                 }
                 if !self.upstream_weights.is_empty()
@@ -809,10 +908,12 @@ impl ProxyConfig {
 
         self.load_balance.validate()?;
         if self.load_balance.selection.uses_maglev()
-            && (self.upstreams_file.is_some() || self.upstream_dns_refresh_secs.is_some())
+            && (self.upstreams_file.is_some()
+                || self.upstreams_http_url.is_some()
+                || self.upstream_dns_refresh_secs.is_some())
         {
             return Err(ConfigError::InvalidLoadBalanceSelection {
-                reason: "maglev selections require a static proxy.upstreams pool; file-refreshed and DNS-refreshed pools rebuild membership dynamically",
+                reason: "maglev selections require a static proxy.upstreams pool; file, HTTP, and DNS discovery pools rebuild membership dynamically",
             });
         }
         Ok(())
@@ -1228,6 +1329,10 @@ impl ProxyErrorPageConfig {
     }
 }
 fn default_proxy_upstreams_file_refresh_secs() -> u64 {
+    5
+}
+
+fn default_proxy_upstreams_http_refresh_secs() -> u64 {
     5
 }
 
