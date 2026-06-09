@@ -19,6 +19,8 @@ health checks where TCP/TLS, HTTP, gRPC, and JSON checks are not enough.
   `FLUXHEIM_HEALTH_BACKEND_PORT`.
 - Load-balancer runtime status now reports the active health-check protocol
   without exposing exec command paths or arguments.
+- Exec health-check backend summaries now identify the protocol without
+  including the configured command path.
 - Added `examples/load-balancer-exec-health.toml` as a validated local command
   monitor example.
 
@@ -31,8 +33,8 @@ health checks where TCP/TLS, HTTP, gRPC, and JSON checks are not enough.
 - Exec checks run serially per pool in this release; `parallel = true` is
   rejected for exec checks to avoid spawning many local processes at once.
 - Exec command paths and arguments are normal configuration fields. They are
-  not exposed in runtime status, but operators should not put credentials in
-  argv or allow-list entries.
+  not exposed in runtime status or backend summaries, but operators should not
+  put credentials in argv or allow-list entries.
 - Agent checks and database protocol probes remain future work.
 
 ## Packaging Notes

@@ -154,7 +154,7 @@ impl FluxHealthCheck for FluxExecHealthCheck {
     }
 
     fn backend_summary(&self, target: &Backend) -> String {
-        format!("{} via exec:{}", target.addr, self.command)
+        format!("{} via exec", target.addr)
     }
 }
 
@@ -1041,6 +1041,11 @@ mod tests {
         assert_eq!(health_check.command, "/usr/local/libexec/fluxheim-health");
         assert_eq!(health_check.args.as_ref(), ["--probe".to_owned()]);
         assert_eq!(health_check.timeout, Duration::from_secs(3));
+        let backend = Backend::new("127.0.0.1:8080").unwrap();
+        assert_eq!(
+            health_check.backend_summary(&backend),
+            "127.0.0.1:8080 via exec"
+        );
     }
 
     #[tokio::test]

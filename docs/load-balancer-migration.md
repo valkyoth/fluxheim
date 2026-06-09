@@ -9,7 +9,8 @@ For local command-based monitors, use
 `examples/load-balancer-exec-health.toml`.
 Exec monitor command paths and arguments are normal configuration data, so do
 not put credentials in argv; let the local helper read protected local secrets
-it owns.
+it owns. Runtime status and health-check backend summaries expose only the
+protocol, not the exec command path or arguments.
 
 This is a migration guide for pool behavior, not a claim that Fluxheim clones
 every product module. UDP, GSLB/DNS steering, WAF policy, VPN/firewall

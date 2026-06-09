@@ -25,6 +25,8 @@ behavior when the change improves security or project direction.
   `FLUXHEIM_HEALTH_BACKEND_PORT`.
 - Expose the active health-check protocol in load-balancer runtime status for
   operator visibility without exposing exec command paths or arguments.
+- Keep exec health-check backend summaries to `via exec`, avoiding command
+  path exposure in log-facing health-check strings.
 - Add `examples/load-balancer-exec-health.toml` and include it in the local
   example config validation gate.
 - Reject HTTP/gRPC response matchers and request-header fields on exec checks
