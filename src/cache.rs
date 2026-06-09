@@ -8717,11 +8717,12 @@ mod tests {
     use pingora::cache::key::CacheHashKey;
 
     use super::{
-        CacheRequest, CacheStoreError, CachedHeader, CachedImageObject, FluxCacheMissFinish,
-        FluxCachePurgeType, FluxCacheStorage, MemoryImageCache, StaticCacheRequest,
-        eligible_image_request, image_cache_key, memory_image_cache_from_config, static_cache_key,
-        storage_plan,
+        CacheRequest, CacheStoreError, CachedHeader, CachedImageObject, MemoryImageCache,
+        StaticCacheRequest, eligible_image_request, image_cache_key,
+        memory_image_cache_from_config, static_cache_key, storage_plan,
     };
+    #[cfg(feature = "proxy")]
+    use super::{FluxCacheMissFinish, FluxCachePurgeType, FluxCacheStorage};
     #[cfg(feature = "proxy")]
     use crate::config::CacheDiskEncryptionProvider;
     use crate::config::{
