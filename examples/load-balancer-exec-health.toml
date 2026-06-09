@@ -42,6 +42,8 @@ interval_secs = 5
 consecutive_success = 2
 consecutive_failure = 3
 parallel = false
+# Do not put credentials in exec_command or exec_args. Use a service-owned
+# helper that reads its own protected local credential file if needed.
 exec_command = "/usr/local/libexec/fluxheim-health"
 exec_args = ["--check-backend"]
 exec_allowed_commands = ["/usr/local/libexec/fluxheim-health"]

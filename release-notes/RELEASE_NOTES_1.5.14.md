@@ -28,6 +28,9 @@ health checks where TCP/TLS, HTTP, gRPC, and JSON checks are not enough.
   compatible.
 - Exec checks are opt-in and are rejected if mixed with HTTP/gRPC request or
   response matcher fields.
+- Exec command paths and arguments are normal configuration fields. They are
+  not exposed in runtime status, but operators should not put credentials in
+  argv or allow-list entries.
 - Agent checks and database protocol probes remain future work.
 
 ## Packaging Notes

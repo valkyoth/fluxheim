@@ -1276,6 +1276,11 @@ remains a local monitor, not a scripting engine.
 Runtime load-balancer status exposes only the health-check protocol name
 (`tcp`, `http`, `grpc`, or `exec`) for operator visibility; it does not expose
 exec command paths or arguments.
+Do not place secrets in `exec_command`, `exec_args`, or
+`exec_allowed_commands`: they are normal configuration fields and may appear in
+local config files, snapshots, backups, or operator review output. Use a local
+root/service-owned helper that reads its own protected credential file if the
+probe needs credentials.
 `expected_body_json` performs bounded exact scalar matching against JSON health
 responses without JSONPath, array indexing, expressions, or regexes:
 
