@@ -15,6 +15,11 @@ stable while moving cache implementations behind Fluxheim-owned traits.
   use Pingora's session cache machinery without making cache implementations
   depend directly on Pingora's `Storage`, `HandleHit`, or `HandleMiss` traits.
 - Moved storage-focused unit coverage onto the Fluxheim cache interface.
+- Hardened slice-cache multipart range responses by generating a random
+  boundary per response and stripping CR/LF from cached upstream
+  `Content-Type` values before embedding them in MIME part headers.
+- Fixed cache-only test imports so cache feature CI paths do not require the
+  proxy feature just to compile test scaffolding.
 
 ## Compatibility
 

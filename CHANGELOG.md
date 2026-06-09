@@ -24,6 +24,12 @@ behavior when the change improves security or project direction.
   has a Fluxheim-owned boundary for future crate extraction.
 - Move cache unit coverage that exercises storage behavior onto the Fluxheim
   cache interface while preserving the Pingora adapter for proxy integration.
+- Harden slice-cache multipart range responses by replacing deterministic
+  length-derived MIME boundaries with per-response random boundaries and by
+  stripping CR/LF from cached upstream `Content-Type` values before writing
+  MIME part headers.
+- Fix cache-only test imports so cache feature CI builds do not depend on
+  proxy-gated Flux cache trait names unless the proxy feature is enabled.
 - Keep `privacy-cache` as an explicit future design only. Normal cache remains
   incompatible with `privacy-mode`; a future public-asset cache must enforce no
   client-IP keys, no `Cookie`/`Authorization` admission, no per-user variants,

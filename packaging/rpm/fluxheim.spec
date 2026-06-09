@@ -159,6 +159,8 @@ fi
 - Move cache implementation internals behind FluxCacheStorage and
   FluxHandleHit/FluxHandleMiss while preserving the Pingora HTTP proxy adapter
   and existing cache behavior.
+- Harden slice-cache multipart range responses with random MIME boundaries and
+  CR/LF stripping for cached upstream Content-Type values.
 - Keep privacy-cache as a planned explicit public-asset design only.
 
 * Mon Jun 08 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.12-1
