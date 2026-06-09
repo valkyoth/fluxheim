@@ -19,6 +19,8 @@ health checks where TCP/TLS, HTTP, gRPC, and JSON checks are not enough.
   `FLUXHEIM_HEALTH_BACKEND_PORT`.
 - Load-balancer runtime status now reports the active health-check protocol
   without exposing exec command paths or arguments.
+- Added `examples/load-balancer-exec-health.toml` as a validated local command
+  monitor example.
 
 ## Compatibility
 

@@ -5,6 +5,8 @@ cleanly from HAProxy, nginx, Envoy, and F5 LTM-style pools. The validated
 starting fixture is `examples/load-balancer-enterprise.toml`.
 For pull-based control-plane upstream lists, use
 `examples/load-balancer-http-discovery.toml`.
+For local command-based monitors, use
+`examples/load-balancer-exec-health.toml`.
 
 This is a migration guide for pool behavior, not a claim that Fluxheim clones
 every product module. UDP, GSLB/DNS steering, WAF policy, VPN/firewall

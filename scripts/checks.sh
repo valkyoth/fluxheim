@@ -188,6 +188,7 @@ config_tester examples/cache-encryption-local.toml
 config_tester examples/cache-encryption-openbao.toml
 config_tester examples/cache-peer-fill.toml
 config_tester examples/load-balancer-enterprise.toml load-balancer
+config_tester examples/load-balancer-exec-health.toml load-balancer
 config_tester examples/php-fpm.toml web-php
 config_tester examples/tls-modern.toml
 config_tester examples/tls-intermediate.toml
