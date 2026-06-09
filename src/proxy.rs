@@ -4,6 +4,8 @@ use std::io;
 use std::net::{IpAddr, Ipv6Addr, ToSocketAddrs};
 #[cfg(feature = "php-fpm")]
 use std::path::PathBuf;
+#[cfg(feature = "cache")]
+use std::process;
 use std::sync::Arc;
 #[cfg(any(feature = "cache", feature = "load-balancer"))]
 use std::sync::Mutex;
@@ -6471,7 +6473,7 @@ fn compose_slice_response(
         }));
     }
 
-    let boundary = format!("fluxheim-slice-{}", identity.total);
+    let boundary = random_multipart_boundary();
     let body = compose_multipart_slice_body(ranges, slices, identity.total, &boundary)?;
     let mut response = first_slice.meta.response_header_copy();
     response.status = StatusCode::PARTIAL_CONTENT;
@@ -6511,10 +6513,12 @@ fn compose_multipart_slice_body(
     total: u64,
     boundary: &str,
 ) -> Result<Bytes> {
-    let content_type = slices
-        .values()
-        .find_map(|slice| first_header_value(slice.meta.headers(), "content-type"))
-        .unwrap_or_else(|| "application/octet-stream".to_owned());
+    let content_type = sanitize_multipart_content_type(
+        &slices
+            .values()
+            .find_map(|slice| first_header_value(slice.meta.headers(), "content-type"))
+            .unwrap_or_else(|| "application/octet-stream".to_owned()),
+    );
     let mut body = Vec::new();
     for range in ranges {
         body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
@@ -6533,6 +6537,38 @@ fn compose_multipart_slice_body(
     }
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     Ok(Bytes::from(body))
+}
+
+#[cfg(feature = "cache")]
+fn random_multipart_boundary() -> String {
+    let mut raw = [0u8; 16];
+    if let Err(error) = getrandom::fill(&mut raw) {
+        log::error!(
+            target: "fluxheim::security",
+            "failed to generate multipart boundary entropy: {error}"
+        );
+        process::abort();
+    }
+    let mut boundary = String::with_capacity("fluxheim-".len() + raw.len() * 2);
+    boundary.push_str("fluxheim-");
+    for byte in raw {
+        use std::fmt::Write as _;
+        let _ = write!(&mut boundary, "{byte:02x}");
+    }
+    boundary
+}
+
+#[cfg(feature = "cache")]
+fn sanitize_multipart_content_type(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .filter(|character| *character != '\r' && *character != '\n')
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "application/octet-stream".to_owned()
+    } else {
+        sanitized
+    }
 }
 
 #[cfg(feature = "cache")]
@@ -10129,7 +10165,8 @@ mod tests {
     use super::{
         CACHE_PASS_REASON, cache_min_uses_allows_store, cache_pass_record_cacheable,
         cache_pass_record_uncacheable, cache_pass_should_bypass, lookup_proxy_cache_only_object,
-        read_cache_hit_body, response_vary_variance,
+        random_multipart_boundary, read_cache_hit_body, response_vary_variance,
+        sanitize_multipart_content_type,
     };
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
@@ -18072,6 +18109,36 @@ mod tests {
             0,
             header,
         )
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn multipart_slice_boundary_uses_random_unpredictable_value() {
+        let first = random_multipart_boundary();
+        let second = random_multipart_boundary();
+
+        assert!(first.starts_with("fluxheim-"));
+        assert_eq!(first.len(), "fluxheim-".len() + 32);
+        assert!(
+            first["fluxheim-".len()..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        );
+        assert_ne!(first, "fluxheim-slice-4096");
+        assert_ne!(first, second);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn multipart_slice_content_type_strips_crlf() {
+        assert_eq!(
+            sanitize_multipart_content_type("text/plain\r\nX-Injected: yes"),
+            "text/plainX-Injected: yes"
+        );
+        assert_eq!(
+            sanitize_multipart_content_type("\r\n"),
+            "application/octet-stream"
+        );
     }
 
     #[cfg(feature = "cache")]
