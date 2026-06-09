@@ -3422,6 +3422,57 @@ fn rejects_invalid_http_load_balance_health_check() {
             field: "proxy.load_balance.health_check.protocol"
         })
     );
+
+    let exec_parallel: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "exec"
+            exec_command = "/usr/local/libexec/fluxheim-health"
+            exec_allowed_commands = ["/usr/local/libexec/fluxheim-health"]
+            parallel = true
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        exec_parallel.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.parallel"
+        })
+    );
+
+    let exec_with_network_field: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "exec"
+            exec_command = "/usr/local/libexec/fluxheim-health"
+            exec_allowed_commands = ["/usr/local/libexec/fluxheim-health"]
+            host = "app.internal"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        exec_with_network_field.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.host"
+        })
+    );
+
+    let exec_with_connect_timeout: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "exec"
+            exec_command = "/usr/local/libexec/fluxheim-health"
+            exec_allowed_commands = ["/usr/local/libexec/fluxheim-health"]
+            connect_timeout_secs = 1
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        exec_with_connect_timeout.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.connect_timeout_secs"
+        })
+    );
 }
 
 #[test]

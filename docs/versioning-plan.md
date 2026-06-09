@@ -3674,11 +3674,11 @@ the exception while the cache server is being completed as a focused sequence:
   command checks for cases that cannot be represented by TCP, TLS, HTTP, gRPC,
   JSON, or database protocol probes. Require absolute allow-listed command
   paths, no shell expansion, no inherited unsafe environment, strict
-  timeout/output-size limits, redaction, status/audit visibility, and clear
-  compile/profile compatibility. Keep authenticated agent checks for a later
-  monitor slice. Do not add arbitrary scripting, Wasm policy, runtime backend
-  mutation, UDP/GSLB, WAF, VPN/firewall appliance behavior, or database
-  protocol probes in this release.
+  timeout/output-size limits, serial process execution per pool, redaction,
+  status/audit visibility, and clear compile/profile compatibility. Keep
+  authenticated agent checks for a later monitor slice. Do not add arbitrary
+  scripting, Wasm policy, runtime backend mutation, UDP/GSLB, WAF,
+  VPN/firewall appliance behavior, or database protocol probes in this release.
 - `v1.5.15`: database and protocol-aware health-check line. Stop at bounded
   protocol probes for stream/load-balancer deployments where TCP connect is not
   enough: Redis `PING`, PostgreSQL startup/readiness, MySQL handshake/readiness,

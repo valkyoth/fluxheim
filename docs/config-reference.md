@@ -1270,9 +1270,12 @@ command receives only bounded backend context through
 `FLUXHEIM_HEALTH_BACKEND_ADDR`, `FLUXHEIM_HEALTH_BACKEND_HOST`, and
 `FLUXHEIM_HEALTH_BACKEND_PORT`; host and port are empty for non-inet backend
 addresses. `exec_args` are literal argv entries, not shell fragments.
-`exec_timeout_secs` follows the normal health-check timeout bounds. HTTP/gRPC
-request-header and response-matcher fields are rejected on exec checks so this
-remains a local monitor, not a scripting engine.
+`exec_timeout_secs` follows the normal health-check timeout bounds. Exec
+checks are serial per pool in this release; `parallel = true` is rejected for
+exec checks to avoid spawning many local processes at once. HTTP/gRPC
+request-header and response-matcher fields, `host`, `port_override`,
+`connect_timeout_secs`, and `read_timeout_secs` are rejected on exec checks so
+this remains a local monitor, not a scripting engine.
 Runtime load-balancer status exposes only the health-check protocol name
 (`tcp`, `http`, `grpc`, or `exec`) for operator visibility; it does not expose
 exec command paths or arguments.

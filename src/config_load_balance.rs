@@ -650,6 +650,26 @@ impl LoadBalanceHealthCheckConfig {
                 });
             }
         }
+        if self.parallel {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.parallel",
+            });
+        }
+        if self.host.is_some() {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.host",
+            });
+        }
+        if self.connect_timeout_secs.is_some() {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.connect_timeout_secs",
+            });
+        }
+        if self.read_timeout_secs.is_some() {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.read_timeout_secs",
+            });
+        }
         if !self.request_headers.is_empty()
             || self.grpc_service.is_some()
             || !self.expected_statuses.is_empty()

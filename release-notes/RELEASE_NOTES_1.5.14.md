@@ -28,6 +28,8 @@ health checks where TCP/TLS, HTTP, gRPC, and JSON checks are not enough.
   compatible.
 - Exec checks are opt-in and are rejected if mixed with HTTP/gRPC request or
   response matcher fields.
+- Exec checks run serially per pool in this release; `parallel = true` is
+  rejected for exec checks to avoid spawning many local processes at once.
 - Exec command paths and arguments are normal configuration fields. They are
   not exposed in runtime status, but operators should not put credentials in
   argv or allow-list entries.
