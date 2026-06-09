@@ -456,15 +456,15 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.5.13-wolfi`, `v1.5.13-alpine`, `v1.5.13-suse-micro`, `v1.5.13-debian`
+- `v1.5.14-wolfi`, `v1.5.14-alpine`, `v1.5.14-suse-micro`, `v1.5.14-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.5.13`
-- `v1.5.13-base`
+- `v1.5.14`
+- `v1.5.14-base`
 - `latest`
 - `latest-base`
 
@@ -473,21 +473,21 @@ automation. They point at the full/default image profile.
 
 The focused image profiles publish tags with a profile segment:
 
-- `v1.5.13-cache-wolfi`, `v1.5.13-cache-alpine`,
-  `v1.5.13-cache-suse-micro`, `v1.5.13-cache-debian`
-- `v1.5.13-proxy-wolfi`, `v1.5.13-proxy-alpine`,
-  `v1.5.13-proxy-suse-micro`, `v1.5.13-proxy-debian`
-- `v1.5.13-load-balancer-wolfi`, `v1.5.13-load-balancer-alpine`,
-  `v1.5.13-load-balancer-suse-micro`, `v1.5.13-load-balancer-debian`
-- `v1.5.13-php-wolfi`, `v1.5.13-php-alpine`,
-  `v1.5.13-php-suse-micro`, `v1.5.13-php-debian`
+- `v1.5.14-cache-wolfi`, `v1.5.14-cache-alpine`,
+  `v1.5.14-cache-suse-micro`, `v1.5.14-cache-debian`
+- `v1.5.14-proxy-wolfi`, `v1.5.14-proxy-alpine`,
+  `v1.5.14-proxy-suse-micro`, `v1.5.14-proxy-debian`
+- `v1.5.14-load-balancer-wolfi`, `v1.5.14-load-balancer-alpine`,
+  `v1.5.14-load-balancer-suse-micro`, `v1.5.14-load-balancer-debian`
+- `v1.5.14-php-wolfi`, `v1.5.14-php-alpine`,
+  `v1.5.14-php-suse-micro`, `v1.5.14-php-debian`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-load-balancer-wolfi`, `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`,
   `latest-load-balancer-wolfi`, `latest-php-wolfi`, etc. when run from the
   default branch
-- Wolfi short aliases: `v1.5.13-cache`, `v1.5.13-proxy`,
-  `v1.5.13-load-balancer`, `v1.5.13-php`, `latest-cache`, `latest-proxy`,
+- Wolfi short aliases: `v1.5.14-cache`, `v1.5.14-proxy`,
+  `v1.5.14-load-balancer`, `v1.5.14-php`, `latest-cache`, `latest-proxy`,
   `latest-load-balancer`, and `latest-php`
 
 Starting with `v1.5.0`, the load-balancer image profile is part of normal tag

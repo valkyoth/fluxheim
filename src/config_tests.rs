@@ -817,6 +817,32 @@ fn parses_proxy_upstream_pool() {
             .as_deref(),
         Some("example.Health")
     );
+
+    let exec_config: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "exec"
+            exec_command = "/usr/local/libexec/fluxheim-health"
+            exec_args = ["--probe"]
+            exec_allowed_commands = ["/usr/local/libexec/fluxheim-health"]
+            exec_timeout_secs = 2
+            "#,
+    )
+    .unwrap();
+    exec_config.validate().unwrap();
+    assert_eq!(
+        exec_config.proxy.load_balance.health_check.protocol,
+        LoadBalanceHealthCheckProtocol::Exec
+    );
+    assert_eq!(
+        exec_config
+            .proxy
+            .load_balance
+            .health_check
+            .exec_command
+            .as_deref(),
+        Some("/usr/local/libexec/fluxheim-health")
+    );
     assert!(config.proxy.load_balance.slow_start.enabled);
     assert_eq!(config.proxy.load_balance.slow_start.duration_secs, 45);
     assert!(config.proxy.load_balance.persistence.enabled);
@@ -3330,6 +3356,70 @@ fn rejects_invalid_http_load_balance_health_check() {
         invalid_body_substring.validate(),
         Err(ConfigError::InvalidLoadBalanceHealthCheck {
             field: "proxy.load_balance.health_check.expected_body_contains"
+        })
+    );
+
+    let exec_without_allowlist: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "exec"
+            exec_command = "/usr/local/libexec/fluxheim-health"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        exec_without_allowlist.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.exec_allowed_commands"
+        })
+    );
+
+    let exec_relative_command: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "exec"
+            exec_command = "health-check"
+            exec_allowed_commands = ["health-check"]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        exec_relative_command.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.exec_command"
+        })
+    );
+
+    let exec_not_allowed: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "exec"
+            exec_command = "/usr/local/libexec/fluxheim-health"
+            exec_allowed_commands = ["/usr/local/libexec/other-health"]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        exec_not_allowed.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.exec_allowed_commands"
+        })
+    );
+
+    let exec_with_http_matcher: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "exec"
+            exec_command = "/usr/local/libexec/fluxheim-health"
+            exec_allowed_commands = ["/usr/local/libexec/fluxheim-health"]
+            expected_statuses = [200]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        exec_with_http_matcher.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.protocol"
         })
     );
 }

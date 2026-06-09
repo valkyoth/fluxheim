@@ -1908,11 +1908,11 @@ Stable scope:
     a health-derived overlay separate from configured weight and runtime
     operator overrides, must be visible in status/audit, and must automatically
     clear when the backend returns to normal;
-  - local exec/command checks are a later `1.5.x` monitor slice, not part of
-    the first L7 expansion. They must use absolute allow-listed paths, no
-    shell, no ambient environment injection, strict timeout/output limits,
-    redaction, and compile/config gates because they introduce process
-    execution;
+  - local exec/command checks are an opt-in `1.5.14` monitor slice for cases
+    not representable by TCP/TLS, HTTP, gRPC, or JSON checks. They must use
+    absolute allow-listed paths, no shell, no ambient environment injection,
+    strict timeout/output limits, redaction, and compile/config gates because
+    they introduce process execution;
   - protocol-aware database/service monitors for common load-balanced services
     such as Redis `PING`, PostgreSQL startup/auth-safe readiness, MySQL
     handshake/readiness, SMTP, LDAP, and custom send/expect checks are a later
@@ -3670,14 +3670,15 @@ the exception while the cache server is being completed as a focused sequence:
   rewrite the cache format, change normal cache policy semantics, add
   cross-node cache replication, add UDP/GSLB, WAF, VPN/firewall appliance
   behavior, or Wasm/iRules/Lua scripting in this release.
-- `v1.5.14`: local exec and agent health-check line. Stop at opt-in, bounded
-  local command/agent checks for cases that cannot be represented by TCP, TLS,
-  HTTP, gRPC, JSON, or database protocol probes. Require absolute allow-listed
-  command paths, no shell expansion, no inherited unsafe environment, strict
+- `v1.5.14`: local exec health-check line. Stop at opt-in, bounded local
+  command checks for cases that cannot be represented by TCP, TLS, HTTP, gRPC,
+  JSON, or database protocol probes. Require absolute allow-listed command
+  paths, no shell expansion, no inherited unsafe environment, strict
   timeout/output-size limits, redaction, status/audit visibility, and clear
-  compile/profile compatibility. Do not add arbitrary scripting, Wasm policy,
-  runtime backend mutation, UDP/GSLB, WAF, VPN/firewall appliance behavior, or
-  database protocol probes in this release.
+  compile/profile compatibility. Keep authenticated agent checks for a later
+  monitor slice. Do not add arbitrary scripting, Wasm policy, runtime backend
+  mutation, UDP/GSLB, WAF, VPN/firewall appliance behavior, or database
+  protocol probes in this release.
 - `v1.5.15`: database and protocol-aware health-check line. Stop at bounded
   protocol probes for stream/load-balancer deployments where TCP connect is not
   enough: Redis `PING`, PostgreSQL startup/readiness, MySQL handshake/readiness,

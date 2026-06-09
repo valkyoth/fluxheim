@@ -1,4 +1,5 @@
 use std::io;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -56,6 +57,9 @@ pub(super) fn configured_health_check(
                 .map_err(FluxError::into_io)
                 .map(|check| check as Box<dyn FluxHealthCheck>)
         }
+        LoadBalanceHealthCheckProtocol::Exec => configured_exec_health_check(config)
+            .map_err(FluxError::into_io)
+            .map(|check| check as Box<dyn FluxHealthCheck>),
     }
 }
 
@@ -83,6 +87,96 @@ impl FluxHealthCheck for FluxTcpHealthCheck {
     fn backend_summary(&self, target: &Backend) -> String {
         self.inner.backend_summary(target)
     }
+}
+
+struct FluxExecHealthCheck {
+    consecutive_success: usize,
+    consecutive_failure: usize,
+    command: String,
+    args: Arc<[String]>,
+    timeout: Duration,
+}
+
+#[async_trait]
+impl FluxHealthCheck for FluxExecHealthCheck {
+    async fn check(&self, target: &Backend) -> FluxResult<()> {
+        let mut command = tokio::process::Command::new(&self.command);
+        let backend_addr = target.addr.to_string();
+        let backend_inet = target.addr.as_inet();
+        command
+            .args(self.args.iter().map(String::as_str))
+            .env_clear()
+            .env("FLUXHEIM_HEALTH_BACKEND_ADDR", backend_addr)
+            .env(
+                "FLUXHEIM_HEALTH_BACKEND_HOST",
+                backend_inet
+                    .map(|addr| addr.ip().to_string())
+                    .unwrap_or_default(),
+            )
+            .env(
+                "FLUXHEIM_HEALTH_BACKEND_PORT",
+                backend_inet
+                    .map(|addr| addr.port().to_string())
+                    .unwrap_or_default(),
+            )
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = command
+            .spawn()
+            .map_err(|error| FluxError::io("spawn exec health check command", error))?;
+        match tokio::time::timeout(self.timeout, child.wait()).await {
+            Ok(Ok(status)) if status.success() => Ok(()),
+            Ok(Ok(status)) => Err(FluxError::io(
+                "exec health check failed",
+                io::Error::other(match status.code() {
+                    Some(code) => format!("command exited with status {code}"),
+                    None => "command terminated by signal".to_owned(),
+                }),
+            )),
+            Ok(Err(error)) => Err(FluxError::io("wait for exec health check command", error)),
+            Err(_) => {
+                let _ = child.kill().await;
+                Err(FluxError::timeout(
+                    "exec health check timed out",
+                    format!("timeout after {}s", self.timeout.as_secs()),
+                ))
+            }
+        }
+    }
+
+    fn health_threshold(&self, success: bool) -> usize {
+        if success {
+            self.consecutive_success
+        } else {
+            self.consecutive_failure
+        }
+    }
+
+    fn backend_summary(&self, target: &Backend) -> String {
+        format!("{} via exec:{}", target.addr, self.command)
+    }
+}
+
+fn configured_exec_health_check(config: &ProxyConfig) -> FluxResult<Box<FluxExecHealthCheck>> {
+    let Some(command) = config.load_balance.health_check.exec_command.clone() else {
+        return Err(FluxError::InvalidInput(
+            "exec health check command is required",
+        ));
+    };
+    Ok(Box::new(FluxExecHealthCheck {
+        consecutive_success: config.load_balance.health_check.consecutive_success,
+        consecutive_failure: config.load_balance.health_check.consecutive_failure,
+        command,
+        args: config.load_balance.health_check.exec_args.clone().into(),
+        timeout: Duration::from_secs(
+            config
+                .load_balance
+                .health_check
+                .exec_timeout_secs
+                .unwrap_or(1),
+        ),
+    }))
 }
 
 struct FluxHttpHealthCheck {
@@ -707,10 +801,10 @@ mod tests {
 
     use super::HealthDerivedWeights;
     use super::{
-        configured_http_health_check, grpc_frame, grpc_health_request_body, record_health_weight,
-        validate_grpc_health_response_body, validate_grpc_health_response_header,
-        validate_http_health_response, validate_http_health_response_body,
-        validate_http_health_response_body_json,
+        configured_exec_health_check, configured_http_health_check, grpc_frame,
+        grpc_health_request_body, record_health_weight, validate_grpc_health_response_body,
+        validate_grpc_health_response_header, validate_http_health_response,
+        validate_http_health_response_body, validate_http_health_response_body_json,
     };
     use crate::config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
@@ -918,6 +1012,33 @@ mod tests {
             health_check.request_body.as_deref(),
             Some(grpc_health_request_body(Some("example.Health")).as_slice())
         );
+    }
+
+    #[test]
+    fn configures_exec_health_check() {
+        let health_check = configured_exec_health_check(&ProxyConfig {
+            load_balance: LoadBalanceConfig {
+                health_check: LoadBalanceHealthCheckConfig {
+                    protocol: LoadBalanceHealthCheckProtocol::Exec,
+                    consecutive_success: 2,
+                    consecutive_failure: 4,
+                    exec_command: Some("/usr/local/libexec/fluxheim-health".to_owned()),
+                    exec_args: vec!["--probe".to_owned()],
+                    exec_allowed_commands: vec!["/usr/local/libexec/fluxheim-health".to_owned()],
+                    exec_timeout_secs: Some(3),
+                    ..LoadBalanceHealthCheckConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap();
+
+        assert_eq!(health_check.consecutive_success, 2);
+        assert_eq!(health_check.consecutive_failure, 4);
+        assert_eq!(health_check.command, "/usr/local/libexec/fluxheim-health");
+        assert_eq!(health_check.args.as_ref(), ["--probe".to_owned()]);
+        assert_eq!(health_check.timeout, Duration::from_secs(3));
     }
 
     #[test]

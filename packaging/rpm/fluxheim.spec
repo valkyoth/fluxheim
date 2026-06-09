@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.13
+Version:        1.5.14
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,14 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue Jun 09 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.14-1
+- Start the local exec health-check line.
+- Add opt-in bounded load-balancer exec checks with absolute allow-listed
+  command paths, literal argv, no shell, cleared environment, null stdio, and
+  explicit backend context variables.
+- Keep agent checks, database protocol probes, arbitrary scripting/Wasm,
+  UDP/GSLB, WAF, and VPN/firewall appliance behavior as future work.
+
 * Tue Jun 09 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.13-1
 - Start the Fluxheim-owned cache interface line.
 - Move cache implementation internals behind FluxCacheStorage and

@@ -1247,6 +1247,29 @@ application/grpc`, and a `SERVING` response message. `grpc_service =
 checks may use `host`, `request_headers`, timeout fields, connection reuse, and
 `port_override`; HTTP status/header/body matchers are rejected because the
 standard gRPC health response has its own fixed semantics.
+Set `protocol = "exec"` to run an opt-in local command health check for
+backends that cannot be represented by TCP/TLS, HTTP, gRPC, or JSON response
+checks:
+
+```toml
+[proxy.load_balance.health_check]
+protocol = "exec"
+exec_command = "/usr/local/libexec/fluxheim-health"
+exec_args = ["--probe"]
+exec_allowed_commands = ["/usr/local/libexec/fluxheim-health"]
+exec_timeout_secs = 2
+```
+
+Exec health checks require an absolute command path that appears exactly in
+`exec_allowed_commands`. Fluxheim does not invoke a shell, does not inherit the
+process environment, and connects stdin/stdout/stderr to null devices. The
+command receives only bounded backend context through
+`FLUXHEIM_HEALTH_BACKEND_ADDR`, `FLUXHEIM_HEALTH_BACKEND_HOST`, and
+`FLUXHEIM_HEALTH_BACKEND_PORT`; host and port are empty for non-inet backend
+addresses. `exec_args` are literal argv entries, not shell fragments.
+`exec_timeout_secs` follows the normal health-check timeout bounds. HTTP/gRPC
+request-header and response-matcher fields are rejected on exec checks so this
+remains a local monitor, not a scripting engine.
 `expected_body_json` performs bounded exact scalar matching against JSON health
 responses without JSONPath, array indexing, expressions, or regexes:
 

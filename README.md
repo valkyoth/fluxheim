@@ -90,7 +90,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | File-refreshed upstream pools | ✅ | `1.4.1`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
 | HTTP control-plane upstream discovery | ✅ | `1.5.11`; `upstreams_http_url` for bounded pull-based JSON discovery with optional bearer-token authentication. See `examples/load-balancer-http-discovery.toml`. |
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection with circuit-open status visibility. |
-| Active health checks | ✅ | TCP/TLS, HTTP, and standard gRPC health checks; bounded custom HTTP/gRPC health request headers; exact JSON scalar body validation; and `X-Health-Weight` degraded weight signals. Exec/agent checks and database protocol probes are planned across later `1.5.x` health-check lines. |
+| Active health checks | ✅ | TCP/TLS, HTTP, standard gRPC, exact JSON scalar body validation, `X-Health-Weight` degraded weight signals, and opt-in bounded local exec checks. Agent checks and database protocol probes are planned across later `1.5.x` health-check lines. |
 | Load-balancer status | ✅ | Admin status includes configured pools, discovery mode/refresh health, selection/health/retry policy metadata, ready/available summary counts, runtime override counts/timestamps, backend readiness, disabled/drained state, in-flight counts, persistence-entry skew, passive failure/ejection and circuit state, slow-start, and least-time latency state; discovery refreshes also emit bounded success/failure events. |
 | Load-balancer 1.5.x boundaries | Limited | Local persistence and runtime overrides can be restart-persisted with `proxy.load_balance.runtime_state_file`; managed affinity cookie signing keys remain process-local; Fluxheim does not yet add/remove members at runtime, apply runtime weights to hash/ring selectors, share managed-cookie keys, or sync state across active-active nodes. |
 | Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
@@ -336,8 +336,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.5.13-wolfi`, `v1.5.13-cache-wolfi`, `v1.5.13-proxy-wolfi`,
-`v1.5.13-load-balancer-wolfi`, and `v1.5.13-php-wolfi`.
+`v1.5.14-wolfi`, `v1.5.14-cache-wolfi`, `v1.5.14-proxy-wolfi`,
+`v1.5.14-load-balancer-wolfi`, and `v1.5.14-php-wolfi`.
 
 Manual feature selection also works:
 

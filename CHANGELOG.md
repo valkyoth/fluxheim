@@ -7,6 +7,27 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.14 - 2026-06-09
+
+### Changed
+
+- Start the local exec health-check line. The stop line is opt-in, bounded
+  command probes for health checks that cannot be represented by TCP/TLS,
+  HTTP, gRPC, JSON, or later database protocol probes.
+- Add `protocol = "exec"` for load-balancer active health checks with an
+  absolute `exec_command`, exact `exec_allowed_commands` allow-list,
+  bounded literal argv through `exec_args`, and `exec_timeout_secs`.
+- Run exec health checks without a shell, with a cleared inherited
+  environment, null stdio, and explicit backend context variables:
+  `FLUXHEIM_HEALTH_BACKEND_ADDR`, `FLUXHEIM_HEALTH_BACKEND_HOST`, and
+  `FLUXHEIM_HEALTH_BACKEND_PORT`.
+- Reject HTTP/gRPC response matchers and request-header fields on exec checks
+  so local command probes remain a separate monitor type rather than a
+  scripting or response-inspection subsystem.
+- Keep authenticated agent checks, database protocol probes, arbitrary
+  scripting/Wasm, runtime backend mutation, UDP/GSLB, WAF, and VPN/firewall
+  appliance behavior as future-version work.
+
 ## 1.5.13 - 2026-06-09
 
 ### Changed

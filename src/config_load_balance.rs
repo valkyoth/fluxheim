@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::fmt;
+use std::path::Path;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,10 @@ const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_JSON_MATCHERS: usize = 8;
 const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_JSON_PATH_BYTES: usize = 256;
 const LB_HEALTH_CHECK_MAX_REQUEST_HEADERS: usize = 16;
 const LB_HEALTH_CHECK_MAX_REQUEST_HEADER_VALUE_BYTES: usize = 1024;
+const LB_HEALTH_CHECK_MAX_EXEC_ARGS: usize = 16;
+const LB_HEALTH_CHECK_MAX_EXEC_ARG_BYTES: usize = 256;
+const LB_HEALTH_CHECK_MAX_EXEC_ALLOWED_COMMANDS: usize = 16;
+const LB_HEALTH_CHECK_MAX_EXEC_COMMAND_BYTES: usize = 512;
 const MIN_BOUNDED_LOAD_FACTOR_PER_MILLE: u16 = 1000;
 const MAX_BOUNDED_LOAD_FACTOR_PER_MILLE: u16 = 10000;
 const DEFAULT_LB_HEALTH_WEIGHT_MIN_PERCENT: u8 = 25;
@@ -266,6 +271,7 @@ pub enum LoadBalanceHealthCheckProtocol {
     Tcp,
     Http,
     Grpc,
+    Exec,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -313,6 +319,14 @@ pub struct LoadBalanceHealthCheckConfig {
     pub connect_timeout_secs: Option<u64>,
     #[serde(default)]
     pub read_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub exec_command: Option<String>,
+    #[serde(default)]
+    pub exec_args: Vec<String>,
+    #[serde(default)]
+    pub exec_allowed_commands: Vec<String>,
+    #[serde(default)]
+    pub exec_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -377,6 +391,10 @@ impl Default for LoadBalanceHealthCheckConfig {
             port_override: None,
             connect_timeout_secs: None,
             read_timeout_secs: None,
+            exec_command: None,
+            exec_args: Vec::new(),
+            exec_allowed_commands: Vec::new(),
+            exec_timeout_secs: None,
         }
     }
 }
@@ -398,6 +416,7 @@ impl LoadBalanceHealthCheckConfig {
                 field: "proxy.load_balance.health_check.consecutive_failure",
             });
         }
+        self.validate_exec()?;
         if !valid_health_check_path(&self.path) {
             return Err(ConfigError::InvalidLoadBalanceHealthCheck {
                 field: "proxy.load_balance.health_check.path",
@@ -561,7 +580,90 @@ impl LoadBalanceHealthCheckConfig {
             "proxy.load_balance.health_check.read_timeout_secs",
             self.read_timeout_secs,
         )?;
+        validate_optional_timeout_secs(
+            "proxy.load_balance.health_check.exec_timeout_secs",
+            self.exec_timeout_secs,
+        )?;
 
+        Ok(())
+    }
+
+    fn validate_exec(&self) -> Result<(), ConfigError> {
+        if self.protocol != LoadBalanceHealthCheckProtocol::Exec {
+            if self.exec_command.is_some()
+                || !self.exec_args.is_empty()
+                || !self.exec_allowed_commands.is_empty()
+                || self.exec_timeout_secs.is_some()
+            {
+                return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                    field: "proxy.load_balance.health_check.protocol",
+                });
+            }
+            return Ok(());
+        }
+
+        let Some(command) = self.exec_command.as_deref() else {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.exec_command",
+            });
+        };
+        if !valid_health_check_exec_command(command) {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.exec_command",
+            });
+        }
+        if self.exec_allowed_commands.is_empty()
+            || self.exec_allowed_commands.len() > LB_HEALTH_CHECK_MAX_EXEC_ALLOWED_COMMANDS
+        {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.exec_allowed_commands",
+            });
+        }
+        let mut seen = HashSet::new();
+        let mut allowed = false;
+        for allowed_command in &self.exec_allowed_commands {
+            if !valid_health_check_exec_command(allowed_command)
+                || !seen.insert(allowed_command.as_str())
+            {
+                return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                    field: "proxy.load_balance.health_check.exec_allowed_commands",
+                });
+            }
+            if allowed_command == command {
+                allowed = true;
+            }
+        }
+        if !allowed {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.exec_allowed_commands",
+            });
+        }
+        if self.exec_args.len() > LB_HEALTH_CHECK_MAX_EXEC_ARGS {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.exec_args",
+            });
+        }
+        for arg in &self.exec_args {
+            if !valid_health_check_exec_arg(arg) {
+                return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                    field: "proxy.load_balance.health_check.exec_args",
+                });
+            }
+        }
+        if !self.request_headers.is_empty()
+            || self.grpc_service.is_some()
+            || !self.expected_statuses.is_empty()
+            || !self.expected_status_ranges.is_empty()
+            || !self.expected_headers.is_empty()
+            || !self.expected_body_contains.is_empty()
+            || !self.expected_body_json.is_empty()
+            || self.reuse_connection
+            || self.port_override.is_some()
+        {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.protocol",
+            });
+        }
         Ok(())
     }
 }
@@ -1167,6 +1269,17 @@ fn valid_health_check_json_path(path: &str) -> bool {
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
         })
+}
+
+fn valid_health_check_exec_command(command: &str) -> bool {
+    !command.is_empty()
+        && command.len() <= LB_HEALTH_CHECK_MAX_EXEC_COMMAND_BYTES
+        && Path::new(command).is_absolute()
+        && !command.chars().any(char::is_control)
+}
+
+fn valid_health_check_exec_arg(arg: &str) -> bool {
+    arg.len() <= LB_HEALTH_CHECK_MAX_EXEC_ARG_BYTES && !arg.chars().any(char::is_control)
 }
 
 fn reserved_health_check_request_header(name: &str) -> bool {
