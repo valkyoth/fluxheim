@@ -7,6 +7,29 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.13 - 2026-06-09
+
+### Changed
+
+- Start the Fluxheim-owned cache interface line. The stop line is the cache
+  interface boundary only: existing memory, disk, encrypted disk, storage-bin,
+  tiered, purge, stale, cache-lock, range/slice, and predictor behavior remains
+  unchanged.
+- Add `FluxCacheStorage`, `FluxHandleHit`, and `FluxHandleMiss` as
+  Fluxheim-owned cache traits so cache implementations no longer implement
+  Pingora's session-bound `Storage`, `HandleHit`, and `HandleMiss` traits
+  directly.
+- Add narrow Pingora cache adapters for the current HTTP proxy path. Pingora
+  remains the HTTP session/cache caller for now, but the implementation side now
+  has a Fluxheim-owned boundary for future crate extraction.
+- Move cache unit coverage that exercises storage behavior onto the Fluxheim
+  cache interface while preserving the Pingora adapter for proxy integration.
+- Keep `privacy-cache` as an explicit future design only. Normal cache remains
+  incompatible with `privacy-mode`; a future public-asset cache must enforce no
+  client-IP keys, no `Cookie`/`Authorization` admission, no per-user variants,
+  no private/no-store/Set-Cookie storage, strict query defaults, and bounded
+  memory or encrypted short-TTL disk storage.
+
 ## 1.5.12 - 2026-06-08
 
 ### Changed

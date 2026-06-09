@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.12
+Version:        1.5.13
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue Jun 09 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.13-1
+- Start the Fluxheim-owned cache interface line.
+- Move cache implementation internals behind FluxCacheStorage and
+  FluxHandleHit/FluxHandleMiss while preserving the Pingora HTTP proxy adapter
+  and existing cache behavior.
+- Keep privacy-cache as a planned explicit public-asset design only.
+
 * Mon Jun 08 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.12-1
 - Start the Fluxheim-native background task registry line.
 - Move cache metrics, stale cache purging, ACME renewal, admin watchdog, and

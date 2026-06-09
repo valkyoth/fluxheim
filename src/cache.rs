@@ -6714,13 +6714,234 @@ fn decimal_line_len(value: u64) -> u64 {
 }
 
 #[cfg(feature = "proxy")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FluxCachePurgeType {
+    Eviction,
+    Invalidation,
+}
+
+#[cfg(feature = "proxy")]
+impl From<PurgeType> for FluxCachePurgeType {
+    fn from(value: PurgeType) -> Self {
+        match value {
+            PurgeType::Eviction => Self::Eviction,
+            PurgeType::Invalidation => Self::Invalidation,
+        }
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FluxCacheMissFinish {
+    Created(usize),
+    Appended(usize, Option<usize>),
+}
+
+#[cfg(feature = "proxy")]
+impl From<FluxCacheMissFinish> for MissFinishType {
+    fn from(value: FluxCacheMissFinish) -> Self {
+        match value {
+            FluxCacheMissFinish::Created(size) => Self::Created(size),
+            FluxCacheMissFinish::Appended(size, max_size) => Self::Appended(size, max_size),
+        }
+    }
+}
+
+#[cfg(feature = "proxy")]
+pub type FluxCacheHitHandler = Box<dyn FluxHandleHit + Sync + Send>;
+
+#[cfg(feature = "proxy")]
+pub type FluxCacheMissHandler = Box<dyn FluxHandleMiss + Sync + Send>;
+
+#[cfg(feature = "proxy")]
 #[async_trait]
-impl Storage for PingoraMemoryStorage {
-    async fn lookup(
+pub trait FluxCacheStorage {
+    async fn lookup_flux(
+        &'static self,
+        key: &pingora::cache::CacheKey,
+        trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<Option<(CacheMeta, FluxCacheHitHandler)>>;
+
+    async fn get_flux_miss_handler(
+        &'static self,
+        key: &pingora::cache::CacheKey,
+        meta: &CacheMeta,
+        trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<FluxCacheMissHandler>;
+
+    async fn purge_flux(
+        &'static self,
+        key: &pingora::cache::key::CompactCacheKey,
+        purge_type: FluxCachePurgeType,
+        trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<bool>;
+
+    async fn update_flux_meta(
+        &'static self,
+        key: &pingora::cache::CacheKey,
+        meta: &CacheMeta,
+        trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<bool>;
+
+    fn support_flux_streaming_partial_write(&self) -> bool {
+        false
+    }
+
+    fn as_flux_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static);
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
+pub trait FluxHandleHit {
+    async fn read_body(&mut self) -> pingora::Result<Option<Bytes>>;
+
+    async fn finish_flux(
+        self: Box<Self>,
+        key: &pingora::cache::CacheKey,
+        trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<()>;
+
+    fn can_seek(&self) -> bool {
+        false
+    }
+
+    fn can_seek_multipart(&self) -> bool {
+        self.can_seek()
+    }
+
+    fn seek(&mut self, _start: usize, _end: Option<usize>) -> pingora::Result<()> {
+        Error::e_explain(
+            ErrorType::InternalError,
+            "cache hit handler does not support seek",
+        )
+    }
+
+    fn seek_multipart(&mut self, start: usize, end: Option<usize>) -> pingora::Result<()> {
+        self.seek(start, end)
+    }
+
+    fn should_count_access(&self) -> bool {
+        true
+    }
+
+    fn get_eviction_weight(&self) -> usize {
+        0
+    }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync);
+
+    fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync);
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
+pub trait FluxHandleMiss {
+    async fn write_body(&mut self, data: Bytes, eof: bool) -> pingora::Result<()>;
+
+    async fn finish_flux(self: Box<Self>) -> pingora::Result<FluxCacheMissFinish>;
+
+    async fn finish(self: Box<Self>) -> pingora::Result<FluxCacheMissFinish> {
+        self.finish_flux().await
+    }
+
+    fn streaming_write_tag(&self) -> Option<&[u8]> {
+        None
+    }
+}
+
+#[cfg(feature = "proxy")]
+struct PingoraHitHandlerAdapter {
+    inner: FluxCacheHitHandler,
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
+impl pingora::cache::storage::HandleHit for PingoraHitHandlerAdapter {
+    async fn read_body(&mut self) -> pingora::Result<Option<Bytes>> {
+        self.inner.read_body().await
+    }
+
+    async fn finish(
+        self: Box<Self>,
+        _storage: &'static (dyn Storage + Sync),
+        key: &pingora::cache::CacheKey,
+        trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<()> {
+        self.inner.finish_flux(key, trace).await
+    }
+
+    fn can_seek(&self) -> bool {
+        self.inner.can_seek()
+    }
+
+    fn can_seek_multipart(&self) -> bool {
+        self.inner.can_seek_multipart()
+    }
+
+    fn seek(&mut self, start: usize, end: Option<usize>) -> pingora::Result<()> {
+        self.inner.seek(start, end)
+    }
+
+    fn seek_multipart(&mut self, start: usize, end: Option<usize>) -> pingora::Result<()> {
+        self.inner.seek_multipart(start, end)
+    }
+
+    fn should_count_access(&self) -> bool {
+        self.inner.should_count_access()
+    }
+
+    fn get_eviction_weight(&self) -> usize {
+        self.inner.get_eviction_weight()
+    }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self.inner.as_any()
+    }
+
+    fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync) {
+        self.inner.as_any_mut()
+    }
+}
+
+#[cfg(feature = "proxy")]
+struct PingoraMissHandlerAdapter {
+    inner: FluxCacheMissHandler,
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
+impl pingora::cache::storage::HandleMiss for PingoraMissHandlerAdapter {
+    async fn write_body(&mut self, data: Bytes, eof: bool) -> pingora::Result<()> {
+        self.inner.write_body(data, eof).await
+    }
+
+    async fn finish(self: Box<Self>) -> pingora::Result<MissFinishType> {
+        self.inner.finish_flux().await.map(Into::into)
+    }
+
+    fn streaming_write_tag(&self) -> Option<&[u8]> {
+        self.inner.streaming_write_tag()
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn pingora_hit_handler(handler: FluxCacheHitHandler) -> HitHandler {
+    Box::new(PingoraHitHandlerAdapter { inner: handler })
+}
+
+#[cfg(feature = "proxy")]
+fn pingora_miss_handler(handler: FluxCacheMissHandler) -> MissHandler {
+    Box::new(PingoraMissHandlerAdapter { inner: handler })
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
+impl FluxCacheStorage for PingoraMemoryStorage {
+    async fn lookup_flux(
         &'static self,
         key: &pingora::cache::CacheKey,
         _trace: &pingora::cache::trace::SpanHandle,
-    ) -> pingora::Result<Option<(CacheMeta, HitHandler)>> {
+    ) -> pingora::Result<Option<(CacheMeta, FluxCacheHitHandler)>> {
         let Some(object) = self.lookup_object(key) else {
             self.activity.miss();
             return Ok(None);
@@ -6735,12 +6956,12 @@ impl Storage for PingoraMemoryStorage {
         Ok(Some((meta, Box::new(handler))))
     }
 
-    async fn get_miss_handler(
+    async fn get_flux_miss_handler(
         &'static self,
         key: &pingora::cache::CacheKey,
         meta: &CacheMeta,
         _trace: &pingora::cache::trace::SpanHandle,
-    ) -> pingora::Result<MissHandler> {
+    ) -> pingora::Result<FluxCacheMissHandler> {
         Ok(Box::new(PingoraMemoryMissHandler {
             storage: self,
             store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta, &self.cache_tag_headers),
@@ -6751,10 +6972,10 @@ impl Storage for PingoraMemoryStorage {
         }))
     }
 
-    async fn purge(
+    async fn purge_flux(
         &'static self,
         key: &pingora::cache::key::CompactCacheKey,
-        _purge_type: PurgeType,
+        _purge_type: FluxCachePurgeType,
         _trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<bool> {
         let key = key.combined();
@@ -6768,7 +6989,7 @@ impl Storage for PingoraMemoryStorage {
         Ok(existed)
     }
 
-    async fn update_meta(
+    async fn update_flux_meta(
         &'static self,
         key: &pingora::cache::CacheKey,
         meta: &CacheMeta,
@@ -6816,23 +7037,23 @@ impl Storage for PingoraMemoryStorage {
         Ok(true)
     }
 
-    fn support_streaming_partial_write(&self) -> bool {
+    fn support_flux_streaming_partial_write(&self) -> bool {
         false
     }
 
-    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+    fn as_flux_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
         self
     }
 }
 
 #[cfg(feature = "proxy")]
 #[async_trait]
-impl Storage for PingoraDiskStorage {
-    async fn lookup(
+impl FluxCacheStorage for PingoraDiskStorage {
+    async fn lookup_flux(
         &'static self,
         key: &pingora::cache::CacheKey,
         _trace: &pingora::cache::trace::SpanHandle,
-    ) -> pingora::Result<Option<(CacheMeta, HitHandler)>> {
+    ) -> pingora::Result<Option<(CacheMeta, FluxCacheHitHandler)>> {
         let Some(object) = self.lookup_object(key)? else {
             self.activity.miss();
             return Ok(None);
@@ -6847,12 +7068,12 @@ impl Storage for PingoraDiskStorage {
         Ok(Some((meta, Box::new(handler))))
     }
 
-    async fn get_miss_handler(
+    async fn get_flux_miss_handler(
         &'static self,
         key: &pingora::cache::CacheKey,
         meta: &CacheMeta,
         _trace: &pingora::cache::trace::SpanHandle,
-    ) -> pingora::Result<MissHandler> {
+    ) -> pingora::Result<FluxCacheMissHandler> {
         let store_key =
             PingoraStoreKey::from_cache_key_and_meta(key, meta, &self.cache_tag_headers);
         let (temp_path, temp_file) = self
@@ -6870,10 +7091,10 @@ impl Storage for PingoraDiskStorage {
         }))
     }
 
-    async fn purge(
+    async fn purge_flux(
         &'static self,
         key: &pingora::cache::key::CompactCacheKey,
-        _purge_type: PurgeType,
+        _purge_type: FluxCachePurgeType,
         _trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<bool> {
         let combined_key = key.combined();
@@ -6885,7 +7106,7 @@ impl Storage for PingoraDiskStorage {
         Ok(purged)
     }
 
-    async fn update_meta(
+    async fn update_flux_meta(
         &'static self,
         key: &pingora::cache::CacheKey,
         meta: &CacheMeta,
@@ -6905,23 +7126,23 @@ impl Storage for PingoraDiskStorage {
             .is_some())
     }
 
-    fn support_streaming_partial_write(&self) -> bool {
+    fn support_flux_streaming_partial_write(&self) -> bool {
         false
     }
 
-    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+    fn as_flux_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
         self
     }
 }
 
 #[cfg(feature = "proxy")]
 #[async_trait]
-impl Storage for StorageBinDiskStorage {
-    async fn lookup(
+impl FluxCacheStorage for StorageBinDiskStorage {
+    async fn lookup_flux(
         &'static self,
         key: &pingora::cache::CacheKey,
         _trace: &pingora::cache::trace::SpanHandle,
-    ) -> pingora::Result<Option<(CacheMeta, HitHandler)>> {
+    ) -> pingora::Result<Option<(CacheMeta, FluxCacheHitHandler)>> {
         let Some(object) = self.lookup_object_by_combined(&key.combined())? else {
             return Ok(None);
         };
@@ -6934,12 +7155,12 @@ impl Storage for StorageBinDiskStorage {
         Ok(Some((meta, Box::new(handler))))
     }
 
-    async fn get_miss_handler(
+    async fn get_flux_miss_handler(
         &'static self,
         key: &pingora::cache::CacheKey,
         meta: &CacheMeta,
         _trace: &pingora::cache::trace::SpanHandle,
-    ) -> pingora::Result<MissHandler> {
+    ) -> pingora::Result<FluxCacheMissHandler> {
         Ok(Box::new(StorageBinMissHandler {
             storage: self,
             store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta, &self.cache_tag_headers),
@@ -6950,17 +7171,17 @@ impl Storage for StorageBinDiskStorage {
         }))
     }
 
-    async fn purge(
+    async fn purge_flux(
         &'static self,
         key: &pingora::cache::key::CompactCacheKey,
-        _purge_type: PurgeType,
+        _purge_type: FluxCachePurgeType,
         _trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<bool> {
         self.purge_combined(&key.combined())
             .map_err(|error| cache_io_error("purge storage-bin cache object", error))
     }
 
-    async fn update_meta(
+    async fn update_flux_meta(
         &'static self,
         key: &pingora::cache::CacheKey,
         meta: &CacheMeta,
@@ -6980,82 +7201,82 @@ impl Storage for StorageBinDiskStorage {
             .is_some())
     }
 
-    fn support_streaming_partial_write(&self) -> bool {
+    fn support_flux_streaming_partial_write(&self) -> bool {
         false
     }
 
-    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+    fn as_flux_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
         self
     }
 }
 
 #[cfg(feature = "proxy")]
 #[async_trait]
-impl Storage for PingoraDiskStorageBackend {
-    async fn lookup(
+impl FluxCacheStorage for PingoraDiskStorageBackend {
+    async fn lookup_flux(
         &'static self,
         key: &pingora::cache::CacheKey,
         trace: &pingora::cache::trace::SpanHandle,
-    ) -> pingora::Result<Option<(CacheMeta, HitHandler)>> {
+    ) -> pingora::Result<Option<(CacheMeta, FluxCacheHitHandler)>> {
         match self {
-            Self::Filesystem(storage) => storage.lookup(key, trace).await,
-            Self::StorageBin(storage) => storage.lookup(key, trace).await,
+            Self::Filesystem(storage) => storage.lookup_flux(key, trace).await,
+            Self::StorageBin(storage) => storage.lookup_flux(key, trace).await,
         }
     }
 
-    async fn get_miss_handler(
+    async fn get_flux_miss_handler(
         &'static self,
         key: &pingora::cache::CacheKey,
         meta: &CacheMeta,
         trace: &pingora::cache::trace::SpanHandle,
-    ) -> pingora::Result<MissHandler> {
+    ) -> pingora::Result<FluxCacheMissHandler> {
         match self {
-            Self::Filesystem(storage) => storage.get_miss_handler(key, meta, trace).await,
-            Self::StorageBin(storage) => storage.get_miss_handler(key, meta, trace).await,
+            Self::Filesystem(storage) => storage.get_flux_miss_handler(key, meta, trace).await,
+            Self::StorageBin(storage) => storage.get_flux_miss_handler(key, meta, trace).await,
         }
     }
 
-    async fn purge(
+    async fn purge_flux(
         &'static self,
         key: &pingora::cache::key::CompactCacheKey,
-        purge_type: PurgeType,
+        purge_type: FluxCachePurgeType,
         trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<bool> {
         match self {
-            Self::Filesystem(storage) => storage.purge(key, purge_type, trace).await,
-            Self::StorageBin(storage) => storage.purge(key, purge_type, trace).await,
+            Self::Filesystem(storage) => storage.purge_flux(key, purge_type, trace).await,
+            Self::StorageBin(storage) => storage.purge_flux(key, purge_type, trace).await,
         }
     }
 
-    async fn update_meta(
+    async fn update_flux_meta(
         &'static self,
         key: &pingora::cache::CacheKey,
         meta: &CacheMeta,
         trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<bool> {
         match self {
-            Self::Filesystem(storage) => storage.update_meta(key, meta, trace).await,
-            Self::StorageBin(storage) => storage.update_meta(key, meta, trace).await,
+            Self::Filesystem(storage) => storage.update_flux_meta(key, meta, trace).await,
+            Self::StorageBin(storage) => storage.update_flux_meta(key, meta, trace).await,
         }
     }
 
-    fn support_streaming_partial_write(&self) -> bool {
+    fn support_flux_streaming_partial_write(&self) -> bool {
         false
     }
 
-    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+    fn as_flux_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
         self
     }
 }
 
 #[cfg(feature = "proxy")]
 #[async_trait]
-impl Storage for PingoraTieredStorage {
-    async fn lookup(
+impl FluxCacheStorage for PingoraTieredStorage {
+    async fn lookup_flux(
         &'static self,
         key: &pingora::cache::CacheKey,
         _trace: &pingora::cache::trace::SpanHandle,
-    ) -> pingora::Result<Option<(CacheMeta, HitHandler)>> {
+    ) -> pingora::Result<Option<(CacheMeta, FluxCacheHitHandler)>> {
         if let Some(object) = self.memory.lookup_object(key) {
             self.memory.activity.hit();
             let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
@@ -7097,12 +7318,12 @@ impl Storage for PingoraTieredStorage {
         Ok(Some((meta, Box::new(handler))))
     }
 
-    async fn get_miss_handler(
+    async fn get_flux_miss_handler(
         &'static self,
         key: &pingora::cache::CacheKey,
         meta: &CacheMeta,
         _trace: &pingora::cache::trace::SpanHandle,
-    ) -> pingora::Result<MissHandler> {
+    ) -> pingora::Result<FluxCacheMissHandler> {
         Ok(Box::new(PingoraTieredMissHandler {
             storage: self,
             store_key: PingoraStoreKey::from_cache_key_and_meta(
@@ -7121,36 +7342,102 @@ impl Storage for PingoraTieredStorage {
         }))
     }
 
-    async fn purge(
+    async fn purge_flux(
         &'static self,
         key: &pingora::cache::key::CompactCacheKey,
-        purge_type: PurgeType,
+        purge_type: FluxCachePurgeType,
         trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<bool> {
-        let memory_purged = self.memory.purge(key, purge_type, trace).await?;
-        let disk_purged = self.disk.purge(key, purge_type, trace).await?;
+        let memory_purged = self.memory.purge_flux(key, purge_type, trace).await?;
+        let disk_purged = self.disk.purge_flux(key, purge_type, trace).await?;
         Ok(memory_purged || disk_purged)
     }
 
-    async fn update_meta(
+    async fn update_flux_meta(
         &'static self,
         key: &pingora::cache::CacheKey,
         meta: &CacheMeta,
         trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<bool> {
-        let memory_updated = self.memory.update_meta(key, meta, trace).await?;
-        let disk_updated = self.disk.update_meta(key, meta, trace).await?;
+        let memory_updated = self.memory.update_flux_meta(key, meta, trace).await?;
+        let disk_updated = self.disk.update_flux_meta(key, meta, trace).await?;
         Ok(memory_updated || disk_updated)
     }
 
-    fn support_streaming_partial_write(&self) -> bool {
+    fn support_flux_streaming_partial_write(&self) -> bool {
         false
     }
 
-    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+    fn as_flux_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
         self
     }
 }
+
+#[cfg(feature = "proxy")]
+macro_rules! impl_pingora_storage_adapter {
+    ($type:ty) => {
+        #[async_trait]
+        impl Storage for $type {
+            async fn lookup(
+                &'static self,
+                key: &pingora::cache::CacheKey,
+                trace: &pingora::cache::trace::SpanHandle,
+            ) -> pingora::Result<Option<(CacheMeta, HitHandler)>> {
+                self.lookup_flux(key, trace)
+                    .await
+                    .map(|hit| hit.map(|(meta, handler)| (meta, pingora_hit_handler(handler))))
+            }
+
+            async fn get_miss_handler(
+                &'static self,
+                key: &pingora::cache::CacheKey,
+                meta: &CacheMeta,
+                trace: &pingora::cache::trace::SpanHandle,
+            ) -> pingora::Result<MissHandler> {
+                self.get_flux_miss_handler(key, meta, trace)
+                    .await
+                    .map(pingora_miss_handler)
+            }
+
+            async fn purge(
+                &'static self,
+                key: &pingora::cache::key::CompactCacheKey,
+                purge_type: PurgeType,
+                trace: &pingora::cache::trace::SpanHandle,
+            ) -> pingora::Result<bool> {
+                self.purge_flux(key, purge_type.into(), trace).await
+            }
+
+            async fn update_meta(
+                &'static self,
+                key: &pingora::cache::CacheKey,
+                meta: &CacheMeta,
+                trace: &pingora::cache::trace::SpanHandle,
+            ) -> pingora::Result<bool> {
+                self.update_flux_meta(key, meta, trace).await
+            }
+
+            fn support_streaming_partial_write(&self) -> bool {
+                self.support_flux_streaming_partial_write()
+            }
+
+            fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+                self.as_flux_any()
+            }
+        }
+    };
+}
+
+#[cfg(feature = "proxy")]
+impl_pingora_storage_adapter!(PingoraMemoryStorage);
+#[cfg(feature = "proxy")]
+impl_pingora_storage_adapter!(PingoraDiskStorage);
+#[cfg(feature = "proxy")]
+impl_pingora_storage_adapter!(StorageBinDiskStorage);
+#[cfg(feature = "proxy")]
+impl_pingora_storage_adapter!(PingoraDiskStorageBackend);
+#[cfg(feature = "proxy")]
+impl_pingora_storage_adapter!(PingoraTieredStorage);
 
 #[cfg(feature = "proxy")]
 struct PingoraMemoryHitHandler {
@@ -7161,7 +7448,7 @@ struct PingoraMemoryHitHandler {
 
 #[cfg(feature = "proxy")]
 #[async_trait]
-impl pingora::cache::storage::HandleHit for PingoraMemoryHitHandler {
+impl FluxHandleHit for PingoraMemoryHitHandler {
     async fn read_body(&mut self) -> pingora::Result<Option<Bytes>> {
         let end = self.end.unwrap_or(self.body.len()).min(self.body.len());
         if self.offset >= end {
@@ -7173,9 +7460,8 @@ impl pingora::cache::storage::HandleHit for PingoraMemoryHitHandler {
         Ok(Some(chunk))
     }
 
-    async fn finish(
+    async fn finish_flux(
         self: Box<Self>,
-        _storage: &'static (dyn Storage + Sync),
         _key: &pingora::cache::CacheKey,
         _trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<()> {
@@ -7226,7 +7512,7 @@ struct PingoraMemoryMissHandler {
 
 #[cfg(feature = "proxy")]
 #[async_trait]
-impl pingora::cache::storage::HandleMiss for PingoraMemoryMissHandler {
+impl FluxHandleMiss for PingoraMemoryMissHandler {
     async fn write_body(&mut self, data: Bytes, _eof: bool) -> pingora::Result<()> {
         if self.exceeded_limit {
             return Ok(());
@@ -7242,16 +7528,16 @@ impl pingora::cache::storage::HandleMiss for PingoraMemoryMissHandler {
         Ok(())
     }
 
-    async fn finish(self: Box<Self>) -> pingora::Result<MissFinishType> {
+    async fn finish_flux(self: Box<Self>) -> pingora::Result<FluxCacheMissFinish> {
         if self.exceeded_limit {
-            return Ok(MissFinishType::Created(0));
+            return Ok(FluxCacheMissFinish::Created(0));
         }
 
         let meta = CacheMeta::deserialize(&self.serialized_meta.0, &self.serialized_meta.1)?;
         let created =
             self.storage
                 .put_object(self.store_key, meta, Arc::<[u8]>::from(self.body))?;
-        Ok(MissFinishType::Created(created))
+        Ok(FluxCacheMissFinish::Created(created))
     }
 }
 
@@ -7286,7 +7572,7 @@ impl Drop for PingoraDiskMissHandler {
 
 #[cfg(feature = "proxy")]
 #[async_trait]
-impl pingora::cache::storage::HandleMiss for PingoraDiskMissHandler {
+impl FluxHandleMiss for PingoraDiskMissHandler {
     async fn write_body(&mut self, data: Bytes, _eof: bool) -> pingora::Result<()> {
         if self.exceeded_limit {
             return Ok(());
@@ -7311,11 +7597,11 @@ impl pingora::cache::storage::HandleMiss for PingoraDiskMissHandler {
         Ok(())
     }
 
-    async fn finish(self: Box<Self>) -> pingora::Result<MissFinishType> {
+    async fn finish_flux(self: Box<Self>) -> pingora::Result<FluxCacheMissFinish> {
         let mut this = *self;
         if this.exceeded_limit {
             this.cleanup_temp();
-            return Ok(MissFinishType::Created(0));
+            return Ok(FluxCacheMissFinish::Created(0));
         }
 
         if let Some(file) = this.temp_file.take() {
@@ -7337,10 +7623,10 @@ impl pingora::cache::storage::HandleMiss for PingoraDiskMissHandler {
         )?
         else {
             this.cleanup_temp();
-            return Ok(MissFinishType::Created(0));
+            return Ok(FluxCacheMissFinish::Created(0));
         };
         this.cleanup_temp();
-        Ok(MissFinishType::Created(created))
+        Ok(FluxCacheMissFinish::Created(created))
     }
 }
 
@@ -7356,7 +7642,7 @@ struct StorageBinMissHandler {
 
 #[cfg(feature = "proxy")]
 #[async_trait]
-impl pingora::cache::storage::HandleMiss for StorageBinMissHandler {
+impl FluxHandleMiss for StorageBinMissHandler {
     async fn write_body(&mut self, data: Bytes, _eof: bool) -> pingora::Result<()> {
         if self.exceeded_limit {
             return Ok(());
@@ -7372,9 +7658,9 @@ impl pingora::cache::storage::HandleMiss for StorageBinMissHandler {
         Ok(())
     }
 
-    async fn finish(self: Box<Self>) -> pingora::Result<MissFinishType> {
+    async fn finish_flux(self: Box<Self>) -> pingora::Result<FluxCacheMissFinish> {
         if self.exceeded_limit {
-            return Ok(MissFinishType::Created(0));
+            return Ok(FluxCacheMissFinish::Created(0));
         }
 
         let body = Arc::<[u8]>::from(self.body);
@@ -7385,9 +7671,9 @@ impl pingora::cache::storage::HandleMiss for StorageBinMissHandler {
             body,
         )?
         else {
-            return Ok(MissFinishType::Created(0));
+            return Ok(FluxCacheMissFinish::Created(0));
         };
-        Ok(MissFinishType::Created(created))
+        Ok(FluxCacheMissFinish::Created(created))
     }
 }
 
@@ -7403,7 +7689,7 @@ struct PingoraTieredMissHandler {
 
 #[cfg(feature = "proxy")]
 #[async_trait]
-impl pingora::cache::storage::HandleMiss for PingoraTieredMissHandler {
+impl FluxHandleMiss for PingoraTieredMissHandler {
     async fn write_body(&mut self, data: Bytes, _eof: bool) -> pingora::Result<()> {
         if self.exceeded_limit {
             return Ok(());
@@ -7419,9 +7705,9 @@ impl pingora::cache::storage::HandleMiss for PingoraTieredMissHandler {
         Ok(())
     }
 
-    async fn finish(self: Box<Self>) -> pingora::Result<MissFinishType> {
+    async fn finish_flux(self: Box<Self>) -> pingora::Result<FluxCacheMissFinish> {
         if self.exceeded_limit {
-            return Ok(MissFinishType::Created(0));
+            return Ok(FluxCacheMissFinish::Created(0));
         }
 
         let body = Arc::<[u8]>::from(self.body);
@@ -7437,7 +7723,7 @@ impl pingora::cache::storage::HandleMiss for PingoraTieredMissHandler {
             self.serialized_meta.1,
             body,
         )?;
-        Ok(MissFinishType::Created(
+        Ok(FluxCacheMissFinish::Created(
             memory_created.or(disk_created).unwrap_or(0),
         ))
     }
@@ -8428,9 +8714,10 @@ mod tests {
     use pingora::cache::key::CacheHashKey;
 
     use super::{
-        CacheRequest, CacheStoreError, CachedHeader, CachedImageObject, MemoryImageCache,
-        StaticCacheRequest, eligible_image_request, image_cache_key,
-        memory_image_cache_from_config, static_cache_key, storage_plan,
+        CacheRequest, CacheStoreError, CachedHeader, CachedImageObject, FluxCacheMissFinish,
+        FluxCachePurgeType, FluxCacheStorage, MemoryImageCache, StaticCacheRequest,
+        eligible_image_request, image_cache_key, memory_image_cache_from_config, static_cache_key,
+        storage_plan,
     };
     #[cfg(feature = "proxy")]
     use crate::config::CacheDiskEncryptionProvider;
@@ -9866,8 +10153,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn storage_bin_disk_storage_implements_pingora_storage() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("storage-bin-storage-trait");
         let storage = Box::leak(Box::new(
             super::StorageBinDiskStorage::from_plan(super::DiskTierPlan {
@@ -9889,31 +10174,34 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"trait-"), false)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         let finish = block_on(miss.finish()).unwrap();
-        assert!(matches!(
-            finish,
-            pingora::cache::storage::MissFinishType::Created(10)
-        ));
+        assert!(matches!(finish, FluxCacheMissFinish::Created(10)));
 
-        let (_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        let (_meta, mut hit) = block_on(storage.lookup_flux(&key, &span)).unwrap().unwrap();
         assert_eq!(
             block_on(hit.read_body()).unwrap(),
             Some(Bytes::from_static(b"trait-body"))
         );
         assert_eq!(block_on(hit.read_body()).unwrap(), None);
-        assert!(block_on(storage.update_meta(&key, &pingora_meta("max-age=120"), &span)).unwrap());
         assert!(
-            block_on(storage.purge(
+            block_on(storage.update_flux_meta(&key, &pingora_meta("max-age=120"), &span)).unwrap()
+        );
+        assert!(
+            block_on(storage.purge_flux(
                 &key.to_compact(),
-                pingora::cache::PurgeType::Invalidation,
+                FluxCachePurgeType::Invalidation,
                 &span
             ))
             .unwrap()
         );
-        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+        assert!(
+            block_on(storage.lookup_flux(&key, &span))
+                .unwrap()
+                .is_none()
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -10167,8 +10455,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_round_trips_cached_body() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10179,16 +10465,13 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"cached-"), false)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         let finish = block_on(miss.finish()).unwrap();
-        assert!(matches!(
-            finish,
-            pingora::cache::storage::MissFinishType::Created(11)
-        ));
+        assert!(matches!(finish, FluxCacheMissFinish::Created(11)));
 
-        let (stored_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        let (stored_meta, mut hit) = block_on(storage.lookup_flux(&key, &span)).unwrap().unwrap();
         assert!(stored_meta.is_fresh(std::time::SystemTime::now()));
         assert_eq!(
             block_on(hit.read_body()).unwrap(),
@@ -10200,8 +10483,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_tracks_activity_counters() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10213,15 +10494,23 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        assert!(block_on(storage.lookup(&missing, &span)).unwrap().is_none());
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        assert!(
+            block_on(storage.lookup_flux(&missing, &span))
+                .unwrap()
+                .is_none()
+        );
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
-        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_some());
         assert!(
-            block_on(storage.purge(
+            block_on(storage.lookup_flux(&key, &span))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            block_on(storage.purge_flux(
                 &key.to_compact(),
-                pingora::cache::PurgeType::Invalidation,
+                FluxCachePurgeType::Invalidation,
                 &span
             ))
             .unwrap()
@@ -10245,8 +10534,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_refuses_oversized_miss_without_storing() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(8),
@@ -10257,24 +10544,23 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"12345"), false)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"6789"), true)).unwrap();
         let finish = block_on(miss.finish()).unwrap();
 
-        assert!(matches!(
-            finish,
-            pingora::cache::storage::MissFinishType::Created(0)
-        ));
-        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+        assert!(matches!(finish, FluxCacheMissFinish::Created(0)));
+        assert!(
+            block_on(storage.lookup_flux(&key, &span))
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(storage.stats().entries, 0);
     }
 
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_keeps_partial_streaming_disabled() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10282,14 +10568,12 @@ mod tests {
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
 
-        assert!(!storage.support_streaming_partial_write());
+        assert!(!storage.support_flux_streaming_partial_write());
     }
 
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_supports_seek_and_purge() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10300,11 +10584,11 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"0123456789"), true)).unwrap();
         block_on(miss.finish()).unwrap();
 
-        let (_stored_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        let (_stored_meta, mut hit) = block_on(storage.lookup_flux(&key, &span)).unwrap().unwrap();
         assert!(hit.can_seek());
         hit.seek(2, Some(5)).unwrap();
         assert_eq!(
@@ -10313,21 +10597,23 @@ mod tests {
         );
 
         assert!(
-            block_on(storage.purge(
+            block_on(storage.purge_flux(
                 &key.to_compact(),
-                pingora::cache::PurgeType::Invalidation,
+                FluxCachePurgeType::Invalidation,
                 &span
             ))
             .unwrap()
         );
-        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+        assert!(
+            block_on(storage.lookup_flux(&key, &span))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_purges_variants_by_primary_key() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10343,23 +10629,31 @@ mod tests {
         let meta = pingora_meta("max-age=60");
 
         for (key, body) in [(&br_key, b"br".as_slice()), (&gzip_key, b"gzip".as_slice())] {
-            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(key, &meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::copy_from_slice(body), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
 
-        assert!(block_on(storage.lookup(&br_key, &span)).unwrap().is_some());
         assert!(
-            block_on(storage.lookup(&gzip_key, &span))
+            block_on(storage.lookup_flux(&br_key, &span))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&gzip_key, &span))
                 .unwrap()
                 .is_some()
         );
         assert_eq!(storage.purge_index.len(), 2);
 
         assert!(storage.purge_cache_key(&base_key));
-        assert!(block_on(storage.lookup(&br_key, &span)).unwrap().is_none());
         assert!(
-            block_on(storage.lookup(&gzip_key, &span))
+            block_on(storage.lookup_flux(&br_key, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&gzip_key, &span))
                 .unwrap()
                 .is_none()
         );
@@ -10369,8 +10663,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_purges_indexed_user_tag() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10384,7 +10676,7 @@ mod tests {
         let meta = pingora_meta("max-age=60");
 
         for key in [&first, &second, &other] {
-            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(key, &meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -10399,16 +10691,26 @@ mod tests {
                 truncated: false,
             }
         );
-        assert!(block_on(storage.lookup(&first, &span)).unwrap().is_none());
-        assert!(block_on(storage.lookup(&second, &span)).unwrap().is_none());
-        assert!(block_on(storage.lookup(&other, &span)).unwrap().is_some());
+        assert!(
+            block_on(storage.lookup_flux(&first, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&second, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&other, &span))
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_purges_indexed_cache_tag() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10431,11 +10733,11 @@ mod tests {
             .unwrap();
 
         for key in [&first, &second] {
-            let mut miss = block_on(storage.get_miss_handler(key, &tagged, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(key, &tagged, &span)).unwrap();
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
-        let mut miss = block_on(storage.get_miss_handler(&other, &untagged, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&other, &untagged, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
 
@@ -10449,15 +10751,26 @@ mod tests {
                 truncated: false,
             }
         );
-        assert!(block_on(storage.lookup(&first, &span)).unwrap().is_none());
-        assert!(block_on(storage.lookup(&second, &span)).unwrap().is_none());
-        assert!(block_on(storage.lookup(&other, &span)).unwrap().is_some());
+        assert!(
+            block_on(storage.lookup_flux(&first, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&second, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&other, &span))
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_indexed_purge_scans_live_objects_when_index_entry_is_missing() {
-        use pingora::cache::Storage;
         use pingora::cache::key::CacheHashKey;
 
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
@@ -10473,7 +10786,7 @@ mod tests {
             .insert_header("Surrogate-Key", "article:missing-index")
             .unwrap();
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
         assert!(storage.purge_index.remove_combined(&key.combined()));
@@ -10488,14 +10801,16 @@ mod tests {
                 truncated: false,
             }
         );
-        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+        assert!(
+            block_on(storage.lookup_flux(&key, &span))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_removes_purge_entries_for_evicted_objects() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(768),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10511,7 +10826,7 @@ mod tests {
                 format!("evict-key-{index}"),
                 "vhost-a",
             );
-            let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from(vec![b'x'; 128]), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -10529,8 +10844,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_soft_purges_indexed_cache_tag() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10544,11 +10857,11 @@ mod tests {
             .insert_header("Surrogate-Key", "article:1")
             .unwrap();
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
         assert!(
-            block_on(storage.lookup(&key, &span))
+            block_on(storage.lookup_flux(&key, &span))
                 .unwrap()
                 .unwrap()
                 .0
@@ -10567,7 +10880,8 @@ mod tests {
                 truncated: false,
             }
         );
-        let (soft_purged_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        let (soft_purged_meta, mut hit) =
+            block_on(storage.lookup_flux(&key, &span)).unwrap().unwrap();
         assert!(!soft_purged_meta.is_fresh(std::time::SystemTime::now()));
         assert_eq!(
             block_on(hit.read_body()).unwrap(),
@@ -10578,8 +10892,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_uses_configured_cache_tag_headers() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10596,7 +10908,7 @@ mod tests {
             .insert_header("X-App-Cache-Tags", "custom:1")
             .unwrap();
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
 
@@ -10608,7 +10920,11 @@ mod tests {
                 truncated: false,
             }
         );
-        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_some());
+        assert!(
+            block_on(storage.lookup_flux(&key, &span))
+                .unwrap()
+                .is_some()
+        );
         assert_eq!(
             storage.purge_indexed_cache_tag("vhost-a", "custom:1", 8),
             super::CacheIndexedPurgeResult {
@@ -10617,14 +10933,16 @@ mod tests {
                 truncated: false,
             }
         );
-        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+        assert!(
+            block_on(storage.lookup_flux(&key, &span))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_purges_indexed_stale_entries() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10638,7 +10956,7 @@ mod tests {
         let fresh = pingora_meta("max-age=60");
 
         for (key, meta) in [(&stale_key, &stale), (&fresh_key, &fresh)] {
-            let mut miss = block_on(storage.get_miss_handler(key, meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(key, meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -10657,12 +10975,12 @@ mod tests {
             }
         );
         assert!(
-            block_on(storage.lookup(&stale_key, &span))
+            block_on(storage.lookup_flux(&stale_key, &span))
                 .unwrap()
                 .is_none()
         );
         assert!(
-            block_on(storage.lookup(&fresh_key, &span))
+            block_on(storage.lookup_flux(&fresh_key, &span))
                 .unwrap()
                 .is_some()
         );
@@ -10671,8 +10989,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_stale_purge_advances_past_fresh_page() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10692,7 +11008,7 @@ mod tests {
             (&fresh_second, &fresh),
             (&stale_key, &stale),
         ] {
-            let mut miss = block_on(storage.get_miss_handler(key, meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(key, meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -10735,17 +11051,17 @@ mod tests {
             }
         );
         assert!(
-            block_on(storage.lookup(&stale_key, &span))
+            block_on(storage.lookup_flux(&stale_key, &span))
                 .unwrap()
                 .is_none()
         );
         assert!(
-            block_on(storage.lookup(&fresh_first, &span))
+            block_on(storage.lookup_flux(&fresh_first, &span))
                 .unwrap()
                 .is_some()
         );
         assert!(
-            block_on(storage.lookup(&fresh_second, &span))
+            block_on(storage.lookup_flux(&fresh_second, &span))
                 .unwrap()
                 .is_some()
         );
@@ -10754,8 +11070,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_dry_runs_indexed_stale_entries() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10766,7 +11080,7 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let stale = stale_pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&stale_key, &stale, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&stale_key, &stale, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
 
@@ -10784,7 +11098,7 @@ mod tests {
             }
         );
         assert!(
-            block_on(storage.lookup(&stale_key, &span))
+            block_on(storage.lookup_flux(&stale_key, &span))
                 .unwrap()
                 .is_some()
         );
@@ -10793,8 +11107,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_purges_indexed_path_prefix() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10842,7 +11154,7 @@ mod tests {
         .unwrap();
 
         for key in [&asset, &nested_asset, &image] {
-            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(key, &meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -10857,20 +11169,26 @@ mod tests {
                 truncated: false,
             }
         );
-        assert!(block_on(storage.lookup(&asset, &span)).unwrap().is_none());
         assert!(
-            block_on(storage.lookup(&nested_asset, &span))
+            block_on(storage.lookup_flux(&asset, &span))
                 .unwrap()
                 .is_none()
         );
-        assert!(block_on(storage.lookup(&image, &span)).unwrap().is_some());
+        assert!(
+            block_on(storage.lookup_flux(&nested_asset, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&image, &span))
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_memory_storage_purges_indexed_path_pattern() {
-        use pingora::cache::Storage;
-
         let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(512),
@@ -10918,7 +11236,7 @@ mod tests {
         .unwrap();
 
         for key in [&png, &webp, &nested_png] {
-            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(key, &meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -10933,20 +11251,26 @@ mod tests {
                 truncated: false,
             }
         );
-        assert!(block_on(storage.lookup(&png, &span)).unwrap().is_none());
         assert!(
-            block_on(storage.lookup(&nested_png, &span))
+            block_on(storage.lookup_flux(&png, &span))
                 .unwrap()
                 .is_none()
         );
-        assert!(block_on(storage.lookup(&webp, &span)).unwrap().is_some());
+        assert!(
+            block_on(storage.lookup_flux(&nested_png, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&webp, &span))
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_round_trips_cached_body() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("round-trip");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -10962,18 +11286,15 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"disk-"), false)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         assert_eq!(std::fs::read_dir(root.join("tmp")).unwrap().count(), 1);
         let finish = block_on(miss.finish()).unwrap();
-        assert!(matches!(
-            finish,
-            pingora::cache::storage::MissFinishType::Created(9)
-        ));
+        assert!(matches!(finish, FluxCacheMissFinish::Created(9)));
         assert_eq!(std::fs::read_dir(root.join("tmp")).unwrap().count(), 0);
 
-        let (stored_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        let (stored_meta, mut hit) = block_on(storage.lookup_flux(&key, &span)).unwrap().unwrap();
         assert!(stored_meta.is_fresh(std::time::SystemTime::now()));
         assert_eq!(
             block_on(hit.read_body()).unwrap(),
@@ -10988,8 +11309,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_encrypts_local_key_objects() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("encrypted-round-trip");
         let key_path = root.join("cache-key.hex");
         std::fs::create_dir_all(&root).unwrap();
@@ -11017,7 +11336,7 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"secret-cache-body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
 
@@ -11030,7 +11349,7 @@ mod tests {
                 .any(|window| window == b"secret-cache-body")
         );
 
-        let (_stored_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        let (_stored_meta, mut hit) = block_on(storage.lookup_flux(&key, &span)).unwrap().unwrap();
         assert_eq!(
             block_on(hit.read_body()).unwrap(),
             Some(Bytes::from_static(b"secret-cache-body"))
@@ -11322,8 +11641,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_rebuilds_purge_index_from_persistent_objects() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-persistent-index");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -11342,7 +11659,7 @@ mod tests {
             .insert_header("Surrogate-Key", "article:1 listing")
             .unwrap();
 
-        let mut miss = block_on(writer.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(writer.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"disk-body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
         assert_eq!(writer.purge_index.len(), 1);
@@ -11377,8 +11694,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_checkpoint_preserves_shared_root_entries() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-shared-index");
         let vhost = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -11406,11 +11721,13 @@ mod tests {
         let vhost_key = pingora::cache::CacheKey::new("fluxheim-test", "vhost-key", "vhost-a");
         let meta = pingora_meta("max-age=60");
 
-        let mut route_miss = block_on(route.get_miss_handler(&route_key, &meta, &span)).unwrap();
+        let mut route_miss =
+            block_on(route.get_flux_miss_handler(&route_key, &meta, &span)).unwrap();
         block_on(route_miss.write_body(Bytes::from_static(b"route-body"), true)).unwrap();
         block_on(route_miss.finish()).unwrap();
 
-        let mut vhost_miss = block_on(vhost.get_miss_handler(&vhost_key, &meta, &span)).unwrap();
+        let mut vhost_miss =
+            block_on(vhost.get_flux_miss_handler(&vhost_key, &meta, &span)).unwrap();
         block_on(vhost_miss.write_body(Bytes::from_static(b"vhost-body"), true)).unwrap();
         block_on(vhost_miss.finish()).unwrap();
 
@@ -11442,8 +11759,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_merges_valid_checkpoint_with_live_shard_scan() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-index-checkpoint");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -11458,7 +11773,7 @@ mod tests {
         let key = pingora::cache::CacheKey::new("fluxheim-test", "checkpoint-key", "vhost-a");
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
-        let mut miss = block_on(writer.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(writer.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"indexed"), true)).unwrap();
         block_on(miss.finish()).unwrap();
         writer.write_disk_index_checkpoint().unwrap();
@@ -11480,8 +11795,16 @@ mod tests {
         .unwrap();
 
         assert_eq!(rebuilt.stats().unwrap().entries, 2);
-        assert!(block_on(rebuilt.lookup(&key, &span)).unwrap().is_some());
-        assert!(block_on(rebuilt.lookup(&rogue, &span)).unwrap().is_some());
+        assert!(
+            block_on(rebuilt.lookup_flux(&key, &span))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            block_on(rebuilt.lookup_flux(&rogue, &span))
+                .unwrap()
+                .is_some()
+        );
         assert_eq!(rebuilt.stats().unwrap().entries, 2);
 
         std::fs::remove_dir_all(root).unwrap();
@@ -11490,8 +11813,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_debounces_checkpoint_after_insert_burst() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-index-checkpoint-debounce");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -11511,7 +11832,7 @@ mod tests {
         for index in 0..3 {
             let key =
                 pingora::cache::CacheKey::new("fluxheim-test", format!("burst-key-{index}"), "v");
-            let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -11543,8 +11864,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_indexes_objects_beyond_previous_scan_cap() {
-        use pingora::cache::Storage;
-
         let previous_scan_cap = 8_usize;
         let root = unique_test_cache_dir("disk-start-over-previous-entry-cap");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
@@ -11565,7 +11884,7 @@ mod tests {
                 format!("over-cap-key-{index}"),
                 "vhost-a",
             );
-            let mut miss = block_on(writer.get_miss_handler(&key, &meta, &span)).unwrap();
+            let mut miss = block_on(writer.get_flux_miss_handler(&key, &meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -11598,8 +11917,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_enforces_size_budget_after_full_startup_scan() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-start-budget-reconcile");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -11619,7 +11936,7 @@ mod tests {
                 format!("budget-key-{index}"),
                 "vhost-a",
             );
-            let mut miss = block_on(writer.get_miss_handler(&key, &meta, &span)).unwrap();
+            let mut miss = block_on(writer.get_flux_miss_handler(&key, &meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from(vec![b'x'; 512]), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -11642,8 +11959,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_falls_back_when_disk_index_checkpoint_is_corrupt() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-index-corrupt");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -11659,7 +11974,7 @@ mod tests {
         let rogue = pingora::cache::CacheKey::new("fluxheim-test", "rogue-key", "vhost-a");
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
-        let mut miss = block_on(writer.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(writer.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"indexed"), true)).unwrap();
         block_on(miss.finish()).unwrap();
         write_rogue_disk_cache_object(writer, &rogue, &meta, b"rogue");
@@ -11681,8 +11996,16 @@ mod tests {
         .unwrap();
 
         assert_eq!(rebuilt.stats().unwrap().entries, 2);
-        assert!(block_on(rebuilt.lookup(&key, &span)).unwrap().is_some());
-        assert!(block_on(rebuilt.lookup(&rogue, &span)).unwrap().is_some());
+        assert!(
+            block_on(rebuilt.lookup_flux(&key, &span))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            block_on(rebuilt.lookup_flux(&rogue, &span))
+                .unwrap()
+                .is_some()
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -11690,8 +12013,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_rebuilds_path_prefix_index_metadata() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-persistent-path-index");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -11744,7 +12065,7 @@ mod tests {
         .unwrap();
 
         for key in [&asset, &nested_asset, &image] {
-            let mut miss = block_on(writer.get_miss_handler(key, &meta, &span)).unwrap();
+            let mut miss = block_on(writer.get_flux_miss_handler(key, &meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -11773,13 +12094,21 @@ mod tests {
                 truncated: false,
             }
         );
-        assert!(block_on(rebuilt.lookup(&asset, &span)).unwrap().is_none());
         assert!(
-            block_on(rebuilt.lookup(&nested_asset, &span))
+            block_on(rebuilt.lookup_flux(&asset, &span))
                 .unwrap()
                 .is_none()
         );
-        assert!(block_on(rebuilt.lookup(&image, &span)).unwrap().is_some());
+        assert!(
+            block_on(rebuilt.lookup_flux(&nested_asset, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(rebuilt.lookup_flux(&image, &span))
+                .unwrap()
+                .is_some()
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -11787,7 +12116,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_indexed_purge_scans_live_objects_when_index_entry_is_missing() {
-        use pingora::cache::Storage;
         use pingora::cache::key::CacheHashKey;
 
         let root = unique_test_cache_dir("disk-purge-live-scan");
@@ -11817,7 +12145,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
         assert!(storage.purge_index.remove_combined(&key.combined()));
@@ -11834,7 +12162,11 @@ mod tests {
                 truncated: false,
             }
         );
-        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+        assert!(
+            block_on(storage.lookup_flux(&key, &span))
+                .unwrap()
+                .is_none()
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -11905,8 +12237,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_soft_purges_indexed_cache_tag() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-soft-purge");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -11925,11 +12255,11 @@ mod tests {
             .insert_header("Surrogate-Key", "article:1")
             .unwrap();
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"disk-body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
         assert!(
-            block_on(storage.lookup(&key, &span))
+            block_on(storage.lookup_flux(&key, &span))
                 .unwrap()
                 .unwrap()
                 .0
@@ -11948,7 +12278,8 @@ mod tests {
                 truncated: false,
             }
         );
-        let (soft_purged_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        let (soft_purged_meta, mut hit) =
+            block_on(storage.lookup_flux(&key, &span)).unwrap().unwrap();
         assert!(!soft_purged_meta.is_fresh(std::time::SystemTime::now()));
         assert_eq!(
             block_on(hit.read_body()).unwrap(),
@@ -11962,8 +12293,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_purges_indexed_stale_entries() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-stale-purge");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -11982,7 +12311,7 @@ mod tests {
         let fresh = pingora_meta("max-age=60");
 
         for (key, meta) in [(&stale_key, &stale), (&fresh_key, &fresh)] {
-            let mut miss = block_on(storage.get_miss_handler(key, meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(key, meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -12001,12 +12330,12 @@ mod tests {
             }
         );
         assert!(
-            block_on(storage.lookup(&stale_key, &span))
+            block_on(storage.lookup_flux(&stale_key, &span))
                 .unwrap()
                 .is_none()
         );
         assert!(
-            block_on(storage.lookup(&fresh_key, &span))
+            block_on(storage.lookup_flux(&fresh_key, &span))
                 .unwrap()
                 .is_some()
         );
@@ -12017,8 +12346,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_stale_purge_advances_past_fresh_page() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-stale-purge-advance");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -12045,7 +12372,7 @@ mod tests {
             (&fresh_second, &fresh),
             (&stale_key, &stale),
         ] {
-            let mut miss = block_on(storage.get_miss_handler(key, meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(key, meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
@@ -12088,17 +12415,17 @@ mod tests {
             }
         );
         assert!(
-            block_on(storage.lookup(&stale_key, &span))
+            block_on(storage.lookup_flux(&stale_key, &span))
                 .unwrap()
                 .is_none()
         );
         assert!(
-            block_on(storage.lookup(&fresh_first, &span))
+            block_on(storage.lookup_flux(&fresh_first, &span))
                 .unwrap()
                 .is_some()
         );
         assert!(
-            block_on(storage.lookup(&fresh_second, &span))
+            block_on(storage.lookup_flux(&fresh_second, &span))
                 .unwrap()
                 .is_some()
         );
@@ -12109,8 +12436,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_dry_runs_indexed_stale_entries() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-stale-purge-dry-run");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -12126,7 +12451,7 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let stale = stale_pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&stale_key, &stale, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&stale_key, &stale, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
 
@@ -12144,7 +12469,7 @@ mod tests {
             }
         );
         assert!(
-            block_on(storage.lookup(&stale_key, &span))
+            block_on(storage.lookup_flux(&stale_key, &span))
                 .unwrap()
                 .is_some()
         );
@@ -12155,8 +12480,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_purges_variants_by_primary_key() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("disk-vary-purge");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -12177,24 +12500,32 @@ mod tests {
         let meta = pingora_meta("max-age=60");
 
         for (key, body) in [(&br_key, b"br".as_slice()), (&gzip_key, b"gzip".as_slice())] {
-            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(key, &meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::copy_from_slice(body), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
 
         assert_eq!(storage.stats().unwrap().entries, 2);
-        assert!(block_on(storage.lookup(&br_key, &span)).unwrap().is_some());
         assert!(
-            block_on(storage.lookup(&gzip_key, &span))
+            block_on(storage.lookup_flux(&br_key, &span))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&gzip_key, &span))
                 .unwrap()
                 .is_some()
         );
         assert_eq!(storage.purge_index.len(), 2);
 
         assert!(storage.purge_cache_key(&base_key).unwrap());
-        assert!(block_on(storage.lookup(&br_key, &span)).unwrap().is_none());
         assert!(
-            block_on(storage.lookup(&gzip_key, &span))
+            block_on(storage.lookup_flux(&br_key, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&gzip_key, &span))
                 .unwrap()
                 .is_none()
         );
@@ -12207,8 +12538,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_refuses_oversized_miss_without_storing() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("oversized");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -12224,16 +12553,17 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"12345"), false)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"6789"), true)).unwrap();
         let finish = block_on(miss.finish()).unwrap();
 
-        assert!(matches!(
-            finish,
-            pingora::cache::storage::MissFinishType::Created(0)
-        ));
-        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+        assert!(matches!(finish, FluxCacheMissFinish::Created(0)));
+        assert!(
+            block_on(storage.lookup_flux(&key, &span))
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(storage.stats().unwrap().entries, 0);
 
         std::fs::remove_dir_all(root).unwrap();
@@ -12242,8 +12572,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_refuses_unbounded_key_metadata() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("oversized-key-metadata");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -12260,14 +12588,11 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         let finish = block_on(miss.finish()).unwrap();
 
-        assert!(matches!(
-            finish,
-            pingora::cache::storage::MissFinishType::Created(0)
-        ));
+        assert!(matches!(finish, FluxCacheMissFinish::Created(0)));
         assert_eq!(storage.stats().unwrap().entries, 0);
         assert_eq!(storage.stats().unwrap().activity.store_refusals, 1);
 
@@ -12316,8 +12641,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_uses_hashed_paths_and_purges() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("paths");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -12337,7 +12660,7 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
 
@@ -12346,9 +12669,9 @@ mod tests {
         assert_eq!(object_path.extension(), Some(std::ffi::OsStr::new("fhc")));
         assert!(object_path.exists());
         assert!(
-            block_on(storage.purge(
+            block_on(storage.purge_flux(
                 &key.to_compact(),
-                pingora::cache::PurgeType::Invalidation,
+                FluxCachePurgeType::Invalidation,
                 &span
             ))
             .unwrap()
@@ -12361,8 +12684,6 @@ mod tests {
     #[cfg(all(feature = "proxy", unix))]
     #[test]
     fn pingora_disk_storage_refuses_symlinked_shard_writes() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("symlink-shard");
         let outside = unique_test_cache_dir("symlink-shard-outside");
         std::fs::create_dir_all(&outside).unwrap();
@@ -12382,7 +12703,7 @@ mod tests {
 
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
 
         let Err(_error) = block_on(miss.finish()) else {
@@ -12398,8 +12719,6 @@ mod tests {
     #[cfg(all(feature = "proxy", unix))]
     #[test]
     fn pingora_disk_storage_refuses_symlinked_object_reads() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("symlink-object");
         let outside = unique_test_cache_dir("symlink-object-outside");
         std::fs::create_dir_all(&outside).unwrap();
@@ -12421,7 +12740,7 @@ mod tests {
         std::os::unix::fs::symlink(&outside_file, &object_path).unwrap();
 
         let span = pingora::cache::trace::Span::inactive().handle();
-        let Err(_error) = block_on(storage.lookup(&key, &span)) else {
+        let Err(_error) = block_on(storage.lookup_flux(&key, &span)) else {
             panic!("symlinked disk cache object read unexpectedly succeeded");
         };
 
@@ -12432,8 +12751,6 @@ mod tests {
     #[cfg(all(feature = "proxy", unix))]
     #[test]
     fn pingora_disk_storage_refuses_symlinked_object_writes() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("symlink-object-write");
         let outside = unique_test_cache_dir("symlink-object-write-outside");
         std::fs::create_dir_all(&outside).unwrap();
@@ -12456,7 +12773,7 @@ mod tests {
 
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
 
         let Err(_error) = block_on(miss.finish()) else {
@@ -12471,8 +12788,6 @@ mod tests {
     #[cfg(all(feature = "proxy", unix))]
     #[test]
     fn pingora_disk_storage_refuses_symlinks_inside_root() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("symlink-inside-root");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -12492,7 +12807,7 @@ mod tests {
 
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
 
         let Err(_error) = block_on(miss.finish()) else {
@@ -12675,8 +12990,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_evicts_oldest_object_to_admit_new_object() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("eviction");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -12693,19 +13006,31 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&first, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&first, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from(vec![b'a'; 220]), true)).unwrap();
         block_on(miss.finish()).unwrap();
-        assert!(block_on(storage.lookup(&first, &span)).unwrap().is_some());
+        assert!(
+            block_on(storage.lookup_flux(&first, &span))
+                .unwrap()
+                .is_some()
+        );
 
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-        let mut miss = block_on(storage.get_miss_handler(&second, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&second, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from(vec![b'b'; 220]), true)).unwrap();
         block_on(miss.finish()).unwrap();
 
-        assert!(block_on(storage.lookup(&first, &span)).unwrap().is_none());
-        assert!(block_on(storage.lookup(&second, &span)).unwrap().is_some());
+        assert!(
+            block_on(storage.lookup_flux(&first, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&second, &span))
+                .unwrap()
+                .is_some()
+        );
         assert!(!storage.purge_index.contains_combined(&first.combined()));
         assert!(storage.purge_index.contains_combined(&second.combined()));
         let stats = storage.stats().unwrap();
@@ -12718,8 +13043,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_purge_object_path_prunes_purge_index() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("purge-index-prune");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -12735,7 +13058,7 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"cached"), true)).unwrap();
         block_on(miss.finish()).unwrap();
         assert!(storage.purge_index.contains_combined(&key.combined()));
@@ -12750,8 +13073,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_disk_storage_evicts_least_recently_used_index_entry() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("lru-eviction");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
@@ -12770,23 +13091,39 @@ mod tests {
         let meta = pingora_meta("max-age=60");
 
         for (key, byte) in [(&first, b'a'), (&second, b'b')] {
-            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            let mut miss = block_on(storage.get_flux_miss_handler(key, &meta, &span)).unwrap();
             block_on(miss.write_body(Bytes::from(vec![byte; 120]), true)).unwrap();
             block_on(miss.finish()).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert_eq!(storage.stats().unwrap().entries, 2);
 
-        assert!(block_on(storage.lookup(&first, &span)).unwrap().is_some());
+        assert!(
+            block_on(storage.lookup_flux(&first, &span))
+                .unwrap()
+                .is_some()
+        );
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-        let mut miss = block_on(storage.get_miss_handler(&third, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&third, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from(vec![b'c'; 120]), true)).unwrap();
         block_on(miss.finish()).unwrap();
 
-        assert!(block_on(storage.lookup(&first, &span)).unwrap().is_some());
-        assert!(block_on(storage.lookup(&second, &span)).unwrap().is_none());
-        assert!(block_on(storage.lookup(&third, &span)).unwrap().is_some());
+        assert!(
+            block_on(storage.lookup_flux(&first, &span))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&second, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup_flux(&third, &span))
+                .unwrap()
+                .is_some()
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -12794,8 +13131,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_tiered_storage_writes_misses_to_memory_and_disk() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("tiered-write");
         let memory = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(1024),
@@ -12818,17 +13153,14 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(storage.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"tiered-body"), true)).unwrap();
         let finish = block_on(miss.finish()).unwrap();
 
-        assert!(matches!(
-            finish,
-            pingora::cache::storage::MissFinishType::Created(11)
-        ));
+        assert!(matches!(finish, FluxCacheMissFinish::Created(11)));
         assert_eq!(memory.stats().entries, 1);
         assert_eq!(disk.stats().unwrap().entries, 1);
-        let (_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        let (_meta, mut hit) = block_on(storage.lookup_flux(&key, &span)).unwrap().unwrap();
         assert_eq!(
             block_on(hit.read_body()).unwrap(),
             Some(Bytes::from_static(b"tiered-body"))
@@ -12840,8 +13172,6 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn pingora_tiered_storage_promotes_disk_hits_to_memory() {
-        use pingora::cache::Storage;
-
         let root = unique_test_cache_dir("tiered-promote");
         let memory = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
             max_size_bytes: ByteSize::from_bytes(1024),
@@ -12864,19 +13194,19 @@ mod tests {
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
 
-        let mut miss = block_on(disk.get_miss_handler(&key, &meta, &span)).unwrap();
+        let mut miss = block_on(disk.get_flux_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"disk-only"), true)).unwrap();
         block_on(miss.finish()).unwrap();
         assert_eq!(memory.stats().entries, 0);
 
-        let (_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        let (_meta, mut hit) = block_on(storage.lookup_flux(&key, &span)).unwrap().unwrap();
 
         assert_eq!(
             block_on(hit.read_body()).unwrap(),
             Some(Bytes::from_static(b"disk-only"))
         );
         assert_eq!(memory.stats().entries, 1);
-        assert!(block_on(memory.lookup(&key, &span)).unwrap().is_some());
+        assert!(block_on(memory.lookup_flux(&key, &span)).unwrap().is_some());
 
         std::fs::remove_dir_all(root).unwrap();
     }
