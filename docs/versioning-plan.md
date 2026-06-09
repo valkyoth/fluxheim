@@ -1780,11 +1780,11 @@ Stable scope:
   raw `ShutdownWatch`, or `ServiceReadyNotifier` types. Keep
   `ServiceWithDependents` only as the outer Pingora server-registration
   adapter until the later server-bootstrap line.
-- Cache storage should grow a `FluxCacheStorage` interface owned by Fluxheim so
-  memory, disk, encrypted disk, tiered storage, predictors, stale policy,
-  purge/index behavior, and admission tests are no longer coupled to Pingora's
-  `Storage` / `HandleHit` / `HandleMiss` session types. The Pingora HTTP proxy
-  path can keep an adapter while cache internals become independently testable.
+- Cache storage has a `FluxCacheStorage` interface owned by Fluxheim so memory,
+  disk, encrypted disk, tiered storage, predictors, stale policy, purge/index
+  behavior, and admission tests are no longer coupled to Pingora's `Storage` /
+  `HandleHit` / `HandleMiss` session types. The Pingora HTTP proxy path keeps a
+  narrow adapter while cache internals become independently testable.
 - Server bootstrap, listener ownership, and TLS listener configuration remain
   a later major dependency-reduction line, not a `1.5` goal. Pingora's worker
   setup, signal handling, hot-restart file-descriptor passing, service

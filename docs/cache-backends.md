@@ -796,22 +796,21 @@ Checked on 2026-05-05:
 - Rust version: `1.85`
 - Fluxheim use: fixed-length disk cache object paths.
 
-Pingora's HTTP cache storage layer requires implementations of `Storage`,
-`HandleHit`, and `HandleMiss`. Fluxheim now has memory, disk, and tiered
-memory-plus-disk implementations of those traits. Request collapsing is
-integrated with Pingora cache locks. Disk-only admissions now stream response
-body chunks into a bounded temp file under the cache root before atomically
+Fluxheim owns the cache implementation and, since `1.5.13`, the internal cache
+storage interface. `FluxCacheStorage`, `FluxHandleHit`, and `FluxHandleMiss`
+capture the hit, miss, purge, metadata-update, and admission semantics used by
+the memory, disk, storage-bin, and tiered memory-plus-disk backends. The current
+Pingora HTTP proxy path still requires `Storage`, `HandleHit`, and
+`HandleMiss`, so `cache.rs` exposes a narrow adapter layer for that edge rather
+than letting the rest of the cache module depend on Pingora session-bound
+traits.
+
+Request collapsing remains integrated with Pingora cache locks while the HTTP
+proxy path is still Pingora-backed. Disk-only admissions stream response body
+chunks into a bounded temp file under the cache root before atomically
 committing the final object, avoiding whole-object admission buffering for the
 disk tier. Reader-visible partial writes remain disabled until Fluxheim can
 provide a safe tagged reader for in-progress objects.
-
-The future dependency-reduction line should decouple the cache interface rather
-than replace the cache implementation. `cache.rs` already owns Fluxheim's disk
-format, index, encryption, eviction, stale policy, purge index, and admission
-rules; the remaining Pingora dependency is the session-bound `Storage` /
-`HandleHit` / `HandleMiss` interface. A Fluxheim-owned cache trait should keep
-the existing semantics and expose a narrow Pingora adapter for the current HTTP
-proxy path.
 
 Additional Pingora cache primitives worth exposing as Fluxheim matures:
 
