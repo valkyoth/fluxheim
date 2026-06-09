@@ -799,6 +799,8 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use super::Backend;
+    use super::FluxHealthCheck;
     use super::HealthDerivedWeights;
     use super::{
         configured_exec_health_check, configured_http_health_check, grpc_frame,
@@ -1039,6 +1041,48 @@ mod tests {
         assert_eq!(health_check.command, "/usr/local/libexec/fluxheim-health");
         assert_eq!(health_check.args.as_ref(), ["--probe".to_owned()]);
         assert_eq!(health_check.timeout, Duration::from_secs(3));
+    }
+
+    #[tokio::test]
+    async fn exec_health_check_runs_command_and_reports_status() {
+        let command = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let backend = Backend::new("127.0.0.1:8080").unwrap();
+        let success = configured_exec_health_check(&ProxyConfig {
+            load_balance: LoadBalanceConfig {
+                health_check: LoadBalanceHealthCheckConfig {
+                    protocol: LoadBalanceHealthCheckProtocol::Exec,
+                    exec_command: Some(command.clone()),
+                    exec_args: vec!["--help".to_owned()],
+                    exec_allowed_commands: vec![command.clone()],
+                    exec_timeout_secs: Some(2),
+                    ..LoadBalanceHealthCheckConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap();
+        success.check(&backend).await.unwrap();
+
+        let failure = configured_exec_health_check(&ProxyConfig {
+            load_balance: LoadBalanceConfig {
+                health_check: LoadBalanceHealthCheckConfig {
+                    protocol: LoadBalanceHealthCheckProtocol::Exec,
+                    exec_command: Some(command.clone()),
+                    exec_args: vec!["--fluxheim-invalid-test-harness-flag".to_owned()],
+                    exec_allowed_commands: vec![command],
+                    exec_timeout_secs: Some(2),
+                    ..LoadBalanceHealthCheckConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap();
+        assert!(failure.check(&backend).await.is_err());
     }
 
     #[test]
