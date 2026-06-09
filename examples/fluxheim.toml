@@ -101,7 +101,7 @@ vary = ["Accept-Encoding"]
 
 [proxy]
 upstreams = ["127.0.0.1:3000"]
-# Optional Pingora round-robin pool with the load-balancer feature:
+# Optional Fluxheim round-robin pool with the load-balancer feature:
 # upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 upstream_tls = false
 # upstream_sni = "origin.example.test"

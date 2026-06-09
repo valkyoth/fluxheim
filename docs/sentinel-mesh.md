@@ -86,8 +86,8 @@ as `smart-lb` or `wireguard-transport`.
 
 The controller is the Fluxheim process receiving public traffic. It owns:
 
-- Pingora proxy service.
-- Optional Pingora load-balancing service.
+- Fluxheim proxy service.
+- Optional Fluxheim load-balancing service.
 - WireGuard interface or connector.
 - Background observer.
 - Atomic backend state.
@@ -145,8 +145,8 @@ Selection rule for the first version:
 1. Filter out unhealthy backends.
 2. Filter out draining backends unless no other backend is available.
 3. Select the backend with the lowest score.
-4. Fall back to static Pingora round-robin only if smart state is empty and the
-   config explicitly allows fallback.
+4. Fall back to the configured static round-robin pool only if smart state is
+   empty and the config explicitly allows fallback.
 
 ## Scoring
 

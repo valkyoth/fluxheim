@@ -32,7 +32,7 @@ before Cargo starts compiling Pingora.
 
 | Feature | Default | Purpose |
 | --- | --- | --- |
-| `load-balancer` | No | Pingora load-balancing support and health-check setup. |
+| `load-balancer` | No | Fluxheim load-balancing support, health checks, and runtime pool policy. |
 | `metrics` | No | Prometheus metrics listener. |
 | `metrics-otlp` | No | Optional OTLP/HTTP JSON metrics export to a local Prometheus OTLP receiver or collector. |
 | `otel-tracing` | No | W3C `traceparent` propagation and access-log trace ID correlation. |

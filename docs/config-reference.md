@@ -1420,11 +1420,11 @@ that as ambiguous. `upstreams_file` is also mutually exclusive with both static
 forms. A single `upstreams = ["host:port"]` entry behaves like a
 normal single proxy target in all builds and is resolved when requests are
 proxied, so a missing backend does not prevent the gateway from starting. Two
-or more entries activate the Pingora load-balancer path in builds compiled with
-`load-balancer`; those entries may be resolved by load-balancer setup and health
-checking. File-refreshed and DNS-refreshed pools also use the load-balancer path
-and keep serving the previous healthy set when a later refresh is invalid. The same
-`proxy.load_balance` policy applies inside
+or more entries activate the Fluxheim load-balancer path in builds compiled
+with `load-balancer`; those entries may be resolved by load-balancer setup and
+health checking. File-refreshed and DNS-refreshed pools also use the
+load-balancer path and keep serving the previous healthy set when a later
+refresh is invalid. The same `proxy.load_balance` policy applies inside
 `[[vhosts.routes.proxy]]` route proxy blocks; route-level pools get their own
 selection, passive-health, retry, and health-check state.
 `connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs` are
