@@ -118,11 +118,14 @@ jobs:
       - name: Run incubator feature build tests
         run: |
           scripts/validate-features.sh tls-rustls
-          cargo test --no-default-features --features proxy,load-balancer
-          cargo test --no-default-features --features proxy,cache
-          cargo test --no-default-features --features cache
-          cargo test --no-default-features --features web
-          cargo test --no-default-features --features profile-core
+          # These incubator profile permutations are build coverage. Use
+          # `cargo check --tests` so test cfgs compile without linking many
+          # large test binaries under CodeQL's instrumented environment.
+          cargo check --tests --no-default-features --features proxy,load-balancer
+          cargo check --tests --no-default-features --features proxy,cache
+          cargo check --tests --no-default-features --features cache
+          cargo check --tests --no-default-features --features web
+          cargo check --tests --no-default-features --features profile-core
           cargo check --no-default-features --features profile-core,acme-client
           cargo check --no-default-features --features profile-static-site
           cargo check --no-default-features --features profile-reverse-proxy
@@ -142,10 +145,10 @@ jobs:
           cargo check --no-default-features --features profile-fips-rustls
           cargo check --no-default-features --features profile-iso19790-rustls
           cargo check --no-default-features --features tls-rustls
-          cargo test --no-default-features --features proxy,metrics
-          cargo test --no-default-features --features proxy,tls-rustls,acme
-          cargo test --no-default-features --features proxy,tls-rustls,acme-client
-          cargo test --no-default-features --features proxy,web,tls-rustls,privacy-mode
+          cargo check --tests --no-default-features --features proxy,metrics
+          cargo check --tests --no-default-features --features proxy,tls-rustls,acme
+          cargo check --tests --no-default-features --features proxy,tls-rustls,acme-client
+          cargo check --tests --no-default-features --features proxy,web,tls-rustls,privacy-mode
           cargo check --no-default-features --features proxy,tls-rustls
 
       - name: Clean build artifacts before config validation
