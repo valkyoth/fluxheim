@@ -6754,6 +6754,9 @@ pub type FluxCacheHitHandler = Box<dyn FluxHandleHit + Sync + Send>;
 pub type FluxCacheMissHandler = Box<dyn FluxHandleMiss + Sync + Send>;
 
 #[cfg(feature = "proxy")]
+pub type PingoraCacheStorageAdapter = dyn Storage + Sync;
+
+#[cfg(feature = "proxy")]
 #[async_trait]
 pub trait FluxCacheStorage {
     async fn lookup_flux(

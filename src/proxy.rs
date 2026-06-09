@@ -3284,14 +3284,14 @@ impl RuntimeRouteCache {
         })
     }
 
-    fn storage(&self) -> Option<&'static (dyn pingora::cache::Storage + Sync)> {
+    fn storage(&self) -> Option<&'static crate::cache::PingoraCacheStorageAdapter> {
         if let Some(storage) = self.pingora_tiered_storage {
             Some(storage)
         } else if let Some(storage) = self.pingora_memory_storage {
             Some(storage)
         } else {
             self.pingora_disk_storage
-                .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+                .map(|storage| storage as &'static crate::cache::PingoraCacheStorageAdapter)
         }
     }
 }
@@ -5763,7 +5763,7 @@ async fn respond_proxy_cache_only_request(
 
 #[cfg(feature = "cache")]
 async fn lookup_proxy_cache_only_object(
-    storage: &'static (dyn pingora::cache::Storage + Sync),
+    storage: &'static crate::cache::PingoraCacheStorageAdapter,
     mut cache_key: PingoraCacheKey,
     request: &RequestHeader,
     cache: &crate::config::CacheConfig,
@@ -5909,7 +5909,7 @@ struct CacheSliceComposedResponse {
 #[cfg(feature = "cache")]
 async fn proxy_slice_cache_response(
     request: &RequestHeader,
-    storage: &'static (dyn pingora::cache::Storage + Sync),
+    storage: &'static crate::cache::PingoraCacheStorageAdapter,
     base_key: PingoraCacheKey,
     cache: &crate::config::CacheConfig,
     proxy: &RuntimeProxy,
@@ -5982,7 +5982,7 @@ struct CacheSliceLookupResult {
 #[cfg(feature = "cache")]
 struct CacheSliceFillContext<'a> {
     request: &'a RequestHeader,
-    storage: &'static (dyn pingora::cache::Storage + Sync),
+    storage: &'static crate::cache::PingoraCacheStorageAdapter,
     cache: &'a crate::config::CacheConfig,
     proxy: &'a RuntimeProxy,
     route: Option<&'a RuntimeRoute>,
@@ -6066,7 +6066,7 @@ async fn lookup_or_fill_slice(
 
 #[cfg(feature = "cache")]
 async fn wait_for_cached_slice(
-    storage: &'static (dyn pingora::cache::Storage + Sync),
+    storage: &'static crate::cache::PingoraCacheStorageAdapter,
     slice_key: PingoraCacheKey,
     request: &RequestHeader,
     cache: &crate::config::CacheConfig,
@@ -6092,7 +6092,7 @@ async fn wait_for_cached_slice(
 
 #[cfg(feature = "cache")]
 async fn lookup_cached_slice(
-    storage: &'static (dyn pingora::cache::Storage + Sync),
+    storage: &'static crate::cache::PingoraCacheStorageAdapter,
     slice_key: PingoraCacheKey,
     request: &RequestHeader,
     cache: &crate::config::CacheConfig,
@@ -8326,24 +8326,24 @@ fn static_cache_config(
 fn static_cache_storage(
     vhost: &RuntimeVhost,
     route_index: Option<usize>,
-) -> Option<&'static (dyn pingora::cache::Storage + Sync)> {
+) -> Option<&'static crate::cache::PingoraCacheStorageAdapter> {
     if let Some(route_cache) = route_index.and_then(|index| vhost.route(index).cache.as_ref()) {
         return route_cache
             .pingora_memory_storage
-            .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+            .map(|storage| storage as &'static crate::cache::PingoraCacheStorageAdapter)
             .or_else(|| {
                 route_cache
                     .pingora_disk_storage
-                    .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+                    .map(|storage| storage as &'static crate::cache::PingoraCacheStorageAdapter)
             });
     }
     vhost
         .pingora_memory_storage
-        .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+        .map(|storage| storage as &'static crate::cache::PingoraCacheStorageAdapter)
         .or_else(|| {
             vhost
                 .pingora_disk_storage
-                .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+                .map(|storage| storage as &'static crate::cache::PingoraCacheStorageAdapter)
         })
 }
 
@@ -8446,7 +8446,7 @@ fn static_route_request_path_from_parts(request_path: &str, route: &RuntimeRoute
 #[cfg(feature = "cache")]
 async fn read_cache_hit_body(
     mut hit: HitHandler,
-    storage: &'static (dyn pingora::cache::Storage + Sync),
+    storage: &'static crate::cache::PingoraCacheStorageAdapter,
     key: &PingoraCacheKey,
     trace: &pingora::cache::trace::SpanHandle,
     max_body_bytes: u64,
@@ -8764,7 +8764,7 @@ fn selected_cache_config<'a>(
 fn selected_cache_storage(
     vhost: &RuntimeVhost,
     ctx: &RequestContext,
-) -> Option<&'static (dyn pingora::cache::Storage + Sync)> {
+) -> Option<&'static crate::cache::PingoraCacheStorageAdapter> {
     ctx.route_index
         .and_then(|route_index| vhost.route(route_index).cache.as_ref())
         .and_then(RuntimeRouteCache::storage)
@@ -9253,7 +9253,7 @@ fn apply_downstream_flow_control(session: &mut Session, proxy: &ProxyConfig) {
 #[cfg(feature = "cache")]
 fn vhost_cache_storage(
     vhost: &RuntimeVhost,
-) -> Option<&'static (dyn pingora::cache::Storage + Sync)> {
+) -> Option<&'static crate::cache::PingoraCacheStorageAdapter> {
     if let Some(storage) = vhost.pingora_tiered_storage {
         Some(storage)
     } else if let Some(storage) = vhost.pingora_memory_storage {
@@ -9261,7 +9261,7 @@ fn vhost_cache_storage(
     } else {
         vhost
             .pingora_disk_storage
-            .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+            .map(|storage| storage as &'static crate::cache::PingoraCacheStorageAdapter)
     }
 }
 
@@ -14366,8 +14366,8 @@ mod tests {
         let snapshot = proxy.snapshot();
         let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
         let vhost = snapshot.state.vhost(vhost_index);
-        let storage =
-            vhost.pingora_memory_storage.unwrap() as &'static (dyn pingora::cache::Storage + Sync);
+        let storage = vhost.pingora_memory_storage.unwrap()
+            as &'static crate::cache::PingoraCacheStorageAdapter;
         let span = pingora::cache::trace::Span::inactive().handle();
 
         let mut gzip_request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
