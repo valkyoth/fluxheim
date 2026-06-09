@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::fmt;
+use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -1292,10 +1293,14 @@ fn valid_health_check_json_path(path: &str) -> bool {
 }
 
 fn valid_health_check_exec_command(command: &str) -> bool {
+    let path = Path::new(command);
     !command.is_empty()
         && command.len() <= LB_HEALTH_CHECK_MAX_EXEC_COMMAND_BYTES
-        && Path::new(command).is_absolute()
+        && path.is_absolute()
         && !command.chars().any(char::is_control)
+        && path
+            .components()
+            .all(|component| !matches!(component, Component::ParentDir | Component::CurDir))
 }
 
 fn valid_health_check_exec_arg(arg: &str) -> bool {

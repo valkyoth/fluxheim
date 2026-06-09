@@ -1263,10 +1263,11 @@ exec_allowed_commands = ["/usr/local/libexec/fluxheim-health"]
 exec_timeout_secs = 2
 ```
 
-Exec health checks require an absolute command path that appears exactly in
-`exec_allowed_commands`. Fluxheim does not invoke a shell, does not inherit the
-process environment, and connects stdin/stdout/stderr to null devices. The
-command receives only bounded backend context through
+Exec health checks require an absolute command path without `.` or `..` path
+components, and that exact path must appear in `exec_allowed_commands`.
+Fluxheim does not invoke a shell, does not inherit the process environment,
+and connects stdin/stdout/stderr to null devices. The command receives only
+bounded backend context through
 `FLUXHEIM_HEALTH_BACKEND_ADDR`, `FLUXHEIM_HEALTH_BACKEND_HOST`, and
 `FLUXHEIM_HEALTH_BACKEND_PORT`; host and port are empty for non-inet backend
 addresses. `exec_args` are literal argv entries, not shell fragments.

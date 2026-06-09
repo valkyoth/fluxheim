@@ -3390,6 +3390,38 @@ fn rejects_invalid_http_load_balance_health_check() {
         })
     );
 
+    let exec_parent_component_command: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "exec"
+            exec_command = "/usr/local/../libexec/fluxheim-health"
+            exec_allowed_commands = ["/usr/local/../libexec/fluxheim-health"]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        exec_parent_component_command.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.exec_command"
+        })
+    );
+
+    let exec_current_component_allowlist: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "exec"
+            exec_command = "/usr/local/libexec/fluxheim-health"
+            exec_allowed_commands = ["/usr/local/libexec/./fluxheim-health"]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        exec_current_component_allowlist.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.exec_allowed_commands"
+        })
+    );
+
     let exec_not_allowed: Config = toml::from_str(
         r#"
             [proxy.load_balance.health_check]

@@ -12,6 +12,8 @@ health checks where TCP/TLS, HTTP, gRPC, and JSON checks are not enough.
   `exec_timeout_secs`.
 - Exec commands must be absolute paths and must appear exactly in the
   configured allow-list.
+- Exec command paths reject `.` and `..` components so allow-list entries stay
+  transparent during operator review.
 - Exec checks run without a shell, with inherited environment cleared, and with
   stdin/stdout/stderr connected to null devices.
 - Fluxheim provides bounded backend context through:

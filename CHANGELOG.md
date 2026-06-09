@@ -17,6 +17,8 @@ behavior when the change improves security or project direction.
 - Add `protocol = "exec"` for load-balancer active health checks with an
   absolute `exec_command`, exact `exec_allowed_commands` allow-list,
   bounded literal argv through `exec_args`, and `exec_timeout_secs`.
+- Reject `.` and `..` components in exec health-check command paths so the
+  allow-list reflects the binary path being reviewed.
 - Reject parallel exec checks and unrelated network/HTTP health-check fields on
   exec checks, keeping process execution serial per pool in this release.
 - Run exec health checks without a shell, with a cleared inherited
