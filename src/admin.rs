@@ -4440,6 +4440,10 @@ mod tests {
             body["load_balancer"]["vhosts"][0]["pool"]["discovery_mode"],
             "static"
         );
+        assert_eq!(
+            body["load_balancer"]["vhosts"][0]["pool"]["health_check_protocol"],
+            "tcp"
+        );
         let discovery = &body["load_balancer"]["vhosts"][0]["pool"]["discovery"];
         assert_eq!(discovery["mode"], "static");
         assert_eq!(discovery["refresh_enabled"], false);

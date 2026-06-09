@@ -11,9 +11,10 @@ use pingora::services::ServiceWithDependents;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    LoadBalanceHealthCheckExpectedStatusRange, LoadBalancePassiveHealthConfig,
-    LoadBalancePersistenceConfig, LoadBalancePersistenceMode, LoadBalanceQueueConfig,
-    LoadBalanceRetryConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
+    LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol,
+    LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
+    LoadBalanceQueueConfig, LoadBalanceRetryConfig, LoadBalanceSelection,
+    LoadBalanceSlowStartConfig, ProxyConfig,
 };
 use crate::flux_error::FluxError;
 
@@ -102,6 +103,7 @@ pub struct UpstreamLoadBalancer {
     persistence_policy: LoadBalancePersistenceConfig,
     queue_policy: LoadBalanceQueueConfig,
     queue_waiting: Arc<AtomicUsize>,
+    health_check_protocol: Option<LoadBalanceHealthCheckProtocol>,
     runtime_state_file: Option<Arc<PathBuf>>,
     runtime_state_save_lock: Arc<std::sync::Mutex<()>>,
     round_robin_cursor: Arc<AtomicUsize>,
@@ -327,6 +329,7 @@ pub struct LoadBalancerPoolRuntimeStats {
     pub max_iterations: usize,
     pub all_down_status: u16,
     pub health_check_enabled: bool,
+    pub health_check_protocol: Option<LoadBalanceHealthCheckProtocol>,
     pub health_check_frequency_secs: Option<u64>,
     pub parallel_health_check: bool,
     pub passive_health_enabled: bool,
@@ -896,6 +899,11 @@ impl UpstreamLoadBalancer {
                 persistence_policy: config.load_balance.persistence.clone(),
                 queue_policy: config.load_balance.queue.clone(),
                 queue_waiting: Arc::new(AtomicUsize::new(0)),
+                health_check_protocol: config
+                    .load_balance
+                    .health_check
+                    .enabled
+                    .then_some(config.load_balance.health_check.protocol),
                 runtime_state_file: config.load_balance.runtime_state_file.clone().map(Arc::new),
                 runtime_state_save_lock: Arc::new(std::sync::Mutex::new(())),
                 round_robin_cursor: Arc::new(AtomicUsize::new(0)),
@@ -1039,6 +1047,7 @@ impl UpstreamLoadBalancer {
             max_iterations: self.max_iterations,
             all_down_status: self.all_down_status,
             health_check_enabled: health_check_frequency.is_some(),
+            health_check_protocol: self.health_check_protocol,
             health_check_frequency_secs: health_check_frequency
                 .map(|frequency| frequency.as_secs()),
             parallel_health_check: self.inner.parallel_health_check(),

@@ -323,7 +323,7 @@ override counts, circuit-open counts, selection policy, max-iteration and
 all-down settings, discovery mode (`static`, `file`, `http`, or `dns`),
 discovery refresh status, update frequency, success/failure counters, last
 success/failure timestamps, bounded last discovery error, health-check
-frequency and parallel mode, retry policy, passive-health
+protocol, frequency and parallel mode, retry policy, passive-health
 thresholds, slow-start duration, persistence policy and table size, queue policy
 and current waiting count, priority group, locality, tags, max in-flight cap,
 current in-flight count, passive failure count, passive ejection, passive
@@ -1270,6 +1270,9 @@ addresses. `exec_args` are literal argv entries, not shell fragments.
 `exec_timeout_secs` follows the normal health-check timeout bounds. HTTP/gRPC
 request-header and response-matcher fields are rejected on exec checks so this
 remains a local monitor, not a scripting engine.
+Runtime load-balancer status exposes only the health-check protocol name
+(`tcp`, `http`, `grpc`, or `exec`) for operator visibility; it does not expose
+exec command paths or arguments.
 `expected_body_json` performs bounded exact scalar matching against JSON health
 responses without JSONPath, array indexing, expressions, or regexes:
 

@@ -17,6 +17,8 @@ health checks where TCP/TLS, HTTP, gRPC, and JSON checks are not enough.
 - Fluxheim provides bounded backend context through:
   `FLUXHEIM_HEALTH_BACKEND_ADDR`, `FLUXHEIM_HEALTH_BACKEND_HOST`, and
   `FLUXHEIM_HEALTH_BACKEND_PORT`.
+- Load-balancer runtime status now reports the active health-check protocol
+  without exposing exec command paths or arguments.
 
 ## Compatibility
 

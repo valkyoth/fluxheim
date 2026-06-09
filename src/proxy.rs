@@ -10145,8 +10145,6 @@ mod tests {
 
     #[cfg(feature = "compression-gzip")]
     use crate::config::CompressionConfig;
-    #[cfg(feature = "load-balancer")]
-    use crate::config::LoadBalanceRetryConfig;
     #[cfg(feature = "traffic-mirror")]
     use crate::config::TrafficMirrorConfig;
     use crate::config::{
@@ -10154,6 +10152,8 @@ mod tests {
         HttpsRedirectConfig, ProxyConfig, RateLimitMode, RouteConfig, RouteRedirectConfig,
         ServerConfig, ServerLimitsConfig, UpstreamHttpVersion, VhostConfig, WebConfig,
     };
+    #[cfg(feature = "load-balancer")]
+    use crate::config::{LoadBalanceHealthCheckProtocol, LoadBalanceRetryConfig};
     #[cfg(any(feature = "cache", feature = "web"))]
     use crate::test_support::unique_temp_path;
 
@@ -15925,6 +15925,10 @@ mod tests {
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().all_down_status, 502);
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().max_iterations, 256);
         assert!(stats.vhosts[0].pool.as_ref().unwrap().health_check_enabled);
+        assert_eq!(
+            stats.vhosts[0].pool.as_ref().unwrap().health_check_protocol,
+            Some(LoadBalanceHealthCheckProtocol::Tcp)
+        );
         assert!(!stats.vhosts[0].pool.as_ref().unwrap().parallel_health_check);
         assert!(
             stats.vhosts[0]

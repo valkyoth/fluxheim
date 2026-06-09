@@ -21,6 +21,8 @@ behavior when the change improves security or project direction.
   environment, null stdio, and explicit backend context variables:
   `FLUXHEIM_HEALTH_BACKEND_ADDR`, `FLUXHEIM_HEALTH_BACKEND_HOST`, and
   `FLUXHEIM_HEALTH_BACKEND_PORT`.
+- Expose the active health-check protocol in load-balancer runtime status for
+  operator visibility without exposing exec command paths or arguments.
 - Reject HTTP/gRPC response matchers and request-header fields on exec checks
   so local command probes remain a separate monitor type rather than a
   scripting or response-inspection subsystem.
