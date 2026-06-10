@@ -275,6 +275,7 @@ pub enum LoadBalanceHealthCheckProtocol {
     Exec,
     Redis,
     Mysql,
+    Postgres,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -694,7 +695,9 @@ impl LoadBalanceHealthCheckConfig {
     fn validate_protocol_probe(&self) -> Result<(), ConfigError> {
         if !matches!(
             self.protocol,
-            LoadBalanceHealthCheckProtocol::Redis | LoadBalanceHealthCheckProtocol::Mysql
+            LoadBalanceHealthCheckProtocol::Redis
+                | LoadBalanceHealthCheckProtocol::Mysql
+                | LoadBalanceHealthCheckProtocol::Postgres
         ) {
             return Ok(());
         }

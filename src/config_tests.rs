@@ -871,6 +871,20 @@ fn parses_proxy_upstream_pool() {
         mysql_config.proxy.load_balance.health_check.protocol,
         LoadBalanceHealthCheckProtocol::Mysql
     );
+    let postgres_config: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "postgres"
+            connect_timeout_secs = 2
+            read_timeout_secs = 2
+            "#,
+    )
+    .unwrap();
+    postgres_config.validate().unwrap();
+    assert_eq!(
+        postgres_config.proxy.load_balance.health_check.protocol,
+        LoadBalanceHealthCheckProtocol::Postgres
+    );
     assert!(config.proxy.load_balance.slow_start.enabled);
     assert_eq!(config.proxy.load_balance.slow_start.duration_secs, 45);
     assert!(config.proxy.load_balance.persistence.enabled);
@@ -3589,6 +3603,36 @@ fn rejects_invalid_http_load_balance_health_check() {
     .unwrap();
     assert_eq!(
         mysql_parallel.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.parallel"
+        })
+    );
+
+    let postgres_with_http_matcher: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "postgres"
+            expected_statuses = [200]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        postgres_with_http_matcher.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.protocol"
+        })
+    );
+
+    let postgres_parallel: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "postgres"
+            parallel = true
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        postgres_parallel.validate(),
         Err(ConfigError::InvalidLoadBalanceHealthCheck {
             field: "proxy.load_balance.health_check.parallel"
         })

@@ -12,8 +12,8 @@ behavior when the change improves security or project direction.
 ### Changed
 
 - Start the database/protocol-aware health-check line with bounded Redis
-  `PING` and MySQL/MariaDB handshake active health checks for load-balancer
-  pools.
+  `PING`, MySQL/MariaDB handshake, and PostgreSQL SSLRequest active health
+  checks for load-balancer pools.
 - Add `protocol = "redis"` for `proxy.load_balance.health_check`; the probe
   opens a bounded TCP connection to the selected backend, sends one fixed RESP
   `PING` frame, and requires a simple-string `+PONG` response.
@@ -21,11 +21,17 @@ behavior when the change improves security or project direction.
   opens a bounded TCP connection to the selected backend, reads one MySQL
   server greeting packet, and requires a protocol-10 handshake without sending
   a login packet or SQL query.
+- Add `protocol = "postgres"` for `proxy.load_balance.health_check`; the probe
+  opens a bounded TCP connection to the selected backend, sends PostgreSQL's
+  pre-auth SSLRequest, and requires a one-byte `S` or `N` response without
+  sending a StartupMessage or SQL query.
 - Reject HTTP/gRPC response matchers, request headers, host overrides,
-  connection reuse, port overrides, and parallel checking on Redis/MySQL probes
-  so database checks remain health probes rather than a command/query engine.
+  connection reuse, port overrides, and parallel checking on Redis, MySQL, and
+  PostgreSQL probes so database checks remain health probes rather than a
+  command/query engine.
 - Add `examples/load-balancer-redis-health.toml`,
-  `examples/load-balancer-mysql-health.toml`, and include both in the local
+  `examples/load-balancer-mysql-health.toml`,
+  `examples/load-balancer-postgres-health.toml`, and include them in the local
   example config validation gate.
 - Add `scripts/smoke_redis_health_check.sh` to prove Redis health checks
   against Valkey in Podman, including observed Redis `PING` commandstats and
@@ -33,8 +39,11 @@ behavior when the change improves security or project direction.
 - Add `scripts/smoke_mysql_health_check.sh` to prove MySQL health checks
   against MariaDB in Podman, including observed unauthenticated handshake
   accounting and unhealthy transition after the backend stops.
-- Keep Redis TLS, MySQL TLS/authenticated readiness, PostgreSQL readiness,
-  SMTP/LDAP send-expect, authenticated agent checks, UDP/GSLB, WAF,
+- Add `scripts/smoke_postgres_health_check.sh` to prove PostgreSQL health
+  checks against PostgreSQL in Podman, including observed pre-auth connection
+  logging and unhealthy transition after the backend stops.
+- Keep Redis TLS, MySQL TLS/authenticated readiness, PostgreSQL TLS/authenticated
+  readiness, SMTP/LDAP send-expect, authenticated agent checks, UDP/GSLB, WAF,
   VPN/firewall appliance behavior, and Wasm/iRules/Lua scripting as
   future-version work.
 

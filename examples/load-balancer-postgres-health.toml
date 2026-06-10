@@ -1,0 +1,59 @@
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+
+[server.process]
+pid_file = ".fluxheim-dev/fluxheim.pid"
+upgrade_sock = ".fluxheim-dev/fluxheim-upgrade.sock"
+certificate_reload_sock = ".fluxheim-dev/fluxheim-cert-reload.sock"
+
+[admin]
+enabled = false
+listen = "127.0.0.1:9090"
+require_loopback = true
+
+[metrics]
+enabled = true
+listen = "127.0.0.1:9091"
+require_loopback = true
+
+[logging]
+level = "info"
+format = "json"
+target = "stderr"
+
+[proxy]
+upstreams = ["127.0.0.1:5432", "127.0.0.1:5433"]
+upstream_aliases = ["postgres-a", "postgres-b"]
+connect_timeout_secs = 2
+read_timeout_secs = 2
+send_timeout_secs = 2
+downstream_write_timeout_secs = 30
+
+[proxy.load_balance]
+selection = "least-connections"
+max_iterations = 128
+all_down_status = 503
+
+[proxy.load_balance.health_check]
+enabled = true
+protocol = "postgres"
+interval_secs = 5
+consecutive_success = 2
+consecutive_failure = 3
+connect_timeout_secs = 1
+read_timeout_secs = 1
+# PostgreSQL health checks send only the protocol SSLRequest pre-auth handshake
+# and require a one-byte S/N response. Fluxheim does not authenticate, send a
+# StartupMessage, execute SQL, inspect schemas, or act as a PostgreSQL proxy.
+
+[proxy.load_balance.passive_health]
+enabled = true
+consecutive_failure = 3
+ejection_secs = 30
+max_latency_ms = 2000
+
+[proxy.load_balance.queue]
+max_waiting = 128
+timeout_ms = 250
+retry_interval_ms = 10

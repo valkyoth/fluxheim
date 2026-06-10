@@ -193,6 +193,7 @@ config_tester examples/cache-peer-fill.toml
 config_tester examples/load-balancer-enterprise.toml load-balancer
 config_tester examples/load-balancer-exec-health.toml load-balancer
 config_tester examples/load-balancer-mysql-health.toml load-balancer
+config_tester examples/load-balancer-postgres-health.toml load-balancer
 config_tester examples/load-balancer-redis-health.toml load-balancer
 config_tester examples/php-fpm.toml web-php
 config_tester examples/tls-modern.toml

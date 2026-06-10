@@ -1225,6 +1225,9 @@ shape for Redis pools that expose no HTTP/gRPC health endpoint.
 `examples/load-balancer-mysql-health.toml` shows a MySQL/MariaDB handshake
 health-check shape for database pools where a TCP connect is too weak but
 authentication or SQL execution is not acceptable.
+`examples/load-balancer-postgres-health.toml` shows a PostgreSQL pre-auth
+SSLRequest health-check shape for pools where a TCP connect is too weak but
+authentication or SQL execution is not acceptable.
 `proxy.load_balance.health_check.protocol` defaults to `tcp`, which verifies
 TCP reachability and, when `upstream_tls = true`, a TLS handshake. Set
 `protocol = "http"` to send `method` to `path`; `method` defaults to `GET` and
@@ -1280,6 +1283,19 @@ For local proof against a real MySQL-compatible server, run
 `scripts/smoke_mysql_health_check.sh`; it starts MariaDB in Podman, verifies
 Fluxheim increases MariaDB's unauthenticated handshake counter, then stops
 MariaDB and checks that Fluxheim marks the backend unhealthy.
+Set `protocol = "postgres"` to run a bounded PostgreSQL protocol health check.
+Fluxheim opens a TCP connection to the selected backend, sends PostgreSQL's
+8-byte SSLRequest pre-auth handshake, and requires the one-byte `S` or `N`
+SSLResponse. PostgreSQL checks use `connect_timeout_secs` and
+`read_timeout_secs`, but reject request headers, HTTP/gRPC response matchers,
+`host`, `port_override`, connection reuse, and `parallel = true`. PostgreSQL
+checks are probes only: they do not authenticate, send a StartupMessage,
+execute SQL, inspect schemas, or make Fluxheim a PostgreSQL proxy. PostgreSQL
+TLS and authenticated readiness checks remain future work.
+For local proof against a real PostgreSQL server, run
+`scripts/smoke_postgres_health_check.sh`; it starts PostgreSQL in Podman,
+verifies PostgreSQL observes Fluxheim's pre-auth connection, then stops
+PostgreSQL and checks that Fluxheim marks the backend unhealthy.
 Set `protocol = "exec"` to run an opt-in local command health check for
 backends that cannot be represented by TCP/TLS, HTTP, gRPC, or JSON response
 checks:
@@ -1308,10 +1324,10 @@ request-header and response-matcher fields, `host`, `port_override`,
 `connect_timeout_secs`, and `read_timeout_secs` are rejected on exec checks so
 this remains a local monitor, not a scripting engine.
 Runtime load-balancer status exposes only the health-check protocol name
-(`tcp`, `http`, `grpc`, `redis`, `mysql`, or `exec`) for operator visibility;
-it does not expose exec command paths or arguments. Exec backend summaries
-likewise identify the check as `via exec` without including the configured
-command path.
+(`tcp`, `http`, `grpc`, `redis`, `mysql`, `postgres`, or `exec`) for operator
+visibility; it does not expose exec command paths or arguments. Exec backend
+summaries likewise identify the check as `via exec` without including the
+configured command path.
 Do not place secrets in `exec_command`, `exec_args`, or
 `exec_allowed_commands`: they are normal configuration fields and may appear in
 local config files, snapshots, backups, or operator review output. Use a local

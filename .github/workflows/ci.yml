@@ -168,6 +168,7 @@ jobs:
           cargo run --quiet --no-default-features --features profile-development --bin fluxheim-config-tester -- --config examples/load-balancer-enterprise.toml --profile load-balancer --no-runtime-paths
           cargo run --quiet --no-default-features --features profile-development --bin fluxheim-config-tester -- --config examples/load-balancer-exec-health.toml --profile load-balancer --no-runtime-paths
           cargo run --quiet --no-default-features --features profile-development --bin fluxheim-config-tester -- --config examples/load-balancer-mysql-health.toml --profile load-balancer --no-runtime-paths
+          cargo run --quiet --no-default-features --features profile-development --bin fluxheim-config-tester -- --config examples/load-balancer-postgres-health.toml --profile load-balancer --no-runtime-paths
           cargo run --quiet --no-default-features --features profile-development --bin fluxheim-config-tester -- --config examples/load-balancer-redis-health.toml --profile load-balancer --no-runtime-paths
           cargo run --quiet --no-default-features --features profile-web-server,php-fpm,acme-client -- --check-config --config examples/php-fpm.toml
           cargo run --quiet -- --check-config --config examples/tls-modern.toml
