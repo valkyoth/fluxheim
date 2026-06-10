@@ -17,6 +17,9 @@ behavior when the change improves security or project direction.
 - Add `protocol = "redis"` for `proxy.load_balance.health_check`; the probe
   opens a bounded TCP connection to the selected backend, sends one fixed RESP
   `PING` frame, and requires a simple-string `+PONG` response.
+- Read Redis health-check responses until CRLF within the existing 64-byte cap
+  so fragmented `+PONG\r\n` responses do not falsely mark healthy Redis
+  backends down.
 - Add `protocol = "mysql"` for `proxy.load_balance.health_check`; the probe
   opens a bounded TCP connection to the selected backend, reads one MySQL
   server greeting packet, and requires a protocol-10 handshake without sending
@@ -42,6 +45,10 @@ behavior when the change improves security or project direction.
 - Add `scripts/smoke_postgres_health_check.sh` to prove PostgreSQL health
   checks against PostgreSQL in Podman, including observed pre-auth connection
   logging and unhealthy transition after the backend stops.
+- Document that repeated idle MySQL/MariaDB pre-auth handshake probes can count
+  toward non-loopback server host-cache error budgets (`max_connect_errors`);
+  operators should raise that limit, tune probe intervals, or use an
+  authenticated `exec` check such as `mysqladmin ping` where needed.
 - Keep Redis TLS, MySQL TLS/authenticated readiness, PostgreSQL TLS/authenticated
   readiness, SMTP/LDAP send-expect, authenticated agent checks, UDP/GSLB, WAF,
   VPN/firewall appliance behavior, and Wasm/iRules/Lua scripting as

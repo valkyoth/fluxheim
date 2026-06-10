@@ -227,17 +227,17 @@ impl FluxHealthCheck for FluxRedisHealthCheck {
         })?
         .map_err(|error| FluxError::io("write Redis health check request", error))?;
 
-        let mut response = [0u8; REDIS_HEALTH_CHECK_MAX_RESPONSE_BYTES];
-        let read = tokio::time::timeout(self.read_timeout, stream.read(&mut response))
-            .await
-            .map_err(|_| {
-                FluxError::timeout(
-                    "read Redis health check response",
-                    format!("timeout after {}s", self.read_timeout.as_secs()),
-                )
-            })?
-            .map_err(|error| FluxError::io("read Redis health check response", error))?;
-        validate_redis_health_response(&response[..read])
+        let response =
+            tokio::time::timeout(self.read_timeout, read_redis_health_response(&mut stream))
+                .await
+                .map_err(|_| {
+                    FluxError::timeout(
+                        "read Redis health check response",
+                        format!("timeout after {}s", self.read_timeout.as_secs()),
+                    )
+                })?
+                .map_err(|error| FluxError::io("read Redis health check response", error))?;
+        validate_redis_health_response(&response)
     }
 
     fn health_threshold(&self, success: bool) -> usize {
@@ -279,6 +279,22 @@ fn configured_redis_health_check(config: &ProxyConfig) -> FluxResult<Box<FluxRed
                 .unwrap_or(1),
         ),
     }))
+}
+
+async fn read_redis_health_response(stream: &mut tokio::net::TcpStream) -> io::Result<Vec<u8>> {
+    let mut response = Vec::with_capacity(REDIS_HEALTH_CHECK_MAX_RESPONSE_BYTES);
+    let mut byte = [0u8; 1];
+    while response.len() < REDIS_HEALTH_CHECK_MAX_RESPONSE_BYTES {
+        let read = stream.read(&mut byte).await?;
+        if read == 0 {
+            break;
+        }
+        response.push(byte[0]);
+        if response.ends_with(b"\r\n") {
+            break;
+        }
+    }
+    Ok(response)
 }
 
 struct FluxMysqlHealthCheck {
@@ -1453,6 +1469,38 @@ mod tests {
             health_check.backend_summary(&backend),
             format!("{address} via redis")
         );
+    }
+
+    #[tokio::test]
+    async fn redis_health_check_accepts_fragmented_pong() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; REDIS_HEALTH_CHECK_REQUEST.len()];
+            stream.read_exact(&mut request).await.unwrap();
+            assert_eq!(&request, REDIS_HEALTH_CHECK_REQUEST);
+            stream.write_all(b"+PO").await.unwrap();
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            stream.write_all(b"NG\r\n").await.unwrap();
+        });
+        let health_check = configured_redis_health_check(&ProxyConfig {
+            load_balance: LoadBalanceConfig {
+                health_check: LoadBalanceHealthCheckConfig {
+                    protocol: LoadBalanceHealthCheckProtocol::Redis,
+                    connect_timeout_secs: Some(2),
+                    read_timeout_secs: Some(2),
+                    ..LoadBalanceHealthCheckConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap();
+        let backend = Backend::new(&address.to_string()).unwrap();
+
+        health_check.check(&backend).await.unwrap();
+        server.await.unwrap();
     }
 
     #[test]

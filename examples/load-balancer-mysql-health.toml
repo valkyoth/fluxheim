@@ -46,6 +46,10 @@ read_timeout_secs = 1
 # MySQL health checks read only the initial server handshake packet and require
 # a bounded protocol-10 greeting. Fluxheim does not authenticate, send a login
 # packet, execute SQL, inspect schemas, or act as a MySQL proxy.
+# On non-loopback MySQL/MariaDB servers, repeated idle pre-auth disconnects can
+# count toward the server host-cache error budget (`max_connect_errors`). Raise
+# that database setting or use an authenticated exec check such as
+# `mysqladmin ping` if your deployment requires credentialed readiness.
 
 [proxy.load_balance.passive_health]
 enabled = true

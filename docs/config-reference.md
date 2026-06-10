@@ -1278,7 +1278,14 @@ a terminated server-version field. MySQL checks use `connect_timeout_secs` and
 `host`, `port_override`, connection reuse, and `parallel = true`. MySQL checks
 are probes only: they do not authenticate, send a login packet, execute SQL,
 inspect schemas, or make Fluxheim a MySQL proxy. MySQL TLS and authenticated
-readiness checks remain future work.
+readiness checks remain future work. Because the probe intentionally disconnects
+before authentication, non-loopback MySQL/MariaDB servers can count repeated
+idle health probes against their host-cache error budget (`max_connect_errors`)
+and eventually block all connections from the Fluxheim host until `FLUSH HOSTS`
+or equivalent host-cache cleanup. For MySQL pools with low real traffic, set a
+larger `max_connect_errors`, use conservative health-check intervals and
+failure thresholds, or use an authenticated `exec` health check such as
+`mysqladmin ping` when credentialed readiness is required.
 For local proof against a real MySQL-compatible server, run
 `scripts/smoke_mysql_health_check.sh`; it starts MariaDB in Podman, verifies
 Fluxheim increases MariaDB's unauthenticated handshake counter, then stops

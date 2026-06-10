@@ -11,6 +11,9 @@ connect is not enough and an HTTP/gRPC endpoint is not available.
 - Added `protocol = "redis"` for `proxy.load_balance.health_check`.
 - Redis checks open a bounded TCP connection to the selected backend, send one
   fixed RESP `PING` frame, and require a simple-string `+PONG` response.
+- Redis checks now read until CRLF within the existing 64-byte response cap, so
+  fragmented `+PONG\r\n` responses do not falsely mark healthy Redis backends
+  down.
 - Added `protocol = "mysql"` for `proxy.load_balance.health_check`.
 - MySQL checks open a bounded TCP connection to the selected backend, read one
   MySQL server greeting packet, and require a protocol-10 handshake without
@@ -52,6 +55,12 @@ connect is not enough and an HTTP/gRPC endpoint is not available.
   authenticate, run Redis commands beyond `PING`, send MySQL login packets,
   send PostgreSQL StartupMessages, inspect keys or schemas, execute queries, or
   make Fluxheim a database proxy.
+- The MySQL/MariaDB probe intentionally disconnects before authentication. On
+  non-loopback database connections, repeated idle probes can count toward the
+  server host-cache error budget (`max_connect_errors`) and block the Fluxheim
+  host until `FLUSH HOSTS` or equivalent cleanup. Use conservative intervals,
+  raise `max_connect_errors`, or use an authenticated `exec` check such as
+  `mysqladmin ping` for credentialed readiness.
 - Redis TLS, MySQL TLS/authenticated readiness, PostgreSQL TLS/authenticated
   readiness, SMTP/LDAP send-expect, and authenticated agent checks remain
   future work.
