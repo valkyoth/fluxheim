@@ -107,6 +107,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | External auth subrequests | ✅ | `1.4.1`; `[proxy.auth_request]` with bounded header/body forwarding. |
 | Traffic mirroring | ✅ | `1.4.1`; `traffic-mirror` feature with safe bodyless shadow requests. |
 | TCP stream proxying | ✅ | Optional `stream-proxy` feature with Fluxheim-owned L4 TCP listener/data-path and upstream TLS connector boundaries in `1.5.6`, weighted upstream selection, drain/backup policy, bounded idle/lifetime/byte/connect controls, route-local PROXY protocol receive/send, and stream upstream TLS/mTLS controls. |
+| UDP/GSLB beta boundary | Limited | `1.5.16`; separate `[udp]` config namespace and `udp-proxy` feature gate for future scoped DNS UDP, syslog UDP, QUIC pass-through, and game-proxy work. No production UDP listener or generic UDP/GSLB platform yet. |
 
 ### Operations And Packaging
 
@@ -336,8 +337,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.5.15-wolfi`, `v1.5.15-cache-wolfi`, `v1.5.15-proxy-wolfi`,
-`v1.5.15-load-balancer-wolfi`, and `v1.5.15-php-wolfi`.
+`v1.5.16-wolfi`, `v1.5.16-cache-wolfi`, `v1.5.16-proxy-wolfi`,
+`v1.5.16-load-balancer-wolfi`, and `v1.5.16-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
@@ -446,8 +447,9 @@ release.
   operations: runtime pool/member mutation, priority groups, persistence,
   slow-start, richer active/adaptive health checks, circuit breaking, queue and
   overflow behavior, locality/failure-domain policy, richer selection
-  algorithms, admin/audit visibility, and migration fixtures. It is not a WAF,
-  GSLB/DNS appliance, UDP proxy, or iRules-compatible scripting release. See
+  algorithms, admin/audit visibility, migration fixtures, and bounded UDP/GSLB
+  beta exploration. It is not a production WAF, full GSLB/DNS appliance,
+  generic UDP proxy, or iRules-compatible scripting release. See
   [Load Balancer Migration Notes](docs/load-balancer-migration.md) for HAProxy,
   nginx, and F5 pool mappings.
 

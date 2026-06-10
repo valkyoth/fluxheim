@@ -239,6 +239,52 @@ When `metrics` is compiled and enabled,
 outcomes and `fluxheim_stream_bytes_total{route,direction}` records copied
 bytes in each direction.
 
+## UDP Beta
+
+`[udp]` is disabled by default. In `1.5.16` it is a beta configuration boundary
+for the UDP/GSLB exploration line, not a production UDP listener. Normal
+release profiles do not enable the `udp-proxy` feature, and `udp.enabled =
+true` fails clearly unless Fluxheim is built with that beta feature.
+
+The namespace is intentionally separate from `[stream]`; TCP stream routes
+remain TCP-only and do not accept UDP listeners.
+
+```toml
+[udp]
+enabled = false
+
+[[udp.routes]]
+name = "dns-edge"
+mode = "dns-load-balance" # dns-load-balance, syslog-forward, quic-pass-through, game-proxy
+listen = ["127.0.0.1:5353"]
+upstreams = ["192.0.2.10:53", "192.0.2.11:53"]
+# upstream_weights = [1, 1]
+# upstream_aliases = ["dns-a", "dns-b"]
+idle_timeout_secs = 30
+# max_session_secs = 60
+max_datagram_bytes = 1232
+max_sessions = 4096
+```
+
+- `mode` is an explicit future runtime target, not a generic protocol parser.
+  The current accepted values are `dns-load-balance`, `syslog-forward`,
+  `quic-pass-through`, and `game-proxy`.
+- `listen` entries are `ip:port` UDP listeners. Each listener may appear on
+  only one UDP route.
+- Configure either `upstream = "host:port"` or `upstreams = ["host:port", ...]`.
+  `upstream_weights` and `upstream_aliases` are valid only with `upstreams` and
+  must match its length.
+- `idle_timeout_secs` is required and non-zero. `max_session_secs` is optional
+  and non-zero when set.
+- `max_datagram_bytes` must be between 1 and 65507. Route examples should use
+  smaller protocol-aware values where possible, such as 1232 bytes for DNS over
+  UDP deployments that want conservative fragmentation behavior.
+- `max_sessions = 0` means unlimited for that UDP route. Non-zero values are
+  capped at 1000000.
+- `1.5.16` does not add generic UDP proxying, an authoritative DNS server,
+  WAF, VPN/firewall appliance behavior, HTTP/3 ingress, or Wasm/iRules/Lua
+  scripting.
+
 ## Admin
 
 `[admin]` is disabled by default. When enabled, it must be authenticated and

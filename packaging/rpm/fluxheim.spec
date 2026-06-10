@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.15
+Version:        1.5.16
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Wed Jun 10 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.16-1
+- Start the UDP/GSLB exploration line with a separate beta [udp] config
+  namespace and udp-proxy feature gate.
+- Keep UDP runtime support out of production profiles until scoped listener
+  and session semantics are reviewed.
+
 * Wed Jun 10 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.15-1
 - Start the database/protocol-aware health-check line.
 - Add bounded Redis PING, MySQL/MariaDB handshake, and PostgreSQL SSLRequest

@@ -7,6 +7,26 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.16 - 2026-06-10
+
+### Changed
+
+- Start the UDP/GSLB exploration line with a separate `[udp]` beta
+  configuration namespace instead of extending TCP stream routes with UDP
+  semantics.
+- Add the `udp-proxy` feature gate and bounded UDP route schema for explicitly
+  scoped future modes: `dns-load-balance`, `syslog-forward`,
+  `quic-pass-through`, and `game-proxy`.
+- Validate UDP route names, listeners, upstreams, upstream weights, upstream
+  aliases, idle/session timeouts, datagram caps, and session caps before any
+  runtime listener work lands.
+- Keep `udp-proxy` out of the normal full/proxy/load-balancer feature profiles
+  until a reviewed runtime exists. Configs with `udp.enabled = true` fail
+  clearly unless built with the beta feature.
+- Keep generic UDP proxying, authoritative DNS/GSLB, WAF, VPN/firewall
+  appliance behavior, HTTP/3 ingress, and Wasm/iRules/Lua scripting outside
+  this stop line.
+
 ## 1.5.15 - 2026-06-10
 
 ### Changed

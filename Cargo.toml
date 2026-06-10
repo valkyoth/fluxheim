@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.5.15"
+version = "1.5.16"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -40,6 +40,7 @@ compression-gzip = ["compression", "dep:flate2"]
 compression-zstd = ["compression", "dep:zstd"]
 load-balancer = ["proxy", "pingora/lb"]
 stream-proxy = ["proxy"]
+udp-proxy = ["proxy"]
 traffic-mirror = ["proxy"]
 geoip = ["proxy", "dep:maxminddb"]
 cache = ["dep:bytes", "dep:moka", "dep:sha2", "pingora?/cache"]

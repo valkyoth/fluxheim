@@ -50,6 +50,7 @@ mod config_stream;
 pub mod config_tester;
 mod config_tls;
 mod config_types;
+mod config_udp;
 mod config_web;
 #[cfg(feature = "proxy")]
 mod edge_policy;

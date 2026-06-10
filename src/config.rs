@@ -118,6 +118,7 @@ pub use crate::config_tls::{
     TlsIso19790Config, TlsPolicyProfile, TlsProtocolVersion, VhostTlsConfig,
 };
 pub use crate::config_types::{ByteSize, ByteSizeParseError};
+pub use crate::config_udp::{UdpConfig, UdpRouteConfig, UdpRouteMode};
 #[cfg(test)]
 pub(crate) use crate::config_web::MAX_WEB_INDEX_FILES;
 pub use crate::config_web::{DirectoryListingConfig, WebConfig};
@@ -166,6 +167,8 @@ pub struct Config {
     pub geoip: GeoIpConfig,
     #[serde(default)]
     pub stream: StreamConfig,
+    #[serde(default)]
+    pub udp: UdpConfig,
     #[serde(default)]
     pub vhosts: Vec<VhostConfig>,
 }
@@ -316,6 +319,9 @@ impl Config {
         if let Some(stream) = fragment.stream {
             self.stream = stream;
         }
+        if let Some(udp) = fragment.udp {
+            self.udp = udp;
+        }
         self.vhosts.extend(fragment.vhosts);
     }
 
@@ -344,6 +350,7 @@ impl Config {
         self.web.validate()?;
         self.geoip.validate()?;
         self.stream.validate()?;
+        self.udp.validate()?;
         self.validate_vhosts()?;
         self.validate_geoip_policy()?;
         self.validate_compliance_internal_crypto()?;
@@ -679,6 +686,8 @@ struct ConfigFragment {
     geoip: Option<GeoIpConfig>,
     #[serde(default)]
     stream: Option<StreamConfig>,
+    #[serde(default)]
+    udp: Option<UdpConfig>,
     #[serde(default)]
     vhosts: Vec<VhostConfig>,
 }
@@ -1100,6 +1109,26 @@ pub enum ConfigError {
         listen: String,
     },
     DuplicateStreamUpstream {
+        upstream: String,
+    },
+    UdpProxyNotCompiled,
+    InvalidUdpListenAddress {
+        address: String,
+    },
+    InvalidUdpUpstream {
+        address: String,
+    },
+    InvalidUdpProxyPolicy {
+        field: &'static str,
+        reason: &'static str,
+    },
+    DuplicateUdpRouteName {
+        name: String,
+    },
+    DuplicateUdpListener {
+        listen: String,
+    },
+    DuplicateUdpUpstream {
         upstream: String,
     },
     InvalidCompliancePolicy {
@@ -1745,6 +1774,37 @@ impl Display for ConfigError {
             Self::DuplicateStreamUpstream { upstream } => write!(
                 formatter,
                 "stream.routes.upstreams contains duplicate upstream {upstream:?}"
+            ),
+            Self::UdpProxyNotCompiled => write!(
+                formatter,
+                "udp.enabled requires building Fluxheim with the udp-proxy feature"
+            ),
+            Self::InvalidUdpListenAddress { address } => write!(
+                formatter,
+                "udp.routes.listen entries must be ip:port listener addresses, got {address:?}"
+            ),
+            Self::InvalidUdpUpstream { address } => write!(
+                formatter,
+                "UDP upstreams must be host:port or ip:port, got {address:?}"
+            ),
+            Self::InvalidUdpProxyPolicy { field, reason } => {
+                write!(formatter, "{field} is invalid: {reason}")
+            }
+            Self::DuplicateUdpRouteName { name } => {
+                write!(
+                    formatter,
+                    "udp.routes contains duplicate route name {name:?}"
+                )
+            }
+            Self::DuplicateUdpListener { listen } => {
+                write!(
+                    formatter,
+                    "udp.routes contains duplicate listener {listen:?}"
+                )
+            }
+            Self::DuplicateUdpUpstream { upstream } => write!(
+                formatter,
+                "udp.routes.upstreams contains duplicate upstream {upstream:?}"
             ),
             Self::InvalidCompliancePolicy { field, reason } => {
                 write!(formatter, "{field} is invalid: {reason}")

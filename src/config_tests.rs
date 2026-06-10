@@ -9253,6 +9253,7 @@ fn rejects_empty_listeners() {
         web: WebConfig::default(),
         geoip: super::GeoIpConfig::default(),
         stream: super::StreamConfig::default(),
+        udp: super::UdpConfig::default(),
         vhosts: vec![],
     };
 
@@ -10312,6 +10313,7 @@ fn rejects_invalid_upstream() {
         web: WebConfig::default(),
         geoip: super::GeoIpConfig::default(),
         stream: super::StreamConfig::default(),
+        udp: super::UdpConfig::default(),
         vhosts: vec![],
     };
 
@@ -10413,6 +10415,7 @@ fn rejects_empty_index_files() {
         },
         geoip: super::GeoIpConfig::default(),
         stream: super::StreamConfig::default(),
+        udp: super::UdpConfig::default(),
         vhosts: vec![],
     };
 
@@ -10444,6 +10447,7 @@ fn rejects_too_many_index_files() {
         },
         geoip: super::GeoIpConfig::default(),
         stream: super::StreamConfig::default(),
+        udp: super::UdpConfig::default(),
         vhosts: vec![],
     };
 
@@ -10515,6 +10519,7 @@ fn rejects_nested_index_files() {
         },
         geoip: super::GeoIpConfig::default(),
         stream: super::StreamConfig::default(),
+        udp: super::UdpConfig::default(),
         vhosts: vec![],
     };
 
@@ -11707,6 +11712,7 @@ fn rejects_duplicate_vhost_hosts() {
         web: WebConfig::default(),
         geoip: super::GeoIpConfig::default(),
         stream: super::StreamConfig::default(),
+        udp: super::UdpConfig::default(),
         vhosts: vec![
             VhostConfig {
                 name: "first.example".to_owned(),
