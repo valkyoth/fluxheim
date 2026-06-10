@@ -18,6 +18,10 @@ available.
   connection reuse, host overrides, and parallel checking.
 - Added `examples/load-balancer-redis-health.toml` as a validated Redis health
   probe example.
+- Added `scripts/smoke_redis_health_check.sh`, an optional Podman smoke that
+  starts Valkey, verifies Fluxheim increments Valkey's Redis `PING` command
+  counter, then stops Valkey and checks that Fluxheim marks the backend
+  unhealthy.
 
 ## Compatibility
 

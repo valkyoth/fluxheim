@@ -1260,6 +1260,10 @@ HTTP/gRPC response matchers, `host`, `port_override`, connection reuse, and
 `parallel = true`. Redis health checks are probes only: they do not
 authenticate, inspect keys, execute arbitrary Redis commands, or make Fluxheim
 a Redis proxy. Redis TLS and authenticated Redis checks remain future work.
+For local proof against a real Redis-compatible server, run
+`scripts/smoke_redis_health_check.sh`; it starts Valkey in Podman, verifies
+Valkey observes Fluxheim's `PING`, then stops Valkey and checks that Fluxheim
+marks the Redis backend unhealthy.
 Set `protocol = "exec"` to run an opt-in local command health check for
 backends that cannot be represented by TCP/TLS, HTTP, gRPC, or JSON response
 checks:

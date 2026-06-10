@@ -21,6 +21,9 @@ behavior when the change improves security or project direction.
   database checks remain health probes rather than a command/query engine.
 - Add `examples/load-balancer-redis-health.toml` and include it in the local
   example config validation gate.
+- Add `scripts/smoke_redis_health_check.sh` to prove Redis health checks
+  against Valkey in Podman, including observed Redis `PING` commandstats and
+  unhealthy transition after the backend stops.
 - Keep Redis TLS, PostgreSQL readiness, MySQL readiness, SMTP/LDAP
   send-expect, authenticated agent checks, UDP/GSLB, WAF, VPN/firewall
   appliance behavior, and Wasm/iRules/Lua scripting as future-version work.
