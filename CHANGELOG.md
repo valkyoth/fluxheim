@@ -30,6 +30,9 @@ behavior when the change improves security or project direction.
 - Add `scripts/smoke_redis_health_check.sh` to prove Redis health checks
   against Valkey in Podman, including observed Redis `PING` commandstats and
   unhealthy transition after the backend stops.
+- Add `scripts/smoke_mysql_health_check.sh` to prove MySQL health checks
+  against MariaDB in Podman, including observed unauthenticated handshake
+  accounting and unhealthy transition after the backend stops.
 - Keep Redis TLS, MySQL TLS/authenticated readiness, PostgreSQL readiness,
   SMTP/LDAP send-expect, authenticated agent checks, UDP/GSLB, WAF,
   VPN/firewall appliance behavior, and Wasm/iRules/Lua scripting as

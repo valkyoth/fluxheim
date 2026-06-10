@@ -1276,6 +1276,10 @@ a terminated server-version field. MySQL checks use `connect_timeout_secs` and
 are probes only: they do not authenticate, send a login packet, execute SQL,
 inspect schemas, or make Fluxheim a MySQL proxy. MySQL TLS and authenticated
 readiness checks remain future work.
+For local proof against a real MySQL-compatible server, run
+`scripts/smoke_mysql_health_check.sh`; it starts MariaDB in Podman, verifies
+Fluxheim increases MariaDB's unauthenticated handshake counter, then stops
+MariaDB and checks that Fluxheim marks the backend unhealthy.
 Set `protocol = "exec"` to run an opt-in local command health check for
 backends that cannot be represented by TCP/TLS, HTTP, gRPC, or JSON response
 checks:

@@ -28,6 +28,10 @@ HTTP/gRPC endpoint is not available.
   starts Valkey, verifies Fluxheim increments Valkey's Redis `PING` command
   counter, then stops Valkey and checks that Fluxheim marks the backend
   unhealthy.
+- Added `scripts/smoke_mysql_health_check.sh`, an optional Podman smoke that
+  starts MariaDB, verifies Fluxheim increments MariaDB's unauthenticated
+  handshake counter, then stops MariaDB and checks that Fluxheim marks the
+  backend unhealthy.
 
 ## Compatibility
 
