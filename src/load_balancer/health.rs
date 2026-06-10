@@ -32,6 +32,7 @@ const GRPC_SERVING_STATUS: u64 = 1;
 const HEALTH_WEIGHT_HEADER: &str = "x-health-weight";
 const REDIS_HEALTH_CHECK_REQUEST: &[u8] = b"*1\r\n$4\r\nPING\r\n";
 const REDIS_HEALTH_CHECK_MAX_RESPONSE_BYTES: usize = 64;
+const MYSQL_HEALTH_CHECK_MAX_HANDSHAKE_BYTES: usize = 1024;
 
 pub(super) fn configured_health_check(
     config: &ProxyConfig,
@@ -64,6 +65,9 @@ pub(super) fn configured_health_check(
             .map_err(FluxError::into_io)
             .map(|check| check as Box<dyn FluxHealthCheck>),
         LoadBalanceHealthCheckProtocol::Redis => configured_redis_health_check(config)
+            .map_err(FluxError::into_io)
+            .map(|check| check as Box<dyn FluxHealthCheck>),
+        LoadBalanceHealthCheckProtocol::Mysql => configured_mysql_health_check(config)
             .map_err(FluxError::into_io)
             .map(|check| check as Box<dyn FluxHealthCheck>),
     }
@@ -252,6 +256,99 @@ fn configured_redis_health_check(config: &ProxyConfig) -> FluxResult<Box<FluxRed
         ));
     }
     Ok(Box::new(FluxRedisHealthCheck {
+        consecutive_success: config.load_balance.health_check.consecutive_success,
+        consecutive_failure: config.load_balance.health_check.consecutive_failure,
+        connect_timeout: Duration::from_secs(
+            config
+                .load_balance
+                .health_check
+                .connect_timeout_secs
+                .or(config.connect_timeout_secs)
+                .unwrap_or(1),
+        ),
+        read_timeout: Duration::from_secs(
+            config
+                .load_balance
+                .health_check
+                .read_timeout_secs
+                .or(config.read_timeout_secs)
+                .unwrap_or(1),
+        ),
+    }))
+}
+
+struct FluxMysqlHealthCheck {
+    consecutive_success: usize,
+    consecutive_failure: usize,
+    connect_timeout: Duration,
+    read_timeout: Duration,
+}
+
+#[async_trait]
+impl FluxHealthCheck for FluxMysqlHealthCheck {
+    async fn check(&self, target: &Backend) -> FluxResult<()> {
+        let authority = target.addr.to_string();
+        let connect = tokio::net::TcpStream::connect(authority.as_str());
+        let mut stream = tokio::time::timeout(self.connect_timeout, connect)
+            .await
+            .map_err(|_| {
+                FluxError::timeout(
+                    "connect MySQL health check upstream",
+                    format!("timeout after {}s", self.connect_timeout.as_secs()),
+                )
+            })?
+            .map_err(|error| FluxError::io("connect MySQL health check upstream", error))?;
+
+        let mut header = [0u8; 4];
+        tokio::time::timeout(self.read_timeout, stream.read_exact(&mut header))
+            .await
+            .map_err(|_| {
+                FluxError::timeout(
+                    "read MySQL health check packet header",
+                    format!("timeout after {}s", self.read_timeout.as_secs()),
+                )
+            })?
+            .map_err(|error| FluxError::io("read MySQL health check packet header", error))?;
+        let payload_len =
+            usize::from(header[0]) | (usize::from(header[1]) << 8) | (usize::from(header[2]) << 16);
+        if payload_len == 0 || payload_len > MYSQL_HEALTH_CHECK_MAX_HANDSHAKE_BYTES {
+            return Err(FluxError::InvalidInput(
+                "MySQL health check handshake packet is outside allowed size",
+            ));
+        }
+        let mut payload = vec![0u8; payload_len];
+        tokio::time::timeout(self.read_timeout, stream.read_exact(&mut payload))
+            .await
+            .map_err(|_| {
+                FluxError::timeout(
+                    "read MySQL health check handshake",
+                    format!("timeout after {}s", self.read_timeout.as_secs()),
+                )
+            })?
+            .map_err(|error| FluxError::io("read MySQL health check handshake", error))?;
+        validate_mysql_health_handshake(&header, &payload)
+    }
+
+    fn health_threshold(&self, success: bool) -> usize {
+        if success {
+            self.consecutive_success
+        } else {
+            self.consecutive_failure
+        }
+    }
+
+    fn backend_summary(&self, target: &Backend) -> String {
+        format!("{} via mysql", target.addr)
+    }
+}
+
+fn configured_mysql_health_check(config: &ProxyConfig) -> FluxResult<Box<FluxMysqlHealthCheck>> {
+    if config.upstream_tls {
+        return Err(FluxError::InvalidInput(
+            "mysql health checks do not support upstream TLS yet",
+        ));
+    }
+    Ok(Box::new(FluxMysqlHealthCheck {
         consecutive_success: config.load_balance.health_check.consecutive_success,
         consecutive_failure: config.load_balance.health_check.consecutive_failure,
         connect_timeout: Duration::from_secs(
@@ -553,6 +650,25 @@ fn validate_redis_health_response(response: &[u8]) -> FluxResult<()> {
     Err(FluxError::InvalidInput(
         "Redis health check did not receive PONG",
     ))
+}
+
+fn validate_mysql_health_handshake(header: &[u8; 4], payload: &[u8]) -> FluxResult<()> {
+    if header[3] != 0 {
+        return Err(FluxError::InvalidInput(
+            "MySQL health check handshake packet has unexpected sequence id",
+        ));
+    }
+    if payload.first().copied() != Some(10) {
+        return Err(FluxError::InvalidInput(
+            "MySQL health check did not receive protocol 10 handshake",
+        ));
+    }
+    if !payload[1..].contains(&0) {
+        return Err(FluxError::InvalidInput(
+            "MySQL health check handshake is missing server version terminator",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_http_health_response(
@@ -907,10 +1023,11 @@ mod tests {
     use super::HealthDerivedWeights;
     use super::{
         REDIS_HEALTH_CHECK_REQUEST, configured_exec_health_check, configured_http_health_check,
-        configured_redis_health_check, grpc_frame, grpc_health_request_body, record_health_weight,
-        validate_grpc_health_response_body, validate_grpc_health_response_header,
-        validate_http_health_response, validate_http_health_response_body,
-        validate_http_health_response_body_json, validate_redis_health_response,
+        configured_mysql_health_check, configured_redis_health_check, grpc_frame,
+        grpc_health_request_body, record_health_weight, validate_grpc_health_response_body,
+        validate_grpc_health_response_header, validate_http_health_response,
+        validate_http_health_response_body, validate_http_health_response_body_json,
+        validate_mysql_health_handshake, validate_redis_health_response,
     };
     use crate::config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
@@ -1238,6 +1355,71 @@ mod tests {
         assert!(validate_redis_health_response(b"+PONG\r\n").is_ok());
         assert!(validate_redis_health_response(b"-NOAUTH Authentication required\r\n").is_err());
         assert!(validate_redis_health_response(b"$4\r\nPONG\r\n").is_err());
+    }
+
+    #[tokio::test]
+    async fn mysql_health_check_accepts_protocol_handshake() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut payload = Vec::new();
+            payload.push(10);
+            payload.extend_from_slice(b"8.0.36-fluxheim\0");
+            payload.extend_from_slice(&1234u32.to_le_bytes());
+            payload.extend_from_slice(b"abcdefgh");
+            payload.push(0);
+            payload.extend_from_slice(&0xffffu16.to_le_bytes());
+            payload.push(45);
+            payload.extend_from_slice(&0u16.to_le_bytes());
+            payload.extend_from_slice(&0u16.to_le_bytes());
+            payload.push(21);
+            payload.extend_from_slice(&[0u8; 10]);
+            payload.extend_from_slice(b"ijklmnopqrstuv\0");
+            payload.extend_from_slice(b"mysql_native_password\0");
+            let len = payload.len();
+            let header = [
+                (len & 0xff) as u8,
+                ((len >> 8) & 0xff) as u8,
+                ((len >> 16) & 0xff) as u8,
+                0,
+            ];
+            stream.write_all(&header).await.unwrap();
+            stream.write_all(&payload).await.unwrap();
+        });
+        let health_check = configured_mysql_health_check(&ProxyConfig {
+            load_balance: LoadBalanceConfig {
+                health_check: LoadBalanceHealthCheckConfig {
+                    protocol: LoadBalanceHealthCheckProtocol::Mysql,
+                    consecutive_success: 2,
+                    consecutive_failure: 4,
+                    connect_timeout_secs: Some(2),
+                    read_timeout_secs: Some(2),
+                    ..LoadBalanceHealthCheckConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap();
+        let backend = Backend::new(&address.to_string()).unwrap();
+
+        health_check.check(&backend).await.unwrap();
+        server.await.unwrap();
+        assert_eq!(health_check.consecutive_success, 2);
+        assert_eq!(health_check.consecutive_failure, 4);
+        assert_eq!(
+            health_check.backend_summary(&backend),
+            format!("{address} via mysql")
+        );
+    }
+
+    #[test]
+    fn validates_mysql_health_check_handshake() {
+        assert!(validate_mysql_health_handshake(&[22, 0, 0, 0], b"\x0a8.0.36\0rest").is_ok());
+        assert!(validate_mysql_health_handshake(&[22, 0, 0, 1], b"\x0a8.0.36\0rest").is_err());
+        assert!(validate_mysql_health_handshake(&[22, 0, 0, 0], b"\x09old\0rest").is_err());
+        assert!(validate_mysql_health_handshake(&[22, 0, 0, 0], b"\x0aunterminated").is_err());
     }
 
     #[test]

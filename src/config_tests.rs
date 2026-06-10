@@ -857,6 +857,20 @@ fn parses_proxy_upstream_pool() {
         redis_config.proxy.load_balance.health_check.protocol,
         LoadBalanceHealthCheckProtocol::Redis
     );
+    let mysql_config: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "mysql"
+            connect_timeout_secs = 2
+            read_timeout_secs = 2
+            "#,
+    )
+    .unwrap();
+    mysql_config.validate().unwrap();
+    assert_eq!(
+        mysql_config.proxy.load_balance.health_check.protocol,
+        LoadBalanceHealthCheckProtocol::Mysql
+    );
     assert!(config.proxy.load_balance.slow_start.enabled);
     assert_eq!(config.proxy.load_balance.slow_start.duration_secs, 45);
     assert!(config.proxy.load_balance.persistence.enabled);
@@ -3545,6 +3559,36 @@ fn rejects_invalid_http_load_balance_health_check() {
     .unwrap();
     assert_eq!(
         redis_parallel.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.parallel"
+        })
+    );
+
+    let mysql_with_http_matcher: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "mysql"
+            expected_statuses = [200]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        mysql_with_http_matcher.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.protocol"
+        })
+    );
+
+    let mysql_parallel: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "mysql"
+            parallel = true
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        mysql_parallel.validate(),
         Err(ConfigError::InvalidLoadBalanceHealthCheck {
             field: "proxy.load_balance.health_check.parallel"
         })

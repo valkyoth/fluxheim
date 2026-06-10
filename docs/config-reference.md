@@ -1222,6 +1222,9 @@ shape for operators that need a bounded command monitor instead of a network
 probe.
 `examples/load-balancer-redis-health.toml` shows a Redis `PING` health-check
 shape for Redis pools that expose no HTTP/gRPC health endpoint.
+`examples/load-balancer-mysql-health.toml` shows a MySQL/MariaDB handshake
+health-check shape for database pools where a TCP connect is too weak but
+authentication or SQL execution is not acceptable.
 `proxy.load_balance.health_check.protocol` defaults to `tcp`, which verifies
 TCP reachability and, when `upstream_tls = true`, a TLS handshake. Set
 `protocol = "http"` to send `method` to `path`; `method` defaults to `GET` and
@@ -1264,6 +1267,15 @@ For local proof against a real Redis-compatible server, run
 `scripts/smoke_redis_health_check.sh`; it starts Valkey in Podman, verifies
 Valkey observes Fluxheim's `PING`, then stops Valkey and checks that Fluxheim
 marks the Redis backend unhealthy.
+Set `protocol = "mysql"` to run a bounded MySQL/MariaDB handshake health
+check. Fluxheim opens a TCP connection to the selected backend, reads one
+bounded MySQL server greeting packet, and requires a protocol-10 handshake with
+a terminated server-version field. MySQL checks use `connect_timeout_secs` and
+`read_timeout_secs`, but reject request headers, HTTP/gRPC response matchers,
+`host`, `port_override`, connection reuse, and `parallel = true`. MySQL checks
+are probes only: they do not authenticate, send a login packet, execute SQL,
+inspect schemas, or make Fluxheim a MySQL proxy. MySQL TLS and authenticated
+readiness checks remain future work.
 Set `protocol = "exec"` to run an opt-in local command health check for
 backends that cannot be represented by TCP/TLS, HTTP, gRPC, or JSON response
 checks:
@@ -1292,9 +1304,10 @@ request-header and response-matcher fields, `host`, `port_override`,
 `connect_timeout_secs`, and `read_timeout_secs` are rejected on exec checks so
 this remains a local monitor, not a scripting engine.
 Runtime load-balancer status exposes only the health-check protocol name
-(`tcp`, `http`, `grpc`, `redis`, or `exec`) for operator visibility; it does
-not expose exec command paths or arguments. Exec backend summaries likewise
-identify the check as `via exec` without including the configured command path.
+(`tcp`, `http`, `grpc`, `redis`, `mysql`, or `exec`) for operator visibility;
+it does not expose exec command paths or arguments. Exec backend summaries
+likewise identify the check as `via exec` without including the configured
+command path.
 Do not place secrets in `exec_command`, `exec_args`, or
 `exec_allowed_commands`: they are normal configuration fields and may appear in
 local config files, snapshots, backups, or operator review output. Use a local

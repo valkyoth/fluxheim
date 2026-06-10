@@ -274,6 +274,7 @@ pub enum LoadBalanceHealthCheckProtocol {
     Grpc,
     Exec,
     Redis,
+    Mysql,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -691,7 +692,10 @@ impl LoadBalanceHealthCheckConfig {
     }
 
     fn validate_protocol_probe(&self) -> Result<(), ConfigError> {
-        if !matches!(self.protocol, LoadBalanceHealthCheckProtocol::Redis) {
+        if !matches!(
+            self.protocol,
+            LoadBalanceHealthCheckProtocol::Redis | LoadBalanceHealthCheckProtocol::Mysql
+        ) {
             return Ok(());
         }
         if self.parallel {
