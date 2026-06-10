@@ -7,6 +7,24 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.15 - 2026-06-10
+
+### Changed
+
+- Start the database/protocol-aware health-check line with bounded Redis
+  `PING` active health checks for load-balancer pools.
+- Add `protocol = "redis"` for `proxy.load_balance.health_check`; the probe
+  opens a bounded TCP connection to the selected backend, sends one fixed RESP
+  `PING` frame, and requires a simple-string `+PONG` response.
+- Reject HTTP/gRPC response matchers, request headers, host overrides,
+  connection reuse, port overrides, and parallel checking on Redis probes so
+  database checks remain health probes rather than a command/query engine.
+- Add `examples/load-balancer-redis-health.toml` and include it in the local
+  example config validation gate.
+- Keep Redis TLS, PostgreSQL readiness, MySQL readiness, SMTP/LDAP
+  send-expect, authenticated agent checks, UDP/GSLB, WAF, VPN/firewall
+  appliance behavior, and Wasm/iRules/Lua scripting as future-version work.
+
 ## 1.5.14 - 2026-06-09
 
 ### Changed

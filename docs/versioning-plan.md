@@ -3679,15 +3679,18 @@ the exception while the cache server is being completed as a focused sequence:
   authenticated agent checks for a later monitor slice. Do not add arbitrary
   scripting, Wasm policy, runtime backend mutation, UDP/GSLB, WAF,
   VPN/firewall appliance behavior, or database protocol probes in this release.
-- `v1.5.15`: database and protocol-aware health-check line. Stop at bounded
-  protocol probes for stream/load-balancer deployments where TCP connect is not
-  enough: Redis `PING`, PostgreSQL startup/readiness, MySQL handshake/readiness,
-  and optionally SMTP/LDAP/custom send-expect checks if each protocol has
-  strict timeout, byte, authentication, privacy, and logging limits. Treat
-  database checks as health probes only, not a database proxy feature or query
-  execution engine. Do not add UDP/GSLB, WAF, VPN/firewall appliance behavior,
-  arbitrary command execution beyond the prior opt-in exec line, or new Wasm
-  ABI scope in this release.
+- `v1.5.15`: database and protocol-aware health-check line. Start with bounded
+  Redis `PING` health probes for stream/load-balancer deployments where TCP
+  connect is not enough. Stop at fixed health probes only: no Redis command
+  configuration, key inspection, authentication, TLS, or database proxying in
+  the first slice. Keep PostgreSQL startup/readiness, MySQL
+  handshake/readiness, SMTP/LDAP/custom send-expect checks, and authenticated
+  agent checks as later monitor slices unless each protocol has strict timeout,
+  byte, authentication, privacy, and logging limits. Treat database checks as
+  health probes only, not a database proxy feature or query execution engine.
+  Do not add UDP/GSLB, WAF, VPN/firewall appliance behavior, arbitrary command
+  execution beyond the prior opt-in exec line, or new Wasm ABI scope in this
+  release.
 - `v1.5.16`: UDP and GSLB exploration line. Stop at explicitly scoped beta
   modules only: DNS UDP load balancing, syslog UDP forwarding, QUIC
   pass-through, game-server UDP proxying, and/or DNS/GSLB traffic steering if

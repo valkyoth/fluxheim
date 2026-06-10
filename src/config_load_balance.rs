@@ -273,6 +273,7 @@ pub enum LoadBalanceHealthCheckProtocol {
     Http,
     Grpc,
     Exec,
+    Redis,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -418,6 +419,7 @@ impl LoadBalanceHealthCheckConfig {
             });
         }
         self.validate_exec()?;
+        self.validate_protocol_probe()?;
         if !valid_health_check_path(&self.path) {
             return Err(ConfigError::InvalidLoadBalanceHealthCheck {
                 field: "proxy.load_balance.health_check.path",
@@ -669,6 +671,37 @@ impl LoadBalanceHealthCheckConfig {
         if self.read_timeout_secs.is_some() {
             return Err(ConfigError::InvalidLoadBalanceHealthCheck {
                 field: "proxy.load_balance.health_check.read_timeout_secs",
+            });
+        }
+        if !self.request_headers.is_empty()
+            || self.grpc_service.is_some()
+            || !self.expected_statuses.is_empty()
+            || !self.expected_status_ranges.is_empty()
+            || !self.expected_headers.is_empty()
+            || !self.expected_body_contains.is_empty()
+            || !self.expected_body_json.is_empty()
+            || self.reuse_connection
+            || self.port_override.is_some()
+        {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.protocol",
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_protocol_probe(&self) -> Result<(), ConfigError> {
+        if !matches!(self.protocol, LoadBalanceHealthCheckProtocol::Redis) {
+            return Ok(());
+        }
+        if self.parallel {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.parallel",
+            });
+        }
+        if self.host.is_some() {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.host",
             });
         }
         if !self.request_headers.is_empty()

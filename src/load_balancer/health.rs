@@ -11,6 +11,7 @@ use pingora::protocols::http::client::HttpSession;
 use pingora::upstreams::peer::{HttpPeer, Peer};
 use pingora::{Error, ErrorType};
 use serde_json::Value;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use crate::config::{
     LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedJson,
@@ -29,6 +30,8 @@ const HTTP_HEALTH_CHECK_MAX_BODY_BYTES: usize = 64 * 1024;
 const GRPC_HEALTH_CHECK_PATH: &[u8] = b"/grpc.health.v1.Health/Check";
 const GRPC_SERVING_STATUS: u64 = 1;
 const HEALTH_WEIGHT_HEADER: &str = "x-health-weight";
+const REDIS_HEALTH_CHECK_REQUEST: &[u8] = b"*1\r\n$4\r\nPING\r\n";
+const REDIS_HEALTH_CHECK_MAX_RESPONSE_BYTES: usize = 64;
 
 pub(super) fn configured_health_check(
     config: &ProxyConfig,
@@ -58,6 +61,9 @@ pub(super) fn configured_health_check(
                 .map(|check| check as Box<dyn FluxHealthCheck>)
         }
         LoadBalanceHealthCheckProtocol::Exec => configured_exec_health_check(config)
+            .map_err(FluxError::into_io)
+            .map(|check| check as Box<dyn FluxHealthCheck>),
+        LoadBalanceHealthCheckProtocol::Redis => configured_redis_health_check(config)
             .map_err(FluxError::into_io)
             .map(|check| check as Box<dyn FluxHealthCheck>),
     }
@@ -174,6 +180,94 @@ fn configured_exec_health_check(config: &ProxyConfig) -> FluxResult<Box<FluxExec
                 .load_balance
                 .health_check
                 .exec_timeout_secs
+                .unwrap_or(1),
+        ),
+    }))
+}
+
+struct FluxRedisHealthCheck {
+    consecutive_success: usize,
+    consecutive_failure: usize,
+    connect_timeout: Duration,
+    read_timeout: Duration,
+}
+
+#[async_trait]
+impl FluxHealthCheck for FluxRedisHealthCheck {
+    async fn check(&self, target: &Backend) -> FluxResult<()> {
+        let authority = target.addr.to_string();
+        let connect = tokio::net::TcpStream::connect(authority.as_str());
+        let mut stream = tokio::time::timeout(self.connect_timeout, connect)
+            .await
+            .map_err(|_| {
+                FluxError::timeout(
+                    "connect Redis health check upstream",
+                    format!("timeout after {}s", self.connect_timeout.as_secs()),
+                )
+            })?
+            .map_err(|error| FluxError::io("connect Redis health check upstream", error))?;
+        tokio::time::timeout(
+            self.read_timeout,
+            stream.write_all(REDIS_HEALTH_CHECK_REQUEST),
+        )
+        .await
+        .map_err(|_| {
+            FluxError::timeout(
+                "write Redis health check request",
+                format!("timeout after {}s", self.read_timeout.as_secs()),
+            )
+        })?
+        .map_err(|error| FluxError::io("write Redis health check request", error))?;
+
+        let mut response = [0u8; REDIS_HEALTH_CHECK_MAX_RESPONSE_BYTES];
+        let read = tokio::time::timeout(self.read_timeout, stream.read(&mut response))
+            .await
+            .map_err(|_| {
+                FluxError::timeout(
+                    "read Redis health check response",
+                    format!("timeout after {}s", self.read_timeout.as_secs()),
+                )
+            })?
+            .map_err(|error| FluxError::io("read Redis health check response", error))?;
+        validate_redis_health_response(&response[..read])
+    }
+
+    fn health_threshold(&self, success: bool) -> usize {
+        if success {
+            self.consecutive_success
+        } else {
+            self.consecutive_failure
+        }
+    }
+
+    fn backend_summary(&self, target: &Backend) -> String {
+        format!("{} via redis", target.addr)
+    }
+}
+
+fn configured_redis_health_check(config: &ProxyConfig) -> FluxResult<Box<FluxRedisHealthCheck>> {
+    if config.upstream_tls {
+        return Err(FluxError::InvalidInput(
+            "redis health checks do not support upstream TLS yet",
+        ));
+    }
+    Ok(Box::new(FluxRedisHealthCheck {
+        consecutive_success: config.load_balance.health_check.consecutive_success,
+        consecutive_failure: config.load_balance.health_check.consecutive_failure,
+        connect_timeout: Duration::from_secs(
+            config
+                .load_balance
+                .health_check
+                .connect_timeout_secs
+                .or(config.connect_timeout_secs)
+                .unwrap_or(1),
+        ),
+        read_timeout: Duration::from_secs(
+            config
+                .load_balance
+                .health_check
+                .read_timeout_secs
+                .or(config.read_timeout_secs)
                 .unwrap_or(1),
         ),
     }))
@@ -450,6 +544,15 @@ fn apply_health_check_peer_timeouts(
     {
         *read_timeout = Some(Duration::from_secs(timeout));
     }
+}
+
+fn validate_redis_health_response(response: &[u8]) -> FluxResult<()> {
+    if response.starts_with(b"+PONG\r\n") {
+        return Ok(());
+    }
+    Err(FluxError::InvalidInput(
+        "Redis health check did not receive PONG",
+    ))
 }
 
 fn validate_http_health_response(
@@ -803,10 +906,11 @@ mod tests {
     use super::FluxHealthCheck;
     use super::HealthDerivedWeights;
     use super::{
-        configured_exec_health_check, configured_http_health_check, grpc_frame,
-        grpc_health_request_body, record_health_weight, validate_grpc_health_response_body,
-        validate_grpc_health_response_header, validate_http_health_response,
-        validate_http_health_response_body, validate_http_health_response_body_json,
+        REDIS_HEALTH_CHECK_REQUEST, configured_exec_health_check, configured_http_health_check,
+        configured_redis_health_check, grpc_frame, grpc_health_request_body, record_health_weight,
+        validate_grpc_health_response_body, validate_grpc_health_response_header,
+        validate_http_health_response, validate_http_health_response_body,
+        validate_http_health_response_body_json, validate_redis_health_response,
     };
     use crate::config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
@@ -814,6 +918,7 @@ mod tests {
         LoadBalanceHealthCheckProtocol, LoadBalanceHealthCheckRequestHeader, ProxyConfig,
     };
     use crate::http_types::PingoraResponseHeader as ResponseHeader;
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     fn install_test_crypto_provider() {
         #[cfg(feature = "tls-rustls-backend")]
@@ -1088,6 +1193,51 @@ mod tests {
         })
         .unwrap();
         assert!(failure.check(&backend).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn redis_health_check_sends_ping_and_accepts_pong() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; REDIS_HEALTH_CHECK_REQUEST.len()];
+            stream.read_exact(&mut request).await.unwrap();
+            assert_eq!(&request, REDIS_HEALTH_CHECK_REQUEST);
+            stream.write_all(b"+PONG\r\n").await.unwrap();
+        });
+        let health_check = configured_redis_health_check(&ProxyConfig {
+            load_balance: LoadBalanceConfig {
+                health_check: LoadBalanceHealthCheckConfig {
+                    protocol: LoadBalanceHealthCheckProtocol::Redis,
+                    consecutive_success: 2,
+                    consecutive_failure: 4,
+                    connect_timeout_secs: Some(2),
+                    read_timeout_secs: Some(2),
+                    ..LoadBalanceHealthCheckConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap();
+        let backend = Backend::new(&address.to_string()).unwrap();
+
+        health_check.check(&backend).await.unwrap();
+        server.await.unwrap();
+        assert_eq!(health_check.consecutive_success, 2);
+        assert_eq!(health_check.consecutive_failure, 4);
+        assert_eq!(
+            health_check.backend_summary(&backend),
+            format!("{address} via redis")
+        );
+    }
+
+    #[test]
+    fn validates_redis_health_response() {
+        assert!(validate_redis_health_response(b"+PONG\r\n").is_ok());
+        assert!(validate_redis_health_response(b"-NOAUTH Authentication required\r\n").is_err());
+        assert!(validate_redis_health_response(b"$4\r\nPONG\r\n").is_err());
     }
 
     #[test]

@@ -843,6 +843,20 @@ fn parses_proxy_upstream_pool() {
             .as_deref(),
         Some("/usr/local/libexec/fluxheim-health")
     );
+    let redis_config: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "redis"
+            connect_timeout_secs = 2
+            read_timeout_secs = 2
+            "#,
+    )
+    .unwrap();
+    redis_config.validate().unwrap();
+    assert_eq!(
+        redis_config.proxy.load_balance.health_check.protocol,
+        LoadBalanceHealthCheckProtocol::Redis
+    );
     assert!(config.proxy.load_balance.slow_start.enabled);
     assert_eq!(config.proxy.load_balance.slow_start.duration_secs, 45);
     assert!(config.proxy.load_balance.persistence.enabled);
@@ -3503,6 +3517,36 @@ fn rejects_invalid_http_load_balance_health_check() {
         exec_with_connect_timeout.validate(),
         Err(ConfigError::InvalidLoadBalanceHealthCheck {
             field: "proxy.load_balance.health_check.connect_timeout_secs"
+        })
+    );
+
+    let redis_with_http_matcher: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "redis"
+            expected_statuses = [200]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        redis_with_http_matcher.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.protocol"
+        })
+    );
+
+    let redis_parallel: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "redis"
+            parallel = true
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        redis_parallel.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.parallel"
         })
     );
 }

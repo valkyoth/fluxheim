@@ -1220,6 +1220,8 @@ source-IP persistence, retry budgets, metrics, and explicit all-down behavior.
 `examples/load-balancer-exec-health.toml` shows the local exec health-check
 shape for operators that need a bounded command monitor instead of a network
 probe.
+`examples/load-balancer-redis-health.toml` shows a Redis `PING` health-check
+shape for Redis pools that expose no HTTP/gRPC health endpoint.
 `proxy.load_balance.health_check.protocol` defaults to `tcp`, which verifies
 TCP reachability and, when `upstream_tls = true`, a TLS handshake. Set
 `protocol = "http"` to send `method` to `path`; `method` defaults to `GET` and
@@ -1250,6 +1252,14 @@ application/grpc`, and a `SERVING` response message. `grpc_service =
 checks may use `host`, `request_headers`, timeout fields, connection reuse, and
 `port_override`; HTTP status/header/body matchers are rejected because the
 standard gRPC health response has its own fixed semantics.
+Set `protocol = "redis"` to run a bounded Redis health check. Fluxheim opens a
+TCP connection to the selected backend, sends one fixed RESP `PING` frame, and
+requires a simple-string `+PONG` response. Redis checks use
+`connect_timeout_secs` and `read_timeout_secs`, but reject request headers,
+HTTP/gRPC response matchers, `host`, `port_override`, connection reuse, and
+`parallel = true`. Redis health checks are probes only: they do not
+authenticate, inspect keys, execute arbitrary Redis commands, or make Fluxheim
+a Redis proxy. Redis TLS and authenticated Redis checks remain future work.
 Set `protocol = "exec"` to run an opt-in local command health check for
 backends that cannot be represented by TCP/TLS, HTTP, gRPC, or JSON response
 checks:
@@ -1278,9 +1288,9 @@ request-header and response-matcher fields, `host`, `port_override`,
 `connect_timeout_secs`, and `read_timeout_secs` are rejected on exec checks so
 this remains a local monitor, not a scripting engine.
 Runtime load-balancer status exposes only the health-check protocol name
-(`tcp`, `http`, `grpc`, or `exec`) for operator visibility; it does not expose
-exec command paths or arguments. Exec backend summaries likewise identify the
-check as `via exec` without including the configured command path.
+(`tcp`, `http`, `grpc`, `redis`, or `exec`) for operator visibility; it does
+not expose exec command paths or arguments. Exec backend summaries likewise
+identify the check as `via exec` without including the configured command path.
 Do not place secrets in `exec_command`, `exec_args`, or
 `exec_allowed_commands`: they are normal configuration fields and may appear in
 local config files, snapshots, backups, or operator review output. Use a local
