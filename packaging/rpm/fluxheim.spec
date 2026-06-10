@@ -156,9 +156,14 @@ fi
 %changelog
 * Wed Jun 10 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.15-1
 - Start the database/protocol-aware health-check line.
-- Add bounded Redis PING active health checks for load-balancer pools.
-- Keep Redis TLS, PostgreSQL/MySQL readiness, generic send-expect probes, and
-  database proxying as future work.
+- Add bounded Redis PING, MySQL/MariaDB handshake, and PostgreSQL SSLRequest
+  active health checks for load-balancer pools.
+- Read Redis PONG responses until CRLF within the bounded response cap.
+- Document MySQL/MariaDB host-cache max_connect_errors behavior for pre-auth
+  handshake probes and the authenticated exec-check alternative.
+- Log ACME managed-certificate install recovery failures.
+- Keep Redis TLS, MySQL/PostgreSQL authenticated readiness, generic
+  send-expect probes, and database proxying as future work.
 
 * Tue Jun 09 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.14-1
 - Start the local exec health-check line.
