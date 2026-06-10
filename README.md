@@ -339,6 +339,12 @@ Release tags use the same profile/OS suffixes on both registries, for example
 `v1.5.15-wolfi`, `v1.5.15-cache-wolfi`, `v1.5.15-proxy-wolfi`,
 `v1.5.15-load-balancer-wolfi`, and `v1.5.15-php-wolfi`.
 
+Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
+tag. The GitHub Release page is published under `v1.5.15-release` because the
+original immutable GitHub Release object for `v1.5.15` was accidentally
+deleted; GitHub reserves immutable release tag names and does not allow the
+original release page to be restored through the normal release UI/API.
+
 Manual feature selection also works:
 
 ```bash

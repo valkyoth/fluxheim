@@ -6,6 +6,13 @@ This release adds bounded Redis `PING`, MySQL/MariaDB handshake, and
 PostgreSQL SSLRequest active health checks for load-balancer pools where TCP
 connect is not enough and an HTTP/gRPC endpoint is not available.
 
+Publishing note: the signed git tag `v1.5.15` remains the canonical code tag
+for this release. The GitHub Release page is published under
+`v1.5.15-release` because the original immutable GitHub Release object for
+`v1.5.15` was accidentally deleted; GitHub reserves immutable release tag names
+and does not allow the original release page to be restored through the normal
+release UI/API.
+
 ## What Changed
 
 - Added `protocol = "redis"` for `proxy.load_balance.health_check`.
