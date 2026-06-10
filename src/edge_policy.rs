@@ -299,6 +299,9 @@ impl RuntimeRateLimit {
             return RateLimitDecision::Reject(self.status);
         }
 
+        if !self.requests_per_second.is_finite() || self.requests_per_second <= 0.0 {
+            return RateLimitDecision::Reject(self.status);
+        }
         let wait = Duration::from_secs_f64((1.0 - bucket.tokens) / self.requests_per_second);
         if wait > self.max_delay {
             return RateLimitDecision::Reject(self.status);

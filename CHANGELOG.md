@@ -49,6 +49,13 @@ behavior when the change improves security or project direction.
   toward non-loopback server host-cache error budgets (`max_connect_errors`);
   operators should raise that limit, tune probe intervals, or use an
   authenticated `exec` check such as `mysqladmin ping` where needed.
+- Log ACME managed-certificate install recovery failures instead of silently
+  discarding cleanup or backup-restore errors, making cert/key mismatch recovery
+  failures visible to operators.
+- Harden two defensive panic surfaces: delay-mode rate limiting now rejects
+  impossible non-finite/non-positive local rates before computing a wait
+  duration, and load-balancer persistence warning text no longer depends on an
+  `unreachable!()` branch.
 - Keep Redis TLS, MySQL TLS/authenticated readiness, PostgreSQL TLS/authenticated
   readiness, SMTP/LDAP send-expect, authenticated agent checks, UDP/GSLB, WAF,
   VPN/firewall appliance behavior, and Wasm/iRules/Lua scripting as

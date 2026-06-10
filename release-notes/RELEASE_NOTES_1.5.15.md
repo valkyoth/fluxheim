@@ -61,6 +61,11 @@ connect is not enough and an HTTP/gRPC endpoint is not available.
   host until `FLUSH HOSTS` or equivalent cleanup. Use conservative intervals,
   raise `max_connect_errors`, or use an authenticated `exec` check such as
   `mysqladmin ping` for credentialed readiness.
+- ACME managed-certificate install recovery now logs cleanup and backup-restore
+  failures instead of silently discarding those errors.
+- Delay-mode rate limiting and load-balancer persistence warning generation
+  received small defensive hardening so local invariants are explicit at the
+  panic-sensitive call sites.
 - Redis TLS, MySQL TLS/authenticated readiness, PostgreSQL TLS/authenticated
   readiness, SMTP/LDAP send-expect, and authenticated agent checks remain
   future work.

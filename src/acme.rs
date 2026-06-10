@@ -1278,7 +1278,15 @@ fn install_certificate_files(
             rename_certificate_file(&directory, &key_tmp, &paths.key_path, directory_fd)
         {
             if cert_backed_up {
-                let _ = restore_backup(&directory, &cert_backup, &paths.cert_path, directory_fd);
+                if let Err(restore_error) =
+                    restore_backup(&directory, &cert_backup, &paths.cert_path, directory_fd)
+                {
+                    log_acme_certificate_recovery_error(
+                        "restoring previous certificate after private-key install failure",
+                        &paths.cert_path,
+                        &restore_error,
+                    );
+                }
             }
             return Err(error);
         }
@@ -1289,17 +1297,53 @@ fn install_certificate_files(
     })();
 
     if result.is_err() {
-        let _ = cleanup_backup(&directory, &cert_tmp, directory_fd);
-        let _ = cleanup_backup(&directory, &key_tmp, directory_fd);
+        if let Err(error) = cleanup_backup(&directory, &cert_tmp, directory_fd) {
+            log_acme_certificate_recovery_error(
+                "removing temporary certificate file",
+                &cert_tmp,
+                &error,
+            );
+        }
+        if let Err(error) = cleanup_backup(&directory, &key_tmp, directory_fd) {
+            log_acme_certificate_recovery_error(
+                "removing temporary private-key file",
+                &key_tmp,
+                &error,
+            );
+        }
         if cert_backed_up {
-            let _ = restore_backup(&directory, &cert_backup, &paths.cert_path, directory_fd);
+            if let Err(error) =
+                restore_backup(&directory, &cert_backup, &paths.cert_path, directory_fd)
+            {
+                log_acme_certificate_recovery_error(
+                    "restoring previous certificate",
+                    &paths.cert_path,
+                    &error,
+                );
+            }
         }
         if key_backed_up {
-            let _ = restore_backup(&directory, &key_backup, &paths.key_path, directory_fd);
+            if let Err(error) =
+                restore_backup(&directory, &key_backup, &paths.key_path, directory_fd)
+            {
+                log_acme_certificate_recovery_error(
+                    "restoring previous private key",
+                    &paths.key_path,
+                    &error,
+                );
+            }
         }
     }
 
     result
+}
+
+fn log_acme_certificate_recovery_error(action: &str, path: &Path, error: &dyn fmt::Display) {
+    log::error!(
+        target: "fluxheim::security",
+        "ACME certificate install recovery failed while {action} at {}: {error}",
+        path.display()
+    );
 }
 
 #[cfg(unix)]

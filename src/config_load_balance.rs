@@ -160,8 +160,8 @@ impl LoadBalanceConfig {
                 let persistence_mode = match self.persistence.mode {
                     LoadBalancePersistenceMode::Header => "header",
                     LoadBalancePersistenceMode::Cookie => "cookie",
-                    LoadBalancePersistenceMode::SourceIp
-                    | LoadBalancePersistenceMode::ManagedCookie => unreachable!(),
+                    LoadBalancePersistenceMode::SourceIp => "source-ip",
+                    LoadBalancePersistenceMode::ManagedCookie => "managed-cookie",
                 };
                 log::warn!(
                     target: "fluxheim::security",
