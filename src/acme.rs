@@ -1277,16 +1277,15 @@ fn install_certificate_files(
         if let Err(error) =
             rename_certificate_file(&directory, &key_tmp, &paths.key_path, directory_fd)
         {
-            if cert_backed_up {
-                if let Err(restore_error) =
+            if cert_backed_up
+                && let Err(restore_error) =
                     restore_backup(&directory, &cert_backup, &paths.cert_path, directory_fd)
-                {
-                    log_acme_certificate_recovery_error(
-                        "restoring previous certificate after private-key install failure",
-                        &paths.cert_path,
-                        &restore_error,
-                    );
-                }
+            {
+                log_acme_certificate_recovery_error(
+                    "restoring previous certificate after private-key install failure",
+                    &paths.cert_path,
+                    &restore_error,
+                );
             }
             return Err(error);
         }
@@ -1311,27 +1310,25 @@ fn install_certificate_files(
                 &error,
             );
         }
-        if cert_backed_up {
-            if let Err(error) =
+        if cert_backed_up
+            && let Err(error) =
                 restore_backup(&directory, &cert_backup, &paths.cert_path, directory_fd)
-            {
-                log_acme_certificate_recovery_error(
-                    "restoring previous certificate",
-                    &paths.cert_path,
-                    &error,
-                );
-            }
+        {
+            log_acme_certificate_recovery_error(
+                "restoring previous certificate",
+                &paths.cert_path,
+                &error,
+            );
         }
-        if key_backed_up {
-            if let Err(error) =
+        if key_backed_up
+            && let Err(error) =
                 restore_backup(&directory, &key_backup, &paths.key_path, directory_fd)
-            {
-                log_acme_certificate_recovery_error(
-                    "restoring previous private key",
-                    &paths.key_path,
-                    &error,
-                );
-            }
+        {
+            log_acme_certificate_recovery_error(
+                "restoring previous private key",
+                &paths.key_path,
+                &error,
+            );
         }
     }
 
