@@ -12,6 +12,7 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY build.rs ./
 COPY vendor ./vendor
 COPY packaging/systemd ./packaging/systemd
+COPY crates ./crates
 COPY src ./src
 COPY scripts/validate-features.sh scripts/feature-policy.sh ./scripts/
 
