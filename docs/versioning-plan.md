@@ -3786,6 +3786,19 @@ focused crates such as `fluxheim-wasm`, `fluxheim-runtime`,
 other reviewed workspace members. This prevents `1.6`, `1.7`, `1.8`, `1.9`,
 and future ecosystem work from rebuilding the current single-crate sprawl.
 
+Workspace feature rule: the root `fluxheim` crate owns the operator-facing
+feature profiles and release artifact matrix (`profile-full`,
+`profile-load-balancer-edge`, `profile-static-site`, `profile-reverse-proxy`,
+`profile-php`, and related build profiles). Internal workspace crates may have
+small local feature flags only for their own optional dependencies or narrow
+capabilities, but those flags must be mapped deliberately from the root crate.
+Do not let domain crates invent independent public feature surfaces that
+operators have to compose by hand. This keeps existing profile semantics stable
+while allowing `fluxheim-config`, `fluxheim-load-balancer`,
+`fluxheim-cache`, `fluxheim-web`, `fluxheim-php-fpm`, `fluxheim-acme`, and
+future extension crates to move out of the root crate without feature drift or
+circular dependencies.
+
 - `v1.6.0`: shared Wasm extensibility runtime line. Stop at one sandboxed,
   typed, resource-limited extension runtime for operator policy normally solved
   with F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-like cache
