@@ -3754,6 +3754,28 @@ the exception while the cache server is being completed as a focused sequence:
   UDP catchall behavior, authoritative DNS, and GSLB control-plane behavior as
   separate later scopes unless each has its own bounded session, affinity,
   observability, and abuse-control design.
+- `v1.5.22`: Pingora load-balancer/cache dependency removal line. Stop at
+  removing `pingora-load-balancing` and `pingora-cache` from Fluxheim's normal
+  build graph while preserving current operator-facing behavior. The
+  load-balancer side should finish the remaining glue after
+  `crates/fluxheim-load-balancer` by converting selected Fluxheim backends
+  directly into the current HTTP upstream connector without compiling
+  Pingora's LB crate. The cache side should route HTTP cache hits, misses,
+  stale serving, range/slice handling, purge/status behavior, and cache writes
+  through Fluxheim-owned cache interfaces instead of Pingora cache adapter
+  traits. Keep Pingora core/proxy/session dependencies in place until the later
+  server and HTTP runtime lines; this release is only about making LB and cache
+  fully Fluxheim-owned and removing those two Pingora crates from compilation.
+- `v1.5.23`: cache-aware origin protection service line. Stop at one small
+  differentiator that combines cache and load-balancer state without becoming a
+  new proxy runtime: route-scoped origin-fill budgets that apply only to cache
+  misses, revalidations, and background refreshes. When an origin pool is
+  degraded, queue-saturated, or over its fill budget, Fluxheim should prefer
+  bounded stale serving where policy allows, coalesce concurrent fills, and
+  expose clear metrics/status for "origin protected" decisions. This should be
+  useful for stampede control and brownout handling, and is intentionally
+  narrower than a general WAF, scripting system, or global traffic manager. Do
+  not add cross-node cache replication or distributed consensus in this stop.
 
 Workspace rule after `v1.5.17`: once the workspace split starts, future release
 lines must treat crate boundaries as the default for substantial new
