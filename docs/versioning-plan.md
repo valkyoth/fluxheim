@@ -3741,6 +3741,19 @@ the exception while the cache server is being completed as a focused sequence:
   stable enough. Keep Pingora-specific cache/proxy adapters separate from cache
   core when possible. Do not move the main HTTP proxy orchestrator yet; it
   should remain last because it still coordinates all subsystems.
+- `v1.5.21`: UDP production-readiness line. Stop at promoting only the scoped
+  UDP modes that have reviewed production semantics. Required work before any
+  promotion includes per-route UDP metrics/status, explicit public-exposure
+  warnings, response-rate limiting or equivalent amplification controls for
+  DNS-style request/response forwarding, bounded per-source/per-prefix pressure
+  controls where meaningful, upstream health/readiness behavior for UDP pools,
+  rootless/container-network deployment guidance, packet-size and truncation
+  tests, and clear logging that cannot be turned into packet-rate log spam.
+  `syslog-forward` may graduate independently if its one-way semantics are
+  reviewed first. Keep QUIC pass-through, game-server UDP proxying, generic
+  UDP catchall behavior, authoritative DNS, and GSLB control-plane behavior as
+  separate later scopes unless each has its own bounded session, affinity,
+  observability, and abuse-control design.
 
 Workspace rule after `v1.5.17`: once the workspace split starts, future release
 lines must treat crate boundaries as the default for substantial new
