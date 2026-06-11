@@ -35,6 +35,14 @@ cargo install --locked cargo-sbom --version 0.10.0
 ## Dependency, License, And Advisory Gates
 
 - Run `cargo update` only as a deliberate dependency maintenance step.
+- Before tagging, verify compatible dependency updates are exhausted. This gate
+  intentionally ignores `pingora*` packages while Fluxheim is still exiting the
+  Pingora load-balancer/cache dependency surface:
+
+```bash
+scripts/check_latest_crates.sh
+```
+
 - Review every new dependency for maintenance status and SPDX license metadata.
 - Review every new build script, procedural macro, `*-sys` crate, vendored
   native source, native tool invocation, Cargo alias, and CI workflow edit as

@@ -53,6 +53,32 @@ if ! grep -q "^## $cargo_version " CHANGELOG.md; then
     exit 1
 fi
 
+release_notes="release-notes/RELEASE_NOTES_$cargo_version.md"
+if [ ! -f "$release_notes" ]; then
+    echo "release metadata: missing $release_notes" >&2
+    exit 1
+fi
+
+if ! grep -q "^# Fluxheim $cargo_version Release Notes$" "$release_notes"; then
+    echo "release metadata: $release_notes has the wrong title" >&2
+    exit 1
+fi
+
+if ! grep -q "v$cargo_version" README.md; then
+    echo "release metadata: README.md does not reference v$cargo_version" >&2
+    exit 1
+fi
+
+if ! grep -q "v$cargo_version" docs/build-and-podman.md; then
+    echo "release metadata: docs/build-and-podman.md does not reference v$cargo_version" >&2
+    exit 1
+fi
+
+if ! grep -q "^Version:[[:space:]]*$cargo_version$" packaging/rpm/fluxheim.spec; then
+    echo "release metadata: packaging/rpm/fluxheim.spec Version does not match $cargo_version" >&2
+    exit 1
+fi
+
 derivative_version="$(
     awk '
         /^\[\[package\]\]$/ { in_package = 1; name = ""; version = ""; next }

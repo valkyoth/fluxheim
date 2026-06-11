@@ -21,6 +21,10 @@ PHP-FPM, Wasm, and runtime extractions smaller and safer.
   existing modules and tests continue to compile without broad churn.
 - Kept Pingora-specific error conversion at the root adapter boundary instead
   of moving Pingora dependencies into the common crate.
+- Updated `regex` from `1.12.3` to `1.12.4`.
+- Added a release-gate crate freshness check for compatible non-Pingora updates
+  and stricter release metadata checks for release notes, README,
+  build/container docs, and RPM version alignment.
 
 ## Compatibility
 

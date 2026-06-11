@@ -22,6 +22,10 @@ behavior when the change improves security or project direction.
 - Move repository-local test path helpers behind the `fluxheim-common`
   `test-support` feature while keeping the root `crate::test_support` adapter
   for existing tests.
+- Update `regex` from `1.12.3` to `1.12.4`.
+- Add a release-gate freshness check for compatible non-Pingora crate updates
+  and strengthen release metadata validation for release notes, README,
+  build/container docs, and RPM version alignment.
 - Keep all feature profiles, binaries, release scripts, RPM/container behavior,
   config syntax, and runtime behavior unchanged in this first workspace slice.
 
