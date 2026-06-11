@@ -25,6 +25,9 @@ behavior when the change improves security or project direction.
 - Add `response_timeout_secs` for UDP routes, defaulting to `3`, so unanswered
   DNS-style request/response datagrams do not hold route slots for the full
   idle timeout.
+- Remove the unused beta `max_session_secs` UDP field before release; current
+  beta modes process one datagram at a time and use `response_timeout_secs` for
+  upstream waits.
 - Drop oversized upstream UDP responses instead of forwarding truncated
   datagrams, and rate-limit high-volume UDP drop warnings.
 - Default UDP route `max_sessions` to `4096`; `0` remains an explicit

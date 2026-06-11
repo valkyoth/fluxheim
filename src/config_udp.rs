@@ -2,10 +2,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{
-    ConfigError, validate_config_list_len, validate_optional_timeout_secs,
-    validate_required_timeout_secs,
-};
+use crate::config::{ConfigError, validate_config_list_len, validate_required_timeout_secs};
 use crate::config_net::{valid_authority, valid_upstream_alias};
 
 pub(crate) const MAX_UDP_ROUTES: usize = 64;
@@ -97,8 +94,6 @@ pub struct UdpRouteConfig {
     pub idle_timeout_secs: u64,
     #[serde(default = "default_udp_response_timeout_secs")]
     pub response_timeout_secs: u64,
-    #[serde(default)]
-    pub max_session_secs: Option<u64>,
     #[serde(default = "default_udp_max_datagram_bytes")]
     pub max_datagram_bytes: usize,
     #[serde(default = "default_udp_max_sessions")]
@@ -177,7 +172,6 @@ impl UdpRouteConfig {
                 reason: "must be less than or equal to idle_timeout_secs",
             });
         }
-        validate_optional_timeout_secs("udp.routes.max_session_secs", self.max_session_secs)?;
         if self.max_datagram_bytes == 0 || self.max_datagram_bytes > MAX_UDP_DATAGRAM_BYTES {
             return Err(ConfigError::InvalidUdpProxyPolicy {
                 field: "udp.routes.max_datagram_bytes",
@@ -286,7 +280,6 @@ mod tests {
             upstream_aliases: vec!["dns-a".to_owned(), "dns-b".to_owned()],
             idle_timeout_secs: 30,
             response_timeout_secs: 3,
-            max_session_secs: Some(60),
             max_datagram_bytes: 1232,
             max_sessions: 4096,
         }

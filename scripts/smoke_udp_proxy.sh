@@ -165,7 +165,6 @@ listen = ["127.0.0.1:$DNS_LISTEN_PORT"]
 upstream = "127.0.0.1:$DNS_UPSTREAM_PORT"
 idle_timeout_secs = 1
 response_timeout_secs = 1
-max_session_secs = 2
 max_datagram_bytes = 512
 max_sessions = 32
 

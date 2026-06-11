@@ -21,6 +21,9 @@ TCP/UDP routes and it does not ship production UDP/GSLB support yet.
 - Added `response_timeout_secs` for UDP routes. It defaults to `3` seconds and
   keeps unanswered DNS-style datagrams from occupying route slots for the full
   idle timeout.
+- Removed the unused beta `max_session_secs` UDP field before release. Current
+  beta modes handle one datagram at a time; `response_timeout_secs` is the
+  effective cap for DNS-style upstream waits.
 - Hardened beta UDP forwarding so oversized upstream responses are dropped
   instead of being forwarded as truncated datagrams.
 - Rate-limited high-volume UDP drop warnings for oversized downstream

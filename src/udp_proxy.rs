@@ -461,7 +461,6 @@ mod tests {
             upstream_aliases: Vec::new(),
             idle_timeout_secs: 1,
             response_timeout_secs: 1,
-            max_session_secs: Some(1),
             max_datagram_bytes: 512,
             max_sessions: 1,
         }

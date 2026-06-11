@@ -262,7 +262,6 @@ upstreams = ["192.0.2.10:53", "192.0.2.11:53"]
 # upstream_aliases = ["dns-a", "dns-b"]
 idle_timeout_secs = 30
 response_timeout_secs = 3
-# max_session_secs = 60
 max_datagram_bytes = 1232
 max_sessions = 4096
 ```
@@ -281,7 +280,6 @@ max_sessions = 4096
   defaults to `3` and must be less than or equal to `idle_timeout_secs`.
   `dns-load-balance` uses it for upstream connect and response waits so
   unanswered datagrams do not hold route slots for the full idle window.
-  `max_session_secs` is optional and non-zero when set.
 - `max_datagram_bytes` must be between 1 and 65507. Route examples should use
   smaller protocol-aware values where possible, such as 1232 bytes for DNS over
   UDP deployments that want conservative fragmentation behavior.
