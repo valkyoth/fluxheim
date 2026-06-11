@@ -157,6 +157,10 @@ fi
 * Wed Jun 10 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.16-1
 - Start the UDP/GSLB exploration line with a separate beta [udp] config
   namespace, udp-proxy feature gate, and scoped DNS/syslog UDP runtime.
+- Add response_timeout_secs for bounded DNS-style upstream waits, drop
+  oversized upstream UDP responses, and rate-limit high-volume UDP drop logs.
+- Remove the unused beta max_session_secs UDP field before release so it
+  cannot be accepted as a silent no-op.
 - Keep UDP runtime support out of production profiles until scoped listener
   and session semantics are reviewed.
 

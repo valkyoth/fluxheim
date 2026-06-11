@@ -72,6 +72,7 @@ TCP/UDP routes and it does not ship production UDP/GSLB support yet.
 
 ## Packaging Notes
 
+- README, RPM spec, and container-tag documentation are updated for `1.5.16`.
 - RPM and container production profiles remain on the existing full feature
   set and do not enable `udp-proxy`.
 - The standard release artifacts remain the `full`, `cache`, `proxy`,
