@@ -25,6 +25,8 @@ PHP-FPM, Wasm, and runtime extractions smaller and safer.
 - Added a release-gate crate freshness check for compatible non-Pingora updates
   and stricter release metadata checks for release notes, README,
   build/container docs, and RPM version alignment.
+- Fixed the vendored OpenSSL FIPS support build script so Rust 1.96 clippy
+  accepts the crate under release `-D warnings` checks.
 
 ## Compatibility
 

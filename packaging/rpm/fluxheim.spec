@@ -158,6 +158,9 @@ fi
 - Start the workspace and shared-crate foundation line.
 - Add crates/fluxheim-common for shared FluxError/FluxResult and path-safety
   validation while preserving root compatibility adapters.
+- Update regex to 1.12.4 and add release-gate checks for compatible
+  non-Pingora crate freshness and release metadata alignment.
+- Fix the vendored OpenSSL FIPS support build script for Rust 1.96 clippy.
 - Keep RPM feature set, binaries, config syntax, and runtime behavior
   unchanged.
 

@@ -26,6 +26,8 @@ behavior when the change improves security or project direction.
 - Add a release-gate freshness check for compatible non-Pingora crate updates
   and strengthen release metadata validation for release notes, README,
   build/container docs, and RPM version alignment.
+- Fix the OpenSSL FIPS support build-script hex literal grouping so Rust 1.96
+  clippy accepts the vendored support crate under `-D warnings`.
 - Keep all feature profiles, binaries, release scripts, RPM/container behavior,
   config syntax, and runtime behavior unchanged in this first workspace slice.
 
