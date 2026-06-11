@@ -6,5 +6,7 @@
 
 pub mod error;
 pub mod path_safety;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 
 pub use error::{FluxError, FluxResult};

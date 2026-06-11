@@ -14,9 +14,11 @@ PHP-FPM, Wasm, and runtime extractions smaller and safer.
 - Moved the Fluxheim-owned `FluxError` and `FluxResult` boundary into
   `fluxheim-common`.
 - Moved shared forward-path safety validation into `fluxheim-common`.
+- Moved repository-local test path helpers behind the `fluxheim-common`
+  `test-support` feature.
 - Kept root compatibility adapters at `crate::flux_error` and
-  `crate::path_safety` so existing modules continue to compile without broad
-  churn.
+  `crate::path_safety`, plus the test-only `crate::test_support` adapter, so
+  existing modules and tests continue to compile without broad churn.
 - Kept Pingora-specific error conversion at the root adapter boundary instead
   of moving Pingora dependencies into the common crate.
 

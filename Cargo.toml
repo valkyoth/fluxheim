@@ -218,6 +218,7 @@ zeroize = { version = "1.8.2", features = ["derive"], optional = true }
 zstd = { version = "0.13.3", default-features = false, optional = true }
 
 [dev-dependencies]
+fluxheim-common = { path = "crates/fluxheim-common", features = ["test-support"] }
 proptest = "1.6.0"
 
 [profile.release]

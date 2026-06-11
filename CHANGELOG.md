@@ -19,6 +19,9 @@ behavior when the change improves security or project direction.
   existing runtime code.
 - Move shared forward-path safety validation into `fluxheim-common` while
   keeping the root `crate::path_safety` adapter for existing proxy/cache code.
+- Move repository-local test path helpers behind the `fluxheim-common`
+  `test-support` feature while keeping the root `crate::test_support` adapter
+  for existing tests.
 - Keep all feature profiles, binaries, release scripts, RPM/container behavior,
   config syntax, and runtime behavior unchanged in this first workspace slice.
 
