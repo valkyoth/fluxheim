@@ -9,7 +9,7 @@ fn main() {
     let Ok(version) = u64::from_str_radix(&version, 16) else {
         return;
     };
-    if version >= 0x3_00_00_00_0 {
+    if version >= 0x3000_0000 {
         println!("cargo:rustc-cfg=ossl300");
     }
 }
