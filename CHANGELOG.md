@@ -22,6 +22,11 @@ behavior when the change improves security or project direction.
 - Validate UDP route names, listeners, upstreams, upstream weights, upstream
   aliases, idle/session timeouts, datagram caps, and session caps before any
   datagram forwarding starts.
+- Add `response_timeout_secs` for UDP routes, defaulting to `3`, so unanswered
+  DNS-style request/response datagrams do not hold route slots for the full
+  idle timeout.
+- Drop oversized upstream UDP responses instead of forwarding truncated
+  datagrams, and rate-limit high-volume UDP drop warnings.
 - Default UDP route `max_sessions` to `4096`; `0` remains an explicit
   unlimited setting.
 - Add `scripts/smoke_udp_proxy.sh` to prove the beta UDP runtime through the
@@ -35,6 +40,9 @@ behavior when the change improves security or project direction.
 - Keep QUIC pass-through, game-server UDP proxying, generic UDP proxying,
   authoritative DNS/GSLB, WAF, VPN/firewall appliance behavior, HTTP/3 ingress,
   and Wasm/iRules/Lua scripting outside this stop line.
+- Document that `dns-load-balance` remains beta and must not be exposed as an
+  open public DNS reflector without network ingress filtering and future
+  response-rate-limit work.
 
 ## 1.5.15 - 2026-06-10
 

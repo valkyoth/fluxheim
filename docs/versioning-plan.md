@@ -3703,6 +3703,9 @@ the exception while the cache server is being completed as a focused sequence:
   this release. The first slice is the beta `[udp]` config boundary,
   `udp-proxy` feature gate, and scoped DNS/syslog UDP runtime only; production
   profiles must not enable it until the listener/session runtime is promoted.
+  Keep `dns-load-balance` documented as internal/beta-only until response-rate
+  limiting, amplification controls, and public-DNS deployment guidance are
+  reviewed.
 - `v1.5.17`: workspace and shared-crate foundation line. Stop at converting
   Fluxheim to a Cargo workspace while keeping the published binary/package
   behavior unchanged, and extracting only low-risk shared code into one or more

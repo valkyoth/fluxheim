@@ -95,6 +95,8 @@ pub struct UdpRouteConfig {
     pub upstream_aliases: Vec<String>,
     #[serde(default = "default_udp_idle_timeout_secs")]
     pub idle_timeout_secs: u64,
+    #[serde(default = "default_udp_response_timeout_secs")]
+    pub response_timeout_secs: u64,
     #[serde(default)]
     pub max_session_secs: Option<u64>,
     #[serde(default = "default_udp_max_datagram_bytes")]
@@ -165,6 +167,16 @@ impl UdpRouteConfig {
         self.validate_upstream_selection_policy()?;
 
         validate_required_timeout_secs("udp.routes.idle_timeout_secs", self.idle_timeout_secs)?;
+        validate_required_timeout_secs(
+            "udp.routes.response_timeout_secs",
+            self.response_timeout_secs,
+        )?;
+        if self.response_timeout_secs > self.idle_timeout_secs {
+            return Err(ConfigError::InvalidUdpProxyPolicy {
+                field: "udp.routes.response_timeout_secs",
+                reason: "must be less than or equal to idle_timeout_secs",
+            });
+        }
         validate_optional_timeout_secs("udp.routes.max_session_secs", self.max_session_secs)?;
         if self.max_datagram_bytes == 0 || self.max_datagram_bytes > MAX_UDP_DATAGRAM_BYTES {
             return Err(ConfigError::InvalidUdpProxyPolicy {
@@ -246,6 +258,10 @@ const fn default_udp_idle_timeout_secs() -> u64 {
     30
 }
 
+const fn default_udp_response_timeout_secs() -> u64 {
+    3
+}
+
 const fn default_udp_max_datagram_bytes() -> usize {
     4096
 }
@@ -269,6 +285,7 @@ mod tests {
             upstream_weights: vec![1, 2],
             upstream_aliases: vec!["dns-a".to_owned(), "dns-b".to_owned()],
             idle_timeout_secs: 30,
+            response_timeout_secs: 3,
             max_session_secs: Some(60),
             max_datagram_bytes: 1232,
             max_sessions: 4096,
@@ -310,6 +327,20 @@ mod tests {
             route.validate(),
             Err(ConfigError::InvalidUdpProxyPolicy {
                 field: "udp.routes.max_datagram_bytes",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn udp_route_rejects_response_timeout_above_idle_timeout() {
+        let mut route = route();
+        route.idle_timeout_secs = 2;
+        route.response_timeout_secs = 3;
+        assert!(matches!(
+            route.validate(),
+            Err(ConfigError::InvalidUdpProxyPolicy {
+                field: "udp.routes.response_timeout_secs",
                 ..
             })
         ));

@@ -261,6 +261,7 @@ upstreams = ["192.0.2.10:53", "192.0.2.11:53"]
 # upstream_weights = [1, 1]
 # upstream_aliases = ["dns-a", "dns-b"]
 idle_timeout_secs = 30
+response_timeout_secs = 3
 # max_session_secs = 60
 max_datagram_bytes = 1232
 max_sessions = 4096
@@ -276,13 +277,21 @@ max_sessions = 4096
 - Configure either `upstream = "host:port"` or `upstreams = ["host:port", ...]`.
   `upstream_weights` and `upstream_aliases` are valid only with `upstreams` and
   must match its length.
-- `idle_timeout_secs` is required and non-zero. `max_session_secs` is optional
-  and non-zero when set.
+- `idle_timeout_secs` is required and non-zero. `response_timeout_secs`
+  defaults to `3` and must be less than or equal to `idle_timeout_secs`.
+  `dns-load-balance` uses it for upstream connect and response waits so
+  unanswered datagrams do not hold route slots for the full idle window.
+  `max_session_secs` is optional and non-zero when set.
 - `max_datagram_bytes` must be between 1 and 65507. Route examples should use
   smaller protocol-aware values where possible, such as 1232 bytes for DNS over
   UDP deployments that want conservative fragmentation behavior.
 - `max_sessions` defaults to `4096`. `max_sessions = 0` means unlimited for
   that UDP route. Non-zero values are capped at 1000000.
+- `dns-load-balance` is beta and can act as a UDP reflector if exposed to
+  untrusted networks. Bind beta listeners to loopback or internal interfaces
+  unless the deployment has upstream ingress filtering such as BCP38. Response
+  rate limiting, DNS-specific amplification controls, and GSLB policy are
+  required before this mode is promoted for public DNS-edge use.
 - `1.5.16` does not add QUIC pass-through, game-server UDP proxying, generic
   UDP proxying, an authoritative DNS server, WAF, VPN/firewall appliance
   behavior, HTTP/3 ingress, or Wasm/iRules/Lua scripting.

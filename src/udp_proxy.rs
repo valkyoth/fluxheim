@@ -2,8 +2,8 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::process;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 #[cfg(unix)]
@@ -16,6 +16,7 @@ use crate::config::{Config, UdpRouteConfig, UdpRouteMode};
 use crate::flux_error::{FluxError, FluxResult};
 
 const UDP_RECEIVE_BUFFER_BYTES: usize = 65_507;
+const UDP_DROP_LOG_INTERVAL_MILLIS: u64 = 1_000;
 
 pub(crate) fn udp_services_from_config(config: &Config) -> io::Result<Vec<UdpProxyService>> {
     if !config.udp.enabled {
@@ -77,20 +78,18 @@ impl UdpProxyService {
                     match received {
                         Ok((len, source)) => {
                             if len > app.max_datagram_bytes {
-                                log::warn!(
-                                    target: "fluxheim::udp",
-                                    "UDP route {} dropped oversized datagram from {source}: {} bytes > {}",
-                                    app.name,
-                                    len,
-                                    app.max_datagram_bytes
+                                app.log_dropped_datagram(
+                                    source,
+                                    "oversized downstream datagram",
+                                    format_args!("{} bytes > {}", len, app.max_datagram_bytes),
                                 );
                                 continue;
                             }
                             let Some(slot) = app.acquire_session_slot() else {
-                                log::warn!(
-                                    target: "fluxheim::udp",
-                                    "UDP route {} dropped datagram from {source}: max_sessions exceeded",
-                                    app.name
+                                app.log_dropped_datagram(
+                                    source,
+                                    "max_sessions exceeded",
+                                    format_args!("active session cap is {}", app.max_sessions),
                                 );
                                 continue;
                             };
@@ -172,12 +171,13 @@ struct UdpProxyApp {
     mode: UdpRouteMode,
     upstreams: Arc<[RuntimeUdpUpstream]>,
     weight_total: usize,
-    idle_timeout: Duration,
-    max_session_lifetime: Option<Duration>,
+    response_timeout: Duration,
     max_datagram_bytes: usize,
     max_sessions: usize,
     active_sessions: Arc<AtomicUsize>,
     next_upstream: AtomicUsize,
+    last_drop_log_millis: AtomicU64,
+    suppressed_drop_logs: AtomicUsize,
 }
 
 impl UdpProxyApp {
@@ -213,12 +213,13 @@ impl UdpProxyApp {
             mode: route.mode,
             upstreams: upstreams.into(),
             weight_total,
-            idle_timeout: Duration::from_secs(route.idle_timeout_secs),
-            max_session_lifetime: route.max_session_secs.map(Duration::from_secs),
+            response_timeout: Duration::from_secs(route.response_timeout_secs),
             max_datagram_bytes: route.max_datagram_bytes,
             max_sessions: route.max_sessions,
             active_sessions: Arc::new(AtomicUsize::new(0)),
             next_upstream: AtomicUsize::new(0),
+            last_drop_log_millis: AtomicU64::new(0),
+            suppressed_drop_logs: AtomicUsize::new(0),
         })
     }
 
@@ -296,13 +297,19 @@ impl UdpProxyApp {
             .connected_upstream_socket(listener_local, upstream)
             .await?;
         upstream_socket.send(payload).await?;
-        let mut response = vec![0u8; self.max_datagram_bytes];
+        let mut response = vec![0u8; self.max_datagram_bytes.saturating_add(1)];
         let response_timeout = self.response_timeout();
         let len = tokio::time::timeout(response_timeout, upstream_socket.recv(&mut response))
             .await
             .map_err(|_| {
                 io::Error::new(io::ErrorKind::TimedOut, "UDP upstream response timed out")
             })??;
+        if len > self.max_datagram_bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "UDP upstream response exceeded route datagram cap",
+            ));
+        }
         downstream.send_to(&response[..len], source).await?;
         Ok(())
     }
@@ -337,9 +344,37 @@ impl UdpProxyApp {
     }
 
     fn response_timeout(&self) -> Duration {
-        self.max_session_lifetime
-            .map(|lifetime| lifetime.min(self.idle_timeout))
-            .unwrap_or(self.idle_timeout)
+        self.response_timeout
+    }
+
+    fn log_dropped_datagram(
+        &self,
+        source: SocketAddr,
+        reason: &'static str,
+        detail: impl std::fmt::Display,
+    ) {
+        let now = udp_log_millis();
+        let last = self.last_drop_log_millis.load(Ordering::Relaxed);
+        if now.saturating_sub(last) < UDP_DROP_LOG_INTERVAL_MILLIS {
+            self.suppressed_drop_logs.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+
+        if self
+            .last_drop_log_millis
+            .compare_exchange(last, now, Ordering::AcqRel, Ordering::Relaxed)
+            .is_err()
+        {
+            self.suppressed_drop_logs.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+
+        let suppressed = self.suppressed_drop_logs.swap(0, Ordering::AcqRel);
+        log::warn!(
+            target: "fluxheim::udp",
+            "UDP route {} dropped datagram from {source}: {reason}; {detail}; suppressed_since_last={suppressed}",
+            self.name
+        );
     }
 }
 
@@ -399,6 +434,14 @@ fn unspecified_bind_addr(ip: IpAddr) -> SocketAddr {
     }
 }
 
+fn udp_log_millis() -> u64 {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    millis.min(u128::from(u64::MAX)) as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::{UdpProxyApp, UdpSessionSlot, unspecified_bind_addr};
@@ -417,6 +460,7 @@ mod tests {
             upstream_weights: Vec::new(),
             upstream_aliases: Vec::new(),
             idle_timeout_secs: 1,
+            response_timeout_secs: 1,
             max_session_secs: Some(1),
             max_datagram_bytes: 512,
             max_sessions: 1,
@@ -452,6 +496,44 @@ mod tests {
         let mut response = [0u8; 32];
         let (len, _peer) = client.recv_from(&mut response).await.unwrap();
         assert_eq!(&response[..len], b"answer");
+        upstream_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn udp_dns_mode_drops_oversized_upstream_response() {
+        let upstream = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let upstream_addr = upstream.local_addr().unwrap();
+        let upstream_task = tokio::spawn(async move {
+            let mut buf = [0u8; 32];
+            let (_len, peer) = upstream.recv_from(&mut buf).await.unwrap();
+            let oversized = vec![b'x'; 513];
+            upstream.send_to(&oversized, peer).await.unwrap();
+        });
+
+        let app = UdpProxyApp::from_config(&route(
+            upstream_addr.to_string(),
+            UdpRouteMode::DnsLoadBalance,
+        ))
+        .unwrap();
+        let downstream = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        app.process_datagram(
+            downstream.clone(),
+            downstream.local_addr().unwrap(),
+            client.local_addr().unwrap(),
+            b"query".to_vec(),
+        )
+        .await;
+
+        let mut response = [0u8; 32];
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                client.recv_from(&mut response)
+            )
+            .await
+            .is_err()
+        );
         upstream_task.await.unwrap();
     }
 

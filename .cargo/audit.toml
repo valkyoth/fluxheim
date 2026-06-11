@@ -7,6 +7,21 @@ ignore = [
     # Cargo.lock while this suppression exists. Remove this when Pingora drops
     # derivative. Next scheduled manual review before 2026-11-01.
     "RUSTSEC-2024-0388",
+    # Transitive through daemonize 0.5.0. It is used only for process daemon
+    # management, not attacker-controlled file operations. Revisit before
+    # 2026-09-01 or remove when daemonize is replaced.
+    "RUSTSEC-2025-0069",
+    # Transitive through proc-macro-error2 in the compile-time macro stack. It
+    # is not on Fluxheim's runtime request path. Revisit before 2026-09-01 or
+    # remove when upstream dependencies drop it.
+    "RUSTSEC-2026-0173",
+    # Transitive rustls-pemfile remains in the dependency graph even though
+    # Fluxheim's direct key parsing moved to rustls-pki-types::pem::PemObject.
+    # REVIEW: scripts/validate-release-metadata.sh fails if rustls-pemfile
+    # leaves Cargo.lock while this suppression exists. Remove when the
+    # transitive dependency is gone. Next scheduled manual review before
+    # 2026-09-01.
+    "RUSTSEC-2025-0134",
 ]
 
 [database]

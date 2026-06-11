@@ -18,6 +18,13 @@ TCP/UDP routes and it does not ship production UDP/GSLB support yet.
   unlimited setting.
 - Added beta UDP listener/runtime support for `dns-load-balance` and
   `syslog-forward`.
+- Added `response_timeout_secs` for UDP routes. It defaults to `3` seconds and
+  keeps unanswered DNS-style datagrams from occupying route slots for the full
+  idle timeout.
+- Hardened beta UDP forwarding so oversized upstream responses are dropped
+  instead of being forwarded as truncated datagrams.
+- Rate-limited high-volume UDP drop warnings for oversized downstream
+  datagrams and `max_sessions` pressure.
 - Added explicit reserved route modes for future scoped UDP modules:
   `quic-pass-through` and `game-proxy`.
 - Added config validation for duplicate route names, duplicate listeners,
@@ -53,6 +60,9 @@ TCP/UDP routes and it does not ship production UDP/GSLB support yet.
 - No production UDP/GSLB support yet.
 - No generic catchall UDP proxy.
 - No authoritative DNS server or full GSLB control plane.
+- No public-Internet DNS reflector hardening yet. `dns-load-balance` should be
+  bound to loopback or internal interfaces unless the surrounding network
+  provides ingress filtering; response rate limiting remains future work.
 - No QUIC pass-through or game-server UDP session proxying yet.
 - No WAF, VPN/firewall appliance behavior, HTTP/3 ingress, or
   Wasm/iRules/Lua scripting in this release.
