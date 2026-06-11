@@ -29,6 +29,9 @@ TCP/UDP routes and it does not ship production UDP/GSLB support yet.
 - Added `scripts/smoke_udp_proxy.sh`, an optional local smoke that starts
   Fluxheim with a UDP-only config and proves DNS-style response forwarding plus
   syslog-style one-way delivery.
+- Refreshed low-risk dependency and workflow pins: `base64-ng` 1.0.8, `http`
+  1.4.2, manifest `log` 0.4.32, and exact current GitHub Action tags for
+  checkout and Docker image workflows. Pingora was intentionally left unchanged.
 - Kept `udp-proxy` out of the normal `full`, `proxy`, `cache`, `php`, and
   `load-balancer` release profiles until the runtime data plane is added and
   reviewed.

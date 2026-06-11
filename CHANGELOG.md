@@ -26,6 +26,9 @@ behavior when the change improves security or project direction.
   unlimited setting.
 - Add `scripts/smoke_udp_proxy.sh` to prove the beta UDP runtime through the
   Fluxheim binary with local UDP backends.
+- Refresh low-risk dependency and workflow pins: `base64-ng` 1.0.8, `http`
+  1.4.2, manifest `log` 0.4.32, and exact current GitHub Action tags for
+  checkout and Docker image workflows.
 - Keep `udp-proxy` out of the normal full/proxy/load-balancer feature profiles
   until a reviewed runtime exists. Configs with `udp.enabled = true` fail
   clearly unless built with the beta feature.
