@@ -1,12 +1,16 @@
 [package]
 name = "fluxheim"
-version = "1.5.16"
+version = "1.5.17"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
 publish = false
 description = "A modular Rust edge gateway for websites, caching, and load balancing."
 default-run = "fluxheim"
+
+[workspace]
+members = ["crates/fluxheim-common"]
+resolver = "3"
 
 [features]
 default = [
@@ -176,6 +180,7 @@ chrono = { version = "0.4.44", default-features = false, features = ["clock"], o
 clap = { version = "4.6.1", features = ["derive", "env"] }
 env_logger = "0.11.10"
 fastcgi-client = { version = "0.11.1", default-features = false, optional = true }
+fluxheim-common = { path = "crates/fluxheim-common" }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"], optional = true }
 futures = "0.3.32"

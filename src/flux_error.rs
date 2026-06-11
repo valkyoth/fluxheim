@@ -1,88 +1,13 @@
-//! Fluxheim-owned internal error boundary.
-//!
-//! This module gives non-boundary code a typed error surface. Pingora errors
-//! are still produced at Pingora adapter boundaries.
+pub(crate) use fluxheim_common::{FluxError, FluxResult};
 
-use std::io;
-
-pub(crate) type FluxResult<T> = Result<T, FluxError>;
-
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum FluxError {
-    #[error("{context}: {source}")]
-    Io {
-        context: &'static str,
-        #[source]
-        source: io::Error,
-    },
-
-    #[error("{0}")]
-    InvalidInput(&'static str),
-
-    #[error("{0}")]
-    InvalidInputMessage(String),
-
-    #[error("{context}: {detail}")]
-    Timeout {
-        context: &'static str,
-        detail: String,
-    },
-
-    #[error("write PROXY protocol header: {0}")]
-    WriteProxyHeader(#[source] io::Error),
+#[cfg(feature = "ingress")]
+pub(crate) trait FluxErrorPingoraExt {
+    fn into_pingora(self, kind: pingora::ErrorType) -> Box<pingora::Error>;
 }
 
-impl FluxError {
-    pub(crate) fn io(context: &'static str, source: io::Error) -> Self {
-        Self::Io { context, source }
-    }
-
-    pub(crate) fn invalid_input(detail: impl Into<String>) -> Self {
-        Self::InvalidInputMessage(detail.into())
-    }
-
-    pub(crate) fn timeout(context: &'static str, detail: impl Into<String>) -> Self {
-        Self::Timeout {
-            context,
-            detail: detail.into(),
-        }
-    }
-
-    pub(crate) fn write_proxy_header(source: io::Error) -> Self {
-        Self::WriteProxyHeader(source)
-    }
-
-    pub(crate) fn into_io(self) -> io::Error {
-        match self {
-            Self::Io { context, source } => {
-                let kind = source.kind();
-                io::Error::new(kind, Self::Io { context, source })
-            }
-            Self::InvalidInput(_) | Self::InvalidInputMessage(_) => {
-                io::Error::new(io::ErrorKind::InvalidInput, self)
-            }
-            Self::Timeout { .. } => io::Error::new(io::ErrorKind::TimedOut, self),
-            Self::WriteProxyHeader(source) => {
-                let kind = source.kind();
-                io::Error::new(kind, Self::WriteProxyHeader(source))
-            }
-        }
-    }
-
-    #[cfg(all(
-        test,
-        any(all(feature = "web", feature = "proxy"), feature = "compression-gzip")
-    ))]
-    pub(crate) fn io_kind(&self) -> Option<io::ErrorKind> {
-        match self {
-            Self::Io { source, .. } => Some(source.kind()),
-            Self::WriteProxyHeader(source) => Some(source.kind()),
-            Self::InvalidInput(_) | Self::InvalidInputMessage(_) | Self::Timeout { .. } => None,
-        }
-    }
-
-    #[cfg(feature = "ingress")]
-    pub(crate) fn into_pingora(self, kind: pingora::ErrorType) -> Box<pingora::Error> {
+#[cfg(feature = "ingress")]
+impl FluxErrorPingoraExt for FluxError {
+    fn into_pingora(self, kind: pingora::ErrorType) -> Box<pingora::Error> {
         let description = self.to_string();
         pingora::Error::because(kind, description, self)
     }

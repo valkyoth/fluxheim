@@ -337,8 +337,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.5.16-wolfi`, `v1.5.16-cache-wolfi`, `v1.5.16-proxy-wolfi`,
-`v1.5.16-load-balancer-wolfi`, and `v1.5.16-php-wolfi`.
+`v1.5.17-wolfi`, `v1.5.17-cache-wolfi`, `v1.5.17-proxy-wolfi`,
+`v1.5.17-load-balancer-wolfi`, and `v1.5.17-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
@@ -447,9 +447,11 @@ release.
   operations: runtime pool/member mutation, priority groups, persistence,
   slow-start, richer active/adaptive health checks, circuit breaking, queue and
   overflow behavior, locality/failure-domain policy, richer selection
-  algorithms, admin/audit visibility, migration fixtures, and bounded UDP/GSLB
-  beta exploration. It is not a production WAF, full GSLB/DNS appliance,
-  generic UDP proxy, or iRules-compatible scripting release. See
+  algorithms, admin/audit visibility, migration fixtures, bounded UDP/GSLB
+  beta exploration, and the workspace/shared-crate foundation that prepares the
+  config, load-balancer, cache, web, PHP-FPM, and future extension crates. It
+  is not a production WAF, full GSLB/DNS appliance, generic UDP proxy, or
+  iRules-compatible scripting release. See
   [Load Balancer Migration Notes](docs/load-balancer-migration.md) for HAProxy,
   nginx, and F5 pool mappings.
 

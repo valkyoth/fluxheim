@@ -6,7 +6,7 @@ use pingora::cache::{CacheKey as PingoraCacheKey, CachePhase, NoCacheReason};
 use pingora::prelude::Result;
 use pingora::{Error, ErrorType};
 
-use crate::flux_error::{FluxError, FluxResult};
+use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 
 pub(crate) const MAX_VARY_FIELDS: usize = 16;
 const MAX_VARY_HEADER_BYTES: usize = 2048;

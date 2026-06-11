@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.16
+Version:        1.5.17
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu Jun 11 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.17-1
+- Start the workspace and shared-crate foundation line.
+- Add crates/fluxheim-common for shared FluxError/FluxResult and path-safety
+  validation while preserving root compatibility adapters.
+- Keep RPM feature set, binaries, config syntax, and runtime behavior
+  unchanged.
+
 * Wed Jun 10 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.16-1
 - Start the UDP/GSLB exploration line with a separate beta [udp] config
   namespace, udp-proxy feature gate, and scoped DNS/syslog UDP runtime.

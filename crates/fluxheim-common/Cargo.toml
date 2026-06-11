@@ -1,0 +1,11 @@
+[package]
+name = "fluxheim-common"
+version = "1.5.17"
+edition = "2024"
+rust-version = "1.96"
+license = "EUPL-1.2"
+publish = false
+description = "Shared internal Fluxheim primitives."
+
+[dependencies]
+thiserror = "2.0.18"

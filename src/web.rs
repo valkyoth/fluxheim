@@ -11,7 +11,7 @@ use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode
 
 use crate::config::WebConfig;
 #[cfg(feature = "proxy")]
-use crate::flux_error::{FluxError, FluxResult};
+use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 #[cfg(feature = "proxy")]
 use crate::http_types::PingoraResponseHeader as ResponseHeader;
 

@@ -7,6 +7,21 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.17 - 2026-06-11
+
+### Changed
+
+- Start the workspace and shared-crate foundation line.
+- Convert the repository into a Cargo workspace with `crates/fluxheim-common`
+  as the first internal shared crate.
+- Move the Fluxheim-owned `FluxError`/`FluxResult` boundary into
+  `fluxheim-common` while keeping the root `crate::flux_error` adapter for
+  existing runtime code.
+- Move shared forward-path safety validation into `fluxheim-common` while
+  keeping the root `crate::path_safety` adapter for existing proxy/cache code.
+- Keep all feature profiles, binaries, release scripts, RPM/container behavior,
+  config syntax, and runtime behavior unchanged in this first workspace slice.
+
 ## 1.5.16 - 2026-06-10
 
 ### Changed

@@ -8,7 +8,7 @@ use pingora::prelude::{HttpPeer, Result};
 use tokio::io::AsyncWriteExt as _;
 
 use crate::config::UpstreamProxyProtocol;
-use crate::flux_error::{FluxError, FluxResult};
+use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 
 pub(crate) fn apply_upstream_proxy_protocol(
     peer: &mut HttpPeer,

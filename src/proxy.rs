@@ -82,6 +82,7 @@ use crate::edge_policy::{
     InFlightPermit, RateLimitDecision, RuntimeAccessPolicy, RuntimeConcurrencyLimit,
     RuntimeRateLimit, TrustedProxy, parse_trusted_proxies,
 };
+use crate::flux_error::FluxErrorPingoraExt;
 #[cfg(any(feature = "cache", feature = "php-fpm", feature = "web"))]
 use crate::flux_error::{FluxError, FluxResult};
 #[cfg(feature = "load-balancer")]

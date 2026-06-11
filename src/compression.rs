@@ -12,7 +12,7 @@ use flate2::{Compression, write::GzEncoder};
 use pingora::ErrorType;
 use pingora::prelude::Result;
 
-use crate::flux_error::{FluxError, FluxResult};
+use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 
 #[cfg(any(
     feature = "compression-brotli",
