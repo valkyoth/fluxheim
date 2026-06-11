@@ -26,6 +26,10 @@ behavior when the change improves security or project direction.
 - Add a release-gate freshness check for compatible non-Pingora crate updates
   and strengthen release metadata validation for release notes, README,
   build/container docs, and RPM version alignment.
+- Copy workspace crates into all container build stages so release images build
+  correctly after the workspace split.
+- Make `scripts/stable_release_gate.sh release` require the root image smoke
+  plus representative Debian and Alpine variant image smokes before tagging.
 - Fix the OpenSSL FIPS support build-script hex literal grouping so Rust 1.96
   clippy accepts the vendored support crate under `-D warnings`.
 - Keep all feature profiles, binaries, release scripts, RPM/container behavior,

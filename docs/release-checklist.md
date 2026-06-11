@@ -170,9 +170,22 @@ scripts/validate-owasp-top10-2025.sh run
 ```
 
 The stable gate includes the promoted cache and observability smoke tests for
-the `1.2` line. Optional gates below still cover slower or environment-specific
-checks such as TLS backend matrices, load testing, fuzz target compilation, and
-Podman image smoke tests.
+the `1.2` line. In `release` mode it also requires a local container image
+smoke before tagging: the root `Containerfile` plus representative Debian and
+Alpine variant builds. This catches workspace, packaging, and image build
+context mistakes before an immutable tag is pushed.
+
+If a release builder cannot run Podman, do not skip this silently. Run the
+image gate on another builder and attach the evidence before tagging. The
+emergency-only bypass is:
+
+```bash
+FLUXHEIM_SKIP_IMAGE_GATE=1 scripts/stable_release_gate.sh release
+```
+
+Optional gates below still cover slower or environment-specific checks such as
+TLS backend matrices, load testing, fuzz target compilation, and full Podman
+variant image smoke tests.
 
 For release-candidate validation, run the deeper local gate. It enables the TLS
 backend matrix, OpenSSL FIPS-capable validation, rustls/AWS-LC FIPS-capable
@@ -202,7 +215,7 @@ FLUXHEIM_GATE_TLS_SCAN=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_LOAD=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_FRAMING=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_FUZZ_CHECK=1 scripts/stable_release_gate.sh release
-FLUXHEIM_GATE_PODMAN=1 FLUXHEIM_GATE_PODMAN_VARIANTS=1 scripts/stable_release_gate.sh release
+FLUXHEIM_GATE_IMAGE_VARIANTS="debian alpine wolfi suse-micro" scripts/stable_release_gate.sh release
 ```
 
 For release builders that are expected to have a working OpenSSL FIPS provider,

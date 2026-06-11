@@ -36,6 +36,7 @@ scripts/reproducible_build_check.sh
 scripts/validate-release-metadata.sh
 scripts/validate-owasp-top10-2025.sh check
 scripts/podman_smoke.sh
+FLUXHEIM_CONTAINER_VARIANTS="debian alpine" scripts/podman_smoke_variants.sh
 ```
 
 For PHP-FPM releases, also run:
@@ -62,11 +63,18 @@ For stable or release-candidate builds, prefer the stable gate:
 scripts/stable_release_gate.sh release
 ```
 
-For the `1.3` line this stable gate includes the proxy cache and local
-observability smoke suites, plus compile and packaged-config checks for the
-published full/default, cache, and proxy container image profiles. That keeps
-cache, Prometheus/OpenTelemetry basics, and focused image feature wiring
-covered by the same command used for release evidence.
+In `release` mode this stable gate is intentionally tag-blocking for container
+images: it runs the root image smoke plus representative Debian and Alpine
+variant image smokes before a tag should be pushed. Use
+`FLUXHEIM_GATE_IMAGE_VARIANTS="debian alpine wolfi suse-micro"` when the release
+needs full local variant evidence. Use `FLUXHEIM_SKIP_IMAGE_GATE=1` only when
+equivalent image evidence has already been collected on another builder.
+
+For the `1.3` and later lines this stable gate includes the proxy cache and
+local observability smoke suites, plus compile and packaged-config checks for
+the published image profiles. That keeps cache, Prometheus/OpenTelemetry
+basics, and focused image feature wiring covered by the same command used for
+release evidence.
 
 If `cargo audit` reports a known upstream advisory that cannot be fixed in this
 repository yet, record it explicitly in the release notes with the package,

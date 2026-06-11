@@ -123,8 +123,15 @@ else
     echo "stable release gate: skipping fuzz target compile check; set FLUXHEIM_GATE_FUZZ_CHECK=1 to enable"
 fi
 
-if [ "${FLUXHEIM_GATE_PODMAN:-0}" = "1" ]; then
-    echo "stable release gate: Podman smoke"
+if [ "$mode" = "release" ] && [ "${FLUXHEIM_SKIP_IMAGE_GATE:-0}" != "1" ]; then
+    echo "stable release gate: required Podman image smoke"
+    scripts/podman_smoke.sh
+    FLUXHEIM_CONTAINER_VARIANTS="${FLUXHEIM_GATE_IMAGE_VARIANTS:-debian alpine}" \
+        scripts/podman_smoke_variants.sh
+elif [ "$mode" = "release" ]; then
+    echo "stable release gate: skipping required image smoke because FLUXHEIM_SKIP_IMAGE_GATE=1" >&2
+elif [ "${FLUXHEIM_GATE_PODMAN:-0}" = "1" ]; then
+    echo "stable release gate: optional Podman smoke"
     scripts/podman_smoke.sh
     if [ "${FLUXHEIM_GATE_PODMAN_VARIANTS:-0}" = "1" ]; then
         scripts/podman_smoke_variants.sh

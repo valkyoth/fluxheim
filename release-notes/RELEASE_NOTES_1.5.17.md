@@ -25,6 +25,10 @@ PHP-FPM, Wasm, and runtime extractions smaller and safer.
 - Added a release-gate crate freshness check for compatible non-Pingora updates
   and stricter release metadata checks for release notes, README,
   build/container docs, and RPM version alignment.
+- Copied workspace crates into all container build stages so release images
+  build correctly after the workspace split.
+- Made `scripts/stable_release_gate.sh release` require the root image smoke
+  plus representative Debian and Alpine variant image smokes before tagging.
 - Fixed the vendored OpenSSL FIPS support build script so Rust 1.96 clippy
   accepts the crate under release `-D warnings` checks.
 
