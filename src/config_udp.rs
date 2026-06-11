@@ -99,12 +99,21 @@ pub struct UdpRouteConfig {
     pub max_session_secs: Option<u64>,
     #[serde(default = "default_udp_max_datagram_bytes")]
     pub max_datagram_bytes: usize,
-    #[serde(default)]
+    #[serde(default = "default_udp_max_sessions")]
     pub max_sessions: usize,
 }
 
 impl UdpRouteConfig {
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+        if matches!(
+            self.mode,
+            UdpRouteMode::QuicPassThrough | UdpRouteMode::GameProxy
+        ) {
+            return Err(ConfigError::InvalidUdpProxyPolicy {
+                field: "udp.routes.mode",
+                reason: "quic-pass-through and game-proxy are reserved until UDP session affinity is implemented",
+            });
+        }
         if self.name.is_empty() || self.name.len() > MAX_UDP_ROUTE_NAME_BYTES {
             return Err(ConfigError::InvalidUdpProxyPolicy {
                 field: "udp.routes.name",
@@ -241,6 +250,10 @@ const fn default_udp_max_datagram_bytes() -> usize {
     4096
 }
 
+const fn default_udp_max_sessions() -> usize {
+    4096
+}
+
 #[cfg(test)]
 mod tests {
     use super::{UdpConfig, UdpRouteConfig, UdpRouteMode};
@@ -312,5 +325,32 @@ mod tests {
             route.validate(),
             Err(ConfigError::DuplicateUdpUpstream { .. })
         ));
+    }
+
+    #[test]
+    fn udp_route_rejects_reserved_session_modes() {
+        let mut route = route();
+        route.mode = UdpRouteMode::QuicPassThrough;
+        assert!(matches!(
+            route.validate(),
+            Err(ConfigError::InvalidUdpProxyPolicy {
+                field: "udp.routes.mode",
+                ..
+            })
+        ));
+    }
+
+    #[cfg(feature = "udp-proxy")]
+    #[test]
+    fn udp_enabled_allows_empty_http_listeners() {
+        let mut config = crate::config::Config::default();
+        config.server.listen.clear();
+        config.server.tls_listen.clear();
+        config.udp = UdpConfig {
+            enabled: true,
+            routes: vec![route()],
+        };
+
+        config.validate().unwrap();
     }
 }

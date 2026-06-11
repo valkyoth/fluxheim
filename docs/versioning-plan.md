@@ -3700,9 +3700,9 @@ the exception while the cache server is being completed as a focused sequence:
   metrics, rootless/container-network behavior, and clear non-goals. Do not
   turn this into a generic catchall UDP or authoritative-DNS platform, and do
   not add WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in
-  this release. The first slice is the beta `[udp]` config boundary and
-  `udp-proxy` feature gate only; production profiles must not enable it until
-  a reviewed UDP listener/session runtime is present.
+  this release. The first slice is the beta `[udp]` config boundary,
+  `udp-proxy` feature gate, and scoped DNS/syslog UDP runtime only; production
+  profiles must not enable it until the listener/session runtime is promoted.
 - `v1.5.17`: workspace and shared-crate foundation line. Stop at converting
   Fluxheim to a Cargo workspace while keeping the published binary/package
   behavior unchanged, and extracting only low-risk shared code into one or more

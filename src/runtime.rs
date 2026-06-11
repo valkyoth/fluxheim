@@ -125,6 +125,12 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         server.add_service(stream_service);
     }
 
+    #[cfg(feature = "udp-proxy")]
+    for udp_service in crate::udp_proxy::udp_services_from_config(&config)? {
+        log::info!("UDP proxy service enabled");
+        server.add_service(udp_service);
+    }
+
     if let Some(admin_services) = crate::admin::admin_services_from_config(&config, admin_proxy)? {
         log::info!("admin control plane enabled on {}", config.admin.listen);
         if let Some(watchdog) = admin_services.watchdog {

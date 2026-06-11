@@ -3,9 +3,10 @@
 Fluxheim 1.5.16 starts the UDP/GSLB exploration line.
 
 This release adds the first reviewed boundary for UDP work: a separate beta
-`[udp]` configuration namespace and an opt-in `udp-proxy` feature gate. It does
-not turn TCP stream routes into mixed TCP/UDP routes and it does not ship a
-production UDP listener yet.
+`[udp]` configuration namespace, an opt-in `udp-proxy` feature gate, and a
+small scoped UDP runtime for DNS-style request/response forwarding and
+syslog-style one-way forwarding. It does not turn TCP stream routes into mixed
+TCP/UDP routes and it does not ship production UDP/GSLB support yet.
 
 ## What Changed
 
@@ -13,13 +14,18 @@ production UDP listener yet.
 - Added `[udp]` with `enabled` and `routes` fields.
 - Added `[[udp.routes]]` with bounded route mode, listeners, upstreams,
   optional weights, optional aliases, idle/session timeouts, datagram caps, and
-  session caps.
-- Added explicit route modes for future scoped UDP modules:
-  `dns-load-balance`, `syslog-forward`, `quic-pass-through`, and `game-proxy`.
+  session caps. `max_sessions` defaults to `4096`; `0` remains an explicit
+  unlimited setting.
+- Added beta UDP listener/runtime support for `dns-load-balance` and
+  `syslog-forward`.
+- Added explicit reserved route modes for future scoped UDP modules:
+  `quic-pass-through` and `game-proxy`.
 - Added config validation for duplicate route names, duplicate listeners,
   duplicate upstreams, invalid listener/upstream authorities, invalid timeout
   values, oversized datagrams, excessive session caps, and invalid
   weight/alias lists.
+- Added unit coverage with real local UDP sockets for request/response and
+  one-way forwarding behavior.
 - Kept `udp-proxy` out of the normal `full`, `proxy`, `cache`, `php`, and
   `load-balancer` release profiles until the runtime data plane is added and
   reviewed.
@@ -33,12 +39,15 @@ production UDP listener yet.
   normal production builds.
 - The UDP namespace is intentionally separate from `[stream]`; TCP stream
   routing remains TCP-only.
+- UDP-only beta configs can validate without HTTP/TLS listeners when built
+  with `udp-proxy`.
 
 ## Not Included
 
-- No production UDP socket/listener runtime yet.
+- No production UDP/GSLB support yet.
 - No generic catchall UDP proxy.
 - No authoritative DNS server or full GSLB control plane.
+- No QUIC pass-through or game-server UDP session proxying yet.
 - No WAF, VPN/firewall appliance behavior, HTTP/3 ingress, or
   Wasm/iRules/Lua scripting in this release.
 

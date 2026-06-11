@@ -156,7 +156,7 @@ fi
 %changelog
 * Wed Jun 10 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.16-1
 - Start the UDP/GSLB exploration line with a separate beta [udp] config
-  namespace and udp-proxy feature gate.
+  namespace, udp-proxy feature gate, and scoped DNS/syslog UDP runtime.
 - Keep UDP runtime support out of production profiles until scoped listener
   and session semantics are reviewed.
 

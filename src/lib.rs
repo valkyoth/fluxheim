@@ -109,6 +109,8 @@ pub mod tls;
 pub mod trace_context;
 #[cfg(feature = "traffic-mirror")]
 mod traffic_mirror;
+#[cfg(feature = "udp-proxy")]
+mod udp_proxy;
 #[cfg(feature = "proxy")]
 mod upstream_tls;
 #[cfg(feature = "web")]

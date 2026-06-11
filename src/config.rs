@@ -333,8 +333,10 @@ impl Config {
         &self,
         validate_runtime_paths: bool,
     ) -> Result<(), ConfigError> {
-        self.server
-            .validate_with_runtime_path_validation(validate_runtime_paths, self.stream.enabled)?;
+        self.server.validate_with_runtime_path_validation(
+            validate_runtime_paths,
+            self.stream.enabled || self.udp.enabled,
+        )?;
         self.admin.validate()?;
         self.metrics.validate()?;
         self.tracing.validate()?;
