@@ -24,6 +24,8 @@ behavior when the change improves security or project direction.
   datagram forwarding starts.
 - Default UDP route `max_sessions` to `4096`; `0` remains an explicit
   unlimited setting.
+- Add `scripts/smoke_udp_proxy.sh` to prove the beta UDP runtime through the
+  Fluxheim binary with local UDP backends.
 - Keep `udp-proxy` out of the normal full/proxy/load-balancer feature profiles
   until a reviewed runtime exists. Configs with `udp.enabled = true` fail
   clearly unless built with the beta feature.

@@ -26,6 +26,9 @@ TCP/UDP routes and it does not ship production UDP/GSLB support yet.
   weight/alias lists.
 - Added unit coverage with real local UDP sockets for request/response and
   one-way forwarding behavior.
+- Added `scripts/smoke_udp_proxy.sh`, an optional local smoke that starts
+  Fluxheim with a UDP-only config and proves DNS-style response forwarding plus
+  syslog-style one-way delivery.
 - Kept `udp-proxy` out of the normal `full`, `proxy`, `cache`, `php`, and
   `load-balancer` release profiles until the runtime data plane is added and
   reviewed.

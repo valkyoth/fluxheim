@@ -159,6 +159,7 @@ cargo check --no-default-features --features profile-full,acme-client,metrics,me
 cargo check --no-default-features --features profile-cache-edge,acme-client
 cargo check --no-default-features --features profile-proxy-edge,acme-client
 cargo check --no-default-features --features profile-load-balancer-edge,acme-client
+cargo check --no-default-features --features udp-proxy
 expect_cargo_check_failure "privacy-mode" "privacy-mode cannot be combined with the cache feature"
 expect_cargo_check_failure_no_defaults "profile-privacy,metrics" "privacy-mode cannot be combined with metrics"
 expect_feature_validation_failure "profile-privacy,metrics" "privacy-mode cannot be combined with metrics"
