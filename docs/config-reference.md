@@ -1998,10 +1998,11 @@ OpenBao endpoint must be HTTPS unless it is loopback HTTP, and the token must
 come from exactly one safe `token_file` or `token_credential` source. The
 configured key id plus combined cache key are passed as associated data, so a
 stored ciphertext is bound to the cache object identity. The default local-key
-provider does not require OpenBao. OpenBao Transit accepts a single plaintext
-value per `encrypt` request, so Fluxheim bounds concurrent OpenBao encrypted
-commit heap usage and may refuse a cache fill instead of buffering too many
-large plaintext objects at once.
+provider does not require OpenBao. Transit calls do not follow HTTP redirects,
+and Transit JSON responses are read with an explicit size limit before parsing.
+OpenBao Transit accepts a single plaintext value per `encrypt` request, so
+Fluxheim bounds concurrent OpenBao encrypted commit heap usage and may refuse a
+cache fill instead of buffering too many large plaintext objects at once.
 
 In FIPS/ISO-required mode, OpenBao Transit is further restricted to local
 numeric loopback HTTP (`http://127.0.0.1` or `http://[::1]`). Remote OpenBao

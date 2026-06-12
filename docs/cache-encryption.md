@@ -238,6 +238,10 @@ path "transit/decrypt/fluxheim-cache" {
 
 Fluxheim accepts HTTPS OpenBao URLs, plus loopback HTTP URLs for local testing.
 Non-loopback plaintext HTTP OpenBao addresses are rejected.
+Transit encrypt/decrypt calls do not follow HTTP redirects, and Transit JSON
+responses are read through a bounded buffer before parsing so a compromised or
+misconfigured OpenBao endpoint cannot stream unbounded response bodies into the
+cache process.
 
 ## Verifying Runtime Behavior
 

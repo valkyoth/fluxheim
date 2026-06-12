@@ -66,6 +66,10 @@ const DISK_CACHE_ENCRYPTED_STREAM_CHUNK_OVERHEAD_LIMIT: u64 = 80;
 #[cfg(feature = "proxy")]
 const DISK_CACHE_ENCRYPTED_HEAP_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
 #[cfg(feature = "proxy")]
+const OPENBAO_TRANSIT_RESPONSE_OVERHEAD_BYTES: u64 = 4096;
+#[cfg(feature = "proxy")]
+const OPENBAO_TRANSIT_MAX_RESPONSE_BYTES: u64 = DISK_CACHE_ENCRYPTED_HEAP_BUDGET_BYTES;
+#[cfg(feature = "proxy")]
 const DISK_CACHE_INDEX_MAGIC_V1: &str = "FLUXHEIM-DISK-INDEX-v1";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_INDEX_FILENAME: &str = ".fluxheim-disk-index-v1";
@@ -8297,19 +8301,23 @@ fn openbao_transit_encrypt(
     plaintext: &[u8],
     aad: &[u8],
 ) -> std::io::Result<String> {
+    let plaintext = base64_standard_encode(plaintext)?;
+    let associated_data = base64_standard_encode(aad)?;
     let request = serde_json::json!({
-        "plaintext": base64_standard_encode(plaintext)?,
-        "associated_data": base64_standard_encode(aad)?,
+        "plaintext": plaintext,
+        "associated_data": associated_data,
     });
-    let mut response = ureq::post(openbao_transit_url(address, mount, "encrypt", key_name))
+    let mut response = openbao_transit_agent()
+        .post(openbao_transit_url(address, mount, "encrypt", key_name))
         .header("X-Vault-Token", token)
         .header("Accept", "application/json")
         .send_json(request)
         .map_err(|error| openbao_io_error("encrypt", error))?;
-    let value: serde_json::Value = response
-        .body_mut()
-        .read_json()
-        .map_err(|error| openbao_io_error("encrypt response", error))?;
+    let value = openbao_transit_read_json(
+        &mut response,
+        "encrypt response",
+        openbao_transit_response_limit(plaintext.len().max(associated_data.len()) as u64),
+    )?;
     value
         .pointer("/data/ciphertext")
         .and_then(serde_json::Value::as_str)
@@ -8332,19 +8340,22 @@ fn openbao_transit_decrypt(
     ciphertext: &str,
     aad: &[u8],
 ) -> std::io::Result<Vec<u8>> {
+    let associated_data = base64_standard_encode(aad)?;
     let request = serde_json::json!({
         "ciphertext": ciphertext,
-        "associated_data": base64_standard_encode(aad)?,
+        "associated_data": associated_data,
     });
-    let mut response = ureq::post(openbao_transit_url(address, mount, "decrypt", key_name))
+    let mut response = openbao_transit_agent()
+        .post(openbao_transit_url(address, mount, "decrypt", key_name))
         .header("X-Vault-Token", token)
         .header("Accept", "application/json")
         .send_json(request)
         .map_err(|error| openbao_io_error("decrypt", error))?;
-    let value: serde_json::Value = response
-        .body_mut()
-        .read_json()
-        .map_err(|error| openbao_io_error("decrypt response", error))?;
+    let value = openbao_transit_read_json(
+        &mut response,
+        "decrypt response",
+        openbao_transit_response_limit(ciphertext.len().max(associated_data.len()) as u64),
+    )?;
     let plaintext = value
         .pointer("/data/plaintext")
         .and_then(serde_json::Value::as_str)
@@ -8362,6 +8373,49 @@ fn openbao_transit_decrypt(
                 "OpenBao Transit decrypt response plaintext is not valid base64",
             )
         })
+}
+
+#[cfg(feature = "proxy")]
+fn openbao_transit_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .into()
+}
+
+#[cfg(feature = "proxy")]
+fn openbao_transit_response_limit(input_bytes: u64) -> u64 {
+    input_bytes
+        .saturating_mul(2)
+        .saturating_add(OPENBAO_TRANSIT_RESPONSE_OVERHEAD_BYTES)
+        .min(OPENBAO_TRANSIT_MAX_RESPONSE_BYTES)
+}
+
+#[cfg(feature = "proxy")]
+fn openbao_transit_read_json(
+    response: &mut ureq::http::Response<ureq::Body>,
+    operation: &str,
+    max_response_bytes: u64,
+) -> std::io::Result<serde_json::Value> {
+    let body = response
+        .body_mut()
+        .with_config()
+        .limit(max_response_bytes.saturating_add(1))
+        .read_to_vec()
+        .map_err(|error| openbao_io_error(operation, error))?;
+    if body.len() as u64 > max_response_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("OpenBao Transit {operation} exceeded response size limit"),
+        ));
+    }
+    serde_json::from_slice(&body).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("OpenBao Transit {operation} returned invalid JSON: {error}"),
+        )
+    })
 }
 
 #[cfg(feature = "proxy")]
@@ -11863,6 +11917,83 @@ mod tests {
     }
 
     #[cfg(feature = "proxy")]
+    #[test]
+    fn openbao_transit_rejects_redirects() {
+        let openbao_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let redirect_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        redirect_listener
+            .set_nonblocking(true)
+            .expect("configure redirect listener");
+        let address = format!("http://{}", openbao_listener.local_addr().unwrap());
+        let redirect_url = format!(
+            "http://{}/internal",
+            redirect_listener.local_addr().unwrap()
+        );
+        let server = std::thread::spawn(move || {
+            answer_openbao_redirect(
+                &openbao_listener,
+                "/v1/transit/cache/encrypt/fluxheim-cache",
+                &redirect_url,
+            )
+        });
+
+        let error = super::openbao_transit_encrypt(
+            &address,
+            "transit/cache",
+            "fluxheim-cache",
+            "test-token",
+            b"secret-body",
+            b"cache-aad",
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("invalid JSON")
+                || error.to_string().contains("did not include a ciphertext"),
+            "{error}"
+        );
+        server.join().unwrap();
+        assert!(
+            redirect_listener.accept().is_err(),
+            "OpenBao Transit client followed a redirect"
+        );
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn openbao_transit_rejects_oversized_response_body() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        let response_body = "x".repeat(
+            super::openbao_transit_response_limit("c2VjcmV0LWJvZHk=".len() as u64) as usize + 1,
+        );
+        let server = std::thread::spawn(move || {
+            answer_openbao_request(
+                &listener,
+                "/v1/transit/cache/encrypt/fluxheim-cache",
+                &response_body,
+            )
+        });
+
+        let error = super::openbao_transit_encrypt(
+            &address,
+            "transit/cache",
+            "fluxheim-cache",
+            "test-token",
+            b"secret-body",
+            b"cache-aad",
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("exceeded response size limit")
+                || error.to_string().contains("larger than request limit"),
+            "{error}"
+        );
+        server.join().unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
     fn answer_openbao_request(
         listener: &std::net::TcpListener,
         expected_path: &str,
@@ -11908,6 +12039,43 @@ mod tests {
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
             response_body.len(),
             response_body
+        )
+        .unwrap();
+        request
+    }
+
+    #[cfg(feature = "proxy")]
+    fn answer_openbao_redirect(
+        listener: &std::net::TcpListener,
+        expected_path: &str,
+        location: &str,
+    ) -> String {
+        use std::io::{Read as _, Write as _};
+
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        let mut buffer = Vec::new();
+        let mut scratch = [0_u8; 1024];
+        loop {
+            let read = stream.read(&mut scratch).unwrap();
+            assert!(read > 0, "mock OpenBao connection closed early");
+            buffer.extend_from_slice(&scratch[..read]);
+            if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(buffer).unwrap();
+        let normalized_request = request.to_lowercase();
+        assert!(
+            normalized_request
+                .starts_with(&format!("post {expected_path} http/1.1").to_lowercase()),
+            "unexpected OpenBao request: {request}"
+        );
+        write!(
+            stream,
+            "HTTP/1.1 302 Found\r\nlocation: {location}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
         )
         .unwrap();
         request
