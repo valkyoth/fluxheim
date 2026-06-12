@@ -12203,6 +12203,58 @@ fn conf_d_server_trusted_proxies_reject_global_replacement_attempt() {
 }
 
 #[test]
+fn conf_d_proxy_fragment_extends_without_replacing_main_trust_policy() {
+    let dir = TestDir::new("config-file-with-conf-d-proxy-fragment");
+    fs::create_dir_all(dir.child("conf.d")).unwrap();
+    fs::write(
+        dir.child("fluxheim.toml"),
+        r#"
+            include_conf_d = true
+
+            [proxy]
+            upstream = "origin.example.test:443"
+            upstream_tls = true
+            upstream_sni = "origin.example.test"
+            upstream_verify_cert = true
+            upstream_verify_hostname = true
+
+            [proxy.auth_request]
+            enabled = true
+            url = "https://auth.example.test/check"
+            "#,
+    )
+    .unwrap();
+    fs::write(
+        dir.child("conf.d/20-proxy-timeouts.toml"),
+        r#"
+            [proxy]
+            connect_timeout_secs = 5
+            "#,
+    )
+    .unwrap();
+
+    let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+    assert_eq!(
+        config.proxy.upstream.as_deref(),
+        Some("origin.example.test:443")
+    );
+    assert!(config.proxy.upstream_tls);
+    assert_eq!(
+        config.proxy.upstream_sni.as_deref(),
+        Some("origin.example.test")
+    );
+    assert!(config.proxy.upstream_verify_cert);
+    assert!(config.proxy.upstream_verify_hostname);
+    assert!(config.proxy.auth_request.enabled);
+    assert_eq!(
+        config.proxy.auth_request.url.as_deref(),
+        Some("https://auth.example.test/check")
+    );
+    assert_eq!(config.proxy.connect_timeout_secs, Some(5));
+}
+
+#[test]
 fn conf_d_parse_error_reports_source_file() {
     let dir = TestDir::new("config-file-with-bad-conf-d");
     fs::create_dir_all(dir.child("conf.d")).unwrap();

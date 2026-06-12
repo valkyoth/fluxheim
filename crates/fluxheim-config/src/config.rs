@@ -90,6 +90,7 @@ pub use crate::config_php::{
     PhpConfig, PhpFpmConfig, PhpFpmMode, PhpFpmProcessManager, PhpPathInfoMode, PhpPreset,
     PhpRuntime, PhpStderrLogLevel, PhpTryFilesMode,
 };
+use crate::config_proxy::ProxyConfigFragment;
 pub use crate::config_proxy::{
     AuthRequestConfig, ProxyConfig, ProxyErrorPageConfig, TrafficMirrorConfig, UpstreamHttpVersion,
     UpstreamProxyProtocol,
@@ -299,7 +300,7 @@ impl Config {
             self.tls.merge(tls);
         }
         if let Some(proxy) = fragment.proxy {
-            self.proxy = proxy;
+            self.proxy.merge(proxy);
         }
         if let Some(compression) = fragment.compression {
             self.compression = compression;
@@ -675,7 +676,7 @@ struct ConfigFragment {
     #[serde(default)]
     tls: Option<TlsConfigFragment>,
     #[serde(default)]
-    proxy: Option<ProxyConfig>,
+    proxy: Option<ProxyConfigFragment>,
     #[serde(default)]
     compression: Option<CompressionConfig>,
     #[serde(default)]

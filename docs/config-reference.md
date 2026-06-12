@@ -44,6 +44,10 @@ When multiple fragments set `server.trusted_proxies`, Fluxheim extends the
 trusted-proxy list and deduplicates exact entries instead of replacing the
 earlier list. This keeps a later fragment from silently discarding the main
 config's client-IP trust boundary.
+When multiple fragments set `[proxy]`, Fluxheim applies field-level merge
+semantics. A later proxy fragment that sets a timeout or buffer setting does
+not replace the earlier upstream, TLS verification, authentication, mirror, or
+load-balancer policy.
 
 Relative filesystem paths are resolved from the config file directory.
 Config sources must be real TOML files or real directories. Fluxheim rejects a

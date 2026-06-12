@@ -65,6 +65,9 @@ during the v1.5.19 review cycle.
   `server.trusted_proxies` fragments instead of replacing the main list, and by
   rejecting catch-all or near-global trusted-proxy ranges such as `0.0.0.0/0`
   and `::/0`.
+- Hardened split-config proxy handling by applying field-level `[proxy]`
+  fragment merges so a later timeout-only proxy fragment cannot silently clear
+  upstream TLS verification, auth request, mirror, or load-balancer policy.
 
 ## What Changed
 
