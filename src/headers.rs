@@ -737,13 +737,16 @@ fn rewrite_set_cookie_value(
         if index > 0 {
             rewritten.push(';');
         }
-        if let Some(next) =
-            rewrite_cookie_attribute(segment, "domain", &rewrite.cookie_domain, rewrite_domain)
-        {
+        if let Some(next) = rewrite_cookie_attribute(
+            segment,
+            "domain",
+            &rewrite.cookie_domain,
+            rewrite_cookie_domain,
+        ) {
             rewritten.push_str(&next);
             changed = true;
         } else if let Some(next) =
-            rewrite_cookie_attribute(segment, "path", &rewrite.cookie_path, rewrite_header_prefix)
+            rewrite_cookie_attribute(segment, "path", &rewrite.cookie_path, rewrite_cookie_path)
         {
             rewritten.push_str(&next);
             changed = true;
@@ -759,13 +762,17 @@ fn rewrite_cookie_attribute(
     segment: &str,
     attribute: &str,
     rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
-    rewrite_value: fn(&str, &[crate::config::ResponseHeaderRewriteRuleConfig]) -> Option<String>,
+    rewrite_value: fn(
+        CookieAttributeValue<'_>,
+        &[crate::config::ResponseHeaderRewriteRuleConfig],
+    ) -> Option<String>,
 ) -> Option<String> {
     if rules.is_empty() {
         return None;
     }
     let value_start = cookie_attribute_value_start(segment, attribute)?;
-    let rewritten_value = rewrite_value(&segment[value_start..], rules)?;
+    let value = CookieAttributeValue::new(&segment[value_start..]);
+    let rewritten_value = rewrite_value(value, rules)?;
     let mut rewritten = String::with_capacity(value_start + rewritten_value.len());
     rewritten.push_str(&segment[..value_start]);
     rewritten.push_str(&rewritten_value);
@@ -806,16 +813,57 @@ fn cookie_attribute_value_start(segment: &str, attribute: &str) -> Option<usize>
     Some(cursor)
 }
 
-fn rewrite_domain(
-    value: &str,
+#[derive(Clone, Copy)]
+struct CookieAttributeValue<'a> {
+    normalized: &'a str,
+}
+
+impl<'a> CookieAttributeValue<'a> {
+    fn new(value: &'a str) -> Self {
+        let normalized = normalize_cookie_attribute_value(value);
+        Self { normalized }
+    }
+}
+
+fn normalize_cookie_attribute_value(value: &str) -> &str {
+    let value = trim_cookie_attribute_ascii_whitespace(value);
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(value)
+}
+
+fn trim_cookie_attribute_ascii_whitespace(value: &str) -> &str {
+    value.trim_matches(|character| matches!(character, ' ' | '\t'))
+}
+
+fn normalized_cookie_domain(value: &str) -> &str {
+    normalize_cookie_attribute_value(value)
+        .strip_prefix('.')
+        .unwrap_or_else(|| normalize_cookie_attribute_value(value))
+}
+
+fn rewrite_cookie_domain(
+    value: CookieAttributeValue<'_>,
     rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
 ) -> Option<String> {
+    let value = value
+        .normalized
+        .strip_prefix('.')
+        .unwrap_or(value.normalized);
     for rule in rules {
-        if value.eq_ignore_ascii_case(&rule.from) {
+        if value.eq_ignore_ascii_case(normalized_cookie_domain(&rule.from)) {
             return Some(rule.to.clone());
         }
     }
     None
+}
+
+fn rewrite_cookie_path(
+    value: CookieAttributeValue<'_>,
+    rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
+) -> Option<String> {
+    rewrite_header_prefix(value.normalized, rules)
 }
 
 #[cfg(not(feature = "privacy-mode"))]
@@ -948,8 +996,9 @@ mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
 
     use super::{
-        RequestHeader, ResponseHeader, UpstreamRequestPolicyContext, apply_response_policy,
-        apply_upstream_request_policy, strip_upstream_hop_by_hop_request_headers,
+        CookieAttributeValue, RequestHeader, ResponseHeader, UpstreamRequestPolicyContext,
+        apply_response_policy, apply_upstream_request_policy, rewrite_cookie_domain,
+        strip_upstream_hop_by_hop_request_headers,
     };
     #[cfg(not(feature = "privacy-mode"))]
     use super::{
@@ -1323,6 +1372,24 @@ mod tests {
             )
             .unwrap();
         response
+            .append_header(
+                "set-cookie",
+                "leading=1; Domain=.backend.internal; Path=/; HttpOnly",
+            )
+            .unwrap();
+        response
+            .append_header(
+                "set-cookie",
+                "quoted=1; Domain=\"backend.internal\"; Path=\"/app/admin\"; HttpOnly",
+            )
+            .unwrap();
+        response
+            .append_header(
+                "set-cookie",
+                "spaced=1; Domain=backend.internal \t; Path=/app/admin \t; HttpOnly",
+            )
+            .unwrap();
+        response
             .append_header("set-cookie", "theme=dark; Path=/public; Secure")
             .unwrap();
 
@@ -1337,8 +1404,28 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 "session=abc; Domain=example.test; Path=/admin; HttpOnly",
+                "leading=1; Domain=example.test; Path=/; HttpOnly",
+                "quoted=1; Domain=example.test; Path=/admin; HttpOnly",
+                "spaced=1; Domain=example.test; Path=/admin; HttpOnly",
                 "theme=dark; Path=/public; Secure"
             ]
+        );
+    }
+
+    #[test]
+    fn cookie_domain_rewrite_matches_symmetric_leading_dot_rules() {
+        let rules = [crate::config::ResponseHeaderRewriteRuleConfig {
+            from: ".backend.internal".to_owned(),
+            to: "example.test".to_owned(),
+        }];
+
+        assert_eq!(
+            rewrite_cookie_domain(CookieAttributeValue::new("backend.internal"), &rules),
+            Some("example.test".to_owned())
+        );
+        assert_eq!(
+            rewrite_cookie_domain(CookieAttributeValue::new(".BACKEND.internal"), &rules),
+            Some("example.test".to_owned())
         );
     }
 

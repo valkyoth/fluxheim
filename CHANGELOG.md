@@ -28,6 +28,10 @@ behavior when the change improves security or project direction.
 - Percent-encode URI-special bytes in route regex capture substitutions before
   applying rewrite templates, preserving slash-spanning captures while removing
   raw matrix/userinfo/list delimiters from rewritten upstream paths.
+- Normalize `Set-Cookie` `Domain` and `Path` attribute values before response
+  rewrites, covering leading-dot domains, quoted attribute values, and trailing
+  ASCII whitespace so alternate cookie syntax cannot bypass configured rewrite
+  rules.
 - Resolve exact local-static purge identities through the same route rewrite
   logic used by static serving, including `rewrite_prefix`.
 - Apply decoded route matching to edge policy checks, closing mismatches between

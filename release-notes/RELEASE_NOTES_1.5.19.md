@@ -23,6 +23,10 @@ during the v1.5.19 review cycle.
 - Percent-encoded URI-special bytes in route regex capture substitutions before
   applying rewrite templates, preserving slash-spanning captures while removing
   raw matrix/userinfo/list delimiters from rewritten upstream paths.
+- Normalized `Set-Cookie` `Domain` and `Path` attribute values before response
+  rewrites, covering leading-dot domains, quoted attribute values, and trailing
+  ASCII whitespace so alternate cookie syntax cannot bypass configured rewrite
+  rules.
 - Resolved exact local-static purge identities through the same route rewrite
   logic used by static serving, including `rewrite_prefix`.
 - Applied decoded route matching to edge policy checks, closing mismatches
