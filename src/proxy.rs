@@ -10496,7 +10496,7 @@ mod tests {
     ))]
     use crate::test_support::unique_temp_path;
 
-    #[cfg(feature = "compression-gzip")]
+    #[cfg(any(feature = "cache", feature = "compression-gzip"))]
     use super::ProxyRuntimeState;
     #[cfg(feature = "load-balancer")]
     use super::RuntimeRetryBudget;
