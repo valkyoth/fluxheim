@@ -8808,6 +8808,7 @@ fn spawn_proxy_mirror_if_enabled(
     }
 }
 
+#[cfg(feature = "web")]
 async fn continue_to_proxy_or_not_found(
     session: &mut Session,
     vhost: &RuntimeVhost,

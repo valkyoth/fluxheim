@@ -35,6 +35,7 @@ proxy = [
     "dep:async-trait",
     "dep:base64-ng",
     "fluxheim-config/proxy",
+    "dep:percent-encoding",
     "dep:ring",
     "dep:rustix",
     "dep:serde_json",
