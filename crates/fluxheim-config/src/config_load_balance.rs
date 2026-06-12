@@ -57,6 +57,34 @@ pub struct LoadBalanceConfig {
     pub queue: LoadBalanceQueueConfig,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalanceConfigFragment {
+    selection: Option<LoadBalanceSelection>,
+    hash_header: Option<String>,
+    hash_cookie: Option<String>,
+    max_iterations: Option<usize>,
+    all_down_status: Option<u16>,
+    bounded_load_factor_per_mille: Option<u16>,
+    health_check: Option<LoadBalanceHealthCheckConfigFragment>,
+    passive_health: Option<LoadBalancePassiveHealthConfigFragment>,
+    slow_start: Option<LoadBalanceSlowStartConfigFragment>,
+    retry: Option<LoadBalanceRetryConfigFragment>,
+    persistence: Option<LoadBalancePersistenceConfigFragment>,
+    runtime_state_file: Option<PathBuf>,
+    queue: Option<LoadBalanceQueueConfigFragment>,
+}
+
+impl LoadBalanceConfigFragment {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.runtime_state_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
+    }
+}
+
 impl Default for LoadBalanceConfig {
     fn default() -> Self {
         Self {
@@ -78,6 +106,48 @@ impl Default for LoadBalanceConfig {
 }
 
 impl LoadBalanceConfig {
+    pub fn merge(&mut self, fragment: LoadBalanceConfigFragment) {
+        if let Some(selection) = fragment.selection {
+            self.selection = selection;
+        }
+        if let Some(header) = fragment.hash_header {
+            self.hash_header = Some(header);
+        }
+        if let Some(cookie) = fragment.hash_cookie {
+            self.hash_cookie = Some(cookie);
+        }
+        if let Some(max_iterations) = fragment.max_iterations {
+            self.max_iterations = max_iterations;
+        }
+        if let Some(status) = fragment.all_down_status {
+            self.all_down_status = status;
+        }
+        if let Some(factor) = fragment.bounded_load_factor_per_mille {
+            self.bounded_load_factor_per_mille = factor;
+        }
+        if let Some(health_check) = fragment.health_check {
+            self.health_check.merge(health_check);
+        }
+        if let Some(passive_health) = fragment.passive_health {
+            self.passive_health.merge(passive_health);
+        }
+        if let Some(slow_start) = fragment.slow_start {
+            self.slow_start.merge(slow_start);
+        }
+        if let Some(retry) = fragment.retry {
+            self.retry.merge(retry);
+        }
+        if let Some(persistence) = fragment.persistence {
+            self.persistence.merge(persistence);
+        }
+        if let Some(path) = fragment.runtime_state_file {
+            self.runtime_state_file = Some(path);
+        }
+        if let Some(queue) = fragment.queue {
+            self.queue.merge(queue);
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.selection.requires_hash_header() {
             let Some(header) = self.hash_header.as_deref() else {
@@ -333,6 +403,36 @@ pub struct LoadBalanceHealthCheckConfig {
     pub exec_timeout_secs: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalanceHealthCheckConfigFragment {
+    enabled: Option<bool>,
+    protocol: Option<LoadBalanceHealthCheckProtocol>,
+    interval_secs: Option<u64>,
+    consecutive_success: Option<usize>,
+    consecutive_failure: Option<usize>,
+    parallel: Option<bool>,
+    method: Option<String>,
+    path: Option<String>,
+    host: Option<String>,
+    request_headers: Option<Vec<LoadBalanceHealthCheckRequestHeader>>,
+    grpc_service: Option<String>,
+    expected_statuses: Option<Vec<u16>>,
+    expected_status_ranges: Option<Vec<LoadBalanceHealthCheckExpectedStatusRange>>,
+    expected_headers: Option<Vec<LoadBalanceHealthCheckExpectedHeader>>,
+    expected_body_contains: Option<Vec<String>>,
+    expected_body_json: Option<Vec<LoadBalanceHealthCheckExpectedJson>>,
+    health_weight_min_percent: Option<u8>,
+    reuse_connection: Option<bool>,
+    port_override: Option<u16>,
+    connect_timeout_secs: Option<u64>,
+    read_timeout_secs: Option<u64>,
+    exec_command: Option<String>,
+    exec_args: Option<Vec<String>>,
+    exec_allowed_commands: Option<Vec<String>>,
+    exec_timeout_secs: Option<u64>,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LoadBalanceHealthCheckExpectedHeader {
@@ -404,6 +504,84 @@ impl Default for LoadBalanceHealthCheckConfig {
 }
 
 impl LoadBalanceHealthCheckConfig {
+    fn merge(&mut self, fragment: LoadBalanceHealthCheckConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(protocol) = fragment.protocol {
+            self.protocol = protocol;
+        }
+        if let Some(interval_secs) = fragment.interval_secs {
+            self.interval_secs = interval_secs;
+        }
+        if let Some(consecutive_success) = fragment.consecutive_success {
+            self.consecutive_success = consecutive_success;
+        }
+        if let Some(consecutive_failure) = fragment.consecutive_failure {
+            self.consecutive_failure = consecutive_failure;
+        }
+        if let Some(parallel) = fragment.parallel {
+            self.parallel = parallel;
+        }
+        if let Some(method) = fragment.method {
+            self.method = method;
+        }
+        if let Some(path) = fragment.path {
+            self.path = path;
+        }
+        if let Some(host) = fragment.host {
+            self.host = Some(host);
+        }
+        if let Some(headers) = fragment.request_headers {
+            self.request_headers = headers;
+        }
+        if let Some(service) = fragment.grpc_service {
+            self.grpc_service = Some(service);
+        }
+        if let Some(statuses) = fragment.expected_statuses {
+            self.expected_statuses = statuses;
+        }
+        if let Some(ranges) = fragment.expected_status_ranges {
+            self.expected_status_ranges = ranges;
+        }
+        if let Some(headers) = fragment.expected_headers {
+            self.expected_headers = headers;
+        }
+        if let Some(body) = fragment.expected_body_contains {
+            self.expected_body_contains = body;
+        }
+        if let Some(json) = fragment.expected_body_json {
+            self.expected_body_json = json;
+        }
+        if let Some(percent) = fragment.health_weight_min_percent {
+            self.health_weight_min_percent = percent;
+        }
+        if let Some(reuse) = fragment.reuse_connection {
+            self.reuse_connection = reuse;
+        }
+        if let Some(port) = fragment.port_override {
+            self.port_override = Some(port);
+        }
+        if let Some(timeout) = fragment.connect_timeout_secs {
+            self.connect_timeout_secs = Some(timeout);
+        }
+        if let Some(timeout) = fragment.read_timeout_secs {
+            self.read_timeout_secs = Some(timeout);
+        }
+        if let Some(command) = fragment.exec_command {
+            self.exec_command = Some(command);
+        }
+        if let Some(args) = fragment.exec_args {
+            self.exec_args = args;
+        }
+        if let Some(commands) = fragment.exec_allowed_commands {
+            self.exec_allowed_commands = commands;
+        }
+        if let Some(timeout) = fragment.exec_timeout_secs {
+            self.exec_timeout_secs = Some(timeout);
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         if self.interval_secs == 0 {
             return Err(ConfigError::InvalidLoadBalanceHealthCheck {
@@ -748,6 +926,18 @@ pub struct LoadBalancePassiveHealthConfig {
     pub max_latency_ms: u64,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalancePassiveHealthConfigFragment {
+    enabled: Option<bool>,
+    consecutive_failure: Option<usize>,
+    ejection_secs: Option<u64>,
+    min_healthy_backends: Option<usize>,
+    failure_statuses: Option<Vec<u16>>,
+    failure_status_ranges: Option<Vec<LoadBalanceHealthCheckExpectedStatusRange>>,
+    max_latency_ms: Option<u64>,
+}
+
 impl Default for LoadBalancePassiveHealthConfig {
     fn default() -> Self {
         Self {
@@ -763,6 +953,30 @@ impl Default for LoadBalancePassiveHealthConfig {
 }
 
 impl LoadBalancePassiveHealthConfig {
+    fn merge(&mut self, fragment: LoadBalancePassiveHealthConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(consecutive_failure) = fragment.consecutive_failure {
+            self.consecutive_failure = consecutive_failure;
+        }
+        if let Some(ejection_secs) = fragment.ejection_secs {
+            self.ejection_secs = ejection_secs;
+        }
+        if let Some(min_healthy_backends) = fragment.min_healthy_backends {
+            self.min_healthy_backends = min_healthy_backends;
+        }
+        if let Some(statuses) = fragment.failure_statuses {
+            self.failure_statuses = statuses;
+        }
+        if let Some(ranges) = fragment.failure_status_ranges {
+            self.failure_status_ranges = ranges;
+        }
+        if let Some(max_latency_ms) = fragment.max_latency_ms {
+            self.max_latency_ms = max_latency_ms;
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         if self.consecutive_failure == 0 || self.consecutive_failure > 1000 {
             return Err(ConfigError::InvalidLoadBalancePassiveHealth {
@@ -837,6 +1051,13 @@ pub struct LoadBalanceSlowStartConfig {
     pub duration_secs: u64,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalanceSlowStartConfigFragment {
+    enabled: Option<bool>,
+    duration_secs: Option<u64>,
+}
+
 impl Default for LoadBalanceSlowStartConfig {
     fn default() -> Self {
         Self {
@@ -847,6 +1068,15 @@ impl Default for LoadBalanceSlowStartConfig {
 }
 
 impl LoadBalanceSlowStartConfig {
+    fn merge(&mut self, fragment: LoadBalanceSlowStartConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(duration_secs) = fragment.duration_secs {
+            self.duration_secs = duration_secs;
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         if self.duration_secs == 0 || self.duration_secs > 3600 {
             return Err(ConfigError::InvalidLoadBalanceSlowStart {
@@ -886,6 +1116,18 @@ pub struct LoadBalanceRetryConfig {
     pub budget_window_secs: u64,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalanceRetryConfigFragment {
+    enabled: Option<bool>,
+    max_retries: Option<u8>,
+    methods: Option<Vec<String>>,
+    statuses: Option<Vec<u16>>,
+    status_ranges: Option<Vec<LoadBalanceHealthCheckExpectedStatusRange>>,
+    budget_per_window: Option<u32>,
+    budget_window_secs: Option<u64>,
+}
+
 impl Default for LoadBalanceRetryConfig {
     fn default() -> Self {
         Self {
@@ -901,6 +1143,30 @@ impl Default for LoadBalanceRetryConfig {
 }
 
 impl LoadBalanceRetryConfig {
+    fn merge(&mut self, fragment: LoadBalanceRetryConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(max_retries) = fragment.max_retries {
+            self.max_retries = max_retries;
+        }
+        if let Some(methods) = fragment.methods {
+            self.methods = methods;
+        }
+        if let Some(statuses) = fragment.statuses {
+            self.statuses = statuses;
+        }
+        if let Some(ranges) = fragment.status_ranges {
+            self.status_ranges = ranges;
+        }
+        if let Some(budget) = fragment.budget_per_window {
+            self.budget_per_window = budget;
+        }
+        if let Some(window) = fragment.budget_window_secs {
+            self.budget_window_secs = window;
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         if self.max_retries > MAX_LB_RETRIES {
             return Err(ConfigError::InvalidLoadBalanceRetry {
@@ -1038,6 +1304,23 @@ pub struct LoadBalancePersistenceConfig {
     pub managed_cookie_max_age_secs: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalancePersistenceConfigFragment {
+    enabled: Option<bool>,
+    mode: Option<LoadBalancePersistenceMode>,
+    header: Option<String>,
+    cookie: Option<String>,
+    ttl_secs: Option<u64>,
+    table_max_entries: Option<usize>,
+    managed_cookie_domain: Option<String>,
+    managed_cookie_path: Option<String>,
+    managed_cookie_secure: Option<bool>,
+    managed_cookie_http_only: Option<bool>,
+    managed_cookie_same_site: Option<LoadBalanceManagedCookieSameSite>,
+    managed_cookie_max_age_secs: Option<u64>,
+}
+
 impl Default for LoadBalancePersistenceConfig {
     fn default() -> Self {
         Self {
@@ -1058,6 +1341,45 @@ impl Default for LoadBalancePersistenceConfig {
 }
 
 impl LoadBalancePersistenceConfig {
+    fn merge(&mut self, fragment: LoadBalancePersistenceConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(mode) = fragment.mode {
+            self.mode = mode;
+        }
+        if let Some(header) = fragment.header {
+            self.header = Some(header);
+        }
+        if let Some(cookie) = fragment.cookie {
+            self.cookie = Some(cookie);
+        }
+        if let Some(ttl_secs) = fragment.ttl_secs {
+            self.ttl_secs = ttl_secs;
+        }
+        if let Some(entries) = fragment.table_max_entries {
+            self.table_max_entries = entries;
+        }
+        if let Some(domain) = fragment.managed_cookie_domain {
+            self.managed_cookie_domain = Some(domain);
+        }
+        if let Some(path) = fragment.managed_cookie_path {
+            self.managed_cookie_path = Some(path);
+        }
+        if let Some(secure) = fragment.managed_cookie_secure {
+            self.managed_cookie_secure = secure;
+        }
+        if let Some(http_only) = fragment.managed_cookie_http_only {
+            self.managed_cookie_http_only = http_only;
+        }
+        if let Some(same_site) = fragment.managed_cookie_same_site {
+            self.managed_cookie_same_site = same_site;
+        }
+        if let Some(max_age) = fragment.managed_cookie_max_age_secs {
+            self.managed_cookie_max_age_secs = Some(max_age);
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         #[cfg(feature = "privacy-mode")]
         if self.enabled {
@@ -1153,6 +1475,14 @@ pub struct LoadBalanceQueueConfig {
     pub retry_interval_ms: u64,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalanceQueueConfigFragment {
+    max_waiting: Option<usize>,
+    timeout_ms: Option<u64>,
+    retry_interval_ms: Option<u64>,
+}
+
 impl Default for LoadBalanceQueueConfig {
     fn default() -> Self {
         Self {
@@ -1164,6 +1494,18 @@ impl Default for LoadBalanceQueueConfig {
 }
 
 impl LoadBalanceQueueConfig {
+    fn merge(&mut self, fragment: LoadBalanceQueueConfigFragment) {
+        if let Some(max_waiting) = fragment.max_waiting {
+            self.max_waiting = max_waiting;
+        }
+        if let Some(timeout_ms) = fragment.timeout_ms {
+            self.timeout_ms = timeout_ms;
+        }
+        if let Some(retry_interval_ms) = fragment.retry_interval_ms {
+            self.retry_interval_ms = retry_interval_ms;
+        }
+    }
+
     #[cfg(feature = "load-balancer")]
     pub fn enabled(&self) -> bool {
         self.max_waiting > 0 && self.timeout_ms > 0

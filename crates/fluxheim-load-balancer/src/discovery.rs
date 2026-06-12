@@ -449,6 +449,15 @@ fn restricted_http_discovery_ipv4(ip: Ipv4Addr) -> bool {
 }
 
 fn restricted_http_discovery_ipv6(ip: Ipv6Addr) -> bool {
+    if let Some(mapped) = ip.to_ipv4_mapped() {
+        return restricted_http_discovery_ipv4(mapped);
+    }
+    if let Some(compatible) = ip.to_ipv4()
+        && !ip.is_loopback()
+        && !ip.is_unspecified()
+    {
+        return restricted_http_discovery_ipv4(compatible);
+    }
     let segments = ip.segments();
     ip.is_unspecified()
         || ip.is_loopback()
@@ -674,6 +683,35 @@ mod tests {
             parse_proxy_upstreams_http_body(br#"["169.254.169.254:80","127.0.0.1:3001"]"#, true)
                 .unwrap();
         assert_eq!(upstreams, ["169.254.169.254:80", "127.0.0.1:3001"]);
+    }
+
+    #[test]
+    fn rejects_http_discovery_ipv4_encoded_ipv6_literals_without_opt_in() {
+        for upstream in [
+            "[::ffff:169.254.169.254]:80",
+            "[::ffff:127.0.0.1]:3001",
+            "[::ffff:10.0.0.1]:3001",
+            "[::169.254.169.254]:80",
+        ] {
+            let body = format!(r#"["{upstream}","8.8.8.8:3002"]"#);
+            assert!(
+                parse_proxy_upstreams_http_body(body.as_bytes(), false)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("private"),
+                "{upstream}"
+            );
+        }
+
+        let upstreams = parse_proxy_upstreams_http_body(
+            br#"["[::ffff:169.254.169.254]:80","[::ffff:127.0.0.1]:3001"]"#,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            upstreams,
+            ["[::ffff:169.254.169.254]:80", "[::ffff:127.0.0.1]:3001"]
+        );
     }
 
     #[tokio::test]

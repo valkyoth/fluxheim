@@ -13,6 +13,7 @@ use crate::config::{
 use crate::config_header::validate_header_name;
 use crate::config_http::{valid_http_base_url, valid_http_endpoint_url};
 use crate::config_load_balance::LB_SAFE_RETRY_METHODS;
+use crate::config_load_balance::LoadBalanceConfigFragment;
 #[cfg(feature = "load-balancer")]
 use crate::config_loader::read_proxy_upstreams_file;
 #[cfg(feature = "load-balancer")]
@@ -180,8 +181,8 @@ pub struct ProxyConfigFragment {
     upstream_proxy_protocol: Option<UpstreamProxyProtocol>,
     upstream_http_version: Option<UpstreamHttpVersion>,
     websocket: Option<bool>,
-    auth_request: Option<AuthRequestConfig>,
-    mirror: Option<TrafficMirrorConfig>,
+    auth_request: Option<AuthRequestConfigFragment>,
+    mirror: Option<TrafficMirrorConfigFragment>,
     upstream_h2_max_streams: Option<usize>,
     upstream_h2_ping_interval_secs: Option<u64>,
     connect_timeout_secs: Option<u64>,
@@ -201,7 +202,7 @@ pub struct ProxyConfigFragment {
     downstream_total_response_timeout_secs: Option<u64>,
     downstream_min_send_rate_bytes_per_sec: Option<usize>,
     error_pages: Option<Vec<ProxyErrorPageConfig>>,
-    load_balance: Option<LoadBalanceConfig>,
+    load_balance: Option<LoadBalanceConfigFragment>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -417,10 +418,10 @@ impl ProxyConfig {
             self.websocket = websocket;
         }
         if let Some(auth_request) = fragment.auth_request {
-            self.auth_request = auth_request;
+            self.auth_request.merge(auth_request);
         }
         if let Some(mirror) = fragment.mirror {
-            self.mirror = mirror;
+            self.mirror.merge(mirror);
         }
         if let Some(streams) = fragment.upstream_h2_max_streams {
             self.upstream_h2_max_streams = Some(streams);
@@ -480,7 +481,7 @@ impl ProxyConfig {
             self.error_pages = error_pages;
         }
         if let Some(load_balance) = fragment.load_balance {
-            self.load_balance = load_balance;
+            self.load_balance.merge(load_balance);
         }
     }
 
@@ -1279,11 +1280,8 @@ impl ProxyConfigFragment {
         {
             *path = base_dir.join(&path);
         }
-        if let Some(load_balance) = &mut self.load_balance
-            && let Some(path) = &mut load_balance.runtime_state_file
-            && path.is_relative()
-        {
-            *path = base_dir.join(&path);
+        if let Some(load_balance) = &mut self.load_balance {
+            load_balance.resolve_relative_paths(base_dir);
         }
         if let Some(path) = &mut self.upstream_client_cert_path
             && path.is_relative()
@@ -1322,6 +1320,18 @@ pub struct AuthRequestConfig {
     pub max_response_bytes: ByteSize,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthRequestConfigFragment {
+    enabled: Option<bool>,
+    url: Option<String>,
+    forward_headers: Option<Vec<String>>,
+    allow_response_headers: Option<Vec<String>>,
+    connect_timeout_secs: Option<u64>,
+    read_timeout_secs: Option<u64>,
+    max_response_bytes: Option<ByteSize>,
+}
+
 impl Default for AuthRequestConfig {
     fn default() -> Self {
         Self {
@@ -1337,6 +1347,30 @@ impl Default for AuthRequestConfig {
 }
 
 impl AuthRequestConfig {
+    fn merge(&mut self, fragment: AuthRequestConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(url) = fragment.url {
+            self.url = Some(url);
+        }
+        if let Some(headers) = fragment.forward_headers {
+            self.forward_headers = headers;
+        }
+        if let Some(headers) = fragment.allow_response_headers {
+            self.allow_response_headers = headers;
+        }
+        if let Some(timeout) = fragment.connect_timeout_secs {
+            self.connect_timeout_secs = timeout;
+        }
+        if let Some(timeout) = fragment.read_timeout_secs {
+            self.read_timeout_secs = timeout;
+        }
+        if let Some(bytes) = fragment.max_response_bytes {
+            self.max_response_bytes = bytes;
+        }
+    }
+
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
@@ -1439,6 +1473,19 @@ pub struct TrafficMirrorConfig {
     pub max_in_flight: usize,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrafficMirrorConfigFragment {
+    enabled: Option<bool>,
+    base_url: Option<String>,
+    sample_per_mille: Option<u16>,
+    methods: Option<Vec<String>>,
+    forward_headers: Option<Vec<String>>,
+    timeout_secs: Option<u64>,
+    max_response_bytes: Option<ByteSize>,
+    max_in_flight: Option<usize>,
+}
+
 impl Default for TrafficMirrorConfig {
     fn default() -> Self {
         Self {
@@ -1455,6 +1502,33 @@ impl Default for TrafficMirrorConfig {
 }
 
 impl TrafficMirrorConfig {
+    fn merge(&mut self, fragment: TrafficMirrorConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(base_url) = fragment.base_url {
+            self.base_url = Some(base_url);
+        }
+        if let Some(sample) = fragment.sample_per_mille {
+            self.sample_per_mille = sample;
+        }
+        if let Some(methods) = fragment.methods {
+            self.methods = methods;
+        }
+        if let Some(headers) = fragment.forward_headers {
+            self.forward_headers = headers;
+        }
+        if let Some(timeout) = fragment.timeout_secs {
+            self.timeout_secs = timeout;
+        }
+        if let Some(bytes) = fragment.max_response_bytes {
+            self.max_response_bytes = bytes;
+        }
+        if let Some(max_in_flight) = fragment.max_in_flight {
+            self.max_in_flight = max_in_flight;
+        }
+    }
+
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());

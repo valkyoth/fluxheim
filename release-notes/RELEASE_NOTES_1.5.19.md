@@ -89,6 +89,9 @@ during the v1.5.19 review cycle.
   rejecting private, loopback, link-local, multicast, reserved, documentation,
   metadata, and unspecified resolved addresses unless
   `proxy.upstream_dns_allow_private_backends = true` is set.
+- Hardened HTTP and DNS discovery backend filtering by applying the IPv4
+  private address policy to IPv4-mapped and IPv4-compatible IPv6 literals
+  before they can be accepted as upstream addresses.
 - Hardened split-config trusted-proxy handling by extending
   `server.trusted_proxies` fragments instead of replacing the main list, and by
   rejecting catch-all or near-global trusted-proxy ranges such as `0.0.0.0/0`
@@ -96,6 +99,10 @@ during the v1.5.19 review cycle.
 - Hardened split-config proxy handling by applying field-level `[proxy]`
   fragment merges so a later timeout-only proxy fragment cannot silently clear
   upstream TLS verification, auth request, mirror, or load-balancer policy.
+- Completed recursive split-config merges for `[proxy.auth_request]`,
+  `[proxy.mirror]`, and `[proxy.load_balance]` so partial nested fragments
+  cannot reset established auth, shadow-traffic, persistence, health-check,
+  retry, or load-balancer selection policy back to defaults.
 - Hardened split-config handling for `[compression]`, `[cache]`,
   `[cache_purger]`, `[web]`, and `[stream]` so partial fragments cannot
   silently drop previously configured compression limits, cache encryption,

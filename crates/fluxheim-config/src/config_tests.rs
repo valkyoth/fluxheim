@@ -12431,6 +12431,167 @@ fn conf_d_proxy_fragment_extends_without_replacing_main_trust_policy() {
 }
 
 #[test]
+fn conf_d_proxy_nested_fragments_merge_without_replacing_security_policy() {
+    let dir = TestDir::new("config-file-with-conf-d-proxy-nested-fragment");
+    let runtime_state_file = safe_child_path(
+        &secure_test_dir("config-conf-d-proxy-lb-state"),
+        "state.json",
+    );
+    fs::create_dir_all(dir.child("conf.d")).unwrap();
+    fs::write(
+        dir.child("fluxheim.toml"),
+        format!(
+            r#"
+            include_conf_d = true
+
+            [proxy]
+            upstreams = ["origin-a.example.test:443", "origin-b.example.test:443"]
+
+            [proxy.auth_request]
+            enabled = true
+            url = "https://auth.example.test/check"
+            forward_headers = ["x-request-id"]
+            allow_response_headers = ["x-user"]
+            connect_timeout_secs = 2
+            read_timeout_secs = 5
+
+            [proxy.mirror]
+            enabled = false
+            base_url = "https://mirror.example.test"
+            sample_per_mille = 250
+            methods = ["GET"]
+            forward_headers = ["x-request-id"]
+            timeout_secs = 2
+            max_in_flight = 32
+
+            [proxy.load_balance]
+            selection = "header-hash"
+            hash_header = "x-session"
+            max_iterations = 16
+            all_down_status = 503
+            runtime_state_file = "{}"
+
+            [proxy.load_balance.health_check]
+            enabled = true
+            protocol = "http"
+            path = "/healthz"
+            expected_statuses = [200]
+
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "header"
+            header = "x-session"
+            ttl_secs = 600
+
+            [proxy.load_balance.retry]
+            enabled = true
+            statuses = [502]
+            budget_per_window = 10
+
+            [proxy.load_balance.queue]
+            max_waiting = 32
+            timeout_ms = 250
+            "#,
+            runtime_state_file.display()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        dir.child("conf.d/20-proxy-nested-policy.toml"),
+        r#"
+            [proxy.auth_request]
+            read_timeout_secs = 7
+
+            [proxy.mirror]
+            timeout_secs = 4
+
+            [proxy.load_balance.passive_health]
+            enabled = true
+            consecutive_failure = 4
+            "#,
+    )
+    .unwrap();
+
+    let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+    assert!(config.proxy.auth_request.enabled);
+    assert_eq!(
+        config.proxy.auth_request.url.as_deref(),
+        Some("https://auth.example.test/check")
+    );
+    assert_eq!(config.proxy.auth_request.forward_headers, ["x-request-id"]);
+    assert_eq!(config.proxy.auth_request.allow_response_headers, ["x-user"]);
+    assert_eq!(config.proxy.auth_request.connect_timeout_secs, 2);
+    assert_eq!(config.proxy.auth_request.read_timeout_secs, 7);
+
+    assert!(!config.proxy.mirror.enabled);
+    assert_eq!(
+        config.proxy.mirror.base_url.as_deref(),
+        Some("https://mirror.example.test")
+    );
+    assert_eq!(config.proxy.mirror.sample_per_mille, 250);
+    assert_eq!(config.proxy.mirror.methods, ["GET"]);
+    assert_eq!(config.proxy.mirror.forward_headers, ["x-request-id"]);
+    assert_eq!(config.proxy.mirror.timeout_secs, 4);
+    assert_eq!(config.proxy.mirror.max_in_flight, 32);
+
+    assert_eq!(
+        config.proxy.load_balance.selection,
+        LoadBalanceSelection::HeaderHash
+    );
+    assert_eq!(
+        config.proxy.load_balance.hash_header.as_deref(),
+        Some("x-session")
+    );
+    assert_eq!(config.proxy.load_balance.max_iterations, 16);
+    assert_eq!(config.proxy.load_balance.all_down_status, 503);
+    assert_eq!(
+        config.proxy.load_balance.runtime_state_file.as_deref(),
+        Some(runtime_state_file.as_path())
+    );
+    assert!(config.proxy.load_balance.health_check.enabled);
+    assert_eq!(
+        config.proxy.load_balance.health_check.protocol,
+        LoadBalanceHealthCheckProtocol::Http
+    );
+    assert_eq!(config.proxy.load_balance.health_check.path, "/healthz");
+    assert_eq!(
+        config.proxy.load_balance.health_check.expected_statuses,
+        [200]
+    );
+    assert!(config.proxy.load_balance.persistence.enabled);
+    assert_eq!(
+        config.proxy.load_balance.persistence.mode,
+        LoadBalancePersistenceMode::Header
+    );
+    assert_eq!(
+        config.proxy.load_balance.persistence.header.as_deref(),
+        Some("x-session")
+    );
+    assert_eq!(config.proxy.load_balance.persistence.ttl_secs, 600);
+    assert!(config.proxy.load_balance.retry.enabled);
+    assert_eq!(config.proxy.load_balance.retry.statuses, [502]);
+    assert_eq!(config.proxy.load_balance.retry.budget_per_window, 10);
+    assert_eq!(config.proxy.load_balance.queue.max_waiting, 32);
+    assert_eq!(config.proxy.load_balance.queue.timeout_ms, 250);
+    assert!(config.proxy.load_balance.passive_health.enabled);
+    assert_eq!(
+        config.proxy.load_balance.passive_health.consecutive_failure,
+        4
+    );
+
+    #[cfg(not(feature = "privacy-mode"))]
+    config.validate().unwrap();
+    #[cfg(feature = "privacy-mode")]
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence is not available in privacy-mode builds"
+        })
+    );
+}
+
+#[test]
 fn conf_d_admin_fragment_extends_without_replacing_main_auth_policy() {
     let dir = TestDir::new("config-file-with-conf-d-admin-fragment");
     let snapshot_store = secure_test_dir("config-conf-d-admin-snapshots");
