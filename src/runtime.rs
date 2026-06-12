@@ -1,12 +1,10 @@
 use std::error::Error;
 #[cfg(feature = "proxy")]
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
 use std::io::Read;
 #[cfg(feature = "proxy")]
 use std::io::Write;
-#[cfg(all(feature = "proxy", unix))]
-use std::os::unix::fs::OpenOptionsExt;
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 #[cfg(feature = "proxy")]
@@ -713,18 +711,31 @@ fn init_logging(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 #[cfg(feature = "proxy")]
 fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
-    let mut options = OpenOptions::new();
-    options.create(true).write(true);
+    let mut flags =
+        rustix::fs::OFlags::CREATE | rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::CLOEXEC;
     if append {
-        options.append(true);
+        flags |= rustix::fs::OFlags::APPEND;
     } else {
-        options.truncate(true);
+        flags |= rustix::fs::OFlags::TRUNC;
     }
 
     #[cfg(unix)]
-    options.custom_flags(O_NOFOLLOW);
+    {
+        flags |= rustix::fs::OFlags::NOFOLLOW;
+    }
 
-    let file = options.open(path)?;
+    let fd = rustix::fs::open(
+        path,
+        flags,
+        rustix::fs::Mode::RUSR
+            | rustix::fs::Mode::WUSR
+            | rustix::fs::Mode::RGRP
+            | rustix::fs::Mode::WGRP
+            | rustix::fs::Mode::ROTH
+            | rustix::fs::Mode::WOTH,
+    )
+    .map_err(rustix_to_io_error)?;
+    let file = File::from(fd);
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(std::io::Error::new(
@@ -736,37 +747,10 @@ fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
     Ok(file)
 }
 
-#[cfg(all(feature = "proxy", any(target_os = "linux", target_os = "android")))]
-const O_NOFOLLOW: i32 = 0o400000;
-
-#[cfg(all(
-    feature = "proxy",
-    any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    )
-))]
-const O_NOFOLLOW: i32 = 0x0100;
-
-#[cfg(all(
-    feature = "proxy",
-    unix,
-    not(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    ))
-))]
-const O_NOFOLLOW: i32 = 0;
+#[cfg(feature = "proxy")]
+fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
+    std::io::Error::from_raw_os_error(error.raw_os_error())
+}
 
 #[cfg(feature = "proxy")]
 fn write_text_log_record(

@@ -81,6 +81,8 @@ during the v1.5.19 review cycle.
 - Hardened auth-request response header handling so allowed auth response
   headers cannot override Fluxheim's upstream request header policy on name
   collisions.
+- Hardened Unix admin-token and file-log opening by using rustix
+  architecture-correct `NOFOLLOW` flags instead of hand-coded constants.
 
 ## What Changed
 

@@ -3052,47 +3052,24 @@ fn secret_parent_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
 
 #[cfg(unix)]
 fn open_regular_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
-    use std::os::unix::fs::OpenOptionsExt;
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(rustix_to_io_error)
+    .map_err(|error| {
+        format!(
+            "failed to open admin token file {} without following symlinks: {error}",
+            path.display()
+        )
+    })?;
+    Ok(fd.into())
+}
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    const O_NOFOLLOW: i32 = 0o400000;
-    #[cfg(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    ))]
-    const O_NOFOLLOW: i32 = 0x0100;
-    #[cfg(all(
-        unix,
-        not(any(
-            target_os = "linux",
-            target_os = "android",
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "freebsd",
-            target_os = "netbsd",
-            target_os = "openbsd",
-            target_os = "dragonfly"
-        ))
-    ))]
-    compile_error!(
-        "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe file opening before building Fluxheim"
-    );
-
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(O_NOFOLLOW)
-        .open(path)
-        .map_err(|error| {
-            format!(
-                "failed to open admin token file {} without following symlinks: {error}",
-                path.display()
-            )
-            .into()
-        })
+#[cfg(unix)]
+fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
+    std::io::Error::from_raw_os_error(error.raw_os_error())
 }
 
 #[cfg(not(unix))]

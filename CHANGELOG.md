@@ -86,6 +86,8 @@ behavior when the change improves security or project direction.
 - Harden auth-request response header handling so allowed auth response
   headers cannot override Fluxheim's upstream request header policy on name
   collisions.
+- Harden Unix admin-token and file-log opening by using rustix
+  architecture-correct `NOFOLLOW` flags instead of hand-coded constants.
 
 ### Changed
 
