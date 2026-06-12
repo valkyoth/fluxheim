@@ -9,6 +9,36 @@ behavior when the change improves security or project direction.
 
 ## 1.5.19 - 2026-06-12
 
+### Security
+
+- Fix fallback proxy cache auth ordering so cache fallback handling cannot run
+  before the configured authorization decision.
+- Apply decoded route matching to edge policy checks, closing mismatches between
+  encoded request paths and policy enforcement.
+- Preserve private cache-control directives for status-specific TTL handling so
+  restrictive origin cache headers are not weakened by cache policy.
+- Harden PHP-FPM path handling by denying scripts after resolved-path
+  normalization and covering directory-index resolution under denied PHP path
+  prefixes.
+- Fix proxy-only route decode feature wiring so shared path safety remains
+  available in proxy builds without cache.
+- Isolate upstream CA bundle material in peer reuse keys to avoid reusing
+  upstream TLS peers across distinct trust material.
+- Add a default stream proxy connection cap to avoid unbounded accepted TCP
+  stream connections.
+- Detach self-healing probes from public proxy traffic paths.
+- Preserve restrictive PHP cache headers when PHP-FPM responses are converted
+  into Fluxheim responses.
+- Reject PHP-FPM `PHP_VALUE` and `PHP_ADMIN_VALUE` style ini-control parameters
+  so configured PHP params cannot rewrite php-fpm runtime policy.
+- Clean pending PHP request-body spool files on retry/error paths.
+- Add `php.max_in_flight`, defaulting to `8`, to cap concurrent PHP-FPM requests
+  before request body buffering and FastCGI dispatch.
+- Add `proxy.load_balance.passive_health.min_healthy_backends`, defaulting to
+  `1`, so passive outlier ejection cannot fail-closed an entire load-balanced
+  pool by default. Operators can set it to `0` to retain strict fail-closed
+  passive-health behavior.
+
 ### Changed
 
 - Move the Fluxheim-owned load-balancer core into the internal

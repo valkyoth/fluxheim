@@ -1,7 +1,38 @@
 # Fluxheim 1.5.19 Release Notes
 
 Fluxheim 1.5.19 moves the Fluxheim-owned load-balancer core into the internal
-`fluxheim-load-balancer` workspace crate.
+`fluxheim-load-balancer` workspace crate and includes security hardening found
+during the v1.5.19 review cycle.
+
+## Security Fixes
+
+- Fixed fallback proxy cache auth ordering so cache fallback handling cannot
+  run before the configured authorization decision.
+- Applied decoded route matching to edge policy checks, closing mismatches
+  between encoded request paths and policy enforcement.
+- Preserved private cache-control directives for status-specific TTL handling
+  so restrictive origin cache headers are not weakened by cache policy.
+- Hardened PHP-FPM path handling by denying scripts after resolved-path
+  normalization and covering directory-index resolution under denied PHP path
+  prefixes.
+- Fixed proxy-only route decode feature wiring so shared path safety remains
+  available in proxy builds without cache.
+- Isolated upstream CA bundle material in peer reuse keys to avoid reusing
+  upstream TLS peers across distinct trust material.
+- Added a default stream proxy connection cap to avoid unbounded accepted TCP
+  stream connections.
+- Detached self-healing probes from public proxy traffic paths.
+- Preserved restrictive PHP cache headers when PHP-FPM responses are converted
+  into Fluxheim responses.
+- Rejected PHP-FPM `PHP_VALUE` and `PHP_ADMIN_VALUE` style ini-control
+  parameters so configured PHP params cannot rewrite php-fpm runtime policy.
+- Cleaned pending PHP request-body spool files on retry/error paths.
+- Added `php.max_in_flight`, defaulting to `8`, to cap concurrent PHP-FPM
+  requests before request body buffering and FastCGI dispatch.
+- Added `proxy.load_balance.passive_health.min_healthy_backends`, defaulting to
+  `1`, so passive outlier ejection cannot fail-closed an entire load-balanced
+  pool by default. Operators can set it to `0` to retain strict fail-closed
+  passive-health behavior.
 
 ## What Changed
 
