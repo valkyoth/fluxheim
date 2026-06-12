@@ -2944,6 +2944,7 @@ fn request_denied_by_access_policy(
     state: &ProxyRuntimeState,
     vhost: &RuntimeVhost,
     route_index: Option<usize>,
+    route_policy_index: Option<usize>,
     _ctx: &RequestContext,
 ) -> bool {
     let client_ip = effective_acl_client_ip(session, state);
@@ -2958,14 +2959,16 @@ fn request_denied_by_access_policy(
     {
         return true;
     }
-    route_index
-        .map(|route_index| {
-            !vhost
-                .route(route_index)
-                .access
-                .allows(client_ip, tls_identity.as_ref(), geo_context)
-        })
-        .unwrap_or(false)
+    for route_index in [route_index, route_policy_index].into_iter().flatten() {
+        if !vhost
+            .route(route_index)
+            .access
+            .allows(client_ip, tls_identity.as_ref(), geo_context)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn request_limited_by_rate_policy(
@@ -3837,8 +3840,33 @@ fn managed_http_01_owner_vhost<'a>(
     })
 }
 
+fn decoded_route_policy_path(path: &str) -> Option<String> {
+    if !path.as_bytes().contains(&b'%') {
+        return None;
+    }
+    let decoded = percent_encoding::percent_decode_str(path)
+        .decode_utf8()
+        .ok()?;
+    if decoded == path || decoded.contains('\0') || !decoded.starts_with('/') {
+        return None;
+    }
+    Some(decoded.into_owned())
+}
+
 impl RuntimeVhost {
     fn route_index(&self, method: &str, path: &str) -> Option<usize> {
+        let (matched, fallback) = self.route_index_parts(method, path);
+        matched.or(fallback)
+    }
+
+    fn route_policy_index(&self, method: &str, path: &str) -> Option<usize> {
+        decoded_route_policy_path(path)
+            .as_deref()
+            .and_then(|decoded_path| self.route_index_parts(method, decoded_path).0)
+            .or_else(|| self.route_index(method, path))
+    }
+
+    fn route_index_parts(&self, method: &str, path: &str) -> (Option<usize>, Option<usize>) {
         let mut fallback = None;
         let mut best_prefix: Option<(usize, usize)> = None;
         let mut first_regex = None;
@@ -3849,7 +3877,7 @@ impl RuntimeVhost {
             }
             match &route.matcher {
                 RuntimeRouteMatcher::Exact(_) if route.matcher.matches_path(path) => {
-                    return Some(index);
+                    return (Some(index), fallback);
                 }
                 RuntimeRouteMatcher::Prefix(_) if route.matcher.matches_path(path) => {
                     let prefix_len = route.matcher.prefix_len().unwrap_or(0);
@@ -3867,10 +3895,8 @@ impl RuntimeVhost {
             }
         }
 
-        best_prefix
-            .map(|(index, _)| index)
-            .or(first_regex)
-            .or(fallback)
+        let matched = best_prefix.map(|(index, _)| index).or(first_regex);
+        (matched, fallback)
     }
 
     fn route(&self, index: usize) -> &RuntimeRoute {
@@ -3889,6 +3915,11 @@ impl RuntimeVhost {
     #[cfg(test)]
     fn route_index_by_path_for_tests(&self, path: &str) -> Option<usize> {
         self.route_index("GET", path)
+    }
+
+    #[cfg(test)]
+    fn route_policy_index_by_path_for_tests(&self, path: &str) -> Option<usize> {
+        self.route_policy_index("GET", path)
     }
 
     fn from_legacy(
@@ -4260,20 +4291,27 @@ impl ProxyHttp for FluxProxy {
         };
         ctx.vhost_index = Some(vhost_index);
         let vhost = state.vhost(vhost_index);
-        ctx.route_index = vhost.route_index(
-            session.req_header().method.as_str(),
-            session.req_header().uri.path(),
-        );
+        let method = session.req_header().method.as_str();
+        let path = session.req_header().uri.path();
+        ctx.route_index = vhost.route_index(method, path);
+        let route_policy_index = vhost.route_policy_index(method, path);
         #[cfg(feature = "geoip")]
         {
             ctx.geo_context = state.geo_context(effective_acl_client_ip(session, &state));
         }
         #[cfg(feature = "metrics")]
-        let edge_policy_route = ctx
-            .route_index
+        let edge_policy_route = route_policy_index
+            .or(ctx.route_index)
             .and_then(|route_index| vhost.routes.get(route_index))
             .map(|route| route.name.as_str());
-        if request_denied_by_access_policy(session, &state, vhost, ctx.route_index, ctx) {
+        if request_denied_by_access_policy(
+            session,
+            &state,
+            vhost,
+            ctx.route_index,
+            route_policy_index,
+            ctx,
+        ) {
             #[cfg(feature = "metrics")]
             crate::metrics::record_edge_policy_event(
                 vhost.name.as_str(),
@@ -4284,7 +4322,7 @@ impl ProxyHttp for FluxProxy {
             respond_text_error(session, 403, Bytes::from_static(b"forbidden")).await?;
             return Ok(true);
         }
-        match request_limited_by_rate_policy(session, &state, vhost, ctx.route_index) {
+        match request_limited_by_rate_policy(session, &state, vhost, route_policy_index) {
             RateLimitDecision::Allow => {}
             RateLimitDecision::Delay(delay) => {
                 #[cfg(feature = "metrics")]
@@ -4308,7 +4346,7 @@ impl ProxyHttp for FluxProxy {
                 return Ok(true);
             }
         }
-        match acquire_request_concurrency_permits(vhost, ctx.route_index).await {
+        match acquire_request_concurrency_permits(vhost, route_policy_index).await {
             Ok(permits) => ctx.in_flight_permits = permits,
             Err(status) => {
                 #[cfg(feature = "metrics")]
@@ -4323,8 +4361,8 @@ impl ProxyHttp for FluxProxy {
                 return Ok(true);
             }
         }
-        ctx.request_body_limit_bytes = ctx
-            .route_index
+        ctx.request_body_limit_bytes = route_policy_index
+            .or(ctx.route_index)
             .and_then(|route_index| vhost.route(route_index).max_request_body_bytes)
             .or(vhost.max_request_body_bytes)
             .map(|bytes| bytes.as_u64())
@@ -12932,6 +12970,15 @@ mod tests {
             Some(3)
         );
         assert_eq!(vhost.route_index_by_path_for_tests("/missing"), Some(0));
+        assert_eq!(vhost.route_index_by_path_for_tests("/%61pi/users"), Some(0));
+        assert_eq!(
+            vhost.route_policy_index_by_path_for_tests("/%61pi/users"),
+            Some(1)
+        );
+        assert_eq!(
+            vhost.route_policy_index_by_path_for_tests("/%61pi/v2/status"),
+            Some(4)
+        );
     }
 
     #[test]
