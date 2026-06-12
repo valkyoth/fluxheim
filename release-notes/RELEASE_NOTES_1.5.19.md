@@ -89,6 +89,9 @@ during the v1.5.19 review cycle.
 - Restricted WebSocket-enabled proxy routes to the `websocket` upgrade token so
   valid but unrelated protocol upgrades such as `h2c` are not forwarded to
   upstreams.
+- Removed vendored Pingora upstream TLS underscore-to-hyphen hostname
+  verification rewriting so certificates are checked against the exact
+  configured SNI or alternative name.
 
 ## What Changed
 

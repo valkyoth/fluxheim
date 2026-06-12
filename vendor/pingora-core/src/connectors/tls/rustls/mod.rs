@@ -35,8 +35,6 @@ use pingora_rustls::{
 use crate::protocols::tls::{client::handshake, TlsStream};
 use crate::{connectors::ConnectorOptions, listeners::ALPN, protocols::IO, upstreams::peer::Peer};
 
-use super::replace_leftmost_underscore;
-
 #[derive(Clone)]
 pub struct Connector {
     pub ctx: Arc<TlsConnector>,
@@ -210,7 +208,7 @@ where
         }
     }
 
-    let mut domain = peer.sni().to_string();
+    let domain = peer.sni().to_string();
 
     let verification_mode = if peer.sni().is_empty() {
         Some(VerificationMode::SkipAll)
@@ -219,10 +217,6 @@ where
     } else if !peer.verify_hostname() {
         Some(VerificationMode::SkipHostname)
     } else {
-        // if sni had underscores in leftmost label replace and add
-        if let Some(sni_s) = replace_leftmost_underscore(peer.sni()) {
-            domain = sni_s;
-        }
         None
         // to use the custom verifier for the full verify:
         // Some(VerificationMode::Full)
