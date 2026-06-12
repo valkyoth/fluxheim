@@ -53,3 +53,34 @@ fn existing_path_has_insecure_write_permissions(
         }
     }
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::existing_path_has_insecure_write_permissions;
+    use fluxheim_common::test_support::unique_temp_path;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    use std::path::PathBuf;
+
+    #[test]
+    fn follows_symlinked_path_for_permission_checks() {
+        let target = unique_temp_path("fs-trust-world-writable-target");
+        let link = unique_temp_path("fs-trust-world-writable-link");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o777)).unwrap();
+        symlink(&target, &link).unwrap();
+
+        let mut current = link;
+        assert!(existing_path_has_insecure_write_permissions(&mut current).unwrap());
+    }
+
+    #[test]
+    fn rejects_excessive_path_depth_for_permission_checks() {
+        let mut current = PathBuf::new();
+        for _ in 0..=super::MAX_PERMISSION_INSPECTION_DEPTH {
+            current.push("missing");
+        }
+
+        let error = existing_path_has_insecure_write_permissions(&mut current).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+}

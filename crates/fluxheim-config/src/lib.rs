@@ -28,8 +28,8 @@ pub mod config_tls;
 pub mod config_types;
 pub mod config_udp;
 pub mod config_web;
-mod fs_trust;
-mod internal_crypto;
+pub mod fs_trust;
+pub mod internal_crypto;
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 mod otlp_http;
 

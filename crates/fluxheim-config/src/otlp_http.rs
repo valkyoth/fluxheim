@@ -23,3 +23,30 @@ fn endpoint_host(authority: &str) -> &str {
         .map(|(host, _)| host)
         .unwrap_or(authority)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::plaintext_non_loopback_endpoint;
+
+    #[test]
+    fn detects_plaintext_non_loopback_otlp_endpoint() {
+        assert!(!plaintext_non_loopback_endpoint(
+            "https://collector.example.test/v1/traces"
+        ));
+        assert!(!plaintext_non_loopback_endpoint(
+            "http://127.0.0.1:4318/v1/traces"
+        ));
+        assert!(!plaintext_non_loopback_endpoint(
+            "http://[::1]:4318/v1/traces"
+        ));
+        assert!(!plaintext_non_loopback_endpoint(
+            "http://localhost:4318/v1/traces"
+        ));
+        assert!(plaintext_non_loopback_endpoint(
+            "http://collector.example.test/v1/traces"
+        ));
+        assert!(plaintext_non_loopback_endpoint(
+            "http://10.0.0.10:4318/v1/traces"
+        ));
+    }
+}
