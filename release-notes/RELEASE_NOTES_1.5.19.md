@@ -98,6 +98,12 @@ during the v1.5.19 review cycle.
 - Hardened traffic mirroring by rejecting unsafe mirrored paths/queries before
   outbound URL construction and suppressing recursive mirror requests marked
   with `X-Fluxheim-Mirror`.
+- Added stream route `allow_sources` and `deny_sources` IP/CIDR policies so raw
+  TCP stream listeners can reject unauthorized sources before connecting
+  upstream.
+- Hardened stream hostname upstreams against DNS-rebinding pivots by rejecting
+  private or reserved DNS answers unless the route explicitly sets
+  `upstream_dns_allow_private_addresses = true`.
 
 ## What Changed
 
@@ -120,6 +126,9 @@ during the v1.5.19 review cycle.
 ## Compatibility
 
 - Existing config files remain valid.
+- Stream routes that use hostname upstreams resolving to private or reserved
+  addresses must now set `upstream_dns_allow_private_addresses = true` when
+  that resolution is intentional. IP-literal upstreams are unchanged.
 - Existing admin load-balancer status and mutation APIs remain unchanged.
 - Existing feature profiles and release artifact names are unchanged.
 - Existing RPM and container production feature sets are unchanged.

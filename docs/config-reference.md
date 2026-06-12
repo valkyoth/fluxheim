@@ -192,8 +192,11 @@ max_connection_bytes = 1073741824
 max_connections = 1024
 downstream_proxy_protocol = "off" # "off", "v1", or "v2"
 trusted_proxies = []
+allow_sources = []
+deny_sources = []
 upstream_proxy_protocol = "off" # "off", "v1", or "v2"
 upstream_tls = false
+upstream_dns_allow_private_addresses = false
 # upstream_sni = "db.internal.example"
 # upstream_verify_cert = true
 # upstream_verify_hostname = true
@@ -228,12 +231,27 @@ upstream_tls = false
 - `downstream_proxy_protocol` enables PROXY protocol receive for this stream
   route only. It defaults to `off` and requires route-local `trusted_proxies`.
   The HTTP `server.proxy_protocol` setting does not apply to stream listeners.
+- `allow_sources` and `deny_sources` are route-local stream source policies.
+  Entries are IP addresses or CIDR ranges. `deny_sources` wins over
+  `allow_sources`. When `allow_sources` is non-empty, clients without a source
+  address or outside the allow list are rejected before Fluxheim connects
+  upstream. With downstream PROXY receive enabled, the policy evaluates the
+  trusted PROXY client address; otherwise it evaluates the direct TCP peer.
+  HTTP access, auth subrequest, rate-limit, and geo policies do not apply to
+  raw TCP stream routes.
 - `upstream_proxy_protocol` writes a HAProxy PROXY protocol header to the
   selected upstream before forwarding stream bytes. Use it only when the
   upstream explicitly expects PROXY protocol. It cannot be combined with
   `upstream_tls`; stream TLS handshakes need a dedicated pre-TLS PROXY
   connector before that combination can be enabled safely.
 - `upstream_tls = true` sends TLS to the selected stream upstream.
+  Hostname upstreams are resolved on connection setup. By default, Fluxheim
+  rejects hostname DNS answers that resolve only to private, loopback,
+  link-local, multicast, broadcast, documentation, or unspecified addresses to
+  reduce DNS-rebinding pivots. Set
+  `upstream_dns_allow_private_addresses = true` only for routes whose hostname
+  upstreams are intentionally resolved by trusted internal DNS. IP-literal
+  upstreams remain explicit and are not blocked by this DNS guard.
   `upstream_sni` is optional; when unset Fluxheim derives SNI from the selected
   upstream host. IP upstreams do not have a DNS hostname to verify; set
   `upstream_sni` when a TLS certificate must be matched for an IP-address

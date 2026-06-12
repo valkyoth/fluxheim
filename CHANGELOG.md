@@ -103,6 +103,12 @@ behavior when the change improves security or project direction.
 - Harden traffic mirroring by rejecting unsafe mirrored paths/queries before
   outbound URL construction and suppressing recursive mirror requests marked
   with `X-Fluxheim-Mirror`.
+- Add stream route `allow_sources` and `deny_sources` IP/CIDR policies so raw
+  TCP stream listeners can reject unauthorized sources before connecting
+  upstream.
+- Harden stream hostname upstreams against DNS-rebinding pivots by rejecting
+  private or reserved DNS answers unless the route explicitly sets
+  `upstream_dns_allow_private_addresses = true`.
 
 ### Changed
 

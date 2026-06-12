@@ -106,7 +106,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | WebSocket / HTTP upgrade | ✅ | `1.4.1`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
 | External auth subrequests | ✅ | `1.4.1`; `[proxy.auth_request]` with bounded header/body forwarding. |
 | Traffic mirroring | ✅ | `1.4.1`; `traffic-mirror` feature with safe bodyless shadow requests. |
-| TCP stream proxying | ✅ | Optional `stream-proxy` feature with Fluxheim-owned L4 TCP listener/data-path and upstream TLS connector boundaries in `1.5.6`, weighted upstream selection, drain/backup policy, bounded idle/lifetime/byte/connect controls, route-local PROXY protocol receive/send, and stream upstream TLS/mTLS controls. |
+| TCP stream proxying | ✅ | Optional `stream-proxy` feature with Fluxheim-owned L4 TCP listener/data-path and upstream TLS connector boundaries, source IP/CIDR allow/deny policy, hostname-upstream DNS-rebinding guards, weighted upstream selection, drain/backup policy, bounded idle/lifetime/byte/connect controls, route-local PROXY protocol receive/send, and stream upstream TLS/mTLS controls. |
 | UDP/GSLB beta boundary | Limited | `1.5.16`; separate `[udp]` config namespace and `udp-proxy` feature gate with beta DNS-style request/response forwarding, bounded response waits, oversized-response drops, drop-log rate limiting, and syslog one-way forwarding. Public DNS reflector hardening, QUIC pass-through, game proxying, production UDP support, and generic UDP/GSLB platform behavior are not included yet. |
 
 ### Operations And Packaging

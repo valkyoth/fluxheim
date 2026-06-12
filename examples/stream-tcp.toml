@@ -19,8 +19,13 @@ max_connection_bytes = 1073741824
 max_connections = 1024
 downstream_proxy_protocol = "off"
 trusted_proxies = []
+# allow_sources = ["10.0.0.0/8"]
+# deny_sources = ["10.0.0.13"]
 upstream_proxy_protocol = "off"
 upstream_tls = false
+# Set true only when hostname upstreams intentionally resolve to private
+# addresses through trusted internal DNS. IP-literal upstreams are explicit.
+# upstream_dns_allow_private_addresses = true
 # upstream_sni = "db.internal.example"
 # upstream_verify_cert = true
 # upstream_verify_hostname = true

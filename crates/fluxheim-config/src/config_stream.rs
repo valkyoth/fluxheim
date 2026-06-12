@@ -10,7 +10,7 @@ use crate::config::{
     validate_required_timeout_secs,
 };
 use crate::config_net::{
-    normalize_host, valid_authority, valid_trusted_proxy, valid_upstream_alias,
+    normalize_host, valid_authority, valid_ip_matcher, valid_trusted_proxy, valid_upstream_alias,
 };
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 
@@ -18,6 +18,7 @@ pub const MAX_STREAM_ROUTES: usize = 128;
 pub const MAX_STREAM_ROUTE_NAME_BYTES: usize = 128;
 pub const MAX_STREAM_LISTENERS: usize = 64;
 pub const MAX_STREAM_UPSTREAMS: usize = 64;
+pub const MAX_STREAM_SOURCE_MATCHERS: usize = 256;
 pub const MAX_STREAM_MAX_CONNECTIONS: usize = 1_000_000;
 const MAX_STREAM_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_STREAM_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
@@ -137,9 +138,15 @@ pub struct StreamRouteConfig {
     #[serde(default)]
     pub trusted_proxies: Vec<String>,
     #[serde(default)]
+    pub allow_sources: Vec<String>,
+    #[serde(default)]
+    pub deny_sources: Vec<String>,
+    #[serde(default)]
     pub upstream_proxy_protocol: UpstreamProxyProtocol,
     #[serde(default)]
     pub upstream_tls: bool,
+    #[serde(default)]
+    pub upstream_dns_allow_private_addresses: bool,
     #[serde(default)]
     pub upstream_sni: Option<String>,
     #[serde(default = "default_true")]
@@ -260,6 +267,8 @@ impl StreamRouteConfig {
                 });
             }
         }
+        self.validate_source_matchers("stream.routes.allow_sources", &self.allow_sources)?;
+        self.validate_source_matchers("stream.routes.deny_sources", &self.deny_sources)?;
         if self.downstream_proxy_protocol != DownstreamProxyProtocol::Off
             && self.trusted_proxies.is_empty()
         {
@@ -277,6 +286,30 @@ impl StreamRouteConfig {
             .iter()
             .map(String::as_str)
             .chain(self.upstreams.iter().map(String::as_str))
+    }
+
+    fn validate_source_matchers(
+        &self,
+        field: &'static str,
+        matchers: &[String],
+    ) -> Result<(), ConfigError> {
+        validate_config_list_len(field, matchers.len(), MAX_STREAM_SOURCE_MATCHERS)?;
+        let mut seen = HashSet::new();
+        for matcher in matchers {
+            if !valid_ip_matcher(matcher) {
+                return Err(ConfigError::InvalidStreamProxyPolicy {
+                    field,
+                    reason: "entries must be IP addresses or CIDR ranges",
+                });
+            }
+            if !seen.insert(matcher.to_ascii_lowercase()) {
+                return Err(ConfigError::InvalidStreamProxyPolicy {
+                    field,
+                    reason: "entries must be unique",
+                });
+            }
+        }
+        Ok(())
     }
 
     fn validate_upstream_selection_policy(&self) -> Result<(), ConfigError> {
@@ -502,8 +535,11 @@ impl Default for StreamRouteConfig {
             max_connections: DEFAULT_STREAM_MAX_CONNECTIONS,
             downstream_proxy_protocol: DownstreamProxyProtocol::default(),
             trusted_proxies: Vec::new(),
+            allow_sources: Vec::new(),
+            deny_sources: Vec::new(),
             upstream_proxy_protocol: UpstreamProxyProtocol::default(),
             upstream_tls: false,
+            upstream_dns_allow_private_addresses: false,
             upstream_sni: None,
             upstream_verify_cert: true,
             upstream_verify_hostname: true,
@@ -822,6 +858,45 @@ listen = ["127.0.0.1:15432"]
 upstreams = ["127.0.0.1:5432", "127.0.0.1:6432"]
 backup_upstreams = ["127.0.0.1:5432"]
 drain_upstreams = ["127.0.0.1:5432"]
+"#,
+        )
+        .unwrap();
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn stream_config_accepts_source_acls_and_private_dns_opt_in() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "db.internal.example:5432"
+allow_sources = ["10.0.0.0/8", "2001:db8::/32"]
+deny_sources = ["10.0.0.13"]
+upstream_dns_allow_private_addresses = true
+"#,
+        )
+        .unwrap();
+
+        assert!(config.validate().is_ok());
+        assert!(config.routes[0].upstream_dns_allow_private_addresses);
+    }
+
+    #[test]
+    fn stream_config_rejects_invalid_source_acl_matchers() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+allow_sources = ["not-a-cidr"]
 "#,
         )
         .unwrap();

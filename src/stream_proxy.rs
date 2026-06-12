@@ -186,8 +186,11 @@ pub(crate) struct StreamProxyApp {
     max_connections: usize,
     active_connections: Arc<AtomicUsize>,
     next_upstream: AtomicUsize,
+    source_allow: Arc<[StreamSourceMatcher]>,
+    source_deny: Arc<[StreamSourceMatcher]>,
     upstream_proxy_protocol: UpstreamProxyProtocol,
     upstream_tls: bool,
+    upstream_dns_allow_private_addresses: bool,
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_tls_connector: Option<StreamUpstreamTlsConnector>,
 }
@@ -222,6 +225,8 @@ impl StreamProxyApp {
             .map(|index| upstreams[*index].weight)
             .sum::<usize>()
             .max(1);
+        let source_allow = parse_stream_source_matchers(&route.allow_sources, "allow source")?;
+        let source_deny = parse_stream_source_matchers(&route.deny_sources, "deny source")?;
 
         #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
         let upstream_tls_connector = StreamUpstreamTlsConnector::from_route(route)?;
@@ -239,8 +244,11 @@ impl StreamProxyApp {
             max_connections: route.max_connections,
             active_connections: Arc::new(AtomicUsize::new(0)),
             next_upstream: AtomicUsize::new(0),
+            source_allow: source_allow.into(),
+            source_deny: source_deny.into(),
             upstream_proxy_protocol: route.upstream_proxy_protocol,
             upstream_tls: route.upstream_tls,
+            upstream_dns_allow_private_addresses: route.upstream_dns_allow_private_addresses,
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_tls_connector,
         })
@@ -291,9 +299,29 @@ impl StreamProxyApp {
             max_connection_bytes: self.max_connection_bytes,
             upstream_proxy_protocol: self.upstream_proxy_protocol,
             upstream_tls: self.upstream_tls,
+            upstream_dns_allow_private_addresses: self.upstream_dns_allow_private_addresses,
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_tls_connector: self.upstream_tls_connector.clone(),
         }
+    }
+
+    fn source_allowed(&self, source: Option<SocketAddr>) -> bool {
+        let Some(source) = source else {
+            return self.source_allow.is_empty();
+        };
+        let source_ip = source.ip();
+        if self
+            .source_deny
+            .iter()
+            .any(|matcher| matcher.matches(source_ip))
+        {
+            return false;
+        }
+        self.source_allow.is_empty()
+            || self
+                .source_allow
+                .iter()
+                .any(|matcher| matcher.matches(source_ip))
     }
 
     async fn process_downstream(
@@ -338,6 +366,18 @@ impl StreamProxyApp {
                 return;
             }
         };
+        if !self.source_allowed(source) {
+            record_stream_connection(self.name.as_ref(), "rejected");
+            log::warn!(
+                target: "fluxheim::stream",
+                "stream route {} rejected source {} by stream source policy",
+                self.name,
+                source
+                    .map(|address| address.to_string())
+                    .unwrap_or_else(|| "unknown".to_owned())
+            );
+            return;
+        }
         let candidates = self.select_upstream_candidates();
         let options = self.connection_options();
         let started = Instant::now();
@@ -574,6 +614,7 @@ struct StreamProxyConnectionOptions {
     max_connection_bytes: Option<u64>,
     upstream_proxy_protocol: UpstreamProxyProtocol,
     upstream_tls: bool,
+    upstream_dns_allow_private_addresses: bool,
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_tls_connector: Option<StreamUpstreamTlsConnector>,
 }
@@ -744,7 +785,10 @@ async fn connect_upstream(
 
     match tokio::time::timeout(
         options.connect_timeout,
-        connect_upstream_inner(upstream_authority),
+        connect_upstream_inner(
+            upstream_authority,
+            options.upstream_dns_allow_private_addresses,
+        ),
     )
     .await
     {
@@ -772,7 +816,11 @@ async fn connect_tls_upstream(
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     {
         let connect = async {
-            let socket_addr = resolve_upstream_socket_addr(upstream_authority).await?;
+            let socket_addr = resolve_upstream_socket_addr(
+                upstream_authority,
+                options.upstream_dns_allow_private_addresses,
+            )
+            .await?;
             let Some(connector) = &options.upstream_tls_connector else {
                 return Err(FluxError::InvalidInput(
                     "stream upstream TLS connector is not initialized",
@@ -797,14 +845,21 @@ async fn connect_tls_upstream(
     }
 }
 
-async fn connect_upstream_inner(upstream_authority: &str) -> FluxResult<tokio::net::TcpStream> {
-    let socket_addr = resolve_upstream_socket_addr(upstream_authority).await?;
+async fn connect_upstream_inner(
+    upstream_authority: &str,
+    allow_private_dns_addresses: bool,
+) -> FluxResult<tokio::net::TcpStream> {
+    let socket_addr =
+        resolve_upstream_socket_addr(upstream_authority, allow_private_dns_addresses).await?;
     tokio::net::TcpStream::connect(socket_addr)
         .await
         .map_err(|error| FluxError::io("connect stream upstream", error))
 }
 
-async fn resolve_upstream_socket_addr(upstream_authority: &str) -> FluxResult<SocketAddr> {
+async fn resolve_upstream_socket_addr(
+    upstream_authority: &str,
+    allow_private_dns_addresses: bool,
+) -> FluxResult<SocketAddr> {
     if let Ok(socket_addr) = upstream_authority.parse::<SocketAddr>() {
         return Ok(socket_addr);
     }
@@ -812,15 +867,57 @@ async fn resolve_upstream_socket_addr(upstream_authority: &str) -> FluxResult<So
     let resolved = tokio::net::lookup_host(upstream_authority)
         .await
         .map_err(|error| FluxError::io("resolve stream upstream", error))?;
-    resolved.into_iter().next().ok_or_else(|| {
-        FluxError::io(
-            "resolve stream upstream",
-            io::Error::new(
-                io::ErrorKind::AddrNotAvailable,
-                "stream upstream resolved to no socket addresses",
-            ),
-        )
-    })
+    let mut saw_rejected_address = false;
+    for socket_addr in resolved {
+        if allow_private_dns_addresses || stream_dns_resolved_address_allowed(socket_addr.ip()) {
+            return Ok(socket_addr);
+        }
+        saw_rejected_address = true;
+    }
+    if saw_rejected_address {
+        return Err(FluxError::InvalidInput(
+            "stream upstream DNS resolved only to private or reserved addresses; set upstream_dns_allow_private_addresses = true for trusted internal DNS upstreams",
+        ));
+    }
+    Err(FluxError::io(
+        "resolve stream upstream",
+        io::Error::new(
+            io::ErrorKind::AddrNotAvailable,
+            "stream upstream resolved to no socket addresses",
+        ),
+    ))
+}
+
+fn stream_dns_resolved_address_allowed(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => stream_dns_resolved_ipv4_address_allowed(address),
+        IpAddr::V6(address) => stream_dns_resolved_ipv6_address_allowed(address),
+    }
+}
+
+fn stream_dns_resolved_ipv4_address_allowed(address: Ipv4Addr) -> bool {
+    let [first, second, ..] = address.octets();
+    !(address.is_unspecified()
+        || address.is_loopback()
+        || address.is_private()
+        || address.is_link_local()
+        || address.is_multicast()
+        || address.is_broadcast()
+        || address.is_documentation()
+        || first >= 240
+        || first == 0
+        || (first == 100 && (64..=127).contains(&second))
+        || (first == 198 && matches!(second, 18 | 19)))
+}
+
+fn stream_dns_resolved_ipv6_address_allowed(address: Ipv6Addr) -> bool {
+    let segments = address.segments();
+    !(address.is_unspecified()
+        || address.is_loopback()
+        || address.is_multicast()
+        || address.is_unique_local()
+        || address.is_unicast_link_local()
+        || (segments[0] == 0x2001 && segments[1] == 0x0db8))
 }
 
 async fn write_upstream_proxy_protocol(
@@ -843,12 +940,12 @@ async fn write_upstream_proxy_protocol(
 }
 
 #[derive(Debug, Clone)]
-enum StreamTrustedSource {
+enum StreamSourceMatcher {
     Ip(IpAddr),
     Cidr { network: IpAddr, prefix: u8 },
 }
 
-impl StreamTrustedSource {
+impl StreamSourceMatcher {
     fn matches(&self, address: IpAddr) -> bool {
         match self {
             Self::Ip(trusted) => *trusted == address,
@@ -856,6 +953,8 @@ impl StreamTrustedSource {
         }
     }
 }
+
+type StreamTrustedSource = StreamSourceMatcher;
 
 const PROXY_PROTOCOL_V1_MAX_LINE: usize = 108;
 const PROXY_PROTOCOL_V2_HEADER_LEN: usize = 16;
@@ -869,21 +968,30 @@ fn parse_stream_trusted_sources(route: &StreamRouteConfig) -> FluxResult<Vec<Str
     route
         .trusted_proxies
         .iter()
-        .map(|source| parse_stream_proxy_protocol_trusted_source(source))
+        .map(|source| parse_stream_source_matcher(source, "trusted proxy"))
         .collect::<FluxResult<Vec<_>>>()
 }
 
-fn parse_stream_proxy_protocol_trusted_source(value: &str) -> FluxResult<StreamTrustedSource> {
+fn parse_stream_source_matchers(
+    values: &[String],
+    field: &'static str,
+) -> FluxResult<Vec<StreamSourceMatcher>> {
+    values
+        .iter()
+        .map(|source| parse_stream_source_matcher(source, field))
+        .collect::<FluxResult<Vec<_>>>()
+}
+
+fn parse_stream_source_matcher(
+    value: &str,
+    field: &'static str,
+) -> FluxResult<StreamSourceMatcher> {
     if let Some((address, prefix)) = value.split_once('/') {
         let network = address.parse::<IpAddr>().map_err(|error| {
-            FluxError::invalid_input(format!(
-                "invalid stream trusted proxy network {value:?}: {error}"
-            ))
+            FluxError::invalid_input(format!("invalid stream {field} network {value:?}: {error}"))
         })?;
         let prefix = prefix.parse::<u8>().map_err(|error| {
-            FluxError::invalid_input(format!(
-                "invalid stream trusted proxy prefix {value:?}: {error}"
-            ))
+            FluxError::invalid_input(format!("invalid stream {field} prefix {value:?}: {error}"))
         })?;
         let max_prefix = match network {
             IpAddr::V4(_) => 32,
@@ -891,16 +999,14 @@ fn parse_stream_proxy_protocol_trusted_source(value: &str) -> FluxResult<StreamT
         };
         if prefix > max_prefix {
             return Err(FluxError::invalid_input(format!(
-                "invalid stream trusted proxy prefix {value:?}: prefix exceeds address family width"
+                "invalid stream {field} prefix {value:?}: prefix exceeds address family width"
             )));
         }
-        return Ok(StreamTrustedSource::Cidr { network, prefix });
+        return Ok(StreamSourceMatcher::Cidr { network, prefix });
     }
-    Ok(StreamTrustedSource::Ip(value.parse::<IpAddr>().map_err(
+    Ok(StreamSourceMatcher::Ip(value.parse::<IpAddr>().map_err(
         |error| {
-            FluxError::invalid_input(format!(
-                "invalid stream trusted proxy address {value:?}: {error}"
-            ))
+            FluxError::invalid_input(format!("invalid stream {field} address {value:?}: {error}"))
         },
     )?))
 }
@@ -1166,6 +1272,7 @@ mod tests {
             max_connection_bytes,
             upstream_proxy_protocol: UpstreamProxyProtocol::Off,
             upstream_tls: false,
+            upstream_dns_allow_private_addresses: false,
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_tls_connector: None,
         }
@@ -1189,8 +1296,11 @@ mod tests {
             max_connections: 0,
             downstream_proxy_protocol: DownstreamProxyProtocol::Off,
             trusted_proxies: Vec::new(),
+            allow_sources: Vec::new(),
+            deny_sources: Vec::new(),
             upstream_proxy_protocol: UpstreamProxyProtocol::Off,
             upstream_tls: false,
+            upstream_dns_allow_private_addresses: false,
             upstream_sni: None,
             upstream_verify_cert: true,
             upstream_verify_hostname: true,
@@ -1251,15 +1361,99 @@ mod tests {
 
     #[test]
     fn stream_trusted_sources_match_exact_and_cidr() {
-        let exact = super::parse_stream_proxy_protocol_trusted_source("127.0.0.1").unwrap();
+        let exact = super::parse_stream_source_matcher("127.0.0.1", "trusted proxy").unwrap();
         assert!(exact.matches("127.0.0.1".parse().unwrap()));
         assert!(!exact.matches("127.0.0.2".parse().unwrap()));
 
-        let cidr = super::parse_stream_proxy_protocol_trusted_source("10.0.0.0/24").unwrap();
+        let cidr = super::parse_stream_source_matcher("10.0.0.0/24", "trusted proxy").unwrap();
         assert!(cidr.matches("10.0.0.42".parse().unwrap()));
         assert!(!cidr.matches("10.0.1.42".parse().unwrap()));
 
-        assert!(super::parse_stream_proxy_protocol_trusted_source("10.0.0.0/64").is_err());
+        assert!(super::parse_stream_source_matcher("10.0.0.0/64", "trusted proxy").is_err());
+    }
+
+    #[test]
+    fn stream_source_policy_denies_before_allowing() {
+        let app = StreamProxyApp::from_config(&StreamRouteConfig {
+            name: "tcp".to_owned(),
+            listen: vec!["127.0.0.1:12345".to_owned()],
+            upstream: Some("127.0.0.1:5432".to_owned()),
+            allow_sources: vec!["10.0.0.0/8".to_owned()],
+            deny_sources: vec!["10.0.0.13".to_owned()],
+            ..StreamRouteConfig::default()
+        })
+        .unwrap();
+
+        assert!(app.source_allowed(Some("10.0.0.12:1234".parse().unwrap())));
+        assert!(!app.source_allowed(Some("10.0.0.13:1234".parse().unwrap())));
+        assert!(!app.source_allowed(Some("192.0.2.10:1234".parse().unwrap())));
+        assert!(!app.source_allowed(None));
+
+        let app = StreamProxyApp::from_config(&StreamRouteConfig {
+            name: "tcp".to_owned(),
+            listen: vec!["127.0.0.1:12345".to_owned()],
+            upstream: Some("127.0.0.1:5432".to_owned()),
+            deny_sources: vec!["192.0.2.0/24".to_owned()],
+            ..StreamRouteConfig::default()
+        })
+        .unwrap();
+        assert!(app.source_allowed(None));
+        assert!(app.source_allowed(Some("10.0.0.12:1234".parse().unwrap())));
+        assert!(!app.source_allowed(Some("192.0.2.10:1234".parse().unwrap())));
+    }
+
+    #[test]
+    fn stream_dns_rebind_guard_rejects_private_resolved_addresses() {
+        assert!(!super::stream_dns_resolved_address_allowed(
+            "127.0.0.1".parse().unwrap()
+        ));
+        assert!(!super::stream_dns_resolved_address_allowed(
+            "10.0.0.1".parse().unwrap()
+        ));
+        assert!(!super::stream_dns_resolved_address_allowed(
+            "169.254.169.254".parse().unwrap()
+        ));
+        assert!(!super::stream_dns_resolved_address_allowed(
+            "100.64.0.1".parse().unwrap()
+        ));
+        assert!(!super::stream_dns_resolved_address_allowed(
+            "198.18.0.1".parse().unwrap()
+        ));
+        assert!(!super::stream_dns_resolved_address_allowed(
+            "240.0.0.1".parse().unwrap()
+        ));
+        assert!(!super::stream_dns_resolved_address_allowed(
+            "::1".parse().unwrap()
+        ));
+        assert!(!super::stream_dns_resolved_address_allowed(
+            "fc00::1".parse().unwrap()
+        ));
+        assert!(!super::stream_dns_resolved_address_allowed(
+            "2001:db8::1".parse().unwrap()
+        ));
+        assert!(super::stream_dns_resolved_address_allowed(
+            "1.1.1.1".parse().unwrap()
+        ));
+        assert!(super::stream_dns_resolved_address_allowed(
+            "2606:4700:4700::1111".parse().unwrap()
+        ));
+    }
+
+    #[test]
+    fn stream_dns_rebind_guard_allows_explicit_ip_literal_upstreams() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            assert_eq!(
+                super::resolve_upstream_socket_addr("127.0.0.1:5432", false)
+                    .await
+                    .unwrap(),
+                "127.0.0.1:5432".parse().unwrap()
+            );
+        });
     }
 
     #[test]

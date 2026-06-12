@@ -10138,6 +10138,7 @@ where
     Ok(peer)
 }
 
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 fn proxy_peer_group_key_with_material(current: u64, label: &[u8], material_key: u64) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for byte in current
