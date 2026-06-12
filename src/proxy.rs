@@ -6823,7 +6823,6 @@ fn prune_inactive_cache_fill_concurrency_counters(
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PeerFillRequest {
     uri_path_and_query: String,
-    host: Option<String>,
     headers: Vec<(&'static str, String)>,
 }
 
@@ -6865,7 +6864,6 @@ fn peer_fill_request_from_header(request: &RequestHeader) -> PeerFillRequest {
             .path_and_query()
             .map(|value| value.as_str().to_owned())
             .unwrap_or_else(|| request.uri.path().to_owned()),
-        host: explicit_request_host_header(request).map(ToOwned::to_owned),
         headers,
     }
 }
@@ -6893,9 +6891,6 @@ fn fetch_peer_fill_response(
         .get(&url)
         .header("cache-control", "only-if-cached")
         .header("x-fluxheim-peer-fill", "1");
-    if let Some(host) = request.host.as_deref() {
-        builder = builder.header("host", host);
-    }
     for (name, value) in &request.headers {
         builder = builder.header(*name, value.as_str());
     }
@@ -10212,14 +10207,6 @@ fn request_host_header(request: &RequestHeader) -> Option<&str> {
         .get("host")
         .and_then(|value| value.to_str().ok())
         .or_else(|| request.uri.authority().map(|authority| authority.as_str()))
-}
-
-#[cfg(feature = "cache")]
-fn explicit_request_host_header(request: &RequestHeader) -> Option<&str> {
-    request
-        .headers
-        .get("host")
-        .and_then(|value| value.to_str().ok())
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -17009,7 +16996,7 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
-    fn peer_fill_request_keeps_only_safe_negotiation_headers() {
+    fn peer_fill_request_keeps_only_safe_negotiation_headers_and_drops_client_host() {
         let mut request = RequestHeader::build("GET", b"/img/logo.webp?v=1", None).unwrap();
         request.insert_header("host", "site.example").unwrap();
         request.insert_header("accept", "image/webp").unwrap();
@@ -17023,7 +17010,6 @@ mod tests {
         let peer_request = peer_fill_request_from_header(&request);
 
         assert_eq!(peer_request.uri_path_and_query, "/img/logo.webp?v=1");
-        assert_eq!(peer_request.host.as_deref(), Some("site.example"));
         assert_eq!(
             peer_request.headers,
             vec![
@@ -17045,7 +17031,7 @@ mod tests {
         let peer_request = peer_fill_request_from_header(&request);
 
         assert_eq!(peer_request.uri_path_and_query, "/img/logo.webp?v=1");
-        assert_eq!(peer_request.host, None);
+        assert!(peer_request.headers.is_empty());
     }
 
     #[cfg(feature = "cache")]

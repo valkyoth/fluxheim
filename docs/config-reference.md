@@ -2038,9 +2038,10 @@ proxy-cache requests with `Cache-Control: only-if-cached` are answered only from
 a fresh local cache object and otherwise return `504` without contacting origin.
 Outbound peer fill uses the same safe request mode on local proxy-cache misses,
 stores valid peer hits locally, and falls back to origin only when `fail_open`
-is true. Peer requests include the original host plus safe negotiation headers
-such as `Accept`, `Accept-Encoding`, and `Accept-Language`; credentials such as
-`Authorization` and `Cookie` are not forwarded.
+is true. Peer-fill requests do not forward the client `Host` header; peers
+receive the authority from their configured `base_url` plus safe negotiation
+headers such as `Accept`, `Accept-Encoding`, and `Accept-Language`.
+Credentials such as `Authorization` and `Cookie` are not forwarded.
 `examples/cache-peer-fill.toml` shows the focused validated fixture. Metrics
 builds expose aggregate peer-fill configuration through
 `fluxheim_cache_peer_fill_enabled_policies`,

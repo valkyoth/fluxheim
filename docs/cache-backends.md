@@ -267,8 +267,9 @@ internal cache implementation.
   gives outbound peer fill a safe no-origin endpoint. On a local proxy-cache
   miss, Fluxheim asks configured peers for that no-origin endpoint before
   falling back to origin according to `fail_open`; peer hits are stored locally
-  and peer requests forward only host plus safe negotiation headers rather than
-  client credentials. The example
+  and peer requests do not forward the client `Host` header. Peer requests use
+  the authority from the configured peer `base_url` plus safe negotiation
+  headers rather than client credentials. The example
   `examples/cache-peer-fill.toml` shows the current config shape for
   cache-cluster planning. `scripts/smoke_peer_fill_cache.sh` runs a local
   multi-node smoke that proves node-to-node `PEER-HIT`, no extra origin fetch,
