@@ -100,6 +100,9 @@ behavior when the change improves security or project direction.
 - Strip client-controlled hop-by-hop request headers before forwarding to
   upstreams, including `Connection`-listed extension headers and non-WebSocket
   `Upgrade` values.
+- Harden traffic mirroring by rejecting unsafe mirrored paths/queries before
+  outbound URL construction and suppressing recursive mirror requests marked
+  with `X-Fluxheim-Mirror`.
 
 ### Changed
 

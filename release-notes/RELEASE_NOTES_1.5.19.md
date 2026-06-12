@@ -95,6 +95,9 @@ during the v1.5.19 review cycle.
 - Stripped client-controlled hop-by-hop request headers before forwarding to
   upstreams, including `Connection`-listed extension headers and non-WebSocket
   `Upgrade` values.
+- Hardened traffic mirroring by rejecting unsafe mirrored paths/queries before
+  outbound URL construction and suppressing recursive mirror requests marked
+  with `X-Fluxheim-Mirror`.
 
 ## What Changed
 

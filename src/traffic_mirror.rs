@@ -80,6 +80,7 @@ fn traffic_mirror_request(
     context: TrafficMirrorRouteContext<'_>,
 ) -> Option<TrafficMirrorRequest> {
     if !mirror.enabled
+        || traffic_mirror_recursion_marker_present(request)
         || !mirror
             .methods
             .iter()
@@ -107,6 +108,10 @@ fn traffic_mirror_request(
         #[cfg(feature = "metrics")]
         metric_route: context.route_name.map(str::to_owned),
     })
+}
+
+fn traffic_mirror_recursion_marker_present(request: &RequestHeader) -> bool {
+    request.headers.get("x-fluxheim-mirror").is_some()
 }
 
 fn traffic_mirror_slot_key(context: TrafficMirrorRouteContext<'_>) -> String {
@@ -238,7 +243,9 @@ fn traffic_mirror_sample_selected_with_salt(
 }
 
 pub(crate) fn traffic_mirror_url(base_url: &str, path_and_query: &str) -> Option<String> {
-    if !path_and_query.starts_with('/') {
+    if path_and_query.contains('#')
+        || !fluxheim_common::path_safety::safe_forward_path_and_query(path_and_query)
+    {
         return None;
     }
     let mut url = base_url.trim_end_matches('/').to_owned();
@@ -314,4 +321,56 @@ fn request_host_header(request: &RequestHeader) -> Option<&str> {
         .headers
         .get("host")
         .and_then(|value| value.to_str().ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TrafficMirrorRouteContext, traffic_mirror_request, traffic_mirror_url};
+    use crate::config::TrafficMirrorConfig;
+    use crate::http_types::PingoraRequestHeader as RequestHeader;
+
+    #[test]
+    fn traffic_mirror_url_rejects_unsafe_path_and_query() {
+        assert_eq!(
+            traffic_mirror_url("http://127.0.0.1:9000/shadow", "/api/items?q=1").as_deref(),
+            Some("http://127.0.0.1:9000/shadow/api/items?q=1")
+        );
+        for path in [
+            "../admin",
+            "/../admin",
+            "/%2e%2e/admin",
+            "/%252e%252e/admin",
+            "/assets\\..\\secret",
+            "/api/items#/admin",
+        ] {
+            assert!(
+                traffic_mirror_url("http://127.0.0.1:9000/shadow", path).is_none(),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn traffic_mirror_request_skips_recursion_marker() {
+        let mut request = RequestHeader::build("GET", b"/api/items", None).unwrap();
+        request.insert_header("x-fluxheim-mirror", "1").unwrap();
+        let mirror = TrafficMirrorConfig {
+            enabled: true,
+            base_url: Some("http://127.0.0.1:9000/shadow".to_owned()),
+            sample_per_mille: 1000,
+            ..TrafficMirrorConfig::default()
+        };
+
+        assert!(
+            traffic_mirror_request(
+                &request,
+                &mirror,
+                TrafficMirrorRouteContext {
+                    vhost_name: "test",
+                    route_name: Some("api"),
+                },
+            )
+            .is_none()
+        );
+    }
 }
