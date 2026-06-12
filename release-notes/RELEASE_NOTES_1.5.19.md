@@ -61,6 +61,10 @@ during the v1.5.19 review cycle.
   rejecting private, loopback, link-local, multicast, reserved, documentation,
   metadata, and unspecified resolved addresses unless
   `proxy.upstream_dns_allow_private_backends = true` is set.
+- Hardened split-config trusted-proxy handling by extending
+  `server.trusted_proxies` fragments instead of replacing the main list, and by
+  rejecting catch-all or near-global trusted-proxy ranges such as `0.0.0.0/0`
+  and `::/0`.
 
 ## What Changed
 

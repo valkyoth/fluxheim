@@ -86,7 +86,29 @@ pub fn valid_ip_matcher(value: &str) -> bool {
 }
 
 pub fn valid_trusted_proxy(value: &str) -> bool {
-    valid_ip_matcher(value)
+    valid_ip_matcher(value) && trusted_proxy_has_safe_scope(value)
+}
+
+fn trusted_proxy_has_safe_scope(value: &str) -> bool {
+    let value = value.trim();
+    let Some((address, prefix)) = value.split_once('/') else {
+        return value
+            .parse::<IpAddr>()
+            .is_ok_and(|address| !address.is_unspecified());
+    };
+    let Ok(address) = address.parse::<IpAddr>() else {
+        return false;
+    };
+    let Ok(prefix) = prefix.parse::<u8>() else {
+        return false;
+    };
+    if address.is_unspecified() {
+        return false;
+    }
+    match address {
+        IpAddr::V4(_) => prefix >= 8,
+        IpAddr::V6(_) => prefix >= 32,
+    }
 }
 
 pub fn valid_upstream_alias(alias: &str) -> bool {

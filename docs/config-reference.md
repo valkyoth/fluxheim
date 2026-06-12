@@ -40,6 +40,10 @@ sibling `conf.d/` directory load after the main file. When the config path is a
 directory, Fluxheim loads visible `*.toml` files in that directory first and
 then visible `*.toml` files in its `conf.d/` child. Files are loaded in lexical
 order within each directory.
+When multiple fragments set `server.trusted_proxies`, Fluxheim extends the
+trusted-proxy list and deduplicates exact entries instead of replacing the
+earlier list. This keeps a later fragment from silently discarding the main
+config's client-IP trust boundary.
 
 Relative filesystem paths are resolved from the config file directory.
 Config sources must be real TOML files or real directories. Fluxheim rejects a
@@ -116,7 +120,10 @@ Notes:
   gateway, Cloudflare, or a trusted edge proxy. When the direct peer is trusted,
   Fluxheim walks `X-Forwarded-For` from right to left and restores the last
   non-trusted hop for generated client-IP headers, equivalent to nginx
-  `real_ip_recursive on`. The list is capped at 512 entries.
+  `real_ip_recursive on`. The list is capped at 512 entries. Entries must be
+  concrete IP addresses or bounded CIDR ranges; catch-all and near-global trust
+  scopes such as `0.0.0.0/0`, IPv4 prefixes broader than `/8`, `::/0`, IPv6
+  prefixes broader than `/32`, and unspecified addresses are rejected.
 - `proxy_protocol` defaults to `off`. Set it to `v1` or `v2` only on listeners reached
   exclusively through trusted load balancers or edge proxies that send HAProxy
   PROXY protocol before TLS/HTTP/stream bytes. Fluxheim requires

@@ -64,7 +64,11 @@ impl ServerConfig {
             self.default_vhost = Some(default_vhost);
         }
         if let Some(trusted_proxies) = fragment.trusted_proxies {
-            self.trusted_proxies = trusted_proxies;
+            for trusted_proxy in trusted_proxies {
+                if !self.trusted_proxies.contains(&trusted_proxy) {
+                    self.trusted_proxies.push(trusted_proxy);
+                }
+            }
         }
         if let Some(proxy_protocol) = fragment.proxy_protocol {
             self.proxy_protocol = proxy_protocol;
