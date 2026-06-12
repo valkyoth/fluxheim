@@ -104,7 +104,7 @@ pub struct StreamRouteConfig {
     pub max_connection_secs: Option<u64>,
     #[serde(default)]
     pub max_connection_bytes: Option<u64>,
-    #[serde(default)]
+    #[serde(default = "default_stream_max_connections")]
     pub max_connections: usize,
     #[serde(default)]
     pub downstream_proxy_protocol: DownstreamProxyProtocol,
@@ -473,7 +473,7 @@ impl Default for StreamRouteConfig {
             idle_timeout_secs: default_stream_idle_timeout_secs(),
             max_connection_secs: None,
             max_connection_bytes: None,
-            max_connections: 0,
+            max_connections: DEFAULT_STREAM_MAX_CONNECTIONS,
             downstream_proxy_protocol: DownstreamProxyProtocol::default(),
             trusted_proxies: Vec::new(),
             upstream_proxy_protocol: UpstreamProxyProtocol::default(),
@@ -497,8 +497,14 @@ fn default_stream_connect_timeout_secs() -> u64 {
     5
 }
 
+pub const DEFAULT_STREAM_MAX_CONNECTIONS: usize = 1024;
+
 fn default_stream_idle_timeout_secs() -> u64 {
     300
+}
+
+fn default_stream_max_connections() -> usize {
+    DEFAULT_STREAM_MAX_CONNECTIONS
 }
 
 fn validate_optional_timeout_secs(
@@ -564,7 +570,7 @@ pub fn acquire_stream_connection_slot(
 
 #[cfg(all(test, feature = "stream-proxy"))]
 mod tests {
-    use super::{StreamConfig, acquire_stream_connection_slot};
+    use super::{DEFAULT_STREAM_MAX_CONNECTIONS, StreamConfig, acquire_stream_connection_slot};
     use crate::config::{Config, StreamRouteConfig};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -583,6 +589,46 @@ upstream = "127.0.0.1:5432"
         )
         .unwrap();
 
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn stream_route_defaults_to_bounded_connection_cap() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.routes[0].max_connections,
+            DEFAULT_STREAM_MAX_CONNECTIONS
+        );
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn stream_route_accepts_explicit_unlimited_connection_cap() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+max_connections = 0
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.routes[0].max_connections, 0);
         assert!(config.validate().is_ok());
     }
 

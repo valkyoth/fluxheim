@@ -205,8 +205,10 @@ upstream_tls = false
   when set. Leave it unset for no wall-clock lifetime cap.
 - `max_connection_bytes` is optional and caps copied bytes per direction for a
   single stream connection.
-- `max_connections = 0` means unlimited for that stream route. Non-zero values
-  cap concurrent accepted connections before connecting upstream.
+- `max_connections` caps concurrent accepted connections before connecting
+  upstream and defaults to `1024`. Setting `max_connections = 0` is an explicit
+  unlimited override for private or otherwise externally protected stream
+  routes; public listeners should keep a non-zero cap sized to the backend.
 - `downstream_proxy_protocol` enables PROXY protocol receive for this stream
   route only. It defaults to `off` and requires route-local `trusted_proxies`.
   The HTTP `server.proxy_protocol` setting does not apply to stream listeners.
