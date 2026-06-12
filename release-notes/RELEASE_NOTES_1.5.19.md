@@ -48,6 +48,9 @@ during the v1.5.19 review cycle.
   wired it into vendored Pingora HTTP/2 downstream request-body reads so
   slow-body clients cannot hold proxy forwarding tasks indefinitely while
   withholding DATA frames or END_STREAM.
+- Applied the downstream read timeout before PHP-FPM request-body collection and
+  drain paths, covering PHP routes that read the body before FastCGI execution
+  begins.
 
 ## What Changed
 

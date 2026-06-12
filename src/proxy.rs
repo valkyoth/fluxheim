@@ -7210,6 +7210,7 @@ async fn respond_php_request(
         .map(|bytes| bytes.as_u64())
         .or(ctx.request_body_limit_bytes)
         .unwrap_or(DEFAULT_PHP_REQUEST_BODY_LIMIT_BYTES);
+    apply_downstream_flow_control(session, &selected_runtime_proxy(vhost, ctx).config);
     let request_body = if php.config.pass_request_body {
         read_php_request_body(session, ctx, &php.config, body_limit).await?
     } else {
