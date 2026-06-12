@@ -2,7 +2,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Read;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -123,6 +123,7 @@ struct FileUpstreamDiscovery {
 struct HttpUpstreamDiscovery {
     url: String,
     bearer_token_file: Option<PathBuf>,
+    allow_private_backends: bool,
 }
 
 struct StaticUpstreamDiscovery {
@@ -155,6 +156,7 @@ impl FluxBackendDiscovery for HttpUpstreamDiscovery {
         let upstreams = fetch_proxy_upstreams_http_for_discovery(
             self.url.clone(),
             self.bearer_token_file.clone(),
+            self.allow_private_backends,
         )
         .await?;
         let mut backends = FluxBackendSet::default();
@@ -189,21 +191,24 @@ async fn read_proxy_upstreams_file_for_discovery(path: PathBuf) -> FluxResult<Ve
 async fn fetch_proxy_upstreams_http_for_discovery(
     url: String,
     bearer_token_file: Option<PathBuf>,
+    allow_private_backends: bool,
 ) -> FluxResult<Vec<String>> {
     let result = if tokio::runtime::Handle::try_current().is_ok() {
-        tokio::task::spawn_blocking(move || fetch_proxy_upstreams_http(&url, bearer_token_file))
-            .await
-            .map_err(|error| {
-                FluxError::io(
-                    "proxy upstreams HTTP discovery task failed",
-                    io::Error::other(error.to_string()),
-                )
-            })?
+        tokio::task::spawn_blocking(move || {
+            fetch_proxy_upstreams_http(&url, bearer_token_file, allow_private_backends)
+        })
+        .await
+        .map_err(|error| {
+            FluxError::io(
+                "proxy upstreams HTTP discovery task failed",
+                io::Error::other(error.to_string()),
+            )
+        })?
     } else {
         // The construction-time update is synchronously polled before a Tokio
         // reactor exists. Keep the bootstrap fetch immediately ready; later
         // refreshes run through spawn_blocking().
-        fetch_proxy_upstreams_http(&url, bearer_token_file)
+        fetch_proxy_upstreams_http(&url, bearer_token_file, allow_private_backends)
     };
 
     result.map_err(|error| FluxError::io("failed to fetch proxy upstreams HTTP discovery", error))
@@ -212,6 +217,7 @@ async fn fetch_proxy_upstreams_http_for_discovery(
 fn fetch_proxy_upstreams_http(
     url: &str,
     bearer_token_file: Option<PathBuf>,
+    allow_private_backends: bool,
 ) -> io::Result<Vec<String>> {
     let timeout = Duration::from_secs(5);
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -263,7 +269,7 @@ fn fetch_proxy_upstreams_http(
             "HTTP discovery response is too large",
         ));
     }
-    parse_proxy_upstreams_http_body(&body)
+    parse_proxy_upstreams_http_body(&body, allow_private_backends)
 }
 
 fn read_http_discovery_bearer_token(path: &Path) -> io::Result<Zeroizing<String>> {
@@ -350,7 +356,10 @@ enum HttpDiscoveryPayload {
     Object { upstreams: Vec<String> },
 }
 
-fn parse_proxy_upstreams_http_body(body: &[u8]) -> io::Result<Vec<String>> {
+fn parse_proxy_upstreams_http_body(
+    body: &[u8],
+    allow_private_backends: bool,
+) -> io::Result<Vec<String>> {
     let payload: HttpDiscoveryPayload = serde_json::from_slice(body).map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -362,10 +371,13 @@ fn parse_proxy_upstreams_http_body(body: &[u8]) -> io::Result<Vec<String>> {
             upstreams
         }
     };
-    validate_http_discovery_upstreams(upstreams)
+    validate_http_discovery_upstreams(upstreams, allow_private_backends)
 }
 
-fn validate_http_discovery_upstreams(upstreams: Vec<String>) -> io::Result<Vec<String>> {
+fn validate_http_discovery_upstreams(
+    upstreams: Vec<String>,
+    allow_private_backends: bool,
+) -> io::Result<Vec<String>> {
     let mut validated = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for upstream in upstreams {
@@ -374,6 +386,12 @@ fn validate_http_discovery_upstreams(upstreams: Vec<String>) -> io::Result<Vec<S
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "HTTP discovery upstream is not a host:port or ip:port authority",
+            ));
+        }
+        if !allow_private_backends && http_discovery_upstream_uses_restricted_ip_literal(value) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "HTTP discovery upstream uses a private, loopback, link-local, multicast, reserved, or documentation IP address without proxy.upstreams_http_allow_private_backends",
             ));
         }
         if !seen.insert(value.to_ascii_lowercase()) {
@@ -397,6 +415,48 @@ fn validate_http_discovery_upstreams(upstreams: Vec<String>) -> io::Result<Vec<S
         ));
     }
     Ok(validated)
+}
+
+fn http_discovery_upstream_uses_restricted_ip_literal(upstream: &str) -> bool {
+    upstream
+        .parse::<SocketAddr>()
+        .is_ok_and(|socket| restricted_http_discovery_ip(socket.ip()))
+}
+
+fn restricted_http_discovery_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => restricted_http_discovery_ipv4(ip),
+        IpAddr::V6(ip) => restricted_http_discovery_ipv6(ip),
+    }
+}
+
+fn restricted_http_discovery_ipv4(ip: Ipv4Addr) -> bool {
+    let [first, second, third, _fourth] = ip.octets();
+    ip.is_unspecified()
+        || ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_multicast()
+        || first == 0
+        || first >= 240
+        || (first == 100 && (64..=127).contains(&second))
+        || (first == 192 && second == 0 && third == 0)
+        || (first == 192 && second == 0 && third == 2)
+        || (first == 198 && matches!(second, 18 | 19))
+        || (first == 198 && second == 51 && third == 100)
+        || (first == 203 && second == 0 && third == 113)
+}
+
+fn restricted_http_discovery_ipv6(ip: Ipv6Addr) -> bool {
+    let segments = ip.segments();
+    ip.is_unspecified()
+        || ip.is_loopback()
+        || ip.is_multicast()
+        || (segments[0] & 0xfe00) == 0xfc00
+        || (segments[0] & 0xffc0) == 0xfe80
+        || (segments[0] == 0x2001 && segments[1] == 0x0db8)
+        || (segments[0] == 0x0100 && segments[1] == 0 && segments[2] == 0 && segments[3] == 0)
 }
 
 struct DnsUpstreamDiscovery {
@@ -507,6 +567,7 @@ fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Box<dyn Flux
         return Ok(Box::new(HttpUpstreamDiscovery {
             url: url.clone(),
             bearer_token_file: config.upstreams_http_bearer_token_file.clone(),
+            allow_private_backends: config.upstreams_http_allow_private_backends,
         }));
     }
     if config.upstream_dns_refresh_secs.is_some() {
@@ -534,33 +595,36 @@ mod tests {
 
     #[test]
     fn parses_http_discovery_list_payload() {
-        let upstreams =
-            parse_proxy_upstreams_http_body(br#"["127.0.0.1:3001","backend.example.test:443"]"#)
-                .unwrap();
+        let upstreams = parse_proxy_upstreams_http_body(
+            br#"["8.8.8.8:3001","backend.example.test:443"]"#,
+            false,
+        )
+        .unwrap();
 
-        assert_eq!(upstreams, ["127.0.0.1:3001", "backend.example.test:443"]);
+        assert_eq!(upstreams, ["8.8.8.8:3001", "backend.example.test:443"]);
     }
 
     #[test]
     fn parses_http_discovery_object_payload() {
         let upstreams = parse_proxy_upstreams_http_body(
-            br#"{"upstreams":["127.0.0.1:3001","127.0.0.1:3002"]}"#,
+            br#"{"upstreams":["8.8.8.8:3001","1.1.1.1:3002"]}"#,
+            false,
         )
         .unwrap();
 
-        assert_eq!(upstreams, ["127.0.0.1:3001", "127.0.0.1:3002"]);
+        assert_eq!(upstreams, ["8.8.8.8:3001", "1.1.1.1:3002"]);
     }
 
     #[test]
     fn rejects_http_discovery_duplicate_and_short_payloads() {
         assert!(
-            parse_proxy_upstreams_http_body(br#"["127.0.0.1:3001","127.0.0.1:3001"]"#)
+            parse_proxy_upstreams_http_body(br#"["8.8.8.8:3001","8.8.8.8:3001"]"#, false)
                 .unwrap_err()
                 .to_string()
                 .contains("repeats")
         );
         assert!(
-            parse_proxy_upstreams_http_body(br#"["127.0.0.1:3001"]"#)
+            parse_proxy_upstreams_http_body(br#"["8.8.8.8:3001"]"#, false)
                 .unwrap_err()
                 .to_string()
                 .contains("at least two")
@@ -570,7 +634,7 @@ mod tests {
     #[test]
     fn rejects_http_discovery_invalid_authority() {
         assert!(
-            parse_proxy_upstreams_http_body(br#"["http://127.0.0.1:3001","127.0.0.1:3002"]"#)
+            parse_proxy_upstreams_http_body(br#"["http://127.0.0.1:3001","1.1.1.1:3002"]"#, false)
                 .unwrap_err()
                 .to_string()
                 .contains("authority")
@@ -578,15 +642,42 @@ mod tests {
     }
 
     #[test]
+    fn rejects_http_discovery_private_backends_without_opt_in() {
+        assert!(
+            parse_proxy_upstreams_http_body(br#"["169.254.169.254:80","8.8.8.8:3002"]"#, false)
+                .unwrap_err()
+                .to_string()
+                .contains("private")
+        );
+        assert!(
+            parse_proxy_upstreams_http_body(br#"["127.0.0.1:3001","8.8.8.8:3002"]"#, false)
+                .unwrap_err()
+                .to_string()
+                .contains("private")
+        );
+        assert!(
+            parse_proxy_upstreams_http_body(br#"["[::1]:3001","8.8.8.8:3002"]"#, false)
+                .unwrap_err()
+                .to_string()
+                .contains("private")
+        );
+
+        let upstreams =
+            parse_proxy_upstreams_http_body(br#"["169.254.169.254:80","127.0.0.1:3001"]"#, true)
+                .unwrap();
+        assert_eq!(upstreams, ["169.254.169.254:80", "127.0.0.1:3001"]);
+    }
+
+    #[test]
     fn rejects_http_discovery_payload_over_upstream_cap() {
         let upstreams = (0..=fluxheim_config::config_proxy::MAX_PROXY_UPSTREAMS)
-            .map(|index| format!("\"127.0.0.1:{}\"", 3000 + index))
+            .map(|index| format!("\"8.8.8.8:{}\"", 3000 + index))
             .collect::<Vec<_>>()
             .join(",");
         let body = format!("[{upstreams}]");
 
         assert!(
-            parse_proxy_upstreams_http_body(body.as_bytes())
+            parse_proxy_upstreams_http_body(body.as_bytes(), false)
                 .unwrap_err()
                 .to_string()
                 .contains("too many")
@@ -668,9 +759,12 @@ mod tests {
             stream.write_all(body).unwrap();
         });
 
-        let upstreams =
-            fetch_proxy_upstreams_http(&format!("http://{address}/v1/upstreams"), Some(token_path))
-                .unwrap();
+        let upstreams = fetch_proxy_upstreams_http(
+            &format!("http://{address}/v1/upstreams"),
+            Some(token_path),
+            true,
+        )
+        .unwrap();
         handle.join().unwrap();
         let request = receiver.recv().unwrap();
 

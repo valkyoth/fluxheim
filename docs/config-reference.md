@@ -1099,6 +1099,11 @@ contain whitespace after trimming surrounding whitespace. Fluxheim sends
 `Accept: application/json` and `Cache-Control: no-store`, and rejects non-JSON
 `Content-Type` values when the discovery endpoint includes that header; missing
 `Content-Type` is accepted so small internal sidecars can stay simple.
+Returned IP-literal backends in private, loopback, link-local, multicast,
+reserved, documentation, or metadata ranges are rejected by default. Set
+`upstreams_http_allow_private_backends = true` only when the configured
+discovery endpoint is trusted to return private service-network members and the
+route is intended to reach those networks.
 Discovery endpoints must use HTTPS unless they are numeric loopback
 `http://127.0.0.1` or `http://[::1]` control-plane sidecars. HTTP discovery is
 intentionally pull-only in this

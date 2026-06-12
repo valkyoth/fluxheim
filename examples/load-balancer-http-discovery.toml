@@ -36,6 +36,7 @@ target = "stderr"
 upstreams_http_url = "https://control-plane.example.test/v1/fluxheim/upstreams/app"
 upstreams_http_refresh_secs = 5
 upstreams_http_bearer_token_file = "/run/secrets/fluxheim-discovery-token"
+upstreams_http_allow_private_backends = true
 connect_timeout_secs = 3
 read_timeout_secs = 30
 send_timeout_secs = 30

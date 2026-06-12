@@ -40,6 +40,10 @@ during the v1.5.19 review cycle.
 - Rejected verified HTTP proxy upstream TLS configs that target an IP-addressed
   upstream without explicit `upstream_sni`, preventing the Pingora connector
   from falling into empty-SNI certificate-verification bypass behavior.
+- Hardened HTTP load-balancer discovery so private, loopback, link-local,
+  metadata, multicast, reserved, and documentation IP-literal backends are
+  rejected by default unless the operator explicitly enables
+  `proxy.upstreams_http_allow_private_backends`.
 
 ## What Changed
 

@@ -981,6 +981,7 @@ fn parses_proxy_upstreams_http_discovery() {
             upstreams_http_url = "https://discovery.example.test/v1/upstreams"
             upstreams_http_refresh_secs = 2
             upstreams_http_bearer_token_file = "{}"
+            upstreams_http_allow_private_backends = true
             "#,
         token_file.display()
     ))
@@ -995,6 +996,7 @@ fn parses_proxy_upstreams_http_discovery() {
         config.proxy.upstreams_http_bearer_token_file.as_deref(),
         Some(token_file.as_path())
     );
+    assert!(config.proxy.upstreams_http_allow_private_backends);
     config.validate().unwrap();
 }
 

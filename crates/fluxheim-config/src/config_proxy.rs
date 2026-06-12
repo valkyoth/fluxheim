@@ -50,6 +50,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstreams_http_bearer_token_file: Option<PathBuf>,
     #[serde(default)]
+    pub upstreams_http_allow_private_backends: bool,
+    #[serde(default)]
     pub upstream_dns_refresh_secs: Option<u64>,
     #[serde(default)]
     pub upstream_weights: Vec<usize>,
@@ -187,6 +189,7 @@ impl Default for ProxyConfig {
             upstreams_http_url: None,
             upstreams_http_refresh_secs: default_proxy_upstreams_http_refresh_secs(),
             upstreams_http_bearer_token_file: None,
+            upstreams_http_allow_private_backends: false,
             upstream_dns_refresh_secs: None,
             upstream_weights: Vec::new(),
             upstream_priority_groups: Vec::new(),
