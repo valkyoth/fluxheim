@@ -8766,7 +8766,7 @@ fn http_upgrade_request_value(request: &RequestHeader) -> Option<&str> {
     }
     request_header_values(request, "upgrade")
         .map(str::trim)
-        .find(|value| valid_http_upgrade_token(value))
+        .find(|value| valid_http_upgrade_token(value) && value.eq_ignore_ascii_case("websocket"))
 }
 
 fn valid_http_upgrade_token(value: &str) -> bool {
@@ -13453,6 +13453,19 @@ mod tests {
         let mut downstream = RequestHeader::build("GET", b"/chat", None).unwrap();
         downstream.insert_header("connection", "upgrade").unwrap();
         downstream.insert_header("upgrade", "web socket").unwrap();
+        let proxy = ProxyConfig {
+            websocket: true,
+            ..ProxyConfig::default()
+        };
+
+        assert!(!proxy_upgrade_request_allowed(&downstream, &proxy));
+    }
+
+    #[test]
+    fn websocket_upgrade_policy_rejects_non_websocket_tokens() {
+        let mut downstream = RequestHeader::build("GET", b"/chat", None).unwrap();
+        downstream.insert_header("connection", "upgrade").unwrap();
+        downstream.insert_header("upgrade", "h2c").unwrap();
         let proxy = ProxyConfig {
             websocket: true,
             ..ProxyConfig::default()

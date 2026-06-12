@@ -86,6 +86,9 @@ during the v1.5.19 review cycle.
 - Hardened trusted-proxy `X-Forwarded-For` parsing so any malformed hop rejects
   the forwarded chain and falls back to the direct peer IP instead of silently
   attributing traffic to a trusted proxy hop.
+- Restricted WebSocket-enabled proxy routes to the `websocket` upgrade token so
+  valid but unrelated protocol upgrades such as `h2c` are not forwarded to
+  upstreams.
 
 ## What Changed
 

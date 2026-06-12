@@ -91,6 +91,9 @@ behavior when the change improves security or project direction.
 - Harden trusted-proxy `X-Forwarded-For` parsing so any malformed hop rejects
   the forwarded chain and falls back to the direct peer IP instead of silently
   attributing traffic to a trusted proxy hop.
+- Restrict WebSocket-enabled proxy routes to the `websocket` upgrade token so
+  valid but unrelated protocol upgrades such as `h2c` are not forwarded to
+  upstreams.
 
 ### Changed
 
