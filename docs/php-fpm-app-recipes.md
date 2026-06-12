@@ -583,7 +583,7 @@ hosts = ["discourse.example.test"]
 max_request_body_bytes = "64MiB"
 
 [vhosts.proxy]
-upstreams = ["discourse_app:80"]
+upstreams = ["discourse-app:80"]
 upstream_tls = false
 connect_timeout_secs = 5
 read_timeout_secs = 90

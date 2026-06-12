@@ -434,7 +434,7 @@ name = "turbine-app"
 hosts = ["turbine.example.test"]
 
 [vhosts.proxy]
-upstreams = ["turbine_app:8080"]
+upstreams = ["turbine-app:8080"]
 upstream_tls = false
 ```
 

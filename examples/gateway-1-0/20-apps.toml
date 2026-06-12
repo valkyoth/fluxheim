@@ -34,7 +34,7 @@ enabled = true
 upstreams = ["host.containers.internal:8080"]
 
 [vhosts.proxy]
-upstreams = ["meowmory_app:3000"]
+upstreams = ["meowmory-app:3000"]
 upstream_tls = false
 connect_timeout_secs = 5
 read_timeout_secs = 60
@@ -85,7 +85,7 @@ enabled = true
 upstreams = ["host.containers.internal:8080"]
 
 [vhosts.proxy]
-upstreams = ["ulyaoth_app:80"]
+upstreams = ["ulyaoth-app:80"]
 upstream_tls = false
 connect_timeout_secs = 90
 read_timeout_secs = 90
@@ -135,7 +135,7 @@ enabled = true
 upstreams = ["host.containers.internal:8080"]
 
 [vhosts.proxy]
-upstreams = ["hashavatar_app:8080"]
+upstreams = ["hashavatar-app:8080"]
 upstream_tls = false
 connect_timeout_secs = 5
 read_timeout_secs = 60

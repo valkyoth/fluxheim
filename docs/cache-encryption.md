@@ -187,7 +187,7 @@ key_name = "fluxheim-repo-cache"
 token_credential = "openbao-token"
 
 [vhosts.proxy]
-upstreams = ["repo_backend:8080"]
+upstreams = ["repo-backend:8080"]
 upstream_tls = false
 ```
 
