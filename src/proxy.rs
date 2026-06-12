@@ -7470,6 +7470,9 @@ fn resolve_php_script(
             if php_should_redirect_directory_index(request_path, &script_name, php) {
                 return PhpResolveOutcome::RedirectDirectorySlash;
             }
+            if php_script_name_denied(php, &script_name) {
+                return PhpResolveOutcome::Forbidden;
+            }
             return PhpResolveOutcome::Execute(PhpScriptResolution {
                 file,
                 script_name,
@@ -7485,11 +7488,19 @@ fn resolve_php_script(
     }
 
     match php.files.resolve(&script_name) {
-        Ok(ResolveResult::Found(file)) => PhpResolveOutcome::Execute(PhpScriptResolution {
-            file,
-            script_name,
-            path_info,
-        }),
+        Ok(ResolveResult::Found(file)) => {
+            let Some(resolved_script_name) = php_static_file_script_name(php, &file) else {
+                return PhpResolveOutcome::Forbidden;
+            };
+            if php_script_name_denied(php, &resolved_script_name) {
+                return PhpResolveOutcome::Forbidden;
+            }
+            PhpResolveOutcome::Execute(PhpScriptResolution {
+                file,
+                script_name: resolved_script_name,
+                path_info,
+            })
+        }
         Ok(ResolveResult::Forbidden) => PhpResolveOutcome::Forbidden,
         Ok(ResolveResult::NotFound | ResolveResult::DirectoryListing(_)) => {
             PhpResolveOutcome::NotFound
@@ -11298,6 +11309,15 @@ mod tests {
         ));
         assert!(matches!(
             resolve_php_script(&php, "/wp-content/uploads/shell.php", true),
+            PhpResolveOutcome::Forbidden
+        ));
+
+        let (encoded_script, _, _) =
+            php_script_name_for_request(&php, "/wp-content/upl%256fads/shell.php").unwrap();
+        assert_eq!(encoded_script, "/wp-content/upl%6fads/shell.php");
+        assert!(!php_script_name_denied(&php, &encoded_script));
+        assert!(matches!(
+            resolve_php_script(&php, "/wp-content/upl%256fads/shell.php", true),
             PhpResolveOutcome::Forbidden
         ));
     }
