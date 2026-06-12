@@ -4478,6 +4478,9 @@ impl ProxyHttp for FluxProxy {
         #[cfg(feature = "web")]
         {
             let Some(web) = &vhost.web else {
+                if authorize_proxy_fallback_or_not_found(session, vhost, ctx).await? {
+                    return Ok(true);
+                }
                 #[cfg(feature = "cache")]
                 if respond_proxy_slice_cache_request(session, ctx, &state, vhost_index).await? {
                     return Ok(true);
@@ -4486,7 +4489,7 @@ impl ProxyHttp for FluxProxy {
                 if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
                     return Ok(true);
                 }
-                return continue_to_proxy_or_not_found(session, vhost, ctx).await;
+                return continue_authorized_proxy(session, vhost, ctx);
             };
 
             let method = session.req_header().method.as_str().to_owned();
@@ -4559,6 +4562,9 @@ impl ProxyHttp for FluxProxy {
                     Ok(true)
                 }
                 Ok(ResolveResult::NotFound) => {
+                    if authorize_proxy_fallback_or_not_found(session, vhost, ctx).await? {
+                        return Ok(true);
+                    }
                     #[cfg(feature = "cache")]
                     if respond_proxy_slice_cache_request(session, ctx, &state, vhost_index).await? {
                         return Ok(true);
@@ -4567,7 +4573,7 @@ impl ProxyHttp for FluxProxy {
                     if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
                         return Ok(true);
                     }
-                    continue_to_proxy_or_not_found(session, vhost, ctx).await
+                    continue_authorized_proxy(session, vhost, ctx)
                 }
                 Err(error) => {
                     log::error!("static file resolver failed: {error}");
@@ -4580,6 +4586,9 @@ impl ProxyHttp for FluxProxy {
 
         #[cfg(not(feature = "web"))]
         {
+            if authorize_proxy_fallback_or_not_found(session, vhost, ctx).await? {
+                return Ok(true);
+            }
             #[cfg(feature = "cache")]
             if respond_proxy_slice_cache_request(session, ctx, &state, vhost_index).await? {
                 return Ok(true);
@@ -4588,7 +4597,7 @@ impl ProxyHttp for FluxProxy {
             if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
                 return Ok(true);
             }
-            continue_to_proxy_or_not_found(session, vhost, ctx).await
+            continue_authorized_proxy(session, vhost, ctx)
         }
     }
 
@@ -8755,16 +8764,31 @@ async fn continue_to_proxy_or_not_found(
     vhost: &RuntimeVhost,
     ctx: &mut RequestContext,
 ) -> Result<bool> {
-    if selected_runtime_proxy(vhost, ctx).enabled {
-        if authorize_proxy_request(session, ctx, vhost).await? {
-            return Ok(true);
-        }
-        spawn_proxy_mirror_if_enabled(session.req_header(), vhost, ctx);
-        Ok(false)
-    } else {
-        session.respond_error(404).await?;
-        Ok(true)
+    if authorize_proxy_fallback_or_not_found(session, vhost, ctx).await? {
+        return Ok(true);
     }
+    continue_authorized_proxy(session, vhost, ctx)
+}
+
+async fn authorize_proxy_fallback_or_not_found(
+    session: &mut Session,
+    vhost: &RuntimeVhost,
+    ctx: &mut RequestContext,
+) -> Result<bool> {
+    if !selected_runtime_proxy(vhost, ctx).enabled {
+        session.respond_error(404).await?;
+        return Ok(true);
+    }
+    authorize_proxy_request(session, ctx, vhost).await
+}
+
+fn continue_authorized_proxy(
+    session: &mut Session,
+    vhost: &RuntimeVhost,
+    ctx: &RequestContext,
+) -> Result<bool> {
+    spawn_proxy_mirror_if_enabled(session.req_header(), vhost, ctx);
+    Ok(false)
 }
 
 fn selected_response_headers<'a>(
