@@ -2377,6 +2377,7 @@ mod tests {
             upstream: None,
             upstreams: vec!["localhost:3000".to_owned()],
             upstream_dns_refresh_secs: Some(2),
+            upstream_dns_allow_private_backends: true,
             load_balance: LoadBalanceConfig {
                 max_iterations: 8,
                 ..LoadBalanceConfig::default()
@@ -2941,6 +2942,7 @@ mod tests {
             upstream: None,
             upstreams: vec!["localhost:3000".to_owned()],
             upstream_dns_refresh_secs: Some(2),
+            upstream_dns_allow_private_backends: true,
             load_balance: LoadBalanceConfig {
                 max_iterations: 8,
                 ..LoadBalanceConfig::default()

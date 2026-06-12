@@ -1084,6 +1084,12 @@ mutually exclusive with `upstream`, `upstreams_file`, `upstream_weights`,
 `upstream_tags`, `backup_upstreams`, `drain_upstreams`, and
 `disabled_upstreams`; use the
 static pool form when those richer backend policies are required.
+Resolved DNS addresses in private, loopback, link-local, multicast, reserved,
+documentation, metadata, or unspecified ranges are rejected by default so a
+compromised or attacker-controlled DNS record cannot silently rebind a public
+service name to an internal backend. Set
+`upstream_dns_allow_private_backends = true` only for trusted service-discovery
+DNS zones that intentionally resolve to private service-network addresses.
 For pull-based control-plane discovery, load-balancer builds can set
 `upstreams_http_url = "https://control-plane.example.test/v1/upstreams"` instead
 of `upstream`, `upstreams`, or `upstreams_file`. Fluxheim fetches the endpoint at

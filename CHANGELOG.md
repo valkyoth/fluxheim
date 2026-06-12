@@ -62,6 +62,10 @@ behavior when the change improves security or project direction.
 - Remove encrypted filesystem disk-cache fill heap amplification for the local
   provider by committing streamed cache bodies through bounded AEAD chunks, and
   bound the OpenBao Transit whole-object fallback heap budget.
+- Harden DNS-refreshed upstream discovery against DNS rebinding pivots by
+  rejecting private, loopback, link-local, multicast, reserved, documentation,
+  metadata, and unspecified resolved addresses unless
+  `proxy.upstream_dns_allow_private_backends = true` is set.
 
 ### Changed
 

@@ -57,6 +57,10 @@ during the v1.5.19 review cycle.
 - Removed encrypted filesystem disk-cache fill heap amplification for the local
   provider by committing streamed cache bodies through bounded AEAD chunks, and
   bounded the OpenBao Transit whole-object fallback heap budget.
+- Hardened DNS-refreshed upstream discovery against DNS rebinding pivots by
+  rejecting private, loopback, link-local, multicast, reserved, documentation,
+  metadata, and unspecified resolved addresses unless
+  `proxy.upstream_dns_allow_private_backends = true` is set.
 
 ## What Changed
 

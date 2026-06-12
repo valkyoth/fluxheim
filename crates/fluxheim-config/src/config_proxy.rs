@@ -54,6 +54,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_dns_refresh_secs: Option<u64>,
     #[serde(default)]
+    pub upstream_dns_allow_private_backends: bool,
+    #[serde(default)]
     pub upstream_weights: Vec<usize>,
     #[serde(default)]
     pub upstream_priority_groups: Vec<u16>,
@@ -194,6 +196,7 @@ impl Default for ProxyConfig {
             upstreams_http_bearer_token_file: None,
             upstreams_http_allow_private_backends: false,
             upstream_dns_refresh_secs: None,
+            upstream_dns_allow_private_backends: false,
             upstream_weights: Vec::new(),
             upstream_priority_groups: Vec::new(),
             upstream_priority_group_min_active: default_upstream_priority_group_min_active(),
@@ -504,6 +507,11 @@ impl ProxyConfig {
                     });
                 }
             }
+        } else if self.upstream_dns_allow_private_backends {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstream_dns_allow_private_backends",
+                reason: "requires proxy.upstream_dns_refresh_secs",
+            });
         }
         if self.upstreams.len() > MAX_PROXY_UPSTREAMS {
             return Err(ConfigError::TooManyProxyUpstreams {

@@ -461,6 +461,7 @@ fn restricted_http_discovery_ipv6(ip: Ipv6Addr) -> bool {
 
 struct DnsUpstreamDiscovery {
     upstreams: Arc<[String]>,
+    allow_private_backends: bool,
 }
 
 #[async_trait]
@@ -470,6 +471,11 @@ impl FluxBackendDiscovery for DnsUpstreamDiscovery {
         for upstream in self.upstreams.iter() {
             let resolved = resolve_proxy_upstream_for_discovery(upstream).await?;
             for address in resolved {
+                if !self.allow_private_backends && restricted_http_discovery_ip(address.ip()) {
+                    return Err(FluxError::InvalidInput(
+                        "DNS discovery resolved a private, loopback, link-local, multicast, reserved, or documentation IP address without proxy.upstream_dns_allow_private_backends",
+                    ));
+                }
                 let backend = FluxBackend::new(&address.to_string())?;
                 backends.insert(backend);
             }
@@ -573,6 +579,7 @@ fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Box<dyn Flux
     if config.upstream_dns_refresh_secs.is_some() {
         return Ok(Box::new(DnsUpstreamDiscovery {
             upstreams: config.upstreams.clone().into(),
+            allow_private_backends: config.upstream_dns_allow_private_backends,
         }));
     }
 
@@ -584,14 +591,15 @@ fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Box<dyn Flux
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
-    use std::sync::mpsc;
+    use std::sync::{Arc, mpsc};
 
     use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
 
     use super::{
-        fetch_proxy_upstreams_http, parse_proxy_upstreams_http_body,
+        DnsUpstreamDiscovery, fetch_proxy_upstreams_http, parse_proxy_upstreams_http_body,
         validate_http_discovery_bearer_token, validate_http_discovery_content_type,
     };
+    use crate::backend::FluxBackendDiscovery;
 
     #[test]
     fn parses_http_discovery_list_payload() {
@@ -666,6 +674,26 @@ mod tests {
             parse_proxy_upstreams_http_body(br#"["169.254.169.254:80","127.0.0.1:3001"]"#, true)
                 .unwrap();
         assert_eq!(upstreams, ["169.254.169.254:80", "127.0.0.1:3001"]);
+    }
+
+    #[tokio::test]
+    async fn rejects_dns_discovery_private_backends_without_opt_in() {
+        let discovery = DnsUpstreamDiscovery {
+            upstreams: Arc::from(["127.0.0.1:3001".to_owned()]),
+            allow_private_backends: false,
+        };
+
+        let error = discovery
+            .discover_flux_backends()
+            .await
+            .expect_err("restricted DNS backend");
+        assert!(error.to_string().contains("private"));
+
+        let discovery = DnsUpstreamDiscovery {
+            upstreams: Arc::from(["127.0.0.1:3001".to_owned()]),
+            allow_private_backends: true,
+        };
+        assert!(discovery.discover_flux_backends().await.is_ok());
     }
 
     #[test]

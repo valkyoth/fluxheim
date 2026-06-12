@@ -963,11 +963,13 @@ fn parses_proxy_upstream_dns_refresh() {
             [proxy]
             upstreams = ["localhost:3001"]
             upstream_dns_refresh_secs = 2
+            upstream_dns_allow_private_backends = true
             "#,
     )
     .unwrap();
 
     assert_eq!(config.proxy.upstream_dns_refresh_secs, Some(2));
+    assert!(config.proxy.upstream_dns_allow_private_backends);
     config.validate().unwrap();
 }
 
@@ -1000,6 +1002,27 @@ fn parses_proxy_upstreams_http_discovery() {
     );
     assert!(config.proxy.upstreams_http_allow_private_backends);
     config.validate().unwrap();
+}
+
+#[cfg(feature = "load-balancer")]
+#[test]
+fn rejects_dns_private_backend_opt_in_without_dns_refresh() {
+    let config: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["localhost:3001", "localhost:3002"]
+            upstream_dns_allow_private_backends = true
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_dns_allow_private_backends",
+            reason: "requires proxy.upstream_dns_refresh_secs",
+        })
+    );
 }
 
 #[cfg(feature = "load-balancer")]
