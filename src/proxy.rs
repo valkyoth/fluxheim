@@ -6865,7 +6865,7 @@ fn peer_fill_request_from_header(request: &RequestHeader) -> PeerFillRequest {
             .path_and_query()
             .map(|value| value.as_str().to_owned())
             .unwrap_or_else(|| request.uri.path().to_owned()),
-        host: request_host_header(request).map(ToOwned::to_owned),
+        host: explicit_request_host_header(request).map(ToOwned::to_owned),
         headers,
     }
 }
@@ -10212,6 +10212,14 @@ fn request_host_header(request: &RequestHeader) -> Option<&str> {
         .get("host")
         .and_then(|value| value.to_str().ok())
         .or_else(|| request.uri.authority().map(|authority| authority.as_str()))
+}
+
+#[cfg(feature = "cache")]
+fn explicit_request_host_header(request: &RequestHeader) -> Option<&str> {
+    request
+        .headers
+        .get("host")
+        .and_then(|value| value.to_str().ok())
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -17024,6 +17032,20 @@ mod tests {
                 ("accept-language", "en".to_owned()),
             ]
         );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn peer_fill_request_does_not_use_uri_authority_as_host() {
+        let mut request = RequestHeader::build("GET", b"/img/logo.webp?v=1", None).unwrap();
+        request.uri = "https://internal-admin.example/img/logo.webp?v=1"
+            .parse()
+            .unwrap();
+
+        let peer_request = peer_fill_request_from_header(&request);
+
+        assert_eq!(peer_request.uri_path_and_query, "/img/logo.webp?v=1");
+        assert_eq!(peer_request.host, None);
     }
 
     #[cfg(feature = "cache")]

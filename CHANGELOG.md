@@ -80,6 +80,9 @@ behavior when the change improves security or project direction.
 - Harden split-config admin handling by applying field-level `[admin]`
   fragment merges so a later ops-socket or health-only admin fragment cannot
   silently disable the admin API or clear token and snapshot-store settings.
+- Harden cache peer-fill request construction so absolute-form requests
+  without an explicit `Host` header cannot forward URI authority as the peer
+  request `Host`.
 
 ### Changed
 
