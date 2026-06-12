@@ -7797,6 +7797,51 @@ fn php_spool_error(context: &'static str, error: io::Error) -> Box<Error> {
 }
 
 #[cfg(feature = "php-fpm")]
+struct PendingPhpRequestBodySpool {
+    path: PathBuf,
+    file: Option<tokio::fs::File>,
+    cleanup: bool,
+}
+
+#[cfg(feature = "php-fpm")]
+impl PendingPhpRequestBodySpool {
+    fn new(path: PathBuf, file: tokio::fs::File) -> Self {
+        Self {
+            path,
+            file: Some(file),
+            cleanup: true,
+        }
+    }
+
+    fn file_mut(&mut self) -> io::Result<&mut tokio::fs::File> {
+        self.file
+            .as_mut()
+            .ok_or_else(|| io::Error::other("pending PHP request body spool file missing"))
+    }
+
+    fn into_parts(mut self) -> io::Result<(PathBuf, tokio::fs::File)> {
+        self.cleanup = false;
+        let path = std::mem::take(&mut self.path);
+        let file = self
+            .file
+            .take()
+            .ok_or_else(|| io::Error::other("pending PHP request body spool file missing"))?;
+        Ok((path, file))
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+impl Drop for PendingPhpRequestBodySpool {
+    fn drop(&mut self) {
+        if !self.cleanup || self.path.as_os_str().is_empty() {
+            return;
+        }
+        drop(self.file.take());
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(feature = "php-fpm")]
 async fn read_php_request_body(
     session: &mut Session,
     ctx: &mut RequestContext,
@@ -7810,7 +7855,7 @@ async fn read_php_request_body(
         .map(|bytes| usize::try_from(bytes.as_u64()).unwrap_or(usize::MAX));
     let spool_dir = config.request_body_spool_dir.as_deref();
     let mut body = Vec::new();
-    let mut spool: Option<(PathBuf, tokio::fs::File)> = None;
+    let mut spool: Option<PendingPhpRequestBodySpool> = None;
     while let Some(chunk) = session.as_downstream_mut().read_request_body().await? {
         if request_body_chunk_limit_status(
             limit_bytes,
@@ -7824,10 +7869,17 @@ async fn read_php_request_body(
                 "PHP request body exceeds configured limit",
             );
         }
-        if let Some((_, file)) = &mut spool {
-            file.write_all(&chunk).await.map_err(|error| {
-                php_spool_error("failed to write PHP request body spool file", error)
-            })?;
+        if let Some(spool) = &mut spool {
+            spool
+                .file_mut()
+                .map_err(|error| {
+                    php_spool_error("failed to access PHP request body spool file", error)
+                })?
+                .write_all(&chunk)
+                .await
+                .map_err(|error| {
+                    php_spool_error("failed to write PHP request body spool file", error)
+                })?;
             continue;
         }
         if let (Some(threshold), Some(spool_dir)) = (spool_threshold, spool_dir)
@@ -7847,12 +7899,15 @@ async fn read_php_request_body(
             file.write_all(&chunk).await.map_err(|error| {
                 php_spool_error("failed to write PHP request body spool file", error)
             })?;
-            spool = Some((path, file));
+            spool = Some(PendingPhpRequestBodySpool::new(path, file));
         } else {
             body.extend_from_slice(&chunk);
         }
     }
-    if let Some((path, mut file)) = spool {
+    if let Some(spool) = spool {
+        let (path, mut file) = spool.into_parts().map_err(|error| {
+            php_spool_error("failed to access PHP request body spool file", error)
+        })?;
         file.flush().await.map_err(|error| {
             php_spool_error("failed to flush PHP request body spool file", error)
         })?;
@@ -10325,9 +10380,9 @@ mod tests {
     use super::{LoadBalancerMemberStateRequest, LoadBalancerRuntimeBackendState};
     #[cfg(feature = "php-fpm")]
     use super::{
-        MAX_PHP_PARAM_VALUE_BYTES, PhpResolveOutcome, RuntimePhp, add_php_custom_params,
-        add_php_host_param, add_php_request_header_params, apply_php_x_accel_expires,
-        directory_slash_redirect_location, explicit_authority_port,
+        MAX_PHP_PARAM_VALUE_BYTES, PendingPhpRequestBodySpool, PhpResolveOutcome, RuntimePhp,
+        add_php_custom_params, add_php_host_param, add_php_request_header_params,
+        apply_php_x_accel_expires, directory_slash_redirect_location, explicit_authority_port,
         ignore_php_origin_cache_headers, parse_php_fpm_output, php_content_type_param,
         php_fpm_path_translated, php_fpm_script_filename, php_header_param_name,
         php_script_name_denied, php_script_name_for_request, php_server_name_param,
@@ -11106,6 +11161,31 @@ mod tests {
 
         drop(reader);
         drop(body);
+        assert!(!path.exists());
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn pending_php_request_body_spool_cleans_up_on_early_drop() {
+        let spool_dir = unique_temp_path("php-pending-spool-cleanup");
+        fs::create_dir_all(&spool_dir).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build()
+            .unwrap();
+        let (path, mut file) = runtime
+            .block_on(create_php_request_body_spool_file(&spool_dir))
+            .unwrap();
+        runtime.block_on(async {
+            use tokio::io::AsyncWriteExt;
+
+            file.write_all(b"partial-upload").await.unwrap();
+            file.flush().await.unwrap();
+        });
+
+        assert!(path.exists());
+        let pending = PendingPhpRequestBodySpool::new(path.clone(), file);
+        drop(pending);
         assert!(!path.exists());
     }
 
