@@ -2756,6 +2756,24 @@ impl ProxyRuntimeState {
         &self.vhosts[index]
     }
 
+    #[cfg(feature = "cache")]
+    fn peer_fill_host_for_request(&self, host: Option<&str>, vhost_index: usize) -> Option<String> {
+        if let Some(normalized) = host.and_then(normalize_host)
+            && self
+                .resolve_vhost_index(Some(&normalized))
+                .is_ok_and(|index| index == vhost_index)
+        {
+            return Some(normalized);
+        }
+
+        self.vhost(vhost_index)
+            .hosts
+            .iter()
+            .find(|host| !host.starts_with("*."))
+            .cloned()
+            .or_else(|| normalize_host(self.vhost(vhost_index).name.as_str()))
+    }
+
     fn trusted_proxy(&self, address: IpAddr) -> bool {
         self.trusted_proxies
             .iter()
@@ -4957,7 +4975,9 @@ impl ProxyHttp for FluxProxy {
             .await?;
             return Ok(false);
         };
-        let request = peer_fill_request_from_header(session.req_header());
+        let peer_fill_host = state.peer_fill_host_for_request(request_host(session), vhost_index);
+        let request =
+            peer_fill_request_from_header(session.req_header(), peer_fill_host.as_deref());
         let response_headers = selected_response_headers(vhost, ctx);
         let max_body_bytes = peer_fill
             .max_object_bytes
@@ -6845,6 +6865,7 @@ fn prune_inactive_cache_fill_concurrency_counters(
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PeerFillRequest {
     uri_path_and_query: String,
+    host: Option<String>,
     headers: Vec<(&'static str, String)>,
 }
 
@@ -6873,7 +6894,10 @@ impl PeerFillResponse {
 }
 
 #[cfg(feature = "cache")]
-fn peer_fill_request_from_header(request: &RequestHeader) -> PeerFillRequest {
+fn peer_fill_request_from_header(
+    request: &RequestHeader,
+    canonical_host: Option<&str>,
+) -> PeerFillRequest {
     let mut headers = Vec::new();
     for name in ["accept", "accept-encoding", "accept-language"] {
         for value in request_header_values(request, name) {
@@ -6886,6 +6910,7 @@ fn peer_fill_request_from_header(request: &RequestHeader) -> PeerFillRequest {
             .path_and_query()
             .map(|value| value.as_str().to_owned())
             .unwrap_or_else(|| request.uri.path().to_owned()),
+        host: canonical_host.map(ToOwned::to_owned),
         headers,
     }
 }
@@ -6913,6 +6938,9 @@ fn fetch_peer_fill_response(
         .get(&url)
         .header("cache-control", "only-if-cached")
         .header(PEER_FILL_MARKER_HEADER, "1");
+    if let Some(host) = request.host.as_deref() {
+        builder = builder.header("host", host);
+    }
     for (name, value) in &request.headers {
         builder = builder.header(*name, value.as_str());
     }
@@ -17362,7 +17390,7 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
-    fn peer_fill_request_keeps_only_safe_negotiation_headers_and_drops_client_host() {
+    fn peer_fill_request_keeps_safe_negotiation_headers_and_canonical_host() {
         let mut request = RequestHeader::build("GET", b"/img/logo.webp?v=1", None).unwrap();
         request.insert_header("host", "site.example").unwrap();
         request.insert_header("accept", "image/webp").unwrap();
@@ -17373,9 +17401,10 @@ mod tests {
             .unwrap();
         request.insert_header("cookie", "session=private").unwrap();
 
-        let peer_request = peer_fill_request_from_header(&request);
+        let peer_request = peer_fill_request_from_header(&request, Some("cache.example"));
 
         assert_eq!(peer_request.uri_path_and_query, "/img/logo.webp?v=1");
+        assert_eq!(peer_request.host.as_deref(), Some("cache.example"));
         assert_eq!(
             peer_request.headers,
             vec![
@@ -17394,10 +17423,49 @@ mod tests {
             .parse()
             .unwrap();
 
-        let peer_request = peer_fill_request_from_header(&request);
+        let peer_request = peer_fill_request_from_header(&request, None);
 
         assert_eq!(peer_request.uri_path_and_query, "/img/logo.webp?v=1");
+        assert_eq!(peer_request.host, None);
         assert!(peer_request.headers.is_empty());
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn peer_fill_host_uses_selected_vhost_host_without_unknown_host_pivot() {
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            listen = ["127.0.0.1:8080"]
+            default_vhost = "cache"
+
+            [proxy]
+            upstreams = ["127.0.0.1:3000"]
+
+            [[vhosts]]
+            name = "cache"
+            hosts = ["cache.test", "*.tenant.test"]
+
+            [vhosts.proxy]
+            upstreams = ["127.0.0.1:3000"]
+            "#,
+        )
+        .unwrap();
+        let state = ProxyRuntimeState::from_config(&config).unwrap();
+        let vhost_index = state.vhost_index(Some("cache.test"));
+
+        assert_eq!(
+            state.peer_fill_host_for_request(Some("Cache.Test:443"), vhost_index),
+            Some("cache.test".to_owned())
+        );
+        assert_eq!(
+            state.peer_fill_host_for_request(Some("api.tenant.test"), vhost_index),
+            Some("api.tenant.test".to_owned())
+        );
+        assert_eq!(
+            state.peer_fill_host_for_request(Some("other.example"), vhost_index),
+            Some("cache.test".to_owned())
+        );
     }
 
     #[cfg(feature = "cache")]

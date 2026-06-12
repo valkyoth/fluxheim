@@ -115,9 +115,9 @@ behavior when the change improves security or project direction.
 - Harden split-config admin handling by applying field-level `[admin]`
   fragment merges so a later ops-socket or health-only admin fragment cannot
   silently disable the admin API or clear token and snapshot-store settings.
-- Harden cache peer-fill request construction so client-controlled `Host`
-  headers and absolute-form URI authorities are not forwarded as the peer
-  request `Host`.
+- Harden cache peer-fill request construction so peer lookups use the selected
+  vhost's canonical `Host`, while client-controlled `Host` headers and
+  absolute-form URI authorities cannot pivot peer requests to another vhost.
 - Add an inbound peer-fill recursion guard so requests marked with
   `X-Fluxheim-Peer-Fill: 1` cannot launch another outbound peer-fill fetch in
   cyclic peer topologies.
