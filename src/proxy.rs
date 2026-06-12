@@ -10351,7 +10351,11 @@ fn approximate_request_header_bytes(request: &RequestHeader) -> usize {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "php-fpm")]
+    #[cfg(any(
+        feature = "php-fpm",
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl"
+    ))]
     use std::fs;
     #[cfg(any(feature = "php-fpm", feature = "compression-gzip"))]
     use std::io;
