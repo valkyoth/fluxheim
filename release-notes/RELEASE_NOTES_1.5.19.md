@@ -166,7 +166,11 @@ during the v1.5.19 review cycle.
 - Hardened PHP-FPM path handling by rejecting protocol-relative directory-slash
   redirects and decoded control characters in path-derived FastCGI params.
 - Hardened PHP-FPM TCP endpoint validation by rejecting unsafe IP literals and
-  requiring `allow_private_tcp_upstreams = true` for private/link-local IPs.
+  requiring `allow_private_tcp_upstreams = true` for loopback,
+  private/link-local IPs.
+- Rejected stream routes that enable upstream TLS certificate verification for
+  IP-addressed upstreams without an explicit `upstream_sni`, matching the HTTP
+  proxy validation rule and avoiding runtime hostname-verification skips.
 - Hardened traffic mirroring by rejecting unsafe mirrored paths/queries before
   outbound URL construction and suppressing recursive mirror requests marked
   with `X-Fluxheim-Mirror`.

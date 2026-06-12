@@ -5787,6 +5787,7 @@ fn parses_php_fpm_vhost_config() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             keepalive = true
             pool_max_idle = 4
             idle_timeout_secs = 45
@@ -5903,6 +5904,7 @@ fn parses_php_fpm_tcp_upstreams() {
 
             [vhosts.php.fpm]
             tcp_upstreams = ["127.0.0.1:9000", "127.0.0.1:9001"]
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-fpm-upstreams-process"),
         root.display()
@@ -6141,6 +6143,7 @@ fn rejects_managed_php_fpm_with_external_endpoint() {
             php_fpm_binary = "/usr/bin/env"
             socket_dir = "{}"
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-fpm-managed-endpoint-process"),
         root.display(),
@@ -6272,6 +6275,7 @@ fn rejects_external_php_fpm_with_managed_fields() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             user = "fluxheim"
             "#,
         test_process_config_toml("config-php-fpm-external-managed-process"),
@@ -6377,6 +6381,35 @@ fn rejects_private_php_fpm_tcp_ip_without_explicit_opt_in() {
 }
 
 #[test]
+fn rejects_loopback_php_fpm_tcp_ip_without_explicit_opt_in() {
+    let root = unique_temp_path("config-php-fpm-loopback-tcp-root");
+    std::fs::create_dir_all(&root).unwrap();
+    let config: Config = toml::from_str(&format!(
+        r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+        test_process_config_toml("config-php-fpm-loopback-tcp-process"),
+        root.display(),
+    ))
+    .unwrap();
+
+    let error = config.validate().unwrap_err().to_string();
+    assert!(error.contains("php.fpm.tcp"), "{error}");
+    assert!(error.contains("allow_private_tcp_upstreams"), "{error}");
+}
+
+#[test]
 fn accepts_private_php_fpm_tcp_ip_with_explicit_opt_in() {
     let root = unique_temp_path("config-php-fpm-private-tcp-opt-in-root");
     std::fs::create_dir_all(&root).unwrap();
@@ -6452,6 +6485,7 @@ fn rejects_mixed_php_fpm_endpoint_modes() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             tcp_upstreams = ["127.0.0.1:9001"]
             "#,
         test_process_config_toml("config-php-fpm-mixed-process"),
@@ -6484,6 +6518,7 @@ fn rejects_incomplete_php_request_body_spool_config() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-spool-threshold-without-dir-process"),
         root.display(),
@@ -6507,6 +6542,7 @@ fn rejects_incomplete_php_request_body_spool_config() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-spool-dir-without-threshold-process"),
         root.display(),
@@ -6543,6 +6579,7 @@ fn rejects_php_request_body_spool_threshold_at_or_above_body_limit() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-spool-threshold-over-limit-process"),
         root.display(),
@@ -6583,6 +6620,7 @@ fn rejects_php_request_body_spool_path_that_is_not_directory() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-spool-file-process"),
         root.display(),
@@ -6621,6 +6659,7 @@ fn rejects_php_request_body_spool_dir_with_insecure_permissions() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-spool-insecure-process"),
         root.display(),
@@ -6651,6 +6690,7 @@ fn rejects_zero_php_response_limit() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-zero-response-process"),
         root.display()
@@ -6680,6 +6720,7 @@ fn rejects_excessive_php_response_limit() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-excessive-response-process"),
         root.display()
@@ -6710,6 +6751,7 @@ fn rejects_zero_php_response_header_limit() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-zero-response-header-process"),
         root.display()
@@ -6739,6 +6781,7 @@ fn rejects_excessive_php_response_header_limit() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-excessive-response-header-process"),
         root.display()
@@ -6768,6 +6811,7 @@ fn rejects_zero_php_stderr_limit() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-zero-stderr-process"),
         root.display()
@@ -6797,6 +6841,7 @@ fn rejects_invalid_php_stderr_failure_pattern() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-bad-stderr-pattern-process"),
         root.display()
@@ -6830,6 +6875,7 @@ fn rejects_too_many_php_stderr_failure_patterns() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-many-stderr-patterns-process"),
         root.display(),
@@ -6861,6 +6907,7 @@ fn rejects_invalid_php_hidden_response_header() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-bad-hidden-header-process"),
         root.display()
@@ -6890,6 +6937,7 @@ fn rejects_duplicate_php_hidden_response_header() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-duplicate-hidden-header-process"),
         root.display()
@@ -6924,6 +6972,7 @@ fn rejects_too_many_php_hidden_response_headers() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-many-hidden-headers-process"),
         root.display(),
@@ -6955,6 +7004,7 @@ fn rejects_invalid_php_intercept_error_status() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-bad-intercept-status-process"),
         root.display()
@@ -6984,6 +7034,7 @@ fn rejects_duplicate_php_intercept_error_status() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-duplicate-intercept-status-process"),
         root.display()
@@ -7017,6 +7068,7 @@ fn rejects_too_many_php_intercept_error_statuses() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-many-intercept-statuses-process"),
         root.display(),
@@ -7061,6 +7113,7 @@ fn rejects_duplicate_php_error_page_status() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-duplicate-error-page-process"),
         root.display(),
@@ -7111,6 +7164,7 @@ fn rejects_too_many_php_error_pages() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-many-error-pages-process"),
         root.display(),
@@ -7142,6 +7196,7 @@ fn rejects_php_fpm_with_socket_and_tcp() {
             [vhosts.php.fpm]
             socket = "/run/php/php-fpm.sock"
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-fpm-conflict-process"),
         root.display()
@@ -7173,6 +7228,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             max_retries = 11
             "#,
         test_process_config_toml("config-php-fpm-invalid-retries-process"),
@@ -7196,6 +7252,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             retry_methods = ["GET", "get"]
             "#,
         test_process_config_toml("config-php-fpm-invalid-retry-methods-process"),
@@ -7220,6 +7277,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-invalid-server-port-process"),
         root.display()
@@ -7245,6 +7303,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-http-param-process"),
         root.display()
@@ -7267,6 +7326,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             retry_methods = ["GET", "POST"]
             "#,
         test_process_config_toml("config-php-fpm-unsafe-retry-method-process"),
@@ -7294,6 +7354,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             retry_methods = [{}]
             "#,
         test_process_config_toml("config-php-fpm-too-many-retry-methods-process"),
@@ -7319,6 +7380,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             retry_timeout_secs = 0
             "#,
         test_process_config_toml("config-php-fpm-invalid-retry-timeout-process"),
@@ -7342,6 +7404,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             retry_statuses = [404]
             "#,
         test_process_config_toml("config-php-fpm-invalid-retry-status-process"),
@@ -7369,6 +7432,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             retry_statuses = [{}]
             "#,
         test_process_config_toml("config-php-fpm-too-many-retry-statuses-process"),
@@ -7394,6 +7458,7 @@ fn rejects_invalid_php_fpm_retry_policy() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             retry_statuses = [500, 500]
             "#,
         test_process_config_toml("config-php-fpm-duplicate-retry-status-process"),
@@ -7422,6 +7487,7 @@ fn rejects_php_fpm_keepalive_without_idle_capacity() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             keepalive = true
             pool_max_idle = 0
             "#,
@@ -7455,6 +7521,7 @@ fn rejects_php_param_that_overrides_script_filename() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-param-protected-process"),
         root.display()
@@ -7491,6 +7558,7 @@ fn rejects_php_fpm_ini_control_params() {
 
                 [vhosts.php.fpm]
                 tcp = "127.0.0.1:9000"
+                allow_private_tcp_upstreams = true
                 "#,
             test_process_config_toml("config-php-param-ini-control-process"),
             root.display()
@@ -7522,6 +7590,7 @@ fn rejects_invalid_php_max_in_flight() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-max-in-flight-process"),
         root.display()
@@ -7553,6 +7622,7 @@ fn rejects_php_param_control_character_value() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-param-control-process"),
         root.display()
@@ -7588,6 +7658,7 @@ fn rejects_too_many_php_params() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-many-params-process"),
         root.display(),
@@ -7619,6 +7690,7 @@ fn rejects_php_extension_with_leading_dot() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-extension-dot-process"),
         root.display()
@@ -7651,6 +7723,7 @@ fn rejects_duplicate_php_allowed_extension() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-duplicate-extension-process"),
         root.display()
@@ -7685,6 +7758,7 @@ fn rejects_too_many_php_allowed_extensions() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-many-extensions-process"),
         root.display(),
@@ -7716,6 +7790,7 @@ fn rejects_invalid_php_deny_path_prefix() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-bad-deny-prefix-process"),
         root.display()
@@ -7745,6 +7820,7 @@ fn rejects_duplicate_php_deny_path_prefix() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-duplicate-deny-prefix-process"),
         root.display()
@@ -7778,6 +7854,7 @@ fn rejects_too_many_php_deny_path_prefixes() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         test_process_config_toml("config-php-many-deny-prefixes-process"),
         root.display(),
@@ -12785,6 +12862,7 @@ fn conf_d_web_fragment_keeps_main_static_root_and_dotfile_policy() {
 }
 
 #[test]
+#[cfg(feature = "stream-proxy")]
 fn conf_d_stream_fragment_keeps_main_routes() {
     let dir = TestDir::new("config-file-with-conf-d-stream-fragment");
     fs::create_dir_all(dir.child("conf.d")).unwrap();
@@ -12825,6 +12903,35 @@ fn conf_d_stream_fragment_keeps_main_routes() {
         config.stream.routes[0].upstream_sni.as_deref(),
         Some("db.example.test")
     );
+}
+
+#[test]
+fn rejects_stream_tls_verified_ip_upstream_without_explicit_sni() {
+    let config: Config = toml::from_str(
+        r#"
+            [stream]
+            enabled = true
+
+            [[stream.routes]]
+            name = "database"
+            listen = ["127.0.0.1:19091"]
+            upstream = "127.0.0.1:5432"
+            upstream_tls = true
+            upstream_verify_cert = true
+            "#,
+    )
+    .unwrap();
+
+    #[cfg(feature = "stream-proxy")]
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidStreamProxyPolicy {
+            field: "stream.routes.upstream_sni",
+            reason: "IP-addressed upstreams with upstream_tls and upstream_verify_cert require explicit upstream_sni"
+        })
+    );
+    #[cfg(not(feature = "stream-proxy"))]
+    assert_eq!(config.validate(), Err(ConfigError::StreamProxyNotCompiled));
 }
 
 #[test]
@@ -13473,6 +13580,7 @@ fn accepts_final_php_root_symlink_when_enabled() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
     )
     .unwrap();
@@ -13510,6 +13618,7 @@ fn rejects_existing_php_fpm_root_symlink() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
     )
     .unwrap();
@@ -13552,6 +13661,7 @@ fn rejects_php_root_below_symlinked_parent_when_final_symlink_enabled() {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
     )
     .unwrap();

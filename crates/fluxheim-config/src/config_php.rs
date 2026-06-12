@@ -780,7 +780,7 @@ fn validate_php_fpm_tcp_endpoint(
     if !allow_private_tcp_upstreams && php_fpm_tcp_ip_requires_private_opt_in(address) {
         return Err(ConfigError::InvalidPhpConfig {
             field,
-            reason: "private or link-local IP literals require allow_private_tcp_upstreams = true",
+            reason: "loopback, private, or link-local IP literals require allow_private_tcp_upstreams = true",
         });
     }
     Ok(())
@@ -798,11 +798,12 @@ fn php_fpm_tcp_ip_always_invalid(address: IpAddr) -> bool {
 fn php_fpm_tcp_ip_requires_private_opt_in(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(address) => {
-            !address.is_loopback() && (address.is_private() || address.is_link_local())
+            address.is_loopback() || address.is_private() || address.is_link_local()
         }
         IpAddr::V6(address) => {
-            !address.is_loopback()
-                && (ipv6_is_unique_local(address) || ipv6_is_unicast_link_local(address))
+            address.is_loopback()
+                || ipv6_is_unique_local(address)
+                || ipv6_is_unicast_link_local(address)
         }
     }
 }

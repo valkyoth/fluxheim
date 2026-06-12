@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "stream-proxy")]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,7 +11,8 @@ use crate::config::{
     validate_required_timeout_secs,
 };
 use crate::config_net::{
-    normalize_host, valid_authority, valid_ip_matcher, valid_trusted_proxy, valid_upstream_alias,
+    normalize_host, upstream_host, valid_authority, valid_ip_matcher, valid_trusted_proxy,
+    valid_upstream_alias,
 };
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 
@@ -435,6 +437,16 @@ impl StreamRouteConfig {
                 reason: "must not be empty",
             });
         }
+        if self.upstream_tls
+            && self.upstream_verify_cert
+            && self.upstream_sni.is_none()
+            && self.upstreams().any(stream_upstream_authority_host_is_ip)
+        {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.upstream_sni",
+                reason: "IP-addressed upstreams with upstream_tls and upstream_verify_cert require explicit upstream_sni",
+            });
+        }
         if !self.upstream_verify_cert && self.upstream_verify_hostname {
             return Err(ConfigError::InvalidStreamProxyPolicy {
                 field: "stream.routes.upstream_verify_hostname",
@@ -515,6 +527,10 @@ impl StreamRouteConfig {
         }
         Ok(())
     }
+}
+
+fn stream_upstream_authority_host_is_ip(upstream: &str) -> bool {
+    upstream_host(upstream).is_some_and(|host| host.parse::<IpAddr>().is_ok())
 }
 
 impl Default for StreamRouteConfig {

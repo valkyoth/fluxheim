@@ -256,13 +256,14 @@ upstream_dns_allow_private_addresses = false
   `upstream_dns_allow_private_addresses = true` only for routes whose hostname
   upstreams are intentionally resolved by trusted internal DNS. IP-literal
   upstreams remain explicit and are not blocked by this DNS guard.
-  `upstream_sni` is optional; when unset Fluxheim derives SNI from the selected
-  upstream host. IP upstreams do not have a DNS hostname to verify; set
-  `upstream_sni` when a TLS certificate must be matched for an IP-address
-  upstream. `upstream_verify_cert` and `upstream_verify_hostname` default to
-  `true`; disabling certificate verification also requires hostname
-  verification to be disabled so the policy cannot imply a hostname check that
-  is not happening.
+  `upstream_sni` is optional for hostname upstreams; when unset Fluxheim derives
+  SNI from the selected upstream host. IP-literal upstreams with
+  `upstream_tls = true` and certificate verification enabled require explicit
+  `upstream_sni`, because an IP address does not provide a DNS hostname for
+  certificate verification. `upstream_verify_cert` and
+  `upstream_verify_hostname` default to `true`; disabling certificate
+  verification also requires hostname verification to be disabled so the policy
+  cannot imply a hostname check that is not happening.
 - `upstream_alternative_cn` replaces the SNI-derived verification hostname with
   one explicit non-wildcard hostname. It is not an additional hostname checked
   alongside SNI. `upstream_ca_path` loads a route-local PEM CA bundle.
@@ -3014,8 +3015,7 @@ APP_MEMORY_LIMIT = "256M"
 # Default mode. Fluxheim connects to an operator-managed php-fpm pool.
 mode = "external"
 tcp = "php-fpm:9000"
-# Required when TCP endpoints use private or link-local IP literals outside
-# loopback.
+# Required when TCP endpoints use loopback, private, or link-local IP literals.
 # allow_private_tcp_upstreams = true
 # Or use a private Unix socket:
 # socket = "/run/php/php-fpm.sock"
@@ -3249,11 +3249,12 @@ endpoint modes are mutually exclusive. `tcp_upstreams` enables round-robin TCP
 selection and conservative failover across configured php-fpm backends. The
 `tcp_upstreams` list is capped at 64 entries and rejects duplicate authorities.
 Unsafe TCP IP literals such as unspecified or multicast addresses are rejected.
-Private or link-local IP literals outside loopback require
-`php.fpm.allow_private_tcp_upstreams = true`; this keeps private-network
-FastCGI connectivity an explicit operator trust boundary while preserving local
-loopback php-fpm deployments. Hostname endpoints are validated as authorities,
-but DNS resolution remains an operational boundary for the php-fpm network.
+Loopback, private, or link-local IP literals require
+`php.fpm.allow_private_tcp_upstreams = true`; this keeps numeric local and
+private-network FastCGI connectivity an explicit operator trust boundary. Use a
+Unix socket for same-host php-fpm when possible. Hostname endpoints are
+validated as authorities, but DNS resolution remains an operational boundary
+for the php-fpm network.
 When enabled, stale idle entries older than `php.fpm.idle_timeout_secs` are
 discarded before reuse. `pool_max_idle` must be between 1 and 1024 when
 keepalive is enabled. `php.fpm.max_retries` defaults to `0`; when set,

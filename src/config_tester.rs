@@ -519,6 +519,7 @@ mod tests {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            allow_private_tcp_upstreams = true
             "#,
         );
 
