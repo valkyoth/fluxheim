@@ -2135,13 +2135,16 @@ freshness.
 `status_ttls` is optional. Each key is an HTTP status code and each value is a
 positive TTL in seconds. When a cache-participating origin response matches, the
 cache policy replaces response freshness headers with
-`Cache-Control: public, max-age=<ttl>` before cache admission. Non-200 origin
-responses are admitted only when their status appears in `status_ttls`, or when
-`default_status_ttl_secs` is set as a fallback for any status. Use
-`default_status_ttl_secs` carefully: it can make unusual or error statuses
-cacheable on the matched route unless another admission rule rejects the
-response. `stale_while_revalidate_secs` and `stale_if_error_secs` are optional
-and must be greater than zero when set.
+`Cache-Control: max-age=<ttl>` before cache admission. Origin
+`private`, `no-store`, `no-cache`, `Set-Cookie`, and other shared-cache
+rejections are preserved and still prevent storage unless
+`ignore_origin_cache_headers` is explicitly enabled for a trusted static route.
+Non-200 origin responses are admitted only when their status appears in
+`status_ttls`, or when `default_status_ttl_secs` is set as a fallback for any
+status. Use `default_status_ttl_secs` carefully: it can make unusual or error
+statuses cacheable on the matched route unless another admission rule rejects
+the response. `stale_while_revalidate_secs` and `stale_if_error_secs` are
+optional and must be greater than zero when set.
 `stale_while_revalidate_secs` permits serving an already-stored stale object
 while Fluxheim revalidates it in the background, and `stale_if_error_secs`
 permits serving stale during upstream errors. Both windows are counted after

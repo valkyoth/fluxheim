@@ -127,8 +127,11 @@ internal cache implementation.
 - `cache.status_ttls`, `vhosts.cache.status_ttls`, and
   `vhosts.routes.cache.status_ttls` define explicit positive TTLs by response
   status. Matching cache-participating origin responses have their freshness
-  headers normalized to `Cache-Control: public, max-age=<ttl>` before cache
-  admission. Non-200 statuses are only admitted when explicitly listed here.
+  headers normalized to `Cache-Control: max-age=<ttl>` before cache admission.
+  Origin `private`, `no-store`, `no-cache`, `Set-Cookie`, and other
+  shared-cache rejection signals are preserved and still prevent storage unless
+  `ignore_origin_cache_headers` is explicitly enabled. Non-200 statuses are
+  only admitted when explicitly listed here.
 - `cache.stale_if_error_secs`, `vhosts.cache.stale_if_error_secs`, and
   `vhosts.routes.cache.stale_if_error_secs` add an explicit stale-if-error
   window to cache-participating responses. Pingora can then serve an expired

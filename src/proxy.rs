@@ -17360,7 +17360,7 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
-    fn cache_policy_applies_status_ttl_before_admission() {
+    fn cache_policy_preserves_origin_shared_cache_rejections_before_admission() {
         use std::collections::BTreeMap;
 
         use pingora::cache::CachePhase;
@@ -17387,17 +17387,51 @@ mod tests {
 
         apply_cache_status_ttl(&mut response, &cache, CachePhase::Miss).unwrap();
 
+        assert!(response.headers.contains_key("expires"));
+        assert_eq!(
+            response.headers.get("cache-control").unwrap().to_str().ok(),
+            Some("private, no-store")
+        );
+        assert_eq!(
+            response_cache_admission_rejection(&response, &cache),
+            Some("cache-control-private")
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_policy_applies_status_ttl_to_neutral_response_before_admission() {
+        use std::collections::BTreeMap;
+
+        use pingora::cache::CachePhase;
+
+        let cache = CacheConfig {
+            status_ttls: BTreeMap::from([(200, 3600), (404, 60)]),
+            stale_while_revalidate_secs: Some(30),
+            stale_if_error_secs: Some(120),
+            ..CacheConfig::default()
+        };
+        let mut response = ResponseHeader::build(200, Some(3)).unwrap();
+        response.insert_header("content-type", "image/png").unwrap();
+        response
+            .insert_header("expires", "Wed, 21 Oct 2015 07:28:00 GMT")
+            .unwrap();
+
+        assert_eq!(response_cache_admission_rejection(&response, &cache), None);
+
+        apply_cache_status_ttl(&mut response, &cache, CachePhase::Miss).unwrap();
+
         assert!(!response.headers.contains_key("expires"));
         assert_eq!(
             response.headers.get("cache-control").unwrap().to_str().ok(),
-            Some("public, max-age=3600, stale-while-revalidate=30, stale-if-error=120")
+            Some("max-age=3600, stale-while-revalidate=30, stale-if-error=120")
         );
         assert_eq!(response_cache_admission_rejection(&response, &cache), None);
     }
 
     #[cfg(feature = "cache")]
     #[test]
-    fn cache_policy_applies_default_status_ttl_fallback() {
+    fn cache_policy_preserves_origin_shared_cache_rejections_for_default_status_ttl() {
         use pingora::cache::CachePhase;
 
         let cache = CacheConfig {
@@ -17417,7 +17451,30 @@ mod tests {
         apply_cache_status_ttl(&mut response, &cache, CachePhase::Miss).unwrap();
         assert_eq!(
             response.headers.get("cache-control").unwrap().to_str().ok(),
-            Some("public, max-age=15, stale-if-error=60")
+            Some("private, no-store")
+        );
+        assert_eq!(
+            response_cache_admission_rejection(&response, &cache),
+            Some("cache-control-private")
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_policy_applies_default_status_ttl_fallback_to_neutral_response() {
+        use pingora::cache::CachePhase;
+
+        let cache = CacheConfig {
+            default_status_ttl_secs: Some(15),
+            stale_if_error_secs: Some(60),
+            ..CacheConfig::default()
+        };
+        let mut response = ResponseHeader::build(418, Some(1)).unwrap();
+
+        apply_cache_status_ttl(&mut response, &cache, CachePhase::Miss).unwrap();
+        assert_eq!(
+            response.headers.get("cache-control").unwrap().to_str().ok(),
+            Some("max-age=15, stale-if-error=60")
         );
         assert_eq!(response_cache_admission_rejection(&response, &cache), None);
     }

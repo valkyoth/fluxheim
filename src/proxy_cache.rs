@@ -545,6 +545,9 @@ pub(crate) fn apply_cache_status_ttl(
         .copied()
         .or(cache.default_status_ttl_secs)
     {
+        if response_cache_header_policy_rejection(response, cache).is_some() {
+            return Ok(());
+        }
         response.remove_header("expires");
         return response.insert_header(
             "cache-control",
@@ -711,7 +714,7 @@ pub(crate) fn cache_control_freshness_value(
     stale_while_revalidate_secs: Option<u32>,
     stale_if_error_secs: Option<u32>,
 ) -> String {
-    let mut value = format!("public, max-age={ttl_secs}");
+    let mut value = format!("max-age={ttl_secs}");
     if let Some(stale_while_revalidate_secs) = stale_while_revalidate_secs {
         value.push_str(", stale-while-revalidate=");
         value.push_str(&stale_while_revalidate_secs.to_string());
