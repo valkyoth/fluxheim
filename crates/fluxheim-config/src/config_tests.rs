@@ -3677,6 +3677,7 @@ fn validates_load_balance_passive_health() {
             enabled = true
             consecutive_failure = 2
             ejection_secs = 10
+            min_healthy_backends = 2
             failure_statuses = [500, 502, 503]
             failure_status_ranges = [{ start = 520, end = 529 }]
             max_latency_ms = 250
@@ -3684,6 +3685,14 @@ fn validates_load_balance_passive_health() {
     )
     .unwrap();
     config.validate().unwrap();
+    assert_eq!(
+        config
+            .proxy
+            .load_balance
+            .passive_health
+            .min_healthy_backends,
+        2
+    );
     assert_eq!(config.proxy.load_balance.passive_health.max_latency_ms, 250);
     assert_eq!(
         config
@@ -3736,6 +3745,20 @@ fn validates_load_balance_passive_health() {
         invalid_latency.validate(),
         Err(ConfigError::InvalidLoadBalancePassiveHealth {
             field: "proxy.load_balance.passive_health.max_latency_ms"
+        })
+    );
+
+    let invalid_floor: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.passive_health]
+            min_healthy_backends = 4097
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_floor.validate(),
+        Err(ConfigError::InvalidLoadBalancePassiveHealth {
+            field: "proxy.load_balance.passive_health.min_healthy_backends"
         })
     );
 }

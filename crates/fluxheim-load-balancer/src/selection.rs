@@ -105,19 +105,7 @@ fn priority_activation_satisfied(
     snapshot
         .backends()
         .iter()
-        .filter(|backend| {
-            snapshot.ready(backend)
-                && context
-                    .backend_policy
-                    .permits(backend, pass, context.counters)
-                && context
-                    .passive_health
-                    .is_none_or(|health| !health.is_ejected(backend))
-                && (pass.ignore_slow_start
-                    || context
-                        .slow_start
-                        .is_none_or(|state| state.permits_read_only(backend)))
-        })
+        .filter(|backend| backend_candidate_allowed_read_only(snapshot, backend, context, pass))
         .take(context.backend_policy.priority_group_min_active())
         .count()
         >= context.backend_policy.priority_group_min_active()
@@ -159,18 +147,7 @@ fn select_weighted_round_robin_with_backup_policy(
     let mut candidates = Vec::new();
     let mut total_weight = 0usize;
     for backend in snapshot.backends().iter() {
-        if !snapshot.ready(backend)
-            || !context
-                .backend_policy
-                .permits(backend, pass, context.counters)
-            || context
-                .passive_health
-                .is_some_and(|health| health.is_ejected(backend))
-            || (!pass.ignore_slow_start
-                && context
-                    .slow_start
-                    .is_some_and(|state| !state.permits(backend)))
-        {
+        if !backend_candidate_allowed(snapshot, backend, context, pass) {
             continue;
         }
         let weight = context.backend_policy.effective_weight(backend);
@@ -232,11 +209,13 @@ fn select_least_connections_with_backup_policy(
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
     for backend in snapshot.backends().iter() {
-        if !snapshot.ready(backend)
-            || !backend_policy.permits(backend, pass, counters)
-            || passive_health.is_some_and(|health| health.is_ejected(backend))
-            || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
-        {
+        let context = SelectionContext {
+            passive_health,
+            slow_start,
+            counters,
+            backend_policy,
+        };
+        if !backend_candidate_allowed(snapshot, backend, context, pass) {
             continue;
         }
         let connections = counters.count(backend);
@@ -303,11 +282,13 @@ fn select_least_sessions_with_backup_policy(
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
     for backend in snapshot.backends().iter() {
-        if !snapshot.ready(backend)
-            || !backend_policy.permits(backend, pass, counters)
-            || passive_health.is_some_and(|health| health.is_ejected(backend))
-            || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
-        {
+        let context = SelectionContext {
+            passive_health,
+            slow_start,
+            counters,
+            backend_policy,
+        };
+        if !backend_candidate_allowed(snapshot, backend, context, pass) {
             continue;
         }
         let sessions = persistence_entry_counts
@@ -387,11 +368,13 @@ fn select_least_time_with_backup_policy(
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
     for backend in snapshot.backends().iter() {
-        if !snapshot.ready(backend)
-            || !backend_policy.permits(backend, pass, counters)
-            || passive_health.is_some_and(|health| health.is_ejected(backend))
-            || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
-        {
+        let context = SelectionContext {
+            passive_health,
+            slow_start,
+            counters,
+            backend_policy,
+        };
+        if !backend_candidate_allowed(snapshot, backend, context, pass) {
             continue;
         }
         let latency_score = latency.score(backend).unwrap_or(0);
@@ -637,17 +620,79 @@ fn backend_candidate_allowed(
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> bool {
+    backend_candidate_base_allowed(snapshot, backend, context, pass, false)
+        && passive_health_candidate_allowed(snapshot, backend, context)
+}
+
+fn backend_candidate_allowed_read_only(
+    snapshot: &BackendContainerSnapshot,
+    backend: &Backend,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+) -> bool {
+    backend_candidate_base_allowed(snapshot, backend, context, pass, true)
+        && passive_health_candidate_allowed(snapshot, backend, context)
+}
+
+fn backend_candidate_base_allowed(
+    snapshot: &BackendContainerSnapshot,
+    backend: &Backend,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+    slow_start_read_only: bool,
+) -> bool {
     snapshot.ready(backend)
         && context
             .backend_policy
             .permits(backend, pass, context.counters)
-        && context
-            .passive_health
-            .is_none_or(|health| !health.is_ejected(backend))
         && (pass.ignore_slow_start
-            || context
-                .slow_start
-                .is_none_or(|state| state.permits(backend)))
+            || context.slow_start.is_none_or(|state| {
+                if slow_start_read_only {
+                    state.permits_read_only(backend)
+                } else {
+                    state.permits(backend)
+                }
+            }))
+}
+
+fn passive_health_candidate_allowed(
+    snapshot: &BackendContainerSnapshot,
+    backend: &Backend,
+    context: SelectionContext<'_>,
+) -> bool {
+    let Some(health) = context.passive_health else {
+        return true;
+    };
+    if !health.is_ejected(backend) {
+        return true;
+    }
+    let floor = health.min_healthy_backends();
+    floor > 0 && non_ejected_candidate_count(snapshot, context, floor) < floor
+}
+
+fn non_ejected_candidate_count(
+    snapshot: &BackendContainerSnapshot,
+    context: SelectionContext<'_>,
+    limit: usize,
+) -> usize {
+    let Some(health) = context.passive_health else {
+        return limit;
+    };
+    let floor_pass = SelectionPass {
+        minimum_priority_group: None,
+        allow_backup: true,
+        ignore_slow_start: true,
+        ignore_locality: true,
+    };
+    snapshot
+        .backends()
+        .iter()
+        .filter(|backend| {
+            backend_candidate_base_allowed(snapshot, backend, context, floor_pass, true)
+                && !health.is_ejected(backend)
+        })
+        .take(limit)
+        .count()
 }
 
 pub(super) fn select_consistent_hash(
@@ -763,18 +808,7 @@ fn bounded_load_snapshot(
     let mut total_connections = 0usize;
     let mut total_weight = 0usize;
     for backend in snapshot.backends().iter() {
-        if !snapshot.ready(backend)
-            || !context
-                .backend_policy
-                .permits(backend, pass, context.counters)
-            || context
-                .passive_health
-                .is_some_and(|health| health.is_ejected(backend))
-            || (!pass.ignore_slow_start
-                && context
-                    .slow_start
-                    .is_some_and(|state| !state.permits_read_only(backend)))
-        {
+        if !backend_candidate_allowed_read_only(snapshot, backend, context, pass) {
             continue;
         }
         total_connections = total_connections.saturating_add(context.counters.count(backend));
@@ -959,16 +993,7 @@ pub(super) fn select_maglev(
             let Some(backend) = backend_by_key.get(&key) else {
                 continue;
             };
-            if snapshot.ready(backend)
-                && inputs
-                    .backend_policy
-                    .permits(backend, pass, inputs.counters)
-                && inputs
-                    .passive_health
-                    .is_none_or(|health| !health.is_ejected(backend))
-                && (pass.ignore_slow_start
-                    || inputs.slow_start.is_none_or(|state| state.permits(backend)))
-            {
+            if backend_candidate_allowed(&snapshot, backend, context, pass) {
                 return Some(SelectedUpstream::new(backend.clone()));
             }
         }

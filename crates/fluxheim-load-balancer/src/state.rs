@@ -109,6 +109,7 @@ impl Debug for LoadBalancedUpstreamReporter {
 pub(super) struct PassiveHealthState {
     consecutive_failure: usize,
     ejection: Duration,
+    min_healthy_backends: usize,
     max_latency: Option<Duration>,
     failure_statuses: Arc<[u16]>,
     failure_status_ranges: Arc<[LoadBalanceHealthCheckExpectedStatusRange]>,
@@ -126,6 +127,7 @@ impl PassiveHealthState {
         Self {
             consecutive_failure: config.consecutive_failure,
             ejection: Duration::from_secs(config.ejection_secs),
+            min_healthy_backends: config.min_healthy_backends,
             max_latency: (config.max_latency_ms > 0)
                 .then(|| Duration::from_millis(config.max_latency_ms)),
             failure_statuses: config.failure_statuses.clone().into(),
@@ -155,6 +157,10 @@ impl PassiveHealthState {
         }
         state.ejected_until = None;
         false
+    }
+
+    pub(super) fn min_healthy_backends(&self) -> usize {
+        self.min_healthy_backends
     }
 
     pub(super) fn key_is_currently_ejected(&self, key: u64) -> bool {

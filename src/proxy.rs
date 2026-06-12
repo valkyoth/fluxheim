@@ -16163,6 +16163,7 @@ mod tests {
                                 enabled: true,
                                 consecutive_failure: 2,
                                 ejection_secs: 15,
+                                min_healthy_backends: 1,
                                 failure_statuses: vec![503],
                                 failure_status_ranges: Vec::new(),
                                 max_latency_ms: 250,

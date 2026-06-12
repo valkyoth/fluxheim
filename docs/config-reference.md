@@ -1022,6 +1022,7 @@ duration_secs = 30
 enabled = false
 consecutive_failure = 3
 ejection_secs = 30
+min_healthy_backends = 1
 failure_statuses = []
 failure_status_ranges = []
 max_latency_ms = 0
@@ -1436,8 +1437,12 @@ Pingora's health-check defaults.
 `proxy.load_balance.passive_health.enabled = true` adds opt-in passive outlier
 detection. Fluxheim records selected upstream outcomes, treats 5xx responses as
 failures by default, and temporarily ejects a backend after
-`consecutive_failure` failures for `ejection_secs`. `failure_statuses` may
-narrow the failure set to specific 5xx status codes, and
+`consecutive_failure` failures for `ejection_secs`. `min_healthy_backends`
+defaults to `1`; when passive ejection would leave fewer than this number of
+selectable backends, Fluxheim ignores passive ejection for that selection pass
+instead of failing the entire pool. Set it to `0` only when strict fail-closed
+behavior is preferred over availability during a full-pool passive ejection.
+`failure_statuses` may narrow the failure set to specific 5xx status codes, and
 `failure_status_ranges` accepts inclusive 5xx ranges such as
 `[{ start = 520, end = 529 }]`. `max_latency_ms = 0` disables latency ejection;
 a positive value treats responses at or above that latency as passive failures.
@@ -1445,9 +1450,10 @@ Passive ejection is also exposed in load-balancer runtime status as
 `circuit_state = "open"` with a pool-level `circuit_open_backend_count` so
 temporary outlier removal is explainable through the admin plane.
 Active health checks and passive ejection are combined; if no backend is
-currently selectable,
+currently selectable after the passive-health floor and other policy gates,
 Fluxheim returns a proxy error instead of falling back to a configured primary
-upstream.
+upstream. Disabled, drained, saturated, or active-health-unready backends are
+not revived by the passive-health floor.
 `proxy.load_balance.slow_start.enabled = true` warms newly seen and passively
 recovered load-balanced backends over `duration_secs` before they receive their
 full normal selection share. If all otherwise healthy candidates are still

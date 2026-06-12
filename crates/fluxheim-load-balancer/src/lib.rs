@@ -3562,6 +3562,72 @@ mod tests {
         assert_ne!(failed_addr, next.backend.addr);
     }
 
+    #[test]
+    fn passive_health_floor_prevents_full_pool_outage() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                passive_health: LoadBalancePassiveHealthConfig {
+                    enabled: true,
+                    consecutive_failure: 1,
+                    ejection_secs: 60,
+                    ..LoadBalancePassiveHealthConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let first = balancer.select(&request(), None).unwrap();
+        let first_addr = first.backend.addr.clone();
+        assert!(first.reporter.unwrap().record_failure().ejected);
+        let second = balancer.select(&request(), None).unwrap();
+        let second_addr = second.backend.addr.clone();
+        assert_ne!(first_addr, second_addr);
+        assert!(second.reporter.unwrap().record_failure().ejected);
+
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.passive_ejected_backend_count, 2);
+        assert_eq!(stats.available_backend_count, 0);
+        let selected = balancer
+            .select(&request(), None)
+            .expect("passive health floor keeps a backend selectable");
+        assert!(selected.backend.addr == first_addr || selected.backend.addr == second_addr);
+    }
+
+    #[test]
+    fn passive_health_floor_can_be_disabled_for_strict_fail_closed() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                passive_health: LoadBalancePassiveHealthConfig {
+                    enabled: true,
+                    consecutive_failure: 1,
+                    ejection_secs: 60,
+                    min_healthy_backends: 0,
+                    ..LoadBalancePassiveHealthConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let first = balancer.select(&request(), None).unwrap();
+        first.reporter.unwrap().record_failure();
+        let second = balancer.select(&request(), None).unwrap();
+        second.reporter.unwrap().record_failure();
+
+        assert!(balancer.select(&request(), None).is_none());
+    }
+
     #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn runtime_status_reports_passive_failure_count_before_ejection() {

@@ -83,6 +83,7 @@ read_timeout_secs = 2
 enabled = true
 consecutive_failure = 3
 ejection_secs = 30
+min_healthy_backends = 1
 failure_statuses = [500, 502, 503]
 failure_status_ranges = [{ start = 520, end = 529 }]
 max_latency_ms = 2000

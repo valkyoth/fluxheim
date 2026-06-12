@@ -738,6 +738,8 @@ pub struct LoadBalancePassiveHealthConfig {
     pub consecutive_failure: usize,
     #[serde(default = "default_lb_passive_ejection_secs")]
     pub ejection_secs: u64,
+    #[serde(default = "default_lb_passive_min_healthy_backends")]
+    pub min_healthy_backends: usize,
     #[serde(default)]
     pub failure_statuses: Vec<u16>,
     #[serde(default)]
@@ -752,6 +754,7 @@ impl Default for LoadBalancePassiveHealthConfig {
             enabled: false,
             consecutive_failure: default_lb_passive_consecutive_failure(),
             ejection_secs: default_lb_passive_ejection_secs(),
+            min_healthy_backends: default_lb_passive_min_healthy_backends(),
             failure_statuses: Vec::new(),
             failure_status_ranges: Vec::new(),
             max_latency_ms: 0,
@@ -769,6 +772,11 @@ impl LoadBalancePassiveHealthConfig {
         if self.ejection_secs == 0 || self.ejection_secs > 3600 {
             return Err(ConfigError::InvalidLoadBalancePassiveHealth {
                 field: "proxy.load_balance.passive_health.ejection_secs",
+            });
+        }
+        if self.min_healthy_backends > 4096 {
+            return Err(ConfigError::InvalidLoadBalancePassiveHealth {
+                field: "proxy.load_balance.passive_health.min_healthy_backends",
             });
         }
         if self.max_latency_ms > 600_000 {
@@ -814,6 +822,10 @@ fn default_lb_passive_consecutive_failure() -> usize {
 
 fn default_lb_passive_ejection_secs() -> u64 {
     30
+}
+
+fn default_lb_passive_min_healthy_backends() -> usize {
+    1
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
