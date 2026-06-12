@@ -11297,6 +11297,14 @@ mod tests {
             "<?php echo 'blocked';",
         )
         .unwrap();
+        fs::write(
+            php.root
+                .join("wp-content")
+                .join("uploads")
+                .join("index.php"),
+            "<?php echo 'blocked index';",
+        )
+        .unwrap();
         php.config.deny_path_prefixes = vec!["/wp-content/uploads/".to_owned()];
 
         assert!(php_script_name_denied(
@@ -11318,6 +11326,10 @@ mod tests {
         assert!(!php_script_name_denied(&php, &encoded_script));
         assert!(matches!(
             resolve_php_script(&php, "/wp-content/upl%256fads/shell.php", true),
+            PhpResolveOutcome::Forbidden
+        ));
+        assert!(matches!(
+            resolve_php_script(&php, "/wp-content/uploads/", true),
             PhpResolveOutcome::Forbidden
         ));
     }
