@@ -9991,12 +9991,33 @@ where
     if let Some(upstream_tls) = upstream_tls {
         peer.options.ca = upstream_tls.ca.clone();
         peer.client_cert_key = upstream_tls.client_cert_key.clone();
+        if let Some(ca_pool_key) = upstream_tls.ca_pool_key {
+            peer.group_key = proxy_peer_group_key_with_material(
+                peer.group_key,
+                b"fluxheim-upstream-ca",
+                ca_pool_key,
+            );
+        }
     }
     apply_proxy_timeouts(&mut peer, proxy);
     apply_proxy_upstream_socket_policy(&mut peer, proxy);
     apply_proxy_upstream_http_policy(&mut peer, proxy);
     apply_proxy_upstream_tls_policy(&mut peer, proxy);
     Ok(peer)
+}
+
+fn proxy_peer_group_key_with_material(current: u64, label: &[u8], material_key: u64) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in current
+        .to_le_bytes()
+        .into_iter()
+        .chain(label.iter().copied())
+        .chain(material_key.to_le_bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 fn apply_proxy_timeouts(peer: &mut HttpPeer, proxy: &ProxyConfig) {
@@ -13613,6 +13634,47 @@ mod tests {
 
         assert!(peer.options.ca.is_some());
         assert!(peer.client_cert_key.is_some());
+        assert_ne!(peer.group_key, 0);
+    }
+
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
+    #[test]
+    fn proxy_upstream_ca_material_isolates_pingora_reuse_hash() {
+        use pingora::upstreams::peer::Peer;
+
+        let alternate_ca_path = unique_temp_path("proxy-upstream-ca-pool-key");
+        let ca = fs::read("tests/fixtures/tls/localhost-cert.pem").unwrap();
+        let mut alternate_ca = ca.clone();
+        alternate_ca.extend_from_slice(&ca);
+        fs::write(&alternate_ca_path, alternate_ca).unwrap();
+
+        let base_proxy = ProxyConfig {
+            upstream: Some("127.0.0.1:6010".to_owned()),
+            upstream_tls: true,
+            upstream_sni: Some("shared-origin.example".to_owned()),
+            upstream_ca_path: Some("tests/fixtures/tls/localhost-cert.pem".into()),
+            ..ProxyConfig::default()
+        };
+        let alternate_proxy = ProxyConfig {
+            upstream_ca_path: Some(alternate_ca_path),
+            ..base_proxy.clone()
+        };
+        let base_runtime = RuntimeProxy::from_config(&base_proxy, "base proxy").unwrap();
+        let alternate_runtime =
+            RuntimeProxy::from_config(&alternate_proxy, "alternate proxy").unwrap();
+
+        let base_peer =
+            http_peer_for_runtime_proxy(base_proxy.primary_upstream(), &base_runtime).unwrap();
+        let alternate_peer =
+            http_peer_for_runtime_proxy(alternate_proxy.primary_upstream(), &alternate_runtime)
+                .unwrap();
+
+        assert_eq!(base_peer._address, alternate_peer._address);
+        assert_eq!(base_peer.sni, alternate_peer.sni);
+        assert!(base_peer.options.ca.is_some());
+        assert!(alternate_peer.options.ca.is_some());
+        assert_ne!(base_peer.group_key, alternate_peer.group_key);
+        assert_ne!(base_peer.reuse_hash(), alternate_peer.reuse_hash());
     }
 
     #[test]

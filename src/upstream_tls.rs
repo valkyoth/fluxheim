@@ -12,6 +12,7 @@ use zeroize::Zeroizing;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RuntimeUpstreamTls {
     pub(crate) ca: Option<Arc<pingora::protocols::tls::CaType>>,
+    pub(crate) ca_pool_key: Option<u64>,
     pub(crate) client_cert_key: Option<Arc<pingora::utils::tls::CertKey>>,
 }
 
@@ -33,8 +34,10 @@ impl RuntimeUpstreamTls {
         client_cert_path: Option<&std::path::Path>,
         client_key_path: Option<&std::path::Path>,
     ) -> io::Result<Self> {
+        let ca_bundle = ca_path.map(load_upstream_ca_bundle).transpose()?;
         Ok(Self {
-            ca: ca_path.map(load_upstream_ca_bundle).transpose()?,
+            ca: ca_bundle.as_ref().map(|bundle| bundle.ca.clone()),
+            ca_pool_key: ca_bundle.map(|bundle| bundle.pool_key),
             client_cert_key: match (client_cert_path, client_key_path) {
                 (Some(cert), Some(key)) => Some(load_upstream_client_cert_key(cert, key)?),
                 _ => None,
@@ -81,6 +84,26 @@ compile_error!(
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 const MAX_UPSTREAM_TLS_FILE_BYTES: u64 = 1024 * 1024;
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
+struct LoadedUpstreamCaBundle {
+    ca: Arc<pingora::protocols::tls::CaType>,
+    pool_key: u64,
+}
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
+fn upstream_tls_ca_pool_key(contents: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in b"fluxheim-upstream-ca\0"
+        .iter()
+        .copied()
+        .chain(contents.iter().copied())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 pub(crate) fn read_upstream_tls_file(path: &std::path::Path) -> io::Result<Vec<u8>> {
@@ -142,10 +165,9 @@ pub(crate) fn read_upstream_tls_file(path: &std::path::Path) -> io::Result<Vec<u
 }
 
 #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
-fn load_upstream_ca_bundle(
-    path: &std::path::Path,
-) -> io::Result<Arc<pingora::protocols::tls::CaType>> {
+fn load_upstream_ca_bundle(path: &std::path::Path) -> io::Result<LoadedUpstreamCaBundle> {
     let contents = read_upstream_tls_file(path)?;
+    let pool_key = upstream_tls_ca_pool_key(&contents);
     use rustls::pki_types::{CertificateDer, pem::PemObject};
 
     let certs = CertificateDer::pem_slice_iter(&contents)
@@ -181,14 +203,16 @@ fn load_upstream_ca_bundle(
                 ),
             )
         })?;
-    Ok(Arc::from(wrapped.into_boxed_slice()))
+    Ok(LoadedUpstreamCaBundle {
+        ca: Arc::from(wrapped.into_boxed_slice()),
+        pool_key,
+    })
 }
 
 #[cfg(all(feature = "tls-openssl", not(feature = "tls-rustls-backend")))]
-fn load_upstream_ca_bundle(
-    path: &std::path::Path,
-) -> io::Result<Arc<pingora::protocols::tls::CaType>> {
+fn load_upstream_ca_bundle(path: &std::path::Path) -> io::Result<LoadedUpstreamCaBundle> {
     let contents = read_upstream_tls_file(path)?;
+    let pool_key = upstream_tls_ca_pool_key(&contents);
     let certs = pingora::tls::x509::X509::stack_from_pem(&contents).map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -207,7 +231,10 @@ fn load_upstream_ca_bundle(
             ),
         ));
     }
-    Ok(Arc::from(certs.into_boxed_slice()))
+    Ok(LoadedUpstreamCaBundle {
+        ca: Arc::from(certs.into_boxed_slice()),
+        pool_key,
+    })
 }
 
 #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
