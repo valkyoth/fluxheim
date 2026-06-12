@@ -12,6 +12,11 @@ during the v1.5.19 review cycle.
   route-local policy checks, cache keying, or upstream forwarding.
 - Treated incoming method casing as equivalent for route method filters so
   lowercase HTTP/1 method tokens cannot miss method-scoped route policy.
+- Restricted accepted inbound request IDs to an identifier-safe alphabet so
+  URL-like or email-like values are regenerated before reaching logs, traces,
+  templates, or upstream headers.
+- Released response-compression output buffers after each emitted chunk while
+  preserving the cumulative `max_output_bytes` cap.
 - Applied decoded route matching to edge policy checks, closing mismatches
   between encoded request paths and policy enforcement.
 - Preserved private cache-control directives for status-specific TTL handling

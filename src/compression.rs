@@ -23,6 +23,7 @@ pub(crate) struct ResponseCompressionEncoder {
     pub(crate) encoding: &'static str,
     inner: ResponseCompressionEncoderInner,
     emitted: usize,
+    total_output_bytes: usize,
     max_output_bytes: usize,
 }
 
@@ -51,6 +52,7 @@ impl std::fmt::Debug for ResponseCompressionEncoder {
             .debug_struct("ResponseCompressionEncoder")
             .field("encoding", &self.encoding)
             .field("emitted", &self.emitted)
+            .field("total_output_bytes", &self.total_output_bytes)
             .finish_non_exhaustive()
     }
 }
@@ -72,6 +74,7 @@ impl ResponseCompressionEncoder {
                 22,
             )))),
             emitted: 0,
+            total_output_bytes: 0,
             max_output_bytes,
         }
     }
@@ -85,6 +88,7 @@ impl ResponseCompressionEncoder {
                 Compression::new(level),
             )),
             emitted: 0,
+            total_output_bytes: 0,
             max_output_bytes,
         }
     }
@@ -99,6 +103,7 @@ impl ResponseCompressionEncoder {
                 })?,
             )),
             emitted: 0,
+            total_output_bytes: 0,
             max_output_bytes,
         })
     }
@@ -125,15 +130,21 @@ impl ResponseCompressionEncoder {
                     encoder
                         .flush()
                         .map_err(|error| FluxError::io("flush brotli response chunk", error))?;
-                    let bytes = copy_new_compression_bytes(
-                        encoder.get_ref(),
+                    let bytes = take_new_compression_bytes(
+                        encoder.get_mut(),
                         &mut self.emitted,
+                        &mut self.total_output_bytes,
                         self.max_output_bytes,
                     )?;
                     *encoder_slot.as_mut() = Some(encoder);
                     return Ok(bytes);
                 };
-                copy_new_compression_bytes(&output, &mut self.emitted, self.max_output_bytes)
+                take_final_compression_bytes(
+                    output,
+                    &mut self.emitted,
+                    &mut self.total_output_bytes,
+                    self.max_output_bytes,
+                )
             }
             #[cfg(feature = "compression-gzip")]
             ResponseCompressionEncoderInner::Gzip(encoder) => {
@@ -151,9 +162,10 @@ impl ResponseCompressionEncoder {
                         .flush()
                         .map_err(|error| FluxError::io("flush gzip response chunk", error))?;
                 }
-                copy_new_compression_bytes(
-                    encoder.get_ref(),
+                take_new_compression_bytes(
+                    encoder.get_mut(),
                     &mut self.emitted,
+                    &mut self.total_output_bytes,
                     self.max_output_bytes,
                 )
             }
@@ -175,15 +187,21 @@ impl ResponseCompressionEncoder {
                     encoder
                         .flush()
                         .map_err(|error| FluxError::io("flush zstd response chunk", error))?;
-                    let bytes = copy_new_compression_bytes(
-                        encoder.get_ref(),
+                    let bytes = take_new_compression_bytes(
+                        encoder.get_mut(),
                         &mut self.emitted,
+                        &mut self.total_output_bytes,
                         self.max_output_bytes,
                     )?;
                     *encoder_slot = Some(encoder);
                     return Ok(bytes);
                 };
-                copy_new_compression_bytes(&output, &mut self.emitted, self.max_output_bytes)
+                take_final_compression_bytes(
+                    output,
+                    &mut self.emitted,
+                    &mut self.total_output_bytes,
+                    self.max_output_bytes,
+                )
             }
         }
     }
@@ -194,23 +212,71 @@ impl ResponseCompressionEncoder {
     feature = "compression-gzip",
     feature = "compression-zstd"
 ))]
-fn copy_new_compression_bytes(
-    output: &[u8],
+fn take_new_compression_bytes(
+    output: &mut Vec<u8>,
     emitted: &mut usize,
+    total_output_bytes: &mut usize,
     max_output_bytes: usize,
 ) -> FluxResult<Bytes> {
-    if output.len() > max_output_bytes {
-        return Err(FluxError::io(
-            "compressed response exceeds max_output_bytes",
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "compressed response exceeds max_output_bytes",
-            ),
-        ));
-    }
+    let Some(new_len) = output.len().checked_sub(*emitted) else {
+        return Err(compressed_response_exceeds_limit_error());
+    };
+    ensure_compressed_output_within_limit(new_len, total_output_bytes, max_output_bytes)?;
     let bytes = Bytes::copy_from_slice(&output[*emitted..]);
-    *emitted = output.len();
+    *output = Vec::new();
+    *emitted = 0;
     Ok(bytes)
+}
+
+#[cfg(any(feature = "compression-brotli", feature = "compression-zstd"))]
+fn take_final_compression_bytes(
+    output: Vec<u8>,
+    emitted: &mut usize,
+    total_output_bytes: &mut usize,
+    max_output_bytes: usize,
+) -> FluxResult<Bytes> {
+    let Some(new_len) = output.len().checked_sub(*emitted) else {
+        return Err(compressed_response_exceeds_limit_error());
+    };
+    ensure_compressed_output_within_limit(new_len, total_output_bytes, max_output_bytes)?;
+    let bytes = Bytes::copy_from_slice(&output[*emitted..]);
+    *emitted = 0;
+    Ok(bytes)
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn ensure_compressed_output_within_limit(
+    new_len: usize,
+    total_output_bytes: &mut usize,
+    max_output_bytes: usize,
+) -> FluxResult<()> {
+    let Some(next_total) = total_output_bytes.checked_add(new_len) else {
+        return Err(compressed_response_exceeds_limit_error());
+    };
+    if next_total > max_output_bytes {
+        return Err(compressed_response_exceeds_limit_error());
+    }
+    *total_output_bytes = next_total;
+    Ok(())
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn compressed_response_exceeds_limit_error() -> FluxError {
+    FluxError::io(
+        "compressed response exceeds max_output_bytes",
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "compressed response exceeds max_output_bytes",
+        ),
+    )
 }
 
 #[cfg(any(
@@ -535,4 +601,50 @@ fn append_vary_accept_encoding(response: &mut ResponseHeader) -> Result<()> {
         response.append_header("vary", "accept-encoding")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "compression-gzip")]
+    #[test]
+    fn gzip_encoder_releases_retained_output_between_chunks() {
+        let mut encoder = ResponseCompressionEncoder::gzip(0, 4096);
+        let first = encoder
+            .encode_chunk(Some(&Bytes::from(vec![b'a'; 1024])), false)
+            .unwrap();
+        assert!(!first.is_empty());
+        assert!(encoder.total_output_bytes >= first.len());
+        let ResponseCompressionEncoderInner::Gzip(gzip) = &encoder.inner else {
+            panic!("expected gzip encoder");
+        };
+        assert_eq!(gzip.get_ref().len(), 0);
+
+        let second = encoder
+            .encode_chunk(Some(&Bytes::from(vec![b'b'; 1024])), false)
+            .unwrap();
+        assert!(!second.is_empty());
+        assert!(encoder.total_output_bytes >= first.len() + second.len());
+        let ResponseCompressionEncoderInner::Gzip(gzip) = &encoder.inner else {
+            panic!("expected gzip encoder");
+        };
+        assert_eq!(gzip.get_ref().len(), 0);
+    }
+
+    #[cfg(feature = "compression-gzip")]
+    #[test]
+    fn gzip_encoder_limit_counts_released_output_cumulatively() {
+        let mut encoder = ResponseCompressionEncoder::gzip(0, 4096);
+        let first = encoder
+            .encode_chunk(Some(&Bytes::from(vec![b'a'; 1024])), false)
+            .unwrap();
+        assert!(!first.is_empty());
+        encoder.max_output_bytes = encoder.total_output_bytes + 1;
+
+        let error = encoder
+            .encode_chunk(Some(&Bytes::from(vec![b'b'; 1024])), true)
+            .unwrap_err();
+        assert_eq!(error.io_kind(), Some(io::ErrorKind::InvalidData));
+    }
 }

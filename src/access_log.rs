@@ -207,9 +207,9 @@ pub(crate) fn count_response_body_chunk(bytes_seen: &mut u64, body: Option<&Byte
 fn valid_request_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b':' | b'/' | b'@')
-        })
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
 #[cfg(not(feature = "privacy-mode"))]
@@ -523,5 +523,23 @@ mod tests {
                 .unwrap();
         assert!(regenerated.starts_with("fh-"));
         assert_ne!(regenerated, "bad value");
+
+        let mut url_like = RequestHeader::build("GET", b"/", None).unwrap();
+        url_like
+            .insert_header("x-request-id", "https://evil.example/reset")
+            .unwrap();
+        let regenerated =
+            access_log_request_id(&crate::config::AccessLoggingConfig::default(), &url_like)
+                .unwrap();
+        assert!(regenerated.starts_with("fh-"));
+
+        let mut email_like = RequestHeader::build("GET", b"/", None).unwrap();
+        email_like
+            .insert_header("x-request-id", "admin@example.test")
+            .unwrap();
+        let regenerated =
+            access_log_request_id(&crate::config::AccessLoggingConfig::default(), &email_like)
+                .unwrap();
+        assert!(regenerated.starts_with("fh-"));
     }
 }

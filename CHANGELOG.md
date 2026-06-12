@@ -17,6 +17,11 @@ behavior when the change improves security or project direction.
   route-local policy checks, cache keying, or upstream forwarding.
 - Treat incoming method casing as equivalent for route method filters so
   lowercase HTTP/1 method tokens cannot miss method-scoped route policy.
+- Restrict accepted inbound request IDs to an identifier-safe alphabet so
+  URL-like or email-like values are regenerated before reaching logs, traces,
+  templates, or upstream headers.
+- Release response-compression output buffers after each emitted chunk while
+  preserving the cumulative `max_output_bytes` cap.
 - Apply decoded route matching to edge policy checks, closing mismatches between
   encoded request paths and policy enforcement.
 - Preserve private cache-control directives for status-specific TTL handling so
