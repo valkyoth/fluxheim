@@ -1,0 +1,38 @@
+[package]
+name = "fluxheim-load-balancer"
+version = "1.5.19"
+edition = "2024"
+rust-version = "1.96"
+license = "EUPL-1.2"
+publish = false
+description = "Internal Fluxheim load-balancer core and Pingora adapter boundary."
+
+[features]
+metrics = []
+privacy-mode = []
+test-support = ["fluxheim-common/test-support"]
+tls-rustls-backend = ["dep:rustls", "rustls/ring"]
+
+[dependencies]
+arc-swap = "1.9.1"
+async-trait = "0.1.89"
+base64-ng = "1.0.8"
+bytes = "1.11.1"
+fluxheim-common = { path = "../fluxheim-common" }
+fluxheim-config = { path = "../fluxheim-config", features = ["load-balancer", "proxy"] }
+futures = "0.3.32"
+getrandom = "0.4.2"
+log = "0.4.32"
+pingora = { version = "=0.8.0", default-features = false, features = ["lb", "proxy"] }
+ring = "0.17.14"
+rustls = { version = "0.23.40", optional = true }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+subtle = "2.6.1"
+tokio = { version = "1.52.3", default-features = false, features = ["io-util", "net", "process", "rt", "sync", "time"] }
+ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"] }
+zeroize = { version = "1.8.2", features = ["derive"] }
+
+[dev-dependencies]
+fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
+proptest = "1.6.0"

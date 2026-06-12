@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::config::ProxyConfig;
+use fluxheim_config::ProxyConfig;
 
 use super::backend::BackendContainerSnapshot;
 use super::backend::{BackendIdentity, FluxBackend};

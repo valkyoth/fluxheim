@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim"
-version = "1.5.18"
+version = "1.5.19"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1031,6 +1031,7 @@ dependencies = [
  "flate2",
  "fluxheim-common",
  "fluxheim-config",
+ "fluxheim-load-balancer",
  "fluxheim-openssl-fips-support",
  "futures",
  "getrandom 0.4.2",
@@ -1070,14 +1071,14 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-common"
-version = "1.5.18"
+version = "1.5.19"
 dependencies = [
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "fluxheim-config"
-version = "1.5.18"
+version = "1.5.19"
 dependencies = [
  "fluxheim-common",
  "log",
@@ -1085,6 +1086,31 @@ dependencies = [
  "regex",
  "serde",
  "toml",
+]
+
+[[package]]
+name = "fluxheim-load-balancer"
+version = "1.5.19"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "base64-ng",
+ "bytes",
+ "fluxheim-common",
+ "fluxheim-config",
+ "futures",
+ "getrandom 0.4.2",
+ "log",
+ "pingora",
+ "proptest",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tokio",
+ "ureq",
+ "zeroize",
 ]
 
 [[package]]

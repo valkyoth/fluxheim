@@ -190,8 +190,8 @@ fn optional_symlink_metadata(path: &Path) -> io::Result<Option<fs::Metadata>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::load_balancer::LoadBalancerRuntimeStateSnapshot;
-    use crate::test_support::{safe_child_path, unique_temp_path};
+    use crate::policy;
+    use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
 
     #[test]
     fn runtime_state_file_round_trips_json_snapshot() {
@@ -200,7 +200,7 @@ mod tests {
         let path = safe_child_path(&dir, "state.json");
         let snapshot = LoadBalancerRuntimeStateSnapshot {
             version: 1,
-            runtime_overrides: crate::load_balancer::policy::RuntimeBackendPolicySnapshot {
+            runtime_overrides: policy::RuntimeBackendPolicySnapshot {
                 states: Vec::new(),
                 weights: Vec::new(),
             },
@@ -226,7 +226,7 @@ mod tests {
 
         let snapshot = LoadBalancerRuntimeStateSnapshot {
             version: 1,
-            runtime_overrides: crate::load_balancer::policy::RuntimeBackendPolicySnapshot {
+            runtime_overrides: policy::RuntimeBackendPolicySnapshot {
                 states: Vec::new(),
                 weights: Vec::new(),
             },
@@ -249,7 +249,7 @@ mod tests {
         std::os::unix::fs::symlink(&outside, &link).unwrap();
         let snapshot = LoadBalancerRuntimeStateSnapshot {
             version: 1,
-            runtime_overrides: crate::load_balancer::policy::RuntimeBackendPolicySnapshot {
+            runtime_overrides: policy::RuntimeBackendPolicySnapshot {
                 states: Vec::new(),
                 weights: Vec::new(),
             },

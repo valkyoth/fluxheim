@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.18
+Version:        1.5.19
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,14 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Fri Jun 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.19-1
+- Move the Fluxheim-owned load-balancer core into the internal
+  crates/fluxheim-load-balancer workspace crate.
+- Keep admin, proxy, runtime, RPM, container, feature-profile, and config
+  behavior unchanged through root compatibility wiring.
+- Preserve the load-balancer edge image/profile while keeping Pingora removal
+  as later 1.5.x work.
+
 * Fri Jun 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.18-1
 - Move configuration schema, parsing, validation, loader logic, and tests into
   the internal crates/fluxheim-config workspace crate.

@@ -13,14 +13,12 @@ use pingora::{Error, ErrorType};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-use crate::config::{
+use fluxheim_common::{FluxError, FluxResult};
+use fluxheim_config::{
     LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedJson,
     LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol, ProxyConfig,
 };
-use crate::flux_error::{FluxError, FluxResult};
-use crate::http_types::{
-    PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader,
-};
+use pingora::http::{RequestHeader, ResponseHeader};
 
 use super::backend::{FluxHealthCheck, RuntimeBackend as Backend};
 use super::key::backend_key;
@@ -1150,17 +1148,17 @@ mod tests {
         validate_mysql_health_handshake, validate_postgres_health_response,
         validate_redis_health_response,
     };
-    use crate::config::{
+    use fluxheim_config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
         LoadBalanceHealthCheckExpectedJson, LoadBalanceHealthCheckExpectedStatusRange,
         LoadBalanceHealthCheckProtocol, LoadBalanceHealthCheckRequestHeader, ProxyConfig,
     };
-    use crate::http_types::PingoraResponseHeader as ResponseHeader;
+    use pingora::http::ResponseHeader;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     fn install_test_crypto_provider() {
         #[cfg(feature = "tls-rustls-backend")]
-        let _ = crate::tls::install_rustls_crypto_provider();
+        let _ = rustls::crypto::ring::default_provider().install_default();
     }
 
     #[test]

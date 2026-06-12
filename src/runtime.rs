@@ -68,6 +68,20 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     ))]
     crate::tls::validate_fips_runtime_config(&config)?;
 
+    #[cfg(feature = "load-balancer")]
+    fluxheim_load_balancer::set_admin_hmac_sha256(|context, key, message| {
+        crate::internal_crypto::admin_hmac_sha256_or_abort(
+            crate::internal_crypto::admin_mac_provider(),
+            context,
+            key,
+            message,
+        )
+    });
+    #[cfg(all(feature = "load-balancer", feature = "metrics"))]
+    fluxheim_load_balancer::set_load_balancer_event_recorder(
+        crate::metrics::record_load_balancer_event,
+    );
+
     let pingora_conf = pingora_server_conf(&config);
     let mut server = pingora::server::Server::new_with_opt_and_conf(None, pingora_conf);
     server.bootstrap();

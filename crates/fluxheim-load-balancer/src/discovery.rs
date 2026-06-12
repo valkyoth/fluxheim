@@ -16,8 +16,8 @@ use zeroize::Zeroizing;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
-use crate::config::ProxyConfig;
-use crate::flux_error::{FluxError, FluxResult};
+use fluxheim_common::{FluxError, FluxResult};
+use fluxheim_config::ProxyConfig;
 
 use super::backend::{FluxBackend, FluxBackendDiscovery, FluxBackendSet, FluxLoadBalancerRuntime};
 use super::health::configured_health_check;
@@ -168,7 +168,7 @@ impl FluxBackendDiscovery for HttpUpstreamDiscovery {
 
 async fn read_proxy_upstreams_file_for_discovery(path: PathBuf) -> FluxResult<Vec<String>> {
     let result = if tokio::runtime::Handle::try_current().is_ok() {
-        tokio::task::spawn_blocking(move || crate::config::read_proxy_upstreams_file(&path))
+        tokio::task::spawn_blocking(move || fluxheim_config::read_proxy_upstreams_file(&path))
             .await
             .map_err(|error| {
                 FluxError::io(
@@ -180,7 +180,7 @@ async fn read_proxy_upstreams_file_for_discovery(path: PathBuf) -> FluxResult<Ve
         // Pingora performs the initial load-balancer update synchronously during
         // construction. There is no Tokio reactor yet in that path, so this
         // bootstrap read must stay immediately ready for now_or_never().
-        crate::config::read_proxy_upstreams_file(&path)
+        fluxheim_config::read_proxy_upstreams_file(&path)
     };
 
     result.map_err(|error| FluxError::io("failed to read proxy upstreams file", error))
@@ -370,7 +370,7 @@ fn validate_http_discovery_upstreams(upstreams: Vec<String>) -> io::Result<Vec<S
     let mut seen = std::collections::HashSet::new();
     for upstream in upstreams {
         let value = upstream.trim();
-        if !crate::config_net::valid_authority(value) {
+        if !fluxheim_config::config_net::valid_authority(value) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "HTTP discovery upstream is not a host:port or ip:port authority",
@@ -382,7 +382,7 @@ fn validate_http_discovery_upstreams(upstreams: Vec<String>) -> io::Result<Vec<S
                 "HTTP discovery response repeats an upstream",
             ));
         }
-        if validated.len() >= crate::config_proxy::MAX_PROXY_UPSTREAMS {
+        if validated.len() >= fluxheim_config::config_proxy::MAX_PROXY_UPSTREAMS {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "HTTP discovery response contains too many upstreams",
@@ -525,7 +525,7 @@ mod tests {
     use std::io::{Read, Write};
     use std::sync::mpsc;
 
-    use crate::test_support::{safe_child_path, unique_temp_path};
+    use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
 
     use super::{
         fetch_proxy_upstreams_http, parse_proxy_upstreams_http_body,
@@ -579,7 +579,7 @@ mod tests {
 
     #[test]
     fn rejects_http_discovery_payload_over_upstream_cap() {
-        let upstreams = (0..=crate::config_proxy::MAX_PROXY_UPSTREAMS)
+        let upstreams = (0..=fluxheim_config::config_proxy::MAX_PROXY_UPSTREAMS)
             .map(|index| format!("\"127.0.0.1:{}\"", 3000 + index))
             .collect::<Vec<_>>()
             .join(",");

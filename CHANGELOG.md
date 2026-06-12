@@ -7,6 +7,24 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.19 - 2026-06-12
+
+### Changed
+
+- Move the Fluxheim-owned load-balancer core into the internal
+  `crates/fluxheim-load-balancer` workspace crate.
+- Keep the root `crate::load_balancer` compatibility shim so admin, proxy,
+  runtime, config, release profiles, and operator-facing behavior remain
+  unchanged.
+- Move load-balancer backend snapshots, discovery adapters, health checks,
+  selection algorithms, runtime policy overrides, persistence, queue policy,
+  state files, background task glue, and tests together under the new crate.
+- Add narrow root-to-crate hooks for metrics event recording and compliance
+  HMAC signing without making the load-balancer crate depend on proxy, admin,
+  cache, web, or PHP internals.
+- Keep `pingora-load-balancing` and Pingora health-check adapter removal as
+  later 1.5.x work; this release is an ownership/boundary extraction only.
+
 ## 1.5.18 - 2026-06-12
 
 ### Changed

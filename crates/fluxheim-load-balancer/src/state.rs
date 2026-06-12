@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::config::{
+use fluxheim_config::{
     LoadBalanceHealthCheckExpectedStatusRange, LoadBalancePassiveHealthConfig,
     LoadBalanceSlowStartConfig,
 };
@@ -440,8 +440,8 @@ impl BackendLatencyState {
 
 #[cfg(test)]
 mod tests {
-    use super::super::backend::FluxBackend;
     use super::*;
+    use crate::backend::FluxBackend;
 
     #[test]
     fn slow_start_zero_duration_permits_without_division() {

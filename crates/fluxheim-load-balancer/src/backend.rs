@@ -11,9 +11,9 @@ use std::time::UNIX_EPOCH;
 
 use super::LoadBalancerMetricLabels;
 use super::key::{backend_authority_key, backend_key};
-use crate::flux_error::{FluxError, FluxResult};
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
+use fluxheim_common::{FluxError, FluxResult};
 use futures::future;
 use pingora::lb::Backend;
 
@@ -712,7 +712,8 @@ mod tests {
         BackendIdentity, FluxBackend, FluxBackendDiscovery, FluxBackendSet,
         FluxLoadBalancerRuntime, MAX_RUNTIME_BACKEND_COUNT,
     };
-    use crate::flux_error::{FluxError, FluxResult};
+    use crate::key::{backend_authority_key, backend_key};
+    use fluxheim_common::{FluxError, FluxResult};
 
     struct TestDiscovery {
         backends: Mutex<FluxBackendSet>,
@@ -752,10 +753,7 @@ mod tests {
 
         assert_eq!(backend.authority(), "127.0.0.1:3000");
         assert_eq!(backend.weight(), 7);
-        assert_eq!(
-            backend.key(),
-            crate::load_balancer::backend_authority_key("127.0.0.1:3000")
-        );
+        assert_eq!(backend.key(), backend_authority_key("127.0.0.1:3000"));
     }
 
     #[test]
@@ -786,7 +784,7 @@ mod tests {
 
         let snapshot = runtime.snapshot.load();
         let pingora_backend = backend.to_pingora_backend().unwrap();
-        let key = crate::load_balancer::backend_key(&pingora_backend);
+        let key = backend_key(&pingora_backend);
         assert!(snapshot.backends.contains(&pingora_backend));
         assert!(snapshot.health.contains_key(&key));
         assert!(!snapshot.health.get(&key).unwrap().ready());
@@ -810,8 +808,8 @@ mod tests {
             .unwrap();
 
         let snapshot = runtime.snapshot.load();
-        let current_key = crate::load_balancer::backend_key(&current);
-        let updated_key = crate::load_balancer::backend_key(&replacement);
+        let current_key = backend_key(&current);
+        let updated_key = backend_key(&replacement);
         assert!(!snapshot.backends.contains(&current));
         assert!(snapshot.backends.contains(&replacement));
         assert!(!snapshot.health.contains_key(&current_key));

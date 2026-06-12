@@ -10,7 +10,7 @@ use super::policy::BackendSelectionPolicy;
 use super::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
 };
-use crate::flux_error::{FluxError, FluxResult};
+use fluxheim_common::{FluxError, FluxResult};
 
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const MAGLEV_TABLE_SIZE: usize = 65_537;

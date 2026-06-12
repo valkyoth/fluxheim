@@ -5,11 +5,11 @@ use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::config::{
+use fluxheim_config::{
     LoadBalanceManagedCookieSameSite, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
     LoadBalanceSelection, ProxyConfig,
 };
-use crate::http_types::PingoraRequestHeader as RequestHeader;
+use pingora::http::RequestHeader;
 
 pub(super) const MAX_PERSISTENCE_KEY_BYTES: usize = 512;
 const MANAGED_COOKIE_KEY_BYTES: usize = 16;
@@ -29,8 +29,8 @@ pub(super) struct LoadBalancerPersistenceState {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ManagedAffinityCookie {
-    pub(crate) header_value: String,
+pub struct ManagedAffinityCookie {
+    pub header_value: String,
 }
 
 #[derive(Clone, Debug)]
@@ -477,12 +477,7 @@ fn managed_cookie_tag_with_key(
     message.extend_from_slice(&cookie_name_len.to_le_bytes());
     message.extend_from_slice(cookie_name);
     message.extend_from_slice(key);
-    crate::internal_crypto::admin_hmac_sha256_or_abort(
-        crate::internal_crypto::admin_mac_provider(),
-        "lb managed-cookie",
-        hmac_key,
-        &message,
-    )
+    crate::crypto::admin_hmac_sha256_or_abort("lb managed-cookie", hmac_key, &message)
 }
 
 fn managed_cookie_hmac_key_for_sign() -> Zeroizing<[u8; 32]> {
