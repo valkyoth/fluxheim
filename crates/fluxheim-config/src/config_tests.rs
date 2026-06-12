@@ -12255,6 +12255,181 @@ fn conf_d_proxy_fragment_extends_without_replacing_main_trust_policy() {
 }
 
 #[test]
+fn conf_d_compression_fragment_keeps_main_resource_limits() {
+    let dir = TestDir::new("config-file-with-conf-d-compression-fragment");
+    fs::create_dir_all(dir.child("conf.d")).unwrap();
+    fs::write(
+        dir.child("fluxheim.toml"),
+        r#"
+            include_conf_d = true
+
+            [compression]
+            enabled = true
+            gzip = true
+            brotli = false
+            min_bytes = "1KiB"
+            max_input_bytes = "64MiB"
+            max_output_bytes = "128MiB"
+            "#,
+    )
+    .unwrap();
+    fs::write(
+        dir.child("conf.d/20-compression.toml"),
+        r#"
+            [compression]
+            brotli = true
+            "#,
+    )
+    .unwrap();
+
+    let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+    assert!(config.compression.enabled);
+    assert!(config.compression.gzip);
+    assert!(config.compression.brotli);
+    assert_eq!(
+        config.compression.max_input_bytes,
+        ByteSize::from_bytes(64 * 1024 * 1024)
+    );
+    assert_eq!(
+        config.compression.max_output_bytes,
+        ByteSize::from_bytes(128 * 1024 * 1024)
+    );
+}
+
+#[test]
+fn conf_d_cache_fragment_keeps_main_disk_encryption_policy() {
+    let dir = TestDir::new("config-file-with-conf-d-cache-fragment");
+    fs::create_dir_all(dir.child("conf.d")).unwrap();
+    fs::create_dir_all(dir.child("cache")).unwrap();
+    fs::write(dir.child("cache.key"), "local-cache-key").unwrap();
+    fs::write(
+        dir.child("fluxheim.toml"),
+        r#"
+            include_conf_d = true
+
+            [cache]
+            enabled = true
+            max_object_bytes = "16MiB"
+
+            [cache.disk]
+            enabled = true
+            path = "cache"
+            max_size_bytes = "256MiB"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "local"
+            key_file = "cache.key"
+            "#,
+    )
+    .unwrap();
+    fs::write(
+        dir.child("conf.d/20-cache-policy.toml"),
+        r#"
+            [cache]
+            default_status_ttl_secs = 60
+            "#,
+    )
+    .unwrap();
+
+    let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+    assert!(config.cache.enabled);
+    assert!(config.cache.disk.enabled);
+    assert!(config.cache.disk.encryption.enabled);
+    assert_eq!(
+        config.cache.disk.path.as_deref(),
+        Some(dir.child("cache").as_path())
+    );
+    assert_eq!(
+        config.cache.disk.encryption.key_file.as_deref(),
+        Some(dir.child("cache.key").as_path())
+    );
+    assert_eq!(config.cache.default_status_ttl_secs, Some(60));
+}
+
+#[test]
+fn conf_d_web_fragment_keeps_main_static_root_and_dotfile_policy() {
+    let dir = TestDir::new("config-file-with-conf-d-web-fragment");
+    fs::create_dir_all(dir.child("conf.d")).unwrap();
+    fs::create_dir_all(dir.child("site")).unwrap();
+    fs::write(
+        dir.child("fluxheim.toml"),
+        r#"
+            include_conf_d = true
+
+            [web]
+            root = "site"
+            deny_dotfiles = true
+            index_files = ["index.html", "index.htm"]
+            "#,
+    )
+    .unwrap();
+    fs::write(
+        dir.child("conf.d/20-web-listing.toml"),
+        r#"
+            [web.directory_listing]
+            enabled = true
+            "#,
+    )
+    .unwrap();
+
+    let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+    assert_eq!(
+        config.web.root.as_deref(),
+        Some(dir.child("site").as_path())
+    );
+    assert!(config.web.deny_dotfiles);
+    assert_eq!(config.web.index_files, ["index.html", "index.htm"]);
+    assert!(config.web.directory_listing.enabled);
+}
+
+#[test]
+fn conf_d_stream_fragment_keeps_main_routes() {
+    let dir = TestDir::new("config-file-with-conf-d-stream-fragment");
+    fs::create_dir_all(dir.child("conf.d")).unwrap();
+    fs::write(
+        dir.child("fluxheim.toml"),
+        r#"
+            include_conf_d = true
+
+            [stream]
+            enabled = true
+
+            [[stream.routes]]
+            name = "database"
+            listen = ["127.0.0.1:19091"]
+            upstream = "127.0.0.1:5432"
+            upstream_tls = true
+            upstream_sni = "db.example.test"
+            upstream_verify_cert = true
+            "#,
+    )
+    .unwrap();
+    fs::write(
+        dir.child("conf.d/20-stream-enabled.toml"),
+        r#"
+            [stream]
+            enabled = true
+            "#,
+    )
+    .unwrap();
+
+    let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+    assert!(config.stream.enabled);
+    assert_eq!(config.stream.routes.len(), 1);
+    assert_eq!(config.stream.routes[0].name, "database");
+    assert!(config.stream.routes[0].upstream_tls);
+    assert_eq!(
+        config.stream.routes[0].upstream_sni.as_deref(),
+        Some("db.example.test")
+    );
+}
+
+#[test]
 fn conf_d_parse_error_reports_source_file() {
     let dir = TestDir::new("config-file-with-bad-conf-d");
     fs::create_dir_all(dir.child("conf.d")).unwrap();

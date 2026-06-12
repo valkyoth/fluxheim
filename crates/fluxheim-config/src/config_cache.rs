@@ -24,6 +24,15 @@ pub struct CachePurgerConfig {
     pub batches: usize,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CachePurgerConfigFragment {
+    enabled: Option<bool>,
+    interval_secs: Option<u64>,
+    limit: Option<usize>,
+    batches: Option<usize>,
+}
+
 impl Default for CachePurgerConfig {
     fn default() -> Self {
         Self {
@@ -36,6 +45,21 @@ impl Default for CachePurgerConfig {
 }
 
 impl CachePurgerConfig {
+    pub fn merge(&mut self, fragment: CachePurgerConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(interval_secs) = fragment.interval_secs {
+            self.interval_secs = interval_secs;
+        }
+        if let Some(limit) = fragment.limit {
+            self.limit = limit;
+        }
+        if let Some(batches) = fragment.batches {
+            self.batches = batches;
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.enabled {
             #[cfg(not(feature = "cache"))]
@@ -179,6 +203,55 @@ pub struct CacheConfig {
     pub peer_fill: CachePeerFillConfig,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheConfigFragment {
+    preset: Option<CachePreset>,
+    enabled: Option<bool>,
+    local_static: Option<bool>,
+    status_header: Option<String>,
+    status_reason_header: Option<String>,
+    hide_response_headers: Option<Vec<String>>,
+    tag_headers: Option<Vec<String>>,
+    no_store_response_headers: Option<Vec<String>>,
+    no_store_response_header_values: Option<BTreeMap<String, String>>,
+    bypass_path_prefixes: Option<Vec<String>>,
+    bypass_path_exact: Option<Vec<String>>,
+    bypass_request_headers: Option<Vec<String>>,
+    bypass_request_header_values: Option<BTreeMap<String, String>>,
+    bypass_cookie_names: Option<Vec<String>>,
+    bypass_cookie_name_prefixes: Option<Vec<String>>,
+    bypass_cookie_values: Option<BTreeMap<String, String>>,
+    bypass_query_params: Option<Vec<String>>,
+    bypass_query_values: Option<BTreeMap<String, String>>,
+    bypass_query: Option<bool>,
+    allow_client_cache_refresh: Option<bool>,
+    vary_request_headers: Option<Vec<String>>,
+    ignore_origin_cache_headers: Option<bool>,
+    key_namespace: Option<String>,
+    key_parts: Option<Vec<CacheKeyPart>>,
+    min_uses: Option<u32>,
+    pass_uncacheable_after: Option<u32>,
+    range: Option<CacheRangeConfigFragment>,
+    status_ttls: Option<BTreeMap<u16, u32>>,
+    default_status_ttl_secs: Option<u32>,
+    stale_while_revalidate_secs: Option<u32>,
+    stale_if_error_secs: Option<u32>,
+    stale_if_error_on: Option<Vec<CacheStaleErrorKind>>,
+    stale_if_error_statuses: Option<Vec<u16>>,
+    include_query: Option<bool>,
+    content_types: Option<Vec<String>>,
+    #[serde(alias = "extensions")]
+    image_extensions: Option<Vec<String>>,
+    methods: Option<Vec<String>>,
+    max_object_bytes: Option<ByteSize>,
+    memory: Option<CacheMemoryConfigFragment>,
+    disk: Option<CacheDiskConfigFragment>,
+    lock: Option<CacheLockConfigFragment>,
+    predictor: Option<CachePredictorConfigFragment>,
+    peer_fill: Option<CachePeerFillConfigFragment>,
+}
+
 const MAX_CACHE_HEADER_LIST_ENTRIES: usize = 64;
 pub const MAX_CACHE_BYPASS_PATHS: usize = 128;
 const MAX_CACHE_BYPASS_HEADERS: usize = 64;
@@ -243,6 +316,138 @@ impl Default for CacheConfig {
 }
 
 impl CacheConfig {
+    pub fn merge(&mut self, fragment: CacheConfigFragment) {
+        if let Some(preset) = fragment.preset {
+            self.preset = preset;
+        }
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(local_static) = fragment.local_static {
+            self.local_static = local_static;
+        }
+        if let Some(status_header) = fragment.status_header {
+            self.status_header = Some(status_header);
+        }
+        if let Some(status_reason_header) = fragment.status_reason_header {
+            self.status_reason_header = Some(status_reason_header);
+        }
+        if let Some(headers) = fragment.hide_response_headers {
+            self.hide_response_headers = headers;
+        }
+        if let Some(headers) = fragment.tag_headers {
+            self.tag_headers = headers;
+        }
+        if let Some(headers) = fragment.no_store_response_headers {
+            self.no_store_response_headers = headers;
+        }
+        if let Some(values) = fragment.no_store_response_header_values {
+            self.no_store_response_header_values = values;
+        }
+        if let Some(paths) = fragment.bypass_path_prefixes {
+            self.bypass_path_prefixes = paths;
+        }
+        if let Some(paths) = fragment.bypass_path_exact {
+            self.bypass_path_exact = paths;
+        }
+        if let Some(headers) = fragment.bypass_request_headers {
+            self.bypass_request_headers = headers;
+        }
+        if let Some(values) = fragment.bypass_request_header_values {
+            self.bypass_request_header_values = values;
+        }
+        if let Some(cookies) = fragment.bypass_cookie_names {
+            self.bypass_cookie_names = cookies;
+        }
+        if let Some(cookies) = fragment.bypass_cookie_name_prefixes {
+            self.bypass_cookie_name_prefixes = cookies;
+        }
+        if let Some(values) = fragment.bypass_cookie_values {
+            self.bypass_cookie_values = values;
+        }
+        if let Some(params) = fragment.bypass_query_params {
+            self.bypass_query_params = params;
+        }
+        if let Some(values) = fragment.bypass_query_values {
+            self.bypass_query_values = values;
+        }
+        if let Some(bypass_query) = fragment.bypass_query {
+            self.bypass_query = bypass_query;
+        }
+        if let Some(allow) = fragment.allow_client_cache_refresh {
+            self.allow_client_cache_refresh = allow;
+        }
+        if let Some(headers) = fragment.vary_request_headers {
+            self.vary_request_headers = headers;
+        }
+        if let Some(ignore) = fragment.ignore_origin_cache_headers {
+            self.ignore_origin_cache_headers = ignore;
+        }
+        if let Some(namespace) = fragment.key_namespace {
+            self.key_namespace = Some(namespace);
+        }
+        if let Some(parts) = fragment.key_parts {
+            self.key_parts = parts;
+        }
+        if let Some(min_uses) = fragment.min_uses {
+            self.min_uses = min_uses;
+        }
+        if let Some(pass_uncacheable_after) = fragment.pass_uncacheable_after {
+            self.pass_uncacheable_after = pass_uncacheable_after;
+        }
+        if let Some(range) = fragment.range {
+            self.range.merge(range);
+        }
+        if let Some(ttls) = fragment.status_ttls {
+            self.status_ttls = ttls;
+        }
+        if let Some(ttl) = fragment.default_status_ttl_secs {
+            self.default_status_ttl_secs = Some(ttl);
+        }
+        if let Some(ttl) = fragment.stale_while_revalidate_secs {
+            self.stale_while_revalidate_secs = Some(ttl);
+        }
+        if let Some(ttl) = fragment.stale_if_error_secs {
+            self.stale_if_error_secs = Some(ttl);
+        }
+        if let Some(kinds) = fragment.stale_if_error_on {
+            self.stale_if_error_on = kinds;
+        }
+        if let Some(statuses) = fragment.stale_if_error_statuses {
+            self.stale_if_error_statuses = statuses;
+        }
+        if let Some(include_query) = fragment.include_query {
+            self.include_query = include_query;
+        }
+        if let Some(content_types) = fragment.content_types {
+            self.content_types = content_types;
+        }
+        if let Some(extensions) = fragment.image_extensions {
+            self.image_extensions = extensions;
+        }
+        if let Some(methods) = fragment.methods {
+            self.methods = methods;
+        }
+        if let Some(max_object_bytes) = fragment.max_object_bytes {
+            self.max_object_bytes = max_object_bytes;
+        }
+        if let Some(memory) = fragment.memory {
+            self.memory.merge(memory);
+        }
+        if let Some(disk) = fragment.disk {
+            self.disk.merge(disk);
+        }
+        if let Some(lock) = fragment.lock {
+            self.lock.merge(lock);
+        }
+        if let Some(predictor) = fragment.predictor {
+            self.predictor.merge(predictor);
+        }
+        if let Some(peer_fill) = fragment.peer_fill {
+            self.peer_fill.merge(peer_fill);
+        }
+    }
+
     #[cfg(any(feature = "cache", test))]
     pub fn with_presets(&self) -> Self {
         let mut config = self.clone();
@@ -640,6 +845,14 @@ impl CacheConfig {
     }
 }
 
+impl CacheConfigFragment {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(disk) = &mut self.disk {
+            disk.resolve_relative_paths(base_dir);
+        }
+    }
+}
+
 pub fn validate_cache_compliance_internal_crypto(
     cache: &CacheConfig,
     scope: &'static str,
@@ -697,6 +910,14 @@ pub struct CacheRangeConfig {
     pub slice: CacheRangeSliceConfig,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheRangeConfigFragment {
+    enabled: Option<bool>,
+    max_bytes: Option<ByteSize>,
+    slice: Option<CacheRangeSliceConfigFragment>,
+}
+
 impl Default for CacheRangeConfig {
     fn default() -> Self {
         Self {
@@ -708,6 +929,18 @@ impl Default for CacheRangeConfig {
 }
 
 impl CacheRangeConfig {
+    fn merge(&mut self, fragment: CacheRangeConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(max_bytes) = fragment.max_bytes {
+            self.max_bytes = max_bytes;
+        }
+        if let Some(slice) = fragment.slice {
+            self.slice.merge(slice);
+        }
+    }
+
     fn validate(&self, scope: &'static str, max_object_bytes: ByteSize) -> Result<(), ConfigError> {
         if self.max_bytes.as_u64() == 0 {
             return Err(ConfigError::InvalidCacheRangePolicy {
@@ -746,6 +979,15 @@ pub struct CacheRangeSliceConfig {
     pub fill_missing: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheRangeSliceConfigFragment {
+    enabled: Option<bool>,
+    size_bytes: Option<ByteSize>,
+    max_slices: Option<u32>,
+    fill_missing: Option<bool>,
+}
+
 impl Default for CacheRangeSliceConfig {
     fn default() -> Self {
         Self {
@@ -758,6 +1000,21 @@ impl Default for CacheRangeSliceConfig {
 }
 
 impl CacheRangeSliceConfig {
+    fn merge(&mut self, fragment: CacheRangeSliceConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(size_bytes) = fragment.size_bytes {
+            self.size_bytes = size_bytes;
+        }
+        if let Some(max_slices) = fragment.max_slices {
+            self.max_slices = max_slices;
+        }
+        if let Some(fill_missing) = fragment.fill_missing {
+            self.fill_missing = fill_missing;
+        }
+    }
+
     fn validate(
         &self,
         scope: &'static str,
@@ -1040,6 +1297,14 @@ pub struct CacheLockConfig {
     pub wait_timeout_secs: u64,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheLockConfigFragment {
+    enabled: Option<bool>,
+    age_timeout_secs: Option<u64>,
+    wait_timeout_secs: Option<u64>,
+}
+
 impl Default for CacheLockConfig {
     fn default() -> Self {
         Self {
@@ -1051,6 +1316,18 @@ impl Default for CacheLockConfig {
 }
 
 impl CacheLockConfig {
+    fn merge(&mut self, fragment: CacheLockConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(age_timeout_secs) = fragment.age_timeout_secs {
+            self.age_timeout_secs = age_timeout_secs;
+        }
+        if let Some(wait_timeout_secs) = fragment.wait_timeout_secs {
+            self.wait_timeout_secs = wait_timeout_secs;
+        }
+    }
+
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         if self.age_timeout_secs == 0 {
             return Err(ConfigError::InvalidCacheLockTimeout {
@@ -1077,6 +1354,13 @@ pub struct CachePredictorConfig {
     pub capacity: usize,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CachePredictorConfigFragment {
+    enabled: Option<bool>,
+    capacity: Option<usize>,
+}
+
 impl Default for CachePredictorConfig {
     fn default() -> Self {
         Self {
@@ -1087,6 +1371,15 @@ impl Default for CachePredictorConfig {
 }
 
 impl CachePredictorConfig {
+    fn merge(&mut self, fragment: CachePredictorConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(capacity) = fragment.capacity {
+            self.capacity = capacity;
+        }
+    }
+
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         if self.enabled && (self.capacity == 0 || self.capacity > CACHE_PREDICTOR_MAX_CAPACITY) {
             return Err(ConfigError::InvalidCachePredictorCapacity { scope });
@@ -1123,6 +1416,19 @@ pub struct CachePeerFillConfig {
     pub fail_open: bool,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CachePeerFillConfigFragment {
+    enabled: Option<bool>,
+    peers: Option<Vec<CachePeerConfig>>,
+    connect_timeout_secs: Option<u64>,
+    read_timeout_secs: Option<u64>,
+    max_object_bytes: Option<ByteSize>,
+    max_concurrent_requests: Option<usize>,
+    allow_insecure_http: Option<bool>,
+    fail_open: Option<bool>,
+}
+
 impl Default for CachePeerFillConfig {
     fn default() -> Self {
         Self {
@@ -1139,6 +1445,33 @@ impl Default for CachePeerFillConfig {
 }
 
 impl CachePeerFillConfig {
+    fn merge(&mut self, fragment: CachePeerFillConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(peers) = fragment.peers {
+            self.peers = peers;
+        }
+        if let Some(timeout_secs) = fragment.connect_timeout_secs {
+            self.connect_timeout_secs = timeout_secs;
+        }
+        if let Some(timeout_secs) = fragment.read_timeout_secs {
+            self.read_timeout_secs = timeout_secs;
+        }
+        if let Some(max_object_bytes) = fragment.max_object_bytes {
+            self.max_object_bytes = Some(max_object_bytes);
+        }
+        if let Some(max_concurrent_requests) = fragment.max_concurrent_requests {
+            self.max_concurrent_requests = max_concurrent_requests;
+        }
+        if let Some(allow_insecure_http) = fragment.allow_insecure_http {
+            self.allow_insecure_http = allow_insecure_http;
+        }
+        if let Some(fail_open) = fragment.fail_open {
+            self.fail_open = fail_open;
+        }
+    }
+
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         #[cfg(not(feature = "cache"))]
         if self.enabled {
@@ -1356,6 +1689,13 @@ pub struct CacheMemoryConfig {
     pub max_size_bytes: ByteSize,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheMemoryConfigFragment {
+    enabled: Option<bool>,
+    max_size_bytes: Option<ByteSize>,
+}
+
 impl Default for CacheMemoryConfig {
     fn default() -> Self {
         Self {
@@ -1366,6 +1706,15 @@ impl Default for CacheMemoryConfig {
 }
 
 impl CacheMemoryConfig {
+    fn merge(&mut self, fragment: CacheMemoryConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(max_size_bytes) = fragment.max_size_bytes {
+            self.max_size_bytes = max_size_bytes;
+        }
+    }
+
     fn validate(&self, scope: &'static str, max_object_bytes: ByteSize) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
@@ -1404,6 +1753,17 @@ pub struct CacheDiskConfig {
     pub encryption: CacheDiskEncryptionConfig,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheDiskConfigFragment {
+    enabled: Option<bool>,
+    backend: Option<CacheDiskBackend>,
+    path: Option<PathBuf>,
+    max_size_bytes: Option<ByteSize>,
+    storage_bin: Option<CacheDiskStorageBinConfigFragment>,
+    encryption: Option<CacheDiskEncryptionConfigFragment>,
+}
+
 #[derive(Debug, Clone, Copy, Default, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CacheDiskBackend {
@@ -1426,6 +1786,38 @@ impl Default for CacheDiskConfig {
 }
 
 impl CacheDiskConfig {
+    fn merge(&mut self, fragment: CacheDiskConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(backend) = fragment.backend {
+            self.backend = backend;
+        }
+        if let Some(path) = fragment.path {
+            self.path = Some(path);
+        }
+        if let Some(max_size_bytes) = fragment.max_size_bytes {
+            self.max_size_bytes = max_size_bytes;
+        }
+        if let Some(storage_bin) = fragment.storage_bin {
+            self.storage_bin.merge(storage_bin);
+        }
+        if let Some(encryption) = fragment.encryption {
+            self.encryption.merge(encryption);
+        }
+    }
+
+    fn resolve_fragment_relative_paths(fragment: &mut CacheDiskConfigFragment, base_dir: &Path) {
+        if let Some(path) = &mut fragment.path
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
+        if let Some(encryption) = &mut fragment.encryption {
+            encryption.resolve_relative_paths(base_dir);
+        }
+    }
+
     fn validate(&self, scope: &'static str, max_object_bytes: ByteSize) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
@@ -1464,6 +1856,12 @@ impl CacheDiskConfig {
     }
 }
 
+impl CacheDiskConfigFragment {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        CacheDiskConfig::resolve_fragment_relative_paths(self, base_dir);
+    }
+}
+
 #[derive(Debug, Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CacheDiskEncryptionConfig {
@@ -1481,6 +1879,18 @@ pub struct CacheDiskEncryptionConfig {
     pub key_credential: Option<String>,
     #[serde(default)]
     pub openbao: CacheDiskEncryptionOpenBaoConfig,
+}
+
+#[derive(Debug, Clone, Default, Eq, Hash, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheDiskEncryptionConfigFragment {
+    enabled: Option<bool>,
+    provider: Option<CacheDiskEncryptionProvider>,
+    algorithm: Option<CacheDiskEncryptionAlgorithm>,
+    key_id: Option<String>,
+    key_file: Option<PathBuf>,
+    key_credential: Option<String>,
+    openbao: Option<CacheDiskEncryptionOpenBaoConfigFragment>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, Hash, PartialEq, Deserialize, Serialize)]
@@ -1516,6 +1926,30 @@ impl Default for CacheDiskEncryptionConfig {
 }
 
 impl CacheDiskEncryptionConfig {
+    fn merge(&mut self, fragment: CacheDiskEncryptionConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(provider) = fragment.provider {
+            self.provider = provider;
+        }
+        if let Some(algorithm) = fragment.algorithm {
+            self.algorithm = algorithm;
+        }
+        if let Some(key_id) = fragment.key_id {
+            self.key_id = Some(key_id);
+        }
+        if let Some(key_file) = fragment.key_file {
+            self.key_file = Some(key_file);
+        }
+        if let Some(key_credential) = fragment.key_credential {
+            self.key_credential = Some(key_credential);
+        }
+        if let Some(openbao) = fragment.openbao {
+            self.openbao.merge(openbao);
+        }
+    }
+
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(key_file) = &mut self.key_file
             && key_file.is_relative()
@@ -1588,6 +2022,19 @@ impl CacheDiskEncryptionConfig {
     }
 }
 
+impl CacheDiskEncryptionConfigFragment {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(key_file) = &mut self.key_file
+            && key_file.is_relative()
+        {
+            *key_file = base_dir.join(&key_file);
+        }
+        if let Some(openbao) = &mut self.openbao {
+            openbao.resolve_relative_paths(base_dir);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, Hash, PartialEq, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct CacheDiskEncryptionOpenBaoConfig {
@@ -1603,7 +2050,35 @@ pub struct CacheDiskEncryptionOpenBaoConfig {
     pub token_credential: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Eq, Hash, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheDiskEncryptionOpenBaoConfigFragment {
+    address: Option<String>,
+    mount: Option<String>,
+    key_name: Option<String>,
+    token_file: Option<PathBuf>,
+    token_credential: Option<String>,
+}
+
 impl CacheDiskEncryptionOpenBaoConfig {
+    fn merge(&mut self, fragment: CacheDiskEncryptionOpenBaoConfigFragment) {
+        if let Some(address) = fragment.address {
+            self.address = Some(address);
+        }
+        if let Some(mount) = fragment.mount {
+            self.mount = Some(mount);
+        }
+        if let Some(key_name) = fragment.key_name {
+            self.key_name = Some(key_name);
+        }
+        if let Some(token_file) = fragment.token_file {
+            self.token_file = Some(token_file);
+        }
+        if let Some(token_credential) = fragment.token_credential {
+            self.token_credential = Some(token_credential);
+        }
+    }
+
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(token_file) = &mut self.token_file
             && token_file.is_relative()
@@ -1697,6 +2172,16 @@ impl CacheDiskEncryptionOpenBaoConfig {
             self.token_file.as_ref(),
             self.token_credential.as_deref(),
         )
+    }
+}
+
+impl CacheDiskEncryptionOpenBaoConfigFragment {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(token_file) = &mut self.token_file
+            && token_file.is_relative()
+        {
+            *token_file = base_dir.join(&token_file);
+        }
     }
 }
 
@@ -1804,6 +2289,14 @@ pub struct CacheDiskStorageBinConfig {
     pub max_open_bins: usize,
 }
 
+#[derive(Debug, Clone, Default, Eq, Hash, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheDiskStorageBinConfigFragment {
+    bin_size_bytes: Option<ByteSize>,
+    preallocate: Option<bool>,
+    max_open_bins: Option<usize>,
+}
+
 impl Default for CacheDiskStorageBinConfig {
     fn default() -> Self {
         Self {
@@ -1815,6 +2308,18 @@ impl Default for CacheDiskStorageBinConfig {
 }
 
 impl CacheDiskStorageBinConfig {
+    fn merge(&mut self, fragment: CacheDiskStorageBinConfigFragment) {
+        if let Some(bin_size_bytes) = fragment.bin_size_bytes {
+            self.bin_size_bytes = bin_size_bytes;
+        }
+        if let Some(preallocate) = fragment.preallocate {
+            self.preallocate = preallocate;
+        }
+        if let Some(max_open_bins) = fragment.max_open_bins {
+            self.max_open_bins = max_open_bins;
+        }
+    }
+
     fn validate(
         &self,
         scope: &'static str,

@@ -73,6 +73,10 @@ behavior when the change improves security or project direction.
 - Harden split-config proxy handling by applying field-level `[proxy]`
   fragment merges so a later timeout-only proxy fragment cannot silently clear
   upstream TLS verification, auth request, mirror, or load-balancer policy.
+- Harden split-config handling for `[compression]`, `[cache]`,
+  `[cache_purger]`, `[web]`, and `[stream]` so partial fragments cannot
+  silently drop previously configured compression limits, cache encryption,
+  static-file safety policy, or stream routes.
 
 ### Changed
 

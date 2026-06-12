@@ -31,7 +31,23 @@ pub struct StreamConfig {
     pub routes: Vec<StreamRouteConfig>,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StreamConfigFragment {
+    enabled: Option<bool>,
+    routes: Option<Vec<StreamRouteConfig>>,
+}
+
 impl StreamConfig {
+    pub fn merge(&mut self, fragment: StreamConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(routes) = fragment.routes {
+            self.routes = routes;
+        }
+    }
+
     pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         for route in &mut self.routes {
             route.resolve_relative_paths(base_dir);
@@ -75,6 +91,16 @@ impl StreamConfig {
             }
         }
         Ok(())
+    }
+}
+
+impl StreamConfigFragment {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(routes) = &mut self.routes {
+            for route in routes {
+                route.resolve_relative_paths(base_dir);
+            }
+        }
     }
 }
 

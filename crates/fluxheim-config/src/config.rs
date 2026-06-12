@@ -30,6 +30,7 @@ pub use crate::config_cache::{
     CachePeerFillConfig, CachePredictorConfig, CachePreset, CachePurgerConfig, CacheRangeConfig,
     CacheRangeSliceConfig, CacheStaleErrorKind,
 };
+use crate::config_cache::{CacheConfigFragment, CachePurgerConfigFragment};
 #[cfg(test)]
 pub use crate::config_cache::{
     MAX_CACHE_BYPASS_COOKIES, MAX_CACHE_BYPASS_PATHS, MAX_CACHE_CONTENT_TYPES,
@@ -37,6 +38,7 @@ pub use crate::config_cache::{
     MAX_CACHE_VARY_REQUEST_HEADERS, fips_allowed_local_openbao_endpoint,
 };
 pub use crate::config_compression::CompressionConfig;
+use crate::config_compression::CompressionConfigFragment;
 #[cfg(test)]
 pub use crate::config_compression::DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES;
 pub use crate::config_geoip::{GeoIpConfig, GeoIpDatabaseConfig, GeoIpProvider};
@@ -107,6 +109,7 @@ pub use crate::config_server::{
 };
 #[cfg(test)]
 pub use crate::config_server::{MAX_SERVER_LISTENERS, MAX_TRUSTED_PROXIES};
+use crate::config_stream::StreamConfigFragment;
 pub use crate::config_stream::{StreamConfig, StreamRouteConfig};
 use crate::config_tls::TlsConfigFragment;
 #[cfg(test)]
@@ -122,6 +125,7 @@ pub use crate::config_types::{ByteSize, ByteSizeParseError};
 pub use crate::config_udp::{UdpConfig, UdpRouteConfig, UdpRouteMode};
 #[cfg(test)]
 pub use crate::config_web::MAX_WEB_INDEX_FILES;
+use crate::config_web::WebConfigFragment;
 pub use crate::config_web::{DirectoryListingConfig, WebConfig};
 use serde::{Deserialize, Serialize};
 
@@ -303,22 +307,22 @@ impl Config {
             self.proxy.merge(proxy);
         }
         if let Some(compression) = fragment.compression {
-            self.compression = compression;
+            self.compression.merge(compression);
         }
         if let Some(cache) = fragment.cache {
-            self.cache = cache;
+            self.cache.merge(cache);
         }
         if let Some(cache_purger) = fragment.cache_purger {
-            self.cache_purger = cache_purger;
+            self.cache_purger.merge(cache_purger);
         }
         if let Some(web) = fragment.web {
-            self.web = web;
+            self.web.merge(web);
         }
         if let Some(geoip) = fragment.geoip {
             self.geoip = geoip;
         }
         if let Some(stream) = fragment.stream {
-            self.stream = stream;
+            self.stream.merge(stream);
         }
         if let Some(udp) = fragment.udp {
             self.udp = udp;
@@ -678,17 +682,17 @@ struct ConfigFragment {
     #[serde(default)]
     proxy: Option<ProxyConfigFragment>,
     #[serde(default)]
-    compression: Option<CompressionConfig>,
+    compression: Option<CompressionConfigFragment>,
     #[serde(default)]
-    cache: Option<CacheConfig>,
+    cache: Option<CacheConfigFragment>,
     #[serde(default)]
-    cache_purger: Option<CachePurgerConfig>,
+    cache_purger: Option<CachePurgerConfigFragment>,
     #[serde(default)]
-    web: Option<WebConfig>,
+    web: Option<WebConfigFragment>,
     #[serde(default)]
     geoip: Option<GeoIpConfig>,
     #[serde(default)]
-    stream: Option<StreamConfig>,
+    stream: Option<StreamConfigFragment>,
     #[serde(default)]
     udp: Option<UdpConfig>,
     #[serde(default)]

@@ -25,6 +25,17 @@ pub struct WebConfig {
     pub expires: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebConfigFragment {
+    root: Option<PathBuf>,
+    index_files: Option<Vec<String>>,
+    deny_dotfiles: Option<bool>,
+    directory_listing: Option<DirectoryListingConfigFragment>,
+    cache_control: Option<String>,
+    expires: Option<String>,
+}
+
 impl Default for WebConfig {
     fn default() -> Self {
         Self {
@@ -39,6 +50,27 @@ impl Default for WebConfig {
 }
 
 impl WebConfig {
+    pub fn merge(&mut self, fragment: WebConfigFragment) {
+        if let Some(root) = fragment.root {
+            self.root = Some(root);
+        }
+        if let Some(index_files) = fragment.index_files {
+            self.index_files = index_files;
+        }
+        if let Some(deny_dotfiles) = fragment.deny_dotfiles {
+            self.deny_dotfiles = deny_dotfiles;
+        }
+        if let Some(directory_listing) = fragment.directory_listing {
+            self.directory_listing.merge(directory_listing);
+        }
+        if let Some(cache_control) = fragment.cache_control {
+            self.cache_control = cache_control;
+        }
+        if let Some(expires) = fragment.expires {
+            self.expires = Some(expires);
+        }
+    }
+
     pub fn enabled(&self) -> bool {
         self.root.is_some()
     }
@@ -88,6 +120,16 @@ impl WebConfig {
     }
 }
 
+impl WebConfigFragment {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(root) = &mut self.root
+            && root.is_relative()
+        {
+            *root = base_dir.join(&root);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DirectoryListingConfig {
@@ -99,7 +141,27 @@ pub struct DirectoryListingConfig {
     pub local_time: bool,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryListingConfigFragment {
+    enabled: Option<bool>,
+    exact_size: Option<bool>,
+    local_time: Option<bool>,
+}
+
 impl DirectoryListingConfig {
+    fn merge(&mut self, fragment: DirectoryListingConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(exact_size) = fragment.exact_size {
+            self.exact_size = exact_size;
+        }
+        if let Some(local_time) = fragment.local_time {
+            self.local_time = local_time;
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         Ok(())
     }
