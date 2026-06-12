@@ -10472,6 +10472,8 @@ mod tests {
     use super::ProxyRuntimeState;
     #[cfg(feature = "load-balancer")]
     use super::RuntimeRetryBudget;
+    #[cfg(all(feature = "web", feature = "cache"))]
+    use super::static_route_request_path_from_parts;
     #[cfg(feature = "cache")]
     use super::{
         CACHE_PASS_REASON, cache_min_uses_allows_store, cache_pass_record_cacheable,
@@ -10492,7 +10494,6 @@ mod tests {
         proxy_protocol_v2_header, proxy_upgrade_request_allowed, redirect_authority,
         request_body_chunk_limit_status, request_limit_status, route_redirect_location,
         route_rewritten_path_and_query, safe_proxy_request_path,
-        static_route_request_path_from_parts,
     };
     #[cfg(feature = "load-balancer")]
     use super::{LoadBalancerMemberStateRequest, LoadBalancerRuntimeBackendState};
@@ -13927,6 +13928,7 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "web", feature = "cache"))]
     #[test]
     fn static_route_purge_path_uses_rewrite_prefix_like_static_serve() {
         let route = super::RuntimeRoute {
