@@ -78,6 +78,9 @@ during the v1.5.19 review cycle.
 - Hardened cache peer-fill request construction so client-controlled `Host`
   headers and absolute-form URI authorities are not forwarded as the peer
   request `Host`.
+- Hardened auth-request response header handling so allowed auth response
+  headers cannot override Fluxheim's upstream request header policy on name
+  collisions.
 
 ## What Changed
 

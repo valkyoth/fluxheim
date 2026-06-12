@@ -4854,6 +4854,7 @@ impl ProxyHttp for FluxProxy {
         let tls_identity = downstream_tls_client_identity(session);
         let route_regex_captures =
             vhost.route_regex_captures(ctx.route_index, session.req_header().uri.path());
+        apply_auth_request_headers(upstream_request, &ctx.auth_request_headers)?;
         crate::headers::apply_upstream_request_policy(
             upstream_request,
             request_headers,
@@ -4867,9 +4868,6 @@ impl ProxyHttp for FluxProxy {
                 route_regex_captures: route_regex_captures.as_ref(),
             },
         )?;
-        for (name, value) in &ctx.auth_request_headers {
-            upstream_request.insert_header(name.clone(), value.clone())?;
-        }
         apply_websocket_upgrade_headers_if_enabled(
             session.req_header(),
             upstream_request,
@@ -8669,6 +8667,16 @@ fn static_cached_body_for_plan(
     }
 }
 
+fn apply_auth_request_headers(
+    upstream_request: &mut RequestHeader,
+    headers: &[(String, String)],
+) -> Result<()> {
+    for (name, value) in headers {
+        upstream_request.insert_header(name.clone(), value.clone())?;
+    }
+    Ok(())
+}
+
 #[cfg(feature = "cache")]
 fn response_vary_variance(
     meta: &CacheMeta,
@@ -10411,13 +10419,14 @@ mod tests {
     #[allow(unused_imports)]
     use super::{
         FluxProxy, HostRoutingRejectReason, RuntimeProxy, append_fluxheim_via_to_request,
-        append_fluxheim_via_to_response, apply_websocket_upgrade_headers_if_enabled,
-        approximate_request_header_bytes, count_response_body_chunk,
-        effective_client_ip_from_forwarded_for, grpc_content_type, grpc_route_rejection_status,
-        http_peer_for_proxy, http_peer_for_runtime_proxy, https_redirect_location,
-        normalize_cookie_headers, proxy_protocol_v1_header, proxy_protocol_v2_header,
-        proxy_upgrade_request_allowed, redirect_authority, request_body_chunk_limit_status,
-        request_limit_status, route_redirect_location, route_rewritten_path_and_query,
+        append_fluxheim_via_to_response, apply_auth_request_headers,
+        apply_websocket_upgrade_headers_if_enabled, approximate_request_header_bytes,
+        count_response_body_chunk, effective_client_ip_from_forwarded_for, grpc_content_type,
+        grpc_route_rejection_status, http_peer_for_proxy, http_peer_for_runtime_proxy,
+        https_redirect_location, normalize_cookie_headers, proxy_protocol_v1_header,
+        proxy_protocol_v2_header, proxy_upgrade_request_allowed, redirect_authority,
+        request_body_chunk_limit_status, request_limit_status, route_redirect_location,
+        route_rewritten_path_and_query,
     };
     #[cfg(feature = "load-balancer")]
     use super::{LoadBalancerMemberStateRequest, LoadBalancerRuntimeBackendState};
@@ -13466,6 +13475,79 @@ mod tests {
                 ("authorization".to_owned(), "Bearer abc".to_owned()),
                 ("cookie".to_owned(), "a=1".to_owned())
             ]
+        );
+    }
+
+    #[test]
+    fn auth_request_headers_are_preserved_without_policy_collision() {
+        let mut upstream = RequestHeader::build("GET", b"/private", None).unwrap();
+
+        apply_auth_request_headers(
+            &mut upstream,
+            &[("x-auth-request-user".to_owned(), "alice".to_owned())],
+        )
+        .unwrap();
+        crate::headers::apply_upstream_request_policy(
+            &mut upstream,
+            &crate::config::RequestHeaderPolicyConfig::default(),
+            crate::headers::UpstreamRequestPolicyContext {
+                client_addr: None,
+                trusted_proxy: false,
+                trusted_proxy_matcher: None,
+                downstream_tls: false,
+                request_id: None,
+                tls_identity: None,
+                route_regex_captures: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            upstream
+                .headers
+                .get("x-auth-request-user")
+                .and_then(|value| value.to_str().ok()),
+            Some("alice")
+        );
+    }
+
+    #[test]
+    fn request_policy_overrides_colliding_auth_request_headers() {
+        let mut upstream = RequestHeader::build("GET", b"/private", None).unwrap();
+        let policy = crate::config::RequestHeaderPolicyConfig {
+            set: std::collections::BTreeMap::from([(
+                "x-client-ip".to_owned(),
+                "198.51.100.10".to_owned(),
+            )]),
+            ..crate::config::RequestHeaderPolicyConfig::default()
+        };
+
+        apply_auth_request_headers(
+            &mut upstream,
+            &[("x-client-ip".to_owned(), "127.0.0.1".to_owned())],
+        )
+        .unwrap();
+        crate::headers::apply_upstream_request_policy(
+            &mut upstream,
+            &policy,
+            crate::headers::UpstreamRequestPolicyContext {
+                client_addr: None,
+                trusted_proxy: false,
+                trusted_proxy_matcher: None,
+                downstream_tls: false,
+                request_id: None,
+                tls_identity: None,
+                route_regex_captures: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            upstream
+                .headers
+                .get("x-client-ip")
+                .and_then(|value| value.to_str().ok()),
+            Some("198.51.100.10")
         );
     }
 
