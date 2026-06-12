@@ -24,7 +24,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 use crate::config::{AdminAuthThrottleConfig, AdminConfig, AdminHealthResponseMode, Config};
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::LoadBalancerRuntimeBackendState;
-use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
+use crate::proxy::FluxProxy;
 #[cfg(feature = "load-balancer")]
 use crate::proxy::{
     LoadBalancerMemberAddRequest, LoadBalancerMemberRemoveRequest,
@@ -474,10 +474,6 @@ impl AdminApp {
             })),
             auth_throttle: AdminAuthThrottle::new(config.admin.auth_throttle),
         };
-
-        if app.self_healing_enabled {
-            app.proxy.set_health_reporter(Arc::new(app.clone()));
-        }
 
         Ok(app)
     }
@@ -2746,50 +2742,6 @@ impl ValidationMetrics {
     }
 }
 
-impl ProxyHealthReporter for AdminApp {
-    fn record_proxy_health_signal(&self, signal: ProxyHealthSignal) {
-        if !self.self_healing_enabled {
-            return;
-        }
-
-        match self.record_health_signal(signal.healthy()) {
-            HealthSignalOutcome::NoPendingValidation => {}
-            HealthSignalOutcome::Recorded { snapshot, metrics } => {
-                log::debug!(
-                    "proxy self-healing signal recorded: snapshot={snapshot} healthy={} successful_checks={} failed_checks={} error_rate_per_mille={}",
-                    signal.healthy(),
-                    metrics.successful_checks,
-                    metrics.failed_checks,
-                    metrics.error_rate_per_mille()
-                );
-            }
-            HealthSignalOutcome::Confirm { snapshot, metrics } => {
-                log::info!(
-                    "proxy self-healing signal confirmed snapshot={snapshot} successful_checks={} failed_checks={} error_rate_per_mille={}",
-                    metrics.successful_checks,
-                    metrics.failed_checks,
-                    metrics.error_rate_per_mille()
-                );
-            }
-            HealthSignalOutcome::Rollback(pending) => {
-                let response = self.rollback_pending_validation(&pending, "proxy-error-rate");
-                if response.status.is_success() {
-                    log::warn!(
-                        "proxy self-healing signal rolled back failed snapshot={}",
-                        pending.target_snapshot
-                    );
-                } else {
-                    log::error!(
-                        "proxy self-healing rollback failed: snapshot={} status={}",
-                        pending.target_snapshot,
-                        response.status.as_u16()
-                    );
-                }
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 enum HealthSignalOutcome {
     NoPendingValidation,
@@ -4210,7 +4162,7 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use crate::config_route::RouteConfig;
-    use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
+    use crate::proxy::FluxProxy;
     use crate::snapshot::SnapshotStore;
     #[cfg(feature = "load-balancer")]
     use crate::test_support::safe_child_path;
@@ -6901,7 +6853,7 @@ mod tests {
     }
 
     #[test]
-    fn admin_from_config_installs_proxy_health_reporter_when_self_healing_is_enabled() {
+    fn admin_from_config_does_not_install_proxy_health_reporter_for_self_healing() {
         let dir = TestDir::new("admin-proxy-health-reporter");
         let token_file = dir.path.join("admin-token");
         std::fs::write(&token_file, "secret-token\n").unwrap();
@@ -6922,7 +6874,7 @@ mod tests {
 
         let app = AdminApp::from_config(&config, proxy).unwrap();
 
-        assert!(app.proxy.has_health_reporter());
+        assert!(!app.proxy.has_health_reporter());
     }
 
     #[test]
@@ -7347,112 +7299,6 @@ mod tests {
         assert_eq!(response.status, StatusCode::OK);
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""reason":"error-rate""#));
-        assert_eq!(app.store.current_id().unwrap(), Some(baseline.id.clone()));
-        assert_eq!(app.proxy.route_host(Some("baseline.test")), "baseline");
-        let state = app.runtime_state();
-        assert_eq!(state.pending_validation, None);
-        assert_eq!(state.known_good_snapshot, Some(baseline.id));
-    }
-
-    #[test]
-    fn proxy_health_signal_confirms_pending_snapshot() {
-        let mut app = app_with_config_and_self_healing(Config::default(), true);
-        app.min_successful_checks = 2;
-        let snapshot = app
-            .store
-            .snapshot_config(&Config::default(), Some("candidate"))
-            .unwrap();
-        set_test_runtime_state(
-            &app,
-            None,
-            None,
-            Some(super::PendingValidation {
-                target_snapshot: snapshot.id.clone(),
-                previous_snapshot: None,
-                impact: "noop".to_owned(),
-                expires_unix_secs: super::unix_secs().saturating_add(30),
-                successful_checks: 1,
-                failed_checks: 0,
-            }),
-        );
-
-        ProxyHealthReporter::record_proxy_health_signal(&app, ProxyHealthSignal::Success);
-
-        let state = app.runtime_state();
-        assert_eq!(state.pending_validation, None);
-        assert_eq!(state.known_good_snapshot, Some(snapshot.id));
-    }
-
-    #[test]
-    fn proxy_health_signal_rolls_back_when_error_rate_exceeds_threshold() {
-        let baseline_config = Config {
-            vhosts: vec![VhostConfig {
-                name: "baseline".to_owned(),
-                hosts: vec!["baseline.test".to_owned()],
-                max_request_body_bytes: None,
-                access: Default::default(),
-                rate_limit: Default::default(),
-                concurrency: Default::default(),
-                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
-                redirect: crate::config::VhostRedirectConfig::default(),
-                tls: crate::config::VhostTlsConfig::default(),
-                proxy: ProxyConfig::default(),
-                cache: crate::config::CacheConfig::default(),
-                compression: None,
-                headers: crate::config::VhostHeaderPolicyConfig::default(),
-                php: crate::config::PhpConfig::default(),
-                web: WebConfig::default(),
-                routes: Vec::new(),
-            }],
-            ..Config::default()
-        };
-        let app = app_with_config_and_self_healing(baseline_config.clone(), true);
-        let baseline = app
-            .store
-            .snapshot_config(&baseline_config, Some("baseline"))
-            .unwrap();
-        let candidate_config = Config {
-            vhosts: vec![VhostConfig {
-                name: "candidate".to_owned(),
-                hosts: vec!["candidate.test".to_owned()],
-                max_request_body_bytes: None,
-                access: Default::default(),
-                rate_limit: Default::default(),
-                concurrency: Default::default(),
-                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
-                redirect: crate::config::VhostRedirectConfig::default(),
-                tls: crate::config::VhostTlsConfig::default(),
-                proxy: ProxyConfig::default(),
-                cache: crate::config::CacheConfig::default(),
-                compression: None,
-                headers: crate::config::VhostHeaderPolicyConfig::default(),
-                php: crate::config::PhpConfig::default(),
-                web: WebConfig::default(),
-                routes: Vec::new(),
-            }],
-            ..Config::default()
-        };
-        let candidate = app
-            .store
-            .snapshot_config(&candidate_config, Some("candidate"))
-            .unwrap();
-        set_test_runtime_state(
-            &app,
-            Some(candidate.id.clone()),
-            Some(baseline.id.clone()),
-            Some(super::PendingValidation {
-                target_snapshot: candidate.id.clone(),
-                previous_snapshot: Some(baseline.id.clone()),
-                impact: "snapshot".to_owned(),
-                expires_unix_secs: super::unix_secs().saturating_add(30),
-                successful_checks: 0,
-                failed_checks: 0,
-            }),
-        );
-        app.proxy.reload_from_config(&candidate_config).unwrap();
-
-        ProxyHealthReporter::record_proxy_health_signal(&app, ProxyHealthSignal::Failure);
-
         assert_eq!(app.store.current_id().unwrap(), Some(baseline.id.clone()));
         assert_eq!(app.proxy.route_host(Some("baseline.test")), "baseline");
         let state = app.runtime_state();

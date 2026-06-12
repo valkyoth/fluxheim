@@ -259,22 +259,19 @@ confirm request, the Pingora self-healing watchdog attempts the same known-good
 rollback without waiting for operator traffic. Admin requests also enforce the
 deadline as a secondary guard.
 
-Fluxheim also records conservative proxy-integrated health signals while a
-snapshot is pending validation. Successful downstream `2xx` and `3xx` responses
-count toward `admin.self_healing.min_successful_checks`. Downstream `5xx`
-responses and fatal Pingora proxy errors count toward the failure rate. Client
-errors such as `4xx` are ignored because they often describe request behavior,
-not whether the new config is broken.
+Public proxy traffic does not confirm or roll back pending snapshots. This keeps
+unauthenticated data-plane clients from influencing admin reload state. Only
+authenticated admin self-healing actions, local watchdog expiry, and explicit
+operator-driven health reports can advance pending validation.
 
-The proxy-integrated path uses the same state transitions as the admin report
-endpoint:
+The self-healing path uses these state transitions:
 
 1. Mark the pre-reload snapshot as known-good.
 2. Validate and apply a snapshot-safe reload through `POST /_fluxheim/reload`.
 3. Watch a configurable health window with the background watchdog.
 4. Treat clear failures as broken, for example local health-check failure,
-   startup-owned service failure, rising 5xx rate, or repeated upstream
-   selection failure.
+   startup-owned service failure, or an authenticated failure report from the
+   local watchdog.
 5. Automatically swap back to the previous known-good runtime snapshot when the
    new snapshot is unhealthy.
 6. Leave process-upgrade-only changes to the supervisor/Pingora upgrade path.
