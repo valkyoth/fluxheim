@@ -2383,46 +2383,113 @@ binary/orchestration crate. Good target crates include `fluxheim-server`,
 `fluxheim-runtime`, `fluxheim-proxy`, `fluxheim-cache`, `fluxheim-web`,
 `fluxheim-php-fpm`, `fluxheim-acme`, and narrow protocol/helper crates.
 
+Pre-planning dependency map:
+
+| Current Pingora surface | Replacement direction | Notes |
+| --- | --- | --- |
+| `pingora-load-balancing` backend containers, health service wiring, and background service traits | `fluxheim-load-balancer` owns `FluxBackend`, backend snapshots, discovery, health checks, persistence, runtime state, and Tokio update tasks | Selection logic is already Fluxheim-owned. Finish removing Pingora background/listen/shutdown traits from this crate before touching the HTTP proxy core. |
+| `pingora-cache` `Storage`, `CacheKey`, metadata, hit/miss, and adapter types | `fluxheim-cache` owns `FluxCacheStorage`, `FluxCacheKey`, metadata, hit/miss/admission/stale/purge interfaces | The existing disk/index/encryption/eviction code is already Fluxheim logic. Keep a temporary adapter only while the old proxy runtime exists. |
+| `pingora::server::Server`, service registration, shutdown watch, and listener bootstrap | `fluxheim-server` / `fluxheim-runtime` built on `tokio`, `tokio::signal`, `JoinHandle`/task registry, watch channels, and a cancellation token such as `tokio-util::sync::CancellationToken` | Keep signal behavior, graceful shutdown, readiness, log rotation, and any retained hot-restart behavior covered by smoke tests before removal. |
+| Pingora TCP stream service and transport connector wrappers | direct `tokio::net::TcpListener`, `tokio::net::TcpStream`, existing PROXY protocol framing, `tokio-rustls`, and `tokio-openssl` | Stream proxy data path is already mostly Tokio copy loops, limits, counters, and timers. This is the lowest-risk runtime cutover. |
+| Pingora TLS listener configuration and peer abstractions | Fluxheim listener/peer structs backed by `rustls`/`tokio-rustls` and OpenSSL/`tokio-openssl` only | Do not reintroduce s2n or BoringSSL. Preserve SNI, mTLS/client auth, ALPN, OCSP where supported, FIPS/ISO evidence, and cert reload semantics. |
+| `pingora::http` wrappers and `pingora::{Error, ErrorType}` | standard `http` types, `bytes`, `http-body`/`http-body-util`, and `fluxheim-common`/`fluxheim-runtime` error taxonomy | Keep conversion shims until the HTTP proxy runtime is fully replaced. New internal APIs should not add fresh Pingora types. |
+| Pingora `ProxyHttp` and `Session` callback lifecycle | `fluxheim-proxy` async request pipeline using standard `http` request/response parts, bounded body streams, Fluxheim route/cache/auth/mirror/PHP modules, and explicit upstream connectors | This is the largest migration. Build it beside the old path first, run fixture parity, then cut over profile by profile. |
+| Pingora HTTP/1.1 and HTTP/2 connection handling | Evaluate `hyper`/`hyper-util` for HTTP/1.1 and HTTP/2 serving/client pools, with direct `h2` use where Fluxheim needs lower-level limits | Do not cut over until header count, body read, response write lifetime, flow-control, reset, and timeout controls are testable. If an upstream crate does not expose a required safety hook, add a Fluxheim boundary or postpone that protocol mode. |
+
+Replacement rules for 1.6:
+
+- Prefer standard Rust ecosystem crates that Fluxheim already uses or can test
+  directly: `tokio`, `http`, `bytes`, `rustls`, `tokio-rustls`, `openssl`,
+  `tokio-openssl`, `thiserror`, and focused protocol crates such as
+  `hyper`/`hyper-util`/`h2` only after a security-hook review.
+- New crates must be owned by a domain boundary first, not added directly to
+  `proxy.rs` or `runtime.rs`. The root `fluxheim` crate should mostly wire
+  config, feature flags, and binaries together.
+- Feature mapping must stay explicit: root features such as `proxy`, `cache`,
+  `load-balancer`, `stream-proxy`, `php-fpm`, `tls-rustls`, and `tls-openssl`
+  map to matching sub-crate features. Avoid hidden default features that pull
+  Pingora back into the graph.
+- Every cutover release gets a dependency gate that knows which Pingora crate
+  should already be gone. By the final 1.6 release, all official profile
+  `cargo tree` runs and container builds must fail if any Pingora crate appears.
+- The old and new paths may coexist only behind temporary internal feature
+  gates during migration. They must not both ship as long-term supported
+  runtimes.
+
 Planned `1.6.x` sequence:
 
 - `v1.6.0`: Pingora-exit foundation. Freeze current HTTP/proxy/cache/LB
-  behavior into golden tests, migration fixtures, smoke scripts, and release
-  gates. Add dependency-graph checks that can fail the release once a target
-  Pingora crate is expected to be gone. Keep runtime behavior unchanged.
-- `v1.6.1`: remove `pingora-load-balancing` and `pingora-cache` from normal
-  builds if not already completed in `1.5.22`. Finish Fluxheim-owned cache and
-  load-balancer adapters so normal profiles no longer compile those crates.
-- `v1.6.2`: move TCP stream proxying to a Fluxheim-owned Tokio listener and
-  connector path, including upstream TLS/mTLS adapters through rustls and
-  OpenSSL. Remove Pingora stream service entrypoints from stream builds.
-- `v1.6.3`: replace Pingora background service wiring with Fluxheim-owned
-  Tokio task supervision, cancellation, readiness, and shutdown handling for
-  cache metrics, ACME renewal, stale purging, admin/self-healing work,
-  discovery refresh loops, and load-balancer updates.
-- `v1.6.4`: finish standard Rust `http` type usage and Fluxheim-owned error
-  taxonomy at internal boundaries. Keep only narrow compatibility shims where a
-  not-yet-replaced outer runtime still needs them.
-- `v1.6.5`: replace Pingora server bootstrap, worker setup, service
-  registration, signal handling, log-rotation signal behavior, hot-restart
-  file-descriptor passing where retained, listener creation, and TLS listener
-  configuration behind Fluxheim-owned APIs.
-- `v1.6.6`: replace the HTTP/1.1 proxy request/response path with a
-  Fluxheim-owned pipeline using standard `http` types and bounded body streams.
-  Preserve routing, upstream selection, request/response header policy, access
-  policy, rate/concurrency limits, error handling, and observability.
-- `v1.6.7`: complete HTTP proxy runtime parity for streaming request/response
-  bodies, retries, timeouts, compression, auth-request, traffic mirroring,
-  PHP-FPM, ACME challenge routing, GeoIP, cache interaction, and admin-visible
-  failure semantics.
-- `v1.6.8`: complete HTTP/2 parity and hardening in the Fluxheim-owned runtime,
-  including request-boundary limits, response-flow-control lifetime limits,
-  slow-body protection, stream resets, HPACK/header-count controls where
+  behavior into golden tests, migration fixtures, smoke scripts, packet-level
+  HTTP fixtures, cache fixtures, TLS fixtures, and release gates. Add
+  dependency-graph checks that can fail the release once a target Pingora crate
+  is expected to be gone. Add the first `fluxheim-runtime` / `fluxheim-server`
+  traits and keep runtime behavior unchanged.
+- `v1.6.1`: load-balancer independence. Remove `pingora-load-balancing` from
+  normal builds if not already completed in `1.5.22`. Replace remaining
+  Pingora background/listen/shutdown service traits in
+  `fluxheim-load-balancer` with Fluxheim/Tokio task handles. Add a
+  load-balancer-only `cargo tree` gate proving `pingora-load-balancing` is not
+  compiled.
+- `v1.6.2`: cache independence. Move cache interfaces into `fluxheim-cache`
+  and replace remaining Pingora cache key/meta/hit/miss/admission adapter
+  usage in normal cache builds. Keep a temporary compatibility adapter only for
+  the old HTTP runtime. Add a cache profile gate proving `pingora-cache` is not
+  compiled.
+- `v1.6.3`: stream runtime cutover. Move TCP stream proxying to
+  `fluxheim-stream` or `fluxheim-proxy` using direct Tokio listeners and
+  connectors, including upstream TLS/mTLS through rustls and OpenSSL. Remove
+  Pingora stream service entrypoints from stream builds and keep stream smoke
+  tests for source ACL, SNI verification, PROXY protocol, limits, and timeout
+  behavior.
+- `v1.6.4`: background runtime cutover. Replace Pingora background service
+  wiring with Fluxheim-owned Tokio task supervision, cancellation, readiness,
+  and shutdown handling for cache metrics, ACME renewal, stale purging,
+  admin/self-healing work, discovery refresh loops, and load-balancer updates.
+- `v1.6.5`: HTTP/error boundary cleanup. Finish standard Rust `http` type usage
+  and Fluxheim-owned error taxonomy at internal boundaries. Keep only narrow
+  compatibility shims where a not-yet-replaced outer runtime still needs them.
+  Add a lint/search gate that blocks new internal `pingora::http` and
+  `pingora::Error` usage outside adapters.
+- `v1.6.6`: listener/TLS abstraction. Introduce Fluxheim-owned listener,
+  certificate resolver, SNI, ALPN, mTLS/client-auth, OCSP, and upstream-peer
+  abstractions backed by rustls and OpenSSL. Keep Pingora listeners active only
+  as the old adapter while parity tests run.
+- `v1.6.7`: server bootstrap cutover. Replace Pingora server bootstrap, worker
+  setup, service registration, signal handling, log-rotation signal behavior,
+  hot-restart file-descriptor passing where retained, listener creation, and
+  TLS listener configuration behind Fluxheim-owned APIs.
+- `v1.6.8`: native HTTP/1.1 runtime preview. Add the Fluxheim-owned HTTP/1.1
+  proxy pipeline beside the old path using standard `http` types, bounded body
+  streams, explicit downstream/upstream timeouts, and existing route/policy
+  modules. Keep it behind an internal migration feature until fixture parity is
+  green.
+- `v1.6.9`: native HTTP/1.1 runtime cutover. Make the Fluxheim-owned HTTP/1.1
+  path the default for selected profiles, preserving routing, upstream
+  selection, request/response header policy, access policy,
+  rate/concurrency limits, retries, compression, auth-request, traffic
+  mirroring, PHP-FPM, ACME challenge routing, GeoIP, cache interaction,
+  observability, and admin-visible failure semantics.
+- `v1.6.10`: native HTTP/2 runtime preview. Add HTTP/2 serving/proxying through
+  the selected Rust stack only after validating request-boundary limits,
+  response-flow-control lifetime limits, slow-body protection, stream resets,
+  trailer behavior, gRPC pass-through, HPACK/header-count controls where
   available, and mixed HTTP/1.1+HTTP/2 fixtures.
-- `v1.6.9`: remove remaining Pingora crates, vendored Pingora patches, Pingora
-  compatibility shims, and Pingora-specific docs from normal builds. Release
-  gates must prove `cargo tree` and container builds do not compile Pingora.
-- `v1.6.10`: stabilization/security-only release for the Pingora-free runtime
-  before adding new extensibility or protocol surface.
+- `v1.6.11`: native HTTP/2 runtime cutover. Make the Fluxheim-owned HTTP/2 path
+  the default for supported profiles and keep strict fallback rules for any
+  protocol safety hook that is not exposed by the underlying crate.
+- `v1.6.12`: upstream connector and pooling parity. Replace remaining Pingora
+  upstream peer/session/pool behavior with Fluxheim-owned connectors and pools
+  for HTTP/1.1, HTTP/2, TLS/mTLS, DNS/file/runtime-discovered backends,
+  retry/failover decisions, and privacy-mode-safe observability.
+- `v1.6.13`: remove remaining Pingora crates, vendored Pingora patches,
+  Pingora compatibility shims, and Pingora-specific docs from normal builds.
+  Release gates must prove `cargo tree` and container builds do not compile
+  Pingora for default, full, cache, proxy, PHP, load-balancer, FIPS, macOS
+  developer, and release-image profiles.
+- `v1.6.14`: stabilization/security-only release for the Pingora-free runtime
+  before adding new extensibility or protocol surface. This release should
+  prioritize pentest cleanup, performance regression checks, memory/FD leak
+  checks, long-running soak tests, and documentation clarity.
 
 Stable exit criteria:
 
