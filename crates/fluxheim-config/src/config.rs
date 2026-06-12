@@ -14,6 +14,7 @@ pub use crate::config_acme::{
 pub use crate::config_acme::{
     MAX_ACME_CHALLENGE_UPSTREAMS, MAX_ACME_ISSUERS, MAX_VHOST_ACME_DOMAINS,
 };
+use crate::config_admin::AdminConfigFragment;
 pub use crate::config_admin::MAX_ADMIN_HEALTH_PATH_BYTES;
 pub use crate::config_admin::{
     AdminAuthThrottleConfig, AdminClientCertificateConfig, AdminConfig, AdminHealthConfig,
@@ -286,7 +287,7 @@ impl Config {
             self.server.merge(server);
         }
         if let Some(admin) = fragment.admin {
-            self.admin = admin;
+            self.admin.merge(admin);
         }
         if let Some(metrics) = fragment.metrics {
             self.metrics = metrics;
@@ -668,7 +669,7 @@ struct ConfigFragment {
     #[serde(default)]
     server: Option<ServerConfigFragment>,
     #[serde(default)]
-    admin: Option<AdminConfig>,
+    admin: Option<AdminConfigFragment>,
     #[serde(default)]
     metrics: Option<MetricsConfig>,
     #[serde(default)]

@@ -42,6 +42,23 @@ pub struct AdminConfig {
     pub client_certificate: AdminClientCertificateConfig,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminConfigFragment {
+    enabled: Option<bool>,
+    listen: Option<String>,
+    require_loopback: Option<bool>,
+    token_env: Option<String>,
+    token_file: Option<PathBuf>,
+    snapshot_store: Option<PathBuf>,
+    transport: Option<AdminTransportConfigFragment>,
+    ops_socket: Option<AdminOpsSocketConfigFragment>,
+    health: Option<AdminHealthConfigFragment>,
+    auth_throttle: Option<AdminAuthThrottleConfigFragment>,
+    self_healing: Option<AdminSelfHealingConfigFragment>,
+    client_certificate: Option<AdminClientCertificateConfigFragment>,
+}
+
 impl Default for AdminConfig {
     fn default() -> Self {
         Self {
@@ -62,6 +79,45 @@ impl Default for AdminConfig {
 }
 
 impl AdminConfig {
+    pub fn merge(&mut self, fragment: AdminConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(listen) = fragment.listen {
+            self.listen = listen;
+        }
+        if let Some(require_loopback) = fragment.require_loopback {
+            self.require_loopback = require_loopback;
+        }
+        if let Some(token_env) = fragment.token_env {
+            self.token_env = Some(token_env);
+        }
+        if let Some(token_file) = fragment.token_file {
+            self.token_file = Some(token_file);
+        }
+        if let Some(snapshot_store) = fragment.snapshot_store {
+            self.snapshot_store = Some(snapshot_store);
+        }
+        if let Some(transport) = fragment.transport {
+            self.transport.merge(transport);
+        }
+        if let Some(ops_socket) = fragment.ops_socket {
+            self.ops_socket.merge(ops_socket);
+        }
+        if let Some(health) = fragment.health {
+            self.health.merge(health);
+        }
+        if let Some(auth_throttle) = fragment.auth_throttle {
+            self.auth_throttle.merge(auth_throttle);
+        }
+        if let Some(self_healing) = fragment.self_healing {
+            self.self_healing.merge(self_healing);
+        }
+        if let Some(client_certificate) = fragment.client_certificate {
+            self.client_certificate.merge(client_certificate);
+        }
+    }
+
     pub fn admin_client_certificate_required(&self) -> bool {
         self.client_certificate.required || !self.client_certificate.allow_sha256.is_empty()
     }
@@ -151,6 +207,24 @@ impl AdminConfig {
     }
 }
 
+impl AdminConfigFragment {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(token_file) = &mut self.token_file
+            && token_file.is_relative()
+        {
+            *token_file = base_dir.join(&token_file);
+        }
+        if let Some(snapshot_store) = &mut self.snapshot_store
+            && snapshot_store.is_relative()
+        {
+            *snapshot_store = base_dir.join(&snapshot_store);
+        }
+        if let Some(ops_socket) = &mut self.ops_socket {
+            ops_socket.resolve_relative_paths(base_dir);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminOpsSocketConfig {
@@ -160,6 +234,14 @@ pub struct AdminOpsSocketConfig {
     pub path: PathBuf,
     #[serde(default = "default_admin_ops_socket_mode")]
     pub mode: String,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminOpsSocketConfigFragment {
+    enabled: Option<bool>,
+    path: Option<PathBuf>,
+    mode: Option<String>,
 }
 
 impl Default for AdminOpsSocketConfig {
@@ -173,6 +255,18 @@ impl Default for AdminOpsSocketConfig {
 }
 
 impl AdminOpsSocketConfig {
+    fn merge(&mut self, fragment: AdminOpsSocketConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(path) = fragment.path {
+            self.path = path;
+        }
+        if let Some(mode) = fragment.mode {
+            self.mode = mode;
+        }
+    }
+
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if self.path.is_relative() {
             self.path = base_dir.join(&self.path);
@@ -217,6 +311,16 @@ impl AdminOpsSocketConfig {
     }
 }
 
+impl AdminOpsSocketConfigFragment {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.path
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
+    }
+}
+
 fn default_admin_ops_socket_path() -> PathBuf {
     PathBuf::from("/run/fluxheim/fluxheim-ops.sock")
 }
@@ -249,6 +353,20 @@ pub struct AdminTransportConfig {
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminTransportConfigFragment {
+    mode: Option<AdminRemoteTransportMode>,
+}
+
+impl AdminTransportConfig {
+    fn merge(&mut self, fragment: AdminTransportConfigFragment) {
+        if let Some(mode) = fragment.mode {
+            self.mode = mode;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AdminRemoteTransportMode {
     #[default]
@@ -269,6 +387,15 @@ pub struct AdminClientCertificateConfig {
     pub deny_sha256: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminClientCertificateConfigFragment {
+    required: Option<bool>,
+    sha256_header: Option<String>,
+    allow_sha256: Option<Vec<String>>,
+    deny_sha256: Option<Vec<String>>,
+}
+
 impl Default for AdminClientCertificateConfig {
     fn default() -> Self {
         Self {
@@ -281,6 +408,21 @@ impl Default for AdminClientCertificateConfig {
 }
 
 impl AdminClientCertificateConfig {
+    fn merge(&mut self, fragment: AdminClientCertificateConfigFragment) {
+        if let Some(required) = fragment.required {
+            self.required = required;
+        }
+        if let Some(header) = fragment.sha256_header {
+            self.sha256_header = header;
+        }
+        if let Some(allow_sha256) = fragment.allow_sha256 {
+            self.allow_sha256 = allow_sha256;
+        }
+        if let Some(deny_sha256) = fragment.deny_sha256 {
+            self.deny_sha256 = deny_sha256;
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         validate_header_name(
             "admin.client_certificate.sha256_header",
@@ -314,6 +456,24 @@ pub struct AdminHealthConfig {
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminHealthConfigFragment {
+    unauthenticated: Option<bool>,
+    response: Option<AdminHealthResponseMode>,
+}
+
+impl AdminHealthConfig {
+    fn merge(&mut self, fragment: AdminHealthConfigFragment) {
+        if let Some(unauthenticated) = fragment.unauthenticated {
+            self.unauthenticated = unauthenticated;
+        }
+        if let Some(response) = fragment.response {
+            self.response = response;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AdminHealthResponseMode {
     Minimal,
@@ -340,6 +500,18 @@ pub struct AdminAuthThrottleConfig {
     pub max_sources: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminAuthThrottleConfigFragment {
+    enabled: Option<bool>,
+    window_secs: Option<u64>,
+    per_source_failures: Option<usize>,
+    global_failures: Option<usize>,
+    base_lockout_secs: Option<u64>,
+    max_lockout_secs: Option<u64>,
+    max_sources: Option<usize>,
+}
+
 impl Default for AdminAuthThrottleConfig {
     fn default() -> Self {
         Self {
@@ -355,6 +527,30 @@ impl Default for AdminAuthThrottleConfig {
 }
 
 impl AdminAuthThrottleConfig {
+    fn merge(&mut self, fragment: AdminAuthThrottleConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(window_secs) = fragment.window_secs {
+            self.window_secs = window_secs;
+        }
+        if let Some(failures) = fragment.per_source_failures {
+            self.per_source_failures = failures;
+        }
+        if let Some(failures) = fragment.global_failures {
+            self.global_failures = failures;
+        }
+        if let Some(lockout_secs) = fragment.base_lockout_secs {
+            self.base_lockout_secs = lockout_secs;
+        }
+        if let Some(lockout_secs) = fragment.max_lockout_secs {
+            self.max_lockout_secs = lockout_secs;
+        }
+        if let Some(max_sources) = fragment.max_sources {
+            self.max_sources = max_sources;
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
@@ -409,6 +605,16 @@ pub struct AdminSelfHealingConfig {
     pub max_error_rate_per_mille: u16,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminSelfHealingConfigFragment {
+    enabled: Option<bool>,
+    validation_window_secs: Option<u64>,
+    health_path: Option<String>,
+    min_successful_checks: Option<usize>,
+    max_error_rate_per_mille: Option<u16>,
+}
+
 impl Default for AdminSelfHealingConfig {
     fn default() -> Self {
         Self {
@@ -422,6 +628,24 @@ impl Default for AdminSelfHealingConfig {
 }
 
 impl AdminSelfHealingConfig {
+    fn merge(&mut self, fragment: AdminSelfHealingConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(validation_window_secs) = fragment.validation_window_secs {
+            self.validation_window_secs = validation_window_secs;
+        }
+        if let Some(health_path) = fragment.health_path {
+            self.health_path = health_path;
+        }
+        if let Some(min_successful_checks) = fragment.min_successful_checks {
+            self.min_successful_checks = min_successful_checks;
+        }
+        if let Some(max_error_rate_per_mille) = fragment.max_error_rate_per_mille {
+            self.max_error_rate_per_mille = max_error_rate_per_mille;
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         if self.validation_window_secs == 0 {
             return Err(ConfigError::InvalidAdminSelfHealing {

@@ -72,6 +72,9 @@ during the v1.5.19 review cycle.
   `[cache_purger]`, `[web]`, and `[stream]` so partial fragments cannot
   silently drop previously configured compression limits, cache encryption,
   static-file safety policy, or stream routes.
+- Hardened split-config admin handling by applying field-level `[admin]`
+  fragment merges so a later ops-socket or health-only admin fragment cannot
+  silently disable the admin API or clear token and snapshot-store settings.
 
 ## What Changed
 

@@ -12255,6 +12255,67 @@ fn conf_d_proxy_fragment_extends_without_replacing_main_trust_policy() {
 }
 
 #[test]
+fn conf_d_admin_fragment_extends_without_replacing_main_auth_policy() {
+    let dir = TestDir::new("config-file-with-conf-d-admin-fragment");
+    let snapshot_store = secure_test_dir("config-conf-d-admin-snapshots");
+    fs::create_dir_all(dir.child("conf.d")).unwrap();
+    fs::write(
+        dir.child("fluxheim.toml"),
+        format!(
+            r#"
+                include_conf_d = true
+
+                [admin]
+                enabled = true
+                listen = "127.0.0.1:19090"
+                token_env = "FLUXHEIM_ADMIN_TOKEN"
+                snapshot_store = "{}"
+
+                [admin.health]
+                response = "minimal"
+
+                [admin.auth_throttle]
+                per_source_failures = 3
+                global_failures = 50
+                "#,
+            snapshot_store.display()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        dir.child("conf.d/20-admin-ops.toml"),
+        r#"
+            [admin.ops_socket]
+            path = "fluxheim-ops.sock"
+            "#,
+    )
+    .unwrap();
+
+    let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+    assert!(config.admin.enabled);
+    assert_eq!(config.admin.listen, "127.0.0.1:19090");
+    assert_eq!(
+        config.admin.token_env.as_deref(),
+        Some("FLUXHEIM_ADMIN_TOKEN")
+    );
+    assert_eq!(
+        config.admin.snapshot_store.as_deref(),
+        Some(snapshot_store.as_path())
+    );
+    assert_eq!(
+        config.admin.health.response,
+        AdminHealthResponseMode::Minimal
+    );
+    assert_eq!(config.admin.auth_throttle.per_source_failures, 3);
+    assert_eq!(config.admin.auth_throttle.global_failures, 50);
+    assert_eq!(
+        config.admin.ops_socket.path,
+        dir.child("conf.d/fluxheim-ops.sock")
+    );
+}
+
+#[test]
 fn conf_d_compression_fragment_keeps_main_resource_limits() {
     let dir = TestDir::new("config-file-with-conf-d-compression-fragment");
     fs::create_dir_all(dir.child("conf.d")).unwrap();

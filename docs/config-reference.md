@@ -48,10 +48,11 @@ When multiple fragments set `[proxy]`, Fluxheim applies field-level merge
 semantics. A later proxy fragment that sets a timeout or buffer setting does
 not replace the earlier upstream, TLS verification, authentication, mirror, or
 load-balancer policy.
-The same field-level merge model applies to `[compression]`, `[cache]`,
-`[cache_purger]`, `[web]`, and `[stream]`. Later fragments can override fields
-they explicitly set without clearing previously configured resource limits,
-cache encryption, static-file safety policy, or stream routes.
+The same field-level merge model applies to `[admin]`, `[compression]`,
+`[cache]`, `[cache_purger]`, `[web]`, and `[stream]`. Later fragments can
+override fields they explicitly set without clearing previously configured
+admin authentication, resource limits, cache encryption, static-file safety
+policy, or stream routes.
 
 Relative filesystem paths are resolved from the config file directory.
 Config sources must be real TOML files or real directories. Fluxheim rejects a
