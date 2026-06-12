@@ -32,13 +32,18 @@ local/static cache responses when the selected cache policy has
 
 `provider = "local"` uses AES-256-GCM with a 64-character hex key loaded from
 one safe file or credential. It is simple and fast, but Fluxheim must be able
-to read the raw cache key at startup.
+to read the raw cache key at startup. Filesystem disk-cache fills use bounded
+encrypted chunks with this provider, preserving the streaming memory profile of
+plain filesystem cache writes.
 
 `provider = "openbao-transit"` sends object bytes to OpenBao Transit
 `encrypt` and `decrypt` endpoints and stores only the returned `vault:v...`
 ciphertext in the cache backend. Use this when key custody, audit trails, and
 centralized rotation matter more than the added call latency on disk-cache
-reads and writes.
+reads and writes. Because the Transit API encrypts one complete plaintext value
+per request, Fluxheim caps concurrent OpenBao encrypted commit heap usage and
+can refuse a large cache fill under pressure rather than buffering too many
+objects at once.
 
 Both providers bind the configured `key_id` and the combined cache key as
 authenticated data. A stored encrypted object cannot be silently moved to a
@@ -304,6 +309,9 @@ ciphertext rather than the plaintext response body.
 
 - Keep cache encryption opt-in. It adds CPU work for local-key encryption and
   network/service dependency for OpenBao Transit.
+- Prefer the local provider when large filesystem cache fills must preserve
+  streaming memory behavior; OpenBao Transit is a whole-object external crypto
+  boundary by design.
 - Prefer `storage-bin` for high-churn encrypted caches that would otherwise
   create many small encrypted object files.
 - Use memory plus encrypted disk when hot objects should remain fast but disk

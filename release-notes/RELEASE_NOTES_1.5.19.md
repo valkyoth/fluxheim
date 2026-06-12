@@ -54,6 +54,9 @@ during the v1.5.19 review cycle.
 - Hardened downstream HTTP/2 flow-control defaults by capping per-stream send
   buffering at 256 KiB, keeping DATA frames at 16 KiB, fixing the receive
   window at 64 KiB, and reducing pending-accept reset-stream pressure.
+- Removed encrypted filesystem disk-cache fill heap amplification for the local
+  provider by committing streamed cache bodies through bounded AEAD chunks, and
+  bounded the OpenBao Transit whole-object fallback heap budget.
 
 ## What Changed
 

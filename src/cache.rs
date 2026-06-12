@@ -6,6 +6,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 #[cfg(feature = "proxy")]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "proxy")]
 use std::sync::{Mutex, OnceLock, RwLock};
 
 #[cfg(feature = "proxy")]
@@ -55,6 +57,14 @@ const DISK_CACHE_MAGIC_V4: &[u8] = b"FLUXHEIM-CACHE-v4\n";
 const DISK_CACHE_MAGIC_V5: &[u8] = b"FLUXHEIM-CACHE-v5\n";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_ENCRYPTED_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-ENC-v1\n";
+#[cfg(feature = "proxy")]
+const DISK_CACHE_ENCRYPTED_STREAM_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-ENC-STREAM-v1\n";
+#[cfg(feature = "proxy")]
+const DISK_CACHE_ENCRYPTED_STREAM_CHUNK_SIZE: usize = 64 * 1024;
+#[cfg(feature = "proxy")]
+const DISK_CACHE_ENCRYPTED_STREAM_CHUNK_OVERHEAD_LIMIT: u64 = 80;
+#[cfg(feature = "proxy")]
+const DISK_CACHE_ENCRYPTED_HEAP_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
 #[cfg(feature = "proxy")]
 const DISK_CACHE_INDEX_MAGIC_V1: &str = "FLUXHEIM-DISK-INDEX-v1";
 #[cfg(feature = "proxy")]
@@ -121,6 +131,9 @@ static PINGORA_TIERED_STORAGE_REGISTRY: OnceLock<
 static PINGORA_CACHE_LOCK_REGISTRY: OnceLock<
     Mutex<HashMap<(u64, u32), &'static CacheKeyLockImpl>>,
 > = OnceLock::new();
+
+#[cfg(feature = "proxy")]
+static DISK_CACHE_ENCRYPTED_HEAP_BYTES: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(feature = "proxy")]
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
@@ -202,6 +215,55 @@ enum DiskCacheEncryptionProvider {
         key_name: Arc<str>,
         token: Arc<Zeroizing<String>>,
     },
+}
+
+#[cfg(feature = "proxy")]
+struct DiskCacheEncryptedHeapReservation {
+    bytes: u64,
+}
+
+#[cfg(feature = "proxy")]
+impl Drop for DiskCacheEncryptedHeapReservation {
+    fn drop(&mut self) {
+        DISK_CACHE_ENCRYPTED_HEAP_BYTES.fetch_sub(self.bytes, Ordering::Relaxed);
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn reserve_disk_cache_encrypted_heap(
+    bytes: u64,
+) -> std::io::Result<DiskCacheEncryptedHeapReservation> {
+    if bytes > DISK_CACHE_ENCRYPTED_HEAP_BUDGET_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::WouldBlock,
+            "encrypted disk cache commit exceeds heap budget",
+        ));
+    }
+
+    let mut current = DISK_CACHE_ENCRYPTED_HEAP_BYTES.load(Ordering::Relaxed);
+    loop {
+        let Some(next) = current.checked_add(bytes) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "encrypted disk cache heap budget overflow",
+            ));
+        };
+        if next > DISK_CACHE_ENCRYPTED_HEAP_BUDGET_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "encrypted disk cache commit heap budget exhausted",
+            ));
+        }
+        match DISK_CACHE_ENCRYPTED_HEAP_BYTES.compare_exchange_weak(
+            current,
+            next,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return Ok(DiskCacheEncryptedHeapReservation { bytes }),
+            Err(observed) => current = observed,
+        }
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -7795,24 +7857,45 @@ fn encode_disk_cache_object(
             + response_header.len()
             + body.len(),
     );
-    encoded.write_all(DISK_CACHE_MAGIC_V5)?;
-    writeln!(encoded, "{}", store_key.combined.len())?;
-    writeln!(encoded, "{}", store_key.primary.len())?;
-    writeln!(encoded, "{}", store_key.user_tag.len())?;
-    writeln!(encoded, "{}", encoded_cache_tags.len())?;
-    writeln!(encoded, "{}", index_path.len())?;
-    writeln!(encoded, "{}", internal_meta.len())?;
-    writeln!(encoded, "{}", response_header.len())?;
-    writeln!(encoded, "{}", body.len())?;
-    encoded.write_all(store_key.combined.as_bytes())?;
-    encoded.write_all(store_key.primary.as_bytes())?;
-    encoded.write_all(store_key.user_tag.as_bytes())?;
-    encoded.write_all(encoded_cache_tags.as_bytes())?;
-    encoded.write_all(index_path.as_bytes())?;
-    encoded.write_all(internal_meta)?;
-    encoded.write_all(response_header)?;
+    write_disk_cache_object_plaintext_prefix(
+        &mut encoded,
+        store_key,
+        internal_meta,
+        response_header,
+        body.len() as u64,
+    )?;
     encoded.write_all(body)?;
     Ok(encoded)
+}
+
+#[cfg(feature = "proxy")]
+fn write_disk_cache_object_plaintext_prefix<W: std::io::Write>(
+    writer: &mut W,
+    store_key: &PingoraStoreKey,
+    internal_meta: &[u8],
+    response_header: &[u8],
+    body_len: u64,
+) -> std::io::Result<()> {
+    let encoded_cache_tags = encode_cache_tags(&store_key.cache_tags);
+    let index_path = store_key.index_path.as_deref().unwrap_or_default();
+
+    writer.write_all(DISK_CACHE_MAGIC_V5)?;
+    writeln!(writer, "{}", store_key.combined.len())?;
+    writeln!(writer, "{}", store_key.primary.len())?;
+    writeln!(writer, "{}", store_key.user_tag.len())?;
+    writeln!(writer, "{}", encoded_cache_tags.len())?;
+    writeln!(writer, "{}", index_path.len())?;
+    writeln!(writer, "{}", internal_meta.len())?;
+    writeln!(writer, "{}", response_header.len())?;
+    writeln!(writer, "{body_len}")?;
+    writer.write_all(store_key.combined.as_bytes())?;
+    writer.write_all(store_key.primary.as_bytes())?;
+    writer.write_all(store_key.user_tag.as_bytes())?;
+    writer.write_all(encoded_cache_tags.as_bytes())?;
+    writer.write_all(index_path.as_bytes())?;
+    writer.write_all(internal_meta)?;
+    writer.write_all(response_header)?;
+    Ok(())
 }
 
 #[cfg(feature = "proxy")]
@@ -7875,10 +7958,113 @@ fn encrypt_disk_cache_object(
 }
 
 #[cfg(feature = "proxy")]
+struct LocalEncryptedDiskCacheObjectWriter<'a> {
+    file: std::fs::File,
+    key: &'a ring::aead::LessSafeKey,
+    key_id: &'a str,
+    combined_key: &'a str,
+    chunk_index: u64,
+    buffer: Vec<u8>,
+}
+
+#[cfg(feature = "proxy")]
+impl<'a> LocalEncryptedDiskCacheObjectWriter<'a> {
+    fn create(
+        path: &Path,
+        key: &'a ring::aead::LessSafeKey,
+        key_id: &'a str,
+        combined_key: &'a str,
+    ) -> std::io::Result<Self> {
+        use std::io::Write as _;
+
+        let mut file = create_new_disk_cache_file(path)?;
+        file.write_all(DISK_CACHE_ENCRYPTED_STREAM_MAGIC_V1)?;
+        writeln!(file, "{}", key_id.len())?;
+        writeln!(file, "{}", combined_key.len())?;
+        file.write_all(key_id.as_bytes())?;
+        file.write_all(combined_key.as_bytes())?;
+        Ok(Self {
+            file,
+            key,
+            key_id,
+            combined_key,
+            chunk_index: 0,
+            buffer: Vec::with_capacity(DISK_CACHE_ENCRYPTED_STREAM_CHUNK_SIZE),
+        })
+    }
+
+    fn flush_chunk(&mut self) -> std::io::Result<()> {
+        use std::io::Write as _;
+
+        if self.buffer.is_empty() {
+            return Ok(());
+        }
+
+        let mut nonce = [0_u8; 12];
+        getrandom::fill(&mut nonce).map_err(|error| {
+            std::io::Error::other(format!("generate cache encryption nonce: {error}"))
+        })?;
+        let aad =
+            cache_encryption_stream_chunk_aad(self.key_id, self.combined_key, self.chunk_index);
+        let nonce_value = ring::aead::Nonce::assume_unique_for_key(nonce);
+        let mut ciphertext = std::mem::take(&mut self.buffer);
+        self.key
+            .seal_in_place_append_tag(nonce_value, ring::aead::Aad::from(aad), &mut ciphertext)
+            .map_err(|_| std::io::Error::other("encrypt cache object chunk"))?;
+
+        writeln!(self.file, "{}", nonce.len())?;
+        writeln!(self.file, "{}", ciphertext.len())?;
+        self.file.write_all(&nonce)?;
+        self.file.write_all(&ciphertext)?;
+        self.chunk_index = self.chunk_index.saturating_add(1);
+        self.buffer = Vec::with_capacity(DISK_CACHE_ENCRYPTED_STREAM_CHUNK_SIZE);
+        Ok(())
+    }
+
+    fn finish(mut self) -> std::io::Result<()> {
+        self.flush_chunk()?;
+        self.file.sync_all()
+    }
+}
+
+#[cfg(feature = "proxy")]
+impl std::io::Write for LocalEncryptedDiskCacheObjectWriter<'_> {
+    fn write(&mut self, mut buf: &[u8]) -> std::io::Result<usize> {
+        let written = buf.len();
+        while !buf.is_empty() {
+            let available = DISK_CACHE_ENCRYPTED_STREAM_CHUNK_SIZE - self.buffer.len();
+            let take = available.min(buf.len());
+            self.buffer.extend_from_slice(&buf[..take]);
+            buf = &buf[take..];
+            if self.buffer.len() == DISK_CACHE_ENCRYPTED_STREAM_CHUNK_SIZE {
+                self.flush_chunk()?;
+            }
+        }
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
+#[cfg(feature = "proxy")]
 fn decrypt_disk_cache_object_if_needed(
     bytes: &[u8],
     encryption: Option<&DiskCacheEncryption>,
 ) -> std::io::Result<Vec<u8>> {
+    if bytes.get(..DISK_CACHE_ENCRYPTED_STREAM_MAGIC_V1.len())
+        == Some(DISK_CACHE_ENCRYPTED_STREAM_MAGIC_V1)
+    {
+        let Some(encryption) = encryption else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "encrypted cache object found but cache disk encryption is disabled",
+            ));
+        };
+        return decrypt_local_streamed_disk_cache_object(bytes, encryption);
+    }
+
     if bytes.get(..DISK_CACHE_ENCRYPTED_MAGIC_V1.len()) != Some(DISK_CACHE_ENCRYPTED_MAGIC_V1) {
         if encryption.is_some() {
             return Err(std::io::Error::new(
@@ -7988,12 +8174,117 @@ fn decrypt_disk_cache_object_if_needed(
 }
 
 #[cfg(feature = "proxy")]
+fn decrypt_local_streamed_disk_cache_object(
+    bytes: &[u8],
+    encryption: &DiskCacheEncryption,
+) -> std::io::Result<Vec<u8>> {
+    let DiskCacheEncryptionProvider::Local { key } = &encryption.provider else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "streamed encrypted cache object requires local encryption provider",
+        ));
+    };
+
+    let mut offset = DISK_CACHE_ENCRYPTED_STREAM_MAGIC_V1.len();
+    let key_id_len = parse_disk_cache_len(bytes, &mut offset)?;
+    let combined_key_len = parse_disk_cache_len(bytes, &mut offset)?;
+    let key_id_end = offset
+        .checked_add(key_id_len)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "key id overflow"))?;
+    let combined_key_end = key_id_end.checked_add(combined_key_len).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "combined key overflow")
+    })?;
+    if combined_key_end > bytes.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "streamed encrypted cache object header is truncated",
+        ));
+    }
+
+    let key_id = cache_object_utf8(&bytes[offset..key_id_end], "encryption key id")?;
+    if key_id != encryption.key_id.as_ref() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "encrypted cache object key id does not match configured key",
+        ));
+    }
+    let combined_key = cache_object_utf8(&bytes[key_id_end..combined_key_end], "combined key")?;
+    offset = combined_key_end;
+
+    let mut plaintext = Vec::new();
+    let mut chunk_index = 0_u64;
+    while offset < bytes.len() {
+        let nonce_len = parse_disk_cache_len(bytes, &mut offset)?;
+        let ciphertext_len = parse_disk_cache_len(bytes, &mut offset)?;
+        let nonce_end = offset.checked_add(nonce_len).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "nonce length overflow")
+        })?;
+        let ciphertext_end = nonce_end.checked_add(ciphertext_len).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ciphertext length overflow",
+            )
+        })?;
+        if ciphertext_end > bytes.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "streamed encrypted cache object chunk is truncated",
+            ));
+        }
+        if nonce_len != 12 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid streamed encrypted cache object nonce length",
+            ));
+        }
+        let mut nonce = [0_u8; 12];
+        nonce.copy_from_slice(&bytes[offset..nonce_end]);
+        let mut chunk = bytes[nonce_end..ciphertext_end].to_vec();
+        let aad = cache_encryption_stream_chunk_aad(&encryption.key_id, &combined_key, chunk_index);
+        let plaintext_len = key
+            .open_in_place(
+                ring::aead::Nonce::assume_unique_for_key(nonce),
+                ring::aead::Aad::from(aad),
+                &mut chunk,
+            )
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "decrypt cache object chunk",
+                )
+            })?
+            .len();
+        chunk.truncate(plaintext_len);
+        plaintext.extend_from_slice(&chunk);
+        offset = ciphertext_end;
+        chunk_index = chunk_index.saturating_add(1);
+    }
+    Ok(plaintext)
+}
+
+#[cfg(feature = "proxy")]
 fn cache_encryption_aad(key_id: &str, combined_key: &str) -> Vec<u8> {
     let mut aad = Vec::with_capacity(32 + key_id.len() + combined_key.len());
     aad.extend_from_slice(b"fluxheim-cache-disk-v1\0");
     aad.extend_from_slice(key_id.as_bytes());
     aad.push(0);
     aad.extend_from_slice(combined_key.as_bytes());
+    aad
+}
+
+#[cfg(feature = "proxy")]
+fn cache_encryption_stream_chunk_aad(
+    key_id: &str,
+    combined_key: &str,
+    chunk_index: u64,
+) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(48 + key_id.len() + combined_key.len());
+    aad.extend_from_slice(b"fluxheim-cache-disk-stream-v1\0");
+    aad.extend_from_slice(key_id.as_bytes());
+    aad.push(0);
+    aad.extend_from_slice(combined_key.as_bytes());
+    aad.push(0);
+    aad.extend_from_slice(&chunk_index.to_le_bytes());
     aad
 }
 
@@ -8132,9 +8423,31 @@ fn write_disk_cache_object_from_body_file(
     body_path: &Path,
     body_len: u64,
 ) -> std::io::Result<()> {
-    use std::io::{Read as _, Write as _};
+    use std::io::Read as _;
 
-    if encryption.is_some() {
+    if let Some(encryption) = encryption {
+        if matches!(
+            &encryption.provider,
+            DiskCacheEncryptionProvider::Local { .. }
+        ) {
+            return write_local_encrypted_disk_cache_object_from_body_file(
+                path,
+                encryption,
+                store_key,
+                internal_meta,
+                response_header,
+                body_path,
+                body_len,
+            );
+        }
+
+        let heap_bytes = encrypted_full_object_heap_estimate(
+            store_key,
+            internal_meta,
+            response_header,
+            body_len,
+        );
+        let _heap_reservation = reserve_disk_cache_encrypted_heap(heap_bytes)?;
         let body_file = open_existing_disk_cache_file(body_path)?;
         let metadata = body_file.metadata()?;
         if !metadata.is_file() || metadata.len() != body_len {
@@ -8155,7 +8468,7 @@ fn write_disk_cache_object_from_body_file(
         }
         return write_disk_cache_object(
             path,
-            encryption,
+            Some(encryption),
             store_key,
             internal_meta,
             response_header,
@@ -8164,26 +8477,13 @@ fn write_disk_cache_object_from_body_file(
     }
 
     let mut file = create_new_disk_cache_file(path)?;
-    let encoded_cache_tags = encode_cache_tags(&store_key.cache_tags);
-
-    let index_path = store_key.index_path.as_deref().unwrap_or_default();
-
-    file.write_all(DISK_CACHE_MAGIC_V5)?;
-    writeln!(file, "{}", store_key.combined.len())?;
-    writeln!(file, "{}", store_key.primary.len())?;
-    writeln!(file, "{}", store_key.user_tag.len())?;
-    writeln!(file, "{}", encoded_cache_tags.len())?;
-    writeln!(file, "{}", index_path.len())?;
-    writeln!(file, "{}", internal_meta.len())?;
-    writeln!(file, "{}", response_header.len())?;
-    writeln!(file, "{body_len}")?;
-    file.write_all(store_key.combined.as_bytes())?;
-    file.write_all(store_key.primary.as_bytes())?;
-    file.write_all(store_key.user_tag.as_bytes())?;
-    file.write_all(encoded_cache_tags.as_bytes())?;
-    file.write_all(index_path.as_bytes())?;
-    file.write_all(internal_meta)?;
-    file.write_all(response_header)?;
+    write_disk_cache_object_plaintext_prefix(
+        &mut file,
+        store_key,
+        internal_meta,
+        response_header,
+        body_len,
+    )?;
 
     let body_file = open_existing_disk_cache_file(body_path)?;
     let metadata = body_file.metadata()?;
@@ -8202,6 +8502,71 @@ fn write_disk_cache_object_from_body_file(
     }
     file.sync_all()?;
     Ok(())
+}
+
+#[cfg(feature = "proxy")]
+fn write_local_encrypted_disk_cache_object_from_body_file(
+    path: &Path,
+    encryption: &DiskCacheEncryption,
+    store_key: &PingoraStoreKey,
+    internal_meta: &[u8],
+    response_header: &[u8],
+    body_path: &Path,
+    body_len: u64,
+) -> std::io::Result<()> {
+    use std::io::Read as _;
+
+    let DiskCacheEncryptionProvider::Local { key } = &encryption.provider else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "streamed local encryption requires local cache encryption provider",
+        ));
+    };
+
+    let body_file = open_existing_disk_cache_file(body_path)?;
+    let metadata = body_file.metadata()?;
+    if !metadata.is_file() || metadata.len() != body_len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "disk cache streamed body length changed before commit",
+        ));
+    }
+
+    let mut writer = LocalEncryptedDiskCacheObjectWriter::create(
+        path,
+        key,
+        &encryption.key_id,
+        &store_key.combined,
+    )?;
+    write_disk_cache_object_plaintext_prefix(
+        &mut writer,
+        store_key,
+        internal_meta,
+        response_header,
+        body_len,
+    )?;
+    let copied = std::io::copy(&mut body_file.take(body_len.saturating_add(1)), &mut writer)?;
+    if copied != body_len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "disk cache streamed body ended before expected length",
+        ));
+    }
+    writer.finish()
+}
+
+#[cfg(feature = "proxy")]
+fn encrypted_full_object_heap_estimate(
+    store_key: &PingoraStoreKey,
+    internal_meta: &[u8],
+    response_header: &[u8],
+    body_len: u64,
+) -> u64 {
+    let plaintext_bytes = pingora_object_weight_len(internal_meta, response_header, body_len)
+        .saturating_add(disk_cache_header_overhead(store_key));
+    plaintext_bytes
+        .saturating_mul(4)
+        .saturating_add(1024 * 1024)
 }
 
 #[cfg(feature = "proxy")]
@@ -8252,9 +8617,7 @@ fn read_disk_cache_object(
         ));
     }
 
-    let max_encoded_bytes = max_object_bytes
-        .as_u64()
-        .saturating_add(DISK_CACHE_HEADER_OVERHEAD_LIMIT);
+    let max_encoded_bytes = disk_cache_encoded_read_limit(max_object_bytes.as_u64());
     if metadata.len() > max_encoded_bytes {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -8278,6 +8641,23 @@ fn read_disk_cache_object(
         ));
     }
     Ok(bytes)
+}
+
+#[cfg(feature = "proxy")]
+fn disk_cache_encoded_read_limit(max_object_bytes: u64) -> u64 {
+    let plaintext_limit = max_object_bytes.saturating_add(DISK_CACHE_HEADER_OVERHEAD_LIMIT);
+    plaintext_limit
+        .saturating_add(encrypted_stream_overhead_limit(plaintext_limit))
+        .saturating_add(DISK_CACHE_HEADER_OVERHEAD_LIMIT)
+}
+
+#[cfg(feature = "proxy")]
+fn encrypted_stream_overhead_limit(plaintext_limit: u64) -> u64 {
+    let chunk_size = DISK_CACHE_ENCRYPTED_STREAM_CHUNK_SIZE as u64;
+    let chunks = plaintext_limit.div_ceil(chunk_size).saturating_add(1);
+    chunks
+        .saturating_mul(DISK_CACHE_ENCRYPTED_STREAM_CHUNK_OVERHEAD_LIMIT)
+        .saturating_add(512)
 }
 
 #[cfg(feature = "proxy")]
@@ -11346,7 +11726,7 @@ mod tests {
 
         let object_path = storage.path_for_combined_key(&key.combined());
         let encoded = std::fs::read(&object_path).unwrap();
-        assert!(encoded.starts_with(super::DISK_CACHE_ENCRYPTED_MAGIC_V1));
+        assert!(encoded.starts_with(super::DISK_CACHE_ENCRYPTED_STREAM_MAGIC_V1));
         assert!(
             !encoded
                 .windows(b"secret-cache-body".len())
@@ -12949,14 +13329,16 @@ mod tests {
         let root = unique_test_cache_dir("read-oversized");
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("oversized.fhc");
+        let max_object_bytes = 8_u64;
         std::fs::write(
             &path,
-            vec![b'x'; (super::DISK_CACHE_HEADER_OVERHEAD_LIMIT + 16) as usize],
+            vec![b'x'; (super::disk_cache_encoded_read_limit(max_object_bytes) + 1) as usize],
         )
         .unwrap();
 
         let error =
-            super::read_disk_cache_object(&root, &path, ByteSize::from_bytes(8)).unwrap_err();
+            super::read_disk_cache_object(&root, &path, ByteSize::from_bytes(max_object_bytes))
+                .unwrap_err();
 
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         std::fs::remove_dir_all(root).unwrap();
