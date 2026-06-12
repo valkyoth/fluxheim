@@ -347,6 +347,9 @@ for single-user/rootless deployments.
 - Explicit request header/body pass-through switches for advanced migrations.
   Implemented as `php.pass_request_headers` and `php.pass_request_body`, both
   defaulting to `true`.
+- PHP-specific in-flight request cap. Implemented as `php.max_in_flight`,
+  defaulting to `8`, so buffered PHP-FPM responses cannot multiply without a
+  route-local or vhost-local bound.
 - `X-Accel-Redirect` / `X-Sendfile` support. Implemented for PHP-assisted
   static offload under `php.root`; `X-Sendfile` paths are mapped from
   `php.fpm_root` for split containers, and configured PHP script extensions

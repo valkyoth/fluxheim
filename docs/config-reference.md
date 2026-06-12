@@ -2867,6 +2867,7 @@ pass_request_body = true
 # Optional override for CGI SERVER_PORT; otherwise Host port or scheme default is used.
 server_port = 8443
 request_timeout_secs = 30
+max_in_flight = 8
 max_request_body_bytes = "64MiB"
 # Optional: spill larger PHP request bodies to disk before FastCGI dispatch.
 request_body_spool_threshold_bytes = "4MiB"
@@ -2996,7 +2997,10 @@ to gRPC.
 
 For PHP actions, `max_request_body_bytes` bounds the request sent to php-fpm
 and `max_response_bytes` bounds the FastCGI STDOUT/STDERR bytes accepted from
-php-fpm before Fluxheim rejects the response. Set `php.request_body_spool_threshold_bytes` with
+php-fpm before Fluxheim rejects the response. `max_in_flight` caps concurrent
+PHP-FPM requests for that vhost or route before request body buffering and
+FastCGI dispatch; it defaults to `8` to bound the number of fully buffered PHP
+responses held at once. Set `php.request_body_spool_threshold_bytes` with
 `php.request_body_spool_dir` to spill larger request bodies to an owner-safe
 temporary file before php-fpm dispatch. This keeps `CONTENT_LENGTH` exact for
 FastCGI and lets retries replay the same upload without cloning a large memory

@@ -50,6 +50,9 @@ pass_request_body = true
 # explicit Host port or falls back to 443 for TLS and 80 for cleartext.
 # server_port = 443
 request_timeout_secs = 30
+# Default 8. Caps concurrent PHP-FPM requests before request body buffering and
+# FastCGI dispatch. Raise only with matching memory and php-fpm worker capacity.
+max_in_flight = 8
 max_request_body_bytes = "64MiB"
 # Optional upload spooling for larger request bodies. Configure both fields
 # together; the directory must be safe for the Fluxheim service user.

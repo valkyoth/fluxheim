@@ -21,6 +21,8 @@ use std::time::Duration;
     not(feature = "privacy-mode")
 ))]
 use std::time::Instant;
+#[cfg(feature = "php-fpm")]
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 #[cfg(any(feature = "cache", feature = "php-fpm"))]
 use crate::http_types::StatusCode;
@@ -3399,9 +3401,15 @@ struct RuntimePhp {
     fpm_root: std::path::PathBuf,
     files: StaticFileServer,
     error_pages: Vec<RuntimeErrorPage>,
+    in_flight: Arc<Semaphore>,
     fpm_pools: Vec<Arc<PhpFpmPool>>,
     fpm_next: Arc<AtomicUsize>,
     _managed_fpm: Option<Arc<ManagedPhpFpmProcess>>,
+}
+
+#[cfg(feature = "php-fpm")]
+struct PhpInFlightPermit {
+    _permit: OwnedSemaphorePermit,
 }
 
 #[cfg(feature = "web")]
@@ -3592,6 +3600,7 @@ impl RuntimePhp {
             fpm_pools,
             fpm_next: Arc::new(AtomicUsize::new(0)),
             _managed_fpm: managed_fpm,
+            in_flight: Arc::new(Semaphore::new(runtime_config.max_in_flight)),
             config: runtime_config,
             root,
             fpm_root,
@@ -3602,6 +3611,13 @@ impl RuntimePhp {
 
     fn error_page(&self, status: u16) -> Option<&RuntimeErrorPage> {
         self.error_pages.iter().find(|page| page.status == status)
+    }
+
+    fn try_acquire(&self) -> Option<PhpInFlightPermit> {
+        Arc::clone(&self.in_flight)
+            .try_acquire_owned()
+            .ok()
+            .map(|permit| PhpInFlightPermit { _permit: permit })
     }
 }
 
@@ -7170,6 +7186,23 @@ async fn respond_php_request(
             return Ok(true);
         }
     };
+    let Some(_php_in_flight) = php.try_acquire() else {
+        respond_text_error(
+            session,
+            503,
+            Bytes::from_static(b"php-fpm request limit reached"),
+        )
+        .await?;
+        record_php_request_metrics(
+            ctx,
+            vhost,
+            &method,
+            Some(503),
+            "in_flight_limit",
+            started_at,
+        );
+        return Ok(true);
+    };
 
     let body_limit = php
         .config
@@ -10330,6 +10363,8 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
+    #[cfg(feature = "php-fpm")]
+    use tokio::sync::Semaphore;
 
     use crate::http_types::PingoraRequestHeader as RequestHeader;
     use crate::http_types::PingoraResponseHeader as ResponseHeader;
@@ -11114,16 +11149,37 @@ mod tests {
         })
         .unwrap()
         .unwrap();
+        let max_in_flight = config.max_in_flight;
         RuntimePhp {
             config,
             root: root.canonicalize().unwrap(),
             fpm_root: root.canonicalize().unwrap(),
             files,
             error_pages: Vec::new(),
+            in_flight: Arc::new(Semaphore::new(max_in_flight)),
             fpm_pools: Vec::new(),
             fpm_next: Arc::new(AtomicUsize::new(0)),
             _managed_fpm: None,
         }
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_runtime_in_flight_limit_rejects_when_full() {
+        let mut php = php_test_runtime("php-in-flight-limit");
+        php.config.max_in_flight = 2;
+        php.in_flight = Arc::new(Semaphore::new(php.config.max_in_flight));
+
+        let first = php.try_acquire();
+        let second = php.try_acquire();
+        let third = php.try_acquire();
+
+        assert!(first.is_some());
+        assert!(second.is_some());
+        assert!(third.is_none());
+
+        drop(first);
+        assert!(php.try_acquire().is_some());
     }
 
     #[cfg(feature = "php-fpm")]

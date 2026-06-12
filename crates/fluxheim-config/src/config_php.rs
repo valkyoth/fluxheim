@@ -26,6 +26,8 @@ pub const MAX_PHP_PARAMS: usize = 128;
 pub const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
 pub const MAX_PHP_FPM_RETRY_STATUSES: usize = 100;
 pub const MAX_PHP_INTERCEPT_ERROR_STATUSES: usize = 200;
+pub const DEFAULT_PHP_MAX_IN_FLIGHT: usize = 8;
+pub const MAX_PHP_MAX_IN_FLIGHT: usize = 4096;
 const MAX_PHP_FPM_MANAGED_WORKERS: usize = 256;
 const MAX_PHP_FPM_MANAGED_MAX_REQUESTS: usize = 1_000_000;
 const MAX_PHP_FPM_MANAGED_MAX_SPAWN_RATE: usize = 1024;
@@ -69,6 +71,8 @@ pub struct PhpConfig {
     pub deny_path_prefixes: Vec<String>,
     #[serde(default = "default_php_request_timeout_secs")]
     pub request_timeout_secs: u64,
+    #[serde(default = "default_php_max_in_flight")]
+    pub max_in_flight: usize,
     #[serde(default)]
     pub max_request_body_bytes: Option<ByteSize>,
     #[serde(default)]
@@ -124,6 +128,7 @@ impl Default for PhpConfig {
             allowed_extensions: default_php_allowed_extensions(),
             deny_path_prefixes: Vec::new(),
             request_timeout_secs: default_php_request_timeout_secs(),
+            max_in_flight: default_php_max_in_flight(),
             max_request_body_bytes: None,
             request_body_spool_threshold_bytes: None,
             request_body_spool_dir: None,
@@ -258,6 +263,12 @@ impl PhpConfig {
         validate_php_deny_path_prefixes(&self.deny_path_prefixes)?;
         validate_php_params(&self.params)?;
         validate_required_timeout_secs("php.request_timeout_secs", self.request_timeout_secs)?;
+        if self.max_in_flight == 0 || self.max_in_flight > MAX_PHP_MAX_IN_FLIGHT {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.max_in_flight",
+                reason: "must be between 1 and 4096",
+            });
+        }
         if self
             .max_request_body_bytes
             .is_some_and(|bytes| bytes.as_u64() == 0)
@@ -755,6 +766,10 @@ fn default_php_allowed_extensions() -> Vec<String> {
 
 fn default_php_request_timeout_secs() -> u64 {
     30
+}
+
+fn default_php_max_in_flight() -> usize {
+    DEFAULT_PHP_MAX_IN_FLIGHT
 }
 
 fn default_php_max_response_bytes() -> ByteSize {

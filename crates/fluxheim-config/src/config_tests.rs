@@ -5592,6 +5592,7 @@ fn parses_php_fpm_vhost_config() {
             ignore_origin_cache_headers = true
             intercept_error_statuses = [404, 500, 502]
             request_timeout_secs = 30
+            max_in_flight = 6
             max_request_body_bytes = "16MiB"
             request_body_spool_threshold_bytes = "1MiB"
             request_body_spool_dir = "{}"
@@ -5657,6 +5658,7 @@ fn parses_php_fpm_vhost_config() {
     );
     assert!(php.ignore_origin_cache_headers);
     assert_eq!(php.intercept_error_statuses, [404, 500, 502]);
+    assert_eq!(php.max_in_flight, 6);
     assert_eq!(php.error_pages.len(), 1);
     assert_eq!(php.error_pages[0].status, 502);
     assert_eq!(php.error_pages[0].path, "/502.html");
@@ -7200,6 +7202,35 @@ fn rejects_php_fpm_ini_control_params() {
         assert!(error.contains("php.params"), "{error}");
         assert!(error.contains("managed by Fluxheim"), "{error}");
     }
+}
+
+#[test]
+fn rejects_invalid_php_max_in_flight() {
+    let root = unique_temp_path("config-php-max-in-flight");
+    std::fs::create_dir_all(&root).unwrap();
+    let config: Config = toml::from_str(&format!(
+        r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            max_in_flight = 0
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+        test_process_config_toml("config-php-max-in-flight-process"),
+        root.display()
+    ))
+    .unwrap();
+
+    let error = config.validate().unwrap_err().to_string();
+    assert!(error.contains("php.max_in_flight"), "{error}");
 }
 
 #[test]
