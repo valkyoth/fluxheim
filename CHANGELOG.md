@@ -56,6 +56,9 @@ behavior when the change improves security or project direction.
 - Apply the downstream read timeout before PHP-FPM request-body collection and
   drain paths, covering PHP routes that read the body before FastCGI execution
   begins.
+- Harden downstream HTTP/2 flow-control defaults by capping per-stream send
+  buffering at 256 KiB, keeping DATA frames at 16 KiB, fixing the receive
+  window at 64 KiB, and reducing pending-accept reset-stream pressure.
 
 ### Changed
 

@@ -33,6 +33,14 @@ const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
 const DOWNSTREAM_H2_MAX_HEADER_LIST_SIZE: u32 = 64 * 1024;
 #[cfg(feature = "proxy")]
 const DOWNSTREAM_H2_MAX_CONCURRENT_STREAMS: u32 = 32;
+#[cfg(feature = "proxy")]
+const DOWNSTREAM_H2_INITIAL_WINDOW_SIZE: u32 = 64 * 1024;
+#[cfg(feature = "proxy")]
+const DOWNSTREAM_H2_MAX_FRAME_SIZE: u32 = 16 * 1024;
+#[cfg(feature = "proxy")]
+const DOWNSTREAM_H2_MAX_SEND_BUFFER_SIZE: usize = 256 * 1024;
+#[cfg(feature = "proxy")]
+const DOWNSTREAM_H2_MAX_PENDING_ACCEPT_RESET_STREAMS: usize = 8;
 #[cfg(all(
     feature = "proxy",
     any(
@@ -215,6 +223,10 @@ fn hardened_downstream_h2_options() -> pingora::protocols::http::v2::server::H2O
     let mut options = pingora::protocols::http::v2::server::H2Options::new();
     options.max_header_list_size(DOWNSTREAM_H2_MAX_HEADER_LIST_SIZE);
     options.max_concurrent_streams(DOWNSTREAM_H2_MAX_CONCURRENT_STREAMS);
+    options.initial_window_size(DOWNSTREAM_H2_INITIAL_WINDOW_SIZE);
+    options.max_frame_size(DOWNSTREAM_H2_MAX_FRAME_SIZE);
+    options.max_send_buffer_size(DOWNSTREAM_H2_MAX_SEND_BUFFER_SIZE);
+    options.max_pending_accept_reset_streams(DOWNSTREAM_H2_MAX_PENDING_ACCEPT_RESET_STREAMS);
     options
 }
 
@@ -849,6 +861,15 @@ mod tests {
     #[test]
     fn json_escape_escapes_control_characters() {
         assert_eq!(json_escape("a\u{0001}b"), "a\\u0001b");
+    }
+
+    #[test]
+    fn hardened_downstream_h2_options_builds_with_flow_control_caps() {
+        let _options = super::hardened_downstream_h2_options();
+
+        assert_eq!(super::DOWNSTREAM_H2_MAX_CONCURRENT_STREAMS, 32);
+        assert_eq!(super::DOWNSTREAM_H2_MAX_SEND_BUFFER_SIZE, 256 * 1024);
+        assert_eq!(super::DOWNSTREAM_H2_MAX_PENDING_ACCEPT_RESET_STREAMS, 8);
     }
 
     #[test]

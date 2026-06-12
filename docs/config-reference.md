@@ -1579,6 +1579,11 @@ per vhost, or on a route-level proxy block.
 Fluxheim also installs hardened downstream HTTP/2 handshake defaults whenever
 HTTP/2 is enabled: decoded request header lists are capped at 64 KiB per stream
 and remotely initiated concurrent streams are capped at 32 per connection.
+HTTP/2 DATA frame size is kept at 16 KiB, the advertised receive window is
+fixed at 64 KiB, per-stream send buffering is capped at 256 KiB, and
+pending-accept reset streams are capped at 8 so slow-reading HTTP/2 clients
+cannot use the h2 crate's larger defaults to accumulate unbounded response
+buffers.
 Fluxheim also enforces `server.limits.max_request_headers` after HTTP/2 header
 decoding; duplicate header values such as split `Cookie` crumbs count toward
 that limit. These service-level caps are applied before vhost routing because
