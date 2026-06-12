@@ -9173,6 +9173,10 @@ fn apply_php_x_accel_expires(response: &mut ResponseHeader) -> FluxResult<()> {
         return Ok(());
     };
 
+    if php_origin_cache_policy_is_restrictive(response) {
+        return Ok(());
+    }
+
     response.remove_header("cache-control");
     response.remove_header("expires");
     response.remove_header("pragma");
@@ -9204,6 +9208,34 @@ fn apply_php_x_accel_expires(response: &mut ResponseHeader) -> FluxResult<()> {
         .insert_header("expires", httpdate::fmt_http_date(expires))
         .map_err(php_x_accel_header_error)?;
     Ok(())
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_origin_cache_policy_is_restrictive(response: &ResponseHeader) -> bool {
+    response
+        .headers
+        .get_all("cache-control")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(|directive| {
+            directive
+                .trim()
+                .split_once('=')
+                .map_or_else(|| directive.trim(), |(name, _)| name.trim())
+        })
+        .any(|directive| {
+            directive.eq_ignore_ascii_case("private")
+                || directive.eq_ignore_ascii_case("no-store")
+                || directive.eq_ignore_ascii_case("no-cache")
+        })
+        || response
+            .headers
+            .get_all("pragma")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .flat_map(|value| value.split(','))
+            .any(|directive| directive.trim().eq_ignore_ascii_case("no-cache"))
 }
 
 #[cfg(feature = "php-fpm")]
@@ -12163,13 +12195,13 @@ mod tests {
     fn php_x_accel_expires_maps_positive_ttl_to_cache_headers() {
         let mut response = ResponseHeader::build(200, None).unwrap();
         response.insert_header("x-accel-expires", "60").unwrap();
-        response.insert_header("cache-control", "no-cache").unwrap();
-        response.insert_header("pragma", "no-cache").unwrap();
+        response
+            .insert_header("cache-control", "public, no-transform")
+            .unwrap();
 
         apply_php_x_accel_expires(&mut response).unwrap();
 
         assert!(!response.headers.contains_key("x-accel-expires"));
-        assert!(!response.headers.contains_key("pragma"));
         assert_eq!(
             response
                 .headers
@@ -12178,6 +12210,36 @@ mod tests {
             Some("public, max-age=60")
         );
         assert!(response.headers.contains_key("expires"));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_x_accel_expires_preserves_restrictive_origin_cache_policy() {
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response.insert_header("x-accel-expires", "300").unwrap();
+        response
+            .insert_header("cache-control", "private, no-store")
+            .unwrap();
+        response.insert_header("pragma", "no-cache").unwrap();
+
+        apply_php_x_accel_expires(&mut response).unwrap();
+
+        assert!(!response.headers.contains_key("x-accel-expires"));
+        assert_eq!(
+            response
+                .headers
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok()),
+            Some("private, no-store")
+        );
+        assert_eq!(
+            response
+                .headers
+                .get("pragma")
+                .and_then(|value| value.to_str().ok()),
+            Some("no-cache")
+        );
+        assert!(!response.headers.contains_key("expires"));
     }
 
     #[cfg(feature = "php-fpm")]

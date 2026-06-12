@@ -354,7 +354,10 @@ for single-user/rootless deployments.
 - `X-Accel-Expires` response control handling. Implemented for PHP responses:
   Fluxheim strips the internal header, maps valid TTLs to `Cache-Control` and
   `Expires`, treats zero or past expiries as `no-store`, and uses `private`
-  directives for responses that set cookies.
+  directives for responses that set cookies. If the origin response already has
+  restrictive cache policy such as `Cache-Control: private`, `no-store`,
+  `no-cache`, or `Pragma: no-cache`, Fluxheim preserves that policy and does not
+  promote the response to shared-cache eligibility.
 - `fastcgi_intercept_errors`-style integration with Fluxheim error pages.
   Initial generic interception implemented as `php.intercept_error_statuses`.
 - Response header hide/pass/ignore controls for PHP backends.

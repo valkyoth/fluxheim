@@ -3083,7 +3083,11 @@ to offload files with configured PHP script extensions.
 Fluxheim also consumes PHP `X-Accel-Expires` control headers instead of
 forwarding them to clients. Positive TTLs become normal `Cache-Control` and
 `Expires` headers; responses with `Set-Cookie` use `private` cache directives,
-and zero or past expiries become `no-store, private`.
+and zero or past expiries become `no-store, private`. When the PHP response
+already carries restrictive origin cache policy such as `Cache-Control:
+private`, `no-store`, `no-cache`, or `Pragma: no-cache`, Fluxheim strips only
+the internal `X-Accel-Expires` header and preserves the origin cache policy
+instead of promoting the response to shared-cache eligibility.
 Fluxheim always strips hop-by-hop php-fpm response headers such as
 `Connection`, `Transfer-Encoding`, and headers named by `Connection` before it
 frames the client response.
