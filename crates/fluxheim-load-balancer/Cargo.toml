@@ -23,7 +23,7 @@ fluxheim-config = { path = "../fluxheim-config", features = ["load-balancer", "p
 futures = "0.3.32"
 getrandom = "0.4.2"
 log = "0.4.32"
-pingora = { version = "=0.8.0", default-features = false, features = ["lb", "proxy"] }
+pingora = { version = "=0.8.1", default-features = false, features = ["lb", "proxy"] }
 ring = "0.17.14"
 rustls = { version = "0.23.40", optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
