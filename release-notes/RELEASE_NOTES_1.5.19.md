@@ -83,6 +83,9 @@ during the v1.5.19 review cycle.
   collisions.
 - Hardened Unix admin-token and file-log opening by using rustix
   architecture-correct `NOFOLLOW` flags instead of hand-coded constants.
+- Hardened trusted-proxy `X-Forwarded-For` parsing so any malformed hop rejects
+  the forwarded chain and falls back to the direct peer IP instead of silently
+  attributing traffic to a trusted proxy hop.
 
 ## What Changed
 
