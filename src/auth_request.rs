@@ -12,6 +12,14 @@ pub(crate) struct AuthRequestInput {
     pub(crate) headers: Vec<(String, Zeroizing<String>)>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct AuthRequestContext<'a> {
+    pub(crate) original_uri: &'a str,
+    pub(crate) forwarded_for: Option<&'a str>,
+    pub(crate) forwarded_host: Option<&'a str>,
+    pub(crate) forwarded_proto: &'a str,
+}
+
 #[derive(Debug)]
 pub(crate) enum AuthRequestDecision {
     Allow { headers: Vec<(String, String)> },
@@ -21,10 +29,13 @@ pub(crate) enum AuthRequestDecision {
 pub(crate) fn auth_request_input(
     request: &RequestHeader,
     auth: &crate::config::AuthRequestConfig,
+    context: AuthRequestContext<'_>,
 ) -> AuthRequestInput {
     let mut headers = Vec::new();
     for name in &auth.forward_headers {
-        if let Some(value) = request_header_values_joined(request, name) {
+        if let Some(value) = trusted_context_header_value(name, context)
+            .or_else(|| request_header_values_joined(request, name))
+        {
             headers.push((name.clone(), Zeroizing::new(value)));
         }
     }
@@ -116,6 +127,25 @@ fn auth_request_io_error(error: impl std::fmt::Display) -> FluxError {
     )
 }
 
+fn trusted_context_header_value(name: &str, context: AuthRequestContext<'_>) -> Option<String> {
+    if name.eq_ignore_ascii_case("x-original-uri")
+        || name.eq_ignore_ascii_case("x-forwarded-uri")
+        || name.eq_ignore_ascii_case("x-auth-request-redirect")
+    {
+        return Some(context.original_uri.to_owned());
+    }
+    if name.eq_ignore_ascii_case("x-forwarded-for") || name.eq_ignore_ascii_case("x-real-ip") {
+        return context.forwarded_for.map(str::to_owned);
+    }
+    if name.eq_ignore_ascii_case("x-forwarded-host") {
+        return context.forwarded_host.map(str::to_owned);
+    }
+    if name.eq_ignore_ascii_case("x-forwarded-proto") {
+        return Some(context.forwarded_proto.to_owned());
+    }
+    None
+}
+
 fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<String> {
     let mut values = request
         .headers
@@ -123,8 +153,13 @@ fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<S
         .iter()
         .filter_map(|value| value.to_str().ok());
     let first = values.next()?.to_owned();
+    let separator = if name.eq_ignore_ascii_case("cookie") {
+        "; "
+    } else {
+        ", "
+    };
     Some(values.fold(first, |mut joined, value| {
-        joined.push_str(", ");
+        joined.push_str(separator);
         joined.push_str(value);
         joined
     }))

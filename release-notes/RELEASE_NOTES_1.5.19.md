@@ -81,6 +81,13 @@ during the v1.5.19 review cycle.
 - Hardened auth-request response header handling so allowed auth response
   headers cannot override Fluxheim's upstream request header policy on name
   collisions.
+- Hardened auth-request forwarded context handling so allow-listed
+  `X-Original-URI`, `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Host`, and
+  `X-Forwarded-Proto` values are synthesized from Fluxheim's trusted request
+  context instead of copied from spoofable client headers.
+- Matched auth-request split `Cookie` handling to the origin request path by
+  joining repeated `Cookie` fields with `; ` instead of `, ` before sending
+  the authorization subrequest.
 - Hardened Unix admin-token and file-log opening by using rustix
   architecture-correct `NOFOLLOW` flags instead of hand-coded constants.
 - Hardened trusted-proxy `X-Forwarded-For` parsing so any malformed hop rejects

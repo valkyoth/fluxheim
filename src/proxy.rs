@@ -8810,7 +8810,36 @@ async fn authorize_proxy_request(
         .route_index
         .and_then(|route_index| vhost.routes.get(route_index))
         .map(|route| route.name.as_str());
-    let input = crate::auth_request::auth_request_input(session.req_header(), auth);
+    let original_uri = session
+        .req_header()
+        .uri
+        .path_and_query()
+        .map(|path_and_query| path_and_query.as_str())
+        .unwrap_or("/");
+    let forwarded_host = request_host_header(session.req_header()).map(str::to_owned);
+    let forwarded_proto = if downstream_tls(session) {
+        "https"
+    } else {
+        "http"
+    };
+    #[cfg(not(feature = "privacy-mode"))]
+    let forwarded_for = ctx
+        .state
+        .as_deref()
+        .and_then(|state| effective_acl_client_ip(session, state))
+        .map(|ip| ip.to_string());
+    #[cfg(feature = "privacy-mode")]
+    let forwarded_for: Option<String> = None;
+    let input = crate::auth_request::auth_request_input(
+        session.req_header(),
+        auth,
+        crate::auth_request::AuthRequestContext {
+            original_uri,
+            forwarded_for: forwarded_for.as_deref(),
+            forwarded_host: forwarded_host.as_deref(),
+            forwarded_proto,
+        },
+    );
     let auth = auth.clone();
     let decision = match tokio::task::spawn_blocking(move || {
         crate::auth_request::fetch_auth_request_decision(&auth, &input)
@@ -10460,7 +10489,7 @@ mod tests {
         capture_revalidation_304_headers, request_cache_only_if_cached,
         response_with_revalidation_304_headers, revalidation_304_vary_changed,
     };
-    use crate::auth_request::auth_request_input;
+    use crate::auth_request::{AuthRequestContext, auth_request_input};
     #[cfg(feature = "compression-gzip")]
     use crate::compression::{
         ResponseCompressionEncoder, ResponseCompressionEncoding, gzip_response_eligible,
@@ -13507,7 +13536,7 @@ mod tests {
             ..AuthRequestConfig::default()
         };
 
-        let headers = auth_request_input(&request, &auth).headers;
+        let headers = auth_request_input(&request, &auth, AuthRequestContext::default()).headers;
         let headers = headers
             .iter()
             .map(|(name, value)| (name.clone(), value.as_str().to_owned()))
@@ -13519,6 +13548,73 @@ mod tests {
                 ("cookie".to_owned(), "a=1".to_owned())
             ]
         );
+    }
+
+    #[test]
+    fn auth_request_input_uses_trusted_context_for_spoofable_headers() {
+        let mut request = RequestHeader::build("GET", b"/admin?debug=1", None).unwrap();
+        request.insert_header("host", "app.example").unwrap();
+        request
+            .insert_header("x-original-uri", "/public/health")
+            .unwrap();
+        request
+            .insert_header("x-forwarded-for", "10.0.0.5")
+            .unwrap();
+        let auth = AuthRequestConfig {
+            enabled: true,
+            url: Some("http://127.0.0.1:4180/auth".to_owned()),
+            forward_headers: vec![
+                "x-original-uri".to_owned(),
+                "x-forwarded-for".to_owned(),
+                "x-forwarded-host".to_owned(),
+                "x-forwarded-proto".to_owned(),
+            ],
+            ..AuthRequestConfig::default()
+        };
+
+        let headers = auth_request_input(
+            &request,
+            &auth,
+            AuthRequestContext {
+                original_uri: "/admin?debug=1",
+                forwarded_for: Some("203.0.113.10"),
+                forwarded_host: Some("app.example"),
+                forwarded_proto: "https",
+            },
+        )
+        .headers
+        .iter()
+        .map(|(name, value)| (name.clone(), value.as_str().to_owned()))
+        .collect::<Vec<_>>();
+
+        assert_eq!(
+            headers,
+            [
+                ("x-original-uri".to_owned(), "/admin?debug=1".to_owned()),
+                ("x-forwarded-for".to_owned(), "203.0.113.10".to_owned()),
+                ("x-forwarded-host".to_owned(), "app.example".to_owned()),
+                ("x-forwarded-proto".to_owned(), "https".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn auth_request_input_joins_repeated_cookies_like_origin_requests() {
+        let mut request = RequestHeader::build("GET", b"/account", None).unwrap();
+        request.append_header("cookie", "session=low").unwrap();
+        request.append_header("cookie", "tenant=admin").unwrap();
+        let auth = AuthRequestConfig {
+            enabled: true,
+            url: Some("http://127.0.0.1:4180/auth".to_owned()),
+            forward_headers: vec!["cookie".to_owned()],
+            ..AuthRequestConfig::default()
+        };
+
+        let headers = auth_request_input(&request, &auth, AuthRequestContext::default()).headers;
+
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[0].0, "cookie");
+        assert_eq!(headers[0].1.as_str(), "session=low; tenant=admin");
     }
 
     #[test]

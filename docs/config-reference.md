@@ -1651,14 +1651,20 @@ accidentally.
 `[proxy.auth_request]` is Fluxheim's NGINX-style external authorization hook for
 proxy actions. When enabled, Fluxheim sends a bounded `GET` subrequest to `url`
 before forwarding the real request. Only headers listed in `forward_headers`
-are copied to the auth endpoint. Any 2xx auth response allows the request and
-headers listed in `allow_response_headers` are copied into the upstream request;
-4xx/5xx auth responses stop the request and return the auth status with a
-bounded text body. Other auth statuses are treated as a gateway-side auth
-failure. The hook can be configured globally, per vhost proxy, or per route
-proxy block. In FIPS/ISO-required mode, auth subrequests are limited to numeric
-local `http://127.0.0.1/...` or `http://[::1]/...` sidecars until outbound TLS
-client evidence is routed through the selected validated provider. With metrics
+are forwarded to the auth endpoint. For common request-context headers,
+Fluxheim does not copy client-supplied values: `X-Original-URI`,
+`X-Forwarded-URI`, `X-Auth-Request-Redirect`, `X-Forwarded-For`, `X-Real-IP`,
+`X-Forwarded-Host`, and `X-Forwarded-Proto` are synthesized from the trusted
+request context when those names are allow-listed. Repeated `Cookie` fields are
+joined with `; ` before the auth subrequest, matching the origin request path.
+Any 2xx auth response allows the request and headers listed in
+`allow_response_headers` are copied into the upstream request; 4xx/5xx auth
+responses stop the request and return the auth status with a bounded text body.
+Other auth statuses are treated as a gateway-side auth failure. The hook can be
+configured globally, per vhost proxy, or per route proxy block. In
+FIPS/ISO-required mode, auth subrequests are limited to numeric local
+`http://127.0.0.1/...` or `http://[::1]/...` sidecars until outbound TLS client
+evidence is routed through the selected validated provider. With metrics
 enabled, auth subrequest decisions are counted by
 `fluxheim_edge_policy_events_total` with bounded `auth_request` policy labels
 and `allow`, `deny`, or `error` outcomes.

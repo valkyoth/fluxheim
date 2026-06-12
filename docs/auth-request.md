@@ -89,6 +89,15 @@ Inbound headers stripped before auth:
 - any `X-User-*`, `X-Auth-*`, `X-Forwarded-*`, or configured identity headers
   that could be spoofed by the client.
 
+When an operator explicitly allow-lists common request-context names,
+Fluxheim-generated context wins over client-supplied values. `X-Original-URI`,
+`X-Forwarded-URI`, `X-Auth-Request-Redirect`, `X-Forwarded-For`, `X-Real-IP`,
+`X-Forwarded-Host`, and `X-Forwarded-Proto` are built from the current request
+and trusted proxy chain before the auth subrequest is sent. Repeated `Cookie`
+fields are joined with `; `, matching the normalized upstream origin request,
+so the auth service and origin receive the same cookie structure when cookies
+are explicitly forwarded.
+
 Headers copied from the auth response to the original upstream request must
 also be allow-listed. Recommended defaults:
 
