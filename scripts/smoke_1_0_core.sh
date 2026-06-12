@@ -299,6 +299,7 @@ max_request_body_bytes = "64MiB"
 [vhosts.routes.proxy]
 upstreams = ["127.0.0.1:$ORIGIN_PORT"]
 upstream_tls = false
+websocket = true
 read_timeout_secs = 600
 send_timeout_secs = 600
 

@@ -1264,6 +1264,18 @@ impl ProxyConfig {
 }
 
 impl ProxyConfigFragment {
+    pub(crate) fn has_conflicting_upstream_sources(&self) -> bool {
+        usize::from(self.upstream.is_some())
+            + usize::from(
+                self.upstreams
+                    .as_ref()
+                    .is_some_and(|upstreams| !upstreams.is_empty()),
+            )
+            + usize::from(self.upstreams_file.is_some())
+            + usize::from(self.upstreams_http_url.is_some())
+            > 1
+    }
+
     pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(path) = &mut self.upstream_ca_path
             && path.is_relative()

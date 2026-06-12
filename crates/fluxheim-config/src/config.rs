@@ -220,7 +220,7 @@ impl Config {
         }
 
         let mut config = Self::default();
-        config.merge(fragment);
+        config.merge(fragment)?;
         if include_conf_d && let Some(parent) = parent {
             config.merge_conf_d(parent)?;
         }
@@ -236,7 +236,7 @@ impl Config {
             if let Some(parent) = file.parent() {
                 fragment.resolve_relative_paths(parent);
             }
-            config.merge(fragment);
+            config.merge(fragment)?;
         }
 
         Ok(config)
@@ -260,7 +260,7 @@ impl Config {
             if let Some(parent) = file.parent() {
                 fragment.resolve_relative_paths(parent);
             }
-            self.merge(fragment);
+            self.merge(fragment)?;
         }
 
         Ok(())
@@ -282,7 +282,7 @@ impl Config {
         }
     }
 
-    fn merge(&mut self, fragment: ConfigFragment) {
+    fn merge(&mut self, fragment: ConfigFragment) -> Result<(), ConfigLoadError> {
         if let Some(server) = fragment.server {
             self.server.merge(server);
         }
@@ -305,6 +305,11 @@ impl Config {
             self.tls.merge(tls);
         }
         if let Some(proxy) = fragment.proxy {
+            if proxy.has_conflicting_upstream_sources() {
+                return Err(ConfigLoadError::Validate(
+                    ConfigError::ConflictingProxyUpstreams,
+                ));
+            }
             self.proxy.merge(proxy);
         }
         if let Some(compression) = fragment.compression {
@@ -329,6 +334,7 @@ impl Config {
             self.udp = udp;
         }
         self.vhosts.extend(fragment.vhosts);
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {

@@ -1126,6 +1126,27 @@ fn rejects_ambiguous_proxy_upstream_aliases() {
 }
 
 #[test]
+fn loading_config_rejects_ambiguous_proxy_upstream_aliases_before_fragment_merge() {
+    let dir = TestDir::new("config-file-conflicting-proxy-upstreams");
+    fs::write(
+        dir.child("fluxheim.toml"),
+        r#"
+            [proxy]
+            upstream = "127.0.0.1:3000"
+            upstreams = ["127.0.0.1:3001"]
+            "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        Config::load(Some(&dir.child("fluxheim.toml"))),
+        Err(ConfigLoadError::Validate(
+            ConfigError::ConflictingProxyUpstreams
+        ))
+    ));
+}
+
+#[test]
 fn rejects_invalid_proxy_upstream_weights() {
     let mismatch: Config = toml::from_str(
         r#"
