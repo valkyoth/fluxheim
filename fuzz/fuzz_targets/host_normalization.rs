@@ -15,6 +15,7 @@ fuzz_target!(|data: &[u8]| {
         assert!(!host.contains('?'));
         assert!(!host.contains('#'));
         assert!(!host.contains('@'));
+        assert!(!host.contains('%'));
         assert!(!host.chars().any(|ch| ch.is_whitespace() || ch.is_control()));
         assert_eq!(host, host.to_ascii_lowercase());
     }

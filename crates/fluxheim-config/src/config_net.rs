@@ -35,6 +35,9 @@ pub fn normalize_host(host: &str) -> Option<String> {
     if host.is_empty() || host.starts_with('.') {
         return None;
     }
+    if host.parse::<IpAddr>().is_err() && !valid_dns_hostname(host) {
+        return None;
+    }
 
     Some(host.to_ascii_lowercase())
 }
@@ -61,7 +64,11 @@ pub fn upstream_host(authority: &str) -> Option<String> {
 }
 
 pub fn valid_authority(authority: &str) -> bool {
-    authority.parse::<SocketAddr>().is_ok() || split_host_port(authority).is_some()
+    if authority.parse::<SocketAddr>().is_ok() {
+        return true;
+    }
+    split_host_port(authority)
+        .is_some_and(|(host, _)| host.parse::<IpAddr>().is_ok() || normalize_host(host).is_some())
 }
 
 pub fn valid_ip_matcher(value: &str) -> bool {
@@ -188,12 +195,7 @@ fn valid_u16_port(port: &str) -> bool {
 }
 
 fn valid_http_host(host: &str) -> bool {
-    !host.is_empty()
-        && !host.starts_with('-')
-        && !host.ends_with('-')
-        && host
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+    host.parse::<IpAddr>().is_ok() || valid_dns_hostname(host)
 }
 
 fn split_host_port(authority: &str) -> Option<(&str, u16)> {
@@ -213,4 +215,28 @@ fn split_host_port(authority: &str) -> Option<(&str, u16)> {
     }
 
     Some((host, port))
+}
+
+fn valid_dns_hostname(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    if host.is_empty() || host.len() > 253 || host.as_bytes().contains(&b'%') {
+        return false;
+    }
+
+    let mut last_label = "";
+    for label in host.split('.') {
+        if label.is_empty()
+            || label.len() > 63
+            || label.starts_with('-')
+            || label.ends_with('-')
+            || !label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return false;
+        }
+        last_label = label;
+    }
+
+    !last_label.bytes().all(|byte| byte.is_ascii_digit())
 }

@@ -19,6 +19,7 @@ use super::{
 };
 #[cfg(feature = "cache")]
 use super::{CachePeerConfig, CachePeerFillConfig};
+use crate::config_net::valid_authority;
 use crate::config_proxy::{
     DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS,
     DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS,
@@ -152,6 +153,12 @@ fn default_config_is_valid() {
 fn rejects_redirect_query_template_inside_url_authority() {
     assert!(!crate::config_route::valid_redirect_target_template(
         "https://{query}.example.test/"
+    ));
+    assert!(!crate::config_route::valid_redirect_target_template(
+        "https://example..test{uri}"
+    ));
+    assert!(!crate::config_route::valid_redirect_target_template(
+        "https://trusted%2finternal.example{uri}"
     ));
     assert!(crate::config_route::valid_redirect_target_template(
         "https://example.test/search?{query}"
@@ -10855,13 +10862,24 @@ fn normalizes_host_names() {
     assert_eq!(normalize_host("example.com?next=https://evil.test"), None);
     assert_eq!(normalize_host("example.com#fragment"), None);
     assert_eq!(normalize_host("user@example.com"), None);
+    assert_eq!(normalize_host("trusted%2finternal.example"), None);
+    assert_eq!(normalize_host("example..com"), None);
+    assert_eq!(normalize_host("-example.com"), None);
+    assert_eq!(normalize_host("example-.com"), None);
+    assert_eq!(normalize_host("example.123"), None);
     assert_eq!(normalize_host("example.com\u{0001}"), None);
     assert_eq!(normalize_host("*.example.com"), None);
+    assert_eq!(normalize_host("localhost"), Some("localhost".to_owned()));
+    assert_eq!(normalize_host("php-fpm:9000"), Some("php-fpm".to_owned()));
     assert_eq!(
         normalize_host_pattern("*.Example.COM"),
         Some("*.example.com".to_owned())
     );
     assert_eq!(normalize_host_pattern("*bad.example.com"), None);
+    assert!(!valid_authority("example..com:443"));
+    assert!(!valid_authority("trusted%2finternal.example:443"));
+    assert!(valid_authority("localhost:443"));
+    assert!(valid_authority("php-fpm:9000"));
 }
 
 fn host_candidate() -> impl Strategy<Value = String> {
@@ -10913,6 +10931,7 @@ proptest! {
             Just('#'),
             Just('@'),
             Just('*'),
+            Just('%'),
             Just(' '),
         ],
     ) {

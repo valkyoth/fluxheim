@@ -121,6 +121,10 @@ Notes:
   back to `default_vhost` for missing, invalid, or unknown host names. Set it
   to `true` in hardened multi-tenant deployments to reject missing or invalid
   host identity with `400` and unknown hosts with `421`.
+- Host names are normalized to lowercase and reject percent signs, empty labels
+  such as consecutive dots, leading/trailing label hyphens, overlong labels,
+  and numeric-only final labels. Single-label internal names such as
+  `localhost` remain valid.
 - If vhosts live in a sibling `conf.d` directory and `--config` points at the
   main file, set top-level `include_conf_d = true`; alternatively point
   `--config` at the config directory so visible `.toml` files are loaded in
@@ -1113,7 +1117,8 @@ cache_control = "private, no-store"
 ```
 
 Every `upstreams` entry must be an authority such as
-`127.0.0.1:3000` or `origin.example.test:443`.
+`127.0.0.1:3000` or `origin.example.test:443`. Hostname authorities use the
+same normalized DNS-label checks as incoming `Host` headers.
 Proxy upstream lists are capped at 64 entries and reject duplicates
 case-insensitively. Proxy error-page lists are also capped at 64 entries.
 For load-balancer builds, `upstreams_file = "/run/fluxheim/backends/app.txt"`

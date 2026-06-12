@@ -126,6 +126,9 @@ during the v1.5.19 review cycle.
 - Rejected redirect templates that place `{query}` inside the URL authority so
   attacker-controlled query strings cannot turn operator redirect rules into
   authority-changing redirects.
+- Hardened Host and authority normalization by rejecting percent signs,
+  consecutive dots, leading/trailing label hyphens, overlong labels, and
+  numeric-only final labels in DNS hostnames.
 - Hardened traffic mirroring by rejecting unsafe mirrored paths/queries before
   outbound URL construction and suppressing recursive mirror requests marked
   with `X-Fluxheim-Mirror`.

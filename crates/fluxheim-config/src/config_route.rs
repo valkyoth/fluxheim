@@ -9,6 +9,7 @@ use crate::config::{
     RateLimitConfig, UpstreamHttpVersion, VhostHeaderPolicyConfig, WebConfig, valid_http_token,
 };
 use crate::config_header::valid_route_regex_capture_variable;
+use crate::config_net::valid_http_authority;
 
 const MAX_ROUTE_METHODS: usize = 16;
 const MAX_ROUTE_REGEX_BYTES: usize = 4096;
@@ -624,17 +625,8 @@ pub fn valid_redirect_target_template(value: &str) -> bool {
     else {
         return false;
     };
-    let authority = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default()
-        .trim_matches(['[', ']']);
-    !authority.is_empty()
-        && !authority.contains('@')
-        && !authority.contains('\\')
-        && !authority.chars().any(|character| {
-            character.is_control() || character.is_whitespace() || matches!(character, '/' | '#')
-        })
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    valid_http_authority(authority)
 }
 
 fn redirect_template_authority_contains(value: &str, needle: &str) -> bool {
