@@ -2944,12 +2944,6 @@ impl AdminClientCertificatePolicy {
     }
 }
 
-impl AdminConfig {
-    fn admin_client_certificate_required(&self) -> bool {
-        self.client_certificate.required || !self.client_certificate.allow_sha256.is_empty()
-    }
-}
-
 fn single_sha256_header(headers: &HeaderMap, name: &str) -> AdminClientCertificateHeader {
     let mut values = headers.get_all(name).iter();
     let Some(value) = values.next() else {

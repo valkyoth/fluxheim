@@ -18,14 +18,14 @@ use crate::config_path::{
 };
 use crate::config_route::validate_route_path;
 
-pub(crate) const MAX_PHP_ALLOWED_EXTENSIONS: usize = 16;
-pub(crate) const MAX_PHP_DENY_PATH_PREFIXES: usize = 128;
-pub(crate) const MAX_PHP_HIDE_RESPONSE_HEADERS: usize = 64;
-pub(crate) const MAX_PHP_STDERR_FAILURE_PATTERNS: usize = 32;
-pub(crate) const MAX_PHP_PARAMS: usize = 128;
-pub(crate) const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
-pub(crate) const MAX_PHP_FPM_RETRY_STATUSES: usize = 100;
-pub(crate) const MAX_PHP_INTERCEPT_ERROR_STATUSES: usize = 200;
+pub const MAX_PHP_ALLOWED_EXTENSIONS: usize = 16;
+pub const MAX_PHP_DENY_PATH_PREFIXES: usize = 128;
+pub const MAX_PHP_HIDE_RESPONSE_HEADERS: usize = 64;
+pub const MAX_PHP_STDERR_FAILURE_PATTERNS: usize = 32;
+pub const MAX_PHP_PARAMS: usize = 128;
+pub const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
+pub const MAX_PHP_FPM_RETRY_STATUSES: usize = 100;
+pub const MAX_PHP_INTERCEPT_ERROR_STATUSES: usize = 200;
 const MAX_PHP_FPM_MANAGED_WORKERS: usize = 256;
 const MAX_PHP_FPM_MANAGED_MAX_REQUESTS: usize = 1_000_000;
 const MAX_PHP_FPM_MANAGED_MAX_SPAWN_RATE: usize = 1024;
@@ -149,7 +149,7 @@ impl Default for PhpConfig {
 }
 
 impl PhpConfig {
-    pub(crate) fn apply_preset_defaults(&mut self) {
+    pub fn apply_preset_defaults(&mut self) {
         match self.preset {
             PhpPreset::None => {}
             PhpPreset::WordPress => self.apply_wordpress_preset_defaults(),
@@ -177,7 +177,7 @@ impl PhpConfig {
         self.enabled
     }
 
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(root) = &mut self.root
             && root.is_relative()
         {
@@ -199,7 +199,7 @@ impl PhpConfig {
         }
     }
 
-    pub(crate) fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+    pub fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
         }
@@ -558,14 +558,14 @@ impl Default for PhpFpmConfig {
 
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_FPM_RETRIES: u8 = 10;
-pub(crate) const MAX_PHP_FPM_TCP_UPSTREAMS: usize = 64;
-pub(crate) const MAX_PHP_ERROR_PAGES: usize = 64;
+pub const MAX_PHP_FPM_TCP_UPSTREAMS: usize = 64;
+pub const MAX_PHP_ERROR_PAGES: usize = 64;
 const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
 const MAX_PHP_RESPONSE_CONFIG_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PHP_RESPONSE_HEADER_CONFIG_BYTES: usize = 1024 * 1024;
 
 impl PhpFpmConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(socket) = &mut self.socket
             && socket.is_relative()
         {
@@ -588,7 +588,7 @@ impl PhpFpmConfig {
         }
     }
 
-    pub(crate) fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+    pub fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         let endpoint_count = usize::from(self.socket.is_some())
             + usize::from(self.tcp.is_some())
             + usize::from(!self.tcp_upstreams.is_empty());
@@ -913,7 +913,7 @@ fn validate_php_root_path(
     Ok(())
 }
 
-pub(crate) fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(), ConfigError> {
+pub fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(), ConfigError> {
     if params.len() > MAX_PHP_PARAMS {
         return Err(ConfigError::InvalidPhpConfig {
             field: "php.params",
@@ -928,7 +928,7 @@ pub(crate) fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(
     Ok(())
 }
 
-pub(crate) fn validate_php_index(index: &str) -> Result<(), ConfigError> {
+pub fn validate_php_index(index: &str) -> Result<(), ConfigError> {
     if index.trim().is_empty()
         || index.contains('/')
         || index.contains('\\')
@@ -944,7 +944,7 @@ pub(crate) fn validate_php_index(index: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
-pub(crate) fn validate_php_extensions(extensions: &[String]) -> Result<(), ConfigError> {
+pub fn validate_php_extensions(extensions: &[String]) -> Result<(), ConfigError> {
     if extensions.is_empty() {
         return Err(ConfigError::InvalidPhpConfig {
             field: "php.allowed_extensions",
@@ -982,7 +982,7 @@ pub(crate) fn validate_php_extensions(extensions: &[String]) -> Result<(), Confi
     Ok(())
 }
 
-pub(crate) fn validate_php_deny_path_prefixes(prefixes: &[String]) -> Result<(), ConfigError> {
+pub fn validate_php_deny_path_prefixes(prefixes: &[String]) -> Result<(), ConfigError> {
     if prefixes.len() > MAX_PHP_DENY_PATH_PREFIXES {
         return Err(ConfigError::InvalidPhpConfig {
             field: "php.deny_path_prefixes",
@@ -1017,7 +1017,7 @@ pub(crate) fn validate_php_deny_path_prefixes(prefixes: &[String]) -> Result<(),
     Ok(())
 }
 
-pub(crate) fn validate_php_stderr_failure_patterns(patterns: &[String]) -> Result<(), ConfigError> {
+pub fn validate_php_stderr_failure_patterns(patterns: &[String]) -> Result<(), ConfigError> {
     if patterns.len() > MAX_PHP_STDERR_FAILURE_PATTERNS {
         return Err(ConfigError::InvalidPhpConfig {
             field: "php.stderr_failure_patterns",
@@ -1045,7 +1045,7 @@ pub(crate) fn validate_php_stderr_failure_patterns(patterns: &[String]) -> Resul
     Ok(())
 }
 
-pub(crate) fn validate_php_hide_response_headers(headers: &[String]) -> Result<(), ConfigError> {
+pub fn validate_php_hide_response_headers(headers: &[String]) -> Result<(), ConfigError> {
     if headers.len() > MAX_PHP_HIDE_RESPONSE_HEADERS {
         return Err(ConfigError::InvalidPhpConfig {
             field: "php.hide_response_headers",
@@ -1066,7 +1066,7 @@ pub(crate) fn validate_php_hide_response_headers(headers: &[String]) -> Result<(
     Ok(())
 }
 
-pub(crate) fn validate_php_fpm_retry_methods(methods: &[String]) -> Result<(), ConfigError> {
+pub fn validate_php_fpm_retry_methods(methods: &[String]) -> Result<(), ConfigError> {
     if methods.len() > MAX_PHP_FPM_RETRY_METHODS {
         return Err(ConfigError::InvalidPhpConfig {
             field: "php.fpm.retry_methods",
@@ -1102,7 +1102,7 @@ pub(crate) fn validate_php_fpm_retry_methods(methods: &[String]) -> Result<(), C
     Ok(())
 }
 
-pub(crate) fn validate_php_fpm_retry_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
+pub fn validate_php_fpm_retry_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
     if statuses.len() > MAX_PHP_FPM_RETRY_STATUSES {
         return Err(ConfigError::InvalidPhpConfig {
             field: "php.fpm.retry_statuses",
@@ -1127,7 +1127,7 @@ pub(crate) fn validate_php_fpm_retry_statuses(statuses: &[u16]) -> Result<(), Co
     Ok(())
 }
 
-pub(crate) fn validate_php_intercept_error_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
+pub fn validate_php_intercept_error_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
     if statuses.len() > MAX_PHP_INTERCEPT_ERROR_STATUSES {
         return Err(ConfigError::InvalidPhpConfig {
             field: "php.intercept_error_statuses",
@@ -1153,7 +1153,7 @@ pub(crate) fn validate_php_intercept_error_statuses(statuses: &[u16]) -> Result<
 }
 
 #[cfg(unix)]
-pub(crate) fn validate_php_fpm_managed_config(
+pub fn validate_php_fpm_managed_config(
     config: &PhpFpmConfig,
     scope: &'static str,
 ) -> Result<(), ConfigError> {
@@ -1546,7 +1546,7 @@ fn warn_high_risk_php_param(name: &str, value: &str) {
     }
 }
 
-pub(crate) fn protected_php_param_name(name: &str) -> bool {
+pub fn protected_php_param_name(name: &str) -> bool {
     matches!(
         name,
         "AUTH_TYPE"

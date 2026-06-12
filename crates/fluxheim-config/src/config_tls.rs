@@ -6,9 +6,9 @@ use crate::config::{ConfigError, validate_config_list_len};
 use crate::config_acme::{AcmeConfig, AcmeConfigFragment, VhostAcmeConfig};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 
-pub(crate) const MAX_TLS_CURVE_PREFERENCES: usize = 16;
-pub(crate) const MAX_TLS_CIPHER_SUITES: usize = 32;
-pub(crate) const MAX_TLS_CERTIFICATES: usize = 1024;
+pub const MAX_TLS_CURVE_PREFERENCES: usize = 16;
+pub const MAX_TLS_CIPHER_SUITES: usize = 32;
+pub const MAX_TLS_CERTIFICATES: usize = 1024;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -22,13 +22,13 @@ pub struct VhostTlsConfig {
 }
 
 impl VhostTlsConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(certificate) = &mut self.certificate {
             certificate.resolve_relative_paths(base_dir);
         }
     }
 
-    pub(crate) fn validate(
+    pub fn validate(
         &self,
         scope: &'static str,
         vhost_hosts: &[String],
@@ -82,7 +82,7 @@ pub struct TlsConfig {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct TlsConfigFragment {
+pub struct TlsConfigFragment {
     enabled: Option<bool>,
     backend: Option<TlsBackend>,
     profile: Option<TlsPolicyProfile>,
@@ -98,7 +98,7 @@ pub(crate) struct TlsConfigFragment {
 }
 
 impl TlsConfig {
-    pub(crate) fn merge(&mut self, fragment: TlsConfigFragment) {
+    pub fn merge(&mut self, fragment: TlsConfigFragment) {
         if let Some(enabled) = fragment.enabled {
             self.enabled = enabled;
         }
@@ -137,7 +137,7 @@ impl TlsConfig {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         validate_config_list_len(
             "tls.curve_preferences",
             self.curve_preferences.len(),
@@ -277,7 +277,7 @@ impl TlsConfig {
         }
     }
 
-    pub(crate) fn acme_issuer_exists(&self, issuer: &str) -> bool {
+    pub fn acme_issuer_exists(&self, issuer: &str) -> bool {
         self.acme
             .issuers
             .iter()
@@ -286,7 +286,7 @@ impl TlsConfig {
 }
 
 impl TlsConfigFragment {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(client_auth) = &mut self.client_auth {
             client_auth.resolve_relative_paths(base_dir);
         }
@@ -649,7 +649,7 @@ pub struct StaticCertificateConfig {
 }
 
 impl StaticCertificateConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if self.cert_path.is_relative() {
             self.cert_path = base_dir.join(&self.cert_path);
         }
@@ -658,7 +658,7 @@ impl StaticCertificateConfig {
         }
     }
 
-    pub(crate) fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+    pub fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         if self.cert_path.as_os_str().is_empty() {
             return Err(ConfigError::EmptyTlsCertificatePath { scope });
         }

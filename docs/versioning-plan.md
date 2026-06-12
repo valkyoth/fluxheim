@@ -3716,14 +3716,16 @@ the exception while the cache server is being completed as a focused sequence:
   Keep all existing feature profiles, binaries, release scripts, RPM/container
   builds, fuzz targets, and documentation paths working. Do not split proxy,
   cache, load-balancer, config, admin, or runtime crates in this release.
-- `v1.5.18`: configuration crate extraction line. Stop at moving config
-  structs, parsing, validation, config-source loading, and config tests behind
-  `crates/fluxheim-config`, with the root `fluxheim` crate re-exporting the
-  same public config surface it uses today. Preserve all error messages,
-  relative-path behavior, safe-file validation, profile compatibility, reload
-  classification inputs, config tester behavior, and release metadata checks.
-  Do not change config syntax, migrate operator config files, or split runtime
-  behavior in this release.
+- `v1.5.18`: configuration crate extraction and HTTP/2 response hardening line.
+  Stop at moving config structs, parsing, validation, config-source loading,
+  and config tests behind `crates/fluxheim-config`, with the root `fluxheim`
+  crate re-exporting the same public config surface it uses today. Preserve all
+  error messages, relative-path behavior, safe-file validation, profile
+  compatibility, reload classification inputs, config tester behavior, and
+  release metadata checks. Also add the HTTP/2 absolute response-write lifetime
+  bound and request-header-count clarification from the HTTP/2 Bomb review. Do
+  not change config syntax, migrate operator config files, or split runtime
+  behavior beyond the HTTP/2 timeout hardening in this release.
 - `v1.5.19`: load-balancer crate extraction line. Stop at moving the
   Fluxheim-owned load-balancer core into `crates/fluxheim-load-balancer`,
   including backend snapshots, discovery adapters, health checks, selection

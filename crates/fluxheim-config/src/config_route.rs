@@ -84,7 +84,7 @@ pub struct RouteConfig {
 }
 
 impl RouteConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(proxy) = &mut self.proxy {
             proxy.resolve_relative_paths(base_dir);
         }
@@ -99,7 +99,7 @@ impl RouteConfig {
         }
     }
 
-    pub(crate) fn validate(&self, vhost: &str, regex_enabled: bool) -> Result<(), ConfigError> {
+    pub fn validate(&self, vhost: &str, regex_enabled: bool) -> Result<(), ConfigError> {
         if self.name.trim().is_empty() {
             return Err(ConfigError::EmptyRouteName {
                 vhost: vhost.to_owned(),
@@ -404,7 +404,7 @@ impl Default for VhostRedirectConfig {
 }
 
 impl VhostRedirectConfig {
-    pub(crate) fn validate(&self, vhost: &str) -> Result<(), ConfigError> {
+    pub fn validate(&self, vhost: &str) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
         }
@@ -457,7 +457,7 @@ impl VhostRedirectConfig {
     }
 }
 
-pub(crate) fn validate_route_path(
+pub fn validate_route_path(
     _field: &'static str,
     value: &str,
     _prefix: bool,
@@ -478,7 +478,7 @@ pub(crate) fn validate_route_path(
     Ok(())
 }
 
-pub(crate) fn validate_route_rewrite_prefix_path(value: &str) -> Result<(), ConfigError> {
+pub fn validate_route_rewrite_prefix_path(value: &str) -> Result<(), ConfigError> {
     validate_route_path("vhosts.routes.rewrite_prefix", value, true)?;
     if value.contains('%') || value.chars().any(char::is_whitespace) {
         return Err(ConfigError::InvalidRouteMatcher {
@@ -489,7 +489,7 @@ pub(crate) fn validate_route_rewrite_prefix_path(value: &str) -> Result<(), Conf
     Ok(())
 }
 
-pub(crate) fn validate_route_rewrite_template_path(value: &str) -> Result<(), ConfigError> {
+pub fn validate_route_rewrite_template_path(value: &str) -> Result<(), ConfigError> {
     if !value.starts_with('/')
         || value.contains('\0')
         || value.contains('\\')
@@ -538,7 +538,7 @@ pub(crate) fn validate_route_rewrite_template_path(value: &str) -> Result<(), Co
     Ok(())
 }
 
-pub(crate) fn validate_route_regex(value: &str) -> Result<(), ConfigError> {
+pub fn validate_route_regex(value: &str) -> Result<(), ConfigError> {
     if value.is_empty()
         || value.len() > MAX_ROUTE_REGEX_BYTES
         || value.contains('\0')
@@ -559,7 +559,7 @@ pub(crate) fn validate_route_regex(value: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
-pub(crate) fn validate_route_methods(
+pub fn validate_route_methods(
     vhost: &str,
     route: &str,
     methods: &[String],
@@ -596,7 +596,7 @@ pub(crate) fn validate_route_methods(
     Ok(())
 }
 
-pub(crate) fn valid_redirect_target_template(value: &str) -> bool {
+pub fn valid_redirect_target_template(value: &str) -> bool {
     let value = value.trim();
     if !(value.starts_with("https://") || value.starts_with("http://"))
         || value

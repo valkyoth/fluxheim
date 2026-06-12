@@ -7,8 +7,8 @@ use crate::config::{ByteSize, ConfigError, validate_config_list_len};
 use crate::config_net::valid_trusted_proxy;
 use crate::config_path::{validate_optional_process_path, validate_required_process_path};
 
-pub(crate) const MAX_SERVER_LISTENERS: usize = 64;
-pub(crate) const MAX_TRUSTED_PROXIES: usize = 512;
+pub const MAX_SERVER_LISTENERS: usize = 64;
+pub const MAX_TRUSTED_PROXIES: usize = 512;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -53,7 +53,7 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
-    pub(crate) fn merge(&mut self, fragment: ServerConfigFragment) {
+    pub fn merge(&mut self, fragment: ServerConfigFragment) {
         if let Some(listen) = fragment.listen {
             self.listen = listen;
         }
@@ -86,7 +86,7 @@ impl ServerConfig {
         }
     }
 
-    pub(crate) fn validate_with_runtime_path_validation(
+    pub fn validate_with_runtime_path_validation(
         &self,
         validate_runtime_paths: bool,
         allow_empty_http_listeners: bool,
@@ -161,7 +161,7 @@ pub enum DownstreamProxyProtocol {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ServerConfigFragment {
+pub struct ServerConfigFragment {
     #[serde(default)]
     listen: Option<Vec<String>>,
     #[serde(default)]
@@ -185,7 +185,7 @@ pub(crate) struct ServerConfigFragment {
 }
 
 impl ServerConfigFragment {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(process) = &mut self.process {
             process.resolve_relative_paths(base_dir);
         }
@@ -427,17 +427,17 @@ fn default_process_certificate_reload_sock() -> PathBuf {
     default_process_runtime_path("fluxheim-cert-reload.sock")
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn default_process_runtime_path(name: &str) -> PathBuf {
     PathBuf::from("/run/fluxheim").join(name)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn default_process_runtime_path(name: &str) -> PathBuf {
-    crate::test_support::safe_relative_path(
-        &crate::test_support::test_root(),
-        &format!("run/{name}"),
-    )
+    let root = PathBuf::from("target/fluxheim-test-tmp");
+    let _ = std::fs::create_dir_all(&root);
+    let root = root.canonicalize().unwrap_or(root);
+    root.join("run").join(name)
 }
 
 fn default_process_threads() -> usize {

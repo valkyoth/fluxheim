@@ -10,7 +10,7 @@ use crate::config_path::{
     validate_non_world_writable_parent, validate_path, validate_required_process_path,
 };
 
-pub(crate) const MAX_ADMIN_HEALTH_PATH_BYTES: usize = 2048;
+pub const MAX_ADMIN_HEALTH_PATH_BYTES: usize = 2048;
 const DEFAULT_ADMIN_HEALTH_PATH: &str = "/_fluxheim/health";
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -62,7 +62,11 @@ impl Default for AdminConfig {
 }
 
 impl AdminConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn admin_client_certificate_required(&self) -> bool {
+        self.client_certificate.required || !self.client_certificate.allow_sha256.is_empty()
+    }
+
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(token_file) = &mut self.token_file
             && token_file.is_relative()
         {
@@ -76,7 +80,7 @@ impl AdminConfig {
         self.ops_socket.resolve_relative_paths(base_dir);
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         let listen = self.listen.parse::<SocketAddr>().map_err(|_| {
             ConfigError::InvalidAdminListenAddress {
                 address: self.listen.clone(),
@@ -208,7 +212,7 @@ impl AdminOpsSocketConfig {
     }
 
     #[cfg(all(unix, any(test, feature = "proxy")))]
-    pub(crate) fn mode_bits(&self) -> u32 {
+    pub fn mode_bits(&self) -> u32 {
         parse_admin_ops_socket_mode(&self.mode).unwrap_or(0o600)
     }
 }

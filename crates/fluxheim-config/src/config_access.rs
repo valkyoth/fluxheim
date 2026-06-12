@@ -48,7 +48,7 @@ impl Default for AccessPolicyConfig {
 }
 
 impl AccessPolicyConfig {
-    pub(crate) fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+    pub fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         validate_access_rule_list(scope, "allow", &self.allow)?;
         validate_access_rule_list(scope, "deny", &self.deny)?;
         validate_client_cert_sha256_list(
@@ -68,7 +68,7 @@ impl AccessPolicyConfig {
         Ok(())
     }
 
-    pub(crate) fn requires_geoip(&self) -> bool {
+    pub fn requires_geoip(&self) -> bool {
         !self.allow_countries.is_empty()
             || !self.deny_countries.is_empty()
             || !self.allow_asns.is_empty()
@@ -133,7 +133,7 @@ impl Default for RateLimitConfig {
 }
 
 impl RateLimitConfig {
-    pub(crate) fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+    pub fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
         }
@@ -248,7 +248,7 @@ impl Default for ConcurrencyLimitConfig {
 }
 
 impl ConcurrencyLimitConfig {
-    pub(crate) fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+    pub fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
         }
@@ -303,7 +303,7 @@ fn default_true() -> bool {
 
 const MAX_ACCESS_RULES: usize = 256;
 
-pub(crate) fn validate_access_rule_list(
+pub fn validate_access_rule_list(
     scope: &'static str,
     field: &'static str,
     values: &[String],
@@ -330,7 +330,7 @@ pub(crate) fn validate_access_rule_list(
     Ok(())
 }
 
-pub(crate) fn validate_client_cert_sha256_list(
+pub fn validate_client_cert_sha256_list(
     scope: &'static str,
     field: &'static str,
     values: &[String],

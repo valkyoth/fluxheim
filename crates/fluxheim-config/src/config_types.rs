@@ -6,7 +6,7 @@ use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ByteSize(pub(crate) u64);
+pub struct ByteSize(pub u64);
 
 impl ByteSize {
     pub const fn from_bytes(bytes: u64) -> Self {

@@ -983,6 +983,7 @@ upstream_tcp_fast_open = false
 read_timeout_secs = 60
 send_timeout_secs = 30
 downstream_write_timeout_secs = 30
+downstream_total_response_timeout_secs = 300
 downstream_min_send_rate_bytes_per_sec = 8192
 
 [proxy.load_balance]
@@ -1543,20 +1544,24 @@ timeout, and upstream request-body/write timeout.
 other token-based upgrade requests on that proxy block. Fluxheim validates this
 with `upstream_http_version = "http1"` because HTTP/2 origins do not use the
 same hop-by-hop upgrade mechanism.
-`downstream_write_timeout_secs` and
+`downstream_write_timeout_secs`,
+`downstream_total_response_timeout_secs`, and
 `downstream_min_send_rate_bytes_per_sec` protect the client-facing side of
-proxied responses. The write timeout caps stalled downstream writes and defaults
-to 30 seconds so HTTP/2 clients cannot hold response bodies indefinitely with a
-zero receive window. The minimum send rate asks Pingora to derive a timeout from
-each response chunk size and is mainly useful against slow HTTP/1 clients. These
-fields are optional and can be set globally, per vhost, or on a route-level
-proxy block.
+proxied responses. The write timeout caps each stalled downstream write and
+defaults to 30 seconds. The total response timeout is an absolute HTTP/2
+response-write lifetime bound and defaults to 300 seconds; it is not reset by
+partial writes or client `WINDOW_UPDATE` frames. The minimum send rate asks
+Pingora to derive a timeout from each response chunk size and is mainly useful
+against slow HTTP/1 clients. These fields are optional and can be set globally,
+per vhost, or on a route-level proxy block.
 
 Fluxheim also installs hardened downstream HTTP/2 handshake defaults whenever
 HTTP/2 is enabled: decoded request header lists are capped at 64 KiB per stream
-and remotely initiated concurrent streams are capped at 32 per connection. These
-service-level caps are applied before vhost routing because HTTP/2 negotiation
-happens before a `Host`/`:authority` value can be trusted.
+and remotely initiated concurrent streams are capped at 32 per connection.
+Fluxheim also enforces `server.limits.max_request_headers` after HTTP/2 header
+decoding; duplicate header values such as split `Cookie` crumbs count toward
+that limit. These service-level caps are applied before vhost routing because
+HTTP/2 negotiation happens before a `Host`/`:authority` value can be trusted.
 
 When `websocket = true` and the downstream request contains a valid
 `Connection: Upgrade` token plus a valid `Upgrade` token, Fluxheim forwards the

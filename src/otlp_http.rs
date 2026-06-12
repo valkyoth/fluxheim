@@ -138,6 +138,7 @@ fn load_ca_certificates(path: &Path) -> io::Result<Vec<ureq::tls::Certificate<'s
     Ok(certificates)
 }
 
+#[cfg(test)]
 pub(crate) fn plaintext_non_loopback_endpoint(endpoint: &str) -> bool {
     let Some(rest) = endpoint.strip_prefix("http://") else {
         return false;
@@ -152,6 +153,7 @@ pub(crate) fn plaintext_non_loopback_endpoint(endpoint: &str) -> bool {
             .is_ok_and(|address| address.is_loopback())
 }
 
+#[cfg(test)]
 fn endpoint_host(authority: &str) -> &str {
     if let Some(stripped) = authority.strip_prefix('[')
         && let Some((host, _)) = stripped.split_once(']')

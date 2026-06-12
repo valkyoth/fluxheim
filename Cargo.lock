@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim"
-version = "1.5.17"
+version = "1.5.18"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1030,6 +1030,7 @@ dependencies = [
  "fastcgi-client",
  "flate2",
  "fluxheim-common",
+ "fluxheim-config",
  "fluxheim-openssl-fips-support",
  "futures",
  "getrandom 0.4.2",
@@ -1069,9 +1070,21 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-common"
-version = "1.5.17"
+version = "1.5.18"
 dependencies = [
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "fluxheim-config"
+version = "1.5.18"
+dependencies = [
+ "fluxheim-common",
+ "log",
+ "proptest",
+ "regex",
+ "serde",
+ "toml",
 ]
 
 [[package]]

@@ -7,6 +7,27 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.18 - 2026-06-12
+
+### Changed
+
+- Move the Fluxheim configuration schema, parsing, validation, config-source
+  loading, and config tests into the internal `crates/fluxheim-config`
+  workspace crate.
+- Keep the root `crate::config` and `crate::config_*` compatibility shims so
+  runtime modules, release profiles, config tester behavior, and operator config
+  syntax remain unchanged.
+- Add a config-crate `test-support` feature so root integration tests retain
+  repository-local process paths without changing production defaults.
+
+### Security
+
+- Harden downstream HTTP/2 response handling against the HTTP/2 Bomb
+  window-stall half by adding an absolute
+  `proxy.downstream_total_response_timeout_secs` response-write lifetime bound.
+- Clarify and test that `server.limits.max_request_headers` counts duplicate
+  request header values, including split HTTP/2 `Cookie` crumbs, before routing.
+
 ## 1.5.17 - 2026-06-11
 
 ### Changed

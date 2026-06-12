@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.5.17"
+version = "1.5.18"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -9,7 +9,7 @@ description = "A modular Rust edge gateway for websites, caching, and load balan
 default-run = "fluxheim"
 
 [workspace]
-members = ["crates/fluxheim-common"]
+members = ["crates/fluxheim-common", "crates/fluxheim-config"]
 resolver = "3"
 
 [features]
@@ -30,6 +30,7 @@ proxy = [
     "ingress",
     "dep:async-trait",
     "dep:base64-ng",
+    "fluxheim-config/proxy",
     "dep:ring",
     "dep:rustix",
     "dep:serde_json",
@@ -42,12 +43,12 @@ compression = ["proxy"]
 compression-brotli = ["compression", "dep:brotli"]
 compression-gzip = ["compression", "dep:flate2"]
 compression-zstd = ["compression", "dep:zstd"]
-load-balancer = ["proxy", "pingora/lb"]
-stream-proxy = ["proxy"]
-udp-proxy = ["proxy"]
-traffic-mirror = ["proxy"]
-geoip = ["proxy", "dep:maxminddb"]
-cache = ["dep:bytes", "dep:moka", "dep:sha2", "pingora?/cache"]
+load-balancer = ["proxy", "fluxheim-config/load-balancer", "pingora/lb"]
+stream-proxy = ["proxy", "fluxheim-config/stream-proxy"]
+udp-proxy = ["proxy", "fluxheim-config/udp-proxy"]
+traffic-mirror = ["proxy", "fluxheim-config/traffic-mirror"]
+geoip = ["proxy", "dep:maxminddb", "fluxheim-config/geoip"]
+cache = ["dep:bytes", "dep:moka", "dep:sha2", "fluxheim-config/cache", "pingora?/cache"]
 web = [
     "dep:bytes",
     "dep:chrono",
@@ -58,19 +59,21 @@ web = [
 tls = ["ingress", "dep:rustix"]
 tls-rustls-backend = [
     "tls",
+    "fluxheim-config/tls-rustls-backend",
     "pingora/rustls",
     "dep:rustls",
     "dep:rustls-native-certs",
     "dep:tokio-rustls",
 ]
 tls-rustls = ["tls-rustls-backend", "rustls/ring"]
-tls-rustls-fips = ["tls-rustls-backend", "dep:aws-lc-rs", "rustls/fips"]
+tls-rustls-fips = ["tls-rustls-backend", "dep:aws-lc-rs", "fluxheim-config/tls-rustls-fips", "rustls/fips"]
 tls-rustls-iso19790 = ["tls-rustls-fips"]
-tls-openssl = ["tls", "pingora/openssl", "dep:openssl", "dep:tokio-openssl"]
-tls-openssl-fips = ["tls-openssl", "dep:fluxheim-openssl-fips-support", "dep:openssl"]
+tls-openssl = ["tls", "fluxheim-config/tls-openssl", "pingora/openssl", "dep:openssl", "dep:tokio-openssl"]
+tls-openssl-fips = ["tls-openssl", "dep:fluxheim-openssl-fips-support", "dep:openssl", "fluxheim-config/tls-openssl-fips"]
 tls-openssl-iso19790 = ["tls-openssl-fips"]
 acme = [
     "tls",
+    "fluxheim-config/acme",
     "dep:instant-acme",
     "dep:serde_json",
     "dep:sha2",
@@ -87,12 +90,12 @@ acme-client = [
     "instant-acme/hyper-rustls",
 ]
 metrics = ["dep:prometheus"]
-metrics-otlp = ["metrics", "dep:serde_json", "dep:ureq"]
-otel-tracing = ["proxy"]
-otel-otlp = ["otel-tracing", "dep:serde_json", "dep:ureq"]
+metrics-otlp = ["metrics", "dep:serde_json", "dep:ureq", "fluxheim-config/metrics-otlp"]
+otel-tracing = ["proxy", "fluxheim-config/otel-tracing"]
+otel-otlp = ["otel-tracing", "dep:serde_json", "dep:ureq", "fluxheim-config/otel-otlp"]
 php = ["proxy", "web"]
-php-fpm = ["php", "dep:fastcgi-client", "dep:tokio", "fastcgi-client/runtime-tokio"]
-privacy-mode = ["proxy", "web"]
+php-fpm = ["php", "dep:fastcgi-client", "dep:tokio", "fastcgi-client/runtime-tokio", "fluxheim-config/php-fpm"]
+privacy-mode = ["proxy", "web", "fluxheim-config/privacy-mode"]
 security = []
 
 # Cargo does not have a separate --group flag. These profile features are
@@ -181,6 +184,7 @@ clap = { version = "4.6.1", features = ["derive", "env"] }
 env_logger = "0.11.10"
 fastcgi-client = { version = "0.11.1", default-features = false, optional = true }
 fluxheim-common = { path = "crates/fluxheim-common" }
+fluxheim-config = { path = "crates/fluxheim-config" }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"], optional = true }
 futures = "0.3.32"
@@ -219,6 +223,7 @@ zstd = { version = "0.13.3", default-features = false, optional = true }
 
 [dev-dependencies]
 fluxheim-common = { path = "crates/fluxheim-common", features = ["test-support"] }
+fluxheim-config = { path = "crates/fluxheim-config", features = ["test-support"] }
 proptest = "1.6.0"
 
 [profile.release]

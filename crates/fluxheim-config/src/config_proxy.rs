@@ -1,4 +1,6 @@
 use std::collections::{BTreeSet, HashSet};
+#[cfg(feature = "load-balancer")]
+use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -18,8 +20,6 @@ use crate::config_net::{normalize_host, upstream_host, valid_authority, valid_up
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 use crate::config_route::validate_route_path;
 use crate::config_web::WebConfig;
-#[cfg(feature = "load-balancer")]
-use crate::load_balancer::backend_authority_key;
 
 const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
 
@@ -129,6 +129,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub downstream_write_timeout_secs: Option<u64>,
     #[serde(default)]
+    pub downstream_total_response_timeout_secs: Option<u64>,
+    #[serde(default)]
     pub downstream_min_send_rate_bytes_per_sec: Option<usize>,
     #[serde(default)]
     pub error_pages: Vec<ProxyErrorPageConfig>,
@@ -154,7 +156,7 @@ pub enum UpstreamHttpVersion {
     Http1AndHttp2,
 }
 
-pub(crate) const MAX_PROXY_UPSTREAMS: usize = 64;
+pub const MAX_PROXY_UPSTREAMS: usize = 64;
 const MIN_PROXY_UPSTREAMS_FILE_REFRESH_SECS: u64 = 1;
 const MAX_PROXY_UPSTREAMS_FILE_REFRESH_SECS: u64 = 300;
 #[cfg(feature = "load-balancer")]
@@ -166,12 +168,13 @@ const MAX_PROXY_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 const MAX_PROXY_UPSTREAM_PRIORITY_GROUP: u16 = 1000;
 const MAX_PROXY_UPSTREAM_MAX_IN_FLIGHT: usize = 1_000_000;
 const MAX_PROXY_UPSTREAM_TAGS_PER_BACKEND: usize = 16;
-pub(crate) const MAX_PROXY_ERROR_PAGES: usize = 64;
+pub const MAX_PROXY_ERROR_PAGES: usize = 64;
 const MAX_PROXY_UPSTREAM_H2_STREAMS: usize = 1024;
 const MAX_PROXY_UPSTREAM_TCP_KEEPALIVE_COUNT: usize = 128;
 const MAX_PROXY_UPSTREAM_TCP_RECV_BUFFER_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_PROXY_UPSTREAM_DSCP: u8 = 63;
-pub(crate) const DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS: u64 = 30;
+pub const DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS: u64 = 30;
+pub const DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS: u64 = 300;
 
 impl Default for ProxyConfig {
     fn default() -> Self {
@@ -223,6 +226,9 @@ impl Default for ProxyConfig {
             read_timeout_secs: None,
             send_timeout_secs: None,
             downstream_write_timeout_secs: Some(DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS),
+            downstream_total_response_timeout_secs: Some(
+                DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS,
+            ),
             downstream_min_send_rate_bytes_per_sec: None,
             error_pages: Vec::new(),
             load_balance: LoadBalanceConfig::default(),
@@ -263,7 +269,7 @@ impl ProxyConfig {
             .unwrap_or_else(|| upstream_host(self.primary_upstream()).unwrap_or_default())
     }
 
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(path) = &mut self.upstream_ca_path
             && path.is_relative()
         {
@@ -299,7 +305,7 @@ impl ProxyConfig {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         let dynamic_discovery_count = usize::from(self.upstreams_file.is_some())
             + usize::from(self.upstreams_http_url.is_some());
         if self.upstream.is_some()
@@ -886,6 +892,10 @@ impl ProxyConfig {
             "proxy.downstream_write_timeout_secs",
             self.downstream_write_timeout_secs,
         )?;
+        validate_optional_timeout_secs(
+            "proxy.downstream_total_response_timeout_secs",
+            self.downstream_total_response_timeout_secs,
+        )?;
         if self
             .downstream_min_send_rate_bytes_per_sec
             .is_some_and(|rate| rate == 0)
@@ -1293,6 +1303,31 @@ fn validate_load_balancer_backend_keys(upstreams: &[String]) -> Result<(), Confi
     Ok(())
 }
 
+#[cfg(feature = "load-balancer")]
+fn backend_authority_key(authority: &str) -> u64 {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    struct Fnv1a64(u64);
+
+    impl Hasher for Fnv1a64 {
+        fn finish(&self) -> u64 {
+            self.0
+        }
+
+        fn write(&mut self, bytes: &[u8]) {
+            for byte in bytes {
+                self.0 ^= u64::from(*byte);
+                self.0 = self.0.wrapping_mul(FNV_PRIME);
+            }
+        }
+    }
+
+    let mut hasher = Fnv1a64(FNV_OFFSET);
+    hasher.write(authority.as_bytes());
+    hasher.finish()
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProxyErrorPageConfig {
@@ -1303,7 +1338,7 @@ pub struct ProxyErrorPageConfig {
 }
 
 impl ProxyErrorPageConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         self.web.resolve_relative_paths(base_dir);
     }
 

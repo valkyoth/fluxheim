@@ -31,7 +31,7 @@ impl Default for GeoIpConfig {
 }
 
 impl GeoIpConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         for database in &mut self.databases {
             if database.path.is_relative() {
                 database.path = base_dir.join(&database.path);
@@ -39,7 +39,7 @@ impl GeoIpConfig {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
         }
@@ -101,7 +101,7 @@ pub enum GeoIpProvider {
 
 impl GeoIpProvider {
     #[cfg(feature = "geoip")]
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Maxmind => "maxmind",
             Self::CirclGeoOpen => "circl-geo-open",

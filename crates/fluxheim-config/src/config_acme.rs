@@ -13,9 +13,9 @@ use crate::config_net::{normalize_host, valid_authority};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 use crate::config_tls::TlsConfig;
 
-pub(crate) const MAX_ACME_ISSUERS: usize = 128;
-pub(crate) const MAX_VHOST_ACME_DOMAINS: usize = 64;
-pub(crate) const MAX_ACME_CHALLENGE_UPSTREAMS: usize = 64;
+pub const MAX_ACME_ISSUERS: usize = 128;
+pub const MAX_VHOST_ACME_DOMAINS: usize = 64;
+pub const MAX_ACME_CHALLENGE_UPSTREAMS: usize = 64;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -29,7 +29,7 @@ pub struct VhostAcmeConfig {
 }
 
 impl VhostAcmeConfig {
-    pub(crate) fn validate(
+    pub fn validate(
         &self,
         scope: &'static str,
         vhost_hosts: &[String],
@@ -119,7 +119,7 @@ pub struct VhostAcmeChallengeConfig {
 }
 
 impl VhostAcmeChallengeConfig {
-    pub(crate) fn validate(&self, vhost: &str) -> Result<(), ConfigError> {
+    pub fn validate(&self, vhost: &str) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
         }
@@ -237,7 +237,7 @@ pub struct AcmeConfig {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct AcmeConfigFragment {
+pub struct AcmeConfigFragment {
     enabled: Option<bool>,
     storage: Option<PathBuf>,
     contact_email: Option<String>,
@@ -264,7 +264,7 @@ impl Default for AcmeConfig {
 }
 
 impl AcmeConfig {
-    pub(crate) fn merge(&mut self, fragment: AcmeConfigFragment) {
+    pub fn merge(&mut self, fragment: AcmeConfigFragment) {
         if let Some(enabled) = fragment.enabled {
             self.enabled = enabled;
         }
@@ -291,7 +291,7 @@ impl AcmeConfig {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         validate_config_list_len("tls.acme.issuers", self.issuers.len(), MAX_ACME_ISSUERS)?;
 
         if self.enabled {
@@ -341,7 +341,7 @@ impl AcmeConfig {
 }
 
 impl AcmeConfigFragment {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(storage) = &mut self.storage
             && storage.is_relative()
         {

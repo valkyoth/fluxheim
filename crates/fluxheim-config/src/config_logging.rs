@@ -22,7 +22,7 @@ pub struct LoggingConfig {
 }
 
 impl LoggingConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(path) = &mut self.file.path
             && path.is_relative()
         {
@@ -30,7 +30,7 @@ impl LoggingConfig {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         self.file.validate()?;
         self.access.validate()
     }

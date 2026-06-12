@@ -5,7 +5,7 @@ use crate::config_types::ByteSize;
 
 const DEFAULT_COMPRESSION_MIN_BYTES: u64 = 1024;
 const DEFAULT_COMPRESSION_MAX_INPUT_BYTES: u64 = 1024 * 1024;
-pub(crate) const DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES: u64 = 2 * 1024 * 1024;
+pub const DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES: u64 = 2 * 1024 * 1024;
 const DEFAULT_COMPRESSION_GZIP_LEVEL: u32 = 4;
 const DEFAULT_COMPRESSION_ZSTD_LEVEL: i32 = 3;
 const DEFAULT_COMPRESSION_BROTLI_QUALITY: u32 = 4;
@@ -55,7 +55,7 @@ impl Default for CompressionConfig {
 }
 
 impl CompressionConfig {
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
         }

@@ -16,7 +16,7 @@ pub struct HeaderPolicyConfig {
 }
 
 impl HeaderPolicyConfig {
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         self.request.validate()?;
         self.response.validate()
     }
@@ -39,15 +39,15 @@ pub struct VhostHeaderPolicyConfig {
 }
 
 impl VhostHeaderPolicyConfig {
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         self.request.validate()?;
         self.response.validate()
     }
 }
 
-pub(crate) const MAX_HEADER_MUTATION_NAMES: usize = 128;
-pub(crate) const MAX_HEADER_APPEND_VALUES: usize = 32;
-pub(crate) const MAX_RESPONSE_HEADER_REWRITE_RULES: usize = 32;
+pub const MAX_HEADER_MUTATION_NAMES: usize = 128;
+pub const MAX_HEADER_APPEND_VALUES: usize = 32;
+pub const MAX_RESPONSE_HEADER_REWRITE_RULES: usize = 32;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -94,11 +94,11 @@ impl RequestHeaderPolicyOverlayConfig {
         validate_no_tls_header_append("vhosts.headers.request", &self.append)
     }
 
-    pub(crate) fn effective_unset(&self) -> Vec<String> {
+    pub fn effective_unset(&self) -> Vec<String> {
         combined_header_unset(&self.unset, &self.remove, &self.operations.remove)
     }
 
-    pub(crate) fn effective_set(&self) -> BTreeMap<String, String> {
+    pub fn effective_set(&self) -> BTreeMap<String, String> {
         combined_header_set(&self.set, &self.add, &self.operations.add)
     }
 }
@@ -526,11 +526,11 @@ impl ResponseHeaderPolicyOverlayConfig {
         self.rewrite.validate("vhosts.headers.response.rewrite")
     }
 
-    pub(crate) fn effective_unset(&self) -> Vec<String> {
+    pub fn effective_unset(&self) -> Vec<String> {
         combined_header_unset(&self.unset, &self.remove, &self.operations.remove)
     }
 
-    pub(crate) fn effective_set(&self) -> BTreeMap<String, String> {
+    pub fn effective_set(&self) -> BTreeMap<String, String> {
         combined_header_set(&self.set, &self.add, &self.operations.add)
     }
 }
@@ -559,14 +559,21 @@ impl HeaderValues {
         }
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         match self {
             Self::One(_) => 1,
             Self::Many(values) => values.len(),
         }
     }
 
-    pub(crate) fn extend(&mut self, extra: &Self) {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::One(value) => value.is_empty(),
+            Self::Many(values) => values.is_empty(),
+        }
+    }
+
+    pub fn extend(&mut self, extra: &Self) {
         let mut values = self.iter().map(str::to_owned).collect::<Vec<_>>();
         values.extend(extra.iter().map(str::to_owned));
         *self = Self::Many(values);
@@ -597,7 +604,7 @@ fn default_response_unset_headers() -> Vec<String> {
     vec!["x-powered-by".to_owned()]
 }
 
-pub(crate) fn validate_optional_header_value(
+pub fn validate_optional_header_value(
     field: &'static str,
     value: Option<&str>,
 ) -> Result<(), ConfigError> {
@@ -617,7 +624,7 @@ pub(crate) fn validate_optional_header_value(
     Ok(())
 }
 
-pub(crate) fn validate_header_mutations(
+pub fn validate_header_mutations(
     field: &'static str,
     unset: &[String],
     set: &BTreeMap<String, String>,
@@ -650,7 +657,7 @@ pub(crate) fn validate_header_mutations(
     Ok(())
 }
 
-pub(crate) fn validate_no_tls_header_append(
+pub fn validate_no_tls_header_append(
     field: &'static str,
     append: &BTreeMap<String, HeaderValues>,
 ) -> Result<(), ConfigError> {
@@ -665,7 +672,7 @@ pub(crate) fn validate_no_tls_header_append(
     Ok(())
 }
 
-pub(crate) fn validate_response_header_rewrite_rules(
+pub fn validate_response_header_rewrite_rules(
     field: &'static str,
     header: &'static str,
     rules: &[ResponseHeaderRewriteRuleConfig],
@@ -692,7 +699,7 @@ pub(crate) fn validate_response_header_rewrite_rules(
     Ok(())
 }
 
-pub(crate) fn validate_cookie_domain_rewrite_rules(
+pub fn validate_cookie_domain_rewrite_rules(
     field: &'static str,
     rules: &[ResponseHeaderRewriteRuleConfig],
 ) -> Result<(), ConfigError> {
@@ -718,7 +725,7 @@ pub(crate) fn validate_cookie_domain_rewrite_rules(
     Ok(())
 }
 
-pub(crate) fn validate_cookie_path_rewrite_rules(
+pub fn validate_cookie_path_rewrite_rules(
     field: &'static str,
     rules: &[ResponseHeaderRewriteRuleConfig],
 ) -> Result<(), ConfigError> {
@@ -744,7 +751,7 @@ pub(crate) fn validate_cookie_path_rewrite_rules(
     Ok(())
 }
 
-pub(crate) fn validate_header_add_aliases(
+pub fn validate_header_add_aliases(
     field: &'static str,
     set: &BTreeMap<String, String>,
     add: &BTreeMap<String, String>,
@@ -767,7 +774,7 @@ pub(crate) fn validate_header_add_aliases(
     Ok(())
 }
 
-pub(crate) fn combined_header_unset(
+pub fn combined_header_unset(
     unset: &[String],
     remove: &[String],
     operations_remove: &[String],
@@ -779,7 +786,7 @@ pub(crate) fn combined_header_unset(
     combined
 }
 
-pub(crate) fn combined_header_set(
+pub fn combined_header_set(
     set: &BTreeMap<String, String>,
     add: &BTreeMap<String, String>,
     operations_add: &BTreeMap<String, String>,
@@ -797,7 +804,7 @@ pub(crate) fn combined_header_set(
     combined
 }
 
-pub(crate) fn merge_header_mutations(
+pub fn merge_header_mutations(
     unset: &mut Vec<String>,
     set: &mut BTreeMap<String, String>,
     append: &mut BTreeMap<String, HeaderValues>,
@@ -817,7 +824,7 @@ pub(crate) fn merge_header_mutations(
     }
 }
 
-pub(crate) fn validate_header_name(field: &'static str, name: &str) -> Result<(), ConfigError> {
+pub fn validate_header_name(field: &'static str, name: &str) -> Result<(), ConfigError> {
     let normalized = name.trim();
     if normalized != name || !valid_http_header_name(name) {
         return Err(ConfigError::InvalidHeaderName {
@@ -829,7 +836,7 @@ pub(crate) fn validate_header_name(field: &'static str, name: &str) -> Result<()
     Ok(())
 }
 
-pub(crate) fn validate_dynamic_header_template(
+pub fn validate_dynamic_header_template(
     field: &'static str,
     name: &str,
     value: &str,
@@ -866,7 +873,7 @@ pub(crate) fn validate_dynamic_header_template(
     Ok(())
 }
 
-pub(crate) fn valid_dynamic_header_variable(variable: &str) -> bool {
+pub fn valid_dynamic_header_variable(variable: &str) -> bool {
     matches!(
         variable,
         "host"
@@ -889,7 +896,7 @@ pub(crate) fn valid_dynamic_header_variable(variable: &str) -> bool {
             .is_some_and(valid_http_header_name)
 }
 
-pub(crate) fn valid_route_regex_capture_variable(value: &str) -> bool {
+pub fn valid_route_regex_capture_variable(value: &str) -> bool {
     if value
         .parse::<usize>()
         .is_ok_and(|index| index < MAX_ROUTE_REGEX_CAPTURE_VALUES)
@@ -906,7 +913,7 @@ pub(crate) fn valid_route_regex_capture_variable(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-pub(crate) fn valid_http_header_name(name: &str) -> bool {
+pub fn valid_http_header_name(name: &str) -> bool {
     !name.is_empty()
         && name.bytes().all(|byte| {
             matches!(

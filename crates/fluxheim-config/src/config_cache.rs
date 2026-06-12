@@ -36,7 +36,7 @@ impl Default for CachePurgerConfig {
 }
 
 impl CachePurgerConfig {
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if self.enabled {
             #[cfg(not(feature = "cache"))]
             return Err(ConfigError::CachePurgerNotCompiled);
@@ -180,16 +180,16 @@ pub struct CacheConfig {
 }
 
 const MAX_CACHE_HEADER_LIST_ENTRIES: usize = 64;
-pub(crate) const MAX_CACHE_BYPASS_PATHS: usize = 128;
+pub const MAX_CACHE_BYPASS_PATHS: usize = 128;
 const MAX_CACHE_BYPASS_HEADERS: usize = 64;
-pub(crate) const MAX_CACHE_BYPASS_COOKIES: usize = 128;
+pub const MAX_CACHE_BYPASS_COOKIES: usize = 128;
 const MAX_CACHE_BYPASS_QUERY_PARAMS: usize = 128;
-pub(crate) const MAX_CACHE_VARY_REQUEST_HEADERS: usize = 32;
+pub const MAX_CACHE_VARY_REQUEST_HEADERS: usize = 32;
 const MAX_CACHE_KEY_PARTS: usize = 4;
-pub(crate) const MAX_CACHE_CONTENT_TYPES: usize = 64;
-pub(crate) const MAX_CACHE_IMAGE_EXTENSIONS: usize = 128;
-pub(crate) const MAX_CACHE_METHODS: usize = 16;
-pub(crate) const MAX_CACHE_STATUS_TTLS: usize = 128;
+pub const MAX_CACHE_CONTENT_TYPES: usize = 64;
+pub const MAX_CACHE_IMAGE_EXTENSIONS: usize = 128;
+pub const MAX_CACHE_METHODS: usize = 16;
+pub const MAX_CACHE_STATUS_TTLS: usize = 128;
 const MAX_CACHE_STALE_IF_ERROR_STATUSES: usize = 100;
 
 impl Default for CacheConfig {
@@ -244,13 +244,13 @@ impl Default for CacheConfig {
 
 impl CacheConfig {
     #[cfg(any(feature = "cache", test))]
-    pub(crate) fn with_presets(&self) -> Self {
+    pub fn with_presets(&self) -> Self {
         let mut config = self.clone();
         config.apply_preset_defaults();
         config
     }
 
-    pub(crate) fn apply_preset_defaults(&mut self) {
+    pub fn apply_preset_defaults(&mut self) {
         match self.preset {
             CachePreset::None => {}
             CachePreset::WordPress => self.apply_wordpress_preset_defaults(),
@@ -304,7 +304,7 @@ impl CacheConfig {
         );
     }
 
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(path) = &mut self.disk.path
             && path.is_relative()
         {
@@ -313,7 +313,7 @@ impl CacheConfig {
         self.disk.encryption.resolve_relative_paths(base_dir);
     }
 
-    pub(crate) fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+    pub fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         validate_cache_list_len(
             scope,
             "hide_response_headers",
@@ -640,7 +640,7 @@ impl CacheConfig {
     }
 }
 
-pub(crate) fn validate_cache_compliance_internal_crypto(
+pub fn validate_cache_compliance_internal_crypto(
     cache: &CacheConfig,
     scope: &'static str,
     require_disk_cache_encryption: bool,
@@ -962,7 +962,7 @@ impl Display for CacheKeyPart {
     }
 }
 
-pub(crate) fn extend_unique(target: &mut Vec<String>, values: impl IntoIterator<Item = String>) {
+pub fn extend_unique(target: &mut Vec<String>, values: impl IntoIterator<Item = String>) {
     for value in values {
         if !target.iter().any(|existing| existing == &value) {
             target.push(value);
@@ -1066,7 +1066,7 @@ impl CacheLockConfig {
     }
 }
 
-pub(crate) const CACHE_PREDICTOR_MAX_CAPACITY: usize = 1_048_576;
+pub const CACHE_PREDICTOR_MAX_CAPACITY: usize = 1_048_576;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -1773,7 +1773,7 @@ fn openbao_plain_http_authority_is_loopback(authority: &str) -> bool {
     http_authority_is_numeric_loopback(authority)
 }
 
-pub(crate) fn fips_allowed_local_openbao_endpoint(endpoint: &str) -> bool {
+pub fn fips_allowed_local_openbao_endpoint(endpoint: &str) -> bool {
     let Some(rest) = endpoint.strip_prefix("http://") else {
         return false;
     };

@@ -6,7 +6,7 @@ use crate::config::{ConfigError, validate_config_list_len};
 use crate::config_header::validate_optional_header_value;
 use crate::config_path::validate_path;
 
-pub(crate) const MAX_WEB_INDEX_FILES: usize = 32;
+pub const MAX_WEB_INDEX_FILES: usize = 32;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -43,7 +43,7 @@ impl WebConfig {
         self.root.is_some()
     }
 
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(root) = &mut self.root
             && root.is_relative()
         {
@@ -51,7 +51,7 @@ impl WebConfig {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if let Some(root) = &self.root
             && root.as_os_str().is_empty()
         {

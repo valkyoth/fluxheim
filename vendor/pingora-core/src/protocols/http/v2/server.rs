@@ -27,7 +27,7 @@ use pingora_http::{RequestHeader, ResponseHeader};
 use pingora_timeout::timeout;
 use std::sync::Arc;
 use std::task::ready;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::protocols::http::body_buffer::FixedBuffer;
 use crate::protocols::http::date::get_cached_date;
@@ -109,6 +109,9 @@ pub struct HttpSession {
     pub write_timeout: Option<Duration>,
     // How long to wait when draining (discarding) request body
     total_drain_timeout: Option<Duration>,
+    // Absolute timeout for the whole response write lifetime.
+    total_response_timeout: Option<Duration>,
+    response_write_started_at: Option<Instant>,
 }
 
 impl HttpSession {
@@ -150,6 +153,8 @@ impl HttpSession {
                 digest,
                 write_timeout: None,
                 total_drain_timeout: None,
+                total_response_timeout: None,
+                response_write_started_at: None,
             }
         }))
     }
@@ -261,6 +266,18 @@ impl HttpSession {
         self.total_drain_timeout
     }
 
+    /// Sets the total response timeout. This timeout covers the whole response
+    /// write lifetime and is not reset by partial writes or WINDOW_UPDATE
+    /// frames.
+    pub fn set_total_response_timeout(&mut self, timeout: Option<Duration>) {
+        self.total_response_timeout = timeout;
+    }
+
+    /// Get the total response timeout.
+    pub fn get_total_response_timeout(&self) -> Option<Duration> {
+        self.total_response_timeout
+    }
+
     // the write_* don't have timeouts because the actual writing happens on the connection
     // not here.
 
@@ -303,6 +320,7 @@ impl HttpSession {
 
         let resp = Response::from_parts(header.as_owned_parts(), ());
 
+        self.mark_response_write_started();
         let body_writer = self.send_response.send_response(resp, end).or_err(
             ErrorType::WriteError,
             "while writing h2 response to downstream",
@@ -316,6 +334,21 @@ impl HttpSession {
 
     /// Write response body to the client. See [Self::write_response_header] for how to use `end`.
     pub async fn write_body(&mut self, data: Bytes, end: bool) -> Result<()> {
+        self.mark_response_write_started();
+        let total_timeout = self.total_response_timeout_remaining()?;
+        match total_timeout {
+            Some(t) => match timeout(t, self.write_body_with_write_timeout(data, end)).await {
+                Ok(res) => res,
+                Err(_) => Error::e_explain(
+                    ErrorType::WriteTimedout,
+                    format!("writing h2 response, total timeout: {t:?}"),
+                ),
+            },
+            None => self.write_body_with_write_timeout(data, end).await,
+        }
+    }
+
+    async fn write_body_with_write_timeout(&mut self, data: Bytes, end: bool) -> Result<()> {
         match self.write_timeout {
             Some(t) => match timeout(t, self.do_write_body(data, end)).await {
                 Ok(res) => res,
@@ -326,6 +359,34 @@ impl HttpSession {
             },
             None => self.do_write_body(data, end).await,
         }
+    }
+
+    fn mark_response_write_started(&mut self) {
+        if self.response_write_started_at.is_none() {
+            self.response_write_started_at = Some(Instant::now());
+        }
+    }
+
+    fn total_response_timeout_remaining(&self) -> Result<Option<Duration>> {
+        let Some(total_timeout) = self.total_response_timeout else {
+            return Ok(None);
+        };
+        let Some(started_at) = self.response_write_started_at else {
+            return Ok(Some(total_timeout));
+        };
+        let Some(remaining) = total_timeout.checked_sub(started_at.elapsed()) else {
+            return Error::e_explain(
+                ErrorType::WriteTimedout,
+                format!("writing h2 response, total timeout: {total_timeout:?}"),
+            );
+        };
+        if remaining.is_zero() {
+            return Error::e_explain(
+                ErrorType::WriteTimedout,
+                format!("writing h2 response, total timeout: {total_timeout:?}"),
+            );
+        }
+        Ok(Some(remaining))
     }
 
     async fn do_write_body(&mut self, data: Bytes, end: bool) -> Result<()> {

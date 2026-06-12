@@ -9265,6 +9265,7 @@ const CACHE_UPGRADE_BYPASS_REASON: &str = "upgrade";
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct DownstreamFlowControl {
     write_timeout: Option<std::time::Duration>,
+    total_response_timeout: Option<std::time::Duration>,
     min_send_rate: Option<usize>,
 }
 
@@ -9276,6 +9277,12 @@ fn downstream_flow_control(proxy: &ProxyConfig) -> DownstreamFlowControl {
                 crate::config_proxy::DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS,
             ))
             .map(std::time::Duration::from_secs),
+        total_response_timeout: proxy
+            .downstream_total_response_timeout_secs
+            .or(Some(
+                crate::config_proxy::DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS,
+            ))
+            .map(std::time::Duration::from_secs),
         min_send_rate: proxy.downstream_min_send_rate_bytes_per_sec,
     }
 }
@@ -9284,6 +9291,7 @@ fn apply_downstream_flow_control(session: &mut Session, proxy: &ProxyConfig) {
     let flow_control = downstream_flow_control(proxy);
     let downstream = session.as_downstream_mut();
     downstream.set_write_timeout(flow_control.write_timeout);
+    downstream.set_total_response_timeout(flow_control.total_response_timeout);
     downstream.set_min_send_rate(flow_control.min_send_rate);
 }
 
@@ -10025,7 +10033,7 @@ fn request_limit_status(
         return Some(414);
     }
 
-    if request.headers.len() > limits.max_request_headers {
+    if request_header_field_count(request) > limits.max_request_headers {
         return Some(431);
     }
 
@@ -10041,6 +10049,10 @@ fn request_limit_status(
     }
 
     None
+}
+
+fn request_header_field_count(request: &RequestHeader) -> usize {
+    request.headers.iter().count()
 }
 
 fn request_body_limit_status(limit_bytes: u64, request: &RequestHeader) -> Option<u16> {
@@ -13574,6 +13586,9 @@ mod tests {
             super::downstream_flow_control(&proxy),
             super::DownstreamFlowControl {
                 write_timeout: Some(Duration::from_secs(20)),
+                total_response_timeout: Some(Duration::from_secs(
+                    crate::config_proxy::DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS,
+                )),
                 min_send_rate: Some(8192),
             }
         );
@@ -16232,6 +16247,22 @@ mod tests {
         request.append_header("x-one", "1").unwrap();
         request.append_header("x-two", "2").unwrap();
 
+        assert_eq!(request_limit_status(&limits, None, &request), Some(431));
+    }
+
+    #[test]
+    fn duplicate_request_header_values_count_toward_global_limit() {
+        let limits = ServerLimitsConfig {
+            max_request_header_bytes: ByteSize::from_bytes(512),
+            max_uri_bytes: ByteSize::from_bytes(128),
+            max_request_headers: 1,
+            max_request_body_bytes: ByteSize::from_bytes(1024),
+        };
+        let mut request = RequestHeader::build("GET", b"/ok", None).unwrap();
+        request.append_header("cookie", "a=1").unwrap();
+        request.append_header("cookie", "b=2").unwrap();
+
+        assert_eq!(super::request_header_field_count(&request), 2);
         assert_eq!(request_limit_status(&limits, None, &request), Some(431));
     }
 

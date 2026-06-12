@@ -5,12 +5,12 @@ use serde::{Deserialize, Serialize};
 use crate::config::{ConfigError, validate_config_list_len, validate_required_timeout_secs};
 use crate::config_net::{valid_authority, valid_upstream_alias};
 
-pub(crate) const MAX_UDP_ROUTES: usize = 64;
-pub(crate) const MAX_UDP_ROUTE_NAME_BYTES: usize = 128;
-pub(crate) const MAX_UDP_LISTENERS: usize = 64;
-pub(crate) const MAX_UDP_UPSTREAMS: usize = 64;
-pub(crate) const MAX_UDP_MAX_SESSIONS: usize = 1_000_000;
-pub(crate) const MAX_UDP_DATAGRAM_BYTES: usize = 65_507;
+pub const MAX_UDP_ROUTES: usize = 64;
+pub const MAX_UDP_ROUTE_NAME_BYTES: usize = 128;
+pub const MAX_UDP_LISTENERS: usize = 64;
+pub const MAX_UDP_UPSTREAMS: usize = 64;
+pub const MAX_UDP_MAX_SESSIONS: usize = 1_000_000;
+pub const MAX_UDP_DATAGRAM_BYTES: usize = 65_507;
 const MAX_UDP_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_UDP_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 
@@ -24,7 +24,7 @@ pub struct UdpConfig {
 }
 
 impl UdpConfig {
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if self.enabled {
             #[cfg(not(feature = "udp-proxy"))]
             return Err(ConfigError::UdpProxyNotCompiled);
@@ -101,7 +101,7 @@ pub struct UdpRouteConfig {
 }
 
 impl UdpRouteConfig {
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if matches!(
             self.mode,
             UdpRouteMode::QuicPassThrough | UdpRouteMode::GameProxy
@@ -187,7 +187,7 @@ impl UdpRouteConfig {
         Ok(())
     }
 
-    pub(crate) fn upstreams(&self) -> impl Iterator<Item = &str> {
+    pub fn upstreams(&self) -> impl Iterator<Item = &str> {
         self.upstream
             .iter()
             .map(String::as_str)

@@ -387,6 +387,25 @@ impl Session {
         }
     }
 
+    /// Sets the total response timeout for HTTP/2 downstream response writes.
+    /// This is an absolute lifetime bound and is not reset by partial writes.
+    ///
+    /// This is currently a noop for HTTP/1.x, subrequest, and custom sessions.
+    pub fn set_total_response_timeout(&mut self, timeout: Option<Duration>) {
+        if let Self::H2(s) = self {
+            s.set_total_response_timeout(timeout);
+        }
+    }
+
+    /// Gets the total response timeout for HTTP/2 downstream response writes.
+    pub fn get_total_response_timeout(&self) -> Option<Duration> {
+        if let Self::H2(s) = self {
+            s.get_total_response_timeout()
+        } else {
+            None
+        }
+    }
+
     /// Sets the minimum downstream send rate in bytes per second. This
     /// is used to calculate a write timeout in seconds based on the size
     /// of the buffer being written. If a `min_send_rate` is configured it

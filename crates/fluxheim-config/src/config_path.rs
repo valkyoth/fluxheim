@@ -2,10 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::ConfigError;
 
-pub(crate) fn validate_path(
-    field: impl Into<String>,
-    path: Option<&Path>,
-) -> Result<(), ConfigError> {
+pub fn validate_path(field: impl Into<String>, path: Option<&Path>) -> Result<(), ConfigError> {
     let field = field.into();
     let Some(path) = path else {
         return Ok(());
@@ -37,7 +34,7 @@ pub(crate) fn validate_path(
     Ok(())
 }
 
-pub(crate) fn validate_non_world_writable_parent(
+pub fn validate_non_world_writable_parent(
     field: impl Into<String>,
     path: Option<&Path>,
 ) -> Result<(), ConfigError> {
@@ -66,7 +63,7 @@ pub(crate) fn validate_non_world_writable_parent(
     Ok(())
 }
 
-pub(crate) fn validate_optional_process_path(
+pub fn validate_optional_process_path(
     field: &'static str,
     path: Option<&Path>,
 ) -> Result<(), ConfigError> {
@@ -76,10 +73,7 @@ pub(crate) fn validate_optional_process_path(
     Ok(())
 }
 
-pub(crate) fn validate_required_process_path(
-    field: &'static str,
-    path: &Path,
-) -> Result<(), ConfigError> {
+pub fn validate_required_process_path(field: &'static str, path: &Path) -> Result<(), ConfigError> {
     if path.as_os_str().is_empty() {
         return Err(ConfigError::EmptyProcessPath { field });
     }
@@ -120,7 +114,7 @@ pub(crate) fn validate_required_process_path(
     Ok(())
 }
 
-pub(crate) fn path_inspection_failed(
+pub fn path_inspection_failed(
     field: impl Into<String>,
     path: &Path,
     error: std::io::Error,
@@ -138,7 +132,7 @@ pub(crate) fn path_inspection_failed(
     }
 }
 
-pub(crate) fn path_existing_prefix_contains_symlink(path: &Path) -> std::io::Result<bool> {
+pub fn path_existing_prefix_contains_symlink(path: &Path) -> std::io::Result<bool> {
     let mut current = PathBuf::new();
 
     for component in path.components() {

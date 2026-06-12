@@ -46,8 +46,8 @@ compile_error!(
     "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe config file opening before building Fluxheim"
 );
 
-pub(crate) const MAX_CONFIG_DIRECTORY_FILES: usize = 256;
-pub(crate) const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
+pub const MAX_CONFIG_DIRECTORY_FILES: usize = 256;
+pub const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug)]
 pub enum ConfigLoadError {
@@ -100,7 +100,7 @@ impl Error for ConfigLoadError {
     }
 }
 
-pub(crate) fn canonical_config_source(path: &Path) -> Result<PathBuf, ConfigLoadError> {
+pub fn canonical_config_source(path: &Path) -> Result<PathBuf, ConfigLoadError> {
     if existing_path_contains_symlink(path).map_err(ConfigLoadError::Read)? {
         return Err(ConfigLoadError::InvalidPath {
             path: path.to_path_buf(),
@@ -119,7 +119,7 @@ pub(crate) fn canonical_config_source(path: &Path) -> Result<PathBuf, ConfigLoad
     Err(ConfigLoadError::InvalidPath { path })
 }
 
-pub(crate) fn toml_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
+pub fn toml_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
     let entries = fs::read_dir(dir).map_err(ConfigLoadError::Read)?;
     let mut files = Vec::new();
 
@@ -148,7 +148,7 @@ pub(crate) fn toml_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
     Ok(files)
 }
 
-pub(crate) fn config_directory_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
+pub fn config_directory_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
     let mut files = toml_files(dir)?;
     files.sort();
 
@@ -177,7 +177,7 @@ pub(crate) fn config_directory_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigL
     Ok(files)
 }
 
-pub(crate) fn regular_visible_toml_file(path: &Path) -> Result<bool, ConfigLoadError> {
+pub fn regular_visible_toml_file(path: &Path) -> Result<bool, ConfigLoadError> {
     if !is_visible_toml_file(path) {
         return Ok(false);
     }
@@ -185,7 +185,7 @@ pub(crate) fn regular_visible_toml_file(path: &Path) -> Result<bool, ConfigLoadE
     Ok(!metadata.file_type().is_symlink() && metadata.is_file())
 }
 
-pub(crate) fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigLoadError> {
+pub fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigLoadError> {
     let metadata = fs::symlink_metadata(path).map_err(ConfigLoadError::Read)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(ConfigLoadError::InvalidPath {
@@ -235,7 +235,7 @@ pub(crate) fn read_regular_config_file_to_string(path: &Path) -> Result<String, 
 }
 
 #[cfg(feature = "load-balancer")]
-pub(crate) fn read_proxy_upstreams_file(path: &Path) -> std::io::Result<Vec<String>> {
+pub fn read_proxy_upstreams_file(path: &Path) -> std::io::Result<Vec<String>> {
     const MAX_PROXY_UPSTREAMS_FILE_BYTES: u64 = 64 * 1024;
 
     let metadata = fs::symlink_metadata(path)?;

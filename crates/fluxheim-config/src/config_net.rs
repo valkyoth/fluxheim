@@ -52,7 +52,7 @@ pub fn normalize_host_pattern(host: &str) -> Option<String> {
     }
 }
 
-pub(crate) fn upstream_host(authority: &str) -> Option<String> {
+pub fn upstream_host(authority: &str) -> Option<String> {
     if let Ok(socket) = authority.parse::<SocketAddr>() {
         return Some(socket.ip().to_string());
     }
@@ -60,11 +60,11 @@ pub(crate) fn upstream_host(authority: &str) -> Option<String> {
     split_host_port(authority).map(|(host, _port)| host.to_owned())
 }
 
-pub(crate) fn valid_authority(authority: &str) -> bool {
+pub fn valid_authority(authority: &str) -> bool {
     authority.parse::<SocketAddr>().is_ok() || split_host_port(authority).is_some()
 }
 
-pub(crate) fn valid_ip_matcher(value: &str) -> bool {
+pub fn valid_ip_matcher(value: &str) -> bool {
     let value = value.trim();
     if value.is_empty() || value.chars().any(char::is_whitespace) {
         return false;
@@ -85,11 +85,11 @@ pub(crate) fn valid_ip_matcher(value: &str) -> bool {
     }
 }
 
-pub(crate) fn valid_trusted_proxy(value: &str) -> bool {
+pub fn valid_trusted_proxy(value: &str) -> bool {
     valid_ip_matcher(value)
 }
 
-pub(crate) fn valid_upstream_alias(alias: &str) -> bool {
+pub fn valid_upstream_alias(alias: &str) -> bool {
     !alias.is_empty()
         && alias.len() <= 64
         && alias
@@ -97,7 +97,7 @@ pub(crate) fn valid_upstream_alias(alias: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
-pub(crate) fn http_authority_is_loopback(authority: &str) -> bool {
+pub fn http_authority_is_loopback(authority: &str) -> bool {
     let Some(host) = http_authority_host(authority) else {
         return false;
     };
@@ -107,11 +107,11 @@ pub(crate) fn http_authority_is_loopback(authority: &str) -> bool {
             .is_ok_and(|address| address.is_loopback())
 }
 
-pub(crate) fn http_authority_is_numeric_loopback(authority: &str) -> bool {
+pub fn http_authority_is_numeric_loopback(authority: &str) -> bool {
     http_authority_host(authority).is_some_and(|host| host == "127.0.0.1" || host == "::1")
 }
 
-pub(crate) fn valid_http_authority(authority: &str) -> bool {
+pub fn valid_http_authority(authority: &str) -> bool {
     if authority.starts_with('[') {
         let Some(end) = authority.find(']') else {
             return false;

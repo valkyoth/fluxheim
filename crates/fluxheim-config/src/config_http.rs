@@ -5,7 +5,7 @@ use crate::config_net::{http_authority_is_numeric_loopback, valid_http_authority
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 use crate::config_path::validate_path;
 
-pub(crate) fn fips_allowed_local_otlp_endpoint(endpoint: &str) -> bool {
+pub fn fips_allowed_local_otlp_endpoint(endpoint: &str) -> bool {
     let Some(rest) = endpoint.strip_prefix("http://") else {
         return false;
     };
@@ -18,7 +18,7 @@ pub(crate) fn fips_allowed_local_otlp_endpoint(endpoint: &str) -> bool {
     !path.is_empty() && http_authority_is_numeric_loopback(authority)
 }
 
-pub(crate) fn fips_allowed_local_auth_request_endpoint(endpoint: &str) -> bool {
+pub fn fips_allowed_local_auth_request_endpoint(endpoint: &str) -> bool {
     let Some(rest) = endpoint.strip_prefix("http://") else {
         return false;
     };
@@ -31,7 +31,7 @@ pub(crate) fn fips_allowed_local_auth_request_endpoint(endpoint: &str) -> bool {
     !path.is_empty() && http_authority_is_numeric_loopback(authority)
 }
 
-pub(crate) fn fips_allowed_local_mirror_endpoint(endpoint: &str) -> bool {
+pub fn fips_allowed_local_mirror_endpoint(endpoint: &str) -> bool {
     let Some(rest) = endpoint.strip_prefix("http://") else {
         return false;
     };
@@ -42,7 +42,7 @@ pub(crate) fn fips_allowed_local_mirror_endpoint(endpoint: &str) -> bool {
     http_authority_is_numeric_loopback(authority)
 }
 
-pub(crate) fn valid_http_endpoint_url(endpoint: &str) -> bool {
+pub fn valid_http_endpoint_url(endpoint: &str) -> bool {
     let Some(rest) = endpoint
         .strip_prefix("http://")
         .or_else(|| endpoint.strip_prefix("https://"))
@@ -58,7 +58,7 @@ pub(crate) fn valid_http_endpoint_url(endpoint: &str) -> bool {
     !authority.is_empty() && !path.is_empty() && valid_http_authority(authority)
 }
 
-pub(crate) fn valid_http_base_url(endpoint: &str) -> bool {
+pub fn valid_http_base_url(endpoint: &str) -> bool {
     let Some(rest) = endpoint
         .strip_prefix("http://")
         .or_else(|| endpoint.strip_prefix("https://"))
@@ -73,7 +73,7 @@ pub(crate) fn valid_http_base_url(endpoint: &str) -> bool {
 }
 
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
-pub(crate) fn valid_http_otlp_endpoint(endpoint: &str) -> bool {
+pub fn valid_http_otlp_endpoint(endpoint: &str) -> bool {
     let Some(rest) = endpoint
         .strip_prefix("http://")
         .or_else(|| endpoint.strip_prefix("https://"))
@@ -93,10 +93,7 @@ pub(crate) fn valid_http_otlp_endpoint(endpoint: &str) -> bool {
 }
 
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
-pub(crate) fn validate_otlp_ca_cert_path(
-    field: &str,
-    path: Option<&Path>,
-) -> Result<(), &'static str> {
+pub fn validate_otlp_ca_cert_path(field: &str, path: Option<&Path>) -> Result<(), &'static str> {
     let Some(path) = path else {
         return Ok(());
     };
@@ -109,7 +106,7 @@ pub(crate) fn validate_otlp_ca_cert_path(
 }
 
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
-pub(crate) fn valid_service_name(name: &str) -> bool {
+pub fn valid_service_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 128
         && name

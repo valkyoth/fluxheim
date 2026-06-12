@@ -11,7 +11,7 @@ use crate::config_header::valid_http_header_name;
 use crate::config_net::normalize_host;
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 
-pub(crate) const LB_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
+pub const LB_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
 const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRINGS: usize = 8;
 const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRING_BYTES: usize = 1024;
 const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_JSON_MATCHERS: usize = 8;
@@ -78,7 +78,7 @@ impl Default for LoadBalanceConfig {
 }
 
 impl LoadBalanceConfig {
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if self.selection.requires_hash_header() {
             let Some(header) = self.hash_header.as_deref() else {
                 return Err(ConfigError::InvalidLoadBalanceSelection {
@@ -216,7 +216,7 @@ pub enum LoadBalanceSelection {
 }
 
 impl LoadBalanceSelection {
-    pub(crate) fn requires_hash_header(self) -> bool {
+    pub fn requires_hash_header(self) -> bool {
         matches!(
             self,
             Self::HeaderHash
@@ -226,7 +226,7 @@ impl LoadBalanceSelection {
         )
     }
 
-    pub(crate) fn requires_hash_cookie(self) -> bool {
+    pub fn requires_hash_cookie(self) -> bool {
         matches!(
             self,
             Self::CookieHash
@@ -236,7 +236,7 @@ impl LoadBalanceSelection {
         )
     }
 
-    pub(crate) fn uses_bounded_load(self) -> bool {
+    pub fn uses_bounded_load(self) -> bool {
         matches!(
             self,
             Self::BoundedLoadConsistentSourceHash
@@ -246,7 +246,7 @@ impl LoadBalanceSelection {
         )
     }
 
-    pub(crate) fn uses_maglev(self) -> bool {
+    pub fn uses_maglev(self) -> bool {
         matches!(
             self,
             Self::MaglevSourceHash
@@ -257,7 +257,7 @@ impl LoadBalanceSelection {
     }
 
     #[cfg(feature = "load-balancer")]
-    pub(crate) fn supports_runtime_weight_override(self) -> bool {
+    pub fn supports_runtime_weight_override(self) -> bool {
         matches!(
             self,
             Self::RoundRobin | Self::LeastConnections | Self::LeastSessions | Self::LeastTime
@@ -988,7 +988,7 @@ pub enum LoadBalanceManagedCookieSameSite {
 
 #[cfg(feature = "load-balancer")]
 impl LoadBalanceManagedCookieSameSite {
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Strict => "Strict",
             Self::Lax => "Lax",
@@ -1153,7 +1153,7 @@ impl Default for LoadBalanceQueueConfig {
 
 impl LoadBalanceQueueConfig {
     #[cfg(feature = "load-balancer")]
-    pub(crate) fn enabled(&self) -> bool {
+    pub fn enabled(&self) -> bool {
         self.max_waiting > 0 && self.timeout_ms > 0
     }
 
@@ -1275,7 +1275,7 @@ fn default_lb_all_down_status() -> u16 {
     502
 }
 
-pub(crate) fn default_bounded_load_factor_per_mille() -> u16 {
+pub fn default_bounded_load_factor_per_mille() -> u16 {
     1250
 }
 

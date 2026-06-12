@@ -11,16 +11,16 @@ pub use crate::config_acme::{
     AcmeIssuerConfig, AcmeRenewalConfig, VhostAcmeChallengeConfig, VhostAcmeConfig,
 };
 #[cfg(test)]
-pub(crate) use crate::config_acme::{
+pub use crate::config_acme::{
     MAX_ACME_CHALLENGE_UPSTREAMS, MAX_ACME_ISSUERS, MAX_VHOST_ACME_DOMAINS,
 };
-pub(crate) use crate::config_admin::MAX_ADMIN_HEALTH_PATH_BYTES;
+pub use crate::config_admin::MAX_ADMIN_HEALTH_PATH_BYTES;
 pub use crate::config_admin::{
     AdminAuthThrottleConfig, AdminClientCertificateConfig, AdminConfig, AdminHealthConfig,
     AdminHealthResponseMode, AdminOpsSocketConfig, AdminRemoteTransportMode,
     AdminSelfHealingConfig, AdminTransportConfig,
 };
-pub(crate) use crate::config_cache::{
+pub use crate::config_cache::{
     CACHE_PREDICTOR_MAX_CAPACITY, extend_unique, validate_cache_compliance_internal_crypto,
 };
 pub use crate::config_cache::{
@@ -31,14 +31,14 @@ pub use crate::config_cache::{
     CacheRangeSliceConfig, CacheStaleErrorKind,
 };
 #[cfg(test)]
-pub(crate) use crate::config_cache::{
+pub use crate::config_cache::{
     MAX_CACHE_BYPASS_COOKIES, MAX_CACHE_BYPASS_PATHS, MAX_CACHE_CONTENT_TYPES,
     MAX_CACHE_IMAGE_EXTENSIONS, MAX_CACHE_METHODS, MAX_CACHE_STATUS_TTLS,
     MAX_CACHE_VARY_REQUEST_HEADERS, fips_allowed_local_openbao_endpoint,
 };
 pub use crate::config_compression::CompressionConfig;
 #[cfg(test)]
-pub(crate) use crate::config_compression::DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES;
+pub use crate::config_compression::DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES;
 pub use crate::config_geoip::{GeoIpConfig, GeoIpDatabaseConfig, GeoIpProvider};
 pub use crate::config_header::{
     ForwardedClientIpHeaderMode, HeaderOperationsConfig, HeaderPolicyConfig, HeaderValues,
@@ -47,7 +47,7 @@ pub use crate::config_header::{
     ResponseHeaderRewriteRuleConfig, ResponseHstsConfig, VhostHeaderPolicyConfig,
 };
 #[cfg(test)]
-pub(crate) use crate::config_header::{MAX_HEADER_APPEND_VALUES, MAX_HEADER_MUTATION_NAMES};
+pub use crate::config_header::{MAX_HEADER_APPEND_VALUES, MAX_HEADER_MUTATION_NAMES};
 #[cfg(test)]
 use crate::config_header::{valid_dynamic_header_variable, validate_dynamic_header_template};
 use crate::config_http::{
@@ -64,7 +64,7 @@ pub use crate::config_load_balance::{
 };
 pub use crate::config_loader::ConfigLoadError;
 #[cfg(feature = "load-balancer")]
-pub(crate) use crate::config_loader::read_proxy_upstreams_file;
+pub use crate::config_loader::read_proxy_upstreams_file;
 use crate::config_loader::{
     canonical_config_source, config_directory_files, read_regular_config_file_to_string,
     regular_visible_toml_file, toml_files,
@@ -78,9 +78,9 @@ pub use crate::config_observability::{
     MetricsConfig, MetricsOtlpExportConfig, OtlpTraceExportConfig, TracingConfig, TracingMode,
 };
 #[cfg(feature = "php-fpm")]
-pub(crate) use crate::config_php::protected_php_param_name;
+pub use crate::config_php::protected_php_param_name;
 #[cfg(test)]
-pub(crate) use crate::config_php::{
+pub use crate::config_php::{
     MAX_PHP_ALLOWED_EXTENSIONS, MAX_PHP_DENY_PATH_PREFIXES, MAX_PHP_ERROR_PAGES,
     MAX_PHP_FPM_RETRY_METHODS, MAX_PHP_FPM_RETRY_STATUSES, MAX_PHP_FPM_TCP_UPSTREAMS,
     MAX_PHP_HIDE_RESPONSE_HEADERS, MAX_PHP_INTERCEPT_ERROR_STATUSES, MAX_PHP_PARAMS,
@@ -95,7 +95,7 @@ pub use crate::config_proxy::{
     UpstreamProxyProtocol,
 };
 #[cfg(test)]
-pub(crate) use crate::config_proxy::{MAX_PROXY_ERROR_PAGES, MAX_PROXY_UPSTREAMS};
+pub use crate::config_proxy::{MAX_PROXY_ERROR_PAGES, MAX_PROXY_UPSTREAMS};
 pub use crate::config_route::{
     GrpcRouteConfig, RouteConfig, RouteRedirectConfig, VhostRedirectConfig,
 };
@@ -105,11 +105,11 @@ pub use crate::config_server::{
     ServerLimitsConfig, ServerProcessConfig,
 };
 #[cfg(test)]
-pub(crate) use crate::config_server::{MAX_SERVER_LISTENERS, MAX_TRUSTED_PROXIES};
+pub use crate::config_server::{MAX_SERVER_LISTENERS, MAX_TRUSTED_PROXIES};
 pub use crate::config_stream::{StreamConfig, StreamRouteConfig};
 use crate::config_tls::TlsConfigFragment;
 #[cfg(test)]
-pub(crate) use crate::config_tls::{
+pub use crate::config_tls::{
     MAX_TLS_CERTIFICATES, MAX_TLS_CIPHER_SUITES, MAX_TLS_CURVE_PREFERENCES,
 };
 pub use crate::config_tls::{
@@ -120,7 +120,7 @@ pub use crate::config_tls::{
 pub use crate::config_types::{ByteSize, ByteSizeParseError};
 pub use crate::config_udp::{UdpConfig, UdpRouteConfig, UdpRouteMode};
 #[cfg(test)]
-pub(crate) use crate::config_web::MAX_WEB_INDEX_FILES;
+pub use crate::config_web::MAX_WEB_INDEX_FILES;
 pub use crate::config_web::{DirectoryListingConfig, WebConfig};
 use serde::{Deserialize, Serialize};
 
@@ -131,10 +131,10 @@ const MAX_VHOSTS: usize = 1024;
 const MAX_VHOST_NAME_BYTES: usize = 128;
 const MAX_VHOST_HOSTS: usize = 64;
 const MAX_VHOST_ROUTES: usize = 256;
-pub(crate) const MAX_ROUTE_NAME_BYTES: usize = 128;
-pub(crate) const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
-pub(crate) const MAX_ROUTE_REGEX_CAPTURE_NAME_BYTES: usize = 64;
-pub(crate) const MAX_ROUTE_REGEX_PROGRAM_BYTES: usize = 1024 * 1024;
+pub const MAX_ROUTE_NAME_BYTES: usize = 128;
+pub const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
+pub const MAX_ROUTE_REGEX_CAPTURE_NAME_BYTES: usize = 64;
+pub const MAX_ROUTE_REGEX_PROGRAM_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -708,7 +708,7 @@ impl ConfigFragment {
         })
     }
 
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(server) = &mut self.server {
             server.resolve_relative_paths(base_dir);
         }
@@ -792,7 +792,7 @@ impl VhostConfig {
             .collect()
     }
 
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         self.tls.resolve_relative_paths(base_dir);
         self.proxy.resolve_relative_paths(base_dir);
         self.cache.resolve_relative_paths(base_dir);
@@ -2437,7 +2437,7 @@ fn disabled_proxy_config() -> ProxyConfig {
     ProxyConfig::disabled()
 }
 
-pub(crate) fn valid_http_token(value: &str) -> bool {
+pub fn valid_http_token(value: &str) -> bool {
     !value.is_empty()
         && value.bytes().all(|byte| {
             matches!(
@@ -2462,7 +2462,7 @@ pub(crate) fn valid_http_token(value: &str) -> bool {
         })
 }
 
-pub(crate) fn validate_config_list_len(
+pub fn validate_config_list_len(
     field: impl Into<String>,
     len: usize,
     max: usize,
@@ -2476,7 +2476,7 @@ pub(crate) fn validate_config_list_len(
     Ok(())
 }
 
-pub(crate) fn validate_optional_timeout_secs(
+pub fn validate_optional_timeout_secs(
     field: &'static str,
     value: Option<u64>,
 ) -> Result<(), ConfigError> {
@@ -2486,17 +2486,14 @@ pub(crate) fn validate_optional_timeout_secs(
     Ok(())
 }
 
-pub(crate) fn validate_required_timeout_secs(
-    field: &'static str,
-    value: u64,
-) -> Result<(), ConfigError> {
+pub fn validate_required_timeout_secs(field: &'static str, value: u64) -> Result<(), ConfigError> {
     if value == 0 {
         return Err(ConfigError::InvalidProxyTimeout { field });
     }
     Ok(())
 }
 
-pub(crate) fn valid_credential_name(value: &str) -> bool {
+pub fn valid_credential_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && !value.starts_with('.')

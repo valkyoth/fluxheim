@@ -19,7 +19,10 @@ use super::{
 };
 #[cfg(feature = "cache")]
 use super::{CachePeerConfig, CachePeerFillConfig};
-use crate::config_proxy::DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS;
+use crate::config_proxy::{
+    DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS,
+    DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS,
+};
 use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
 #[cfg(unix)]
 use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
@@ -105,6 +108,12 @@ fn default_config_is_valid() {
     assert_eq!(
         Config::default().proxy.downstream_write_timeout_secs,
         Some(DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS)
+    );
+    assert_eq!(
+        Config::default()
+            .proxy
+            .downstream_total_response_timeout_secs,
+        Some(DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS)
     );
     assert!(!Config::default().compression.enabled);
     assert!(Config::default().compression.gzip);
@@ -385,6 +394,7 @@ fn parses_minimal_toml() {
             upstream_tls = true
             upstream_sni = "origin.example.test"
             downstream_write_timeout_secs = 20
+            downstream_total_response_timeout_secs = 240
             downstream_min_send_rate_bytes_per_sec = 8192
             "#,
     )
@@ -399,6 +409,10 @@ fn parses_minimal_toml() {
     assert!(config.proxy.upstream_tls);
     assert_eq!(config.proxy.upstream_sni(), "origin.example.test");
     assert_eq!(config.proxy.downstream_write_timeout_secs, Some(20));
+    assert_eq!(
+        config.proxy.downstream_total_response_timeout_secs,
+        Some(240)
+    );
     assert_eq!(
         config.proxy.downstream_min_send_rate_bytes_per_sec,
         Some(8192)
@@ -1857,6 +1871,22 @@ fn rejects_zero_proxy_timeouts() {
         config.validate(),
         Err(ConfigError::InvalidProxyTimeout {
             field: "proxy.downstream_write_timeout_secs"
+        })
+    );
+
+    let config: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "127.0.0.1:3000"
+            downstream_total_response_timeout_secs = 0
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidProxyTimeout {
+            field: "proxy.downstream_total_response_timeout_secs"
         })
     );
 
@@ -12277,8 +12307,6 @@ fn conf_d_tls_acme_fragment_preserves_main_tls_settings() {
     assert_eq!(config.vhosts.len(), 1);
     assert!(config.vhosts[0].tls.enabled);
     assert!(config.vhosts[0].tls.acme.enabled);
-    #[cfg(feature = "acme")]
-    assert_eq!(crate::acme::renewal_targets(&config).len(), 1);
 }
 
 #[test]

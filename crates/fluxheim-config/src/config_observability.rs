@@ -34,11 +34,11 @@ impl Default for MetricsConfig {
 }
 
 impl MetricsConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         self.otlp.resolve_relative_paths(base_dir);
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         let listen = self.listen.parse::<SocketAddr>().map_err(|_| {
             ConfigError::InvalidMetricsListenAddress {
                 address: self.listen.clone(),
@@ -177,11 +177,11 @@ impl Default for TracingConfig {
 }
 
 impl TracingConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         self.otlp.resolve_relative_paths(base_dir);
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         #[cfg(not(feature = "otel-tracing"))]
         if self.enabled {
             return Err(ConfigError::TracingNotCompiled);

@@ -14,11 +14,11 @@ use crate::config_net::{
 };
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 
-pub(crate) const MAX_STREAM_ROUTES: usize = 128;
-pub(crate) const MAX_STREAM_ROUTE_NAME_BYTES: usize = 128;
-pub(crate) const MAX_STREAM_LISTENERS: usize = 64;
-pub(crate) const MAX_STREAM_UPSTREAMS: usize = 64;
-pub(crate) const MAX_STREAM_MAX_CONNECTIONS: usize = 1_000_000;
+pub const MAX_STREAM_ROUTES: usize = 128;
+pub const MAX_STREAM_ROUTE_NAME_BYTES: usize = 128;
+pub const MAX_STREAM_LISTENERS: usize = 64;
+pub const MAX_STREAM_UPSTREAMS: usize = 64;
+pub const MAX_STREAM_MAX_CONNECTIONS: usize = 1_000_000;
 const MAX_STREAM_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_STREAM_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 
@@ -32,13 +32,13 @@ pub struct StreamConfig {
 }
 
 impl StreamConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         for route in &mut self.routes {
             route.resolve_relative_paths(base_dir);
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if self.enabled {
             #[cfg(not(feature = "stream-proxy"))]
             return Err(ConfigError::StreamProxyNotCompiled);
@@ -131,7 +131,7 @@ pub struct StreamRouteConfig {
 }
 
 impl StreamRouteConfig {
-    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         for path in [
             &mut self.upstream_ca_path,
             &mut self.upstream_client_cert_path,
@@ -146,7 +146,7 @@ impl StreamRouteConfig {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if self.name.is_empty() || self.name.len() > MAX_STREAM_ROUTE_NAME_BYTES {
             return Err(ConfigError::InvalidStreamProxyPolicy {
                 field: "stream.routes.name",
@@ -246,7 +246,7 @@ impl StreamRouteConfig {
         Ok(())
     }
 
-    pub(crate) fn upstreams(&self) -> impl Iterator<Item = &str> {
+    pub fn upstreams(&self) -> impl Iterator<Item = &str> {
         self.upstream
             .iter()
             .map(String::as_str)
@@ -513,7 +513,7 @@ fn validate_optional_timeout_secs(
 
 #[derive(Debug)]
 #[cfg(feature = "stream-proxy")]
-pub(crate) struct StreamConnectionSlot {
+pub struct StreamConnectionSlot {
     current: std::sync::Arc<AtomicUsize>,
 }
 
@@ -525,7 +525,7 @@ impl Drop for StreamConnectionSlot {
 }
 
 #[cfg(feature = "stream-proxy")]
-pub(crate) fn acquire_stream_connection_slot(
+pub fn acquire_stream_connection_slot(
     current: &std::sync::Arc<AtomicUsize>,
     max_connections: usize,
 ) -> Option<StreamConnectionSlot> {

@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.17
+Version:        1.5.18
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,14 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Fri Jun 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.18-1
+- Move configuration schema, parsing, validation, loader logic, and tests into
+  the internal crates/fluxheim-config workspace crate.
+- Harden downstream HTTP/2 response handling with an absolute response-write
+  lifetime bound for HTTP/2 responses.
+- Clarify and test that duplicate request header values count toward the
+  global request-header count limit before routing.
+
 * Thu Jun 11 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.17-1
 - Start the workspace and shared-crate foundation line.
 - Add crates/fluxheim-common for shared FluxError/FluxResult and path-safety

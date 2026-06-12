@@ -1,0 +1,38 @@
+[package]
+name = "fluxheim-config"
+version = "1.5.18"
+edition = "2024"
+rust-version = "1.96"
+license = "EUPL-1.2"
+publish = false
+description = "Internal Fluxheim configuration schema, parsing, and validation."
+
+[features]
+acme = []
+cache = []
+geoip = []
+load-balancer = []
+metrics-otlp = []
+otel-otlp = []
+otel-tracing = []
+php-fpm = []
+privacy-mode = []
+proxy = []
+stream-proxy = []
+test-support = []
+tls-openssl = []
+tls-openssl-fips = []
+tls-rustls-backend = []
+tls-rustls-fips = []
+traffic-mirror = []
+udp-proxy = []
+
+[dependencies]
+log = "0.4.32"
+regex = "1.12.4"
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "1.1.2"
+
+[dev-dependencies]
+fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
+proptest = "1.6.0"
