@@ -27,6 +27,10 @@ during the v1.5.19 review cycle.
   rewrites, covering leading-dot domains, quoted attribute values, and trailing
   ASCII whitespace so alternate cookie syntax cannot bypass configured rewrite
   rules.
+- Hardened range slice-cache origin fill so dynamic-only upstream discovery
+  cannot fall back to the default loopback upstream, unsafe dot-segment origin
+  paths are rejected, and multipart range requests are bounded by range count
+  and response-wrapper overhead.
 - Resolved exact local-static purge identities through the same route rewrite
   logic used by static serving, including `rewrite_prefix`.
 - Applied decoded route matching to edge policy checks, closing mismatches

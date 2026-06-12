@@ -10,6 +10,9 @@ use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 
 pub(crate) const MAX_VARY_FIELDS: usize = 16;
 const MAX_VARY_HEADER_BYTES: usize = 2048;
+const MAX_CACHE_CLIENT_RANGES: usize = 128;
+const MULTIPART_SLICE_OVERHEAD_BYTES_PER_RANGE: u64 = 256;
+const MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES: u64 = 128;
 
 pub(crate) fn cache_request_from_header(request: &RequestHeader) -> crate::cache::CacheRequest<'_> {
     crate::cache::CacheRequest {
@@ -213,6 +216,9 @@ pub(crate) fn parse_cache_client_ranges(value: &str) -> Option<Vec<CacheClientRa
     let value = value.strip_prefix("bytes=")?;
     let mut ranges = Vec::new();
     for part in value.split(',') {
+        if ranges.len() >= MAX_CACHE_CLIENT_RANGES {
+            return None;
+        }
         let part = part.trim();
         if part.is_empty() {
             return None;
@@ -293,6 +299,21 @@ pub(crate) fn slice_request_within_policy(
     };
     if requested_bytes > cache.range.max_bytes.as_u64() {
         return false;
+    }
+    if ranges.len() > 1 {
+        let Some(multipart_bytes) = requested_bytes
+            .checked_add(
+                u64::try_from(ranges.len())
+                    .unwrap_or(u64::MAX)
+                    .saturating_mul(MULTIPART_SLICE_OVERHEAD_BYTES_PER_RANGE),
+            )
+            .and_then(|bytes| bytes.checked_add(MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES))
+        else {
+            return false;
+        };
+        if multipart_bytes > cache.range.max_bytes.as_u64() {
+            return false;
+        }
     }
     let slices = required_slice_bounds(ranges, slice_size, u64::MAX);
     !slices.is_empty() && slices.len() <= cache.range.slice.max_slices as usize

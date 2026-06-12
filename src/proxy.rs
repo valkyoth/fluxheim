@@ -6383,6 +6383,11 @@ fn origin_slice_request_from_header(
             "origin slice path must be absolute and printable",
         ));
     }
+    if !crate::path_safety::safe_forward_path_and_query(&path_and_query) {
+        return Err(FluxError::InvalidInput(
+            "origin slice path contains unsafe traversal",
+        ));
+    }
     Ok(OriginSliceRequest {
         path_and_query,
         host: request_host_header(request).map(ToOwned::to_owned),
@@ -6397,11 +6402,12 @@ fn origin_slice_url(proxy: &ProxyConfig, path_and_query: &str) -> FluxResult<Str
             "origin slice request path must be absolute",
         ));
     }
-    Ok(format!(
-        "{scheme}://{}{}",
-        proxy.primary_upstream(),
-        path_and_query
-    ))
+    let Some(upstream) = proxy.configured_primary_upstream() else {
+        return Err(FluxError::InvalidInput(
+            "origin slice fill requires a literal upstream",
+        ));
+    };
+    Ok(format!("{scheme}://{upstream}{path_and_query}"))
 }
 
 #[cfg(feature = "cache")]
@@ -10504,8 +10510,8 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use super::{
-        PeerFillResponse, acquire_peer_fill_concurrency_permit, peer_fill_concurrency_key,
-        peer_fill_request_from_header, peer_fill_url,
+        PeerFillResponse, acquire_peer_fill_concurrency_permit, origin_slice_request_from_header,
+        origin_slice_url, peer_fill_concurrency_key, peer_fill_request_from_header, peer_fill_url,
         prune_inactive_cache_fill_concurrency_counters, request_is_peer_fill,
     };
     #[cfg(any(
@@ -18656,6 +18662,16 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn slice_range_parser_rejects_excessive_range_count() {
+        let ranges = std::iter::repeat_n("0-0", 129).collect::<Vec<_>>();
+        assert_eq!(
+            parse_cache_client_ranges(&format!("bytes={}", ranges.join(","))),
+            None
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn slice_ranges_resolve_against_known_total_and_skip_unsatisfied_parts() {
         let ranges = vec![
             CacheClientRange::Bounded { start: 2, end: 8 },
@@ -18723,6 +18739,45 @@ mod tests {
             &cache,
             8
         ));
+        assert!(!slice_request_within_policy(
+            &[
+                CacheSliceBounds { start: 0, end: 0 },
+                CacheSliceBounds { start: 0, end: 0 },
+            ],
+            &cache,
+            8
+        ));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn origin_slice_request_rejects_unsafe_forward_path() {
+        let request = RequestHeader::build("GET", b"/public/../admin/secret", None).unwrap();
+
+        assert!(
+            origin_slice_request_from_header(&request, None, CacheSliceBounds { start: 0, end: 0 })
+                .is_err()
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn origin_slice_url_requires_literal_upstream() {
+        let dynamic_proxy = ProxyConfig {
+            upstream: None,
+            upstreams_file: Some(std::path::PathBuf::from("/run/fluxheim/upstreams.txt")),
+            ..ProxyConfig::default()
+        };
+        assert!(origin_slice_url(&dynamic_proxy, "/asset.bin").is_err());
+
+        let literal_proxy = ProxyConfig {
+            upstream: Some("origin.example.test:8080".to_owned()),
+            ..ProxyConfig::default()
+        };
+        assert_eq!(
+            origin_slice_url(&literal_proxy, "/asset.bin").unwrap(),
+            "http://origin.example.test:8080/asset.bin"
+        );
     }
 
     #[cfg(feature = "cache")]
