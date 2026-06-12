@@ -10451,7 +10451,12 @@ mod tests {
     };
     #[cfg(feature = "load-balancer")]
     use crate::config::{LoadBalanceHealthCheckProtocol, LoadBalanceRetryConfig};
-    #[cfg(any(feature = "cache", feature = "web"))]
+    #[cfg(any(
+        feature = "cache",
+        feature = "web",
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl"
+    ))]
     use crate::test_support::unique_temp_path;
 
     #[cfg(feature = "compression-gzip")]
