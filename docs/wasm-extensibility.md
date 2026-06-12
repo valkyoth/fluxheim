@@ -1,6 +1,7 @@
 # WASM Extensibility
 
-Status: planned `1.6` optional module family.
+Status: planned `1.7` optional module family after the `1.6` Pingora-exit
+runtime line.
 
 Planned Cargo features:
 

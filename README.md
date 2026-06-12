@@ -132,8 +132,9 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Load-balancer module split | ✅ | `1.5.0`; health checks, backend state, persistence, selection algorithms, backend policy/status, and file/DNS discovery are split into focused `load_balancer/*` modules while keeping `crate::load_balancer::*` stable. |
 | Apple Silicon macOS dev builds | ✅ | `1.4.4`; Level 1 developer support with Mac-safe runtime paths while some upstream macOS support remains experimental. |
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional `geoip` feature with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. |
-| HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.9` protocol milestone using the Rust `quinn`/`h3` stack after server and HTTP runtime ownership are stable. |
-| WASM policy hooks | ❌ | Planned for the later `1.6` extensibility line. |
+| Pingora-free runtime | 🚧 | Planned as the `1.6.x` priority line: remove Pingora from every normal Fluxheim build by replacing server/listener/TLS and HTTP proxy runtime boundaries with Fluxheim-owned Rust crates. |
+| HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.8` protocol milestone using the Rust `quinn`/`h3` stack after the `1.6` Pingora-free runtime is stable. |
+| WASM policy hooks | ❌ | Planned for the later `1.7` extensibility line. |
 
 See [Production Readiness](docs/production-readiness.md) for the precise
 stable-core promise and deployment checks. See
@@ -145,8 +146,8 @@ Apple Silicon developer workflow.
 - **Rust first**: memory-safe implementation with a pinned stable toolchain.
 - **Production edge core**: Fluxheim owns the config, security, operations,
   load-balancer, cache, PHP-FPM, stream, and observability model, with the
-  remaining HTTP runtime internals being reduced behind project-owned
-  boundaries over the `1.5` to `1.9` roadmap.
+  remaining Pingora runtime internals being replaced by project-owned Rust
+  crates across the `1.6` roadmap.
 - **Modular builds**: compile only the modules needed for a deployment.
 - **Secure defaults**: strict config validation, request limits, safe filesystem
   handling, dependency policy, and no hidden legacy protocol fallback.
@@ -461,11 +462,10 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Config Reference](docs/config-reference.md), and
 [Production Readiness](docs/production-readiness.md).
 
-Next lines are planned separately after `1.5`: `1.6` for shared Wasm
+Next lines are planned separately after `1.5`: `1.6` for the full Pingora exit
+so normal Fluxheim builds no longer compile Pingora, `1.7` for shared Wasm
 extensibility covering nginx-Lua-style hooks and VCL-like cache policy hooks,
-then later major dependency-reduction lines for Fluxheim-owned server
-bootstrap/listener/TLS handling, the HTTP proxy runtime, and HTTP/3/QUIC based
-on the Rust `quinn`/`h3` stack. See
+and `1.8` for HTTP/3/QUIC based on the Rust `quinn`/`h3` stack. See
 [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
 full release ladder.
 
