@@ -5609,7 +5609,7 @@ fn parses_php_fpm_vhost_config() {
 
             [vhosts.php.params]
             APP_ENV = "production"
-            PHP_VALUE = "memory_limit=256M"
+            APP_MEMORY_LIMIT = "256M"
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -5681,8 +5681,8 @@ fn parses_php_fpm_vhost_config() {
         Some("production")
     );
     assert_eq!(
-        php.params.get("PHP_VALUE").map(String::as_str),
-        Some("memory_limit=256M")
+        php.params.get("APP_MEMORY_LIMIT").map(String::as_str),
+        Some("256M")
     );
     assert_eq!(php.fpm.tcp.as_deref(), Some("127.0.0.1:9000"));
     assert!(php.fpm.tcp_upstreams.is_empty());
@@ -7163,6 +7163,43 @@ fn rejects_php_param_that_overrides_script_filename() {
     let error = config.validate().unwrap_err().to_string();
     assert!(error.contains("php.params"), "{error}");
     assert!(error.contains("managed by Fluxheim"), "{error}");
+}
+
+#[test]
+fn rejects_php_fpm_ini_control_params() {
+    for protected_name in ["PHP_VALUE", "PHP_ADMIN_VALUE"] {
+        let root = unique_temp_path(&format!(
+            "config-php-param-{}",
+            protected_name.to_ascii_lowercase()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+                {}
+
+                [[vhosts]]
+                name = "php"
+                hosts = ["php.example.test"]
+
+                [vhosts.php]
+                enabled = true
+                root = "{}"
+
+                [vhosts.php.params]
+                {protected_name} = "memory_limit=256M"
+
+                [vhosts.php.fpm]
+                tcp = "127.0.0.1:9000"
+                "#,
+            test_process_config_toml("config-php-param-ini-control-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.params"), "{error}");
+        assert!(error.contains("managed by Fluxheim"), "{error}");
+    }
 }
 
 #[test]

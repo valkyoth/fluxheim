@@ -2893,7 +2893,7 @@ index_files = ["index.html"]
 
 [vhosts.routes.php.params]
 APP_ENV = "production"
-PHP_VALUE = "memory_limit=256M"
+APP_MEMORY_LIMIT = "256M"
 
 [vhosts.routes.php.fpm]
 # Default mode. Fluxheim connects to an operator-managed php-fpm pool.
@@ -3137,14 +3137,11 @@ tokens and only accepts `GET`, `HEAD`, `OPTIONS`, and `TRACE`; `php.fpm.retry_st
 status range.
 `[vhosts.php.params]` or `[vhosts.routes.php.params]`
 adds administrator-controlled FastCGI parameters such as `APP_ENV` or
-`PHP_VALUE`; Fluxheim rejects unsafe names, control-character values, and core
-CGI parameters that it owns, including `SCRIPT_FILENAME`, `CONTENT_LENGTH`,
-`HTTPS`, and all `HTTP_*` request-header parameters. Custom parameter tables are capped at 128 entries;
-each parameter name is capped at 128 bytes and each value at 16KiB. `PHP_VALUE`
-and `PHP_ADMIN_VALUE` are powerful php-fpm controls; Fluxheim logs high-risk
-warnings when they mention directives such as `open_basedir`,
-`disable_functions`, `allow_url_include`, or `allow_url_fopen`, and logs an
-error-level warning if `PHP_ADMIN_VALUE` overrides `disable_functions`.
+`APP_MEMORY_LIMIT`; Fluxheim rejects unsafe names, control-character values, and
+core CGI parameters that it owns, including `SCRIPT_FILENAME`,
+`CONTENT_LENGTH`, `HTTPS`, `PHP_VALUE`, `PHP_ADMIN_VALUE`, and all `HTTP_*`
+request-header parameters. Custom parameter tables are capped at 128 entries;
+each parameter name is capped at 128 bytes and each value at 16KiB.
 
 `[vhosts.routes.cache]` is optional. When present, it replaces the vhost cache
 policy for that matched route only. Routes without a cache block continue to use

@@ -11550,6 +11550,11 @@ mod tests {
         let mut custom = std::collections::BTreeMap::new();
         custom.insert("SAFE_PARAM".to_owned(), "ok".to_owned());
         custom.insert("SCRIPT_FILENAME".to_owned(), "/tmp/bypass.php".to_owned());
+        custom.insert("PHP_VALUE".to_owned(), "memory_limit=256M".to_owned());
+        custom.insert(
+            "PHP_ADMIN_VALUE".to_owned(),
+            "disable_functions =".to_owned(),
+        );
         custom.insert("BAD_VALUE".to_owned(), "bad\nvalue".to_owned());
 
         add_php_custom_params(&mut params, &custom);
@@ -11559,6 +11564,8 @@ mod tests {
             Some("ok")
         );
         assert!(!params.contains_key("SCRIPT_FILENAME"));
+        assert!(!params.contains_key("PHP_VALUE"));
+        assert!(!params.contains_key("PHP_ADMIN_VALUE"));
         assert!(!params.contains_key("BAD_VALUE"));
     }
 

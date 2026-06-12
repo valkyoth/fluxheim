@@ -923,7 +923,6 @@ pub fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(), Conf
     for (name, value) in params {
         validate_php_param_name(name)?;
         validate_php_param_value(value)?;
-        warn_high_risk_php_param(name, value);
     }
     Ok(())
 }
@@ -1522,30 +1521,6 @@ fn validate_php_param_value(value: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
-fn warn_high_risk_php_param(name: &str, value: &str) {
-    if !matches!(name, "PHP_VALUE" | "PHP_ADMIN_VALUE") {
-        return;
-    }
-    let value = value.to_ascii_lowercase();
-    if name == "PHP_ADMIN_VALUE" && value.contains("disable_functions=") {
-        log::error!(
-            "php.params.PHP_ADMIN_VALUE overrides disable_functions; verify this is intentional before production deployment"
-        );
-    }
-    for directive in [
-        "open_basedir",
-        "disable_functions",
-        "allow_url_include",
-        "allow_url_fopen",
-    ] {
-        if value.contains(directive) {
-            log::warn!(
-                "php.params.{name} contains high-risk PHP directive {directive:?}; review this setting before production use"
-            );
-        }
-    }
-}
-
 pub fn protected_php_param_name(name: &str) -> bool {
     matches!(
         name,
@@ -1560,6 +1535,8 @@ pub fn protected_php_param_name(name: &str) -> bool {
             | "HTTP_PROXY"
             | "PATH_INFO"
             | "PATH_TRANSLATED"
+            | "PHP_ADMIN_VALUE"
+            | "PHP_VALUE"
             | "QUERY_STRING"
             | "REDIRECT_STATUS"
             | "REMOTE_ADDR"

@@ -73,9 +73,8 @@ CGI/FastCGI request construction:
   application-visible port different from the listener port.
 - `[vhosts.php.params]` and `[vhosts.routes.php.params]` add validated custom
   FastCGI params without allowing overrides of Fluxheim-owned CGI fields.
-  Treat `PHP_VALUE` and `PHP_ADMIN_VALUE` as privileged php-fpm controls:
-  Fluxheim logs high-risk warnings for sensitive PHP directives, but the
-  operator remains responsible for not weakening production PHP policy.
+  Fluxheim also rejects `PHP_VALUE` and `PHP_ADMIN_VALUE` because those
+  php-fpm control parameters can rewrite PHP `ini` policy for every request.
 
 Path mapping and application routing:
 
