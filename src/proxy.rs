@@ -10719,6 +10719,22 @@ mod tests {
             .insert_header("accept-encoding", "*;q=0.5")
             .unwrap();
         assert!(request_accepts_gzip(&wildcard));
+
+        let mut nan = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        nan.insert_header("accept-encoding", "gzip;q=NaN").unwrap();
+        assert!(!request_accepts_gzip(&nan));
+
+        let mut infinity = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        infinity
+            .insert_header("accept-encoding", "gzip;q=Infinity")
+            .unwrap();
+        assert!(!request_accepts_gzip(&infinity));
+
+        let mut out_of_range = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        out_of_range
+            .insert_header("accept-encoding", "gzip;q=1.001")
+            .unwrap();
+        assert!(!request_accepts_gzip(&out_of_range));
     }
 
     #[cfg(feature = "compression-gzip")]

@@ -9715,6 +9715,7 @@ fn parses_admin_read_only_ops_socket() {
             enabled = true
             path = "{}/fluxheim-ops.sock"
             mode = "0660"
+            require_bearer_token = true
             "#,
         snapshot_store.display(),
         socket_dir.display()
@@ -9724,6 +9725,7 @@ fn parses_admin_read_only_ops_socket() {
     config.validate().unwrap();
     assert!(config.admin.ops_socket.enabled);
     assert_eq!(config.admin.ops_socket.mode_bits(), 0o660);
+    assert!(config.admin.ops_socket.require_bearer_token);
 }
 
 #[cfg(unix)]

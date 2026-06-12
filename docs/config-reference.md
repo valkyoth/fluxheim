@@ -351,6 +351,7 @@ mode = "local_only"
 enabled = false
 path = "/run/fluxheim/fluxheim-ops.sock"
 mode = "0600"
+require_bearer_token = false
 
 [admin.health]
 unauthenticated = false
@@ -403,7 +404,10 @@ is Unix-only, and validates its path with the same parent traversal, symlink, an
 unsafe-writable-parent checks used for process sockets. `mode` must grant owner
 read/write access, may grant group read/write access, and must not grant world
 access; use `0600` for service-owner-only status or `0660` for a dedicated
-operator group.
+operator group. By default, the Unix socket's filesystem permissions are the
+trust boundary. Set `require_bearer_token = true` to require the same
+`Authorization: Bearer ...` token as the TCP admin listener for read-only ops
+socket status requests.
 
 When compiled with `load-balancer`, `GET /_fluxheim/status` includes a
 `load_balancer` object for configured vhost and route pools. The status is
@@ -1747,7 +1751,10 @@ existing `Content-Encoding`, no `Set-Cookie`, no request `Cookie` or
 conservative text, JavaScript, JSON, XML, or SVG media type. Fluxheim prefers
 `br`, then `zstd`, then `gzip` when those codecs are enabled and accepted by
 the client. Fluxheim removes `Content-Length` and `ETag` from compressed
-responses and adds `Vary: Accept-Encoding`.
+responses and adds `Vary: Accept-Encoding`. `Accept-Encoding` q-values are
+parsed as finite RFC-style values from `0` through `1` with at most three
+decimal digits; malformed values such as `NaN` or `Infinity` do not enable an
+encoding token.
 
 `min_bytes` and `max_input_bytes` bound the original response size.
 `max_output_bytes` bounds the encoded response size. The configured input

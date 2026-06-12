@@ -116,6 +116,10 @@ behavior when the change improves security or project direction.
   covering both single-quoted and double-quoted URL forms.
 - Harden runtime file-log opening by rejecting symlinked log path components
   immediately before creating or appending the log file.
+- Harden `Accept-Encoding` qvalue parsing so non-finite or malformed values
+  such as `NaN` and `Infinity` cannot influence compression negotiation.
+- Add `admin.ops_socket.require_bearer_token` so local Unix ops-socket status
+  endpoints can require the same bearer token as the TCP admin control plane.
 
 ### Changed
 

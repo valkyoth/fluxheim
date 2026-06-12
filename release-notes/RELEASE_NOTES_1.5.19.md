@@ -111,6 +111,10 @@ during the v1.5.19 review cycle.
   covering both single-quoted and double-quoted URL forms.
 - Hardened runtime file-log opening by rejecting symlinked log path components
   immediately before creating or appending the log file.
+- Hardened `Accept-Encoding` qvalue parsing so non-finite or malformed values
+  such as `NaN` and `Infinity` cannot influence compression negotiation.
+- Added `admin.ops_socket.require_bearer_token` so local Unix ops-socket status
+  endpoints can require the same bearer token as the TCP admin control plane.
 
 ## What Changed
 

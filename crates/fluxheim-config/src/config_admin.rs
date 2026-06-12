@@ -234,6 +234,8 @@ pub struct AdminOpsSocketConfig {
     pub path: PathBuf,
     #[serde(default = "default_admin_ops_socket_mode")]
     pub mode: String,
+    #[serde(default)]
+    pub require_bearer_token: bool,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -242,6 +244,7 @@ pub struct AdminOpsSocketConfigFragment {
     enabled: Option<bool>,
     path: Option<PathBuf>,
     mode: Option<String>,
+    require_bearer_token: Option<bool>,
 }
 
 impl Default for AdminOpsSocketConfig {
@@ -250,6 +253,7 @@ impl Default for AdminOpsSocketConfig {
             enabled: false,
             path: default_admin_ops_socket_path(),
             mode: default_admin_ops_socket_mode(),
+            require_bearer_token: false,
         }
     }
 }
@@ -264,6 +268,9 @@ impl AdminOpsSocketConfig {
         }
         if let Some(mode) = fragment.mode {
             self.mode = mode;
+        }
+        if let Some(require_bearer_token) = fragment.require_bearer_token {
+            self.require_bearer_token = require_bearer_token;
         }
     }
 

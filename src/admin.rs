@@ -412,7 +412,10 @@ pub(crate) fn admin_services_from_config(
         };
         let mut ops_service = Service::new(
             "Fluxheim Local Ops Socket".to_owned(),
-            HttpServer::new_app(AdminOpsApp { app: app.clone() }),
+            HttpServer::new_app(AdminOpsApp {
+                app: app.clone(),
+                require_bearer_token: config.admin.ops_socket.require_bearer_token,
+            }),
         );
         ops_service.add_uds(
             path,
@@ -434,6 +437,7 @@ pub(crate) fn admin_services_from_config(
 #[derive(Clone)]
 pub struct AdminOpsApp {
     app: AdminApp,
+    require_bearer_token: bool,
 }
 
 impl AdminApp {
@@ -847,7 +851,14 @@ impl AdminApp {
     }
 
     #[cfg(unix)]
-    fn handle_ops_socket(&self, method: &str, path: &str, query: Option<&str>) -> AdminResponse {
+    fn handle_ops_socket(
+        &self,
+        method: &str,
+        path: &str,
+        query: Option<&str>,
+        headers: Option<&HeaderMap>,
+        require_bearer_token: bool,
+    ) -> AdminResponse {
         if path.len() > MAX_ADMIN_PATH_BYTES {
             return json_response(StatusCode::URI_TOO_LONG, br#"{"error":"path_too_large"}"#);
         }
@@ -870,6 +881,12 @@ impl AdminApp {
             } else {
                 json_response(StatusCode::NOT_FOUND, br#"{"error":"not_found"}"#)
             };
+        }
+        if require_bearer_token
+            && !headers
+                .is_some_and(|headers| authorized(authorization_header(headers), &self.token))
+        {
+            return json_response(StatusCode::UNAUTHORIZED, br#"{"error":"unauthorized"}"#);
         }
 
         match path {
@@ -2817,6 +2834,8 @@ impl ServeHttp for AdminOpsApp {
             request.method.as_str(),
             request.uri.path(),
             request.uri.query(),
+            Some(&request.headers),
+            self.require_bearer_token,
         ))
     }
 }
@@ -4303,16 +4322,30 @@ mod tests {
     fn ops_socket_exposes_only_read_only_status_without_bearer_auth() {
         let app = app();
 
-        let response = app.handle_ops_socket("GET", "/_fluxheim/status", None);
+        let response = app.handle_ops_socket("GET", "/_fluxheim/status", None, None, false);
         assert_eq!(response.status, StatusCode::OK);
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""status":"ok""#));
 
-        let response = app.handle_ops_socket("POST", "/_fluxheim/status", None);
+        let response = app.handle_ops_socket("POST", "/_fluxheim/status", None, None, false);
         assert_eq!(response.status, StatusCode::METHOD_NOT_ALLOWED);
 
-        let response = app.handle_ops_socket("POST", "/_fluxheim/reload", None);
+        let response = app.handle_ops_socket("POST", "/_fluxheim/reload", None, None, false);
         assert_eq!(response.status, StatusCode::NOT_FOUND);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ops_socket_can_require_bearer_auth_for_status() {
+        let app = app();
+
+        let response = app.handle_ops_socket("GET", "/_fluxheim/status", None, None, true);
+        assert_eq!(response.status, StatusCode::UNAUTHORIZED);
+
+        let headers = auth_headers();
+        let response =
+            app.handle_ops_socket("GET", "/_fluxheim/status", None, Some(&headers), true);
+        assert_eq!(response.status, StatusCode::OK);
     }
 
     #[test]
@@ -4392,7 +4425,8 @@ mod tests {
         let _ = crate::tls::install_rustls_crypto_provider();
 
         let app = app_with_config(load_balancer_admin_config());
-        let response = app.handle_ops_socket("GET", "/_fluxheim/load-balancer/status", None);
+        let response =
+            app.handle_ops_socket("GET", "/_fluxheim/load-balancer/status", None, None, false);
 
         assert_eq!(response.status, StatusCode::OK);
         let body: Value = serde_json::from_slice(&response.body).unwrap();
