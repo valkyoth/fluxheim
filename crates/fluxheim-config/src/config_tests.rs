@@ -393,6 +393,7 @@ fn parses_minimal_toml() {
             upstream = "origin.example.test:443"
             upstream_tls = true
             upstream_sni = "origin.example.test"
+            downstream_read_timeout_secs = 45
             downstream_write_timeout_secs = 20
             downstream_total_response_timeout_secs = 240
             downstream_min_send_rate_bytes_per_sec = 8192
@@ -408,6 +409,7 @@ fn parses_minimal_toml() {
     );
     assert!(config.proxy.upstream_tls);
     assert_eq!(config.proxy.upstream_sni(), "origin.example.test");
+    assert_eq!(config.proxy.downstream_read_timeout_secs, Some(45));
     assert_eq!(config.proxy.downstream_write_timeout_secs, Some(20));
     assert_eq!(
         config.proxy.downstream_total_response_timeout_secs,
@@ -1901,6 +1903,22 @@ fn rejects_zero_proxy_timeouts() {
         config.validate(),
         Err(ConfigError::InvalidProxyTimeout {
             field: "proxy.read_timeout_secs"
+        })
+    );
+
+    let config: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "127.0.0.1:3000"
+            downstream_read_timeout_secs = 0
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidProxyTimeout {
+            field: "proxy.downstream_read_timeout_secs"
         })
     );
 

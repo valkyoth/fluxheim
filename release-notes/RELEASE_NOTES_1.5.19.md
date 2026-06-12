@@ -44,6 +44,10 @@ during the v1.5.19 review cycle.
   metadata, multicast, reserved, and documentation IP-literal backends are
   rejected by default unless the operator explicitly enables
   `proxy.upstreams_http_allow_private_backends`.
+- Added `proxy.downstream_read_timeout_secs`, defaulting to 60 seconds, and
+  wired it into vendored Pingora HTTP/2 downstream request-body reads so
+  slow-body clients cannot hold proxy forwarding tasks indefinitely while
+  withholding DATA frames or END_STREAM.
 
 ## What Changed
 

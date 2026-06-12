@@ -129,6 +129,8 @@ pub struct ProxyConfig {
     pub read_timeout_secs: Option<u64>,
     #[serde(default)]
     pub send_timeout_secs: Option<u64>,
+    #[serde(default = "default_proxy_downstream_read_timeout_secs")]
+    pub downstream_read_timeout_secs: Option<u64>,
     #[serde(default)]
     pub downstream_write_timeout_secs: Option<u64>,
     #[serde(default)]
@@ -176,6 +178,7 @@ const MAX_PROXY_UPSTREAM_H2_STREAMS: usize = 1024;
 const MAX_PROXY_UPSTREAM_TCP_KEEPALIVE_COUNT: usize = 128;
 const MAX_PROXY_UPSTREAM_TCP_RECV_BUFFER_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_PROXY_UPSTREAM_DSCP: u8 = 63;
+pub const DEFAULT_PROXY_DOWNSTREAM_READ_TIMEOUT_SECS: u64 = 60;
 pub const DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS: u64 = 30;
 pub const DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS: u64 = 300;
 
@@ -229,6 +232,7 @@ impl Default for ProxyConfig {
             upstream_tcp_fast_open: false,
             read_timeout_secs: None,
             send_timeout_secs: None,
+            downstream_read_timeout_secs: Some(DEFAULT_PROXY_DOWNSTREAM_READ_TIMEOUT_SECS),
             downstream_write_timeout_secs: Some(DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS),
             downstream_total_response_timeout_secs: Some(
                 DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS,
@@ -902,6 +906,10 @@ impl ProxyConfig {
             self.upstream_h2_ping_interval_secs,
         )?;
         validate_optional_timeout_secs(
+            "proxy.downstream_read_timeout_secs",
+            self.downstream_read_timeout_secs,
+        )?;
+        validate_optional_timeout_secs(
             "proxy.downstream_write_timeout_secs",
             self.downstream_write_timeout_secs,
         )?;
@@ -1399,6 +1407,10 @@ fn default_proxy_upstreams_file_refresh_secs() -> u64 {
 
 fn default_proxy_upstreams_http_refresh_secs() -> u64 {
     5
+}
+
+fn default_proxy_downstream_read_timeout_secs() -> Option<u64> {
+    Some(DEFAULT_PROXY_DOWNSTREAM_READ_TIMEOUT_SECS)
 }
 
 fn default_upstream_priority_group_min_active() -> usize {

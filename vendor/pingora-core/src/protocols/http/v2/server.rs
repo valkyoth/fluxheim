@@ -103,6 +103,9 @@ pub struct HttpSession {
     retry_buffer: Option<FixedBuffer>,
     // digest to record underlying connection info
     digest: Arc<Digest>,
+    /// The read timeout which will be applied while waiting for the next
+    /// request body frame.
+    pub read_timeout: Option<Duration>,
     /// The write timeout which will be applied to writing response body.
     /// The timeout is reset on every write. This is not a timeout on the overall duration of the
     /// response.
@@ -151,6 +154,7 @@ impl HttpSession {
                 body_sent: 0,
                 retry_buffer: None,
                 digest,
+                read_timeout: None,
                 write_timeout: None,
                 total_drain_timeout: None,
                 total_response_timeout: None,
@@ -177,11 +181,19 @@ impl HttpSession {
 
     /// Read request body bytes. `None` when there is no more body to read.
     pub async fn read_body_bytes(&mut self) -> Result<Option<Bytes>> {
-        // TODO: timeout
-        let data = self.request_body_reader.data().await.transpose().or_err(
-            ErrorType::ReadError,
-            "while reading downstream request body",
-        )?;
+        let data = match self.read_timeout {
+            Some(timeout_duration) => timeout(timeout_duration, self.request_body_reader.data())
+                .await
+                .map_err(|_| {
+                    Error::explain(
+                        ErrorType::ReadTimedout,
+                        "while reading downstream HTTP/2 request body",
+                    )
+                })?,
+            None => self.request_body_reader.data().await,
+        }
+        .transpose()
+        .or_err(ErrorType::ReadError, "while reading downstream request body")?;
         if let Some(data) = data.as_ref() {
             self.body_read += data.len();
             if let Some(buffer) = self.retry_buffer.as_mut() {
@@ -264,6 +276,17 @@ impl HttpSession {
     /// Get the total drain timeout.
     pub fn get_total_drain_timeout(&self) -> Option<Duration> {
         self.total_drain_timeout
+    }
+
+    /// Sets the downstream read timeout. This will trigger if no request body
+    /// frame is received within `timeout`.
+    pub fn set_read_timeout(&mut self, timeout: Option<Duration>) {
+        self.read_timeout = timeout;
+    }
+
+    /// Get the read timeout.
+    pub fn get_read_timeout(&self) -> Option<Duration> {
+        self.read_timeout
     }
 
     /// Sets the total response timeout. This timeout covers the whole response

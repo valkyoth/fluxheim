@@ -320,11 +320,10 @@ impl Session {
     /// Sets the downstream read timeout. This will trigger if we're unable
     /// to read from the stream after `timeout`.
     ///
-    /// This is a noop for h2.
     pub fn set_read_timeout(&mut self, timeout: Option<Duration>) {
         match self {
             Self::H1(s) => s.set_read_timeout(timeout),
-            Self::H2(_) => {}
+            Self::H2(s) => s.set_read_timeout(timeout),
             Self::Subrequest(s) => s.set_read_timeout(timeout),
             Self::Custom(c) => c.set_read_timeout(timeout),
         }
@@ -334,7 +333,7 @@ impl Session {
     pub fn get_read_timeout(&self) -> Option<Duration> {
         match self {
             Self::H1(s) => s.get_read_timeout(),
-            Self::H2(_) => None,
+            Self::H2(s) => s.get_read_timeout(),
             Self::Subrequest(s) => s.get_read_timeout(),
             Self::Custom(s) => s.get_read_timeout(),
         }

@@ -9458,6 +9458,7 @@ const CACHE_UPGRADE_BYPASS_REASON: &str = "upgrade";
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct DownstreamFlowControl {
+    read_timeout: Option<std::time::Duration>,
     write_timeout: Option<std::time::Duration>,
     total_response_timeout: Option<std::time::Duration>,
     min_send_rate: Option<usize>,
@@ -9465,6 +9466,12 @@ struct DownstreamFlowControl {
 
 fn downstream_flow_control(proxy: &ProxyConfig) -> DownstreamFlowControl {
     DownstreamFlowControl {
+        read_timeout: proxy
+            .downstream_read_timeout_secs
+            .or(Some(
+                crate::config_proxy::DEFAULT_PROXY_DOWNSTREAM_READ_TIMEOUT_SECS,
+            ))
+            .map(std::time::Duration::from_secs),
         write_timeout: proxy
             .downstream_write_timeout_secs
             .or(Some(
@@ -9484,6 +9491,7 @@ fn downstream_flow_control(proxy: &ProxyConfig) -> DownstreamFlowControl {
 fn apply_downstream_flow_control(session: &mut Session, proxy: &ProxyConfig) {
     let flow_control = downstream_flow_control(proxy);
     let downstream = session.as_downstream_mut();
+    downstream.set_read_timeout(flow_control.read_timeout);
     downstream.set_write_timeout(flow_control.write_timeout);
     downstream.set_total_response_timeout(flow_control.total_response_timeout);
     downstream.set_min_send_rate(flow_control.min_send_rate);
@@ -13960,12 +13968,30 @@ mod tests {
         assert_eq!(
             super::downstream_flow_control(&proxy),
             super::DownstreamFlowControl {
+                read_timeout: Some(Duration::from_secs(
+                    crate::config_proxy::DEFAULT_PROXY_DOWNSTREAM_READ_TIMEOUT_SECS,
+                )),
                 write_timeout: Some(Duration::from_secs(20)),
                 total_response_timeout: Some(Duration::from_secs(
                     crate::config_proxy::DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS,
                 )),
                 min_send_rate: Some(8192),
             }
+        );
+    }
+
+    #[test]
+    fn proxy_downstream_flow_control_uses_secure_default_read_timeout() {
+        let proxy = ProxyConfig {
+            downstream_read_timeout_secs: None,
+            ..ProxyConfig::default()
+        };
+
+        assert_eq!(
+            super::downstream_flow_control(&proxy).read_timeout,
+            Some(Duration::from_secs(
+                crate::config_proxy::DEFAULT_PROXY_DOWNSTREAM_READ_TIMEOUT_SECS
+            ))
         );
     }
 

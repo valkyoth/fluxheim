@@ -984,6 +984,7 @@ upstream_dscp = 46
 upstream_tcp_fast_open = false
 read_timeout_secs = 60
 send_timeout_secs = 30
+downstream_read_timeout_secs = 60
 downstream_write_timeout_secs = 30
 downstream_total_response_timeout_secs = 300
 downstream_min_send_rate_bytes_per_sec = 8192
@@ -1560,14 +1561,18 @@ timeout, and upstream request-body/write timeout.
 other token-based upgrade requests on that proxy block. Fluxheim validates this
 with `upstream_http_version = "http1"` because HTTP/2 origins do not use the
 same hop-by-hop upgrade mechanism.
+`downstream_read_timeout_secs`,
 `downstream_write_timeout_secs`,
 `downstream_total_response_timeout_secs`, and
 `downstream_min_send_rate_bytes_per_sec` protect the client-facing side of
-proxied responses. The write timeout caps each stalled downstream write and
-defaults to 30 seconds. The total response timeout is an absolute HTTP/2
-response-write lifetime bound and defaults to 300 seconds; it is not reset by
-partial writes or client `WINDOW_UPDATE` frames. The minimum send rate asks
-Pingora to derive a timeout from each response chunk size and is mainly useful
+proxied requests and responses. The read timeout caps each stalled downstream
+request-body read and defaults to 60 seconds; this applies to HTTP/1 and to
+HTTP/2 DATA-frame waits in Fluxheim's vendored Pingora core. The write timeout
+caps each stalled downstream write and defaults to 30 seconds. The total
+response timeout is an absolute HTTP/2 response-write lifetime bound and
+defaults to 300 seconds; it is not reset by partial writes or client
+`WINDOW_UPDATE` frames. The minimum send rate asks Pingora to derive a timeout
+from each response chunk size and is mainly useful
 against slow HTTP/1 clients. These fields are optional and can be set globally,
 per vhost, or on a route-level proxy block.
 
