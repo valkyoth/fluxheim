@@ -612,12 +612,7 @@ pub fn validate_optional_header_value(
         return Ok(());
     };
 
-    if value.trim().is_empty()
-        || value
-            .as_bytes()
-            .iter()
-            .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f))
-    {
+    if value.trim().is_empty() || header_value_contains_disallowed_control(value) {
         return Err(ConfigError::InvalidResponseHeaderValue { field });
     }
 
@@ -959,12 +954,7 @@ fn validate_header_mutation_value(
     name: &str,
     value: &str,
 ) -> Result<(), ConfigError> {
-    if value.trim().is_empty()
-        || value
-            .as_bytes()
-            .iter()
-            .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f))
-    {
+    if value.trim().is_empty() || header_value_contains_disallowed_control(value) {
         return Err(ConfigError::InvalidHeaderValue {
             field,
             name: name.to_owned(),
@@ -973,6 +963,13 @@ fn validate_header_mutation_value(
 
     validate_dynamic_header_template(field, name, value)?;
     Ok(())
+}
+
+fn header_value_contains_disallowed_control(value: &str) -> bool {
+    value
+        .as_bytes()
+        .iter()
+        .any(|byte| matches!(byte, 0x00..=0x1f | 0x7f))
 }
 
 fn validate_response_header_rewrite_endpoint(
@@ -988,10 +985,7 @@ fn validate_response_header_rewrite_endpoint(
         || value.len() > 2048
         || !valid_prefix
         || !valid_path_prefix
-        || value
-            .as_bytes()
-            .iter()
-            .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f))
+        || header_value_contains_disallowed_control(value)
     {
         return Err(ConfigError::InvalidHeaderValue {
             field,

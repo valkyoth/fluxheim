@@ -612,9 +612,14 @@ fn rewrite_refresh_url(
     rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
 ) -> Option<String> {
     let url_start = find_refresh_url_start(value)?;
-    let rewritten_url = rewrite_header_prefix(&value[url_start..], rules)?;
-    let mut rewritten = String::with_capacity(url_start + rewritten_url.len());
-    rewritten.push_str(&value[..url_start]);
+    let match_start = if matches!(value.as_bytes().get(url_start), Some(b'"' | b'\'')) {
+        url_start + 1
+    } else {
+        url_start
+    };
+    let rewritten_url = rewrite_header_prefix(&value[match_start..], rules)?;
+    let mut rewritten = String::with_capacity(match_start + rewritten_url.len());
+    rewritten.push_str(&value[..match_start]);
     rewritten.push_str(&rewritten_url);
     Some(rewritten)
 }
@@ -1160,6 +1165,42 @@ mod tests {
                 .get("refresh")
                 .and_then(|value| value.to_str().ok()),
             Some("0; url = https://example.test/login")
+        );
+    }
+
+    #[test]
+    fn rewrites_quoted_response_refresh_urls() {
+        let policy = crate::config::ResponseHeaderPolicyConfig {
+            rewrite: crate::config::ResponseHeaderRewriteConfig {
+                refresh: vec![crate::config::ResponseHeaderRewriteRuleConfig {
+                    from: "http://backend.internal/".to_owned(),
+                    to: "https://example.test/".to_owned(),
+                }],
+                ..crate::config::ResponseHeaderRewriteConfig::default()
+            },
+            ..crate::config::ResponseHeaderPolicyConfig::default()
+        };
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response
+            .append_header("refresh", "0; url=\"http://backend.internal/login\"")
+            .unwrap();
+        response
+            .append_header("refresh", "0; url='http://backend.internal/admin'")
+            .unwrap();
+
+        apply_response_policy(&mut response, &policy).unwrap();
+
+        assert_eq!(
+            response
+                .headers
+                .get_all("refresh")
+                .iter()
+                .filter_map(|value| value.to_str().ok())
+                .collect::<Vec<_>>(),
+            [
+                "0; url=\"https://example.test/login\"",
+                "0; url='https://example.test/admin'"
+            ]
         );
     }
 

@@ -711,6 +711,8 @@ fn init_logging(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 #[cfg(feature = "proxy")]
 fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
+    reject_log_path_symlink_prefix(path)?;
+
     let mut flags =
         rustix::fs::OFlags::CREATE | rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::CLOEXEC;
     if append {
@@ -745,6 +747,26 @@ fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
     }
 
     Ok(file)
+}
+
+#[cfg(feature = "proxy")]
+fn reject_log_path_symlink_prefix(path: &Path) -> std::io::Result<()> {
+    let mut current = std::path::PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("log path contains symlink component: {}", current.display()),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "proxy")]
@@ -1001,6 +1023,23 @@ mod tests {
 
         let _ = std::fs::remove_file(&link);
         let _ = std::fs::remove_file(&target);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn rejects_symlink_log_file_parent() {
+        let real_dir = unique_temp_path("runtime-log-real-parent");
+        let link_dir = unique_temp_path("runtime-log-link-parent");
+        let _ = std::fs::remove_dir_all(&real_dir);
+        let _ = std::fs::remove_file(&link_dir);
+        std::fs::create_dir(&real_dir).unwrap();
+        std::os::unix::fs::symlink(&real_dir, &link_dir).unwrap();
+        let log_path = link_dir.join("fluxheim.log");
+
+        assert!(open_log_file(&log_path, true).is_err());
+
+        let _ = std::fs::remove_file(&link_dir);
+        let _ = std::fs::remove_dir_all(&real_dir);
     }
 
     #[cfg(all(

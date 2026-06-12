@@ -2874,6 +2874,25 @@ fn rejects_invalid_generic_header_value() {
 }
 
 #[test]
+fn rejects_tab_in_static_header_values() {
+    let config: Config = toml::from_str(
+        r#"
+            [headers.request.set]
+            x-test = "field1\tfield2"
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidHeaderValue {
+            field: "headers.request",
+            name: "x-test".to_owned()
+        })
+    );
+}
+
+#[test]
 fn rejects_invalid_load_balance_max_iterations() {
     let config: Config = toml::from_str(
         r#"

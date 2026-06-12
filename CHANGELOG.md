@@ -109,6 +109,13 @@ behavior when the change improves security or project direction.
 - Harden stream hostname upstreams against DNS-rebinding pivots by rejecting
   private or reserved DNS answers unless the route explicitly sets
   `upstream_dns_allow_private_addresses = true`.
+- Reject horizontal tabs in configured static header values so operator header
+  policies cannot pass HTTP/1.x-only whitespace into HTTP/2 upstream requests
+  or responses.
+- Rewrite quoted `Refresh` response URLs for configured prefix rewrite rules,
+  covering both single-quoted and double-quoted URL forms.
+- Harden runtime file-log opening by rejecting symlinked log path components
+  immediately before creating or appending the log file.
 
 ### Changed
 

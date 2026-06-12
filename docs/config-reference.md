@@ -745,9 +745,11 @@ when `logging.file.enabled = true`.
 `logging.file` is disabled by default. When enabled, `path` is required. Relative
 paths are resolved from the config file that defines them. Existing symlinked
 path prefixes are rejected during config validation, and Linux opens the log file
-without following a final symlink. On Unix, file logs must use a dedicated log
-directory and are rejected when the nearest existing parent is group- or world-writable,
-such as `/tmp`.
+without following a final symlink. Runtime log-file open also rejects symlinked
+path components before creating or appending the file, so restart and rotation
+paths apply the same trust boundary as config validation. On Unix, file logs
+must use a dedicated log directory and are rejected when the nearest existing
+parent is group- or world-writable, such as `/tmp`.
 
 In `privacy-mode` builds, access logging and file logging must stay disabled.
 Fluxheim rejects `logging.access.enabled = true` and
@@ -910,7 +912,10 @@ header operations grouped together. Do not define the same header in more than
 one `set`, `add`, or `operations.add` table in the same policy; Fluxheim rejects
 that as ambiguous. Each header mutation policy is bounded: remove/unset, set/add,
 and append header-name collections are capped at 128 entries each, and a single
-append header may contain at most 32 values.
+append header may contain at most 32 values. Static header values must be
+non-empty after trimming and cannot contain HTTP control bytes, including
+horizontal tab, so one config works safely for both HTTP/1.x and HTTP/2
+upstreams. Dynamic template variables strip control characters before insertion.
 
 Security headers are easy to enable globally:
 
@@ -943,9 +948,11 @@ operators who want a different banner can set one through
 upstream redirect headers, similar to NGINX `proxy_redirect` or Apache
 `ProxyPassReverse`. `Location` rewrites apply to the whole header value.
 `Refresh` rewrites apply only to the URL after `url=` and preserve the refresh
-delay. `from` and `to` values must be absolute `http://` / `https://` prefixes
-or absolute paths, must not contain control characters, and each header supports
-up to 32 rules.
+delay. Quoted `Refresh` URLs such as `url="https://backend/"` and
+`url='https://backend/'` are matched against the unquoted URL and keep their
+quote style after rewriting. `from` and `to` values must be absolute
+`http://` / `https://` prefixes or absolute paths, must not contain control
+characters, and each header supports up to 32 rules.
 
 `[[headers.response.rewrite.cookie_domain]]` and
 `[[headers.response.rewrite.cookie_path]]` rewrite `Set-Cookie` `Domain=` and
