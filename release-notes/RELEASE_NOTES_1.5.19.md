@@ -17,6 +17,14 @@ during the v1.5.19 review cycle.
   templates, or upstream headers.
 - Released response-compression output buffers after each emitted chunk while
   preserving the cumulative `max_output_bytes` cap.
+- Made route prefix matching and prefix stripping path-segment aware so sibling
+  paths such as `/repoadmin` cannot enter a `/repo` route or rewrite to
+  unintended upstream paths.
+- Percent-encoded URI-special bytes in route regex capture substitutions before
+  applying rewrite templates, preserving slash-spanning captures while removing
+  raw matrix/userinfo/list delimiters from rewritten upstream paths.
+- Resolved exact local-static purge identities through the same route rewrite
+  logic used by static serving, including `rewrite_prefix`.
 - Applied decoded route matching to edge policy checks, closing mismatches
   between encoded request paths and policy enforcement.
 - Preserved private cache-control directives for status-specific TTL handling

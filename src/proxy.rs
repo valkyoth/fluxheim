@@ -8633,19 +8633,14 @@ fn local_static_file_for_request(
 
 #[cfg(all(feature = "web", feature = "cache"))]
 fn static_route_request_path_from_parts(request_path: &str, route: &RuntimeRoute) -> String {
-    let Some(strip_prefix) = route.strip_prefix.as_deref() else {
-        return request_path.to_owned();
-    };
-    let Some(suffix) = request_path.strip_prefix(strip_prefix) else {
-        return request_path.to_owned();
-    };
-    if suffix.is_empty() {
-        "/".to_owned()
-    } else if suffix.starts_with('/') {
-        suffix.to_owned()
-    } else {
-        format!("/{suffix}")
-    }
+    crate::route_policy::route_rewritten_path(
+        request_path,
+        &route.matcher,
+        route.strip_prefix.as_deref(),
+        route.rewrite_prefix.as_deref(),
+        route.rewrite_template.as_deref(),
+    )
+    .unwrap_or_else(|| request_path.to_owned())
 }
 
 #[cfg(feature = "cache")]
@@ -10491,6 +10486,7 @@ mod tests {
         proxy_protocol_v2_header, proxy_upgrade_request_allowed, redirect_authority,
         request_body_chunk_limit_status, request_limit_status, route_redirect_location,
         route_rewritten_path_and_query, safe_proxy_request_path,
+        static_route_request_path_from_parts,
     };
     #[cfg(feature = "load-balancer")]
     use super::{LoadBalancerMemberStateRequest, LoadBalancerRuntimeBackendState};
@@ -13922,6 +13918,40 @@ mod tests {
         assert_eq!(
             route_rewritten_path_and_query(&request, &route).as_deref(),
             Some("/internal/v1/users?id=7")
+        );
+    }
+
+    #[test]
+    fn static_route_purge_path_uses_rewrite_prefix_like_static_serve() {
+        let route = super::RuntimeRoute {
+            name: "assets".to_owned(),
+            matcher: super::RuntimeRouteMatcher::Prefix("/assets/".to_owned()),
+            methods: Vec::new(),
+            https_redirect_exempt: false,
+            strip_prefix: Some("/assets/".to_owned()),
+            rewrite_prefix: Some("/public/".to_owned()),
+            rewrite_template: None,
+            max_request_body_bytes: None,
+            access: Default::default(),
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            grpc: Default::default(),
+            action: super::RuntimeRouteAction::Proxy(
+                super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
+            ),
+            #[cfg(feature = "load-balancer")]
+            load_balancer: None,
+            #[cfg(feature = "cache")]
+            cache: None,
+            #[cfg(feature = "compression")]
+            compression: None,
+            request_headers: crate::config::RequestHeaderPolicyConfig::default(),
+            response_headers: crate::config::ResponseHeaderPolicyConfig::default(),
+        };
+
+        assert_eq!(
+            static_route_request_path_from_parts("/assets/app.js", &route),
+            "/public/app.js"
         );
     }
 

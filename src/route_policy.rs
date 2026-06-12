@@ -42,7 +42,7 @@ impl RuntimeRouteMatcher {
     pub(crate) fn matches_path(&self, path: &str) -> bool {
         match self {
             Self::Exact(exact) => path == exact,
-            Self::Prefix(prefix) => path.starts_with(prefix),
+            Self::Prefix(prefix) => route_prefix_matches_path(prefix, path),
             Self::Regex(regex) => regex.is_match(path),
             Self::Fallback => true,
         }
@@ -81,17 +81,29 @@ pub(crate) fn route_rewritten_path_and_query(
     rewrite_prefix: Option<&str>,
     rewrite_template: Option<&str>,
 ) -> Option<String> {
-    if let Some(template) = rewrite_template {
-        let rewritten_path = route_rewrite_template_path(request.uri.path(), matcher, template)?;
-        if !safe_forward_path(&rewritten_path) {
-            return None;
-        }
-        return with_original_query(request, rewritten_path);
-    }
+    let rewritten_path = route_rewritten_path(
+        request.uri.path(),
+        matcher,
+        strip_prefix,
+        rewrite_prefix,
+        rewrite_template,
+    )?;
+    with_original_query(request, rewritten_path)
+}
 
+pub(crate) fn route_rewritten_path(
+    path: &str,
+    matcher: &RuntimeRouteMatcher,
+    strip_prefix: Option<&str>,
+    rewrite_prefix: Option<&str>,
+    rewrite_template: Option<&str>,
+) -> Option<String> {
+    if let Some(template) = rewrite_template {
+        let rewritten_path = route_rewrite_template_path(path, matcher, template)?;
+        return safe_forward_path(&rewritten_path).then_some(rewritten_path);
+    }
     let strip_prefix = strip_prefix?;
-    let path = request.uri.path();
-    let suffix = path.strip_prefix(strip_prefix)?;
+    let suffix = route_strip_prefix_suffix(strip_prefix, path)?;
     let rewritten_path = if let Some(rewrite_prefix) = rewrite_prefix {
         join_route_rewrite_prefix(rewrite_prefix, suffix)?
     } else if suffix.is_empty() {
@@ -104,7 +116,7 @@ pub(crate) fn route_rewritten_path_and_query(
     if !safe_forward_path(&rewritten_path) {
         return None;
     }
-    with_original_query(request, rewritten_path)
+    Some(rewritten_path)
 }
 
 fn with_original_query(request: &RequestHeader, rewritten_path: String) -> Option<String> {
@@ -132,7 +144,7 @@ fn route_rewrite_template_path(
         let close = after_open.find('}')?;
         let variable = &after_open[..close];
         if let Some(value) = captures.variable(variable) {
-            rewritten.push_str(value);
+            append_route_regex_capture_value(&mut rewritten, value);
         }
         rest = &after_open[close + 1..];
     }
@@ -174,6 +186,35 @@ fn bounded_route_regex_capture(value: Option<regex::Match<'_>>) -> Option<String
     (value.len() <= MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES).then(|| value.to_owned())
 }
 
+fn route_prefix_matches_path(prefix: &str, path: &str) -> bool {
+    let Some(suffix) = path.strip_prefix(prefix) else {
+        return false;
+    };
+    prefix == "/" || prefix.ends_with('/') || suffix.is_empty() || suffix.starts_with('/')
+}
+
+fn route_strip_prefix_suffix<'a>(strip_prefix: &str, path: &'a str) -> Option<&'a str> {
+    let suffix = path.strip_prefix(strip_prefix)?;
+    (strip_prefix == "/"
+        || strip_prefix.ends_with('/')
+        || suffix.is_empty()
+        || suffix.starts_with('/'))
+    .then_some(suffix)
+}
+
+fn append_route_regex_capture_value(rewritten: &mut String, value: &str) {
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
+            rewritten.push(char::from(byte));
+        } else {
+            static HEX: &[u8; 16] = b"0123456789ABCDEF";
+            rewritten.push('%');
+            rewritten.push(char::from(HEX[usize::from(byte >> 4)]));
+            rewritten.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+    }
+}
+
 fn join_route_rewrite_prefix(rewrite_prefix: &str, suffix: &str) -> Option<String> {
     if rewrite_prefix == "/" {
         return Some(if suffix.is_empty() {
@@ -200,7 +241,7 @@ fn join_route_rewrite_prefix(rewrite_prefix: &str, suffix: &str) -> Option<Strin
 
 #[cfg(test)]
 mod tests {
-    use super::route_method_matches;
+    use super::{RuntimeRouteMatcher, route_method_matches, route_rewritten_path};
 
     #[test]
     fn route_method_matching_treats_inbound_case_as_equivalent() {
@@ -210,5 +251,34 @@ mod tests {
         assert!(route_method_matches(&methods, "get"));
         assert!(route_method_matches(&methods, "Head"));
         assert!(!route_method_matches(&methods, "POST"));
+    }
+
+    #[test]
+    fn prefix_routes_require_path_segment_boundary() {
+        let matcher = RuntimeRouteMatcher::Prefix("/repo".to_owned());
+
+        assert!(matcher.matches_path("/repo"));
+        assert!(matcher.matches_path("/repo/admin"));
+        assert!(!matcher.matches_path("/repoadmin"));
+        assert!(!matcher.matches_path("/repository/admin"));
+    }
+
+    #[test]
+    fn regex_rewrite_capture_values_are_percent_encoded() {
+        let matcher = RuntimeRouteMatcher::Regex(
+            regex::Regex::new(r"^/api/(?P<version>[^/]+)/(?P<rest>.*)$").unwrap(),
+        );
+
+        assert_eq!(
+            route_rewritten_path(
+                "/api/1;jsessionid=admin/users%3Badmin",
+                &matcher,
+                None,
+                None,
+                Some("/v{route.regex.version}/{route.regex.rest}")
+            )
+            .as_deref(),
+            Some("/v1%3Bjsessionid%3Dadmin/users%253Badmin")
+        );
     }
 }
