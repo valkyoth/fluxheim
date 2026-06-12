@@ -861,7 +861,10 @@ emits `X-Real-IP` from the effective client address. If the direct peer matches
 `server.trusted_proxies`, Fluxheim recursively restores that address from the
 trusted `X-Forwarded-For` chain before writing `X-Real-IP`, `X-Forwarded-For`,
 `Forwarded`, or `{remote_addr}` templates. In privacy builds it defaults off and
-client-IP forwarding remains stripped.
+client-IP forwarding remains stripped. IPv4-mapped IPv6 socket addresses such as
+`::ffff:192.0.2.10` are normalized to IPv4 before trusted-proxy, access-policy,
+rate-limit, and GeoIP decisions, so IPv4 CIDR rules apply consistently on
+dual-stack listeners.
 
 Request header values can use a small safe dynamic template set:
 
@@ -956,7 +959,11 @@ delay. Quoted `Refresh` URLs such as `url="https://backend/"` and
 `url='https://backend/'` are matched against the unquoted URL and keep their
 quote style after rewriting. `from` and `to` values must be absolute
 `http://` / `https://` prefixes or absolute paths, must not contain control
-characters, and each header supports up to 32 rules.
+characters, and each header supports up to 32 rules. When `from` is an absolute
+URL prefix, Fluxheim only rewrites matches that end at the URL boundary or are
+followed by `/`, `?`, or `#`; this prevents authority-continuation values such
+as `http://backend.internal@evil.example/` from matching a backend origin
+prefix.
 
 `[[headers.response.rewrite.cookie_domain]]` and
 `[[headers.response.rewrite.cookie_path]]` rewrite `Set-Cookie` `Domain=` and
@@ -1645,8 +1652,9 @@ When `websocket = true` and the downstream request contains a valid
 request upstream with `Connection: upgrade` and the downstream upgrade token.
 Upgrade requests bypass proxy cache policy and should normally use route-level
 read/send timeouts sized for long-lived connections. Leave `websocket = false`
-on normal HTTP routes so hop-by-hop upgrade headers are not forwarded
-accidentally.
+on normal HTTP routes; Fluxheim strips HTTP/1 `Connection` and `Upgrade`
+request headers in that mode so normal proxy routes cannot tunnel upgraded
+protocols accidentally.
 
 `[proxy.auth_request]` is Fluxheim's NGINX-style external authorization hook for
 proxy actions. When enabled, Fluxheim sends a bounded `GET` subrequest to `url`

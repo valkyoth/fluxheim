@@ -82,7 +82,7 @@ use crate::config::{
 };
 use crate::edge_policy::{
     InFlightPermit, RateLimitDecision, RuntimeAccessPolicy, RuntimeConcurrencyLimit,
-    RuntimeRateLimit, TrustedProxy, parse_trusted_proxies,
+    RuntimeRateLimit, TrustedProxy, normalize_ipv4_mapped_ip, parse_trusted_proxies,
 };
 use crate::flux_error::FluxErrorPingoraExt;
 #[cfg(any(feature = "cache", feature = "php-fpm", feature = "web"))]
@@ -3021,7 +3021,8 @@ async fn acquire_request_concurrency_permits(
 }
 
 fn effective_acl_client_ip(session: &Session, state: &ProxyRuntimeState) -> Option<IpAddr> {
-    let direct_ip = session.client_addr().and_then(|addr| addr.as_inet())?.ip();
+    let direct_ip =
+        normalize_ipv4_mapped_ip(session.client_addr().and_then(|addr| addr.as_inet())?.ip());
     let trusted_direct_peer = state.trusted_proxy(direct_ip);
     let forwarded_for = joined_header_values(session.req_header(), "x-forwarded-for");
     Some(effective_client_ip_from_forwarded_for(
@@ -3038,6 +3039,7 @@ fn effective_client_ip_from_forwarded_for(
     forwarded_for: Option<&str>,
     trusted_proxy: impl Fn(IpAddr) -> bool,
 ) -> IpAddr {
+    let direct_ip = normalize_ipv4_mapped_ip(direct_ip);
     if !trusted_direct_peer {
         return direct_ip;
     }
@@ -3048,7 +3050,7 @@ fn effective_client_ip_from_forwarded_for(
 
     let mut last_valid_hop = None;
     for hop in forwarded_for.split(',').rev() {
-        let Some(hop) = parse_forwarded_for_ip(hop) else {
+        let Some(hop) = parse_forwarded_for_ip(hop).map(normalize_ipv4_mapped_ip) else {
             return direct_ip;
         };
         last_valid_hop.get_or_insert(hop);
@@ -8761,6 +8763,9 @@ fn apply_websocket_upgrade_headers_if_enabled(
     upstream_request: &mut RequestHeader,
     proxy: &ProxyConfig,
 ) -> Result<()> {
+    upstream_request.remove_header("connection");
+    upstream_request.remove_header("upgrade");
+
     let Some(upgrade) = http_upgrade_request_value(downstream_request) else {
         return Ok(());
     };
@@ -8768,8 +8773,6 @@ fn apply_websocket_upgrade_headers_if_enabled(
         return Ok(());
     }
 
-    upstream_request.remove_header("connection");
-    upstream_request.remove_header("upgrade");
     upstream_request.insert_header("connection", "upgrade")?;
     upstream_request.insert_header("upgrade", upgrade)?;
     Ok(())
@@ -10935,6 +10938,33 @@ mod tests {
         assert!(!policy.allows(Some(IpAddr::V4(Ipv4Addr::new(10, 9, 2, 3))), None, None));
         assert!(!policy.allows(Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))), None, None));
         assert!(!policy.allows(None, None, None));
+    }
+
+    #[test]
+    fn access_policy_matches_ipv4_mapped_ipv6_against_ipv4_rules() {
+        let policy = RuntimeAccessPolicy::from_config(&crate::config::AccessPolicyConfig {
+            enabled: true,
+            allow: vec!["10.0.0.0/8".to_owned()],
+            deny: vec!["10.9.0.0/16".to_owned()],
+            ..crate::config::AccessPolicyConfig::default()
+        })
+        .unwrap();
+
+        let allowed = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x0a01, 0x0203));
+        let denied = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x0a09, 0x0203));
+
+        assert!(policy.allows(Some(allowed), None, None));
+        assert!(!policy.allows(Some(denied), None, None));
+    }
+
+    #[test]
+    fn access_policy_normalizes_ipv4_mapped_direct_client_ip() {
+        let direct = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x0a00, 0x00fe));
+
+        assert_eq!(
+            effective_client_ip_from_forwarded_for(direct, false, None, |_| false),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 254))
+        );
     }
 
     #[test]
@@ -13501,6 +13531,27 @@ mod tests {
                 .and_then(|v| v.to_str().ok()),
             Some("websocket")
         );
+    }
+
+    #[test]
+    fn websocket_disabled_strips_upgrade_headers() {
+        let mut downstream = RequestHeader::build("GET", b"/chat", None).unwrap();
+        downstream.insert_header("connection", "upgrade").unwrap();
+        downstream.insert_header("upgrade", "websocket").unwrap();
+
+        let mut upstream = RequestHeader::build("GET", b"/chat", None).unwrap();
+        upstream.insert_header("connection", "upgrade").unwrap();
+        upstream.insert_header("upgrade", "websocket").unwrap();
+        let proxy = ProxyConfig {
+            websocket: false,
+            ..ProxyConfig::default()
+        };
+
+        assert!(!proxy_upgrade_request_allowed(&downstream, &proxy));
+        apply_websocket_upgrade_headers_if_enabled(&downstream, &mut upstream, &proxy).unwrap();
+
+        assert!(upstream.headers.get("connection").is_none());
+        assert!(upstream.headers.get("upgrade").is_none());
     }
 
     #[test]

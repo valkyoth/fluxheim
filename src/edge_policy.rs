@@ -18,8 +18,9 @@ pub(crate) enum TrustedProxy {
 
 impl TrustedProxy {
     pub(crate) fn contains(self, address: IpAddr) -> bool {
+        let address = normalize_ipv4_mapped_ip(address);
         match (self, address) {
-            (Self::Exact(trusted), address) => trusted == address,
+            (Self::Exact(trusted), address) => normalize_ipv4_mapped_ip(trusted) == address,
             (
                 Self::Cidr {
                     network: IpAddr::V4(network),
@@ -36,6 +37,16 @@ impl TrustedProxy {
             ) => ipv6_prefix_match(network, address, prefix),
             _ => false,
         }
+    }
+}
+
+pub(crate) fn normalize_ipv4_mapped_ip(address: IpAddr) -> IpAddr {
+    match address {
+        IpAddr::V6(address) => address
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V6(address)),
+        IpAddr::V4(_) => address,
     }
 }
 
@@ -454,7 +465,8 @@ pub(crate) fn parse_trusted_proxies(values: &[String]) -> FluxResult<Vec<Trusted
 fn parse_trusted_proxy(value: &str) -> FluxResult<TrustedProxy> {
     let value = value.trim();
     if let Some((address, prefix)) = value.split_once('/') {
-        let network = address.parse::<IpAddr>().map_err(invalid_trusted_proxy)?;
+        let network =
+            normalize_ipv4_mapped_ip(address.parse::<IpAddr>().map_err(invalid_trusted_proxy)?);
         let prefix = prefix.parse::<u8>().map_err(invalid_trusted_proxy)?;
         let valid_prefix = match network {
             IpAddr::V4(_) => prefix <= 32,
@@ -468,6 +480,7 @@ fn parse_trusted_proxy(value: &str) -> FluxResult<TrustedProxy> {
 
     value
         .parse::<IpAddr>()
+        .map(normalize_ipv4_mapped_ip)
         .map(TrustedProxy::Exact)
         .map_err(invalid_trusted_proxy)
 }

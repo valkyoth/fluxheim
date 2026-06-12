@@ -107,15 +107,24 @@ behavior when the change improves security or project direction.
 - Harden trusted-proxy `X-Forwarded-For` parsing so any malformed hop rejects
   the forwarded chain and falls back to the direct peer IP instead of silently
   attributing traffic to a trusted proxy hop.
+- Normalize IPv4-mapped IPv6 client addresses before trusted-proxy,
+  access-policy, rate-limit, and GeoIP decisions so IPv4 CIDR policy also
+  applies on dual-stack listeners that report IPv4 peers as `::ffff:...`.
 - Restrict WebSocket-enabled proxy routes to the `websocket` upgrade token so
   valid but unrelated protocol upgrades such as `h2c` are not forwarded to
   upstreams.
+- Strip HTTP/1 `Connection` and `Upgrade` request headers when
+  `proxy.websocket = false`, preventing normal proxy routes from tunneling
+  upgraded protocols by accident.
 - Remove vendored Pingora upstream TLS underscore-to-hyphen hostname
   verification rewriting so certificates are checked against the exact
   configured SNI or alternative name.
 - Strip client-controlled hop-by-hop request headers before forwarding to
   upstreams, including `Connection`-listed extension headers and non-WebSocket
   `Upgrade` values.
+- Harden response `Location` and `Refresh` prefix rewrites so absolute URL
+  prefixes only match the intended authority boundary and cannot rewrite
+  userinfo-style URLs such as `http://origin@evil.example/`.
 - Harden traffic mirroring by rejecting unsafe mirrored paths/queries before
   outbound URL construction and suppressing recursive mirror requests marked
   with `X-Fluxheim-Mirror`.

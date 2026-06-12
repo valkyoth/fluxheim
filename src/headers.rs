@@ -596,7 +596,7 @@ fn rewrite_header_prefix(
     rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
 ) -> Option<String> {
     for rule in rules {
-        if value.starts_with(&rule.from) {
+        if response_rewrite_prefix_matches(value, &rule.from) {
             let mut rewritten =
                 String::with_capacity(rule.to.len() + value.len() - rule.from.len());
             rewritten.push_str(&rule.to);
@@ -605,6 +605,32 @@ fn rewrite_header_prefix(
         }
     }
     None
+}
+
+fn response_rewrite_prefix_matches(value: &str, prefix: &str) -> bool {
+    if !value.starts_with(prefix) {
+        return false;
+    }
+    if !response_rewrite_prefix_requires_authority_boundary(prefix) {
+        return true;
+    }
+    matches!(
+        value.as_bytes().get(prefix.len()),
+        None | Some(b'/' | b'?' | b'#')
+    )
+}
+
+fn response_rewrite_prefix_requires_authority_boundary(prefix: &str) -> bool {
+    let Some(authority_and_path) = prefix
+        .strip_prefix("http://")
+        .or_else(|| prefix.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    !authority_and_path
+        .as_bytes()
+        .iter()
+        .any(|byte| matches!(byte, b'/' | b'?' | b'#'))
 }
 
 fn rewrite_refresh_url(
@@ -1165,6 +1191,46 @@ mod tests {
                 .get("refresh")
                 .and_then(|value| value.to_str().ok()),
             Some("0; url = https://example.test/login")
+        );
+    }
+
+    #[test]
+    fn response_location_rewrite_rejects_absolute_authority_continuations() {
+        let policy = crate::config::ResponseHeaderPolicyConfig {
+            rewrite: crate::config::ResponseHeaderRewriteConfig {
+                location: vec![crate::config::ResponseHeaderRewriteRuleConfig {
+                    from: "http://backend.internal".to_owned(),
+                    to: "https://example.test".to_owned(),
+                }],
+                ..crate::config::ResponseHeaderRewriteConfig::default()
+            },
+            ..crate::config::ResponseHeaderPolicyConfig::default()
+        };
+        let mut rejected = ResponseHeader::build(302, None).unwrap();
+        rejected
+            .insert_header("location", "http://backend.internal@evil.example/phish")
+            .unwrap();
+        let mut allowed = ResponseHeader::build(302, None).unwrap();
+        allowed
+            .insert_header("location", "http://backend.internal/login")
+            .unwrap();
+
+        apply_response_policy(&mut rejected, &policy).unwrap();
+        apply_response_policy(&mut allowed, &policy).unwrap();
+
+        assert_eq!(
+            rejected
+                .headers
+                .get("location")
+                .and_then(|value| value.to_str().ok()),
+            Some("http://backend.internal@evil.example/phish")
+        );
+        assert_eq!(
+            allowed
+                .headers
+                .get("location")
+                .and_then(|value| value.to_str().ok()),
+            Some("https://example.test/login")
         );
     }
 
