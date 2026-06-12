@@ -65,6 +65,9 @@ pub(super) fn configured_load_balancer(
     config: &ProxyConfig,
     backend_policy: &BackendSelectionPolicy,
 ) -> io::Result<Option<FluxLoadBalancerRuntime>> {
+    #[cfg(test)]
+    crate::install_test_crypto_provider();
+
     if config.upstreams.len() < 2
         && config.upstreams_file.is_none()
         && config.upstreams_http_url.is_none()

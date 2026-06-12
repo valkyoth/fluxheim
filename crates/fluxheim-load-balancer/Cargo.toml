@@ -36,3 +36,4 @@ zeroize = { version = "1.8.2", features = ["derive"] }
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
 proptest = "1.6.0"
+rustls = { version = "0.23.40", features = ["ring"] }

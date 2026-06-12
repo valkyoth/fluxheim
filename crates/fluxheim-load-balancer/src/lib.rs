@@ -39,6 +39,11 @@ mod state;
 mod state_file;
 
 #[cfg(test)]
+fn install_test_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
+#[cfg(test)]
 use self::backend::BackendIdentity;
 use self::backend::FluxBackend;
 use self::backend::FluxBackendDiscoveryRuntimeStatus;
@@ -466,6 +471,9 @@ impl Debug for UpstreamLoadBalancer {
 
 impl UpstreamLoadBalancer {
     pub fn from_proxy_config(config: &ProxyConfig) -> io::Result<Option<Self>> {
+        #[cfg(test)]
+        install_test_crypto_provider();
+
         let backend_policy = BackendSelectionPolicy::from_config(config);
         match config.load_balance.selection {
             LoadBalanceSelection::RoundRobin => {
@@ -589,6 +597,9 @@ impl UpstreamLoadBalancer {
         route: Option<&str>,
         config: &ProxyConfig,
     ) -> io::Result<Option<(Self, UpstreamLoadBalancerService)>> {
+        #[cfg(test)]
+        install_test_crypto_provider();
+
         let metric_labels = LoadBalancerMetricLabels::new(vhost, route);
         match config.load_balance.selection {
             LoadBalanceSelection::RoundRobin => background_service_for(

@@ -37,6 +37,9 @@ pub(super) fn configured_health_check(
     config: &ProxyConfig,
     health_weights: Arc<HealthDerivedWeights>,
 ) -> io::Result<Box<dyn FluxHealthCheck>> {
+    #[cfg(test)]
+    crate::install_test_crypto_provider();
+
     match config.load_balance.health_check.protocol {
         LoadBalanceHealthCheckProtocol::Tcp => {
             let mut health_check = if config.upstream_tls {
@@ -601,6 +604,9 @@ fn configured_http_health_check(
     config: &ProxyConfig,
     health_weights: Arc<HealthDerivedWeights>,
 ) -> FluxResult<Box<FluxHttpHealthCheck>> {
+    #[cfg(test)]
+    crate::install_test_crypto_provider();
+
     let grpc = config.load_balance.health_check.protocol == LoadBalanceHealthCheckProtocol::Grpc;
     let host = config
         .load_balance
