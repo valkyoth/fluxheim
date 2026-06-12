@@ -6348,6 +6348,93 @@ fn rejects_duplicate_php_fpm_tcp_upstreams() {
 }
 
 #[test]
+fn rejects_private_php_fpm_tcp_ip_without_explicit_opt_in() {
+    let root = unique_temp_path("config-php-fpm-private-tcp-root");
+    std::fs::create_dir_all(&root).unwrap();
+    let config: Config = toml::from_str(&format!(
+        r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "10.0.0.5:9000"
+            "#,
+        test_process_config_toml("config-php-fpm-private-tcp-process"),
+        root.display(),
+    ))
+    .unwrap();
+
+    let error = config.validate().unwrap_err().to_string();
+    assert!(error.contains("php.fpm.tcp"), "{error}");
+    assert!(error.contains("allow_private_tcp_upstreams"), "{error}");
+}
+
+#[test]
+fn accepts_private_php_fpm_tcp_ip_with_explicit_opt_in() {
+    let root = unique_temp_path("config-php-fpm-private-tcp-opt-in-root");
+    std::fs::create_dir_all(&root).unwrap();
+    let config: Config = toml::from_str(&format!(
+        r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "10.0.0.5:9000"
+            allow_private_tcp_upstreams = true
+            "#,
+        test_process_config_toml("config-php-fpm-private-tcp-opt-in-process"),
+        root.display(),
+    ))
+    .unwrap();
+
+    config.validate().unwrap();
+}
+
+#[test]
+fn rejects_unsafe_php_fpm_tcp_ip_even_with_private_opt_in() {
+    let root = unique_temp_path("config-php-fpm-unsafe-tcp-root");
+    std::fs::create_dir_all(&root).unwrap();
+    let config: Config = toml::from_str(&format!(
+        r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "0.0.0.0:9000"
+            allow_private_tcp_upstreams = true
+            "#,
+        test_process_config_toml("config-php-fpm-unsafe-tcp-process"),
+        root.display(),
+    ))
+    .unwrap();
+
+    let error = config.validate().unwrap_err().to_string();
+    assert!(error.contains("php.fpm.tcp"), "{error}");
+    assert!(error.contains("unspecified or multicast"), "{error}");
+}
+
+#[test]
 fn rejects_mixed_php_fpm_endpoint_modes() {
     let root = unique_temp_path("config-php-fpm-mixed-root");
     std::fs::create_dir_all(&root).unwrap();

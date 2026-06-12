@@ -3014,6 +3014,9 @@ APP_MEMORY_LIMIT = "256M"
 # Default mode. Fluxheim connects to an operator-managed php-fpm pool.
 mode = "external"
 tcp = "php-fpm:9000"
+# Required when TCP endpoints use private or link-local IP literals outside
+# loopback.
+# allow_private_tcp_upstreams = true
 # Or use a private Unix socket:
 # socket = "/run/php/php-fpm.sock"
 # Or list multiple TCP endpoints for simple safe-method failover:
@@ -3245,6 +3248,12 @@ Use either `php.fpm.socket`, `php.fpm.tcp`, or `php.fpm.tcp_upstreams`; the
 endpoint modes are mutually exclusive. `tcp_upstreams` enables round-robin TCP
 selection and conservative failover across configured php-fpm backends. The
 `tcp_upstreams` list is capped at 64 entries and rejects duplicate authorities.
+Unsafe TCP IP literals such as unspecified or multicast addresses are rejected.
+Private or link-local IP literals outside loopback require
+`php.fpm.allow_private_tcp_upstreams = true`; this keeps private-network
+FastCGI connectivity an explicit operator trust boundary while preserving local
+loopback php-fpm deployments. Hostname endpoints are validated as authorities,
+but DNS resolution remains an operational boundary for the php-fpm network.
 When enabled, stale idle entries older than `php.fpm.idle_timeout_secs` are
 discarded before reuse. `pool_max_idle` must be between 1 and 1024 when
 keepalive is enabled. `php.fpm.max_retries` defaults to `0`; when set,

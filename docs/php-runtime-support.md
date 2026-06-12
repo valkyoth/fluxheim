@@ -206,6 +206,8 @@ eligible:
 - Deny configured PHP execution path prefixes before contacting php-fpm.
 - Never pass arbitrary process environment to PHP.
 - Use a small allow-list for CGI/FastCGI params.
+- Reject decoded control characters in path-derived FastCGI params and avoid
+  protocol-relative directory-slash redirects.
 - Set `SCRIPT_NAME`, `SCRIPT_FILENAME`, `DOCUMENT_ROOT`, `REQUEST_METHOD`,
   `QUERY_STRING`, `REQUEST_URI`, `SERVER_NAME`, `SERVER_PORT`, and
   `SERVER_PROTOCOL` explicitly.

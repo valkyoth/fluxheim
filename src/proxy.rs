@@ -7580,7 +7580,7 @@ async fn respond_directory_slash_redirect(
 #[cfg(feature = "php-fpm")]
 fn directory_slash_redirect_location(request: &RequestHeader) -> Option<String> {
     let path = request.uri.path();
-    if path.is_empty() || path.ends_with('/') || path.contains('\\') {
+    if path.is_empty() || path.starts_with("//") || path.ends_with('/') || path.contains('\\') {
         return None;
     }
     let mut location = String::with_capacity(
@@ -7652,7 +7652,7 @@ fn php_fpm_path_translated(php: &RuntimePhp, path_info: &str) -> Option<String> 
             || segment == ".."
             || segment.starts_with('.')
             || segment.contains('\\')
-            || segment.contains('\0')
+            || segment.chars().any(char::is_control)
         {
             return None;
         }
@@ -7669,7 +7669,7 @@ fn php_script_name_for_request(
     let decoded = percent_encoding::percent_decode_str(request_path)
         .decode_utf8()
         .ok()?;
-    if !decoded.starts_with('/') || decoded.contains('\0') {
+    if !decoded.starts_with('/') || decoded.chars().any(char::is_control) {
         return None;
     }
 
@@ -11667,6 +11667,8 @@ mod tests {
 
         assert!(php_script_name_for_request(&php, "/app.php/../admin").is_none());
         assert!(php_script_name_for_request(&php, "/app.php/.hidden").is_none());
+        assert!(php_script_name_for_request(&php, "/app.php/user%01admin").is_none());
+        assert!(php_script_name_for_request(&php, "/app.php/user%7Fadmin").is_none());
     }
 
     #[cfg(feature = "php-fpm")]
@@ -11711,6 +11713,14 @@ mod tests {
             directory_slash_redirect_location(&request).as_deref(),
             Some("/blog/?preview=1")
         );
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_directory_slash_redirect_rejects_protocol_relative_path() {
+        let request = RequestHeader::build("GET", b"//evil.example/blog", None).unwrap();
+
+        assert_eq!(directory_slash_redirect_location(&request), None);
     }
 
     #[cfg(feature = "php-fpm")]

@@ -131,6 +131,10 @@ during the v1.5.19 review cycle.
   numeric-only final labels in DNS hostnames.
 - Hardened OpenBao Transit cache encryption calls by disabling HTTP redirects
   and reading Transit JSON responses through a bounded buffer before parsing.
+- Hardened PHP-FPM path handling by rejecting protocol-relative directory-slash
+  redirects and decoded control characters in path-derived FastCGI params.
+- Hardened PHP-FPM TCP endpoint validation by rejecting unsafe IP literals and
+  requiring `allow_private_tcp_upstreams = true` for private/link-local IPs.
 - Hardened traffic mirroring by rejecting unsafe mirrored paths/queries before
   outbound URL construction and suppressing recursive mirror requests marked
   with `X-Fluxheim-Mirror`.

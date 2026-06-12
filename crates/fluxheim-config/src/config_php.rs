@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::fs;
+use std::net::{IpAddr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,7 @@ use crate::config::{
     validate_required_timeout_secs,
 };
 use crate::config_header::validate_header_name;
-use crate::config_net::valid_authority;
+use crate::config_net::{upstream_host, valid_authority};
 use crate::config_path::{
     path_existing_prefix_contains_symlink, path_inspection_failed,
     validate_non_world_writable_parent, validate_path,
@@ -447,6 +448,8 @@ pub struct PhpFpmConfig {
     #[serde(default)]
     pub tcp_upstreams: Vec<String>,
     #[serde(default)]
+    pub allow_private_tcp_upstreams: bool,
+    #[serde(default)]
     pub php_fpm_binary: Option<PathBuf>,
     #[serde(default)]
     pub socket_dir: Option<PathBuf>,
@@ -527,6 +530,7 @@ impl Default for PhpFpmConfig {
             socket: None,
             tcp: None,
             tcp_upstreams: Vec::new(),
+            allow_private_tcp_upstreams: false,
             php_fpm_binary: None,
             socket_dir: None,
             workers: default_php_fpm_managed_workers(),
@@ -692,6 +696,9 @@ impl PhpFpmConfig {
                 reason: "must be host:port or ip:port",
             });
         }
+        if let Some(tcp) = &self.tcp {
+            validate_php_fpm_tcp_endpoint(tcp, self.allow_private_tcp_upstreams, "php.fpm.tcp")?;
+        }
         if self.tcp_upstreams.len() > MAX_PHP_FPM_TCP_UPSTREAMS {
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.fpm.tcp_upstreams",
@@ -706,6 +713,11 @@ impl PhpFpmConfig {
                     reason: "entries must be host:port or ip:port",
                 });
             }
+            validate_php_fpm_tcp_endpoint(
+                tcp,
+                self.allow_private_tcp_upstreams,
+                "php.fpm.tcp_upstreams",
+            )?;
             if !seen_tcp_upstreams.insert(tcp.to_ascii_lowercase()) {
                 return Err(ConfigError::InvalidPhpConfig {
                     field: "php.fpm.tcp_upstreams",
@@ -743,6 +755,64 @@ impl PhpFpmConfig {
         }
         Ok(())
     }
+}
+
+fn validate_php_fpm_tcp_endpoint(
+    authority: &str,
+    allow_private_tcp_upstreams: bool,
+    field: &'static str,
+) -> Result<(), ConfigError> {
+    let Some(host) = upstream_host(authority) else {
+        return Err(ConfigError::InvalidPhpConfig {
+            field,
+            reason: "entries must be host:port or ip:port",
+        });
+    };
+    let Ok(address) = host.parse::<IpAddr>() else {
+        return Ok(());
+    };
+    if php_fpm_tcp_ip_always_invalid(address) {
+        return Err(ConfigError::InvalidPhpConfig {
+            field,
+            reason: "must not use unspecified or multicast IP literals",
+        });
+    }
+    if !allow_private_tcp_upstreams && php_fpm_tcp_ip_requires_private_opt_in(address) {
+        return Err(ConfigError::InvalidPhpConfig {
+            field,
+            reason: "private or link-local IP literals require allow_private_tcp_upstreams = true",
+        });
+    }
+    Ok(())
+}
+
+fn php_fpm_tcp_ip_always_invalid(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => {
+            address.is_unspecified() || address.is_broadcast() || address.is_multicast()
+        }
+        IpAddr::V6(address) => address.is_unspecified() || address.is_multicast(),
+    }
+}
+
+fn php_fpm_tcp_ip_requires_private_opt_in(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => {
+            !address.is_loopback() && (address.is_private() || address.is_link_local())
+        }
+        IpAddr::V6(address) => {
+            !address.is_loopback()
+                && (ipv6_is_unique_local(address) || ipv6_is_unicast_link_local(address))
+        }
+    }
+}
+
+fn ipv6_is_unique_local(address: Ipv6Addr) -> bool {
+    address.segments()[0] & 0xfe00 == 0xfc00
+}
+
+fn ipv6_is_unicast_link_local(address: Ipv6Addr) -> bool {
+    address.segments()[0] & 0xffc0 == 0xfe80
 }
 
 fn default_php_fpm_managed_workers() -> usize {
