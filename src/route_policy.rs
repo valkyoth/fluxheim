@@ -57,7 +57,10 @@ impl RuntimeRouteMatcher {
 }
 
 pub(crate) fn route_method_matches(methods: &[String], method: &str) -> bool {
-    methods.is_empty() || methods.iter().any(|configured| configured == method)
+    methods.is_empty()
+        || methods
+            .iter()
+            .any(|configured| configured.eq_ignore_ascii_case(method))
 }
 
 pub(crate) fn route_regex_captures(
@@ -193,4 +196,19 @@ fn join_route_rewrite_prefix(rewrite_prefix: &str, suffix: &str) -> Option<Strin
     };
 
     safe_forward_path(&rewritten_path).then_some(rewritten_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::route_method_matches;
+
+    #[test]
+    fn route_method_matching_treats_inbound_case_as_equivalent() {
+        let methods = vec!["GET".to_owned(), "HEAD".to_owned()];
+
+        assert!(route_method_matches(&methods, "GET"));
+        assert!(route_method_matches(&methods, "get"));
+        assert!(route_method_matches(&methods, "Head"));
+        assert!(!route_method_matches(&methods, "POST"));
+    }
 }

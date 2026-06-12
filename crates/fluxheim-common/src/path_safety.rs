@@ -17,7 +17,7 @@ pub fn safe_forward_path(path: &str) -> bool {
 }
 
 fn safe_forward_path_segment(segment: &str) -> bool {
-    if segment == ".." {
+    if matches!(segment, "." | "..") {
         return false;
     }
 
@@ -46,7 +46,7 @@ fn safe_forward_path_segment(segment: &str) -> bool {
 }
 
 fn unsafe_decoded_forward_path_segment(segment: &[u8]) -> bool {
-    segment == b".."
+    matches!(segment, b"." | b"..")
         || segment
             .iter()
             .any(|byte| byte.is_ascii_control() || matches!(byte, b'/' | b'\\'))
@@ -88,6 +88,13 @@ mod tests {
         assert!(!safe_forward_path("/%2e%2e/secret"));
         assert!(!safe_forward_path("/%252e%252e/secret"));
         assert!(!safe_forward_path("/%25252e%25252e/secret"));
+    }
+
+    #[test]
+    fn rejects_current_directory_segments() {
+        assert!(!safe_forward_path("/public/./admin"));
+        assert!(!safe_forward_path("/public/%2e/admin"));
+        assert!(safe_forward_path("/.well-known/acme-challenge/token"));
     }
 
     #[test]

@@ -3872,6 +3872,10 @@ fn decoded_route_policy_path(path: &str) -> Option<String> {
     Some(decoded.into_owned())
 }
 
+fn safe_proxy_request_path(path: &str) -> bool {
+    crate::path_safety::safe_forward_path(path)
+}
+
 impl RuntimeVhost {
     fn route_index(&self, method: &str, path: &str) -> Option<usize> {
         let (matched, fallback) = self.route_index_parts(method, path);
@@ -4312,6 +4316,10 @@ impl ProxyHttp for FluxProxy {
         let vhost = state.vhost(vhost_index);
         let method = session.req_header().method.as_str();
         let path = session.req_header().uri.path();
+        if !safe_proxy_request_path(path) {
+            respond_text_error(session, 400, Bytes::from_static(b"unsafe request path")).await?;
+            return Ok(true);
+        }
         ctx.route_index = vhost.route_index(method, path);
         let route_policy_index = vhost.route_policy_index(method, path);
         #[cfg(feature = "geoip")]
@@ -10482,7 +10490,7 @@ mod tests {
         https_redirect_location, normalize_cookie_headers, proxy_protocol_v1_header,
         proxy_protocol_v2_header, proxy_upgrade_request_allowed, redirect_authority,
         request_body_chunk_limit_status, request_limit_status, route_redirect_location,
-        route_rewritten_path_and_query,
+        route_rewritten_path_and_query, safe_proxy_request_path,
     };
     #[cfg(feature = "load-balancer")]
     use super::{LoadBalancerMemberStateRequest, LoadBalancerRuntimeBackendState};
@@ -13493,9 +13501,24 @@ mod tests {
             .vhost(snapshot.state.vhost_index(Some("gateway.example")));
 
         assert_eq!(vhost.route_index("GET", "/resource"), Some(1));
+        assert_eq!(vhost.route_index("get", "/resource"), Some(1));
         assert_eq!(vhost.route_index("HEAD", "/resource"), Some(1));
+        assert_eq!(vhost.route_index("head", "/resource"), Some(1));
         assert_eq!(vhost.route_index("POST", "/resource"), Some(2));
+        assert_eq!(vhost.route_index("post", "/resource"), Some(2));
         assert_eq!(vhost.route_index("PUT", "/resource"), Some(0));
+    }
+
+    #[test]
+    fn proxy_request_path_guard_rejects_dot_segments_before_routing() {
+        assert!(!safe_proxy_request_path("/public/../admin/dashboard"));
+        assert!(!safe_proxy_request_path("/public/./admin/dashboard"));
+        assert!(!safe_proxy_request_path("/public/%2e%2e/admin/dashboard"));
+        assert!(!safe_proxy_request_path("/public/%2e/admin/dashboard"));
+        assert!(safe_proxy_request_path(
+            "/.well-known/acme-challenge/token_123"
+        ));
+        assert!(safe_proxy_request_path("/assets/app.v1.2.css"));
     }
 
     #[test]

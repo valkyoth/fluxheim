@@ -13,6 +13,10 @@ behavior when the change improves security or project direction.
 
 - Fix fallback proxy cache auth ordering so cache fallback handling cannot run
   before the configured authorization decision.
+- Reject ambiguous dot-segment proxy request paths before route selection,
+  route-local policy checks, cache keying, or upstream forwarding.
+- Treat incoming method casing as equivalent for route method filters so
+  lowercase HTTP/1 method tokens cannot miss method-scoped route policy.
 - Apply decoded route matching to edge policy checks, closing mismatches between
   encoded request paths and policy enforcement.
 - Preserve private cache-control directives for status-specific TTL handling so
