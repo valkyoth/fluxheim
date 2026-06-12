@@ -1741,11 +1741,12 @@ Stable scope:
 
 - Compile-time `load-balancer` module remains the place for estate-scale
   features that go beyond one Fluxheim instance's normal proxy routing.
-- The `1.5.x` dependency-reduction line should keep Pingora for the HTTP proxy
-  core while removing it from domains where Fluxheim already owns the datapath:
-  standard HTTP/error type plumbing, the TCP stream proxy, the load-balancer
-  substrate, and mechanical background task registration. Cache should be
-  decoupled through a Fluxheim-owned storage interface rather than replaced.
+- The `1.5.x` modularization line should keep Pingora in the build graph and
+  focus on crate boundaries, Fluxheim-owned internal interfaces, feature
+  mapping, and parity tests. It should not carry hard Pingora-removal gates.
+  Cache, load-balancer, stream, background-task, HTTP/error, web, PHP-FPM, and
+  ACME work in this line should prepare clean adapters and focused crates so
+  the `1.6.x` runtime line can remove Pingora layer by layer.
 - Fluxheim-owned modules should standardize on the Rust `http` crate for
   request/response/status/header types and a Fluxheim-owned `FluxError` /
   `FluxResult` taxonomy instead of propagating Pingora HTTP wrappers and
@@ -1768,11 +1769,11 @@ Stable scope:
   discovery in separate `src/load_balancer/*` modules. Future load-balancer
   work should extend those domains or create a new focused module instead of
   growing the parent orchestration file.
-- The `1.5.x` line should replace Pingora's load-balancing substrate with a
-  Fluxheim-native backend set, discovery trait, readiness state, health-check
-  scheduler, and background update loop. Pingora remains the HTTP proxy
-  transport/runtime while the load-balancer image becomes independent from
-  `pingora-load-balancing`.
+- The `1.5.x` line should keep load-balancer logic moving into
+  `crates/fluxheim-load-balancer` with Fluxheim-owned backend snapshots,
+  discovery traits, readiness state, health-check scheduling, and runtime
+  policy interfaces. Removing `pingora-load-balancing` from compilation is a
+  `1.6.x` responsibility, not a `1.5.x` release gate.
 - Background tasks use the `1.5.12` Fluxheim adapter for Fluxheim-owned work:
   cache metrics, stale purging, ACME renewal, admin watchdog, load-balancer
   refresh loops, and future discovery workers see Fluxheim shutdown/readiness
@@ -2425,7 +2426,7 @@ Planned `1.6.x` sequence:
   is expected to be gone. Add the first `fluxheim-runtime` / `fluxheim-server`
   traits and keep runtime behavior unchanged.
 - `v1.6.1`: load-balancer independence. Remove `pingora-load-balancing` from
-  normal builds if not already completed in `1.5.22`. Replace remaining
+  normal builds. Replace remaining
   Pingora background/listen/shutdown service traits in
   `fluxheim-load-balancer` with Fluxheim/Tokio task handles. Add a
   load-balancer-only `cargo tree` gate proving `pingora-load-balancing` is not
@@ -3660,30 +3661,32 @@ the exception while the cache server is being completed as a focused sequence:
   with `v1.5.6`, load-balancer factory/background wiring moves with `v1.5.7`,
   and broader HTTP/server upstream TLS material loading moves with the later
   server/listener/TLS runtime line.
-- `v1.5.6`: Fluxheim-native stream-proxy runtime line. Stop at replacing
-  Pingora's stream service entrypoint and stream/TLS connector wrappers with a
-  Fluxheim-owned Tokio listener loop and explicit outbound connector for raw
-  TCP plus upstream TLS/mTLS. Preserve existing stream config, route matching,
-  weighted upstream selection, drain/backup policy, route-local PROXY protocol
-  receive/send, true idle timeouts, lifetime and byte caps, metrics, smoke
-  tests, and release-profile behavior. This is also where remaining stream
-  data-path `io::Result` helpers should be moved behind Fluxheim-owned error
-  types because the stream runtime boundary becomes Fluxheim-owned. Do not add
-  UDP proxying, HTTP/3/QUIC,
+- `v1.5.6`: Fluxheim-native stream-proxy boundary line. Stop at isolating the
+  stream data path, listener assumptions, and stream/TLS connector behavior
+  behind Fluxheim-owned Tokio-facing interfaces for raw TCP plus upstream
+  TLS/mTLS. Preserve existing stream config, route matching, weighted upstream
+  selection, drain/backup policy, route-local PROXY protocol receive/send,
+  true idle timeouts, lifetime and byte caps, metrics, smoke tests, and
+  release-profile behavior. This is also where remaining stream data-path
+  `io::Result` helpers should be moved behind Fluxheim-owned error types
+  because the stream runtime boundary becomes Fluxheim-owned. Keep any
+  dependency-removal gate for the `1.6.x` runtime line. Do not add UDP
+  proxying, HTTP/3/QUIC,
   native load-balancer internals, restart-persistent state, cross-node sync,
   WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.7`: Fluxheim-native load-balancer core line. Stop at replacing
-  `pingora-load-balancing` with Fluxheim-owned backend types, backend-set
-  readiness, discovery trait, static/file/DNS discovery adapters, TCP/HTTP
-  health-check scheduling, background update lifecycle, and existing selector
-  entry points. Preserve current config, admin API, status shape, metrics,
-  smoke tests, privacy-mode behavior, managed-cookie behavior, and all
-  selection results as far as possible. Convert remaining load-balancer
-  construction/factory/background update errors onto Fluxheim-owned error
-  types as part of this substrate replacement, not as scattered cleanup. Keep
-  Pingora's HTTP proxy core and
-  upstream transport in place. Do not add restart-persistent state, cross-node
+- `v1.5.7`: Fluxheim-native load-balancer core line. Stop at moving
+  load-balancer-owned backend types, backend-set readiness, discovery traits,
+  static/file/DNS discovery adapters, TCP/HTTP health-check scheduling,
+  background update lifecycle, and existing selector entry points behind
+  Fluxheim-owned module or crate boundaries. Preserve current config, admin
+  API, status shape, metrics, smoke tests, privacy-mode behavior,
+  managed-cookie behavior, and all selection results as far as possible.
+  Convert remaining load-balancer construction/factory/background update errors
+  onto Fluxheim-owned error types as part of this boundary work, not as
+  scattered cleanup. Keep Pingora's HTTP proxy core, upstream transport, and
+  build-graph dependencies in place until the `1.6.x` removal line. Do not add
+  restart-persistent state, cross-node
   sync, runtime add/remove-member, xDS/Kubernetes/Consul discovery, UDP/GSLB,
   WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
@@ -3835,18 +3838,19 @@ the exception while the cache server is being completed as a focused sequence:
   UDP catchall behavior, authoritative DNS, and GSLB control-plane behavior as
   separate later scopes unless each has its own bounded session, affinity,
   observability, and abuse-control design.
-- `v1.5.22`: Pingora load-balancer/cache dependency removal line. Stop at
-  removing `pingora-load-balancing` and `pingora-cache` from Fluxheim's normal
-  build graph while preserving current operator-facing behavior. The
-  load-balancer side should finish the remaining glue after
-  `crates/fluxheim-load-balancer` by converting selected Fluxheim backends
-  directly into the current HTTP upstream connector without compiling
-  Pingora's LB crate. The cache side should route HTTP cache hits, misses,
-  stale serving, range/slice handling, purge/status behavior, and cache writes
-  through Fluxheim-owned cache interfaces instead of Pingora cache adapter
-  traits. Keep Pingora core/proxy/session dependencies in place until the later
-  server and HTTP runtime lines; this release is only about making LB and cache
-  fully Fluxheim-owned and removing those two Pingora crates from compilation.
+- `v1.5.22`: cache and load-balancer crate-boundary preparation line. Stop at
+  tightening `crates/fluxheim-load-balancer` and the planned
+  `crates/fluxheim-cache` boundary so both domains expose Fluxheim-owned
+  backend/cache interfaces, tests, and root-crate adapters without changing
+  runtime behavior or requiring Pingora to disappear from the build graph. The
+  load-balancer side should keep selected Fluxheim backend snapshots and policy
+  state independent from proxy/admin internals. The cache side should keep HTTP
+  cache hit, miss, stale serving, range/slice handling, purge/status behavior,
+  and cache writes expressed through Fluxheim-owned interfaces where practical,
+  while retaining any temporary Pingora adapters needed by the current HTTP
+  runtime. Do not make this a dependency-removal release; actual
+  `pingora-load-balancing` and `pingora-cache` compile removal belongs to
+  `v1.6.1` and `v1.6.2`.
 - `v1.5.23`: cache-aware origin protection service line. Stop at one small
   differentiator that combines cache and load-balancer state without becoming a
   new proxy runtime: route-scoped origin-fill budgets that apply only to cache
