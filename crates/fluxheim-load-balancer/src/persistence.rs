@@ -123,6 +123,10 @@ impl LoadBalancerPersistenceState {
         }
     }
 
+    pub(super) fn is_managed_cookie(&self) -> bool {
+        self.mode == LoadBalancePersistenceMode::ManagedCookie
+    }
+
     pub(super) fn lookup(&self, key: &[u8]) -> Option<u64> {
         let now = Instant::now();
         let mut table = self

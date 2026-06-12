@@ -801,6 +801,9 @@ impl UpstreamLoadBalancer {
         let persistence_entry_counts = self
             .persistence
             .as_ref()
+            .filter(|persistence| {
+                self.fresh_selection_needs_persistence_counts(persistence_key, persistence)
+            })
             .map_or_else(std::collections::HashMap::new, |persistence| {
                 persistence.runtime_counts().1
             });
@@ -819,17 +822,22 @@ impl UpstreamLoadBalancer {
             persistence.record(key, backend_key(&selected.backend));
             self.save_runtime_state_if_configured_in_background("persistence_record");
         } else if let Some(persistence) = &self.persistence
-            && let Some((key, cookie)) = persistence.new_managed_cookie()
+            && let Some((_key, cookie)) = persistence.new_managed_cookie()
         {
-            persistence.record(&key, backend_key(&selected.backend));
-            self.save_runtime_state_if_configured_in_background(
-                "managed_cookie_persistence_record",
-            );
             let mut selected = selected;
             selected.managed_affinity_cookie = Some(cookie);
             return Some(selected);
         }
         Some(selected)
+    }
+
+    fn fresh_selection_needs_persistence_counts(
+        &self,
+        persistence_key: Option<&[u8]>,
+        persistence: &LoadBalancerPersistenceState,
+    ) -> bool {
+        self.selection == LoadBalanceSelection::LeastSessions
+            && (!persistence.is_managed_cookie() || persistence_key.is_some())
     }
 
     fn prepare_selected(
@@ -1908,7 +1916,6 @@ mod tests {
         .unwrap();
 
         let first = balancer.select(&request(), None).unwrap();
-        let first_backend = backend_key(&first.backend);
         let cookie = first
             .managed_affinity_cookie
             .expect("fresh selection emits managed cookie")
@@ -1928,12 +1935,58 @@ mod tests {
             .insert_header("cookie", format!("fluxheim_lb={cookie_value}"))
             .unwrap();
         let second = balancer.select(&persisted_request, None).unwrap();
-        assert_eq!(backend_key(&second.backend), first_backend);
+        let persisted_backend = backend_key(&second.backend);
         assert_eq!(
             second.persistence_outcome,
-            Some(LoadBalancerPersistenceOutcome::Hit)
+            Some(LoadBalancerPersistenceOutcome::Miss)
         );
         assert!(second.managed_affinity_cookie.is_none());
+        assert_eq!(balancer.runtime_stats().persistence.entry_count, 1);
+
+        let third = balancer.select(&persisted_request, None).unwrap();
+        assert_eq!(backend_key(&third.backend), persisted_backend);
+        assert_eq!(
+            third.persistence_outcome,
+            Some(LoadBalancerPersistenceOutcome::Hit)
+        );
+        assert!(third.managed_affinity_cookie.is_none());
+    }
+
+    #[test]
+    fn managed_cookie_missing_cookie_does_not_grow_persistence_table() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                persistence: LoadBalancePersistenceConfig {
+                    enabled: true,
+                    mode: LoadBalancePersistenceMode::ManagedCookie,
+                    cookie: Some("fluxheim_lb".to_owned()),
+                    ttl_secs: 60,
+                    table_max_entries: 4,
+                    ..LoadBalancePersistenceConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        for _ in 0..16 {
+            let selected = balancer.select(&request(), None).unwrap();
+            assert!(selected.managed_affinity_cookie.is_some());
+        }
+
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.persistence.entry_count, 0);
+        assert!(
+            stats
+                .backends
+                .iter()
+                .all(|backend| backend.persistence_entry_count == 0)
+        );
     }
 
     #[test]

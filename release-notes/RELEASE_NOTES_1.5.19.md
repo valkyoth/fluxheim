@@ -33,6 +33,10 @@ during the v1.5.19 review cycle.
   `1`, so passive outlier ejection cannot fail-closed an entire load-balanced
   pool by default. Operators can set it to `0` to retain strict fail-closed
   passive-health behavior.
+- Hardened managed-cookie load-balancer persistence so missing or invalid
+  affinity cookies no longer create server-side persistence-table entries or
+  trigger least-session table scans until the signed cookie is returned by the
+  client.
 
 ## What Changed
 
