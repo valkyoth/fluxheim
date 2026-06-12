@@ -4867,6 +4867,7 @@ impl ProxyHttp for FluxProxy {
                 route_regex_captures: route_regex_captures.as_ref(),
             },
         )?;
+        crate::headers::strip_upstream_hop_by_hop_request_headers(upstream_request)?;
         apply_websocket_upgrade_headers_if_enabled(
             session.req_header(),
             upstream_request,

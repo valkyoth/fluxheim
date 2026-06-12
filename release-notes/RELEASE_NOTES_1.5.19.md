@@ -92,6 +92,9 @@ during the v1.5.19 review cycle.
 - Removed vendored Pingora upstream TLS underscore-to-hyphen hostname
   verification rewriting so certificates are checked against the exact
   configured SNI or alternative name.
+- Stripped client-controlled hop-by-hop request headers before forwarding to
+  upstreams, including `Connection`-listed extension headers and non-WebSocket
+  `Upgrade` values.
 
 ## What Changed
 

@@ -97,6 +97,9 @@ behavior when the change improves security or project direction.
 - Remove vendored Pingora upstream TLS underscore-to-hyphen hostname
   verification rewriting so certificates are checked against the exact
   configured SNI or alternative name.
+- Strip client-controlled hop-by-hop request headers before forwarding to
+  upstreams, including `Connection`-listed extension headers and non-WebSocket
+  `Upgrade` values.
 
 ### Changed
 

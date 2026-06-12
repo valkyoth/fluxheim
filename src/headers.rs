@@ -40,6 +40,78 @@ pub fn apply_upstream_request_policy(
     }
 }
 
+pub fn strip_upstream_hop_by_hop_request_headers(
+    request: &mut RequestHeader,
+) -> pingora::Result<()> {
+    let connection_listed_headers = request
+        .headers
+        .get_all("connection")
+        .iter()
+        .flat_map(|value| value.to_str().unwrap_or_default().split(','))
+        .map(str::trim)
+        .filter(|value| valid_connection_option_token(value))
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    let preserve_chunked_framing = request
+        .headers
+        .get_all("transfer-encoding")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .rfind(|value| !value.is_empty())
+        .is_some_and(|coding| coding.eq_ignore_ascii_case("chunked"));
+
+    for header in connection_listed_headers {
+        request.remove_header(header.as_str());
+    }
+
+    for header in [
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    ] {
+        request.remove_header(header);
+    }
+
+    if preserve_chunked_framing {
+        request.insert_header("transfer-encoding", "chunked")?;
+    }
+
+    Ok(())
+}
+
+fn valid_connection_option_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            matches!(
+                byte,
+                b'!' | b'#'
+                    | b'$'
+                    | b'%'
+                    | b'&'
+                    | b'\''
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'.'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'|'
+                    | b'~'
+                    | b'0'..=b'9'
+                    | b'a'..=b'z'
+                    | b'A'..=b'Z'
+            )
+        })
+}
+
 #[derive(Clone, Copy)]
 pub struct UpstreamRequestPolicyContext<'a> {
     pub client_addr: Option<&'a SocketAddr>,
@@ -846,7 +918,7 @@ mod tests {
 
     use super::{
         RequestHeader, ResponseHeader, UpstreamRequestPolicyContext, apply_response_policy,
-        apply_upstream_request_policy,
+        apply_upstream_request_policy, strip_upstream_hop_by_hop_request_headers,
     };
     #[cfg(not(feature = "privacy-mode"))]
     use super::{
@@ -1160,6 +1232,66 @@ mod tests {
                 "session=abc; Domain=example.test; Path=/admin; HttpOnly",
                 "theme=dark; Path=/public; Secure"
             ]
+        );
+    }
+
+    #[test]
+    fn strips_upstream_hop_by_hop_request_headers() {
+        let mut request = RequestHeader::build("GET", b"/", None).unwrap();
+        request
+            .insert_header("connection", "close, x-hop, keep-alive")
+            .unwrap();
+        request.insert_header("x-hop", "remove").unwrap();
+        request.insert_header("keep-alive", "timeout=9999").unwrap();
+        request
+            .insert_header("proxy-authorization", "Basic dGVzdA==")
+            .unwrap();
+        request
+            .insert_header("proxy-authenticate", "Basic realm=test")
+            .unwrap();
+        request.insert_header("te", "trailers").unwrap();
+        request.insert_header("trailer", "x-extra").unwrap();
+        request.insert_header("upgrade", "h2c").unwrap();
+        request.insert_header("x-end-to-end", "keep").unwrap();
+
+        strip_upstream_hop_by_hop_request_headers(&mut request).unwrap();
+
+        for header in [
+            "connection",
+            "x-hop",
+            "keep-alive",
+            "proxy-authorization",
+            "proxy-authenticate",
+            "te",
+            "trailer",
+            "upgrade",
+        ] {
+            assert!(request.headers.get(header).is_none(), "{header}");
+        }
+        assert_eq!(
+            request
+                .headers
+                .get("x-end-to-end")
+                .and_then(|value| value.to_str().ok()),
+            Some("keep")
+        );
+    }
+
+    #[test]
+    fn normalizes_upstream_chunked_transfer_encoding_for_body_framing() {
+        let mut request = RequestHeader::build("POST", b"/upload", None).unwrap();
+        request
+            .insert_header("transfer-encoding", "gzip, chunked")
+            .unwrap();
+
+        strip_upstream_hop_by_hop_request_headers(&mut request).unwrap();
+
+        assert_eq!(
+            request
+                .headers
+                .get("transfer-encoding")
+                .and_then(|value| value.to_str().ok()),
+            Some("chunked")
         );
     }
 
