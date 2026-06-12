@@ -2079,7 +2079,10 @@ stores valid peer hits locally, and falls back to origin only when `fail_open`
 is true. Peer-fill requests do not forward the client `Host` header; peers
 receive the authority from their configured `base_url` plus safe negotiation
 headers such as `Accept`, `Accept-Encoding`, and `Accept-Language`.
-Credentials such as `Authorization` and `Cookie` are not forwarded.
+Credentials such as `Authorization` and `Cookie` are not forwarded. Outbound
+peer-fill requests carry `X-Fluxheim-Peer-Fill: 1`; inbound requests with that
+marker are not allowed to launch another peer-fill fetch, which prevents
+recursive peer-fill loops in cyclic peer topologies.
 `examples/cache-peer-fill.toml` shows the focused validated fixture. Metrics
 builds expose aggregate peer-fill configuration through
 `fluxheim_cache_peer_fill_enabled_policies`,
@@ -2180,15 +2183,16 @@ flags such as `preview = "1"` when the cookie name alone is too broad.
 `bypass_query = true` disables both cache lookup and cache storage for any
 non-empty query string. This matches common WordPress FastCGI cache examples
 where query-string requests are treated as dynamic.
-`bypass_query_params` disables both cache lookup and cache storage when the raw
+`bypass_query_params` disables both cache lookup and cache storage when the
 request query string contains any listed parameter name. Matching is exact on
-the raw key before `=`, so `preview=true` matches `preview`, while
-`previewed=true` does not. Use it for preview, token, or other app-specific
-query switches that make a response unsafe to share.
-`bypass_query_values` disables both cache lookup and cache storage when a raw
-query parameter has the exact configured value. Matching is performed before
-URL decoding, so keep values simple and encode spaces or separators at the
-application edge.
+the raw key before `=` and on its percent-decoded form, so `preview=true` and
+`pr%65view=true` both match `preview`, while `previewed=true` does not. Use it
+for preview, token, or other app-specific query switches that make a response
+unsafe to share.
+`bypass_query_values` disables both cache lookup and cache storage when a query
+parameter has the exact configured value. Matching checks raw and
+percent-decoded parameter names and values, so `mode=private` and
+`mode=priv%61te` both match `{ mode = "private" }`.
 `allow_client_cache_refresh` is disabled by default. When disabled, client
 headers such as `Cache-Control: no-cache`, `Cache-Control: max-age=0`, and
 `Pragma: no-cache` do not force upstream revalidation, which keeps unauthenticated
@@ -2200,7 +2204,8 @@ forbids storing the response.
 when the origin does not emit a matching `Vary` header. Use this for negotiated
 static assets, for example `Accept-Encoding`. Sensitive request-specific
 headers such as `Cookie`, `Authorization`, and `Proxy-Authorization` are
-rejected here; use `bypass_request_headers` for those.
+rejected here; use `bypass_request_headers` for those. Fluxheim accepts at most
+16 configured vary request headers, matching the runtime Vary field cap.
 `key_namespace` is optional. When set, Fluxheim adds the string to the primary
 cache key, which gives operators a simple cache-versioning knob. Bump it, for
 example from `repoheim-assets-v1` to `repoheim-assets-v2`, to isolate new

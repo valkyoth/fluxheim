@@ -8211,7 +8211,7 @@ fn rejects_too_many_cache_vary_headers() {
 
     let error = config.validate().unwrap_err().to_string();
     assert!(error.contains("cache.vary_request_headers"), "{error}");
-    assert!(error.contains("at most 32 entries"), "{error}");
+    assert!(error.contains("at most 16 entries"), "{error}");
 }
 
 #[test]

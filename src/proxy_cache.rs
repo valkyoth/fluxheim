@@ -781,7 +781,7 @@ fn response_cache_header_policy_rejection(
     ) {
         return Some(reason);
     }
-    match vary_cache_policy(headers) {
+    match cache_vary_policy(headers, cache) {
         VaryCachePolicy::Uncacheable(reason) => Some(reason),
         VaryCachePolicy::None | VaryCachePolicy::Fields(_) => None,
     }
@@ -986,14 +986,81 @@ fn query_matches_cache_bypass(
     }
     query.split('&').any(|part| {
         let (name, value) = part.split_once('=').unwrap_or((part, ""));
-        !name.is_empty()
-            && (configured_params
-                .iter()
-                .any(|configured| configured == name)
-                || configured_values
-                    .get(name)
-                    .is_some_and(|configured| configured == value))
+        if name.is_empty() {
+            return false;
+        }
+
+        query_component_matches_cache_bypass(name, value, configured_params, configured_values)
+            || percent_decode_query_component(name).is_some_and(|decoded_name| {
+                query_component_matches_cache_bypass(
+                    &decoded_name,
+                    value,
+                    configured_params,
+                    configured_values,
+                ) || percent_decode_query_component(value).is_some_and(|decoded_value| {
+                    query_component_matches_cache_bypass(
+                        &decoded_name,
+                        &decoded_value,
+                        configured_params,
+                        configured_values,
+                    )
+                })
+            })
+            || percent_decode_query_component(value).is_some_and(|decoded_value| {
+                query_component_matches_cache_bypass(
+                    name,
+                    &decoded_value,
+                    configured_params,
+                    configured_values,
+                )
+            })
     })
+}
+
+fn query_component_matches_cache_bypass(
+    name: &str,
+    value: &str,
+    configured_params: &[String],
+    configured_values: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    configured_params
+        .iter()
+        .any(|configured| configured == name)
+        || configured_values
+            .get(name)
+            .is_some_and(|configured| configured == value)
+}
+
+fn percent_decode_query_component(component: &str) -> Option<String> {
+    if !component.as_bytes().contains(&b'%') {
+        return None;
+    }
+
+    let mut decoded = Vec::with_capacity(component.len());
+    let mut index = 0usize;
+    let bytes = component.as_bytes();
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = bytes.get(index + 1).and_then(|byte| hex_value(*byte))?;
+            let low = bytes.get(index + 2).and_then(|byte| hex_value(*byte))?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn request_header_values<'a>(

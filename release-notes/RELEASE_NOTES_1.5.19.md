@@ -78,6 +78,15 @@ during the v1.5.19 review cycle.
 - Hardened cache peer-fill request construction so client-controlled `Host`
   headers and absolute-form URI authorities are not forwarded as the peer
   request `Host`.
+- Added an inbound peer-fill recursion guard so requests marked with
+  `X-Fluxheim-Peer-Fill: 1` cannot launch another outbound peer-fill fetch in
+  cyclic peer topologies.
+- Decoded percent-encoded cache bypass query names and values before comparing
+  `bypass_query_params` and `bypass_query_values`, closing encoded preview or
+  private-mode cache bypass evasion.
+- Aligned configured cache Vary request headers with the 16-field runtime Vary
+  cap and rejected effective origin-plus-configured Vary overflows at cache
+  admission instead of dropping variance.
 - Hardened auth-request response header handling so allowed auth response
   headers cannot override Fluxheim's upstream request header policy on name
   collisions.

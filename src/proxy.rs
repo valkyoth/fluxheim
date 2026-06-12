@@ -144,6 +144,8 @@ type FluxCachePredictor = Predictor<CACHE_PREDICTOR_SHARDS>;
 #[cfg(feature = "cache")]
 const PEER_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
 #[cfg(feature = "cache")]
+const PEER_FILL_MARKER_HEADER: &str = "x-fluxheim-peer-fill";
+#[cfg(feature = "cache")]
 const SLICE_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
 #[cfg(feature = "cache")]
 static PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> = OnceLock::new();
@@ -4902,6 +4904,11 @@ impl ProxyHttp for FluxProxy {
         if !cache.peer_fill.enabled || session.req_header().method.as_str() != "GET" {
             return Ok(true);
         }
+        if request_is_peer_fill(session.req_header()) {
+            #[cfg(feature = "metrics")]
+            record_cache_policy_activity(vhost, ctx.route_index, "peer_fill_loop_guard");
+            return Ok(true);
+        }
         let Some(storage) = selected_cache_storage(vhost, ctx) else {
             return Ok(true);
         };
@@ -5650,7 +5657,8 @@ impl ProxyHttp for FluxProxy {
 
         match cache_vary_policy(meta.headers(), cache) {
             VaryCachePolicy::Fields(fields) => Some(vary_request_hash(&fields, request)),
-            VaryCachePolicy::None | VaryCachePolicy::Uncacheable(_) => None,
+            VaryCachePolicy::None => None,
+            VaryCachePolicy::Uncacheable(reason) => Some(uncacheable_vary_hash(reason)),
         }
     }
 }
@@ -6888,7 +6896,7 @@ fn fetch_peer_fill_response(
     let mut builder = agent
         .get(&url)
         .header("cache-control", "only-if-cached")
-        .header("x-fluxheim-peer-fill", "1");
+        .header(PEER_FILL_MARKER_HEADER, "1");
     for (name, value) in &request.headers {
         builder = builder.header(*name, value.as_str());
     }
@@ -6964,6 +6972,16 @@ fn peer_fill_hop_by_hop_header(name: &str) -> bool {
             | "transfer-encoding"
             | "upgrade"
     )
+}
+
+#[cfg(feature = "cache")]
+fn request_is_peer_fill(request: &RequestHeader) -> bool {
+    request_header_values(request, PEER_FILL_MARKER_HEADER).any(|value| value.trim() == "1")
+}
+
+#[cfg(feature = "cache")]
+fn uncacheable_vary_hash(reason: &str) -> HashBinary {
+    pingora::cache::key::hash_key(format!("fluxheim-uncacheable-vary-v1:{reason}"))
 }
 
 #[cfg(feature = "cache")]
@@ -10476,7 +10494,7 @@ mod tests {
     use super::{
         PeerFillResponse, acquire_peer_fill_concurrency_permit, peer_fill_concurrency_key,
         peer_fill_request_from_header, peer_fill_url,
-        prune_inactive_cache_fill_concurrency_counters,
+        prune_inactive_cache_fill_concurrency_counters, request_is_peer_fill,
     };
     #[cfg(any(
         feature = "compression-brotli",
@@ -17257,6 +17275,16 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn peer_fill_marker_header_is_detected_for_loop_guard() {
+        let mut request = RequestHeader::build("GET", b"/img/logo.webp", None).unwrap();
+        assert!(!request_is_peer_fill(&request));
+
+        request.insert_header("x-fluxheim-peer-fill", "1").unwrap();
+        assert!(request_is_peer_fill(&request));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn peer_fill_url_requires_absolute_request_path() {
         assert_eq!(
             peer_fill_url("https://edge.example:8443/", "/img/logo.webp?v=1")
@@ -17501,6 +17529,23 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn request_cache_bypass_decodes_configured_query_params() {
+        let cache = CacheConfig {
+            bypass_query_params: vec!["preview".to_owned()],
+            ..CacheConfig::default()
+        };
+
+        let request = RequestHeader::build("GET", b"/assets/app.js?pr%65view=true", None).unwrap();
+
+        assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-query")
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn request_cache_bypass_honors_configured_query_values() {
         let cache = CacheConfig {
             bypass_query_values: [("mode".to_owned(), "private".to_owned())].into(),
@@ -17520,6 +17565,23 @@ mod tests {
 
         let request = RequestHeader::build("GET", b"/assets/app.js?moder=private", None).unwrap();
         assert!(!request_cache_bypass(&request, &cache));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn request_cache_bypass_decodes_configured_query_values() {
+        let cache = CacheConfig {
+            bypass_query_values: [("mode".to_owned(), "private".to_owned())].into(),
+            ..CacheConfig::default()
+        };
+
+        let request = RequestHeader::build("GET", b"/assets/app.js?mode=priv%61te", None).unwrap();
+
+        assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-query")
+        );
     }
 
     #[cfg(feature = "cache")]
@@ -18367,6 +18429,28 @@ mod tests {
         assert_eq!(
             cache_vary_policy(&response.headers, &cache),
             VaryCachePolicy::Fields(vec!["accept-encoding".to_owned()])
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_admission_rejects_effective_vary_overflow() {
+        let mut response = ResponseHeader::build(200, Some(2)).unwrap();
+        response
+            .insert_header("cache-control", "public, max-age=60")
+            .unwrap();
+        response.insert_header("content-type", "image/png").unwrap();
+        response.insert_header("vary", "accept-encoding").unwrap();
+        let cache = CacheConfig {
+            vary_request_headers: (0..MAX_VARY_FIELDS)
+                .map(|index| format!("x-vary-{index}"))
+                .collect(),
+            ..CacheConfig::default()
+        };
+
+        assert_eq!(
+            response_cache_admission_rejection(&response, &cache),
+            Some("vary-too-many-fields")
         );
     }
 
