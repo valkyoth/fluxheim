@@ -33,7 +33,7 @@ require_test() {
 run_test() {
     name="$1"
     echo "owasp baseline: running $name"
-    cargo test --lib "$name"
+    cargo test --workspace "$name"
 }
 
 echo "owasp baseline: static policy checks"
@@ -57,7 +57,7 @@ require_file_contains docs/production-readiness.md 'FLUXHEIM_GATE_FIPS_OPENSSL=1
 require_file_contains docs/production-readiness.md 'profile-fips-rustls' "rustls/AWS-LC FIPS documentation"
 
 echo "owasp baseline: collecting test inventory"
-test_list="$(cargo test -- --list)"
+test_list="$(cargo test --workspace -- --list)"
 
 echo "owasp baseline: checking representative regression tests"
 while IFS='|' read -r category test_name; do

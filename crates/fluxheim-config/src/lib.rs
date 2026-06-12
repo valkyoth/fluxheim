@@ -33,9 +33,9 @@ pub mod internal_crypto;
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 mod otlp_http;
 
+pub use config::*;
+
 #[cfg(test)]
 mod test_support {
     pub use fluxheim_common::test_support::*;
 }
-
-pub use config::*;

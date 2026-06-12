@@ -27,10 +27,10 @@ echo "stable release gate: formatting"
 cargo fmt --all --check
 
 echo "stable release gate: lint"
-cargo clippy --all-targets -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 
 echo "stable release gate: tests"
-cargo test
+cargo test --workspace
 
 if [ "${FLUXHEIM_GATE_OWASP_RUN:-0}" = "1" ]; then
     echo "stable release gate: OWASP Top 10 2025 baseline (run)"
