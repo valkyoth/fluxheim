@@ -63,10 +63,10 @@ behavior when the change improves security or project direction.
   `1`, so passive outlier ejection cannot fail-closed an entire load-balanced
   pool by default. Operators can set it to `0` to retain strict fail-closed
   passive-health behavior.
-- Harden managed-cookie load-balancer persistence so missing or invalid
-  affinity cookies no longer create server-side persistence-table entries or
-  trigger least-session table scans until the signed cookie is returned by the
-  client.
+- Harden managed-cookie load-balancer persistence so invalid affinity cookies
+  no longer create server-side persistence-table entries, while newly issued
+  signed cookies immediately record one bounded table entry for the selected
+  backend so the next request remains pinned.
 - Reject verified HTTP proxy upstream TLS configs that target an IP-addressed
   upstream without explicit `upstream_sni`, preventing the Pingora connector
   from falling into empty-SNI certificate-verification bypass behavior.

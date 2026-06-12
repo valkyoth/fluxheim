@@ -833,9 +833,11 @@ impl UpstreamLoadBalancer {
             persistence.record(key, backend_key(&selected.backend));
             self.save_runtime_state_if_configured_in_background("persistence_record");
         } else if let Some(persistence) = &self.persistence
-            && let Some((_key, cookie)) = persistence.new_managed_cookie()
+            && let Some((key, cookie)) = persistence.new_managed_cookie()
         {
             let mut selected = selected;
+            persistence.record(&key, backend_key(&selected.backend));
+            self.save_runtime_state_if_configured_in_background("managed_cookie_issue");
             selected.managed_affinity_cookie = Some(cookie);
             return Some(selected);
         }
@@ -1936,6 +1938,8 @@ mod tests {
         assert!(cookie.contains("; HttpOnly"));
         assert!(cookie.contains("; Secure"));
         assert!(cookie.contains("; SameSite=Strict"));
+        let first_backend = backend_key(&first.backend);
+        assert_eq!(balancer.runtime_stats().persistence.entry_count, 1);
 
         let cookie_value = cookie
             .strip_prefix("fluxheim_lb=")
@@ -1946,16 +1950,16 @@ mod tests {
             .insert_header("cookie", format!("fluxheim_lb={cookie_value}"))
             .unwrap();
         let second = balancer.select(&persisted_request, None).unwrap();
-        let persisted_backend = backend_key(&second.backend);
+        assert_eq!(backend_key(&second.backend), first_backend);
         assert_eq!(
             second.persistence_outcome,
-            Some(LoadBalancerPersistenceOutcome::Miss)
+            Some(LoadBalancerPersistenceOutcome::Hit)
         );
         assert!(second.managed_affinity_cookie.is_none());
         assert_eq!(balancer.runtime_stats().persistence.entry_count, 1);
 
         let third = balancer.select(&persisted_request, None).unwrap();
-        assert_eq!(backend_key(&third.backend), persisted_backend);
+        assert_eq!(backend_key(&third.backend), first_backend);
         assert_eq!(
             third.persistence_outcome,
             Some(LoadBalancerPersistenceOutcome::Hit)
@@ -1964,7 +1968,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_cookie_missing_cookie_does_not_grow_persistence_table() {
+    fn managed_cookie_missing_cookie_respects_persistence_table_bound() {
         install_test_crypto_provider();
         let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
             upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
@@ -1991,12 +1995,14 @@ mod tests {
         }
 
         let stats = balancer.runtime_stats();
-        assert_eq!(stats.persistence.entry_count, 0);
+        assert_eq!(stats.persistence.entry_count, 4);
         assert!(
             stats
                 .backends
                 .iter()
-                .all(|backend| backend.persistence_entry_count == 0)
+                .map(|backend| backend.persistence_entry_count)
+                .sum::<usize>()
+                <= 4
         );
     }
 
