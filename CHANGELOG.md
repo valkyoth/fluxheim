@@ -56,6 +56,9 @@ behavior when the change improves security or project direction.
 - Apply the downstream read timeout before PHP-FPM request-body collection and
   drain paths, covering PHP routes that read the body before FastCGI execution
   begins.
+- Revalidate managed PHP-FPM binary paths immediately before spawning child
+  processes and reject symlinked binaries at config validation so local path
+  swaps cannot replace the supervised executable between reload and spawn.
 - Harden downstream HTTP/2 flow-control defaults by capping per-stream send
   buffering at 256 KiB, keeping DATA frames at 16 KiB, fixing the receive
   window at 64 KiB, and reducing pending-accept reset-stream pressure.
@@ -125,6 +128,9 @@ behavior when the change improves security or project direction.
 - Harden response `Location` and `Refresh` prefix rewrites so absolute URL
   prefixes only match the intended authority boundary and cannot rewrite
   userinfo-style URLs such as `http://origin@evil.example/`.
+- Reject redirect templates that place `{query}` inside the URL authority so
+  attacker-controlled query strings cannot turn operator redirect rules into
+  authority-changing redirects.
 - Harden traffic mirroring by rejecting unsafe mirrored paths/queries before
   outbound URL construction and suppressing recursive mirror requests marked
   with `X-Fluxheim-Mirror`.
@@ -145,6 +151,8 @@ behavior when the change improves security or project direction.
   such as `NaN` and `Infinity` cannot influence compression negotiation.
 - Add `admin.ops_socket.require_bearer_token` so local Unix ops-socket status
   endpoints can require the same bearer token as the TCP admin control plane.
+- Require bearer-token authentication for `GET /_fluxheim/snapshots` on the
+  Unix ops socket even when other read-only status endpoints are local-only.
 
 ### Changed
 

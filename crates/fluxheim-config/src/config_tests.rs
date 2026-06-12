@@ -148,6 +148,16 @@ fn default_config_is_valid() {
     assert!(!Config::default().logging.access.enabled);
 }
 
+#[test]
+fn rejects_redirect_query_template_inside_url_authority() {
+    assert!(!crate::config_route::valid_redirect_target_template(
+        "https://{query}.example.test/"
+    ));
+    assert!(crate::config_route::valid_redirect_target_template(
+        "https://example.test/search?{query}"
+    ));
+}
+
 #[cfg(feature = "geoip")]
 #[test]
 fn geoip_config_accepts_local_mmdb_providers() {
@@ -5920,7 +5930,7 @@ fn parses_managed_php_fpm_config() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/bin/sh"
+            php_fpm_binary = "/usr/bin/env"
             socket_dir = "{}"
             workers = 4
             max_requests_per_worker = 250
@@ -5956,7 +5966,7 @@ fn parses_managed_php_fpm_config() {
     assert_eq!(php.fpm.mode, super::PhpFpmMode::Managed);
     assert_eq!(
         php.fpm.php_fpm_binary.as_deref(),
-        Some(Path::new("/bin/sh"))
+        Some(Path::new("/usr/bin/env"))
     );
     assert_eq!(php.fpm.socket_dir.as_deref(), Some(socket_dir.as_path()));
     assert_eq!(php.fpm.workers, 4);
@@ -5995,6 +6005,45 @@ fn parses_managed_php_fpm_config() {
 
 #[cfg(unix)]
 #[test]
+fn rejects_symlinked_managed_php_fpm_binary() {
+    let root = secure_test_dir("config-php-fpm-managed-binary-root");
+    let socket_dir = secure_test_dir("config-php-fpm-managed-binary-socket");
+    let binary_dir = secure_test_dir("config-php-fpm-managed-binary-dir");
+    let real_binary = safe_child_path(&binary_dir, "php-fpm.real");
+    let symlink_binary = safe_child_path(&binary_dir, "php-fpm");
+    fs::write(&real_binary, b"#!/bin/sh\n").unwrap();
+    std::os::unix::fs::symlink(&real_binary, &symlink_binary).unwrap();
+    let config: Config = toml::from_str(&format!(
+        r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            mode = "managed"
+            php_fpm_binary = "{}"
+            socket_dir = "{}"
+            "#,
+        test_process_config_toml("config-php-fpm-managed-binary-process"),
+        root.display(),
+        symlink_binary.display(),
+        socket_dir.display()
+    ))
+    .unwrap();
+
+    let error = config.validate().unwrap_err().to_string();
+    assert!(error.contains("php.fpm.php_fpm_binary"), "{error}");
+    assert!(error.contains("regular executable file"), "{error}");
+}
+
+#[cfg(unix)]
+#[test]
 fn rejects_managed_php_fpm_dynamic_without_spare_bounds() {
     let root = secure_test_dir("config-php-fpm-managed-dynamic-root");
     let socket_dir = secure_test_dir("config-php-fpm-managed-dynamic-socket");
@@ -6012,7 +6061,7 @@ fn rejects_managed_php_fpm_dynamic_without_spare_bounds() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/bin/sh"
+            php_fpm_binary = "/usr/bin/env"
             socket_dir = "{}"
             process_manager = "dynamic"
             "#,
@@ -6045,7 +6094,7 @@ fn rejects_managed_php_fpm_dynamic_inverted_spare_bounds() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/bin/sh"
+            php_fpm_binary = "/usr/bin/env"
             socket_dir = "{}"
             workers = 4
             process_manager = "dynamic"
@@ -6082,7 +6131,7 @@ fn rejects_managed_php_fpm_with_external_endpoint() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/bin/sh"
+            php_fpm_binary = "/usr/bin/env"
             socket_dir = "{}"
             tcp = "127.0.0.1:9000"
             "#,
@@ -6116,7 +6165,7 @@ fn rejects_managed_php_fpm_user_without_group() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/bin/sh"
+            php_fpm_binary = "/usr/bin/env"
             socket_dir = "{}"
             user = "fluxheim"
             "#,
@@ -6150,7 +6199,7 @@ fn rejects_managed_php_fpm_listen_owner_without_group() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/bin/sh"
+            php_fpm_binary = "/usr/bin/env"
             socket_dir = "{}"
             listen_owner = "fluxheim"
             "#,
@@ -6184,7 +6233,7 @@ fn rejects_managed_php_fpm_unsafe_listen_mode() {
 
             [vhosts.php.fpm]
             mode = "managed"
-            php_fpm_binary = "/bin/sh"
+            php_fpm_binary = "/usr/bin/env"
             socket_dir = "{}"
             listen_mode = "0666"
             "#,

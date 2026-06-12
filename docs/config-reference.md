@@ -407,7 +407,9 @@ access; use `0600` for service-owner-only status or `0660` for a dedicated
 operator group. By default, the Unix socket's filesystem permissions are the
 trust boundary. Set `require_bearer_token = true` to require the same
 `Authorization: Bearer ...` token as the TCP admin listener for read-only ops
-socket status requests.
+socket status requests. `GET /_fluxheim/snapshots` always requires the bearer
+token on the ops socket because snapshot IDs and messages expose deployment
+change history.
 
 When compiled with `load-balancer`, `GET /_fluxheim/status` includes a
 `load_balancer` object for configured vhost and route pools. The status is
@@ -559,8 +561,9 @@ runtime pool schema embedded in `/_fluxheim/status`: vhost pools, route pools,
 backend health, runtime member-state overrides, queue depth, persistence table
 size, circuit/passive-health state, slow-start state, locality, tags, aliases,
 and in-flight counts. When `admin.ops_socket.enabled = true`, the same read-only
-endpoint is available over the local Unix ops socket without bearer-token
-authentication.
+endpoint is available over the local Unix ops socket. It follows
+`admin.ops_socket.require_bearer_token`; unlike status endpoints,
+`/_fluxheim/snapshots` always requires bearer authentication.
 
 Authenticated admins can clear the local persistence table for one configured
 vhost or route pool without reloading:
@@ -3085,7 +3088,10 @@ instead of `/chat/room`. Add `rewrite_prefix` when the stripped suffix should
 be attached to an upstream path prefix, for example `/chat/room?id=7` to
 `/backend/chat/room?id=7`; it must be paired with `strip_prefix` and must be an
 absolute safe path. Redirect targets must be absolute `http://` or
-`https://` templates and may use `{uri}`, `{path}`, and `{query}`. Use
+`https://` templates and may use `{uri}`, `{path}`, and `{query}`. `{query}` is
+allowed only after the URL authority, for example in the path or query string,
+because placing untrusted query text inside the authority can create open
+redirects. Use
 `max_request_body_bytes` on a route to narrow or expand the vhost or global
 body limit for uploads handled by that route. Proxy actions accept
 `connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs`; route
@@ -3099,6 +3105,11 @@ or `"http1-and-http2"`, cache must remain disabled for that route, and
 policy: Fluxheim preserves HTTP/2 proxying behavior and rejects obvious
 non-gRPC requests before forwarding, but it does not transcode gRPC-Web or JSON
 to gRPC.
+
+Managed PHP-FPM validates `php_fpm_binary` at config load and again immediately
+before each supervised spawn. The binary path must be absolute, must not contain
+parent traversal, must not be or be below a symlink, must point directly to a
+regular file, and must not be below a group/world-writable parent directory.
 
 For PHP actions, `max_request_body_bytes` bounds the request sent to php-fpm
 and `max_response_bytes` bounds the FastCGI STDOUT/STDERR bytes accepted from

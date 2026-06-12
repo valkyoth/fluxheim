@@ -146,6 +146,9 @@ All admin endpoints, including `/_fluxheim/health`, require
 `Authorization: Bearer <token>` by default. For local-only watchdogs, set
 `[admin.health] unauthenticated = true` while keeping `admin.listen` loopback;
 use `response = "minimal"` for an empty `204` probe response.
+When `[admin.ops_socket]` is enabled, `GET /_fluxheim/snapshots` still requires
+the bearer token on the Unix ops socket because snapshot IDs and messages
+expose deployment change history.
 
 Create a snapshot over HTTP:
 

@@ -1195,6 +1195,7 @@ fn spawn_managed_php_fpm_child(
     plan: &ManagedPhpFpmSpawnPlan,
     shutdown: Option<&AtomicBool>,
 ) -> io::Result<(std::process::Child, Instant)> {
+    ensure_managed_php_fpm_binary_spawn_safe(&plan.scope, &plan.binary)?;
     let _ = std::fs::remove_file(&plan.socket);
     let _ = std::fs::remove_file(&plan.pid_path);
 
@@ -1237,6 +1238,106 @@ fn spawn_managed_php_fpm_child(
                     plan.scope
                 ),
             ))
+        }
+    }
+}
+
+#[cfg(unix)]
+fn ensure_managed_php_fpm_binary_spawn_safe(scope: &str, binary: &Path) -> io::Result<()> {
+    if binary.as_os_str().is_empty() || !binary.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{scope}: managed php-fpm binary {} must be an absolute path",
+                binary.display()
+            ),
+        ));
+    }
+    if binary
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{scope}: managed php-fpm binary {} contains parent traversal",
+                binary.display()
+            ),
+        ));
+    }
+    if existing_php_fpm_path_prefix_contains_symlink(binary)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{scope}: managed php-fpm binary {} must not be or be below a symlink",
+                binary.display()
+            ),
+        ));
+    }
+    if existing_php_fpm_parent_has_insecure_write_permissions(binary)? {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "{scope}: managed php-fpm binary {} is below a group/world-writable parent",
+                binary.display()
+            ),
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(binary).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "{scope}: failed to inspect managed php-fpm binary {} before spawn: {error}",
+                binary.display()
+            ),
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{scope}: managed php-fpm binary {} must point directly to a regular file",
+                binary.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn existing_php_fpm_path_prefix_contains_symlink(path: &Path) -> io::Result<bool> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(unix)]
+fn existing_php_fpm_parent_has_insecure_write_permissions(path: &Path) -> io::Result<bool> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut current = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+
+    loop {
+        match std::fs::metadata(&current) {
+            Ok(metadata) => return Ok(metadata.permissions().mode() & 0o022 != 0),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if !current.pop() {
+                    return Ok(false);
+                }
+            }
+            Err(error) => return Err(error),
         }
     }
 }
@@ -1701,5 +1802,30 @@ fn wait_for_managed_php_fpm_socket(
             return Err(error);
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::ensure_managed_php_fpm_binary_spawn_safe;
+    use crate::test_support::{safe_child_path, unique_temp_path};
+
+    #[test]
+    fn managed_php_fpm_spawn_rejects_symlinked_binary() {
+        let root = unique_temp_path("managed-php-fpm-spawn-binary");
+        std::fs::create_dir_all(&root).unwrap();
+        let real_binary = safe_child_path(&root, "php-fpm.real");
+        let symlink_binary = safe_child_path(&root, "php-fpm");
+        std::fs::write(&real_binary, b"#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(&real_binary, &symlink_binary).unwrap();
+
+        let error = ensure_managed_php_fpm_binary_spawn_safe("test", &symlink_binary).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(
+            error
+                .to_string()
+                .contains("must not be or be below a symlink")
+        );
     }
 }

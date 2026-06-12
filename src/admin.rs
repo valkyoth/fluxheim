@@ -882,7 +882,7 @@ impl AdminApp {
                 json_response(StatusCode::NOT_FOUND, br#"{"error":"not_found"}"#)
             };
         }
-        if require_bearer_token
+        if (require_bearer_token || path == "/_fluxheim/snapshots")
             && !headers
                 .is_some_and(|headers| authorized(authorization_header(headers), &self.token))
         {
@@ -4345,6 +4345,20 @@ mod tests {
         let headers = auth_headers();
         let response =
             app.handle_ops_socket("GET", "/_fluxheim/status", None, Some(&headers), true);
+        assert_eq!(response.status, StatusCode::OK);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ops_socket_requires_bearer_auth_for_snapshots() {
+        let app = app();
+
+        let response = app.handle_ops_socket("GET", "/_fluxheim/snapshots", None, None, false);
+        assert_eq!(response.status, StatusCode::UNAUTHORIZED);
+
+        let headers = auth_headers();
+        let response =
+            app.handle_ops_socket("GET", "/_fluxheim/snapshots", None, Some(&headers), false);
         assert_eq!(response.status, StatusCode::OK);
     }
 

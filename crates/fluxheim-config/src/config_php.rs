@@ -1193,13 +1193,13 @@ pub fn validate_php_fpm_managed_config(
         });
     }
     validate_non_world_writable_parent(format!("{scope}.fpm.php_fpm_binary"), Some(binary))?;
-    let metadata = fs::metadata(binary).map_err(|error| {
+    let metadata = fs::symlink_metadata(binary).map_err(|error| {
         path_inspection_failed(format!("{scope}.fpm.php_fpm_binary"), binary, error)
     })?;
     if !metadata.is_file() {
         return Err(ConfigError::InvalidPhpConfig {
             field: "php.fpm.php_fpm_binary",
-            reason: "must point to a regular executable file",
+            reason: "must point directly to a regular executable file",
         });
     }
 

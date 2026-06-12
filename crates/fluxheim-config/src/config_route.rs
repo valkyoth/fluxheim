@@ -602,6 +602,7 @@ pub fn valid_redirect_target_template(value: &str) -> bool {
         || value
             .chars()
             .any(|character| character.is_control() || character.is_whitespace())
+        || redirect_template_authority_contains(value, "{query}")
     {
         return false;
     }
@@ -634,4 +635,15 @@ pub fn valid_redirect_target_template(value: &str) -> bool {
         && !authority.chars().any(|character| {
             character.is_control() || character.is_whitespace() || matches!(character, '/' | '#')
         })
+}
+
+fn redirect_template_authority_contains(value: &str, needle: &str) -> bool {
+    let Some(rest) = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    authority.contains(needle)
 }
