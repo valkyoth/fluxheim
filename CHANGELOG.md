@@ -42,6 +42,9 @@ behavior when the change improves security or project direction.
   affinity cookies no longer create server-side persistence-table entries or
   trigger least-session table scans until the signed cookie is returned by the
   client.
+- Reject verified HTTP proxy upstream TLS configs that target an IP-addressed
+  upstream without explicit `upstream_sni`, preventing the Pingora connector
+  from falling into empty-SNI certificate-verification bypass behavior.
 
 ### Changed
 

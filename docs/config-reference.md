@@ -1117,9 +1117,12 @@ overrides the SNI name; if it is omitted, Fluxheim derives SNI from the primary
 upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default to
 `true`. Disabling certificate verification is an explicit insecure policy and
 also requires `upstream_verify_hostname = false` so the config cannot imply
-hostname validation while certificate validation is off. `upstream_alternative_cn`
-adds one additional hostname that may match the upstream certificate when the
-configured SNI does not. Wildcards are rejected for this field.
+hostname validation while certificate validation is off. IP-addressed upstreams
+with `upstream_tls = true` and certificate verification enabled require explicit
+`upstream_sni`; otherwise the upstream TLS connector cannot perform normal
+certificate verification. `upstream_alternative_cn` adds one additional hostname
+that may match the upstream certificate when the configured SNI does not.
+Wildcards are rejected for this field.
 `upstream_ca_path` points at a PEM CA bundle used instead of the platform trust
 store for this proxy policy. `upstream_client_cert_path` and
 `upstream_client_key_path` configure an upstream client certificate and private

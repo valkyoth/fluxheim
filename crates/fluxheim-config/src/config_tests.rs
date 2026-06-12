@@ -1438,6 +1438,7 @@ fn rejects_invalid_proxy_upstream_tls_material_policy() {
             [proxy]
             upstream = "127.0.0.1:3000"
             upstream_tls = true
+            upstream_sni = "origin.example.test"
             upstream_client_cert_path = "tests/fixtures/tls/localhost-cert.pem"
             "#,
     )
@@ -1803,11 +1804,54 @@ fn rejects_inconsistent_proxy_upstream_tls_verification_policy() {
 }
 
 #[test]
+fn rejects_verified_proxy_tls_ip_upstream_without_sni() {
+    let config: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "10.0.1.5:443"
+            upstream_tls = true
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidProxyTlsPolicy {
+            reason: "IP-addressed upstreams with upstream_tls and upstream_verify_cert require explicit upstream_sni"
+        })
+    );
+
+    let explicit_sni: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "10.0.1.5:443"
+            upstream_tls = true
+            upstream_sni = "origin.example.test"
+            "#,
+    )
+    .unwrap();
+    explicit_sni.validate().unwrap();
+
+    let explicitly_unverified: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "10.0.1.5:443"
+            upstream_tls = true
+            upstream_verify_cert = false
+            upstream_verify_hostname = false
+            "#,
+    )
+    .unwrap();
+    explicitly_unverified.validate().unwrap();
+}
+
+#[test]
 fn rejects_invalid_proxy_upstream_alternative_cn() {
     let config: Config = toml::from_str(
         r#"
             [proxy]
             upstream_tls = true
+            upstream_sni = "origin.example.test"
             upstream_alternative_cn = "*.example.test"
             "#,
     )

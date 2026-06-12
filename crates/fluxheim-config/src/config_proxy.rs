@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 #[cfg(feature = "load-balancer")]
 use std::hash::Hasher;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -715,6 +716,15 @@ impl ProxyConfig {
         {
             return Err(ConfigError::EmptyUpstreamSni);
         }
+        if self.upstream_tls
+            && self.upstream_verify_cert
+            && self.upstream_sni.is_none()
+            && self.static_upstreams_include_ip_address()
+        {
+            return Err(ConfigError::InvalidProxyTlsPolicy {
+                reason: "IP-addressed upstreams with upstream_tls and upstream_verify_cert require explicit upstream_sni",
+            });
+        }
         if !self.upstream_verify_cert && self.upstream_verify_hostname {
             return Err(ConfigError::InvalidProxyTlsPolicy {
                 reason: "upstream_verify_hostname must be false when upstream_verify_cert = false",
@@ -926,6 +936,20 @@ impl ProxyConfig {
             });
         }
         Ok(())
+    }
+
+    fn static_upstreams_include_ip_address(&self) -> bool {
+        let mut upstreams = self.upstreams.iter().map(String::as_str);
+        if let Some(upstream) = self.upstream.as_deref() {
+            return upstream_authority_host_is_ip(upstream);
+        }
+        if self.upstreams.is_empty()
+            && self.upstreams_file.is_none()
+            && self.upstreams_http_url.is_none()
+        {
+            return upstream_authority_host_is_ip(DEFAULT_UPSTREAM);
+        }
+        upstreams.any(upstream_authority_host_is_ip)
     }
 
     fn validate_upstream_policy(&self) -> Result<(), ConfigError> {
@@ -1286,6 +1310,10 @@ fn validate_proxy_upstream_subset(
         }
     }
     Ok(seen)
+}
+
+fn upstream_authority_host_is_ip(upstream: &str) -> bool {
+    upstream_host(upstream).is_some_and(|host| host.parse::<IpAddr>().is_ok())
 }
 
 #[cfg(feature = "load-balancer")]
