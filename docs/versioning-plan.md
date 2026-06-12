@@ -2423,8 +2423,17 @@ Planned `1.6.x` sequence:
   behavior into golden tests, migration fixtures, smoke scripts, packet-level
   HTTP fixtures, cache fixtures, TLS fixtures, and release gates. Add
   dependency-graph checks that can fail the release once a target Pingora crate
-  is expected to be gone. Add the first `fluxheim-runtime` / `fluxheim-server`
-  traits and keep runtime behavior unchanged.
+  is expected to be gone. Add repeatable runtime baseline tooling before any
+  replacement runtime ships: capture current binary size, startup time, memory,
+  file-descriptor use, idle connection cost, loopback HTTP/1.1 latency,
+  keep-alive throughput, cache HIT/MISS latency, load-balancer selection cost,
+  TLS handshake cost for rustls and OpenSSL where available, and representative
+  container image size. Save machine-readable output under
+  `target/release-evidence/runtime-baseline/` during release gates and keep the
+  benchmark method, command lines, environment assumptions, and accepted
+  comparison rules in a tracked documentation file such as
+  `docs/runtime-baseline.md`. Add the first `fluxheim-runtime` /
+  `fluxheim-server` traits and keep runtime behavior unchanged.
 - `v1.6.1`: load-balancer independence. Remove `pingora-load-balancing` from
   normal builds. Replace remaining
   Pingora background/listen/shutdown service traits in
@@ -2497,11 +2506,22 @@ Stable exit criteria:
 - `cargo tree` for every supported official profile contains no Pingora crate.
 - Release containers, RPM builds, source builds, and focused artifacts compile
   without vendored Pingora code.
+- `1.6.0` baseline evidence exists before runtime cutovers begin, and later
+  `1.6.x` runtime releases compare against it. Regressions in latency, memory,
+  startup time, binary size, connection cost, cache hit path, TLS handshake
+  cost, or container size must be fixed, explicitly accepted in release notes,
+  or justified as a security-driven tradeoff.
 - HTTP/1.1 and HTTP/2 behavior, routing, upstream selection, cache semantics,
   compression, PHP-FPM, ACME, GeoIP, traffic mirroring, auth-request,
   rate/concurrency limits, header policy, observability, admin-visible failure
   semantics, and migration fixtures remain compatible unless a release note
   explicitly documents a security-driven behavior change.
+- Runtime adapters are deleted only after tests prove the new path. Prefer more
+  tests over reviewer memory: golden fixtures, malicious-input fixtures,
+  protocol-boundary fixtures, cache freshness/range/Vary/conditional fixtures,
+  TLS/SNI/mTLS fixtures, load-balancer persistence/health/failover fixtures,
+  PHP-FPM fixtures, admin/status fixtures, and smoke/container tests should
+  grow with every cutover.
 - TLS support remains limited to rustls/rustls-FIPS and OpenSSL/OpenSSL-FIPS,
   with SNI, mTLS/client-auth, ALPN, OCSP where supported, and release evidence
   preserved.
