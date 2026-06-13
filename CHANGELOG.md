@@ -40,6 +40,9 @@ behavior when the change improves security or project direction.
   parsing, generation, and traceparent normalization into
   `crates/fluxheim-observability`, with root `crate::trace_context` kept as a
   compatibility re-export.
+- Start the `fluxheim-protocol` crate boundary by moving PROXY protocol v1/v2
+  upstream header framing into `crates/fluxheim-protocol`, while the root
+  `crate::proxy_protocol` module keeps the Pingora L4 connector adapter.
 
 ### Fixed
 

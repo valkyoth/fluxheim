@@ -34,6 +34,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   Context parsing, generation, and traceparent normalization into
   `crates/fluxheim-observability`, with root `crate::trace_context` kept as a
   compatibility re-export.
+- Started the `fluxheim-protocol` crate boundary by moving PROXY protocol v1/v2
+  upstream header framing into `crates/fluxheim-protocol`, while the root
+  `crate::proxy_protocol` module keeps the Pingora L4 connector adapter.
 
 ## Fixed
 

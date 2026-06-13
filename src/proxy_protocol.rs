@@ -1,4 +1,4 @@
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,6 +9,7 @@ use tokio::io::AsyncWriteExt as _;
 
 use crate::config::UpstreamProxyProtocol;
 use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
+pub(crate) use fluxheim_protocol::{proxy_protocol_v1_header, proxy_protocol_v2_header};
 
 pub(crate) fn apply_upstream_proxy_protocol(
     peer: &mut HttpPeer,
@@ -26,70 +27,6 @@ pub(crate) fn apply_upstream_proxy_protocol(
         header,
         connect_timeout,
     }));
-}
-
-pub(crate) fn proxy_protocol_v1_header(
-    source: Option<SocketAddr>,
-    destination: Option<SocketAddr>,
-) -> Vec<u8> {
-    let Some(source) = source else {
-        return b"PROXY UNKNOWN\r\n".to_vec();
-    };
-    let Some(destination) = destination else {
-        return b"PROXY UNKNOWN\r\n".to_vec();
-    };
-
-    match (source.ip(), destination.ip()) {
-        (IpAddr::V4(source_ip), IpAddr::V4(destination_ip)) => format!(
-            "PROXY TCP4 {source_ip} {destination_ip} {} {}\r\n",
-            source.port(),
-            destination.port()
-        )
-        .into_bytes(),
-        (IpAddr::V6(source_ip), IpAddr::V6(destination_ip)) => format!(
-            "PROXY TCP6 {source_ip} {destination_ip} {} {}\r\n",
-            source.port(),
-            destination.port()
-        )
-        .into_bytes(),
-        _ => b"PROXY UNKNOWN\r\n".to_vec(),
-    }
-}
-
-const PROXY_PROTOCOL_V2_SIGNATURE: &[u8; 12] = b"\r\n\r\n\0\r\nQUIT\n";
-
-pub(crate) fn proxy_protocol_v2_header(
-    source: Option<SocketAddr>,
-    destination: Option<SocketAddr>,
-) -> Vec<u8> {
-    let mut header = Vec::from(&PROXY_PROTOCOL_V2_SIGNATURE[..]);
-    let Some(source) = source else {
-        header.extend_from_slice(&[0x21, 0x00, 0x00, 0x00]);
-        return header;
-    };
-    let Some(destination) = destination else {
-        header.extend_from_slice(&[0x21, 0x00, 0x00, 0x00]);
-        return header;
-    };
-
-    match (source.ip(), destination.ip()) {
-        (IpAddr::V4(source_ip), IpAddr::V4(destination_ip)) => {
-            header.extend_from_slice(&[0x21, 0x11, 0x00, 0x0c]);
-            header.extend_from_slice(&source_ip.octets());
-            header.extend_from_slice(&destination_ip.octets());
-            header.extend_from_slice(&source.port().to_be_bytes());
-            header.extend_from_slice(&destination.port().to_be_bytes());
-        }
-        (IpAddr::V6(source_ip), IpAddr::V6(destination_ip)) => {
-            header.extend_from_slice(&[0x21, 0x21, 0x00, 0x24]);
-            header.extend_from_slice(&source_ip.octets());
-            header.extend_from_slice(&destination_ip.octets());
-            header.extend_from_slice(&source.port().to_be_bytes());
-            header.extend_from_slice(&destination.port().to_be_bytes());
-        }
-        _ => header.extend_from_slice(&[0x21, 0x00, 0x00, 0x00]),
-    }
-    header
 }
 
 #[derive(Debug)]

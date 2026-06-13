@@ -3896,10 +3896,12 @@ the exception while the cache server is being completed as a focused sequence:
   Pingora-specific header selection and response mutation. The
   `crates/fluxheim-observability` boundary now owns W3C Trace Context parsing,
   generation, and traceparent normalization behind the existing
-  `crate::trace_context` surface. Keep Pingora-specific cache/proxy adapters
-  separate from cache core when possible. Do not move the main HTTP proxy
-  orchestrator yet; it should remain last because it still coordinates all
-  subsystems.
+  `crate::trace_context` surface. The `crates/fluxheim-protocol` boundary now
+  owns PROXY protocol v1/v2 upstream header framing while the root
+  `crate::proxy_protocol` adapter keeps Pingora L4 connector wiring. Keep
+  Pingora-specific cache/proxy adapters separate from cache core when possible.
+  Do not move the main HTTP proxy orchestrator yet; it should remain last
+  because it still coordinates all subsystems.
 - `v1.5.21`: UDP production-readiness line. Stop at promoting only the scoped
   UDP modes that have reviewed production semantics. Required work before any
   promotion includes per-route UDP metrics/status, explicit public-exposure
