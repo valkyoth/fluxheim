@@ -3905,7 +3905,8 @@ the exception while the cache server is being completed as a focused sequence:
   `crate::web` surface, and the `crates/fluxheim-php-fpm` boundary with timeout
   classification/error-outcome helpers plus managed restart-backoff and
   sanitized `PATH` fallback helpers plus managed php-fpm config rendering and
-  config-value validators moved behind the existing `crate::php_fpm` surface.
+  config-value validators plus PHP-FPM timeout/retry policy moved behind the
+  existing `crate::php_fpm` surface.
   The `crates/fluxheim-geoip` boundary now owns `GeoContext` and the optional
   local MMDB runtime behind root compatibility re-exports. The
   `crates/fluxheim-compression` boundary now owns response compression encoder

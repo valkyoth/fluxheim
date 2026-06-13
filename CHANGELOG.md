@@ -58,6 +58,10 @@ behavior when the change improves security or project direction.
 - Move managed PHP-FPM config rendering and its config-value validators into
   `crates/fluxheim-php-fpm`, leaving root PHP-FPM process supervision as the
   compatibility adapter.
+- Move PHP-FPM effective timeout calculation, retry attempt/deadline policy,
+  retryable status matching, and retryable error classification into
+  `crates/fluxheim-php-fpm`, with root `crate::php_fpm` retaining the
+  `StatusCode` compatibility adapter.
 - Start the `fluxheim-geoip` crate boundary by moving `GeoContext` and the
   optional local MMDB runtime into `crates/fluxheim-geoip`, with root
   `crate::geo_context` and `crate::geoip` compatibility re-exports.

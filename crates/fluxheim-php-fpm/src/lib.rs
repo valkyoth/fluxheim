@@ -6,6 +6,7 @@
 
 use std::io;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
 
@@ -55,6 +56,80 @@ pub fn php_fpm_error_outcome(error: &io::Error) -> &'static str {
         io::ErrorKind::InvalidInput | io::ErrorKind::Unsupported => "configuration_error",
         io::ErrorKind::InvalidData => "invalid_response",
         _ => "fpm_error",
+    }
+}
+
+pub fn php_fpm_effective_connect_timeout(
+    fpm: &PhpFpmConfig,
+    request_timeout: Duration,
+) -> Duration {
+    fpm.connect_timeout_secs
+        .map(Duration::from_secs)
+        .map(|connect_timeout| connect_timeout.min(request_timeout))
+        .unwrap_or(request_timeout)
+}
+
+pub fn php_fpm_effective_request_timeout(
+    fpm: &PhpFpmConfig,
+    request_timeout: Duration,
+) -> Duration {
+    [fpm.read_timeout_secs, fpm.write_timeout_secs]
+        .into_iter()
+        .flatten()
+        .map(Duration::from_secs)
+        .fold(request_timeout, Duration::min)
+}
+
+fn php_fpm_retry_method_allowed(fpm: &PhpFpmConfig, method: &str) -> bool {
+    fpm.retry_methods
+        .iter()
+        .any(|retry_method| retry_method.eq_ignore_ascii_case(method))
+}
+
+pub fn php_fpm_retry_attempts(fpm: &PhpFpmConfig, method: &str) -> u8 {
+    php_fpm_retry_attempts_for_endpoint_count(fpm, method, 1)
+}
+
+pub fn php_fpm_retry_attempts_for_endpoint_count(
+    fpm: &PhpFpmConfig,
+    method: &str,
+    endpoint_count: usize,
+) -> u8 {
+    if !php_fpm_retry_method_allowed(fpm, method) {
+        return 0;
+    }
+    let failover_retries = endpoint_count.saturating_sub(1).min(usize::from(u8::MAX)) as u8;
+    fpm.max_retries.max(failover_retries)
+}
+
+pub fn php_fpm_retry_deadline(retry_timeout_secs: Option<u64>) -> Option<Instant> {
+    retry_timeout_secs.and_then(|secs| Instant::now().checked_add(Duration::from_secs(secs)))
+}
+
+pub fn php_fpm_retry_deadline_allows(deadline: Option<Instant>) -> bool {
+    match deadline {
+        Some(deadline) => Instant::now() < deadline,
+        None => true,
+    }
+}
+
+pub fn php_fpm_retryable_status(fpm: &PhpFpmConfig, status: u16) -> bool {
+    fpm.retry_statuses.contains(&status)
+}
+
+pub fn php_fpm_retryable_error(error: &io::Error) -> bool {
+    match error.kind() {
+        io::ErrorKind::TimedOut => php_fpm_timeout_kind(error) == Some(PhpFpmTimeoutKind::Connect),
+        io::ErrorKind::ConnectionRefused
+        | io::ErrorKind::ConnectionReset
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::BrokenPipe
+        | io::ErrorKind::NotConnected
+        | io::ErrorKind::AddrInUse
+        | io::ErrorKind::AddrNotAvailable
+        | io::ErrorKind::NotFound
+        | io::ErrorKind::UnexpectedEof => true,
+        _ => false,
     }
 }
 
@@ -274,7 +349,10 @@ mod tests {
 
     use super::{
         PhpFpmTimeoutKind, managed_php_fpm_config, managed_php_fpm_path_env_from,
-        managed_php_fpm_restart_backoff_secs, php_fpm_error_outcome, php_fpm_timeout_error,
+        managed_php_fpm_restart_backoff_secs, php_fpm_effective_connect_timeout,
+        php_fpm_effective_request_timeout, php_fpm_error_outcome, php_fpm_retry_attempts,
+        php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
+        php_fpm_retryable_status, php_fpm_timeout_error,
     };
     use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
 
@@ -323,6 +401,67 @@ mod tests {
         assert_eq!(managed_php_fpm_restart_backoff_secs(1), 2);
         assert_eq!(managed_php_fpm_restart_backoff_secs(4), 16);
         assert_eq!(managed_php_fpm_restart_backoff_secs(64), 30);
+    }
+
+    #[test]
+    fn php_fpm_retry_attempts_respect_method_allowlist_and_failover() {
+        let mut fpm = PhpFpmConfig {
+            max_retries: 2,
+            retry_methods: vec!["GET".to_owned()],
+            ..PhpFpmConfig::default()
+        };
+
+        assert_eq!(php_fpm_retry_attempts(&fpm, "GET"), 2);
+        assert_eq!(php_fpm_retry_attempts(&fpm, "POST"), 0);
+        assert_eq!(php_fpm_retry_attempts_for_endpoint_count(&fpm, "GET", 4), 3);
+
+        fpm.retry_methods.clear();
+        assert_eq!(php_fpm_retry_attempts_for_endpoint_count(&fpm, "GET", 4), 0);
+    }
+
+    #[test]
+    fn php_fpm_effective_timeouts_are_capped_by_request_timeout() {
+        let request_timeout = std::time::Duration::from_secs(10);
+        let mut fpm = PhpFpmConfig {
+            connect_timeout_secs: Some(20),
+            read_timeout_secs: Some(7),
+            write_timeout_secs: Some(4),
+            ..PhpFpmConfig::default()
+        };
+
+        assert_eq!(
+            php_fpm_effective_connect_timeout(&fpm, request_timeout),
+            request_timeout
+        );
+        assert_eq!(
+            php_fpm_effective_request_timeout(&fpm, request_timeout),
+            std::time::Duration::from_secs(4)
+        );
+
+        fpm.connect_timeout_secs = Some(3);
+        assert_eq!(
+            php_fpm_effective_connect_timeout(&fpm, request_timeout),
+            std::time::Duration::from_secs(3)
+        );
+    }
+
+    #[test]
+    fn php_fpm_retryable_statuses_and_errors_are_explicit() {
+        let fpm = PhpFpmConfig {
+            retry_statuses: vec![502, 503],
+            ..PhpFpmConfig::default()
+        };
+
+        assert!(php_fpm_retryable_status(&fpm, 502));
+        assert!(php_fpm_retryable_status(&fpm, 503));
+        assert!(!php_fpm_retryable_status(&fpm, 404));
+        assert!(php_fpm_retryable_error(&io::Error::new(
+            io::ErrorKind::ConnectionRefused,
+            "refused"
+        )));
+        assert!(!php_fpm_retryable_error(&php_fpm_timeout_error(
+            PhpFpmTimeoutKind::Request
+        )));
     }
 
     #[test]

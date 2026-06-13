@@ -8,10 +8,15 @@ use crate::http_types::{PingoraResponseHeader as ResponseHeader, StatusCode};
 
 use crate::config::{PhpConfig, PhpFpmConfig, PhpFpmMode};
 use crate::flux_error::{FluxError, FluxResult};
+#[cfg(test)]
+pub(crate) use fluxheim_php_fpm::php_fpm_retry_attempts;
 pub(crate) use fluxheim_php_fpm::{
     PhpFpmTimeoutKind, managed_php_fpm_config, managed_php_fpm_path_env_from,
-    managed_php_fpm_restart_backoff_secs, php_fpm_error_outcome, php_fpm_timeout_error,
-    php_fpm_timeout_kind,
+    managed_php_fpm_restart_backoff_secs, php_fpm_effective_connect_timeout,
+    php_fpm_effective_request_timeout, php_fpm_error_outcome,
+    php_fpm_retry_attempts_for_endpoint_count, php_fpm_retry_deadline,
+    php_fpm_retry_deadline_allows, php_fpm_retryable_error, php_fpm_retryable_status,
+    php_fpm_timeout_error,
 };
 
 const MANAGED_PHP_FPM_STABLE_RESTART_SECS: u64 = 30;
@@ -385,81 +390,8 @@ pub(crate) async fn execute_php_fpm_once(
     }
 }
 
-pub(crate) fn php_fpm_effective_connect_timeout(
-    fpm: &PhpFpmConfig,
-    request_timeout: Duration,
-) -> Duration {
-    fpm.connect_timeout_secs
-        .map(Duration::from_secs)
-        .map(|connect_timeout| connect_timeout.min(request_timeout))
-        .unwrap_or(request_timeout)
-}
-
-pub(crate) fn php_fpm_effective_request_timeout(
-    fpm: &PhpFpmConfig,
-    request_timeout: Duration,
-) -> Duration {
-    [fpm.read_timeout_secs, fpm.write_timeout_secs]
-        .into_iter()
-        .flatten()
-        .map(Duration::from_secs)
-        .fold(request_timeout, Duration::min)
-}
-
-fn php_fpm_retry_method_allowed(fpm: &PhpFpmConfig, method: &str) -> bool {
-    fpm.retry_methods
-        .iter()
-        .any(|retry_method| retry_method.eq_ignore_ascii_case(method))
-}
-
-#[cfg(test)]
-pub(crate) fn php_fpm_retry_attempts(fpm: &PhpFpmConfig, method: &str) -> u8 {
-    php_fpm_retry_attempts_for_endpoint_count(fpm, method, 1)
-}
-
-pub(crate) fn php_fpm_retry_attempts_for_endpoint_count(
-    fpm: &PhpFpmConfig,
-    method: &str,
-    endpoint_count: usize,
-) -> u8 {
-    if !php_fpm_retry_method_allowed(fpm, method) {
-        return 0;
-    }
-    let failover_retries = endpoint_count.saturating_sub(1).min(usize::from(u8::MAX)) as u8;
-    fpm.max_retries.max(failover_retries)
-}
-
-pub(crate) fn php_fpm_retry_deadline(retry_timeout_secs: Option<u64>) -> Option<Instant> {
-    retry_timeout_secs.and_then(|secs| Instant::now().checked_add(Duration::from_secs(secs)))
-}
-
-pub(crate) fn php_fpm_retry_deadline_allows(deadline: Option<Instant>) -> bool {
-    match deadline {
-        Some(deadline) => Instant::now() < deadline,
-        None => true,
-    }
-}
-
 pub(crate) fn php_fpm_retryable_response(fpm: &PhpFpmConfig, status: StatusCode) -> bool {
-    fpm.retry_statuses
-        .iter()
-        .any(|retry_status| *retry_status == status.as_u16())
-}
-
-pub(crate) fn php_fpm_retryable_error(error: &io::Error) -> bool {
-    match error.kind() {
-        io::ErrorKind::TimedOut => php_fpm_timeout_kind(error) == Some(PhpFpmTimeoutKind::Connect),
-        io::ErrorKind::ConnectionRefused
-        | io::ErrorKind::ConnectionReset
-        | io::ErrorKind::ConnectionAborted
-        | io::ErrorKind::BrokenPipe
-        | io::ErrorKind::NotConnected
-        | io::ErrorKind::AddrInUse
-        | io::ErrorKind::AddrNotAvailable
-        | io::ErrorKind::NotFound
-        | io::ErrorKind::UnexpectedEof => true,
-        _ => false,
-    }
+    php_fpm_retryable_status(fpm, status.as_u16())
 }
 
 pub(crate) async fn collect_php_fpm_response_stream<S>(
