@@ -14,12 +14,13 @@ const MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES: u64 = 128;
 pub(crate) use crate::cache::CacheClientRange;
 pub(crate) use crate::cache::{
     CacheContentRange, CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest,
-    VaryCachePolicy, cache_control_freshness_value, cache_vary_policy, parse_bounded_single_range,
-    parse_cache_client_ranges, parse_cache_content_range, remaining_fresh_ttl_secs,
-    required_slice_bounds, resolve_client_slice_ranges, response_content_type_is_cacheable,
+    CacheStaleEvent, VaryCachePolicy, cache_control_freshness_value, cache_should_serve_stale,
+    cache_vary_policy, parse_bounded_single_range, parse_cache_client_ranges,
+    parse_cache_content_range, remaining_fresh_ttl_secs, required_slice_bounds,
+    resolve_client_slice_ranges, response_content_type_is_cacheable,
 };
 #[cfg(test)]
-pub(crate) use crate::cache::{MAX_VARY_FIELDS, vary_cache_policy};
+pub(crate) use crate::cache::{MAX_VARY_FIELDS, cache_stale_status_allows, vary_cache_policy};
 use crate::cache::{cookie_headers_match_cache_bypass, query_matches_cache_bypass};
 
 pub(crate) fn cache_request_from_header(request: &RequestHeader) -> crate::cache::CacheRequest<'_> {
@@ -108,14 +109,6 @@ pub(crate) fn request_cache_revalidation_requested(
 pub(crate) struct CacheStatusOverride {
     pub(crate) status: &'static str,
     pub(crate) reason: Option<&'static str>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CacheStaleEvent {
-    Updating,
-    UpstreamError(crate::config::CacheStaleErrorKind),
-    UpstreamHttpStatus(u16),
-    OtherError,
 }
 
 pub(crate) fn selected_cache_range_request(
@@ -450,32 +443,6 @@ pub(crate) fn cache_request_participated(phase: CachePhase) -> bool {
 
 pub(crate) fn proxy_cache_method_temporarily_bypassed(method: &str) -> bool {
     method == "HEAD"
-}
-
-pub(crate) fn cache_should_serve_stale(
-    cache: &crate::config::CacheConfig,
-    event: CacheStaleEvent,
-) -> bool {
-    match event {
-        CacheStaleEvent::UpstreamError(kind) => {
-            cache.stale_if_error_secs.is_some() && cache.stale_if_error_on.contains(&kind)
-        }
-        CacheStaleEvent::UpstreamHttpStatus(status) => {
-            cache.stale_if_error_secs.is_some()
-                && cache
-                    .stale_if_error_on
-                    .contains(&crate::config::CacheStaleErrorKind::HttpStatus)
-                && cache_stale_status_allows(cache, status)
-        }
-        CacheStaleEvent::OtherError => false,
-        CacheStaleEvent::Updating => cache.stale_while_revalidate_secs.is_some(),
-    }
-}
-
-pub(crate) fn cache_stale_status_allows(cache: &crate::config::CacheConfig, status: u16) -> bool {
-    (500..=599).contains(&status)
-        && (cache.stale_if_error_statuses.is_empty()
-            || cache.stale_if_error_statuses.contains(&status))
 }
 
 pub(crate) fn cache_stale_error_kind(error: &Error) -> crate::config::CacheStaleErrorKind {

@@ -45,13 +45,14 @@ use fluxheim_cache::purge_index::{cache_path_wildcard_matches, cache_primary_com
 pub use fluxheim_cache::{
     CacheActivityStats, CacheClientRange, CacheContentRange, CacheKey, CacheObjectFreshnessState,
     CacheObjectHeaderValue, CacheObjectMetadata, CacheObjectTier, CacheRangeRequest, CacheRequest,
-    CacheSliceBounds, CacheSliceRangeRequest, CacheStoragePlan, CacheStoreError, CachedHeader,
-    CachedImageObject, DiskCacheStats, DiskTierPlan, MAX_VARY_FIELDS, MemoryCacheStats,
-    MemoryTierPlan, StaticCacheRequest, TieredCacheStats, VaryCachePolicy,
-    cache_control_freshness_value, cache_vary_policy, cookie_headers_match_cache_bypass,
-    parse_bounded_single_range, parse_cache_client_ranges, parse_cache_content_range,
-    query_matches_cache_bypass, remaining_fresh_ttl_secs, required_slice_bounds,
-    resolve_client_slice_ranges, response_content_type_is_cacheable, vary_cache_policy,
+    CacheSliceBounds, CacheSliceRangeRequest, CacheStaleEvent, CacheStoragePlan, CacheStoreError,
+    CachedHeader, CachedImageObject, DiskCacheStats, DiskTierPlan, MAX_VARY_FIELDS,
+    MemoryCacheStats, MemoryTierPlan, StaticCacheRequest, TieredCacheStats, VaryCachePolicy,
+    cache_control_freshness_value, cache_should_serve_stale, cache_stale_status_allows,
+    cache_vary_policy, cookie_headers_match_cache_bypass, parse_bounded_single_range,
+    parse_cache_client_ranges, parse_cache_content_range, query_matches_cache_bypass,
+    remaining_fresh_ttl_secs, required_slice_bounds, resolve_client_slice_ranges,
+    response_content_type_is_cacheable, vary_cache_policy,
 };
 
 #[cfg(feature = "proxy")]

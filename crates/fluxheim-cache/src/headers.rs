@@ -109,6 +109,40 @@ pub fn query_matches_cache_bypass(
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CacheStaleEvent {
+    Updating,
+    UpstreamError(fluxheim_config::CacheStaleErrorKind),
+    UpstreamHttpStatus(u16),
+    OtherError,
+}
+
+pub fn cache_should_serve_stale(
+    cache: &fluxheim_config::CacheConfig,
+    event: CacheStaleEvent,
+) -> bool {
+    match event {
+        CacheStaleEvent::UpstreamError(kind) => {
+            cache.stale_if_error_secs.is_some() && cache.stale_if_error_on.contains(&kind)
+        }
+        CacheStaleEvent::UpstreamHttpStatus(status) => {
+            cache.stale_if_error_secs.is_some()
+                && cache
+                    .stale_if_error_on
+                    .contains(&fluxheim_config::CacheStaleErrorKind::HttpStatus)
+                && cache_stale_status_allows(cache, status)
+        }
+        CacheStaleEvent::OtherError => false,
+        CacheStaleEvent::Updating => cache.stale_while_revalidate_secs.is_some(),
+    }
+}
+
+pub fn cache_stale_status_allows(cache: &fluxheim_config::CacheConfig, status: u16) -> bool {
+    (500..=599).contains(&status)
+        && (cache.stale_if_error_statuses.is_empty()
+            || cache.stale_if_error_statuses.contains(&status))
+}
+
 fn query_component_matches_cache_bypass(
     name: &str,
     value: &str,
@@ -527,6 +561,74 @@ mod tests {
             "preview=false",
             &[],
             &values
+        ));
+    }
+
+    #[test]
+    fn stale_policy_respects_error_and_status_controls() {
+        let cache = fluxheim_config::CacheConfig {
+            stale_if_error_secs: None,
+            stale_if_error_on: vec![fluxheim_config::CacheStaleErrorKind::Connect],
+            ..fluxheim_config::CacheConfig::default()
+        };
+        assert!(!super::cache_should_serve_stale(
+            &cache,
+            super::CacheStaleEvent::UpstreamError(fluxheim_config::CacheStaleErrorKind::Connect)
+        ));
+
+        let cache = fluxheim_config::CacheConfig {
+            stale_if_error_secs: Some(60),
+            stale_if_error_on: vec![fluxheim_config::CacheStaleErrorKind::Connect],
+            ..fluxheim_config::CacheConfig::default()
+        };
+        assert!(super::cache_should_serve_stale(
+            &cache,
+            super::CacheStaleEvent::UpstreamError(fluxheim_config::CacheStaleErrorKind::Connect)
+        ));
+        assert!(!super::cache_should_serve_stale(
+            &cache,
+            super::CacheStaleEvent::OtherError
+        ));
+
+        let cache = fluxheim_config::CacheConfig {
+            stale_if_error_secs: Some(60),
+            stale_if_error_on: vec![fluxheim_config::CacheStaleErrorKind::HttpStatus],
+            ..fluxheim_config::CacheConfig::default()
+        };
+        assert!(super::cache_should_serve_stale(
+            &cache,
+            super::CacheStaleEvent::UpstreamHttpStatus(500)
+        ));
+        assert!(!super::cache_should_serve_stale(
+            &cache,
+            super::CacheStaleEvent::UpstreamHttpStatus(404)
+        ));
+
+        let narrowed = fluxheim_config::CacheConfig {
+            stale_if_error_secs: Some(60),
+            stale_if_error_on: vec![fluxheim_config::CacheStaleErrorKind::HttpStatus],
+            stale_if_error_statuses: vec![502],
+            ..fluxheim_config::CacheConfig::default()
+        };
+        assert!(super::cache_stale_status_allows(&narrowed, 502));
+        assert!(!super::cache_stale_status_allows(&narrowed, 500));
+    }
+
+    #[test]
+    fn stale_policy_respects_revalidation_controls() {
+        let cache = fluxheim_config::CacheConfig::default();
+        assert!(!super::cache_should_serve_stale(
+            &cache,
+            super::CacheStaleEvent::Updating
+        ));
+
+        let cache = fluxheim_config::CacheConfig {
+            stale_while_revalidate_secs: Some(30),
+            ..fluxheim_config::CacheConfig::default()
+        };
+        assert!(super::cache_should_serve_stale(
+            &cache,
+            super::CacheStaleEvent::Updating
         ));
     }
 

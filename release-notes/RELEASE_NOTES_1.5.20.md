@@ -42,6 +42,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   status/header adapter.
 - Moved cache-bypass cookie and query-string matching, including
   percent-decoded query comparisons, into `crates/fluxheim-cache::headers`.
+- Moved cache stale-serving event and status/error allow policy into
+  `crates/fluxheim-cache::headers`, keeping Pingora error classification in
+  root `crate::proxy_cache`.
 - Moved cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

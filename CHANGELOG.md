@@ -48,6 +48,9 @@ behavior when the change improves security or project direction.
   status/header adapter.
 - Move cache-bypass cookie and query-string matching, including percent-decoded
   query comparisons, into `crates/fluxheim-cache::headers`.
+- Move cache stale-serving event and status/error allow policy into
+  `crates/fluxheim-cache::headers`, keeping Pingora error classification in
+  root `crate::proxy_cache`.
 - Move cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing
