@@ -23,6 +23,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved cached object DTOs and `CacheStoreError` into
   `crates/fluxheim-cache::object`, keeping root `crate::cache` re-exports for
   memory-cache and test call sites.
+- Moved cache request/key DTOs into `crates/fluxheim-cache::request`, with root
+  `crate::cache` re-exports and root cache-key builders preserving the existing
+  behavior.
 - Started the `fluxheim-web` crate boundary by moving static directory-listing
   data/rendering helpers into `crates/fluxheim-web`. The root `crate::web`
   module re-exports the same types and renderer while keeping Pingora response

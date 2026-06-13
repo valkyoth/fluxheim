@@ -8,6 +8,7 @@ pub mod api;
 pub mod headers;
 pub mod object;
 pub mod plan;
+pub mod request;
 
 pub use api::{
     CacheActivityResetResult, CacheActivityStats, CacheBackgroundPurgeResult,
@@ -21,3 +22,4 @@ pub use api::{
 };
 pub use object::{CacheStoreError, CachedHeader, CachedImageObject};
 pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};
+pub use request::{CacheKey, CacheRequest, StaticCacheRequest};

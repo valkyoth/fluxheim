@@ -37,9 +37,10 @@ use crate::config::{
 };
 
 pub use fluxheim_cache::{
-    CacheActivityStats, CacheObjectFreshnessState, CacheObjectHeaderValue, CacheObjectMetadata,
-    CacheObjectTier, CacheStoragePlan, CacheStoreError, CachedHeader, CachedImageObject,
-    DiskCacheStats, DiskTierPlan, MemoryCacheStats, MemoryTierPlan, TieredCacheStats,
+    CacheActivityStats, CacheKey, CacheObjectFreshnessState, CacheObjectHeaderValue,
+    CacheObjectMetadata, CacheObjectTier, CacheRequest, CacheStoragePlan, CacheStoreError,
+    CachedHeader, CachedImageObject, DiskCacheStats, DiskTierPlan, MemoryCacheStats,
+    MemoryTierPlan, StaticCacheRequest, TieredCacheStats,
 };
 
 #[cfg(feature = "proxy")]
@@ -1060,32 +1061,6 @@ fn read_storage_bin_range(
     let mut bytes = vec![0; capacity];
     file.read_exact(&mut bytes)?;
     Ok(bytes)
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheRequest<'a> {
-    pub method: &'a str,
-    pub host: Option<&'a str>,
-    pub path: &'a str,
-    pub query: Option<&'a str>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct StaticCacheRequest<'a> {
-    pub method: &'a str,
-    pub host: Option<&'a str>,
-    pub path: &'a str,
-    pub query: Option<&'a str>,
-    pub file_identity: &'a str,
-}
-
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
-pub struct CacheKey(String);
-
-impl CacheKey {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
 #[cfg(feature = "proxy")]
@@ -8909,7 +8884,7 @@ pub fn image_cache_key(config: &CacheConfig, request: &CacheRequest<'_>) -> Opti
             CacheKeyPart::Query => {}
         }
     }
-    Some(CacheKey(key))
+    Some(CacheKey::new(key))
 }
 
 pub fn eligible_static_request(config: &CacheConfig, request: &StaticCacheRequest<'_>) -> bool {
@@ -8953,7 +8928,7 @@ pub fn static_cache_key(
         }
     }
     append_component(&mut key, "file", request.file_identity);
-    Some(CacheKey(key))
+    Some(CacheKey::new(key))
 }
 
 fn method_allowed(config: &CacheConfig, method: &str) -> bool {
