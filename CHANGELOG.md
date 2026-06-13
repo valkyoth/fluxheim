@@ -36,6 +36,8 @@ behavior when the change improves security or project direction.
   parsing, client-range resolution, and required-slice planning into
   `crates/fluxheim-cache::request`, leaving root `crate::proxy_cache` as the
   Pingora request-header and cache-key adapter.
+- Move Content-Range parsing into `crates/fluxheim-cache::request`, so
+  range-cache admission and slice-object reconstruction share one pure parser.
 - Move cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

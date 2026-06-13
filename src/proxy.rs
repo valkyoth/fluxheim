@@ -103,11 +103,12 @@ use crate::php_fpm::{
 };
 #[cfg(feature = "cache")]
 use crate::proxy_cache::{
-    CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest, CacheStaleEvent,
-    CacheStatusOverride, VaryCachePolicy, apply_cache_status_ttl, cache_request_from_header,
-    cache_response_fresh_ttl_secs, cache_should_serve_stale, cache_stale_error_kind,
-    cache_status_header_value, cache_status_reason_header_value, cache_vary_policy,
-    ignore_origin_cache_headers, proxy_cache_method_temporarily_bypassed, range_cache_key,
+    CacheContentRange, CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest,
+    CacheStaleEvent, CacheStatusOverride, VaryCachePolicy, apply_cache_status_ttl,
+    cache_request_from_header, cache_response_fresh_ttl_secs, cache_should_serve_stale,
+    cache_stale_error_kind, cache_status_header_value, cache_status_reason_header_value,
+    cache_vary_policy, ignore_origin_cache_headers, parse_cache_content_range,
+    proxy_cache_method_temporarily_bypassed, range_cache_key,
     range_response_cache_admission_rejection, remaining_fresh_ttl_secs,
     request_cache_bypass_reason, request_cache_revalidation_requested, required_slice_bounds,
     resolve_client_slice_ranges, response_age_secs, response_cache_admission_rejection,
@@ -4253,14 +4254,6 @@ pub struct RequestContext {
 }
 
 #[cfg(feature = "cache")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct CacheContentRange {
-    start: u64,
-    end: u64,
-    total: Option<u64>,
-}
-
-#[cfg(feature = "cache")]
 #[derive(Debug)]
 struct CacheSliceObject {
     bounds: CacheSliceBounds,
@@ -6468,33 +6461,7 @@ fn response_content_range(headers: &::http::HeaderMap) -> Option<CacheContentRan
         .get_all("content-range")
         .iter()
         .filter_map(|value| value.to_str().ok())
-        .find_map(parse_content_range)
-}
-
-#[cfg(feature = "cache")]
-fn parse_content_range(value: &str) -> Option<CacheContentRange> {
-    let value = value.trim();
-    let rest = value.strip_prefix("bytes ")?;
-    if let Some(total) = rest.strip_prefix("*/") {
-        return Some(CacheContentRange {
-            start: 0,
-            end: 0,
-            total: total.parse::<u64>().ok(),
-        });
-    }
-    let (range, complete_len) = rest.split_once('/')?;
-    let (start, end) = range.split_once('-')?;
-    let start = start.parse::<u64>().ok()?;
-    let end = end.parse::<u64>().ok()?;
-    if end < start {
-        return None;
-    }
-    let total = if complete_len == "*" {
-        None
-    } else {
-        Some(complete_len.parse::<u64>().ok()?)
-    };
-    Some(CacheContentRange { start, end, total })
+        .find_map(parse_cache_content_range)
 }
 
 #[cfg(feature = "cache")]

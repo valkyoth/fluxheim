@@ -38,6 +38,22 @@ impl CacheRangeRequest {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CacheContentRange {
+    pub start: u64,
+    pub end: u64,
+    pub total: Option<u64>,
+}
+
+impl CacheContentRange {
+    pub fn bounds(self) -> CacheRangeRequest {
+        CacheRangeRequest {
+            start: self.start,
+            end: self.end,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CacheClientRange {
     Bounded { start: u64, end: u64 },
@@ -102,6 +118,31 @@ pub fn parse_bounded_single_range(range: &str) -> Option<CacheRangeRequest> {
         return None;
     }
     Some(CacheRangeRequest { start, end })
+}
+
+pub fn parse_cache_content_range(value: &str) -> Option<CacheContentRange> {
+    let value = value.trim();
+    let rest = value.strip_prefix("bytes ")?;
+    if let Some(total) = rest.strip_prefix("*/") {
+        return Some(CacheContentRange {
+            start: 0,
+            end: 0,
+            total: total.parse::<u64>().ok(),
+        });
+    }
+    let (range, complete_len) = rest.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    let start = start.parse::<u64>().ok()?;
+    let end = end.parse::<u64>().ok()?;
+    if end < start {
+        return None;
+    }
+    let total = if complete_len == "*" {
+        None
+    } else {
+        Some(complete_len.parse::<u64>().ok()?)
+    };
+    Some(CacheContentRange { start, end, total })
 }
 
 pub fn parse_cache_client_ranges(value: &str) -> Option<Vec<CacheClientRange>> {
@@ -207,8 +248,9 @@ pub fn required_slice_bounds(
 #[cfg(test)]
 mod tests {
     use super::{
-        CacheClientRange, CacheSliceBounds, parse_bounded_single_range, parse_cache_client_ranges,
-        required_slice_bounds, resolve_client_slice_ranges,
+        CacheClientRange, CacheContentRange, CacheSliceBounds, parse_bounded_single_range,
+        parse_cache_client_ranges, parse_cache_content_range, required_slice_bounds,
+        resolve_client_slice_ranges,
     };
 
     #[test]
@@ -220,6 +262,36 @@ mod tests {
         assert_eq!(parse_bounded_single_range("bytes=19-10"), None);
         assert_eq!(parse_bounded_single_range("bytes=10-"), None);
         assert_eq!(parse_bounded_single_range("bytes=10-19,20-29"), None);
+    }
+
+    #[test]
+    fn parses_content_range() {
+        assert_eq!(
+            parse_cache_content_range("bytes 10-19/100"),
+            Some(CacheContentRange {
+                start: 10,
+                end: 19,
+                total: Some(100),
+            })
+        );
+        assert_eq!(
+            parse_cache_content_range("bytes 10-19/*"),
+            Some(CacheContentRange {
+                start: 10,
+                end: 19,
+                total: None,
+            })
+        );
+        assert_eq!(
+            parse_cache_content_range("bytes */100"),
+            Some(CacheContentRange {
+                start: 0,
+                end: 0,
+                total: Some(100),
+            })
+        );
+        assert_eq!(parse_cache_content_range("bytes 19-10/100"), None);
+        assert_eq!(parse_cache_content_range("items 10-19/100"), None);
     }
 
     #[test]

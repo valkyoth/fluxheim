@@ -15,8 +15,9 @@ const MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES: u64 = 128;
 #[cfg(test)]
 pub(crate) use crate::cache::CacheClientRange;
 pub(crate) use crate::cache::{
-    CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest, parse_bounded_single_range,
-    parse_cache_client_ranges, required_slice_bounds, resolve_client_slice_ranges,
+    CacheContentRange, CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest,
+    parse_bounded_single_range, parse_cache_client_ranges, parse_cache_content_range,
+    required_slice_bounds, resolve_client_slice_ranges,
 };
 
 pub(crate) fn cache_request_from_header(request: &RequestHeader) -> crate::cache::CacheRequest<'_> {
@@ -265,22 +266,9 @@ fn content_range_matches(response: &ResponseHeader, expected: CacheRangeRequest)
         .iter()
         .filter_map(|value| value.to_str().ok())
         .any(|value| {
-            parse_content_range_bounds(value)
+            parse_cache_content_range(value)
                 .is_some_and(|range| range.start == expected.start && range.end == expected.end)
         })
-}
-
-fn parse_content_range_bounds(value: &str) -> Option<CacheRangeRequest> {
-    let value = value.trim();
-    let rest = value.strip_prefix("bytes ")?;
-    let (range, _complete_len) = rest.split_once('/')?;
-    let (start, end) = range.split_once('-')?;
-    let start = start.parse::<u64>().ok()?;
-    let end = end.parse::<u64>().ok()?;
-    if end < start {
-        return None;
-    }
-    Some(CacheRangeRequest { start, end })
 }
 
 fn content_length_matches_range(response: &ResponseHeader, expected: CacheRangeRequest) -> bool {

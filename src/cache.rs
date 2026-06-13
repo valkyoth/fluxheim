@@ -43,12 +43,12 @@ pub use fluxheim_cache::purge_index::{
 #[cfg(feature = "proxy")]
 use fluxheim_cache::purge_index::{cache_path_wildcard_matches, cache_primary_component};
 pub use fluxheim_cache::{
-    CacheActivityStats, CacheClientRange, CacheKey, CacheObjectFreshnessState,
+    CacheActivityStats, CacheClientRange, CacheContentRange, CacheKey, CacheObjectFreshnessState,
     CacheObjectHeaderValue, CacheObjectMetadata, CacheObjectTier, CacheRangeRequest, CacheRequest,
     CacheSliceBounds, CacheSliceRangeRequest, CacheStoragePlan, CacheStoreError, CachedHeader,
     CachedImageObject, DiskCacheStats, DiskTierPlan, MemoryCacheStats, MemoryTierPlan,
     StaticCacheRequest, TieredCacheStats, parse_bounded_single_range, parse_cache_client_ranges,
-    required_slice_bounds, resolve_client_slice_ranges,
+    parse_cache_content_range, required_slice_bounds, resolve_client_slice_ranges,
 };
 
 #[cfg(feature = "proxy")]
