@@ -2208,7 +2208,7 @@ fn validate_cache_lookup_expectations(
                 .map(u64::to_string)
                 .collect::<Vec<_>>()
                 .join(",");
-            let found = cache_lookup_found_fresh_ttls(lookup);
+            let found = crate::cache::cache_object_lookup_fresh_ttl_summary(lookup);
             return Err(format!(
                 "cache-lookup expected fresh TTL seconds {expected}, found {found}"
             )
@@ -2226,7 +2226,7 @@ fn validate_cache_lookup_expectations(
                 .map(u64::to_string)
                 .collect::<Vec<_>>()
                 .join(",");
-            let found = cache_lookup_found_body_bytes(lookup);
+            let found = crate::cache::cache_object_lookup_body_bytes_summary(lookup);
             return Err(
                 format!("cache-lookup expected body bytes {expected}, found {found}").into(),
             );
@@ -2240,7 +2240,7 @@ fn validate_cache_lookup_expectations(
                 .any(|header| header.eq_ignore_ascii_case(expected))
         });
         if !matched {
-            let found = cache_lookup_found_header_names(lookup);
+            let found = crate::cache::cache_object_lookup_header_names_summary(lookup);
             return Err(format!(
                 "cache-lookup expected stored header name {expected}, found {found}"
             )
@@ -2254,7 +2254,8 @@ fn validate_cache_lookup_expectations(
             })
         });
         if !matched {
-            let found = cache_lookup_found_header_values(lookup, expected_name);
+            let found =
+                crate::cache::cache_object_lookup_header_values_summary(lookup, expected_name);
             return Err(format!(
                 "cache-lookup expected stored header {expected_name}: {expected_value}, found {found}"
             )
@@ -2269,7 +2270,7 @@ fn validate_cache_lookup_expectations(
                 .any(|cache_tag| cache_tag == expected)
         });
         if !matched {
-            let found = cache_lookup_found_cache_tags(lookup);
+            let found = crate::cache::cache_object_lookup_cache_tags_summary(lookup);
             return Err(
                 format!("cache-lookup expected cache tag {expected}, found {found}").into(),
             );
@@ -2284,7 +2285,9 @@ fn validate_cache_lookup_expectations(
             .iter()
             .any(|object| object.serve_stale_if_error)
     {
-        let found = cache_lookup_found_bool(lookup, |object| object.serve_stale_if_error);
+        let found = crate::cache::cache_object_lookup_bool_summary(lookup, |object| {
+            object.serve_stale_if_error
+        });
         return Err(
             format!("cache-lookup expected stale-if-error eligible object, found {found}").into(),
         );
@@ -2295,120 +2298,15 @@ fn validate_cache_lookup_expectations(
             .iter()
             .any(|object| object.serve_stale_while_revalidate)
     {
-        let found = cache_lookup_found_bool(lookup, |object| object.serve_stale_while_revalidate);
+        let found = crate::cache::cache_object_lookup_bool_summary(lookup, |object| {
+            object.serve_stale_while_revalidate
+        });
         return Err(format!(
             "cache-lookup expected stale-while-revalidate eligible object, found {found}"
         )
         .into());
     }
     Ok(())
-}
-
-#[cfg(all(feature = "cache", feature = "proxy"))]
-fn cache_lookup_found_bool(
-    lookup: &crate::proxy::CacheObjectLookup,
-    value: impl Fn(&crate::cache::CacheObjectMetadata) -> bool,
-) -> String {
-    let mut values = lookup
-        .objects
-        .iter()
-        .map(|object| value(object).to_string())
-        .collect::<Vec<_>>();
-    if values.is_empty() {
-        return "none".to_owned();
-    }
-    values.sort_unstable();
-    values.dedup();
-    values.join(",")
-}
-
-#[cfg(all(feature = "cache", feature = "proxy"))]
-fn cache_lookup_found_fresh_ttls(lookup: &crate::proxy::CacheObjectLookup) -> String {
-    let mut ttls = lookup
-        .objects
-        .iter()
-        .map(|object| object.fresh_ttl_secs.to_string())
-        .collect::<Vec<_>>();
-    if ttls.is_empty() {
-        return "none".to_owned();
-    }
-    ttls.sort_unstable();
-    ttls.dedup();
-    ttls.join(",")
-}
-
-#[cfg(all(feature = "cache", feature = "proxy"))]
-fn cache_lookup_found_body_bytes(lookup: &crate::proxy::CacheObjectLookup) -> String {
-    let mut sizes = lookup
-        .objects
-        .iter()
-        .map(|object| object.body_bytes.to_string())
-        .collect::<Vec<_>>();
-    if sizes.is_empty() {
-        return "none".to_owned();
-    }
-    sizes.sort_unstable();
-    sizes.dedup();
-    sizes.join(",")
-}
-
-#[cfg(all(feature = "cache", feature = "proxy"))]
-fn cache_lookup_found_header_names(lookup: &crate::proxy::CacheObjectLookup) -> String {
-    let mut names = lookup
-        .objects
-        .iter()
-        .flat_map(|object| object.header_names.iter().map(String::as_str))
-        .collect::<Vec<_>>();
-    if names.is_empty() {
-        return "none".to_owned();
-    }
-    names.sort_unstable();
-    names.dedup();
-    names.join(",")
-}
-
-#[cfg(all(feature = "cache", feature = "proxy"))]
-fn cache_lookup_found_header_values(
-    lookup: &crate::proxy::CacheObjectLookup,
-    expected_name: &str,
-) -> String {
-    let mut values = lookup
-        .objects
-        .iter()
-        .flat_map(|object| {
-            object
-                .header_values
-                .iter()
-                .filter(move |header| header.name.eq_ignore_ascii_case(expected_name))
-                .map(|header| header.value.as_str())
-        })
-        .collect::<Vec<_>>();
-    values.sort_unstable();
-    values.dedup();
-    if values.is_empty() {
-        return "<none>".to_owned();
-    }
-    values
-        .into_iter()
-        .take(8)
-        .map(|value| format!("{expected_name}: {value}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-#[cfg(all(feature = "cache", feature = "proxy"))]
-fn cache_lookup_found_cache_tags(lookup: &crate::proxy::CacheObjectLookup) -> String {
-    let mut tags = lookup
-        .objects
-        .iter()
-        .flat_map(|object| object.cache_tags.iter().map(String::as_str))
-        .collect::<Vec<_>>();
-    if tags.is_empty() {
-        return "none".to_owned();
-    }
-    tags.sort_unstable();
-    tags.dedup();
-    tags.join(",")
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]

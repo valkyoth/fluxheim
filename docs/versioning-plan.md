@@ -4007,6 +4007,8 @@ the exception while the cache server is being completed as a focused sequence:
   Config HTTP token validation now also uses the shared
   `crates/fluxheim-protocol` grammar while preserving method-specific
   uppercase checks.
+  Cache object lookup summary formatting now lives in
+  `crates/fluxheim-cache`, leaving the CLI as the command/output adapter.
   Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last

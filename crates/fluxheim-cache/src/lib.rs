@@ -20,8 +20,12 @@ pub use api::{
     CacheObjectHeaderValue, CacheObjectLookup, CacheObjectMetadata, CacheObjectTier,
     CachePurgeRequest, CachePurgeResult, CacheRouteStats, CacheRuntimeStats, CacheRuntimeTotals,
     CacheStalePurgeRequest, CacheStalePurgeResult, CacheVhostStats, DiskCacheStats,
-    MemoryCacheStats, TieredCacheStats, cache_average_bytes, cache_ratio_per_mille,
-    cache_ratio_per_mille_usize, cache_stale_would_purge, cache_storage_tiers,
+    MemoryCacheStats, TieredCacheStats, cache_average_bytes,
+    cache_object_lookup_body_bytes_summary, cache_object_lookup_bool_summary,
+    cache_object_lookup_cache_tags_summary, cache_object_lookup_fresh_ttl_summary,
+    cache_object_lookup_header_names_summary, cache_object_lookup_header_values_summary,
+    cache_ratio_per_mille, cache_ratio_per_mille_usize, cache_stale_would_purge,
+    cache_storage_tiers,
 };
 pub use headers::{
     CacheStaleEvent, MAX_VARY_FIELDS, VaryCachePolicy, VaryRequestHashField,

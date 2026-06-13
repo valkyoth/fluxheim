@@ -464,6 +464,107 @@ pub struct CacheObjectLookup {
     pub objects: Vec<CacheObjectMetadata>,
 }
 
+pub fn cache_object_lookup_bool_summary(
+    lookup: &CacheObjectLookup,
+    value: impl Fn(&CacheObjectMetadata) -> bool,
+) -> String {
+    let mut values = lookup
+        .objects
+        .iter()
+        .map(|object| value(object).to_string())
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return "none".to_owned();
+    }
+    values.sort_unstable();
+    values.dedup();
+    values.join(",")
+}
+
+pub fn cache_object_lookup_fresh_ttl_summary(lookup: &CacheObjectLookup) -> String {
+    let mut ttls = lookup
+        .objects
+        .iter()
+        .map(|object| object.fresh_ttl_secs.to_string())
+        .collect::<Vec<_>>();
+    if ttls.is_empty() {
+        return "none".to_owned();
+    }
+    ttls.sort_unstable();
+    ttls.dedup();
+    ttls.join(",")
+}
+
+pub fn cache_object_lookup_body_bytes_summary(lookup: &CacheObjectLookup) -> String {
+    let mut sizes = lookup
+        .objects
+        .iter()
+        .map(|object| object.body_bytes.to_string())
+        .collect::<Vec<_>>();
+    if sizes.is_empty() {
+        return "none".to_owned();
+    }
+    sizes.sort_unstable();
+    sizes.dedup();
+    sizes.join(",")
+}
+
+pub fn cache_object_lookup_header_names_summary(lookup: &CacheObjectLookup) -> String {
+    let mut names = lookup
+        .objects
+        .iter()
+        .flat_map(|object| object.header_names.iter().map(String::as_str))
+        .collect::<Vec<_>>();
+    if names.is_empty() {
+        return "none".to_owned();
+    }
+    names.sort_unstable();
+    names.dedup();
+    names.join(",")
+}
+
+pub fn cache_object_lookup_header_values_summary(
+    lookup: &CacheObjectLookup,
+    expected_name: &str,
+) -> String {
+    let mut values = lookup
+        .objects
+        .iter()
+        .flat_map(|object| {
+            object
+                .header_values
+                .iter()
+                .filter(move |header| header.name.eq_ignore_ascii_case(expected_name))
+                .map(|header| header.value.as_str())
+        })
+        .collect::<Vec<_>>();
+    values.sort_unstable();
+    values.dedup();
+    if values.is_empty() {
+        return "<none>".to_owned();
+    }
+    values
+        .into_iter()
+        .take(8)
+        .map(|value| format!("{expected_name}: {value}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+pub fn cache_object_lookup_cache_tags_summary(lookup: &CacheObjectLookup) -> String {
+    let mut tags = lookup
+        .objects
+        .iter()
+        .flat_map(|object| object.cache_tags.iter().map(String::as_str))
+        .collect::<Vec<_>>();
+    if tags.is_empty() {
+        return "none".to_owned();
+    }
+    tags.sort_unstable();
+    tags.dedup();
+    tags.join(",")
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheRuntimeStats {
     pub totals: CacheRuntimeTotals,
@@ -508,8 +609,13 @@ pub struct CacheRouteStats {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache_average_bytes, cache_ratio_per_mille, cache_ratio_per_mille_usize,
-        cache_stale_would_purge, cache_storage_tiers,
+        CacheKeyPreview, CacheKeyPreviewScope, CacheObjectFreshnessState, CacheObjectHeaderValue,
+        CacheObjectLookup, CacheObjectMetadata, CacheObjectTier, cache_average_bytes,
+        cache_object_lookup_body_bytes_summary, cache_object_lookup_bool_summary,
+        cache_object_lookup_cache_tags_summary, cache_object_lookup_fresh_ttl_summary,
+        cache_object_lookup_header_names_summary, cache_object_lookup_header_values_summary,
+        cache_ratio_per_mille, cache_ratio_per_mille_usize, cache_stale_would_purge,
+        cache_storage_tiers,
     };
 
     #[test]
@@ -530,5 +636,110 @@ mod tests {
         assert_eq!(cache_storage_tiers(true, true), 2);
         assert_eq!(cache_stale_would_purge(true, 7), 7);
         assert_eq!(cache_stale_would_purge(false, 7), 0);
+    }
+
+    #[test]
+    fn cache_object_lookup_summaries_are_stable_and_bounded() {
+        let lookup = CacheObjectLookup {
+            preview: CacheKeyPreview {
+                vhost: "cache.test".to_owned(),
+                route: None,
+                scope: CacheKeyPreviewScope::Vhost,
+                eligible: true,
+                cache_lock_enabled: true,
+                cache_lock_wait_timeout_secs: 30,
+                cache_predictor_enabled: true,
+                peer_fill_enabled: false,
+                peer_fill_peer_count: 0,
+                peer_fill_max_concurrent_requests: 64,
+                peer_fill_fail_open: true,
+                memory_tier_enabled: true,
+                disk_tier_enabled: true,
+                storage_tiers: 2,
+                reason: None,
+                namespace: None,
+                key_namespace: None,
+                primary_key: None,
+                primary_hash: None,
+                variance_hash: None,
+                combined_hash: None,
+                user_tag: None,
+            },
+            objects: vec![
+                CacheObjectMetadata {
+                    tier: CacheObjectTier::Memory,
+                    purge_indexed: true,
+                    status: 200,
+                    fresh: true,
+                    freshness_state: CacheObjectFreshnessState::Fresh,
+                    serve_stale_while_revalidate: false,
+                    serve_stale_if_error: true,
+                    body_bytes: 42,
+                    weight_bytes: 64,
+                    created_unix_secs: None,
+                    updated_unix_secs: None,
+                    fresh_until_unix_secs: None,
+                    age_secs: 0,
+                    fresh_ttl_secs: 120,
+                    stale_while_revalidate_secs: 0,
+                    stale_if_error_secs: 60,
+                    cache_tags: vec!["asset".to_owned(), "shared".to_owned()],
+                    header_names: vec!["cache-control".to_owned(), "etag".to_owned()],
+                    header_values: vec![
+                        CacheObjectHeaderValue {
+                            name: "etag".to_owned(),
+                            value: "\"a\"".to_owned(),
+                        },
+                        CacheObjectHeaderValue {
+                            name: "x-other".to_owned(),
+                            value: "ignored".to_owned(),
+                        },
+                    ],
+                },
+                CacheObjectMetadata {
+                    tier: CacheObjectTier::Disk,
+                    purge_indexed: false,
+                    status: 200,
+                    fresh: true,
+                    freshness_state: CacheObjectFreshnessState::Fresh,
+                    serve_stale_while_revalidate: false,
+                    serve_stale_if_error: false,
+                    body_bytes: 42,
+                    weight_bytes: 64,
+                    created_unix_secs: None,
+                    updated_unix_secs: None,
+                    fresh_until_unix_secs: None,
+                    age_secs: 0,
+                    fresh_ttl_secs: 60,
+                    stale_while_revalidate_secs: 0,
+                    stale_if_error_secs: 60,
+                    cache_tags: vec!["asset".to_owned()],
+                    header_names: vec!["etag".to_owned()],
+                    header_values: vec![CacheObjectHeaderValue {
+                        name: "ETag".to_owned(),
+                        value: "\"b\"".to_owned(),
+                    }],
+                },
+            ],
+        };
+
+        assert_eq!(
+            cache_object_lookup_bool_summary(&lookup, |object| object.serve_stale_if_error),
+            "false,true"
+        );
+        assert_eq!(cache_object_lookup_fresh_ttl_summary(&lookup), "120,60");
+        assert_eq!(cache_object_lookup_body_bytes_summary(&lookup), "42");
+        assert_eq!(
+            cache_object_lookup_header_names_summary(&lookup),
+            "cache-control,etag"
+        );
+        assert_eq!(
+            cache_object_lookup_header_values_summary(&lookup, "etag"),
+            "etag: \"a\",etag: \"b\""
+        );
+        assert_eq!(
+            cache_object_lookup_cache_tags_summary(&lookup),
+            "asset,shared"
+        );
     }
 }
