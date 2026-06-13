@@ -99,6 +99,16 @@ pub fn http_upgrade_token_valid(value: &str) -> bool {
         })
 }
 
+pub const FLUXHEIM_VIA_VALUE: &str = "1.1 fluxheim";
+
+pub fn append_fluxheim_via_value(existing: &str) -> String {
+    if existing.trim().is_empty() {
+        FLUXHEIM_VIA_VALUE.to_owned()
+    } else {
+        format!("{}, {}", existing.trim(), FLUXHEIM_VIA_VALUE)
+    }
+}
+
 pub fn proxy_protocol_v1_header(
     source: Option<SocketAddr>,
     destination: Option<SocketAddr>,
@@ -168,9 +178,10 @@ mod tests {
     use std::net::{IpAddr, SocketAddr};
 
     use super::{
-        ProxyProtocolTrustedSource, ProxyProtocolTrustedSourceParseError, http_upgrade_token_valid,
-        parse_proxy_protocol_trusted_source, proxy_protocol_v1_header, proxy_protocol_v2_header,
-        route_method_matches, route_prefix_matches_path, route_strip_prefix_suffix,
+        ProxyProtocolTrustedSource, ProxyProtocolTrustedSourceParseError,
+        append_fluxheim_via_value, http_upgrade_token_valid, parse_proxy_protocol_trusted_source,
+        proxy_protocol_v1_header, proxy_protocol_v2_header, route_method_matches,
+        route_prefix_matches_path, route_strip_prefix_suffix,
     };
 
     #[test]
@@ -250,6 +261,16 @@ mod tests {
         assert!(!http_upgrade_token_valid("websocket\r\nx"));
         assert!(!http_upgrade_token_valid("websocket;param"));
         assert!(!http_upgrade_token_valid("websocket/1"));
+    }
+
+    #[test]
+    fn appends_fluxheim_via_value_to_existing_chain() {
+        assert_eq!(append_fluxheim_via_value(""), "1.1 fluxheim");
+        assert_eq!(append_fluxheim_via_value("   "), "1.1 fluxheim");
+        assert_eq!(
+            append_fluxheim_via_value(" 1.0 edge, 1.1 cache "),
+            "1.0 edge, 1.1 cache, 1.1 fluxheim"
+        );
     }
 
     #[test]

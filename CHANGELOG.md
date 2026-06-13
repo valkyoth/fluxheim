@@ -199,6 +199,8 @@ behavior when the change improves security or project direction.
   adapter.
 - Move HTTP Upgrade token grammar validation into `crates/fluxheim-protocol`,
   leaving root proxy as the Pingora request-header adapter.
+- Move Fluxheim `Via` header value formatting into `crates/fluxheim-protocol`,
+  leaving root proxy as the Pingora header mutation adapter.
 
 ### Fixed
 

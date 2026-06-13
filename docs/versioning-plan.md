@@ -3988,6 +3988,9 @@ the exception while the cache server is being completed as a focused sequence:
   HTTP Upgrade token grammar validation now also lives in
   `crates/fluxheim-protocol`, with root proxy kept as the Pingora
   request-header adapter.
+  Fluxheim `Via` header value formatting now also lives in
+  `crates/fluxheim-protocol`, with root proxy kept as the Pingora header
+  mutation adapter.
   Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last

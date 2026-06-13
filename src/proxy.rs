@@ -9616,16 +9616,6 @@ async fn respond_method_not_allowed(
         .await
 }
 
-const FLUXHEIM_VIA_VALUE: &str = "1.1 fluxheim";
-
-fn append_fluxheim_via_value(existing: &str) -> String {
-    if existing.trim().is_empty() {
-        FLUXHEIM_VIA_VALUE.to_owned()
-    } else {
-        format!("{}, {}", existing.trim(), FLUXHEIM_VIA_VALUE)
-    }
-}
-
 fn append_fluxheim_via_to_request(request: &mut RequestHeader) -> Result<()> {
     let existing = request
         .headers
@@ -9635,7 +9625,10 @@ fn append_fluxheim_via_to_request(request: &mut RequestHeader) -> Result<()> {
         .collect::<Vec<_>>()
         .join(", ");
     request.remove_header("via");
-    request.insert_header("via", append_fluxheim_via_value(&existing))
+    request.insert_header(
+        "via",
+        fluxheim_protocol::append_fluxheim_via_value(&existing),
+    )
 }
 
 fn append_fluxheim_via_to_response(response: &mut ResponseHeader) -> Result<()> {
@@ -9647,7 +9640,10 @@ fn append_fluxheim_via_to_response(response: &mut ResponseHeader) -> Result<()> 
         .collect::<Vec<_>>()
         .join(", ");
     response.remove_header("via");
-    response.insert_header("via", append_fluxheim_via_value(&existing))
+    response.insert_header(
+        "via",
+        fluxheim_protocol::append_fluxheim_via_value(&existing),
+    )
 }
 
 #[cfg(feature = "load-balancer")]
