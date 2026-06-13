@@ -158,6 +158,72 @@ pub fn metrics_status_class(status: Option<u16>) -> &'static str {
     status.map(access_log_status_class).unwrap_or("unknown")
 }
 
+pub fn metrics_host_routing_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "missing" => "missing",
+        "invalid" => "invalid",
+        "unknown" => "unknown",
+        _ => "other",
+    }
+}
+
+pub fn metrics_admin_auth_event_label(event: &str) -> &'static str {
+    match event {
+        "failure" => "failure",
+        "throttled" => "throttled",
+        _ => "other",
+    }
+}
+
+pub fn metrics_admin_auth_scope_label(scope: &str) -> &'static str {
+    match scope {
+        "source" => "source",
+        "global" => "global",
+        _ => "other",
+    }
+}
+
+pub fn metrics_compression_encoding_label(encoding: &str) -> &'static str {
+    match encoding {
+        "gzip" => "gzip",
+        "zstd" => "zstd",
+        "br" => "br",
+        _ => "other",
+    }
+}
+
+pub fn metrics_stream_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "completed" => "completed",
+        "rejected" => "rejected",
+        "connect_error" => "connect_error",
+        "timeout" => "timeout",
+        "shutdown" => "shutdown",
+        _ => "error",
+    }
+}
+
+pub fn metrics_stream_direction_label(direction: &str) -> &'static str {
+    match direction {
+        "downstream_to_upstream" => "downstream_to_upstream",
+        "upstream_to_downstream" => "upstream_to_downstream",
+        _ => "other",
+    }
+}
+
+pub fn metrics_acme_event_label(event: &str) -> &'static str {
+    match event {
+        "pending" => "pending",
+        "renewed" => "renewed",
+        "failed" => "failed",
+        "reload_success" => "reload_success",
+        "reload_failed" => "reload_failed",
+        "reload_unavailable" => "reload_unavailable",
+        "tick_error" => "tick_error",
+        _ => "other",
+    }
+}
+
 pub fn access_log_request_id_valid(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -794,6 +860,27 @@ mod tests {
 
         assert_eq!(metrics_status_class(Some(204)), "2xx");
         assert_eq!(metrics_status_class(None), "unknown");
+    }
+
+    #[test]
+    fn metrics_general_labels_are_low_cardinality() {
+        assert_eq!(metrics_host_routing_reason_label("missing"), "missing");
+        assert_eq!(metrics_host_routing_reason_label("attacker"), "other");
+        assert_eq!(metrics_admin_auth_event_label("failure"), "failure");
+        assert_eq!(metrics_admin_auth_event_label("success"), "other");
+        assert_eq!(metrics_admin_auth_scope_label("source"), "source");
+        assert_eq!(metrics_admin_auth_scope_label("route"), "other");
+        assert_eq!(metrics_compression_encoding_label("br"), "br");
+        assert_eq!(metrics_compression_encoding_label("identity"), "other");
+        assert_eq!(metrics_stream_outcome_label("completed"), "completed");
+        assert_eq!(metrics_stream_outcome_label("strange"), "error");
+        assert_eq!(
+            metrics_stream_direction_label("upstream_to_downstream"),
+            "upstream_to_downstream"
+        );
+        assert_eq!(metrics_stream_direction_label("sideways"), "other");
+        assert_eq!(metrics_acme_event_label("renewed"), "renewed");
+        assert_eq!(metrics_acme_event_label("surprise"), "other");
     }
 
     #[test]

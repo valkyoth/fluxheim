@@ -1538,28 +1538,15 @@ fn status_class(status: Option<u16>) -> &'static str {
 }
 
 fn host_routing_reason_label(reason: &str) -> &'static str {
-    match reason {
-        "missing" => "missing",
-        "invalid" => "invalid",
-        "unknown" => "unknown",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_host_routing_reason_label(reason)
 }
 
 fn admin_auth_event_label(event: &str) -> &'static str {
-    match event {
-        "failure" => "failure",
-        "throttled" => "throttled",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_admin_auth_event_label(event)
 }
 
 fn admin_auth_scope_label(scope: &str) -> &'static str {
-    match scope {
-        "source" => "source",
-        "global" => "global",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_admin_auth_scope_label(scope)
 }
 
 fn cache_tier_label(tier: &str) -> &'static str {
@@ -1576,12 +1563,7 @@ fn cache_scope_label(route: Option<&str>) -> &'static str {
 }
 
 fn compression_encoding_label(encoding: &str) -> &'static str {
-    match encoding {
-        "gzip" => "gzip",
-        "zstd" => "zstd",
-        "br" => "br",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_compression_encoding_label(encoding)
 }
 
 fn edge_policy_label(policy: &str) -> &'static str {
@@ -1838,35 +1820,15 @@ fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {
 }
 
 fn stream_outcome_label(outcome: &str) -> &'static str {
-    match outcome {
-        "completed" => "completed",
-        "rejected" => "rejected",
-        "connect_error" => "connect_error",
-        "timeout" => "timeout",
-        "shutdown" => "shutdown",
-        _ => "error",
-    }
+    fluxheim_observability::metrics_stream_outcome_label(outcome)
 }
 
 fn stream_direction_label(direction: &str) -> &'static str {
-    match direction {
-        "downstream_to_upstream" => "downstream_to_upstream",
-        "upstream_to_downstream" => "upstream_to_downstream",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_stream_direction_label(direction)
 }
 
 fn acme_event_label(event: &str) -> &'static str {
-    match event {
-        "pending" => "pending",
-        "renewed" => "renewed",
-        "failed" => "failed",
-        "reload_success" => "reload_success",
-        "reload_failed" => "reload_failed",
-        "reload_unavailable" => "reload_unavailable",
-        "tick_error" => "tick_error",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_acme_event_label(event)
 }
 
 #[cfg(test)]

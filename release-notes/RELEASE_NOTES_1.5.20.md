@@ -131,6 +131,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved proxy metrics outcome, method, and status-class label bucketing into
   `crates/fluxheim-observability`, keeping root `crate::metrics` as the
   Prometheus registry/recorder adapter.
+- Moved general Prometheus label classifiers for host-routing, admin-auth,
+  compression, stream, and ACME events into `crates/fluxheim-observability`,
+  further narrowing root `crate::metrics` to recorder wiring.
 - Moved the OTLP trace exporter and trace-span payload builder into
   `crates/fluxheim-observability` behind its `otlp-trace` feature, with root
   `crate::otel_otlp` kept as a compatibility re-export.
