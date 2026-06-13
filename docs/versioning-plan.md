@@ -2382,7 +2382,12 @@ adapter. When cleanup naturally exposes a subsystem boundary, split it into a
 focused workspace crate instead of growing the root `fluxheim`
 binary/orchestration crate. Good target crates include `fluxheim-server`,
 `fluxheim-runtime`, `fluxheim-proxy`, `fluxheim-cache`, `fluxheim-web`,
-`fluxheim-php-fpm`, `fluxheim-acme`, and narrow protocol/helper crates.
+`fluxheim-php-fpm`, `fluxheim-snapshot`, `fluxheim-acme`,
+`fluxheim-headers`/`fluxheim-http-policy`, `fluxheim-protocol`, and other
+narrow helper crates. Keep `proxy.rs`, `runtime.rs`, and `admin.rs` as late
+extractions: proxy and runtime move only when the native HTTP/server runtime is
+ready, and admin moves only after domain crates expose stable APIs so the admin
+crate does not become a circular dependency hub.
 
 Pre-planning dependency map:
 
@@ -2406,6 +2411,12 @@ Replacement rules for 1.6:
 - New crates must be owned by a domain boundary first, not added directly to
   `proxy.rs` or `runtime.rs`. The root `fluxheim` crate should mostly wire
   config, feature flags, and binaries together.
+- Use the Pingora-exit line to finish the larger crate boundaries before
+  starting new `1.7+` feature families. `fluxheim-snapshot`,
+  `fluxheim-acme`, `fluxheim-headers`/`fluxheim-http-policy`, and
+  `fluxheim-protocol` should move when their dependency direction is clean.
+  `fluxheim-proxy`, `fluxheim-runtime`, and a possible `fluxheim-admin` should
+  remain later steps because they currently coordinate many other domains.
 - Feature mapping must stay explicit: root features such as `proxy`, `cache`,
   `load-balancer`, `stream-proxy`, `php-fpm`, `tls-rustls`, and `tls-openssl`
   map to matching sub-crate features. Avoid hidden default features that pull
@@ -2433,7 +2444,11 @@ Planned `1.6.x` sequence:
   benchmark method, command lines, environment assumptions, and accepted
   comparison rules in a tracked documentation file such as
   `docs/runtime-baseline.md`. Add the first `fluxheim-runtime` /
-  `fluxheim-server` traits and keep runtime behavior unchanged.
+  `fluxheim-server` traits and keep runtime behavior unchanged. Also record the
+  extraction dependency graph for the remaining large root modules:
+  `snapshot.rs`, `acme.rs`, `headers.rs`, `proxy_protocol.rs`,
+  `trace_context.rs`, `runtime.rs`, `proxy.rs`, and `admin.rs`, so later
+  cutovers are ordered by dependencies rather than file size.
 - `v1.6.1`: load-balancer independence. Remove `pingora-load-balancing` from
   normal builds. Replace remaining
   Pingora background/listen/shutdown service traits in
@@ -2455,15 +2470,30 @@ Planned `1.6.x` sequence:
   wiring with Fluxheim-owned Tokio task supervision, cancellation, readiness,
   and shutdown handling for cache metrics, ACME renewal, stale purging,
   admin/self-healing work, discovery refresh loops, and load-balancer updates.
-- `v1.6.5`: HTTP/error boundary cleanup. Finish standard Rust `http` type usage
-  and Fluxheim-owned error taxonomy at internal boundaries. Keep only narrow
-  compatibility shims where a not-yet-replaced outer runtime still needs them.
-  Add a lint/search gate that blocks new internal `pingora::http` and
+  This is the right point to move durable config snapshot IDs, metadata, store
+  validation, listing, rollback file operations, and known-good state helpers
+  into `fluxheim-snapshot`, with the root admin/runtime modules left as API
+  adapters until their own boundaries are ready.
+- `v1.6.5`: HTTP/error, protocol, and header-policy boundary cleanup. Finish
+  standard Rust `http` type usage and Fluxheim-owned error taxonomy at internal
+  boundaries. Move proxy protocol framing, HTTP type adapters, path-safety
+  helpers not already in `fluxheim-common`, and other small protocol helpers
+  into `fluxheim-protocol` where that does not create a dependency cycle. Start
+  `fluxheim-headers` or `fluxheim-http-policy` for hop-by-hop stripping,
+  trusted forwarded-header normalization, route/header mutation helpers, and
+  related tests, but keep proxy-session-specific application in the root proxy
+  adapter until the native HTTP runtime exists. Keep only narrow compatibility
+  shims where a not-yet-replaced outer runtime still needs them. Add a
+  lint/search gate that blocks new internal `pingora::http` and
   `pingora::Error` usage outside adapters.
 - `v1.6.6`: listener/TLS abstraction. Introduce Fluxheim-owned listener,
   certificate resolver, SNI, ALPN, mTLS/client-auth, OCSP, and upstream-peer
   abstractions backed by rustls and OpenSSL. Keep Pingora listeners active only
-  as the old adapter while parity tests run.
+  as the old adapter while parity tests run. Move ACME order/account/certificate
+  installation, renewal scheduling inputs, filesystem safety helpers, and
+  certificate-install rollback logic behind `fluxheim-acme` APIs once the new
+  TLS/listener abstractions can consume them without depending on the old
+  Pingora runtime.
 - `v1.6.7`: server bootstrap cutover. Replace Pingora server bootstrap, worker
   setup, service registration, signal handling, log-rotation signal behavior,
   hot-restart file-descriptor passing where retained, listener creation, and
@@ -2490,7 +2520,11 @@ Planned `1.6.x` sequence:
 - `v1.6.12`: upstream connector and pooling parity. Replace remaining Pingora
   upstream peer/session/pool behavior with Fluxheim-owned connectors and pools
   for HTTP/1.1, HTTP/2, TLS/mTLS, DNS/file/runtime-discovered backends,
-  retry/failover decisions, and privacy-mode-safe observability.
+  retry/failover decisions, and privacy-mode-safe observability. After proxy,
+  cache, load-balancer, snapshot, ACME, header-policy, and protocol crates have
+  stable APIs, reduce `admin.rs` to endpoint routing and auth glue or move it
+  into `fluxheim-admin` if the dependency graph stays one-way. Do not let admin
+  own domain state; it should call domain APIs and serialize responses.
 - `v1.6.13`: remove remaining Pingora crates, vendored Pingora patches,
   Pingora compatibility shims, and Pingora-specific docs from normal builds.
   Release gates must prove `cargo tree` and container builds do not compile
@@ -3937,13 +3971,19 @@ circular dependencies.
   boundaries needed to remove Pingora safely. The whole `1.6.x` series must
   remove Pingora from every normal Fluxheim build by its final stabilization
   release, splitting new runtime domains into focused workspace crates where
-  useful.
+  useful. Track the remaining large root-module exits here too:
+  `fluxheim-snapshot`, `fluxheim-acme`,
+  `fluxheim-headers`/`fluxheim-http-policy`, `fluxheim-protocol`, late
+  `fluxheim-proxy`/`fluxheim-runtime`, and a possible `fluxheim-admin` after
+  domain APIs are stable.
 - `v1.6.x`: Pingora-exit implementation releases. Remove
   `pingora-load-balancing`, `pingora-cache`, stream-service entrypoints,
   background service wiring, Pingora HTTP/error wrappers, Pingora server
   bootstrap/listener/TLS handling, and finally Pingora `ProxyHttp`/`Session`
   in staged minor releases. Preserve current operator-facing behavior and make
-  each release independently testable before deleting the old adapter.
+  each release independently testable before deleting the old adapter. Do not
+  carry unfinished structural crate splits into `1.7` unless they are unrelated
+  to the Pingora-free runtime boundary.
 - `v1.7.0`: shared Wasm extensibility runtime line. Stop at one sandboxed,
   typed, resource-limited extension runtime for operator policy normally solved
   with F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-like cache
