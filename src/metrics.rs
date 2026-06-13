@@ -1557,15 +1557,9 @@ fn method_bucket(method: &str) -> &'static str {
 }
 
 fn status_class(status: Option<u16>) -> &'static str {
-    match status {
-        Some(100..=199) => "1xx",
-        Some(200..=299) => "2xx",
-        Some(300..=399) => "3xx",
-        Some(400..=499) => "4xx",
-        Some(500..=599) => "5xx",
-        Some(_) => "other",
-        None => "unknown",
-    }
+    status
+        .map(fluxheim_observability::access_log_status_class)
+        .unwrap_or("unknown")
 }
 
 fn host_routing_reason_label(reason: &str) -> &'static str {

@@ -3921,10 +3921,11 @@ the exception while the cache server is being completed as a focused sequence:
   `otlp-http` crate feature. It also owns the Prometheus-to-OTLP metrics payload
   builder behind an `otlp-metrics` crate feature while the root metrics OTLP
   module remains exporter lifecycle and HTTP post wiring. Access-log helper
-  logic for request-id validation/generation, low-cardinality status classes,
-  response byte counting, and Unix nanosecond timestamps now also lives in the
-  observability crate while root access logging keeps Pingora request-header
-  integration and JSON event assembly.
+  logic for request-id validation/generation, shared low-cardinality status
+  classes, response byte counting, and Unix nanosecond timestamps now also lives
+  in the observability crate while root access logging keeps Pingora
+  request-header integration and JSON event assembly and Prometheus metrics
+  reuses the shared status-class helper.
   The OTLP trace exporter and trace-span payload builder also live behind the
   `crates/fluxheim-observability` `otlp-trace` feature while root
   `crate::otel_otlp` remains a compatibility re-export.
