@@ -109,6 +109,13 @@ else
     echo "stable release gate: skipping local load smoke; set FLUXHEIM_GATE_LOAD=1 to enable"
 fi
 
+if [ "${FLUXHEIM_GATE_UDP:-0}" = "1" ]; then
+    echo "stable release gate: UDP beta smoke"
+    scripts/smoke_udp_proxy.sh
+else
+    echo "stable release gate: skipping UDP beta smoke; set FLUXHEIM_GATE_UDP=1 to enable"
+fi
+
 if [ "${FLUXHEIM_GATE_FRAMING:-0}" = "1" ]; then
     echo "stable release gate: request framing smoke"
     scripts/smoke_request_framing.sh

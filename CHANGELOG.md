@@ -31,6 +31,8 @@ behavior when the change improves security or project direction.
   readiness guardrails.
 - Extended UDP smoke coverage to verify exact-cap responses are accepted and
   oversized downstream datagrams are dropped before reaching the upstream.
+- Added optional stable-gate UDP beta smoke via `FLUXHEIM_GATE_UDP=1`, with
+  `FLUXHEIM_UDP_SMOKE_ITERATIONS` for longer local soak runs.
 
 ## 1.5.20 - 2026-06-13
 

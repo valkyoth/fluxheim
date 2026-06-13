@@ -30,6 +30,9 @@ controls for safer testing.
   per-source pressure controls.
 - UDP smoke coverage now verifies exact-cap responses are accepted and
   oversized downstream datagrams are dropped before reaching upstreams.
+- The stable release gate can run the UDP beta smoke with
+  `FLUXHEIM_GATE_UDP=1`; set `FLUXHEIM_UDP_SMOKE_ITERATIONS` for longer local
+  soak runs.
 
 ## Compatibility
 

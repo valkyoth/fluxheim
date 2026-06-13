@@ -4,6 +4,19 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-udp-smoke.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_SMOKE_KEEP_LOGS:-0}
+UDP_SMOKE_ITERATIONS=${FLUXHEIM_UDP_SMOKE_ITERATIONS:-25}
+
+case "$UDP_SMOKE_ITERATIONS" in
+    '' | *[!0-9]*)
+        echo "FLUXHEIM_UDP_SMOKE_ITERATIONS must be a positive integer" >&2
+        exit 2
+        ;;
+esac
+
+if [ "$UDP_SMOKE_ITERATIONS" -eq 0 ]; then
+    echo "FLUXHEIM_UDP_SMOKE_ITERATIONS must be greater than zero" >&2
+    exit 2
+fi
 
 ports=$(python3 - <<'PY'
 import socket
@@ -271,11 +284,19 @@ SYSLOG_UPSTREAM_PID=$!
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" >"$TMP_DIR/fluxheim.log" 2>&1 &
 FLUXHEIM_PID=$!
 
-python3 "$TMP_DIR/udp_request.py" 127.0.0.1 "$DNS_LISTEN_PORT" query dns:query
+iteration=1
+while [ "$iteration" -le "$UDP_SMOKE_ITERATIONS" ]; do
+    python3 "$TMP_DIR/udp_request.py" 127.0.0.1 "$DNS_LISTEN_PORT" "query-$iteration" "dns:query-$iteration"
+    iteration=$((iteration + 1))
+done
 python3 "$TMP_DIR/udp_request_len.py" 127.0.0.1 "$DNS_LISTEN_PORT" cap 512
 python3 "$TMP_DIR/udp_send_bytes.py" 127.0.0.1 "$DNS_LISTEN_PORT" 513 z
 python3 "$TMP_DIR/wait_file_not_contains.py" "$TMP_DIR/dns-received.log" zzzzz
-python3 "$TMP_DIR/udp_send.py" 127.0.0.1 "$SYSLOG_LISTEN_PORT" "<13>fluxheim udp smoke"
-python3 "$TMP_DIR/wait_file_contains.py" "$TMP_DIR/syslog-received.log" "fluxheim udp smoke"
+iteration=1
+while [ "$iteration" -le "$UDP_SMOKE_ITERATIONS" ]; do
+    python3 "$TMP_DIR/udp_send.py" 127.0.0.1 "$SYSLOG_LISTEN_PORT" "<13>fluxheim udp smoke $iteration"
+    iteration=$((iteration + 1))
+done
+python3 "$TMP_DIR/wait_file_contains.py" "$TMP_DIR/syslog-received.log" "fluxheim udp smoke $UDP_SMOKE_ITERATIONS"
 
-echo "UDP proxy smoke passed"
+echo "UDP proxy smoke passed ($UDP_SMOKE_ITERATIONS iterations)"

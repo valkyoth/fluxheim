@@ -275,10 +275,15 @@ FLUXHEIM_GATE_FIPS_OPENSSL=1 \
 FLUXHEIM_GATE_FIPS_RUSTLS=1 \
 FLUXHEIM_GATE_TLS_SCAN=1 \
 FLUXHEIM_GATE_LOAD=1 \
+FLUXHEIM_GATE_UDP=1 \
 FLUXHEIM_GATE_FRAMING=1 \
 FLUXHEIM_GATE_FUZZ_CHECK=1 \
 scripts/stable_release_gate.sh check
 ```
+
+For longer UDP beta soak while iterating on `udp-proxy`, combine the UDP gate
+with `FLUXHEIM_UDP_SMOKE_ITERATIONS=<count>`. The default UDP smoke stays
+short enough for local release evidence.
 
 Use `check` mode for local development on rolling distributions. For release
 mode rustls/AWS-LC FIPS evidence, prefer the supported builder workflow in

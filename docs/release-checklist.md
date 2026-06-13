@@ -175,6 +175,15 @@ smoke before tagging: the root `Containerfile` plus representative Debian and
 Alpine variant builds. This catches workspace, packaging, and image build
 context mistakes before an immutable tag is pushed.
 
+For `udp-proxy` beta changes, include the optional UDP smoke before tagging:
+
+```bash
+FLUXHEIM_GATE_UDP=1 scripts/stable_release_gate.sh check
+```
+
+Use `FLUXHEIM_UDP_SMOKE_ITERATIONS=<count>` with that gate for a longer local
+soak when UDP forwarding, rate limits, or passive health behavior changed.
+
 If a release builder cannot run Podman, do not skip this silently. Run the
 image gate on another builder and attach the evidence before tagging. The
 emergency-only bypass is:
