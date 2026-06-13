@@ -16,7 +16,8 @@ pub(crate) use fluxheim_php_fpm::{
     php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
     php_fpm_retry_attempts_for_endpoint_count, php_fpm_retry_deadline,
     php_fpm_retry_deadline_allows, php_fpm_retryable_error, php_fpm_retryable_status,
-    php_fpm_timeout_error, safe_php_header_name, safe_php_header_value,
+    php_fpm_timeout_error, safe_php_header_name, safe_php_header_value, split_first_colon,
+    split_php_response, trim_ascii, trim_ascii_cr,
 };
 
 const MANAGED_PHP_FPM_STABLE_RESTART_SECS: u64 = 30;
@@ -454,7 +455,7 @@ pub(crate) fn parse_php_response(
             "php-fpm response exceeds maximum buffered size",
         ));
     }
-    let (header_bytes, body) = split_php_response(stdout).map_err(FluxError::into_io)?;
+    let (header_bytes, body) = split_php_response(stdout)?;
     if header_bytes.len() as u64 > max_response_header_bytes {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -469,7 +470,7 @@ pub(crate) fn parse_php_response(
         if line.is_empty() {
             continue;
         }
-        let Some((name, value)) = line.split_first_colon() else {
+        let Some((name, value)) = split_first_colon(line) else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "php-fpm response header is malformed",
@@ -484,7 +485,7 @@ pub(crate) fn parse_php_response(
             ));
         }
         if name.eq_ignore_ascii_case(b"status") {
-            status = parse_php_status(value).map_err(FluxError::into_io)?;
+            status = fluxheim_php_fpm::parse_php_status(value)?;
             response.status = StatusCode::from_u16(status)
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             continue;
@@ -509,68 +510,6 @@ pub fn fuzz_parse_php_response(stdout: &[u8]) -> io::Result<()> {
 pub(crate) fn php_response_header(status: u16) -> FluxResult<ResponseHeader> {
     ResponseHeader::build(status, Some(8))
         .map_err(|error| FluxError::invalid_input(error.to_string()))
-}
-
-fn split_php_response(stdout: &[u8]) -> FluxResult<(&[u8], &[u8])> {
-    if let Some(index) = stdout.windows(4).position(|window| window == b"\r\n\r\n") {
-        return Ok((&stdout[..index], &stdout[index + 4..]));
-    }
-    if let Some(index) = stdout.windows(2).position(|window| window == b"\n\n") {
-        return Ok((&stdout[..index], &stdout[index + 2..]));
-    }
-    Err(php_response_parse_error(
-        "php-fpm response is missing header terminator",
-    ))
-}
-
-fn parse_php_status(value: &[u8]) -> FluxResult<u16> {
-    let text = std::str::from_utf8(value).map_err(|error| {
-        php_response_parse_error(format!("PHP Status header is not valid UTF-8: {error}"))
-    })?;
-    let status = text
-        .split_whitespace()
-        .next()
-        .ok_or_else(|| php_response_parse_error("empty PHP Status header"))?
-        .parse::<u16>()
-        .map_err(|error| php_response_parse_error(error.to_string()))?;
-    if !(100..=599).contains(&status) {
-        return Err(php_response_parse_error(
-            "PHP Status header is outside HTTP status range",
-        ));
-    }
-    Ok(status)
-}
-
-fn php_response_parse_error(detail: impl Into<String>) -> FluxError {
-    FluxError::io(
-        "parse php-fpm response",
-        io::Error::new(io::ErrorKind::InvalidData, detail.into()),
-    )
-}
-
-fn trim_ascii_cr(value: &[u8]) -> &[u8] {
-    value.strip_suffix(b"\r").unwrap_or(value)
-}
-
-fn trim_ascii(mut value: &[u8]) -> &[u8] {
-    while matches!(value.first(), Some(b' ' | b'\t')) {
-        value = &value[1..];
-    }
-    while matches!(value.last(), Some(b' ' | b'\t')) {
-        value = &value[..value.len() - 1];
-    }
-    value
-}
-
-trait SplitFirstColon {
-    fn split_first_colon(&self) -> Option<(&[u8], &[u8])>;
-}
-
-impl SplitFirstColon for [u8] {
-    fn split_first_colon(&self) -> Option<(&[u8], &[u8])> {
-        let index = self.iter().position(|byte| *byte == b':')?;
-        Some((&self[..index], &self[index + 1..]))
-    }
 }
 
 #[cfg(not(unix))]

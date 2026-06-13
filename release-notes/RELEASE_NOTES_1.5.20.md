@@ -108,6 +108,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved PHP-FPM response-header name/value safety guards into
   `crates/fluxheim-php-fpm`, keeping root response parsing as the Pingora
   header adapter.
+- Moved PHP-FPM response split, `Status` parsing, ASCII trimming, and header
+  colon splitting into `crates/fluxheim-php-fpm`, leaving root response parsing
+  as the Pingora response-header adapter.
 - Started the `fluxheim-geoip` crate boundary by moving `GeoContext` and the
   optional local MMDB runtime into `crates/fluxheim-geoip`, with root
   `crate::geo_context` and `crate::geoip` compatibility re-exports.

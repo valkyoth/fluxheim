@@ -196,6 +196,61 @@ pub fn safe_php_header_value(value: &[u8]) -> bool {
         .all(|byte| matches!(byte, b' ' | b'\t' | 0x21..=0x7E))
 }
 
+pub fn split_php_response(stdout: &[u8]) -> io::Result<(&[u8], &[u8])> {
+    if let Some(index) = stdout.windows(4).position(|window| window == b"\r\n\r\n") {
+        return Ok((&stdout[..index], &stdout[index + 4..]));
+    }
+    if let Some(index) = stdout.windows(2).position(|window| window == b"\n\n") {
+        return Ok((&stdout[..index], &stdout[index + 2..]));
+    }
+    Err(php_response_parse_error(
+        "php-fpm response is missing header terminator",
+    ))
+}
+
+pub fn parse_php_status(value: &[u8]) -> io::Result<u16> {
+    let text = std::str::from_utf8(value).map_err(|error| {
+        php_response_parse_error(format!("PHP Status header is not valid UTF-8: {error}"))
+    })?;
+    let status = text
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| php_response_parse_error("empty PHP Status header"))?
+        .parse::<u16>()
+        .map_err(|error| php_response_parse_error(error.to_string()))?;
+    if !(100..=599).contains(&status) {
+        return Err(php_response_parse_error(
+            "PHP Status header is outside HTTP status range",
+        ));
+    }
+    Ok(status)
+}
+
+pub fn trim_ascii_cr(value: &[u8]) -> &[u8] {
+    value.strip_suffix(b"\r").unwrap_or(value)
+}
+
+pub fn trim_ascii(mut value: &[u8]) -> &[u8] {
+    while matches!(value.first(), Some(b' ' | b'\t')) {
+        value = &value[1..];
+    }
+    while matches!(value.last(), Some(b' ' | b'\t')) {
+        value = &value[..value.len() - 1];
+    }
+    value
+}
+
+pub fn split_first_colon(value: &[u8]) -> Option<(&[u8], &[u8])> {
+    value
+        .iter()
+        .position(|byte| *byte == b':')
+        .map(|index| (&value[..index], &value[index + 1..]))
+}
+
+fn php_response_parse_error(detail: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, detail.into())
+}
+
 pub fn managed_php_fpm_restart_backoff_secs(restart_failures: usize) -> u64 {
     2_u64.saturating_pow(restart_failures.min(5) as u32).min(30)
 }
@@ -412,11 +467,11 @@ mod tests {
 
     use super::{
         PhpFpmEndpoint, PhpFpmTimeoutKind, managed_php_fpm_config, managed_php_fpm_path_env_from,
-        managed_php_fpm_restart_backoff_secs, php_fpm_effective_connect_timeout,
+        managed_php_fpm_restart_backoff_secs, parse_php_status, php_fpm_effective_connect_timeout,
         php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
         php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
         php_fpm_retryable_status, php_fpm_timeout_error, safe_php_header_name,
-        safe_php_header_value,
+        safe_php_header_value, split_first_colon, split_php_response, trim_ascii, trim_ascii_cr,
     };
     use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
 
@@ -559,6 +614,30 @@ mod tests {
         assert!(!safe_php_header_value(b"bad\x7fdelete"));
         assert!(!safe_php_header_value(b"bad\r\ninject"));
         assert!(!safe_php_header_value("bad-é".as_bytes()));
+    }
+
+    #[test]
+    fn php_response_primitives_parse_headers_status_and_body() {
+        let (headers, body) = split_php_response(b"Status: 201 Created\r\nX-Test: ok\r\n\r\nbody")
+            .expect("response should split");
+        assert_eq!(headers, b"Status: 201 Created\r\nX-Test: ok");
+        assert_eq!(body, b"body");
+        assert_eq!(parse_php_status(b"201 Created").unwrap(), 201);
+        assert_eq!(trim_ascii_cr(b"value\r"), b"value");
+        assert_eq!(trim_ascii(b" \tvalue\t "), b"value");
+        assert_eq!(
+            split_first_colon(b"x-test: value"),
+            Some((&b"x-test"[..], &b" value"[..]))
+        );
+    }
+
+    #[test]
+    fn php_response_primitives_reject_invalid_status() {
+        assert!(split_php_response(b"missing terminator").is_err());
+        assert!(parse_php_status(b"99").is_err());
+        assert!(parse_php_status(b"600").is_err());
+        assert!(parse_php_status(b"not-a-status").is_err());
+        assert!(parse_php_status(&[0xff]).is_err());
     }
 
     #[test]

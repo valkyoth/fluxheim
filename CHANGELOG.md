@@ -114,6 +114,9 @@ behavior when the change improves security or project direction.
 - Move PHP-FPM response-header name/value safety guards into
   `crates/fluxheim-php-fpm`, keeping root response parsing as the Pingora
   header adapter.
+- Move PHP-FPM response split, `Status` parsing, ASCII trimming, and header
+  colon splitting into `crates/fluxheim-php-fpm`, leaving root response parsing
+  as the Pingora response-header adapter.
 - Start the `fluxheim-geoip` crate boundary by moving `GeoContext` and the
   optional local MMDB runtime into `crates/fluxheim-geoip`, with root
   `crate::geo_context` and `crate::geoip` compatibility re-exports.
