@@ -105,6 +105,48 @@ pub fn context_from_traceparent(value: Option<&str>, trusted_peer: bool) -> Opti
         .or_else(TraceContext::generate)
 }
 
+pub fn unix_time_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0)
+}
+
+pub fn access_log_status_class(status: u16) -> &'static str {
+    match status {
+        100..=199 => "1xx",
+        200..=299 => "2xx",
+        300..=399 => "3xx",
+        400..=499 => "4xx",
+        500..=599 => "5xx",
+        _ => "other",
+    }
+}
+
+pub fn access_log_request_id_valid(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
+pub fn generate_access_log_request_id() -> Option<String> {
+    let mut random = [0_u8; 16];
+    getrandom::fill(&mut random).ok()?;
+
+    let mut id = String::with_capacity(35);
+    id.push_str("fh-");
+    for byte in random {
+        let _ = write!(&mut id, "{byte:02x}");
+    }
+    Some(id)
+}
+
+pub fn count_access_log_response_body_bytes(bytes_seen: &mut u64, bytes: usize) {
+    *bytes_seen = bytes_seen.saturating_add(bytes as u64);
+}
+
 fn non_zero_random_16() -> Option<[u8; 16]> {
     for _ in 0..RANDOM_ID_ATTEMPTS {
         let mut bytes = [0_u8; 16];
@@ -689,5 +731,44 @@ mod tests {
 
         assert_ne!(context.trace_id_hex(), "00000000000000000000000000000000");
         assert_eq!(context.to_traceparent().len(), TRACEPARENT_LEN);
+    }
+
+    #[test]
+    fn access_log_status_class_is_low_cardinality() {
+        assert_eq!(access_log_status_class(101), "1xx");
+        assert_eq!(access_log_status_class(204), "2xx");
+        assert_eq!(access_log_status_class(304), "3xx");
+        assert_eq!(access_log_status_class(404), "4xx");
+        assert_eq!(access_log_status_class(503), "5xx");
+        assert_eq!(access_log_status_class(700), "other");
+    }
+
+    #[test]
+    fn access_log_request_id_validation_is_bounded_and_low_cardinality() {
+        assert!(access_log_request_id_valid("edge-req_123.456"));
+        assert!(!access_log_request_id_valid(""));
+        assert!(!access_log_request_id_valid("bad value"));
+        assert!(!access_log_request_id_valid("https://evil.example/reset"));
+        assert!(!access_log_request_id_valid("admin@example.test"));
+        assert!(!access_log_request_id_valid(&"a".repeat(129)));
+    }
+
+    #[test]
+    fn generated_access_log_request_id_uses_safe_prefix() {
+        let request_id =
+            generate_access_log_request_id().expect("request id generation should work");
+
+        assert!(request_id.starts_with("fh-"));
+        assert_eq!(request_id.len(), 35);
+        assert!(access_log_request_id_valid(&request_id));
+    }
+
+    #[test]
+    fn access_log_response_body_byte_counter_saturates() {
+        let mut seen = u64::MAX - 1;
+
+        count_access_log_response_body_bytes(&mut seen, 4);
+
+        assert_eq!(seen, u64::MAX);
     }
 }

@@ -81,6 +81,10 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved the Prometheus-to-OTLP metrics payload builder into
   `crates/fluxheim-observability` behind its `otlp-metrics` feature, leaving
   root metrics OTLP as exporter lifecycle and HTTP post wiring.
+- Moved access-log helper logic for request-id validation/generation,
+  low-cardinality status classes, response byte counting, and Unix nanosecond
+  timestamps into `crates/fluxheim-observability`, while the root access-log
+  module keeps Pingora request-header integration and JSON event assembly.
 - Moved the OTLP trace exporter and trace-span payload builder into
   `crates/fluxheim-observability` behind its `otlp-trace` feature, with root
   `crate::otel_otlp` kept as a compatibility re-export.

@@ -4,6 +4,11 @@ use bytes::Bytes;
 
 #[cfg(not(feature = "privacy-mode"))]
 use crate::config::AccessLoggingConfig;
+use fluxheim_observability::count_access_log_response_body_bytes;
+#[cfg(feature = "otel-otlp")]
+pub(crate) use fluxheim_observability::unix_time_nanos;
+#[cfg(not(feature = "privacy-mode"))]
+use fluxheim_observability::{access_log_request_id_valid, generate_access_log_request_id};
 
 #[cfg(not(feature = "privacy-mode"))]
 pub(crate) struct AccessLogEvent<'a> {
@@ -158,24 +163,9 @@ pub(crate) fn access_log_json(event: AccessLogEvent<'_>) -> String {
     }
 }
 
-#[cfg(feature = "otel-otlp")]
-pub(crate) fn unix_time_nanos() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0)
-}
-
 #[cfg(not(feature = "privacy-mode"))]
 pub(crate) fn status_class(status: u16) -> &'static str {
-    match status {
-        100..=199 => "1xx",
-        200..=299 => "2xx",
-        300..=399 => "3xx",
-        400..=499 => "4xx",
-        500..=599 => "5xx",
-        _ => "other",
-    }
+    fluxheim_observability::access_log_status_class(status)
 }
 
 #[cfg(not(feature = "privacy-mode"))]
@@ -192,37 +182,15 @@ pub(crate) fn access_log_request_id(
         .get(config.request_id_header.as_str())
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
-        .filter(|value| valid_request_id(value))
+        .filter(|value| access_log_request_id_valid(value))
         .map(str::to_owned)
-        .or_else(generate_request_id)
+        .or_else(generate_access_log_request_id)
 }
 
 pub(crate) fn count_response_body_chunk(bytes_seen: &mut u64, body: Option<&Bytes>) {
     if let Some(body) = body {
-        *bytes_seen = bytes_seen.saturating_add(body.len() as u64);
+        count_access_log_response_body_bytes(bytes_seen, body.len());
     }
-}
-
-#[cfg(not(feature = "privacy-mode"))]
-fn valid_request_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
-}
-
-#[cfg(not(feature = "privacy-mode"))]
-fn generate_request_id() -> Option<String> {
-    let mut random = [0_u8; 16];
-    getrandom::fill(&mut random).ok()?;
-
-    let mut id = String::with_capacity(35);
-    id.push_str("fh-");
-    for byte in random {
-        let _ = std::fmt::Write::write_fmt(&mut id, format_args!("{byte:02x}"));
-    }
-    Some(id)
 }
 
 #[cfg(not(feature = "privacy-mode"))]
