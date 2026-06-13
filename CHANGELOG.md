@@ -220,6 +220,8 @@ behavior when the change improves security or project direction.
   leaving the CLI as the command/output adapter.
 - Move cache-warm count summaries and bounded status labels into
   `crates/fluxheim-cache`, leaving the CLI to print the prepared summaries.
+- Use the shared `crates/fluxheim-cache` storage-tier helper directly from
+  admin cache status JSON.
 
 ### Fixed
 

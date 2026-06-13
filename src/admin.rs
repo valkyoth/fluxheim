@@ -3528,7 +3528,7 @@ fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> Vec<Value
                 "peer_fill_peers": vhost.peer_fill_peers,
                 "peer_fill_max_concurrent_requests": vhost.peer_fill_max_concurrent_requests,
                 "peer_fill_fail_open": vhost.peer_fill_fail_open,
-                "storage_tiers": cache_storage_tiers(vhost.memory.is_some(), vhost.disk.is_some()),
+                "storage_tiers": crate::cache::cache_storage_tiers(vhost.memory.is_some(), vhost.disk.is_some()),
                 "configured_routes": vhost.configured_routes,
                 "routes_total": vhost.routes_total,
                 "cache_route_coverage_ratio_per_mille": ratio_per_mille(vhost.routes_total, vhost.configured_routes),
@@ -3559,17 +3559,12 @@ fn cache_route_stats_json(routes: &[crate::proxy::CacheRouteStats]) -> Vec<Value
                 "peer_fill_peers": route.peer_fill_peers,
                 "peer_fill_max_concurrent_requests": route.peer_fill_max_concurrent_requests,
                 "peer_fill_fail_open": route.peer_fill_fail_open,
-                "storage_tiers": cache_storage_tiers(route.memory.is_some(), route.disk.is_some()),
+                "storage_tiers": crate::cache::cache_storage_tiers(route.memory.is_some(), route.disk.is_some()),
                 "memory": memory_cache_stats_json(route.memory.as_ref()),
                 "disk": disk_cache_stats_json(route.disk.as_ref()),
             })
         })
         .collect()
-}
-
-#[cfg(feature = "cache")]
-fn cache_storage_tiers(memory: bool, disk: bool) -> u8 {
-    crate::cache::cache_storage_tiers(memory, disk)
 }
 
 #[cfg(feature = "cache")]

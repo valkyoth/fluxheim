@@ -215,6 +215,8 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   leaving the CLI as the command/output adapter.
 - Moved cache-warm count summaries and bounded status labels into
   `crates/fluxheim-cache`, leaving the CLI to print the prepared summaries.
+- Used the shared `crates/fluxheim-cache` storage-tier helper directly from
+  admin cache status JSON.
 
 ## Fixed
 

@@ -4011,6 +4011,8 @@ the exception while the cache server is being completed as a focused sequence:
   `crates/fluxheim-cache`, leaving the CLI as the command/output adapter.
   Cache-warm count summaries and bounded status labels now also live in
   `crates/fluxheim-cache`, leaving the CLI to print the prepared summaries.
+  Admin cache status JSON now calls the shared `crates/fluxheim-cache`
+  storage-tier helper directly instead of keeping a local wrapper.
   Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last
