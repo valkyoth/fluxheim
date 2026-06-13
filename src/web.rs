@@ -17,7 +17,8 @@ use fluxheim_web::SafeRelativePath;
 use fluxheim_web::StaticResponseConditions;
 pub use fluxheim_web::{
     ByteRangeParse, DirectoryEntry, DirectoryListing, StaticResponseBody, StaticResponseFile,
-    StaticResponsePlan, directory_listing_path, parse_single_byte_range, render_directory_listing,
+    StaticResponsePlan, configured_web_path_contains_symlink, directory_listing_path,
+    parse_single_byte_range, render_directory_listing,
 };
 
 #[cfg(unix)]
@@ -330,29 +331,6 @@ impl StaticFileServer {
 }
 
 const MAX_DIRECTORY_LISTING_ENTRIES: usize = 4096;
-
-fn configured_web_path_contains_symlink(path: &Path) -> io::Result<bool> {
-    for component in path.components() {
-        match component {
-            std::path::Component::Prefix(_)
-            | std::path::Component::RootDir
-            | std::path::Component::Normal(_) => {}
-            std::path::Component::CurDir | std::path::Component::ParentDir => return Ok(true),
-        }
-    }
-
-    let expected = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(path)
-    };
-
-    match path.canonicalize() {
-        Ok(canonical) => Ok(canonical != expected),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
-    }
-}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ResolveResult {

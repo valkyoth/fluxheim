@@ -5,6 +5,7 @@
 )]
 
 use std::ffi::OsString;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -411,6 +412,29 @@ pub fn directory_listing_path(relative: &Path) -> String {
     path
 }
 
+pub fn configured_web_path_contains_symlink(path: &Path) -> io::Result<bool> {
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(_)
+            | std::path::Component::RootDir
+            | std::path::Component::Normal(_) => {}
+            std::path::Component::CurDir | std::path::Component::ParentDir => return Ok(true),
+        }
+    }
+
+    let expected = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+
+    match path.canonicalize() {
+        Ok(canonical) => Ok(canonical != expected),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 fn format_directory_listing_time(modified: SystemTime, local_time: bool) -> String {
     if local_time {
         let local: chrono::DateTime<chrono::Local> = modified.into();
@@ -442,8 +466,9 @@ mod tests {
 
     use super::{
         ByteRangeParse, DirectoryEntry, DirectoryListing, SafeRelativePath, StaticResponseBody,
-        StaticResponseConditions, StaticResponseFile, directory_listing_path,
-        parse_single_byte_range, plan_static_response, render_directory_listing,
+        StaticResponseConditions, StaticResponseFile, configured_web_path_contains_symlink,
+        directory_listing_path, parse_single_byte_range, plan_static_response,
+        render_directory_listing,
     };
 
     #[test]
@@ -509,6 +534,38 @@ mod tests {
             directory_listing_path(Path::new("assets/css")),
             "/assets/css/"
         );
+    }
+
+    #[test]
+    fn configured_web_path_rejects_dot_segments() {
+        assert!(configured_web_path_contains_symlink(Path::new("assets/../public")).unwrap());
+    }
+
+    #[test]
+    fn configured_web_path_allows_missing_plain_path() {
+        let missing =
+            std::env::temp_dir().join(format!("fluxheim-web-missing-{}", std::process::id()));
+
+        assert!(!configured_web_path_contains_symlink(&missing).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configured_web_path_detects_symlinked_parent() {
+        let root = std::env::temp_dir().join(format!(
+            "fluxheim-web-symlink-parent-{}",
+            std::process::id()
+        ));
+        let real = root.join("real");
+        let linked = root.join("linked");
+        let public = linked.join("public");
+        std::fs::create_dir_all(real.join("public")).unwrap();
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+
+        assert!(configured_web_path_contains_symlink(&public).unwrap());
+
+        let _ = std::fs::remove_file(linked);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

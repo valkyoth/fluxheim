@@ -3902,8 +3902,9 @@ the exception while the cache server is being completed as a focused sequence:
   The `crates/fluxheim-web` boundary now has static
   directory-listing data/rendering plus static byte-range parsing and static
   response planning/conditional request evaluation plus safe relative path and
-  directory-listing path helpers moved behind the existing `crate::web` surface,
-  and the `crates/fluxheim-php-fpm` boundary with timeout
+  directory-listing path helpers plus configured web-root symlink detection
+  moved behind the existing `crate::web` surface, and the
+  `crates/fluxheim-php-fpm` boundary with timeout
   classification/error-outcome helpers plus managed restart-backoff and
   sanitized `PATH` fallback helpers plus managed php-fpm config rendering and
   config-value validators plus PHP-FPM timeout/retry policy and endpoint
