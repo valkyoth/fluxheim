@@ -114,7 +114,10 @@ fn trusted_proxy_has_safe_scope(value: &str) -> bool {
     }
     match address {
         IpAddr::V4(_) => prefix >= 8,
-        IpAddr::V6(_) => prefix >= 32,
+        // Large edge providers can publish IPv6 allocations broader than /32
+        // (Cloudflare uses 2a06:98c0::/29). Keep rejecting catch-all and
+        // near-global ranges while allowing real provider trust lists.
+        IpAddr::V6(_) => prefix >= 29,
     }
 }
 

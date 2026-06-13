@@ -136,7 +136,7 @@ Notes:
   `real_ip_recursive on`. The list is capped at 512 entries. Entries must be
   concrete IP addresses or bounded CIDR ranges; catch-all and near-global trust
   scopes such as `0.0.0.0/0`, IPv4 prefixes broader than `/8`, `::/0`, IPv6
-  prefixes broader than `/32`, and unspecified addresses are rejected.
+  prefixes broader than `/29`, and unspecified addresses are rejected.
 - `proxy_protocol` defaults to `off`. Set it to `v1` or `v2` only on listeners reached
   exclusively through trusted load balancers or edge proxies that send HAProxy
   PROXY protocol before TLS/HTTP/stream bytes. Fluxheim requires

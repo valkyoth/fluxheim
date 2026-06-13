@@ -4308,7 +4308,7 @@ fn parses_server_limits() {
     let config: Config = toml::from_str(
         r#"
             [server]
-            trusted_proxies = ["127.0.0.1", "10.0.0.0/8", "2001:db8::/32"]
+            trusted_proxies = ["127.0.0.1", "10.0.0.0/8", "2001:db8::/32", "2a06:98c0::/29"]
             proxy_protocol = "v2"
 
             [server.limits]
@@ -4335,7 +4335,7 @@ fn parses_server_limits() {
     );
     assert_eq!(
         config.server.trusted_proxies,
-        ["127.0.0.1", "10.0.0.0/8", "2001:db8::/32"]
+        ["127.0.0.1", "10.0.0.0/8", "2001:db8::/32", "2a06:98c0::/29"]
     );
     assert_eq!(config.server.proxy_protocol, DownstreamProxyProtocol::V2);
     config.validate().unwrap();
@@ -4367,7 +4367,7 @@ fn rejects_overbroad_trusted_proxy_ranges() {
         "10.0.0.0/7",
         "::/0",
         "::",
-        "2001:db8::/31",
+        "2001:db8::/28",
     ] {
         let config: Config = toml::from_str(&format!(
             r#"
