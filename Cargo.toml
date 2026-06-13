@@ -13,6 +13,7 @@ members = [
     "crates/fluxheim-common",
     "crates/fluxheim-config",
     "crates/fluxheim-cache",
+    "crates/fluxheim-web",
     "crates/fluxheim-load-balancer",
 ]
 resolver = "3"
@@ -62,7 +63,7 @@ geoip = ["proxy", "dep:maxminddb", "fluxheim-config/geoip"]
 cache = ["dep:bytes", "dep:moka", "dep:sha2", "fluxheim-config/cache", "pingora?/cache"]
 web = [
     "dep:bytes",
-    "dep:chrono",
+    "dep:fluxheim-web",
     "dep:httpdate",
     "dep:mime_guess",
     "dep:percent-encoding",
@@ -196,7 +197,6 @@ aws-lc-rs = { version = "1.17.0", default-features = false, features = ["fips"],
 base64-ng = { version = "1.0.8", optional = true }
 brotli = { version = "8.0.3", default-features = false, features = ["std"], optional = true }
 bytes = { version = "1.11.1", optional = true }
-chrono = { version = "0.4.44", default-features = false, features = ["clock"], optional = true }
 clap = { version = "4.6.1", features = ["derive", "env"] }
 env_logger = "0.11.10"
 fastcgi-client = { version = "0.11.1", default-features = false, optional = true }
@@ -204,6 +204,7 @@ fluxheim-common = { path = "crates/fluxheim-common" }
 fluxheim-config = { path = "crates/fluxheim-config" }
 fluxheim-cache = { path = "crates/fluxheim-cache" }
 fluxheim-load-balancer = { path = "crates/fluxheim-load-balancer", optional = true }
+fluxheim-web = { path = "crates/fluxheim-web", optional = true }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"], optional = true }
 futures = "0.3.32"

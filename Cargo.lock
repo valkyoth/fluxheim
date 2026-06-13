@@ -1024,7 +1024,6 @@ dependencies = [
  "base64-ng",
  "brotli 8.0.3",
  "bytes",
- "chrono",
  "clap",
  "env_logger",
  "fastcgi-client",
@@ -1034,6 +1033,7 @@ dependencies = [
  "fluxheim-config",
  "fluxheim-load-balancer",
  "fluxheim-openssl-fips-support",
+ "fluxheim-web",
  "futures",
  "getrandom 0.4.2",
  "http",
@@ -1123,6 +1123,15 @@ name = "fluxheim-openssl-fips-support"
 version = "0.1.0"
 dependencies = [
  "openssl-sys",
+]
+
+[[package]]
+name = "fluxheim-web"
+version = "1.5.20"
+dependencies = [
+ "chrono",
+ "httpdate",
+ "percent-encoding",
 ]
 
 [[package]]

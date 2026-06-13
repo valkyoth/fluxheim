@@ -3842,9 +3842,11 @@ the exception while the cache server is being completed as a focused sequence:
   behavior: `crates/fluxheim-web` for static file planning/serving,
   `crates/fluxheim-php-fpm` for managed PHP-FPM/FastCGI, and/or the first
   `crates/fluxheim-cache` core boundary if the `1.5.13` cache-interface work is
-  stable enough. The first committed step is the `crates/fluxheim-cache`
+  stable enough. Committed steps so far are the `crates/fluxheim-cache`
   boundary with shared cache-header parsing moved behind a root compatibility
-  re-export. Keep Pingora-specific cache/proxy adapters separate from cache core
+  re-export, and the `crates/fluxheim-web` boundary with static
+  directory-listing data/rendering moved behind the existing `crate::web`
+  surface. Keep Pingora-specific cache/proxy adapters separate from cache core
   when possible. Do not move the main HTTP proxy orchestrator yet; it should
   remain last because it still coordinates all subsystems.
 - `v1.5.21`: UDP production-readiness line. Stop at promoting only the scoped

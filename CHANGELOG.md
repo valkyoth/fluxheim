@@ -15,6 +15,10 @@ behavior when the change improves security or project direction.
   request/response directive parsing into `crates/fluxheim-cache`. The root
   crate keeps `crate::cache_headers` as a compatibility re-export, so runtime
   behavior and call sites are unchanged.
+- Start the `fluxheim-web` crate boundary by moving static directory-listing
+  data/rendering helpers into `crates/fluxheim-web`. The root `crate::web`
+  module re-exports the same types and renderer while keeping Pingora response
+  serving in the root adapter.
 
 ### Fixed
 
