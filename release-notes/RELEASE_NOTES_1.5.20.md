@@ -135,7 +135,7 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   Prometheus registry/recorder adapter.
 - Moved general Prometheus label classifiers for host-routing, admin-auth,
   compression, edge-policy, load-balancer event/queue/upstream, stream, ACME,
-  and metrics-OTLP exporter events into `crates/fluxheim-observability`,
+  PHP/PHP-FPM, and metrics-OTLP exporter events into `crates/fluxheim-observability`,
   further narrowing root `crate::metrics` to recorder wiring.
 - Moved the OTLP trace exporter and trace-span payload builder into
   `crates/fluxheim-observability` behind its `otlp-trace` feature, with root

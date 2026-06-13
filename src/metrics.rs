@@ -1644,50 +1644,19 @@ fn cache_purger_entry_result_label(result: &str) -> &'static str {
 }
 
 fn php_outcome_label(outcome: &str) -> &'static str {
-    match outcome {
-        "declined" => "declined",
-        "redirect" => "redirect",
-        "forbidden" => "forbidden",
-        "not_found" => "not_found",
-        "fpm_error" => "fpm_error",
-        "connect_timeout" => "connect_timeout",
-        "request_timeout" => "request_timeout",
-        "connection_error" => "connection_error",
-        "configuration_error" => "configuration_error",
-        "invalid_response" => "invalid_response",
-        "intercepted" => "intercepted",
-        "offload" => "offload",
-        "offload_error" => "offload_error",
-        "response" => "response",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_php_outcome_label(outcome)
 }
 
 fn php_fpm_retry_reason_label(reason: &str) -> &'static str {
-    match reason {
-        "connect_timeout" => "connect_timeout",
-        "connection_error" => "connection_error",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_php_fpm_retry_reason_label(reason)
 }
 
 fn php_fpm_pool_event_label(event: &str) -> &'static str {
-    match event {
-        "connect" => "connect",
-        "reuse" => "reuse",
-        "return" => "return",
-        "drop_stale" => "drop_stale",
-        "discard_full" => "discard_full",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_php_fpm_pool_event_label(event)
 }
 
 fn php_stderr_state_label(state: &str) -> &'static str {
-    match state {
-        "emitted" => "emitted",
-        "truncated" => "truncated",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_php_stderr_state_label(state)
 }
 
 fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {

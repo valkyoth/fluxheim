@@ -295,6 +295,53 @@ pub fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {
     }
 }
 
+pub fn metrics_php_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "declined" => "declined",
+        "redirect" => "redirect",
+        "forbidden" => "forbidden",
+        "not_found" => "not_found",
+        "fpm_error" => "fpm_error",
+        "connect_timeout" => "connect_timeout",
+        "request_timeout" => "request_timeout",
+        "connection_error" => "connection_error",
+        "configuration_error" => "configuration_error",
+        "invalid_response" => "invalid_response",
+        "intercepted" => "intercepted",
+        "offload" => "offload",
+        "offload_error" => "offload_error",
+        "response" => "response",
+        _ => "other",
+    }
+}
+
+pub fn metrics_php_fpm_retry_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "connect_timeout" => "connect_timeout",
+        "connection_error" => "connection_error",
+        _ => "other",
+    }
+}
+
+pub fn metrics_php_fpm_pool_event_label(event: &str) -> &'static str {
+    match event {
+        "connect" => "connect",
+        "reuse" => "reuse",
+        "return" => "return",
+        "drop_stale" => "drop_stale",
+        "discard_full" => "discard_full",
+        _ => "other",
+    }
+}
+
+pub fn metrics_php_stderr_state_label(state: &str) -> &'static str {
+    match state {
+        "emitted" => "emitted",
+        "truncated" => "truncated",
+        _ => "other",
+    }
+}
+
 pub fn metrics_acme_event_label(event: &str) -> &'static str {
     match event {
         "pending" => "pending",
@@ -988,6 +1035,20 @@ mod tests {
         assert_eq!(metrics_stream_direction_label("sideways"), "other");
         assert_eq!(metrics_otlp_export_outcome_label("success"), "success");
         assert_eq!(metrics_otlp_export_outcome_label("delayed"), "other");
+        assert_eq!(
+            metrics_php_outcome_label("connect_timeout"),
+            "connect_timeout"
+        );
+        assert_eq!(metrics_php_outcome_label("surprise"), "other");
+        assert_eq!(
+            metrics_php_fpm_retry_reason_label("connection_error"),
+            "connection_error"
+        );
+        assert_eq!(metrics_php_fpm_retry_reason_label("status_500"), "other");
+        assert_eq!(metrics_php_fpm_pool_event_label("drop_stale"), "drop_stale");
+        assert_eq!(metrics_php_fpm_pool_event_label("custom"), "other");
+        assert_eq!(metrics_php_stderr_state_label("truncated"), "truncated");
+        assert_eq!(metrics_php_stderr_state_label("verbose"), "other");
         assert_eq!(metrics_acme_event_label("renewed"), "renewed");
         assert_eq!(metrics_acme_event_label("surprise"), "other");
     }

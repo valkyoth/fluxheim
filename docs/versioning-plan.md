@@ -3944,9 +3944,9 @@ the exception while the cache server is being completed as a focused sequence:
   request-header integration and JSON event assembly. Proxy metrics outcome,
   method, status-class label bucketing, and general Prometheus label
   classifiers for host-routing, admin-auth, compression, edge-policy,
-  load-balancer event/queue/upstream, stream, ACME, and metrics-OTLP exporter
-  events also now live in the observability crate while root `crate::metrics`
-  remains the Prometheus registry/recorder adapter.
+  load-balancer event/queue/upstream, stream, ACME, PHP/PHP-FPM, and
+  metrics-OTLP exporter events also now live in the observability crate while
+  root `crate::metrics` remains the Prometheus registry/recorder adapter.
   The OTLP trace exporter and trace-span payload builder also live behind the
   `crates/fluxheim-observability` `otlp-trace` feature while root
   `crate::otel_otlp` remains a compatibility re-export.
