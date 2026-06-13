@@ -267,3 +267,60 @@ impl CacheBulkPurgeResult {
         self.requested().saturating_sub(self.disk_purged())
     }
 }
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct CacheRuntimeTotals {
+    pub vhosts: u64,
+    pub enabled_vhosts: u64,
+    pub tiered_vhosts: u64,
+    pub configured_routes: u64,
+    pub routes_total: u64,
+    pub enabled_routes: u64,
+    pub tiered_routes: u64,
+    pub lock_enabled_policies: u64,
+    pub peer_fill_enabled_policies: u64,
+    pub peer_fill_peers: u64,
+    pub peer_fill_max_concurrent_requests: u64,
+    pub memory_tiers: u64,
+    pub memory_entries: u64,
+    pub memory_weighted_size_bytes: u64,
+    pub memory_max_size_bytes: u64,
+    pub memory_purge_index_entries: u64,
+    pub memory_purge_index_max_entries: u64,
+    pub disk_tiers: u64,
+    pub disk_entries: u64,
+    pub disk_size_bytes: u64,
+    pub disk_allocated_size_bytes: u64,
+    pub disk_free_size_bytes: u64,
+    pub disk_free_range_count: u64,
+    pub disk_largest_free_range_bytes: u64,
+    pub disk_bin_files: u64,
+    pub disk_max_size_bytes: u64,
+    pub disk_purge_index_entries: u64,
+    pub disk_purge_index_max_entries: u64,
+    pub hits: u64,
+    pub misses: u64,
+    pub stores: u64,
+    pub store_refusals: u64,
+    pub evictions: u64,
+    pub purges: u64,
+}
+
+impl CacheRuntimeTotals {
+    pub fn enabled_cache_policies(&self) -> u64 {
+        self.enabled_vhosts.saturating_add(self.enabled_routes)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct CacheActivityResetResult {
+    pub vhosts: u64,
+    pub enabled_vhosts: u64,
+    pub configured_routes: u64,
+    pub routes_total: u64,
+    pub enabled_routes: u64,
+    pub memory_tiers: u64,
+    pub disk_tiers: u64,
+    pub tiered_vhosts: u64,
+    pub tiered_routes: u64,
+}
