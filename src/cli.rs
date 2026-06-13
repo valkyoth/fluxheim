@@ -1268,9 +1268,13 @@ fn run_cache_warm_command(
                 &request_headers,
             ) {
                 Ok(result) => {
-                    increment_cache_warm_count(&mut response_statuses, result.status);
-                    let cache_status = cache_warm_safe_label(result.cache_status.as_deref());
-                    increment_cache_warm_count(&mut cache_statuses, cache_status.clone());
+                    crate::cache::cache_warm_increment_count(&mut response_statuses, result.status);
+                    let cache_status =
+                        crate::cache::cache_warm_safe_label(result.cache_status.as_deref());
+                    crate::cache::cache_warm_increment_count(
+                        &mut cache_statuses,
+                        cache_status.clone(),
+                    );
                     if cache_warm_status_is_success(result.status, &options.allow_statuses) {
                         let expected = cache_warm_expected_statuses_for_attempt(
                             &options.expect_cache_statuses,
@@ -1296,7 +1300,7 @@ fn run_cache_warm_command(
                             }
                             Err(error) => {
                                 failed = failed.saturating_add(1);
-                                increment_cache_warm_count(
+                                crate::cache::cache_warm_increment_count(
                                     &mut failure_reasons,
                                     "unexpected_cache_status",
                                 );
@@ -1318,7 +1322,10 @@ fn run_cache_warm_command(
                         }
                     } else {
                         failed = failed.saturating_add(1);
-                        increment_cache_warm_count(&mut failure_reasons, "unexpected_status");
+                        crate::cache::cache_warm_increment_count(
+                            &mut failure_reasons,
+                            "unexpected_status",
+                        );
                         eprintln!(
                             "failed: host={} path={} attempt={}/{} status={} bytes={} cache_status={} error=unexpected warm response status",
                             target.host,
@@ -1336,7 +1343,7 @@ fn run_cache_warm_command(
                 }
                 Err(error) => {
                     failed = failed.saturating_add(1);
-                    increment_cache_warm_count(&mut failure_reasons, "request_error");
+                    crate::cache::cache_warm_increment_count(&mut failure_reasons, "request_error");
                     eprintln!(
                         "failed: host={} path={} attempt={}/{} error={}",
                         target.host,
@@ -1364,36 +1371,13 @@ fn run_cache_warm_command(
 }
 
 #[cfg(feature = "cache")]
-fn increment_cache_warm_count<K: Ord>(counts: &mut std::collections::BTreeMap<K, usize>, key: K) {
-    let count = counts.entry(key).or_insert(0);
-    *count = count.saturating_add(1);
-}
-
-#[cfg(feature = "cache")]
 fn print_cache_warm_counts<K: std::fmt::Display>(
     label: &str,
     counts: &std::collections::BTreeMap<K, usize>,
 ) {
-    if let Some(summary) = cache_warm_counts_summary(counts) {
+    if let Some(summary) = crate::cache::cache_warm_counts_summary(counts) {
         println!("{label}: {summary}");
     }
-}
-
-#[cfg(feature = "cache")]
-fn cache_warm_counts_summary<K: std::fmt::Display>(
-    counts: &std::collections::BTreeMap<K, usize>,
-) -> Option<String> {
-    if counts.is_empty() {
-        return None;
-    }
-
-    Some(
-        counts
-            .iter()
-            .map(|(key, count)| format!("{key}={count}"))
-            .collect::<Vec<_>>()
-            .join(" "),
-    )
 }
 
 #[cfg(not(feature = "cache"))]
@@ -2992,23 +2976,6 @@ fn cache_warm_expected_status_matches(
 }
 
 #[cfg(feature = "cache")]
-fn cache_warm_safe_label(value: Option<&str>) -> String {
-    let Some(value) = value else {
-        return "-".to_owned();
-    };
-    if value.is_empty() || value.len() > 64 {
-        return "other".to_owned();
-    }
-    if value
-        .bytes()
-        .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace() || byte == b'=')
-    {
-        return "other".to_owned();
-    }
-    value.to_owned()
-}
-
-#[cfg(feature = "cache")]
 fn cache_warm_request(
     listen: &std::net::SocketAddr,
     target: &CacheWarmTarget,
@@ -4206,26 +4173,6 @@ mod tests {
                 2
             ),
             &["HIT".to_owned()]
-        );
-        assert_eq!(super::cache_warm_safe_label(Some("HIT")), "HIT");
-        assert_eq!(super::cache_warm_safe_label(None), "-");
-        assert_eq!(super::cache_warm_safe_label(Some("bad value")), "other");
-    }
-
-    #[cfg(feature = "cache")]
-    #[test]
-    fn cache_warm_count_summary_is_stable_and_bounded() {
-        let empty = std::collections::BTreeMap::<String, usize>::new();
-        assert_eq!(super::cache_warm_counts_summary(&empty), None);
-
-        let mut counts = std::collections::BTreeMap::new();
-        counts.insert("unexpected_status".to_owned(), 2);
-        counts.insert("request_error".to_owned(), 1);
-        counts.insert("unexpected_cache_status".to_owned(), 3);
-
-        assert_eq!(
-            super::cache_warm_counts_summary(&counts).as_deref(),
-            Some("request_error=1 unexpected_cache_status=3 unexpected_status=2")
         );
     }
 

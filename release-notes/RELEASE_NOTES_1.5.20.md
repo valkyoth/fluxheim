@@ -213,6 +213,8 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   uppercase checks.
 - Moved cache object lookup summary formatting into `crates/fluxheim-cache`,
   leaving the CLI as the command/output adapter.
+- Moved cache-warm count summaries and bounded status labels into
+  `crates/fluxheim-cache`, leaving the CLI to print the prepared summaries.
 
 ## Fixed
 

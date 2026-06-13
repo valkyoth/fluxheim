@@ -25,7 +25,8 @@ pub use api::{
     cache_object_lookup_cache_tags_summary, cache_object_lookup_fresh_ttl_summary,
     cache_object_lookup_header_names_summary, cache_object_lookup_header_values_summary,
     cache_ratio_per_mille, cache_ratio_per_mille_usize, cache_stale_would_purge,
-    cache_storage_tiers,
+    cache_storage_tiers, cache_warm_counts_summary, cache_warm_increment_count,
+    cache_warm_safe_label,
 };
 pub use headers::{
     CacheStaleEvent, MAX_VARY_FIELDS, VaryCachePolicy, VaryRequestHashField,

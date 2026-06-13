@@ -56,6 +56,7 @@ pub use fluxheim_cache::{
     cache_object_lookup_header_names_summary, cache_object_lookup_header_values_summary,
     cache_ratio_per_mille, cache_ratio_per_mille_usize, cache_should_serve_stale,
     cache_stale_status_allows, cache_stale_would_purge, cache_storage_tiers, cache_vary_policy,
+    cache_warm_counts_summary, cache_warm_increment_count, cache_warm_safe_label,
     cookie_headers_match_cache_bypass, first_header_value, parse_bounded_single_range,
     parse_cache_client_ranges, parse_cache_content_range, query_matches_cache_bypass,
     remaining_fresh_ttl_secs, required_slice_bounds, resolve_client_slice_ranges,

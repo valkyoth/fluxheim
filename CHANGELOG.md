@@ -218,6 +218,8 @@ behavior when the change improves security or project direction.
   grammar while preserving method-specific uppercase checks.
 - Move cache object lookup summary formatting into `crates/fluxheim-cache`,
   leaving the CLI as the command/output adapter.
+- Move cache-warm count summaries and bounded status labels into
+  `crates/fluxheim-cache`, leaving the CLI to print the prepared summaries.
 
 ### Fixed
 

@@ -26,6 +26,46 @@ pub fn cache_stale_would_purge(dry_run: bool, stale: usize) -> usize {
     if dry_run { stale } else { 0 }
 }
 
+pub fn cache_warm_increment_count<K: Ord>(
+    counts: &mut std::collections::BTreeMap<K, usize>,
+    key: K,
+) {
+    let count = counts.entry(key).or_insert(0);
+    *count = count.saturating_add(1);
+}
+
+pub fn cache_warm_counts_summary<K: std::fmt::Display>(
+    counts: &std::collections::BTreeMap<K, usize>,
+) -> Option<String> {
+    if counts.is_empty() {
+        return None;
+    }
+
+    Some(
+        counts
+            .iter()
+            .map(|(key, count)| format!("{key}={count}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+pub fn cache_warm_safe_label(value: Option<&str>) -> String {
+    let Some(value) = value else {
+        return "-".to_owned();
+    };
+    if value.is_empty() || value.len() > 64 {
+        return "other".to_owned();
+    }
+    if value
+        .bytes()
+        .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace() || byte == b'=')
+    {
+        return "other".to_owned();
+    }
+    value.to_owned()
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CachePurgeRequest<'a> {
     pub vhost: Option<&'a str>,
@@ -615,7 +655,8 @@ mod tests {
         cache_object_lookup_cache_tags_summary, cache_object_lookup_fresh_ttl_summary,
         cache_object_lookup_header_names_summary, cache_object_lookup_header_values_summary,
         cache_ratio_per_mille, cache_ratio_per_mille_usize, cache_stale_would_purge,
-        cache_storage_tiers,
+        cache_storage_tiers, cache_warm_counts_summary, cache_warm_increment_count,
+        cache_warm_safe_label,
     };
 
     #[test]
@@ -636,6 +677,29 @@ mod tests {
         assert_eq!(cache_storage_tiers(true, true), 2);
         assert_eq!(cache_stale_would_purge(true, 7), 7);
         assert_eq!(cache_stale_would_purge(false, 7), 0);
+    }
+
+    #[test]
+    fn cache_warm_summaries_are_stable_and_bounded() {
+        let empty = std::collections::BTreeMap::<String, usize>::new();
+        assert_eq!(cache_warm_counts_summary(&empty), None);
+
+        let mut counts = std::collections::BTreeMap::new();
+        cache_warm_increment_count(&mut counts, "unexpected_status".to_owned());
+        cache_warm_increment_count(&mut counts, "unexpected_status".to_owned());
+        cache_warm_increment_count(&mut counts, "request_error".to_owned());
+        cache_warm_increment_count(&mut counts, "unexpected_cache_status".to_owned());
+        cache_warm_increment_count(&mut counts, "unexpected_cache_status".to_owned());
+        cache_warm_increment_count(&mut counts, "unexpected_cache_status".to_owned());
+
+        assert_eq!(
+            cache_warm_counts_summary(&counts).as_deref(),
+            Some("request_error=1 unexpected_cache_status=3 unexpected_status=2")
+        );
+        assert_eq!(cache_warm_safe_label(Some("HIT")), "HIT");
+        assert_eq!(cache_warm_safe_label(None), "-");
+        assert_eq!(cache_warm_safe_label(Some("bad value")), "other");
+        assert_eq!(cache_warm_safe_label(Some("bad=value")), "other");
     }
 
     #[test]
