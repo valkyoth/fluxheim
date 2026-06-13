@@ -1030,6 +1030,7 @@ dependencies = [
  "flate2",
  "fluxheim-cache",
  "fluxheim-common",
+ "fluxheim-compression",
  "fluxheim-config",
  "fluxheim-geoip",
  "fluxheim-load-balancer",
@@ -1080,6 +1081,17 @@ name = "fluxheim-common"
 version = "1.5.20"
 dependencies = [
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "fluxheim-compression"
+version = "1.5.20"
+dependencies = [
+ "brotli 8.0.3",
+ "bytes",
+ "flate2",
+ "fluxheim-common",
+ "zstd",
 ]
 
 [[package]]

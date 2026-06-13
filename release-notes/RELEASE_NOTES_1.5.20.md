@@ -26,6 +26,10 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Started the `fluxheim-geoip` crate boundary by moving `GeoContext` and the
   optional local MMDB runtime into `crates/fluxheim-geoip`, with root
   `crate::geo_context` and `crate::geoip` compatibility re-exports.
+- Started the `fluxheim-compression` crate boundary by moving response
+  compression encoder lifecycle and output-limit accounting into
+  `crates/fluxheim-compression`, while keeping Pingora header selection and
+  response mutation in the root adapter.
 
 ## Fixed
 

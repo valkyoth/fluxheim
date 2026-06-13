@@ -1,0 +1,21 @@
+[package]
+name = "fluxheim-compression"
+version = "1.5.20"
+edition = "2024"
+rust-version = "1.96"
+license = "EUPL-1.2"
+publish = false
+description = "Internal Fluxheim response compression boundary."
+
+[features]
+default = []
+brotli = ["dep:brotli"]
+gzip = ["dep:flate2"]
+zstd = ["dep:zstd"]
+
+[dependencies]
+brotli = { version = "8.0.3", default-features = false, features = ["std"], optional = true }
+bytes = "1.11.1"
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"], optional = true }
+fluxheim-common = { path = "../fluxheim-common" }
+zstd = { version = "0.13.3", default-features = false, optional = true }

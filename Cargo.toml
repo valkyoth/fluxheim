@@ -13,6 +13,7 @@ members = [
     "crates/fluxheim-common",
     "crates/fluxheim-config",
     "crates/fluxheim-cache",
+    "crates/fluxheim-compression",
     "crates/fluxheim-geoip",
     "crates/fluxheim-web",
     "crates/fluxheim-php-fpm",
@@ -49,9 +50,9 @@ proxy = [
     "dep:zeroize",
 ]
 compression = ["proxy"]
-compression-brotli = ["compression", "dep:brotli"]
-compression-gzip = ["compression", "dep:flate2"]
-compression-zstd = ["compression", "dep:zstd"]
+compression-brotli = ["compression", "fluxheim-compression/brotli"]
+compression-gzip = ["compression", "fluxheim-compression/gzip"]
+compression-zstd = ["compression", "fluxheim-compression/zstd"]
 load-balancer = [
     "proxy",
     "dep:fluxheim-load-balancer",
@@ -204,12 +205,12 @@ arc-swap = "1.9.1"
 async-trait = { version = "0.1.89", optional = true }
 aws-lc-rs = { version = "1.17.0", default-features = false, features = ["fips"], optional = true }
 base64-ng = { version = "1.0.8", optional = true }
-brotli = { version = "8.0.3", default-features = false, features = ["std"], optional = true }
 bytes = { version = "1.11.1", optional = true }
 clap = { version = "4.6.1", features = ["derive", "env"] }
 env_logger = "0.11.10"
 fastcgi-client = { version = "0.11.1", default-features = false, optional = true }
 fluxheim-common = { path = "crates/fluxheim-common" }
+fluxheim-compression = { path = "crates/fluxheim-compression" }
 fluxheim-config = { path = "crates/fluxheim-config" }
 fluxheim-cache = { path = "crates/fluxheim-cache" }
 fluxheim-geoip = { path = "crates/fluxheim-geoip" }
@@ -217,7 +218,6 @@ fluxheim-load-balancer = { path = "crates/fluxheim-load-balancer", optional = tr
 fluxheim-php-fpm = { path = "crates/fluxheim-php-fpm", optional = true }
 fluxheim-web = { path = "crates/fluxheim-web", optional = true }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
-flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"], optional = true }
 futures = "0.3.32"
 getrandom = "0.4.2"
 httpdate = { version = "1.0.3", optional = true }
@@ -249,12 +249,14 @@ toml = "1.1.2"
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"], optional = true }
 x509-parser = { version = "0.18.1", default-features = false, optional = true }
 zeroize = { version = "1.8.2", features = ["derive"], optional = true }
-zstd = { version = "0.13.3", default-features = false, optional = true }
 
 [dev-dependencies]
+brotli = { version = "8.0.3", default-features = false, features = ["std"] }
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
 fluxheim-common = { path = "crates/fluxheim-common", features = ["test-support"] }
 fluxheim-config = { path = "crates/fluxheim-config", features = ["test-support"] }
 proptest = "1.6.0"
+zstd = { version = "0.13.3", default-features = false }
 
 [profile.release]
 panic = "abort"
