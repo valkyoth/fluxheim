@@ -3842,7 +3842,12 @@ the exception while the cache server is being completed as a focused sequence:
   behavior: `crates/fluxheim-web` for static file planning/serving,
   `crates/fluxheim-php-fpm` for managed PHP-FPM/FastCGI, and/or the first
   `crates/fluxheim-cache` core boundary if the `1.5.13` cache-interface work is
-  stable enough. Committed steps so far are the `crates/fluxheim-cache`
+  stable enough. This release may also take the smallest low-dependency leaf
+  crate wins when they are cleanly separable, especially
+  `crates/fluxheim-geoip` for Geo-Context/MMDB lookup helpers and
+  `crates/fluxheim-compression` for response-compression negotiation and encoder
+  lifecycle helpers. Treat those as boundary moves only: config, metrics, proxy
+  behavior, and feature names must stay compatible. Committed steps so far are the `crates/fluxheim-cache`
   boundary with shared cache-header parsing moved behind a root compatibility
   re-export, and the `crates/fluxheim-web` boundary with static
   directory-listing data/rendering moved behind the existing `crate::web`
@@ -3864,7 +3869,12 @@ the exception while the cache server is being completed as a focused sequence:
   reviewed first. Keep QUIC pass-through, game-server UDP proxying, generic
   UDP catchall behavior, authoritative DNS, and GSLB control-plane behavior as
   separate later scopes unless each has its own bounded session, affinity,
-  observability, and abuse-control design.
+  observability, and abuse-control design. If the UDP work needs cleaner
+  telemetry wiring, this release may start `crates/fluxheim-observability` as a
+  boundary for Prometheus metrics, OTLP metrics, OTLP trace export, and W3C
+  trace-context helpers. Keep it as an event/export adapter crate first; do not
+  change metric names, label cardinality, trace attributes, or OTLP endpoint
+  validation semantics in the same step.
 - `v1.5.22`: cache and load-balancer crate-boundary preparation line. Stop at
   tightening `crates/fluxheim-load-balancer` and the planned
   `crates/fluxheim-cache` boundary so both domains expose Fluxheim-owned
@@ -3877,7 +3887,12 @@ the exception while the cache server is being completed as a focused sequence:
   while retaining any temporary Pingora adapters needed by the current HTTP
   runtime. Do not make this a dependency-removal release; actual
   `pingora-load-balancing` and `pingora-cache` compile removal belongs to
-  `v1.6.1` and `v1.6.2`.
+  `v1.6.1` and `v1.6.2`. This release may also begin a
+  `crates/fluxheim-snapshot` boundary for durable config snapshot IDs,
+  metadata, store validation, listing, and rollback file operations if those
+  pieces can move without pulling in admin, runtime, or proxy orchestration.
+  Keep live reload classification and admin HTTP handlers in the root crate
+  until their dependencies are clearer.
 - `v1.5.23`: cache-aware origin protection service line. Stop at one small
   differentiator that combines cache and load-balancer state without becoming a
   new proxy runtime: route-scoped origin-fill budgets that apply only to cache
@@ -3888,6 +3903,12 @@ the exception while the cache server is being completed as a focused sequence:
   useful for stampede control and brownout handling, and is intentionally
   narrower than a general WAF, scripting system, or global traffic manager. Do
   not add cross-node cache replication or distributed consensus in this stop.
+  Use this final `1.5.x` workspace pass to finish or defer any small leaf-crate
+  boundaries started in `v1.5.20`-`v1.5.22` so the `1.6.x` Pingora-removal line
+  starts from stable crate APIs. Possible deferrals include `fluxheim-acme`,
+  `fluxheim-headers`/HTTP policy helpers, and additional protocol helpers; move
+  them only when the dependency direction remains root -> domain crate and no
+  circular dependency on proxy/admin/runtime is introduced.
 
 Workspace rule after `v1.5.17`: once the workspace split starts, future release
 lines must treat crate boundaries as the default for substantial new
