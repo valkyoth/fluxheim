@@ -3999,6 +3999,9 @@ the exception while the cache server is being completed as a focused sequence:
   adapter.
   Hop-by-hop `Connection` option token validation now also uses the shared
   `crates/fluxheim-protocol` HTTP token grammar helper.
+  Response header rewrite prefix authority-boundary matching now also lives in
+  `crates/fluxheim-protocol`, with root header policy kept as the mutation
+  adapter.
   Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last

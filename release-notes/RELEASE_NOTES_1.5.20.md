@@ -203,6 +203,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   adapter.
 - Moved hop-by-hop `Connection` option token validation onto the shared
   `crates/fluxheim-protocol` HTTP token grammar helper.
+- Moved response header rewrite prefix authority-boundary matching into
+  `crates/fluxheim-protocol`, leaving root header policy as the mutation
+  adapter.
 
 ## Fixed
 

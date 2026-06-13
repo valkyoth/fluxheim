@@ -570,7 +570,7 @@ fn rewrite_header_prefix(
     rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
 ) -> Option<String> {
     for rule in rules {
-        if response_rewrite_prefix_matches(value, &rule.from) {
+        if fluxheim_protocol::response_rewrite_prefix_matches(value, &rule.from) {
             let mut rewritten =
                 String::with_capacity(rule.to.len() + value.len() - rule.from.len());
             rewritten.push_str(&rule.to);
@@ -579,32 +579,6 @@ fn rewrite_header_prefix(
         }
     }
     None
-}
-
-fn response_rewrite_prefix_matches(value: &str, prefix: &str) -> bool {
-    if !value.starts_with(prefix) {
-        return false;
-    }
-    if !response_rewrite_prefix_requires_authority_boundary(prefix) {
-        return true;
-    }
-    matches!(
-        value.as_bytes().get(prefix.len()),
-        None | Some(b'/' | b'?' | b'#')
-    )
-}
-
-fn response_rewrite_prefix_requires_authority_boundary(prefix: &str) -> bool {
-    let Some(authority_and_path) = prefix
-        .strip_prefix("http://")
-        .or_else(|| prefix.strip_prefix("https://"))
-    else {
-        return false;
-    };
-    !authority_and_path
-        .as_bytes()
-        .iter()
-        .any(|byte| matches!(byte, b'/' | b'?' | b'#'))
 }
 
 fn rewrite_refresh_url(

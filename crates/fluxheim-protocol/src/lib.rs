@@ -113,6 +113,32 @@ pub fn append_fluxheim_via_value(existing: &str) -> String {
     }
 }
 
+pub fn response_rewrite_prefix_matches(value: &str, prefix: &str) -> bool {
+    if !value.starts_with(prefix) {
+        return false;
+    }
+    if !response_rewrite_prefix_requires_authority_boundary(prefix) {
+        return true;
+    }
+    matches!(
+        value.as_bytes().get(prefix.len()),
+        None | Some(b'/' | b'?' | b'#')
+    )
+}
+
+fn response_rewrite_prefix_requires_authority_boundary(prefix: &str) -> bool {
+    let Some(authority_and_path) = prefix
+        .strip_prefix("http://")
+        .or_else(|| prefix.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    !authority_and_path
+        .as_bytes()
+        .iter()
+        .any(|byte| matches!(byte, b'/' | b'?' | b'#'))
+}
+
 pub fn proxy_protocol_v1_header(
     source: Option<SocketAddr>,
     destination: Option<SocketAddr>,
@@ -185,7 +211,8 @@ mod tests {
         ProxyProtocolTrustedSource, ProxyProtocolTrustedSourceParseError,
         append_fluxheim_via_value, http_token_valid, http_upgrade_token_valid,
         parse_proxy_protocol_trusted_source, proxy_protocol_v1_header, proxy_protocol_v2_header,
-        route_method_matches, route_prefix_matches_path, route_strip_prefix_suffix,
+        response_rewrite_prefix_matches, route_method_matches, route_prefix_matches_path,
+        route_strip_prefix_suffix,
     };
 
     #[test]
@@ -276,6 +303,39 @@ mod tests {
             append_fluxheim_via_value(" 1.0 edge, 1.1 cache "),
             "1.0 edge, 1.1 cache, 1.1 fluxheim"
         );
+    }
+
+    #[test]
+    fn response_rewrite_prefix_requires_authority_boundary_for_origin_prefixes() {
+        assert!(response_rewrite_prefix_matches(
+            "http://backend.internal",
+            "http://backend.internal"
+        ));
+        assert!(response_rewrite_prefix_matches(
+            "http://backend.internal/login",
+            "http://backend.internal"
+        ));
+        assert!(response_rewrite_prefix_matches(
+            "http://backend.internal?next=/",
+            "http://backend.internal"
+        ));
+        assert!(response_rewrite_prefix_matches(
+            "http://backend.internal#fragment",
+            "http://backend.internal"
+        ));
+        assert!(!response_rewrite_prefix_matches(
+            "http://backend.internal@evil.example/phish",
+            "http://backend.internal"
+        ));
+        assert!(!response_rewrite_prefix_matches(
+            "http://backend.internal.evil.example/phish",
+            "http://backend.internal"
+        ));
+        assert!(!response_rewrite_prefix_matches(
+            "http://backend.internal.evil.example/phish",
+            "http://backend.internal."
+        ));
+        assert!(response_rewrite_prefix_matches("/old/path", "/old"));
     }
 
     #[test]
