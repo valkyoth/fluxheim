@@ -3890,7 +3890,9 @@ the exception while the cache server is being completed as a focused sequence:
   `crate::cache` and `crate::cache_api` compatibility re-exports preserving the
   admin, CLI, metrics, and proxy surfaces. Cache storage-plan DTOs also moved
   into `crates/fluxheim-cache::plan`, while the Pingora storage adapters remain
-  in the root cache runtime.
+  in the root cache runtime. Cached object DTOs and `CacheStoreError` now live
+  in `crates/fluxheim-cache::object`, again behind root `crate::cache`
+  compatibility re-exports.
   The `crates/fluxheim-web` boundary now has static
   directory-listing data/rendering moved behind the existing `crate::web`
   surface, and the `crates/fluxheim-php-fpm` boundary with timeout

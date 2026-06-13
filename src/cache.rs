@@ -38,8 +38,8 @@ use crate::config::{
 
 pub use fluxheim_cache::{
     CacheActivityStats, CacheObjectFreshnessState, CacheObjectHeaderValue, CacheObjectMetadata,
-    CacheObjectTier, CacheStoragePlan, DiskCacheStats, DiskTierPlan, MemoryCacheStats,
-    MemoryTierPlan, TieredCacheStats,
+    CacheObjectTier, CacheStoragePlan, CacheStoreError, CachedHeader, CachedImageObject,
+    DiskCacheStats, DiskTierPlan, MemoryCacheStats, MemoryTierPlan, TieredCacheStats,
 };
 
 #[cfg(feature = "proxy")]
@@ -1088,20 +1088,6 @@ impl CacheKey {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CachedImageObject {
-    pub status: u16,
-    pub headers: Vec<CachedHeader>,
-    pub body: Arc<[u8]>,
-    pub fresh_until_unix_secs: u64,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CachedHeader {
-    pub name: String,
-    pub value: Vec<u8>,
-}
-
 #[cfg(feature = "proxy")]
 #[derive(Debug)]
 struct CacheActivityCounters {
@@ -1229,17 +1215,6 @@ impl CacheActivityCounters {
         #[cfg(not(feature = "metrics"))]
         let _ = self.tier;
     }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum CacheStoreError {
-    ObjectTooLarge {
-        object_bytes: u64,
-        max_object_bytes: ByteSize,
-    },
-    ObjectTooHeavy {
-        object_bytes: u64,
-    },
 }
 
 #[derive(Clone)]

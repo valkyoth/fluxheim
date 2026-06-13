@@ -26,6 +26,9 @@ behavior when the change improves security or project direction.
 - Move cache storage-plan DTOs into `crates/fluxheim-cache::plan`, keeping
   root `crate::cache` re-exports while the Pingora storage adapters remain in
   the root cache runtime.
+- Move cached object DTOs and `CacheStoreError` into
+  `crates/fluxheim-cache::object`, keeping root `crate::cache` re-exports for
+  memory-cache and test call sites.
 - Start the `fluxheim-web` crate boundary by moving static directory-listing
   data/rendering helpers into `crates/fluxheim-web`. The root `crate::web`
   module re-exports the same types and renderer while keeping Pingora response
