@@ -34,6 +34,14 @@ pub struct StaticResponseFile {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StaticCacheIdentity<'a> {
+    pub path: &'a Path,
+    pub len: u64,
+    pub modified: Option<SystemTime>,
+    pub device_inode: Option<(u64, u64)>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StaticResponsePlan {
     pub status: u16,
     pub body: StaticResponseBody,
@@ -173,6 +181,27 @@ pub fn plan_static_response(
     }
 
     full_static_response_plan(file, method, etag)
+}
+
+pub fn static_cache_identity(identity: StaticCacheIdentity<'_>) -> String {
+    let modified = identity
+        .modified
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| format!("{}:{}", duration.as_secs(), duration.subsec_nanos()))
+        .unwrap_or_else(|| "0:0".to_owned());
+
+    if let Some((device, inode)) = identity.device_inode {
+        format!(
+            "{}:{}:{}:{}:{}",
+            identity.path.display(),
+            device,
+            inode,
+            identity.len,
+            modified
+        )
+    } else {
+        format!("{}:{}:{}", identity.path.display(), identity.len, modified)
+    }
 }
 
 fn full_static_response_plan(
@@ -465,10 +494,10 @@ mod tests {
     use std::time::UNIX_EPOCH;
 
     use super::{
-        ByteRangeParse, DirectoryEntry, DirectoryListing, SafeRelativePath, StaticResponseBody,
-        StaticResponseConditions, StaticResponseFile, configured_web_path_contains_symlink,
-        directory_listing_path, parse_single_byte_range, plan_static_response,
-        render_directory_listing,
+        ByteRangeParse, DirectoryEntry, DirectoryListing, SafeRelativePath, StaticCacheIdentity,
+        StaticResponseBody, StaticResponseConditions, StaticResponseFile,
+        configured_web_path_contains_symlink, directory_listing_path, parse_single_byte_range,
+        plan_static_response, render_directory_listing, static_cache_identity,
     };
 
     #[test]
@@ -653,5 +682,28 @@ mod tests {
 
         assert_eq!(refreshed.status, 200);
         assert_eq!(refreshed.body, StaticResponseBody::Full);
+    }
+
+    #[test]
+    fn formats_static_cache_identity() {
+        let modified = UNIX_EPOCH + std::time::Duration::new(10, 20);
+        assert_eq!(
+            static_cache_identity(StaticCacheIdentity {
+                path: Path::new("/srv/site/app.js"),
+                len: 123,
+                modified: Some(modified),
+                device_inode: None,
+            }),
+            "/srv/site/app.js:123:10:20"
+        );
+        assert_eq!(
+            static_cache_identity(StaticCacheIdentity {
+                path: Path::new("/srv/site/app.js"),
+                len: 123,
+                modified: Some(modified),
+                device_inode: Some((7, 9)),
+            }),
+            "/srv/site/app.js:7:9:123:10:20"
+        );
     }
 }

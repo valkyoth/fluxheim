@@ -86,6 +86,8 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   canonicalization and symlink checks.
 - Moved configured web-root symlink detection into `crates/fluxheim-web`,
   keeping root `StaticFileServer` construction as the filesystem adapter.
+- Moved static cache identity formatting into `crates/fluxheim-web`, keeping
+  root `StaticFile` as the filesystem metadata adapter.
 - Started the `fluxheim-php-fpm` crate boundary by moving PHP-FPM timeout
   classification and bounded error-outcome helpers into
   `crates/fluxheim-php-fpm`, with the root PHP-FPM module re-exporting the same

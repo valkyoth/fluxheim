@@ -4,7 +4,7 @@ use std::io;
 #[cfg(feature = "proxy")]
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use percent_encoding::percent_decode_str;
 
@@ -14,6 +14,8 @@ use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 #[cfg(feature = "proxy")]
 use crate::http_types::PingoraResponseHeader as ResponseHeader;
 use fluxheim_web::SafeRelativePath;
+#[cfg(feature = "proxy")]
+use fluxheim_web::StaticCacheIdentity;
 use fluxheim_web::StaticResponseConditions;
 pub use fluxheim_web::{
     ByteRangeParse, DirectoryEntry, DirectoryListing, StaticResponseBody, StaticResponseFile,
@@ -356,27 +358,17 @@ pub struct StaticFile {
 impl StaticFile {
     #[cfg(feature = "proxy")]
     pub fn cache_identity(&self) -> String {
-        let modified = self
-            .modified
-            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-            .map(|duration| format!("{}:{}", duration.as_secs(), duration.subsec_nanos()))
-            .unwrap_or_else(|| "0:0".to_owned());
-
         #[cfg(unix)]
-        {
-            format!(
-                "{}:{}:{}:{}:{}",
-                self.path.display(),
-                self.device,
-                self.inode,
-                self.len,
-                modified
-            )
-        }
+        let device_inode = Some((self.device, self.inode));
         #[cfg(not(unix))]
-        {
-            format!("{}:{}:{}", self.path.display(), self.len, modified)
-        }
+        let device_inode = None;
+
+        fluxheim_web::static_cache_identity(StaticCacheIdentity {
+            path: &self.path,
+            len: self.len,
+            modified: self.modified,
+            device_inode,
+        })
     }
 }
 
