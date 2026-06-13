@@ -43,6 +43,10 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Started the `fluxheim-protocol` crate boundary by moving PROXY protocol v1/v2
   upstream header framing into `crates/fluxheim-protocol`, while the root
   `crate::proxy_protocol` module keeps the Pingora L4 connector adapter.
+- Started the `fluxheim-snapshot` crate boundary by moving the durable config
+  snapshot store, metadata validation, rollback pointer handling, and
+  symlink-safe filesystem writes into `crates/fluxheim-snapshot`, with root
+  `crate::snapshot` kept as a compatibility re-export.
 
 ## Fixed
 

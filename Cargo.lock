@@ -1038,6 +1038,7 @@ dependencies = [
  "fluxheim-openssl-fips-support",
  "fluxheim-php-fpm",
  "fluxheim-protocol",
+ "fluxheim-snapshot",
  "fluxheim-web",
  "futures",
  "getrandom 0.4.2",
@@ -1171,6 +1172,17 @@ dependencies = [
 [[package]]
 name = "fluxheim-protocol"
 version = "1.5.20"
+
+[[package]]
+name = "fluxheim-snapshot"
+version = "1.5.20"
+dependencies = [
+ "fluxheim-common",
+ "fluxheim-config",
+ "log",
+ "serde",
+ "toml",
+]
 
 [[package]]
 name = "fluxheim-web"

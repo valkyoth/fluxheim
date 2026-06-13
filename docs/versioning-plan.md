@@ -3904,7 +3904,10 @@ the exception while the cache server is being completed as a focused sequence:
   `crate::otel_otlp` remains a compatibility re-export.
   The `crates/fluxheim-protocol` boundary now
   owns PROXY protocol v1/v2 upstream header framing while the root
-  `crate::proxy_protocol` adapter keeps Pingora L4 connector wiring. Keep
+  `crate::proxy_protocol` adapter keeps Pingora L4 connector wiring. The
+  `crates/fluxheim-snapshot` boundary now owns durable config snapshot storage,
+  metadata validation, rollback pointer handling, and symlink-safe filesystem
+  writes while root `crate::snapshot` remains a compatibility re-export. Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last
   because it still coordinates all subsystems.
