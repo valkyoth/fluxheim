@@ -5,6 +5,8 @@ use bytes::Bytes;
 #[cfg(not(feature = "privacy-mode"))]
 use crate::config::AccessLoggingConfig;
 use fluxheim_observability::count_access_log_response_body_bytes;
+#[cfg(not(feature = "privacy-mode"))]
+use fluxheim_observability::json_escape;
 #[cfg(feature = "otel-otlp")]
 pub(crate) use fluxheim_observability::unix_time_nanos;
 #[cfg(not(feature = "privacy-mode"))]
@@ -191,26 +193,6 @@ pub(crate) fn count_response_body_chunk(bytes_seen: &mut u64, body: Option<&Byte
     if let Some(body) = body {
         count_access_log_response_body_bytes(bytes_seen, body.len());
     }
-}
-
-#[cfg(not(feature = "privacy-mode"))]
-fn json_escape(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            character if character.is_control() => {
-                use std::fmt::Write;
-                let _ = write!(escaped, "\\u{:04x}", character as u32);
-            }
-            character => escaped.push(character),
-        }
-    }
-    escaped
 }
 
 #[cfg(test)]

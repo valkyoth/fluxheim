@@ -147,6 +147,8 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   nanosecond timestamps into `crates/fluxheim-observability`, while the root
   access-log module keeps Pingora request-header integration and JSON event
   assembly and Prometheus metrics reuses the shared status-class helper.
+- Moved shared JSON string escaping for access logs and runtime JSON logs into
+  `crates/fluxheim-observability`, keeping both root log schemas unchanged.
 - Moved proxy metrics outcome, method, and status-class label bucketing into
   `crates/fluxheim-observability`, keeping root `crate::metrics` as the
   Prometheus registry/recorder adapter.

@@ -3946,8 +3946,10 @@ the exception while the cache server is being completed as a focused sequence:
   logic for request-id validation/generation, shared low-cardinality status
   classes, response byte counting, and Unix nanosecond timestamps now also lives
   in the observability crate while root access logging keeps Pingora
-  request-header integration and JSON event assembly. Proxy metrics outcome,
-  method, status-class label bucketing, and general Prometheus label
+  request-header integration and JSON event assembly. Shared JSON string
+  escaping for access logs and runtime JSON logs also lives in the
+  observability crate. Proxy metrics outcome, method, status-class label
+  bucketing, and general Prometheus label
   classifiers for host-routing, admin-auth, compression, edge-policy,
   load-balancer event/queue/upstream, stream, ACME, PHP/PHP-FPM, and
   metrics-OTLP exporter events plus bounded ratio and saturating gauge

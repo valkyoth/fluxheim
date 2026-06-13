@@ -123,6 +123,24 @@ pub fn access_log_status_class(status: u16) -> &'static str {
     }
 }
 
+pub fn json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control() => {
+                let _ = write!(escaped, "\\u{:04x}", character as u32);
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
 pub fn metrics_outcome_class(status: Option<u16>, error: bool) -> &'static str {
     if error {
         return "proxy_error";
@@ -988,6 +1006,13 @@ mod tests {
         assert_eq!(access_log_status_class(404), "4xx");
         assert_eq!(access_log_status_class(503), "5xx");
         assert_eq!(access_log_status_class(700), "other");
+    }
+
+    #[test]
+    fn json_escape_escapes_log_fields() {
+        assert_eq!(json_escape("line\n\"x\""), "line\\n\\\"x\\\"");
+        assert_eq!(json_escape("a\u{0001}b"), "a\\u0001b");
+        assert_eq!(json_escape("tab\tcr\rslash\\"), "tab\\tcr\\rslash\\\\");
     }
 
     #[test]

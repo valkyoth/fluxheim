@@ -814,38 +814,17 @@ fn write_json_log_record(
 fn log_record_json(timestamp: &str, level: &str, target: &str, message: &str) -> String {
     format!(
         "{{\"timestamp\":\"{}\",\"level\":\"{}\",\"target\":\"{}\",\"message\":\"{}\"}}",
-        json_escape(timestamp),
-        json_escape(level),
-        json_escape(target),
-        json_escape(message),
+        fluxheim_observability::json_escape(timestamp),
+        fluxheim_observability::json_escape(level),
+        fluxheim_observability::json_escape(target),
+        fluxheim_observability::json_escape(message),
     )
-}
-
-#[cfg(feature = "proxy")]
-fn json_escape(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            character if character.is_control() => {
-                use std::fmt::Write as _;
-                let _ = write!(escaped, "\\u{:04x}", character as u32);
-            }
-            character => escaped.push(character),
-        }
-    }
-    escaped
 }
 
 #[cfg(all(test, feature = "proxy"))]
 mod tests {
     use super::{
-        harden_proxy_service_http2_options, json_escape, log_record_json, open_log_file,
-        pingora_server_conf,
+        harden_proxy_service_http2_options, log_record_json, open_log_file, pingora_server_conf,
     };
     use crate::test_support::unique_temp_path;
 
@@ -866,7 +845,10 @@ mod tests {
 
     #[test]
     fn json_escape_escapes_control_characters() {
-        assert_eq!(json_escape("a\u{0001}b"), "a\\u0001b");
+        assert_eq!(
+            fluxheim_observability::json_escape("a\u{0001}b"),
+            "a\\u0001b"
+        );
     }
 
     #[test]
