@@ -204,6 +204,9 @@ behavior when the change improves security or project direction.
 - Move multipart cache Content-Type sanitization into
   `crates/fluxheim-cache::headers`, leaving root proxy as the slice response
   assembly adapter.
+- Move cache slice metadata first-header extraction into
+  `crates/fluxheim-cache::headers`, leaving root proxy as the slice identity
+  adapter.
 
 ### Fixed
 

@@ -6468,19 +6468,9 @@ fn response_content_range(headers: &::http::HeaderMap) -> Option<CacheContentRan
 fn slice_identity(slice: &CacheSliceObject) -> CacheSliceIdentity {
     CacheSliceIdentity {
         total: slice.total,
-        etag: first_header_value(slice.meta.headers(), "etag"),
-        last_modified: first_header_value(slice.meta.headers(), "last-modified"),
+        etag: crate::cache::first_header_value(slice.meta.headers(), "etag"),
+        last_modified: crate::cache::first_header_value(slice.meta.headers(), "last-modified"),
     }
-}
-
-#[cfg(feature = "cache")]
-fn first_header_value(headers: &::http::HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get_all(name)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .next()
-        .map(ToOwned::to_owned)
 }
 
 #[cfg(feature = "cache")]
@@ -6589,7 +6579,9 @@ fn compose_multipart_slice_body(
     let content_type = crate::cache::sanitize_multipart_content_type(
         &slices
             .values()
-            .find_map(|slice| first_header_value(slice.meta.headers(), "content-type"))
+            .find_map(|slice| {
+                crate::cache::first_header_value(slice.meta.headers(), "content-type")
+            })
             .unwrap_or_else(|| "application/octet-stream".to_owned()),
     );
     let mut body = Vec::new();

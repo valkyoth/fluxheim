@@ -47,6 +47,15 @@ pub fn sanitize_multipart_content_type(value: &str) -> String {
     }
 }
 
+pub fn first_header_value(headers: &http::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get_all(name)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .next()
+        .map(ToOwned::to_owned)
+}
+
 pub fn cookie_headers_match_cache_bypass<'a>(
     cookie_headers: impl IntoIterator<Item = &'a str>,
     configured_names: &[String],
@@ -951,5 +960,19 @@ mod tests {
             super::sanitize_multipart_content_type("\r\n"),
             "application/octet-stream"
         );
+    }
+
+    #[test]
+    fn first_header_value_returns_first_valid_text_value() {
+        let mut headers = http::HeaderMap::new();
+        headers.append("etag", http::HeaderValue::from_bytes(b"\xff").unwrap());
+        headers.append("etag", http::HeaderValue::from_static("\"abc\""));
+        headers.append("etag", http::HeaderValue::from_static("\"def\""));
+
+        assert_eq!(
+            super::first_header_value(&headers, "etag").as_deref(),
+            Some("\"abc\"")
+        );
+        assert_eq!(super::first_header_value(&headers, "missing"), None);
     }
 }

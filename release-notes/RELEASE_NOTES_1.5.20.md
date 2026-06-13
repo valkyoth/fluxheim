@@ -198,6 +198,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved multipart cache Content-Type sanitization into
   `crates/fluxheim-cache::headers`, leaving root proxy as the slice response
   assembly adapter.
+- Moved cache slice metadata first-header extraction into
+  `crates/fluxheim-cache::headers`, leaving root proxy as the slice identity
+  adapter.
 
 ## Fixed
 
