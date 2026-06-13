@@ -18,7 +18,8 @@ pub(crate) use fluxheim_compression::ResponseCompressionEncoder;
     feature = "compression-zstd"
 ))]
 use fluxheim_compression::{
-    cache_control_directive_blocks_compression, content_type_is_compressible, encoding_token_allows,
+    cache_control_directive_blocks_compression, content_encoding_value_is_active,
+    content_type_is_compressible, encoding_token_allows, input_length_within_compression_bounds,
 };
 
 #[cfg(any(
@@ -191,7 +192,7 @@ fn response_has_content_encoding(response: &ResponseHeader) -> bool {
         .get_all("content-encoding")
         .iter()
         .filter_map(|value| value.to_str().ok())
-        .any(|value| !value.trim().eq_ignore_ascii_case("identity"))
+        .any(content_encoding_value_is_active)
 }
 
 #[cfg(any(
@@ -244,7 +245,11 @@ fn response_content_length_in_compression_bounds(
     else {
         return false;
     };
-    length >= config.min_bytes.as_u64() && length <= config.max_input_bytes.as_u64()
+    input_length_within_compression_bounds(
+        length,
+        config.min_bytes.as_u64(),
+        config.max_input_bytes.as_u64(),
+    )
 }
 
 #[cfg(any(

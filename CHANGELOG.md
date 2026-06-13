@@ -125,6 +125,9 @@ behavior when the change improves security or project direction.
 - Move compression response policy string matching for Cache-Control directives
   and Content-Type eligibility into `crates/fluxheim-compression`, leaving root
   response-header iteration as the adapter.
+- Move active Content-Encoding classification and compression input-size bounds
+  into `crates/fluxheim-compression`, keeping root response headers/config as
+  adapters.
 - Start the `fluxheim-observability` crate boundary by moving W3C Trace Context
   parsing, generation, and traceparent normalization into
   `crates/fluxheim-observability`, with root `crate::trace_context` kept as a

@@ -101,6 +101,14 @@ pub fn content_type_is_compressible(content_type: &str) -> bool {
         )
 }
 
+pub fn content_encoding_value_is_active(value: &str) -> bool {
+    !value.trim().eq_ignore_ascii_case("identity")
+}
+
+pub fn input_length_within_compression_bounds(length: u64, min_bytes: u64, max_bytes: u64) -> bool {
+    length >= min_bytes && length <= max_bytes
+}
+
 #[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
 enum ResponseCompressionEncoderInner {
     #[cfg(feature = "brotli")]
@@ -332,8 +340,9 @@ fn compressed_response_exceeds_limit_error() -> FluxError {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache_control_directive_blocks_compression, content_type_is_compressible,
-        encoding_token_allows, parse_accept_encoding_qvalue,
+        cache_control_directive_blocks_compression, content_encoding_value_is_active,
+        content_type_is_compressible, encoding_token_allows,
+        input_length_within_compression_bounds, parse_accept_encoding_qvalue,
     };
 
     #[cfg(feature = "gzip")]
@@ -376,6 +385,14 @@ mod tests {
         assert!(content_type_is_compressible("application/json"));
         assert!(content_type_is_compressible("image/svg+xml"));
         assert!(!content_type_is_compressible("image/png"));
+
+        assert!(!content_encoding_value_is_active("identity"));
+        assert!(!content_encoding_value_is_active(" IDENTITY "));
+        assert!(content_encoding_value_is_active("gzip"));
+
+        assert!(input_length_within_compression_bounds(1024, 512, 2048));
+        assert!(!input_length_within_compression_bounds(128, 512, 2048));
+        assert!(!input_length_within_compression_bounds(4096, 512, 2048));
     }
 
     #[cfg(feature = "gzip")]

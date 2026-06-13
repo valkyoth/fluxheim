@@ -119,6 +119,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved compression response policy string matching for Cache-Control directives
   and Content-Type eligibility into `crates/fluxheim-compression`, leaving root
   response-header iteration as the adapter.
+- Moved active Content-Encoding classification and compression input-size bounds
+  into `crates/fluxheim-compression`, keeping root response headers/config as
+  adapters.
 - Started the `fluxheim-observability` crate boundary by moving W3C Trace
   Context parsing, generation, and traceparent normalization into
   `crates/fluxheim-observability`, with root `crate::trace_context` kept as a

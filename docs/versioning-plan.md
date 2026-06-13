@@ -3931,8 +3931,9 @@ the exception while the cache server is being completed as a focused sequence:
   `crates/fluxheim-compression` boundary now owns response compression encoder
   lifecycle, output-limit accounting, Accept-Encoding token/qvalue parsing, and
   response policy string matching for Cache-Control directives and Content-Type
-  eligibility while the root adapter keeps Pingora-specific header selection,
-  header iteration, and response mutation. The
+  eligibility, active Content-Encoding classification, and input-size bounds
+  while the root adapter keeps Pingora-specific header selection, header
+  iteration, config extraction, and response mutation. The
   `crates/fluxheim-observability` boundary now owns W3C Trace Context parsing,
   generation, and traceparent normalization behind the existing
   `crate::trace_context` surface, and the shared OTLP HTTP agent plus
