@@ -12,6 +12,12 @@ use crate::flux_error::{FluxErrorPingoraExt, FluxResult};
     feature = "compression-zstd"
 ))]
 pub(crate) use fluxheim_compression::ResponseCompressionEncoder;
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+use fluxheim_compression::encoding_token_allows;
 
 #[cfg(any(
     feature = "compression-brotli",
@@ -170,65 +176,6 @@ fn request_accepts_encoding(request: &RequestHeader, expected: &str) -> bool {
         .filter_map(|value| value.to_str().ok())
         .flat_map(|value| value.split(','))
         .any(|token| encoding_token_allows(token, expected))
-}
-
-#[cfg(any(
-    feature = "compression-brotli",
-    feature = "compression-gzip",
-    feature = "compression-zstd"
-))]
-fn encoding_token_allows(token: &str, expected: &str) -> bool {
-    let mut parts = token.split(';');
-    let coding = parts.next().unwrap_or_default().trim();
-    if !coding.eq_ignore_ascii_case(expected) && coding != "*" {
-        return false;
-    }
-
-    for (name, value) in parts
-        .map(str::trim)
-        .filter_map(|parameter| parameter.split_once('='))
-    {
-        if !name.trim().eq_ignore_ascii_case("q") {
-            continue;
-        }
-        let Some(quality_per_mille) = parse_accept_encoding_qvalue(value.trim()) else {
-            return false;
-        };
-        if quality_per_mille == 0 {
-            return false;
-        }
-    }
-    true
-}
-
-#[cfg(any(
-    feature = "compression-brotli",
-    feature = "compression-gzip",
-    feature = "compression-zstd"
-))]
-fn parse_accept_encoding_qvalue(value: &str) -> Option<u16> {
-    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
-    match whole {
-        "0" => {
-            if fraction.len() > 3 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
-                return None;
-            }
-            let mut per_mille = 0u16;
-            let mut scale = 100u16;
-            for byte in fraction.bytes() {
-                per_mille = per_mille.saturating_add(u16::from(byte - b'0') * scale);
-                scale /= 10;
-            }
-            Some(per_mille)
-        }
-        "1" => {
-            if fraction.len() > 3 || !fraction.bytes().all(|byte| byte == b'0') {
-                return None;
-            }
-            Some(1000)
-        }
-        _ => None,
-    }
 }
 
 #[cfg(any(

@@ -27,6 +27,55 @@ pub struct ResponseCompressionEncoder {
     max_output_bytes: usize,
 }
 
+pub fn encoding_token_allows(token: &str, expected: &str) -> bool {
+    let mut parts = token.split(';');
+    let coding = parts.next().unwrap_or_default().trim();
+    if !coding.eq_ignore_ascii_case(expected) && coding != "*" {
+        return false;
+    }
+
+    for (name, value) in parts
+        .map(str::trim)
+        .filter_map(|parameter| parameter.split_once('='))
+    {
+        if !name.trim().eq_ignore_ascii_case("q") {
+            continue;
+        }
+        let Some(quality_per_mille) = parse_accept_encoding_qvalue(value.trim()) else {
+            return false;
+        };
+        if quality_per_mille == 0 {
+            return false;
+        }
+    }
+    true
+}
+
+pub fn parse_accept_encoding_qvalue(value: &str) -> Option<u16> {
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    match whole {
+        "0" => {
+            if fraction.len() > 3 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            let mut per_mille = 0u16;
+            let mut scale = 100u16;
+            for byte in fraction.bytes() {
+                per_mille = per_mille.saturating_add(u16::from(byte - b'0') * scale);
+                scale /= 10;
+            }
+            Some(per_mille)
+        }
+        "1" => {
+            if fraction.len() > 3 || !fraction.bytes().all(|byte| byte == b'0') {
+                return None;
+            }
+            Some(1000)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
 enum ResponseCompressionEncoderInner {
     #[cfg(feature = "brotli")]
@@ -257,6 +306,8 @@ fn compressed_response_exceeds_limit_error() -> FluxError {
 
 #[cfg(test)]
 mod tests {
+    use super::{encoding_token_allows, parse_accept_encoding_qvalue};
+
     #[cfg(feature = "gzip")]
     use std::io;
 
@@ -265,6 +316,27 @@ mod tests {
 
     #[cfg(feature = "gzip")]
     use super::{ResponseCompressionEncoder, ResponseCompressionEncoderInner};
+
+    #[test]
+    fn parses_accept_encoding_qvalues() {
+        assert_eq!(parse_accept_encoding_qvalue("0"), Some(0));
+        assert_eq!(parse_accept_encoding_qvalue("0.125"), Some(125));
+        assert_eq!(parse_accept_encoding_qvalue("1"), Some(1000));
+        assert_eq!(parse_accept_encoding_qvalue("1.000"), Some(1000));
+        assert_eq!(parse_accept_encoding_qvalue("1.001"), None);
+        assert_eq!(parse_accept_encoding_qvalue("0.0000"), None);
+        assert_eq!(parse_accept_encoding_qvalue("NaN"), None);
+    }
+
+    #[test]
+    fn parses_accept_encoding_tokens() {
+        assert!(encoding_token_allows("gzip", "gzip"));
+        assert!(encoding_token_allows("GZIP;q=1.0", "gzip"));
+        assert!(encoding_token_allows("*;q=0.5", "br"));
+        assert!(!encoding_token_allows("br;q=0", "br"));
+        assert!(!encoding_token_allows("gzip;q=banana", "gzip"));
+        assert!(!encoding_token_allows("br", "gzip"));
+    }
 
     #[cfg(feature = "gzip")]
     #[test]
