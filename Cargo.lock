@@ -1031,6 +1031,7 @@ dependencies = [
  "fluxheim-cache",
  "fluxheim-common",
  "fluxheim-config",
+ "fluxheim-geoip",
  "fluxheim-load-balancer",
  "fluxheim-openssl-fips-support",
  "fluxheim-php-fpm",
@@ -1041,7 +1042,6 @@ dependencies = [
  "httpdate",
  "instant-acme",
  "log",
- "maxminddb",
  "mime_guess",
  "moka",
  "openssl",
@@ -1092,6 +1092,15 @@ dependencies = [
  "regex",
  "serde",
  "toml",
+]
+
+[[package]]
+name = "fluxheim-geoip"
+version = "1.5.20"
+dependencies = [
+ "fluxheim-config",
+ "log",
+ "maxminddb",
 ]
 
 [[package]]

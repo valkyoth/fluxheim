@@ -1,0 +1,17 @@
+[package]
+name = "fluxheim-geoip"
+version = "1.5.20"
+edition = "2024"
+rust-version = "1.96"
+license = "EUPL-1.2"
+publish = false
+description = "Internal Fluxheim GeoIP and Geo-Context boundary."
+
+[features]
+default = []
+runtime = ["dep:fluxheim-config", "dep:maxminddb"]
+
+[dependencies]
+fluxheim-config = { path = "../fluxheim-config", features = ["geoip"], optional = true }
+log = "0.4.32"
+maxminddb = { version = "0.28.1", optional = true }
