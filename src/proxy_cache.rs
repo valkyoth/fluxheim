@@ -14,10 +14,10 @@ const MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES: u64 = 128;
 pub(crate) use crate::cache::CacheClientRange;
 pub(crate) use crate::cache::{
     CacheContentRange, CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest,
-    CacheStaleEvent, VaryCachePolicy, cache_control_freshness_value, cache_should_serve_stale,
-    cache_vary_policy, parse_bounded_single_range, parse_cache_client_ranges,
-    parse_cache_content_range, remaining_fresh_ttl_secs, required_slice_bounds,
-    resolve_client_slice_ranges, response_content_type_is_cacheable,
+    CacheStaleEvent, VaryCachePolicy, cache_control_freshness_value, cache_control_with_directive,
+    cache_should_serve_stale, cache_vary_policy, parse_bounded_single_range,
+    parse_cache_client_ranges, parse_cache_content_range, remaining_fresh_ttl_secs,
+    required_slice_bounds, resolve_client_slice_ranges, response_content_type_is_cacheable,
 };
 #[cfg(test)]
 pub(crate) use crate::cache::{MAX_VARY_FIELDS, cache_stale_status_allows, vary_cache_policy};
@@ -509,30 +509,18 @@ pub(crate) fn append_cache_control_directive(
     directive: &str,
     directive_name: &str,
 ) -> Result<()> {
-    let mut directives = Vec::new();
-    for value in response.headers.get_all("cache-control") {
+    let mut values = Vec::new();
+    for value in response.headers.get_all("cache-control").iter() {
         let Ok(value) = value.to_str() else {
             return Ok(());
         };
-        directives.extend(
-            value
-                .split(',')
-                .map(str::trim)
-                .filter(|part| {
-                    !part.is_empty()
-                        && !part
-                            .split_once('=')
-                            .map(|(name, _)| name.trim())
-                            .unwrap_or(part)
-                            .eq_ignore_ascii_case(directive_name)
-                })
-                .map(str::to_owned),
-        );
+        values.push(value.to_owned());
     }
-
-    directives.push(directive.to_owned());
     response.remove_header("cache-control");
-    response.insert_header("cache-control", directives.join(", "))
+    response.insert_header(
+        "cache-control",
+        cache_control_with_directive(values, directive, directive_name),
+    )
 }
 
 fn response_cache_header_policy_rejection(

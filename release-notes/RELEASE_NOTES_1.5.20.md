@@ -48,6 +48,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved response `Age` and `Cache-Control` max-age/s-maxage parsers into
   `crates/fluxheim-cache::headers`, leaving root response helpers as thin
   Pingora header adapters.
+- Moved Cache-Control directive merge/replacement into
+  `crates/fluxheim-cache::headers`, leaving root response mutation as a
+  Pingora header adapter.
 - Moved cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

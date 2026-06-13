@@ -211,6 +211,34 @@ pub fn cache_control_freshness_value(
     value
 }
 
+pub fn cache_control_with_directive<S: AsRef<str>>(
+    values: impl IntoIterator<Item = S>,
+    directive: &str,
+    directive_name: &str,
+) -> String {
+    let mut directives = Vec::new();
+    for value in values {
+        directives.extend(
+            value
+                .as_ref()
+                .split(',')
+                .map(str::trim)
+                .filter(|part| {
+                    !part.is_empty()
+                        && !part
+                            .split_once('=')
+                            .map(|(name, _)| name.trim())
+                            .unwrap_or(part)
+                            .eq_ignore_ascii_case(directive_name)
+                })
+                .map(str::to_owned),
+        );
+    }
+
+    directives.push(directive.to_owned());
+    directives.join(", ")
+}
+
 pub fn response_age_secs(headers: &http::HeaderMap) -> u64 {
     headers
         .get_all("age")
@@ -676,6 +704,26 @@ mod tests {
         assert_eq!(
             super::cache_control_freshness_value(60, None, None),
             "max-age=60"
+        );
+    }
+
+    #[test]
+    fn replaces_cache_control_directive_without_duplicate() {
+        assert_eq!(
+            super::cache_control_with_directive(
+                ["public, max-age=60", "stale-if-error=10"],
+                "stale-if-error=30",
+                "stale-if-error",
+            ),
+            "public, max-age=60, stale-if-error=30"
+        );
+        assert_eq!(
+            super::cache_control_with_directive(
+                ["max-age=60, stale-while-revalidate=5"],
+                "stale-while-revalidate=15",
+                "stale-while-revalidate",
+            ),
+            "max-age=60, stale-while-revalidate=15"
         );
     }
 
