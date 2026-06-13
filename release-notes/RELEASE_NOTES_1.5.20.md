@@ -9,6 +9,11 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   request/response directive parsing into `crates/fluxheim-cache`. The root
   crate keeps `crate::cache_headers` as a compatibility re-export, so runtime
   behavior and call sites are unchanged.
+- Moved pure cache admin request/result/preview DTOs into
+  `crates/fluxheim-cache::api`, with root `crate::cache_api` and
+  `crate::proxy` re-exports kept for compatibility. Runtime cache stats and
+  object lookup DTOs remain in the root shim until cache metadata/stats types
+  move behind the cache crate boundary.
 - Started the `fluxheim-web` crate boundary by moving static directory-listing
   data/rendering helpers into `crates/fluxheim-web`. The root `crate::web`
   module re-exports the same types and renderer while keeping Pingora response

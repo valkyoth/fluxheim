@@ -3881,9 +3881,12 @@ the exception while the cache server is being completed as a focused sequence:
   `crates/fluxheim-geoip` for Geo-Context/MMDB lookup helpers and
   `crates/fluxheim-compression` for response-compression negotiation and encoder
   lifecycle helpers. Treat those as boundary moves only: config, metrics, proxy
-  behavior, and feature names must stay compatible. Committed steps so far are the `crates/fluxheim-cache`
-  boundary with shared cache-header parsing moved behind a root compatibility
-  re-export, and the `crates/fluxheim-web` boundary with static
+  behavior, and feature names must stay compatible. Committed steps so far are
+  the `crates/fluxheim-cache` boundary with shared cache-header parsing and
+  pure cache admin request/result/preview DTOs moved behind root compatibility
+  re-exports. Runtime cache stats and cache-object lookup DTOs stay in the root
+  shim until cache metadata/stats types move behind the cache crate boundary.
+  The `crates/fluxheim-web` boundary now has static
   directory-listing data/rendering moved behind the existing `crate::web`
   surface, and the `crates/fluxheim-php-fpm` boundary with timeout
   classification/error-outcome helpers plus managed restart-backoff and
