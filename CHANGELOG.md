@@ -32,6 +32,10 @@ behavior when the change improves security or project direction.
 - Move cache request/key DTOs into `crates/fluxheim-cache::request`, with root
   `crate::cache` re-exports and root cache-key builders preserving the existing
   behavior.
+- Move cache range/slice request DTOs, single-range parsing, client range
+  parsing, client-range resolution, and required-slice planning into
+  `crates/fluxheim-cache::request`, leaving root `crate::proxy_cache` as the
+  Pingora request-header and cache-key adapter.
 - Move cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

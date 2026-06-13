@@ -24,4 +24,8 @@ pub use api::{
 pub use object::{CacheStoreError, CachedHeader, CachedImageObject};
 pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};
 pub use purge_index::{CachePurgeIndex, CachePurgeIndexEntry};
-pub use request::{CacheKey, CacheRequest, StaticCacheRequest};
+pub use request::{
+    CacheClientRange, CacheKey, CacheRangeRequest, CacheRequest, CacheSliceBounds,
+    CacheSliceRangeRequest, StaticCacheRequest, parse_bounded_single_range,
+    parse_cache_client_ranges, required_slice_bounds, resolve_client_slice_ranges,
+};

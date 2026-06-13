@@ -10,9 +10,14 @@ use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 
 pub(crate) const MAX_VARY_FIELDS: usize = 16;
 const MAX_VARY_HEADER_BYTES: usize = 2048;
-const MAX_CACHE_CLIENT_RANGES: usize = 128;
 const MULTIPART_SLICE_OVERHEAD_BYTES_PER_RANGE: u64 = 256;
 const MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES: u64 = 128;
+#[cfg(test)]
+pub(crate) use crate::cache::CacheClientRange;
+pub(crate) use crate::cache::{
+    CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest, parse_bounded_single_range,
+    parse_cache_client_ranges, required_slice_bounds, resolve_client_slice_ranges,
+};
 
 pub(crate) fn cache_request_from_header(request: &RequestHeader) -> crate::cache::CacheRequest<'_> {
     crate::cache::CacheRequest {
@@ -97,54 +102,6 @@ pub(crate) fn request_cache_revalidation_requested(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CacheRangeRequest {
-    pub(crate) start: u64,
-    pub(crate) end: u64,
-}
-
-impl CacheRangeRequest {
-    pub(crate) fn len(self) -> u64 {
-        self.end.saturating_sub(self.start).saturating_add(1)
-    }
-
-    pub(crate) fn component(self) -> String {
-        format!("bytes={}-{}", self.start, self.end)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum CacheClientRange {
-    Bounded { start: u64, end: u64 },
-    OpenEnded { start: u64 },
-    Suffix { len: u64 },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct CacheSliceRangeRequest {
-    pub(crate) ranges: Vec<CacheClientRange>,
-    pub(crate) if_range: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CacheSliceBounds {
-    pub(crate) start: u64,
-    pub(crate) end: u64,
-}
-
-impl CacheSliceBounds {
-    pub(crate) fn len(self) -> u64 {
-        self.end.saturating_sub(self.start).saturating_add(1)
-    }
-
-    pub(crate) fn range_request(self) -> CacheRangeRequest {
-        CacheRangeRequest {
-            start: self.start,
-            end: self.end,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CacheStatusOverride {
     pub(crate) status: &'static str,
     pub(crate) reason: Option<&'static str>,
@@ -177,24 +134,6 @@ pub(crate) fn selected_cache_range_request(
     (parsed.len() <= cache.range.max_bytes.as_u64()).then_some(parsed)
 }
 
-pub(crate) fn parse_bounded_single_range(range: &str) -> Option<CacheRangeRequest> {
-    let range = range.trim();
-    let range = range.strip_prefix("bytes=")?;
-    if range.contains(',') {
-        return None;
-    }
-    let (start, end) = range.split_once('-')?;
-    if start.is_empty() || end.is_empty() {
-        return None;
-    }
-    let start = start.parse::<u64>().ok()?;
-    let end = end.parse::<u64>().ok()?;
-    if end < start {
-        return None;
-    }
-    Some(CacheRangeRequest { start, end })
-}
-
 pub(crate) fn selected_cache_slice_range_request(
     request: &RequestHeader,
     cache: &crate::config::CacheConfig,
@@ -209,81 +148,6 @@ pub(crate) fn selected_cache_slice_range_request(
     }
     let if_range = request_header_values_joined(request, "if-range");
     parse_cache_client_ranges(range).map(|ranges| CacheSliceRangeRequest { ranges, if_range })
-}
-
-pub(crate) fn parse_cache_client_ranges(value: &str) -> Option<Vec<CacheClientRange>> {
-    let value = value.trim();
-    let value = value.strip_prefix("bytes=")?;
-    let mut ranges = Vec::new();
-    for part in value.split(',') {
-        if ranges.len() >= MAX_CACHE_CLIENT_RANGES {
-            return None;
-        }
-        let part = part.trim();
-        if part.is_empty() {
-            return None;
-        }
-        let (start, end) = part.split_once('-')?;
-        if start.is_empty() {
-            let len = end.parse::<u64>().ok()?;
-            if len == 0 {
-                return None;
-            }
-            ranges.push(CacheClientRange::Suffix { len });
-        } else if end.is_empty() {
-            ranges.push(CacheClientRange::OpenEnded {
-                start: start.parse::<u64>().ok()?,
-            });
-        } else {
-            let start = start.parse::<u64>().ok()?;
-            let end = end.parse::<u64>().ok()?;
-            if end < start {
-                return None;
-            }
-            ranges.push(CacheClientRange::Bounded { start, end });
-        }
-    }
-    (!ranges.is_empty()).then_some(ranges)
-}
-
-pub(crate) fn resolve_client_slice_ranges(
-    ranges: &[CacheClientRange],
-    total: u64,
-) -> Option<Vec<CacheSliceBounds>> {
-    if total == 0 {
-        return Some(Vec::new());
-    }
-    let last = total.saturating_sub(1);
-    let mut resolved = Vec::new();
-    for range in ranges {
-        match *range {
-            CacheClientRange::Bounded { start, end } => {
-                if start > last {
-                    continue;
-                }
-                resolved.push(CacheSliceBounds {
-                    start,
-                    end: end.min(last),
-                });
-            }
-            CacheClientRange::OpenEnded { start } => {
-                if start > last {
-                    continue;
-                }
-                resolved.push(CacheSliceBounds { start, end: last });
-            }
-            CacheClientRange::Suffix { len } => {
-                if len == 0 {
-                    continue;
-                }
-                resolved.push(CacheSliceBounds {
-                    start: total.saturating_sub(len),
-                    end: last,
-                });
-            }
-        }
-    }
-    Some(resolved)
 }
 
 pub(crate) fn slice_request_within_policy(
@@ -317,31 +181,6 @@ pub(crate) fn slice_request_within_policy(
     }
     let slices = required_slice_bounds(ranges, slice_size, u64::MAX);
     !slices.is_empty() && slices.len() <= cache.range.slice.max_slices as usize
-}
-
-pub(crate) fn required_slice_bounds(
-    ranges: &[CacheSliceBounds],
-    slice_size: u64,
-    total: u64,
-) -> Vec<CacheSliceBounds> {
-    let mut slices = Vec::new();
-    let last = total.saturating_sub(1);
-    for range in ranges {
-        let mut start = (range.start / slice_size).saturating_mul(slice_size);
-        while start <= range.end && start <= last {
-            let end = start.saturating_add(slice_size.saturating_sub(1)).min(last);
-            let slice = CacheSliceBounds { start, end };
-            if !slices.contains(&slice) {
-                slices.push(slice);
-            }
-            let Some(next) = start.checked_add(slice_size) else {
-                break;
-            };
-            start = next;
-        }
-    }
-    slices.sort_by_key(|slice| slice.start);
-    slices
 }
 
 pub(crate) fn range_cache_key(
