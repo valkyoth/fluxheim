@@ -3916,8 +3916,9 @@ the exception while the cache server is being completed as a focused sequence:
   `crates/fluxheim-observability` boundary now owns W3C Trace Context parsing,
   generation, and traceparent normalization behind the existing
   `crate::trace_context` surface, and the shared OTLP HTTP agent plus
-  symlink-safe custom CA bundle loader behind an `otlp-http` crate feature
-  while the root `crate::otlp_http` module remains the metrics/tracing adapter.
+  symlink-safe custom CA bundle loader and OTLP HTTP endpoint parser behind an
+  `otlp-http` crate feature while the root `crate::otlp_http` module remains
+  the metrics/tracing adapter.
   The OTLP trace exporter and trace-span payload builder also live behind the
   `crates/fluxheim-observability` `otlp-trace` feature while root
   `crate::otel_otlp` remains a compatibility re-export.

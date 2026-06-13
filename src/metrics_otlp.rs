@@ -1,5 +1,6 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use fluxheim_observability::OtlpHttpEndpoint;
 use prometheus::proto::MetricType;
 use serde_json::json;
 
@@ -10,7 +11,7 @@ pub fn spawn_from_config(config: &MetricsOtlpExportConfig) -> std::io::Result<()
         return Ok(());
     }
 
-    let endpoint = HttpEndpoint::parse(&config.endpoint).ok_or_else(|| {
+    let endpoint = OtlpHttpEndpoint::parse(&config.endpoint).ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "invalid OTLP metrics endpoint",
@@ -43,63 +44,6 @@ pub fn spawn_from_config(config: &MetricsOtlpExportConfig) -> std::io::Result<()
                 format!("failed to spawn OTLP metrics exporter: {error}"),
             )
         })
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct HttpEndpoint {
-    url: String,
-    host: String,
-    port: u16,
-    path: String,
-    authority: String,
-}
-
-impl HttpEndpoint {
-    fn parse(endpoint: &str) -> Option<Self> {
-        let (rest, default_port) = if let Some(rest) = endpoint.strip_prefix("http://") {
-            (rest, 80)
-        } else if let Some(rest) = endpoint.strip_prefix("https://") {
-            (rest, 443)
-        } else {
-            return None;
-        };
-        let (authority, path) = rest.split_once('/')?;
-        if authority.is_empty() || path.is_empty() {
-            return None;
-        }
-        let (host, port) = parse_authority(authority, default_port)?;
-        Some(Self {
-            url: endpoint.to_owned(),
-            host,
-            port,
-            path: format!("/{path}"),
-            authority: authority.to_owned(),
-        })
-    }
-}
-
-fn parse_authority(authority: &str, default_port: u16) -> Option<(String, u16)> {
-    if let Some(stripped) = authority.strip_prefix('[') {
-        let (host, tail) = stripped.split_once(']')?;
-        if host.is_empty() {
-            return None;
-        }
-        let port = if tail.is_empty() {
-            default_port
-        } else {
-            tail.strip_prefix(':')?.parse::<u16>().ok()?
-        };
-        return (port != 0).then(|| (host.to_owned(), port));
-    }
-
-    let Some((host, port)) = authority.rsplit_once(':') else {
-        return Some((authority.to_owned(), default_port));
-    };
-    if host.is_empty() {
-        return None;
-    }
-    let port = port.parse::<u16>().ok()?;
-    (port != 0).then(|| (host.to_owned(), port))
 }
 
 fn build_metrics_payload(
@@ -246,7 +190,7 @@ fn string_attr(key: &str, value: impl Into<String>) -> serde_json::Value {
 
 fn post_otlp_metrics(
     agent: &ureq::Agent,
-    endpoint: &HttpEndpoint,
+    endpoint: &OtlpHttpEndpoint,
     body: String,
 ) -> std::io::Result<()> {
     let response = agent
@@ -280,25 +224,6 @@ mod tests {
     use prometheus::{CounterVec, Encoder, Gauge, HistogramOpts, HistogramVec, Opts};
 
     use super::*;
-
-    #[test]
-    fn parses_prometheus_otlp_endpoint() {
-        let endpoint = HttpEndpoint::parse("http://127.0.0.1:9090/api/v1/otlp/v1/metrics").unwrap();
-
-        assert_eq!(endpoint.host, "127.0.0.1");
-        assert_eq!(endpoint.port, 9090);
-        assert_eq!(endpoint.path, "/api/v1/otlp/v1/metrics");
-    }
-
-    #[test]
-    fn parses_https_prometheus_otlp_endpoint() {
-        let endpoint =
-            HttpEndpoint::parse("https://collector.example.test/api/v1/otlp/v1/metrics").unwrap();
-
-        assert_eq!(endpoint.host, "collector.example.test");
-        assert_eq!(endpoint.port, 443);
-        assert_eq!(endpoint.path, "/api/v1/otlp/v1/metrics");
-    }
 
     #[test]
     fn payload_contains_counter_gauge_and_histogram_metrics() {

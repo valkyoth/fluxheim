@@ -82,6 +82,8 @@ behavior when the change improves security or project direction.
 - Move the shared OTLP HTTP agent and symlink-safe custom CA bundle loader into
   `crates/fluxheim-observability` behind its `otlp-http` feature, while keeping
   the root `crate::otlp_http` module as the metrics/tracing adapter.
+- Move OTLP HTTP endpoint parsing into `crates/fluxheim-observability`, keeping
+  the Prometheus metrics payload conversion in the root metrics adapter.
 - Move the OTLP trace exporter and trace-span payload builder into
   `crates/fluxheim-observability` behind its `otlp-trace` feature, with root
   `crate::otel_otlp` kept as a compatibility re-export.

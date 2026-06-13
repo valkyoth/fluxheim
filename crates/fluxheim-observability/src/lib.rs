@@ -7,6 +7,8 @@
 use std::fmt::Write as _;
 
 #[cfg(feature = "otlp-http")]
+pub use otlp_http::OtlpHttpEndpoint;
+#[cfg(feature = "otlp-http")]
 pub use otlp_http::agent;
 #[cfg(feature = "otlp-trace")]
 pub use otlp_trace::{TraceExporter, TraceSpan};
@@ -202,6 +204,61 @@ mod otlp_http {
 
     const MAX_OTLP_CA_CERT_BYTES: u64 = 1024 * 1024;
 
+    #[derive(Debug, Clone, Eq, PartialEq)]
+    pub struct OtlpHttpEndpoint {
+        pub url: String,
+        pub host: String,
+        pub port: u16,
+        pub path: String,
+    }
+
+    impl OtlpHttpEndpoint {
+        pub fn parse(endpoint: &str) -> Option<Self> {
+            let (rest, default_port) = if let Some(rest) = endpoint.strip_prefix("http://") {
+                (rest, 80)
+            } else if let Some(rest) = endpoint.strip_prefix("https://") {
+                (rest, 443)
+            } else {
+                return None;
+            };
+            let (authority, path) = rest.split_once('/')?;
+            if authority.is_empty() || path.is_empty() {
+                return None;
+            }
+            let (host, port) = parse_authority(authority, default_port)?;
+            Some(Self {
+                url: endpoint.to_owned(),
+                host,
+                port,
+                path: format!("/{path}"),
+            })
+        }
+    }
+
+    fn parse_authority(authority: &str, default_port: u16) -> Option<(String, u16)> {
+        if let Some(stripped) = authority.strip_prefix('[') {
+            let (host, tail) = stripped.split_once(']')?;
+            if host.is_empty() {
+                return None;
+            }
+            let port = if tail.is_empty() {
+                default_port
+            } else {
+                tail.strip_prefix(':')?.parse::<u16>().ok()?
+            };
+            return (port != 0).then(|| (host.to_owned(), port));
+        }
+
+        let Some((host, port)) = authority.rsplit_once(':') else {
+            return Some((authority.to_owned(), default_port));
+        };
+        if host.is_empty() {
+            return None;
+        }
+        let port = port.parse::<u16>().ok()?;
+        (port != 0).then(|| (host.to_owned(), port))
+    }
+
     pub fn agent(timeout: Duration, tls_ca_cert_path: Option<&Path>) -> io::Result<ureq::Agent> {
         let mut builder = ureq::Agent::config_builder()
             .timeout_global(Some(timeout))
@@ -306,7 +363,28 @@ mod otlp_http {
 
     #[cfg(test)]
     mod tests {
-        use super::load_ca_certificates;
+        use super::{OtlpHttpEndpoint, load_ca_certificates};
+
+        #[test]
+        fn parses_prometheus_otlp_endpoint() {
+            let endpoint = OtlpHttpEndpoint::parse("http://127.0.0.1:9090/api/v1/otlp/v1/metrics")
+                .expect("valid endpoint");
+
+            assert_eq!(endpoint.host, "127.0.0.1");
+            assert_eq!(endpoint.port, 9090);
+            assert_eq!(endpoint.path, "/api/v1/otlp/v1/metrics");
+        }
+
+        #[test]
+        fn parses_https_prometheus_otlp_endpoint() {
+            let endpoint =
+                OtlpHttpEndpoint::parse("https://collector.example.test/api/v1/otlp/v1/metrics")
+                    .expect("valid endpoint");
+
+            assert_eq!(endpoint.host, "collector.example.test");
+            assert_eq!(endpoint.port, 443);
+            assert_eq!(endpoint.path, "/api/v1/otlp/v1/metrics");
+        }
 
         #[cfg(unix)]
         #[test]
