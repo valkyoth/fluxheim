@@ -191,6 +191,9 @@ behavior when the change improves security or project direction.
   endpoint adapter.
 - Move cache admin summary math helpers into `crates/fluxheim-cache::api`,
   leaving root admin JSON assembly as the response adapter.
+- Move runtime cache-purger `usize` metric saturation into
+  `crates/fluxheim-observability`, keeping root runtime as the background-task
+  adapter.
 
 ### Fixed
 

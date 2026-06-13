@@ -185,6 +185,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   endpoint adapter.
 - Moved cache admin summary math helpers into `crates/fluxheim-cache::api`,
   leaving root admin JSON assembly as the response adapter.
+- Moved runtime cache-purger `usize` metric saturation into
+  `crates/fluxheim-observability`, keeping root runtime as the background-task
+  adapter.
 
 ## Fixed
 

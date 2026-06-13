@@ -543,15 +543,19 @@ fn record_cache_stale_purge_metrics(
     duration: std::time::Duration,
 ) {
     crate::metrics::record_cache_purger_run(outcome);
-    crate::metrics::record_cache_purger_entries("scanned", usize_to_u64_saturating(result.scanned));
-    crate::metrics::record_cache_purger_entries("stale", usize_to_u64_saturating(result.stale));
-    crate::metrics::record_cache_purger_entries("purged", usize_to_u64_saturating(result.purged));
+    crate::metrics::record_cache_purger_entries(
+        "scanned",
+        fluxheim_observability::metrics_usize_to_u64_saturating(result.scanned),
+    );
+    crate::metrics::record_cache_purger_entries(
+        "stale",
+        fluxheim_observability::metrics_usize_to_u64_saturating(result.stale),
+    );
+    crate::metrics::record_cache_purger_entries(
+        "purged",
+        fluxheim_observability::metrics_usize_to_u64_saturating(result.purged),
+    );
     crate::metrics::record_cache_purger_duration(outcome, duration);
-}
-
-#[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
-fn usize_to_u64_saturating(value: usize) -> u64 {
-    u64::try_from(value).unwrap_or(u64::MAX)
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client"))]

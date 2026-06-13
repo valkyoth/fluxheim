@@ -191,6 +191,10 @@ pub fn metrics_usize_to_i64_saturating(value: usize) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
+pub fn metrics_usize_to_u64_saturating(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
 pub fn metrics_host_routing_reason_label(reason: &str) -> &'static str {
     match reason {
         "missing" => "missing",
@@ -1041,6 +1045,7 @@ mod tests {
         assert_eq!(metrics_u64_to_i64_saturating(42), 42);
         assert_eq!(metrics_u64_to_i64_saturating(u64::MAX), i64::MAX);
         assert_eq!(metrics_usize_to_i64_saturating(42), 42);
+        assert_eq!(metrics_usize_to_u64_saturating(42), 42);
     }
 
     #[test]

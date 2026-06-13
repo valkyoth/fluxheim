@@ -3979,6 +3979,9 @@ the exception while the cache server is being completed as a focused sequence:
   Cache admin summary math helpers now also live in
   `crates/fluxheim-cache::api`, with root admin kept as the JSON response
   adapter.
+  Runtime cache-purger metric saturation now also lives in
+  `crates/fluxheim-observability`, with root runtime kept as the background-task
+  adapter.
   Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last
