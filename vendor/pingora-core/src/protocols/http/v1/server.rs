@@ -260,16 +260,13 @@ impl HttpSession {
                         let contains_content_length =
                             request_header.headers.contains_key(CONTENT_LENGTH);
 
-                        // Transfer encoding overrides content length, so when
-                        // both are present, we can remove content length. This
-                        // is per https://datatracker.ietf.org/doc/html/rfc9112#section-6.3
-                        //
-                        // RFC 9112 Section 6.1 (https://datatracker.ietf.org/doc/html/rfc9112#section-6.1-15)
-                        // also requires us to disable keepalive when both headers are present.
                         let has_both_te_and_cl =
                             contains_content_length && contains_transfer_encoding;
                         if has_both_te_and_cl {
-                            request_header.remove_header(&CONTENT_LENGTH);
+                            return Error::e_explain(
+                                InvalidHTTPHeader,
+                                "request contains both Transfer-Encoding and Content-Length",
+                            );
                         }
 
                         self.buf = buf;
@@ -279,10 +276,6 @@ impl HttpSession {
                         self.response_written = None;
                         self.respect_keepalive();
 
-                        // Disable keepalive if both Transfer-Encoding and Content-Length were present
-                        if has_both_te_and_cl {
-                            self.set_keepalive(None);
-                        }
                         self.validate_request()?;
 
                         return Ok(Some(s));
@@ -1662,18 +1655,24 @@ mod tests_stream {
             .read(input2.as_bytes())
             .build();
         let mut http_stream = HttpSession::new(Box::new(mock_io));
-        let _ = http_stream.read_request().await.unwrap();
+        let read_result = http_stream.read_request().await;
 
         match (content_length_header, transfer_encoding_header) {
-            (Some(_) | None, Some(_)) => {
+            (Some(_), Some(_)) => {
+                assert!(read_result.is_err());
+            }
+            (None, Some(_)) => {
+                read_result.unwrap();
                 assert!(http_stream.get_header(TRANSFER_ENCODING).is_some());
                 assert!(http_stream.get_header(CONTENT_LENGTH).is_none());
             }
             (Some(_), None) => {
+                read_result.unwrap();
                 assert!(http_stream.get_header(TRANSFER_ENCODING).is_none());
                 assert!(http_stream.get_header(CONTENT_LENGTH).is_some());
             }
             _ => {
+                read_result.unwrap();
                 assert!(http_stream.get_header(CONTENT_LENGTH).is_none());
                 assert!(http_stream.get_header(TRANSFER_ENCODING).is_none());
             }
@@ -2505,10 +2504,7 @@ mod tests_stream {
     }
 
     #[tokio::test]
-    async fn test_te_and_cl_disables_keepalive() {
-        // When both Transfer-Encoding and Content-Length are present,
-        // we must disable keepalive per RFC 9112 Section 6.1
-        // https://datatracker.ietf.org/doc/html/rfc9112#section-6.1-15
+    async fn test_te_and_cl_is_rejected() {
         let input = b"POST / HTTP/1.1\r\n\
 Host: pingora.org\r\n\
 Transfer-Encoding: chunked\r\n\
@@ -2520,22 +2516,10 @@ hello\r\n\
 \r\n";
         let mock_io = Builder::new().read(&input[..]).build();
         let mut http_stream = HttpSession::new(Box::new(mock_io));
-        http_stream.read_request().await.unwrap();
-
-        // Keepalive should be disabled
-        assert_eq!(http_stream.keepalive_timeout, KeepaliveStatus::Off);
-
-        // Content-Length header should have been removed
-        assert!(!http_stream
-            .req_header()
-            .headers
-            .contains_key(CONTENT_LENGTH));
-
-        // Transfer-Encoding should still be present
-        assert!(http_stream
-            .req_header()
-            .headers
-            .contains_key(TRANSFER_ENCODING));
+        let error = http_stream.read_request().await.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("request contains both Transfer-Encoding and Content-Length"));
     }
 
     #[tokio::test]

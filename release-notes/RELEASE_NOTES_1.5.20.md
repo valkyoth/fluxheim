@@ -220,6 +220,10 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 
 ## Fixed
 
+- Hardened the vendored HTTP/1 request parser to reject requests that carry
+  both `Transfer-Encoding` and `Content-Length`, matching Fluxheim's raw
+  request-framing release smoke and avoiding ambiguous downstream body
+  framing.
 - Documented the shared protocol HTTP token grammar as case-permissive and
   added a warning when accepted IPv6 trusted-proxy CIDR entries are broader
   than `/32`.

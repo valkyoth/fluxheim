@@ -155,6 +155,8 @@ fi
 
 %changelog
 * Sat Jun 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.20-1
+- Reject ambiguous HTTP/1 request framing with both Transfer-Encoding and
+  Content-Length in the vendored request parser.
 - Allow provider IPv6 trusted-proxy ranges such as Cloudflare's
   2a06:98c0::/29 after the 1.5.19 config-crate split tightened validation too
   far.

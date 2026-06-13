@@ -161,9 +161,9 @@ cases = [
         {400, 411},
     ),
     (
-        "chunked_without_content_length",
+        "valid_chunked_without_content_length",
         b"POST / HTTP/1.1\r\nHost: static.test\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n0\r\n\r\n",
-        {411},
+        {404},
     ),
     (
         "content_length_over_limit",

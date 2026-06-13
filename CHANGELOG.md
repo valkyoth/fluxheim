@@ -225,6 +225,10 @@ behavior when the change improves security or project direction.
 
 ### Fixed
 
+- Harden the vendored HTTP/1 request parser to reject requests that carry both
+  `Transfer-Encoding` and `Content-Length`, matching Fluxheim's raw
+  request-framing release smoke and avoiding ambiguous downstream body
+  framing.
 - Document the shared protocol HTTP token grammar as case-permissive and warn
   when accepted IPv6 trusted-proxy CIDR entries are broader than `/32`.
 - Fix cache-only builds after shared cache stats moved purge-index and activity
