@@ -73,7 +73,7 @@ pub fn route_strip_prefix_suffix<'a>(strip_prefix: &str, path: &'a str) -> Optio
     .then_some(suffix)
 }
 
-pub fn http_upgrade_token_valid(value: &str) -> bool {
+pub fn http_token_valid(value: &str) -> bool {
     !value.is_empty()
         && value.bytes().all(|byte| {
             matches!(
@@ -97,6 +97,10 @@ pub fn http_upgrade_token_valid(value: &str) -> bool {
                     | b'a'..=b'z'
             )
         })
+}
+
+pub fn http_upgrade_token_valid(value: &str) -> bool {
+    http_token_valid(value)
 }
 
 pub const FLUXHEIM_VIA_VALUE: &str = "1.1 fluxheim";
@@ -179,9 +183,9 @@ mod tests {
 
     use super::{
         ProxyProtocolTrustedSource, ProxyProtocolTrustedSourceParseError,
-        append_fluxheim_via_value, http_upgrade_token_valid, parse_proxy_protocol_trusted_source,
-        proxy_protocol_v1_header, proxy_protocol_v2_header, route_method_matches,
-        route_prefix_matches_path, route_strip_prefix_suffix,
+        append_fluxheim_via_value, http_token_valid, http_upgrade_token_valid,
+        parse_proxy_protocol_trusted_source, proxy_protocol_v1_header, proxy_protocol_v2_header,
+        route_method_matches, route_prefix_matches_path, route_strip_prefix_suffix,
     };
 
     #[test]
@@ -253,14 +257,15 @@ mod tests {
 
     #[test]
     fn http_upgrade_tokens_follow_http_token_grammar() {
+        assert!(http_token_valid("websocket"));
+        assert!(http_token_valid("h2c"));
+        assert!(http_token_valid("token!#$%&'*+-.^_`|~09AZaz"));
         assert!(http_upgrade_token_valid("websocket"));
-        assert!(http_upgrade_token_valid("h2c"));
-        assert!(http_upgrade_token_valid("token!#$%&'*+-.^_`|~09AZaz"));
-        assert!(!http_upgrade_token_valid(""));
-        assert!(!http_upgrade_token_valid("web socket"));
-        assert!(!http_upgrade_token_valid("websocket\r\nx"));
-        assert!(!http_upgrade_token_valid("websocket;param"));
-        assert!(!http_upgrade_token_valid("websocket/1"));
+        assert!(!http_token_valid(""));
+        assert!(!http_token_valid("web socket"));
+        assert!(!http_token_valid("websocket\r\nx"));
+        assert!(!http_token_valid("websocket;param"));
+        assert!(!http_token_valid("websocket/1"));
     }
 
     #[test]

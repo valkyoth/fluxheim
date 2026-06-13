@@ -207,6 +207,8 @@ behavior when the change improves security or project direction.
 - Move cache slice metadata first-header extraction into
   `crates/fluxheim-cache::headers`, leaving root proxy as the slice identity
   adapter.
+- Move hop-by-hop `Connection` option token validation onto the shared
+  `crates/fluxheim-protocol` HTTP token grammar helper.
 
 ### Fixed
 

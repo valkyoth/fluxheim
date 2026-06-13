@@ -201,6 +201,8 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved cache slice metadata first-header extraction into
   `crates/fluxheim-cache::headers`, leaving root proxy as the slice identity
   adapter.
+- Moved hop-by-hop `Connection` option token validation onto the shared
+  `crates/fluxheim-protocol` HTTP token grammar helper.
 
 ## Fixed
 

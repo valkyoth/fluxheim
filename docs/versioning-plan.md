@@ -3997,6 +3997,8 @@ the exception while the cache server is being completed as a focused sequence:
   Cache slice metadata first-header extraction now also lives in
   `crates/fluxheim-cache::headers`, with root proxy kept as the slice identity
   adapter.
+  Hop-by-hop `Connection` option token validation now also uses the shared
+  `crates/fluxheim-protocol` HTTP token grammar helper.
   Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last

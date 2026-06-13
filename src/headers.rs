@@ -49,7 +49,7 @@ pub fn strip_upstream_hop_by_hop_request_headers(
         .iter()
         .flat_map(|value| value.to_str().unwrap_or_default().split(','))
         .map(str::trim)
-        .filter(|value| valid_connection_option_token(value))
+        .filter(|value| fluxheim_protocol::http_token_valid(value))
         .map(str::to_ascii_lowercase)
         .collect::<Vec<_>>();
     let preserve_chunked_framing = request
@@ -84,32 +84,6 @@ pub fn strip_upstream_hop_by_hop_request_headers(
     }
 
     Ok(())
-}
-
-fn valid_connection_option_token(value: &str) -> bool {
-    !value.is_empty()
-        && value.bytes().all(|byte| {
-            matches!(
-                byte,
-                b'!' | b'#'
-                    | b'$'
-                    | b'%'
-                    | b'&'
-                    | b'\''
-                    | b'*'
-                    | b'+'
-                    | b'-'
-                    | b'.'
-                    | b'^'
-                    | b'_'
-                    | b'`'
-                    | b'|'
-                    | b'~'
-                    | b'0'..=b'9'
-                    | b'a'..=b'z'
-                    | b'A'..=b'Z'
-            )
-        })
 }
 
 #[derive(Clone, Copy)]
