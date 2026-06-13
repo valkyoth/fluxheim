@@ -625,6 +625,7 @@ impl AdminApp {
             ("GET", "/_fluxheim/status") => self.status_response(),
             ("GET", "/_fluxheim/cache/status") => self.cache_status_response(),
             ("GET", "/_fluxheim/load-balancer/status") => self.load_balancer_status_response(),
+            ("GET", "/_fluxheim/udp/status") => self.udp_status_response(),
             ("GET", "/_fluxheim/snapshots") => self.snapshots_response(),
             ("POST", "/_fluxheim/cache/activity/reset") => self.cache_activity_reset_response(),
             ("POST", "/_fluxheim/self-heal/confirm") => self.self_heal_confirm_response(),
@@ -815,6 +816,7 @@ impl AdminApp {
                 "/_fluxheim/status"
                 | "/_fluxheim/cache/status"
                 | "/_fluxheim/load-balancer/status"
+                | "/_fluxheim/udp/status"
                 | "/_fluxheim/snapshots"
                 | "/_fluxheim/cache/activity/reset"
                 | "/_fluxheim/self-heal/confirm"
@@ -870,6 +872,7 @@ impl AdminApp {
             "/_fluxheim/status"
                 | "/_fluxheim/cache/status"
                 | "/_fluxheim/load-balancer/status"
+                | "/_fluxheim/udp/status"
                 | "/_fluxheim/snapshots"
         ) || path == self.health_path;
         if method != "GET" {
@@ -893,6 +896,7 @@ impl AdminApp {
             "/_fluxheim/status" => self.status_response(),
             "/_fluxheim/cache/status" => self.cache_status_response(),
             "/_fluxheim/load-balancer/status" => self.load_balancer_status_response(),
+            "/_fluxheim/udp/status" => self.udp_status_response(),
             "/_fluxheim/snapshots" => self.snapshots_response(),
             path if path == self.health_path => self.health_response(),
             _ => json_response(StatusCode::NOT_FOUND, br#"{"error":"not_found"}"#),
@@ -943,6 +947,14 @@ impl AdminApp {
             }
             body
         };
+        #[cfg(feature = "udp-proxy")]
+        let body = {
+            let mut body = body;
+            if let Some(object) = body.as_object_mut() {
+                object.insert("udp".to_owned(), udp_status_json(&current_config));
+            }
+            body
+        };
         json_response_value(StatusCode::OK, &body)
     }
 
@@ -979,6 +991,26 @@ impl AdminApp {
         error_response(
             StatusCode::BAD_REQUEST,
             "load balancer support is not compiled in",
+        )
+    }
+
+    #[cfg(feature = "udp-proxy")]
+    fn udp_status_response(&self) -> AdminResponse {
+        let current_config = self.current_config.load();
+        json_response_value(
+            StatusCode::OK,
+            &json!({
+                "status": "ok",
+                "udp": udp_status_json(&current_config),
+            }),
+        )
+    }
+
+    #[cfg(not(feature = "udp-proxy"))]
+    fn udp_status_response(&self) -> AdminResponse {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            "UDP proxy support is not compiled in",
         )
     }
 
@@ -3291,6 +3323,48 @@ fn pending_validation_json(pending: Option<&PendingValidation>) -> Value {
 
 fn reload_reasons_json(reasons: &[ReloadReason]) -> Vec<String> {
     reasons.iter().map(ToString::to_string).collect()
+}
+
+#[cfg(feature = "udp-proxy")]
+fn udp_status_json(config: &Config) -> Value {
+    let routes = config
+        .udp
+        .routes
+        .iter()
+        .map(|route| {
+            json!({
+                "name": route.name,
+                "mode": udp_route_mode_label(route.mode),
+                "listeners": route.listen,
+                "listener_count": route.listen.len(),
+                "upstream_count": route.upstreams().count(),
+                "idle_timeout_secs": route.idle_timeout_secs,
+                "response_timeout_secs": route.response_timeout_secs,
+                "max_datagram_bytes": route.max_datagram_bytes,
+                "max_sessions": route.max_sessions,
+                "max_sessions_per_source": route.max_sessions_per_source,
+                "max_responses_per_source_per_second": route.max_responses_per_source_per_second,
+                "public_exposure_warning": route.listen.iter().filter_map(|listen| listen.parse::<std::net::SocketAddr>().ok()).any(|listen| !listen.ip().is_loopback()),
+            })
+        })
+        .collect::<Vec<_>>();
+    let route_count = routes.len();
+
+    json!({
+        "enabled": config.udp.enabled,
+        "routes": routes,
+        "route_count": route_count,
+    })
+}
+
+#[cfg(feature = "udp-proxy")]
+fn udp_route_mode_label(mode: crate::config::UdpRouteMode) -> &'static str {
+    match mode {
+        crate::config::UdpRouteMode::DnsLoadBalance => "dns-load-balance",
+        crate::config::UdpRouteMode::SyslogForward => "syslog-forward",
+        crate::config::UdpRouteMode::QuicPassThrough => "quic-pass-through",
+        crate::config::UdpRouteMode::GameProxy => "game-proxy",
+    }
 }
 
 #[cfg(feature = "cache")]

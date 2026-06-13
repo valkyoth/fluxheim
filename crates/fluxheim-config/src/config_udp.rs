@@ -10,6 +10,8 @@ pub const MAX_UDP_ROUTE_NAME_BYTES: usize = 128;
 pub const MAX_UDP_LISTENERS: usize = 64;
 pub const MAX_UDP_UPSTREAMS: usize = 64;
 pub const MAX_UDP_MAX_SESSIONS: usize = 1_000_000;
+pub const MAX_UDP_MAX_SESSIONS_PER_SOURCE: usize = 1_000_000;
+pub const MAX_UDP_MAX_RESPONSES_PER_SOURCE_PER_SECOND: usize = 1_000_000;
 pub const MAX_UDP_DATAGRAM_BYTES: usize = 65_507;
 const MAX_UDP_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_UDP_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
@@ -98,6 +100,10 @@ pub struct UdpRouteConfig {
     pub max_datagram_bytes: usize,
     #[serde(default = "default_udp_max_sessions")]
     pub max_sessions: usize,
+    #[serde(default = "default_udp_max_sessions_per_source")]
+    pub max_sessions_per_source: usize,
+    #[serde(default = "default_udp_max_responses_per_source_per_second")]
+    pub max_responses_per_source_per_second: usize,
 }
 
 impl UdpRouteConfig {
@@ -184,6 +190,18 @@ impl UdpRouteConfig {
                 reason: "must be at most 1000000; use 0 for unlimited",
             });
         }
+        if self.max_sessions_per_source > MAX_UDP_MAX_SESSIONS_PER_SOURCE {
+            return Err(ConfigError::InvalidUdpProxyPolicy {
+                field: "udp.routes.max_sessions_per_source",
+                reason: "must be at most 1000000; use 0 for unlimited",
+            });
+        }
+        if self.max_responses_per_source_per_second > MAX_UDP_MAX_RESPONSES_PER_SOURCE_PER_SECOND {
+            return Err(ConfigError::InvalidUdpProxyPolicy {
+                field: "udp.routes.max_responses_per_source_per_second",
+                reason: "must be at most 1000000; use 0 for unlimited",
+            });
+        }
         Ok(())
     }
 
@@ -264,6 +282,14 @@ const fn default_udp_max_sessions() -> usize {
     4096
 }
 
+const fn default_udp_max_sessions_per_source() -> usize {
+    64
+}
+
+const fn default_udp_max_responses_per_source_per_second() -> usize {
+    256
+}
+
 #[cfg(test)]
 mod tests {
     use super::{UdpConfig, UdpRouteConfig, UdpRouteMode};
@@ -282,6 +308,8 @@ mod tests {
             response_timeout_secs: 3,
             max_datagram_bytes: 1232,
             max_sessions: 4096,
+            max_sessions_per_source: 64,
+            max_responses_per_source_per_second: 256,
         }
     }
 
@@ -320,6 +348,30 @@ mod tests {
             route.validate(),
             Err(ConfigError::InvalidUdpProxyPolicy {
                 field: "udp.routes.max_datagram_bytes",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn udp_route_rejects_oversized_source_limits() {
+        let mut route = route();
+        route.max_sessions_per_source = super::MAX_UDP_MAX_SESSIONS_PER_SOURCE + 1;
+        assert!(matches!(
+            route.validate(),
+            Err(ConfigError::InvalidUdpProxyPolicy {
+                field: "udp.routes.max_sessions_per_source",
+                ..
+            })
+        ));
+
+        let mut route = route();
+        route.max_responses_per_source_per_second =
+            super::MAX_UDP_MAX_RESPONSES_PER_SOURCE_PER_SECOND + 1;
+        assert!(matches!(
+            route.validate(),
+            Err(ConfigError::InvalidUdpProxyPolicy {
+                field: "udp.routes.max_responses_per_source_per_second",
                 ..
             })
         ));

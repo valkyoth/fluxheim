@@ -7,6 +7,26 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.21 - 2026-06-13
+
+### Added
+
+- Added UDP beta per-source pressure controls with
+  `max_sessions_per_source`, released when each datagram session completes.
+- Added UDP beta per-source response-rate limiting with
+  `max_responses_per_source_per_second` for request/response UDP routes.
+- Added UDP Prometheus metrics for accepted/sent/error datagrams, drops, and
+  active route sessions.
+- Added `GET /_fluxheim/udp/status` for admin-visible UDP route configuration,
+  listener exposure warnings, and configured UDP limits.
+
+### Changed
+
+- UDP `dns-load-balance` routes now emit a security warning when configured on
+  non-loopback listeners during the beta period.
+- Updated UDP beta documentation and smoke coverage for the new production
+  readiness guardrails.
+
 ## 1.5.20 - 2026-06-13
 
 ### Changed

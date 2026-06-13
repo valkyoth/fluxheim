@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.20
+Version:        1.5.21
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat Jun 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.21-1
+- Add UDP beta per-source pressure controls, response-rate limiting, metrics,
+  and admin status visibility.
+- Keep public UDP exposure explicitly warning-only while the feature remains
+  gated behind udp-proxy.
+
 * Sat Jun 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.20-1
 - Reject ambiguous HTTP/1 request framing with both Transfer-Encoding and
   Content-Length in the vendored request parser.

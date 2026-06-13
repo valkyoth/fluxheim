@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::process;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -17,6 +18,10 @@ use crate::flux_error::{FluxError, FluxResult};
 
 const UDP_RECEIVE_BUFFER_BYTES: usize = 65_507;
 const UDP_DROP_LOG_INTERVAL_MILLIS: u64 = 1_000;
+const UDP_RESPONSE_RATE_TRACKED_SOURCES_FLOOR: usize = 4_096;
+
+type UdpSourceSessions = Arc<Mutex<HashMap<IpAddr, usize>>>;
+type UdpResponseRateWindows = Arc<Mutex<HashMap<IpAddr, UdpResponseRateWindow>>>;
 
 pub(crate) fn udp_services_from_config(config: &Config) -> io::Result<Vec<UdpProxyService>> {
     if !config.udp.enabled {
@@ -78,6 +83,7 @@ impl UdpProxyService {
                     match received {
                         Ok((len, source)) => {
                             if len > app.max_datagram_bytes {
+                                app.record_drop("oversized_downstream");
                                 app.log_dropped_datagram(
                                     source,
                                     "oversized downstream datagram",
@@ -85,14 +91,31 @@ impl UdpProxyService {
                                 );
                                 continue;
                             }
-                            let Some(slot) = app.acquire_session_slot() else {
-                                app.log_dropped_datagram(
-                                    source,
-                                    "max_sessions exceeded",
-                                    format_args!("active session cap is {}", app.max_sessions),
-                                );
-                                continue;
+                            let slot = match app.acquire_session_slot(source.ip()) {
+                                Ok(slot) => slot,
+                                Err(UdpAcquireError::RouteLimit) => {
+                                    app.record_drop("max_sessions");
+                                    app.log_dropped_datagram(
+                                        source,
+                                        "max_sessions exceeded",
+                                        format_args!("active session cap is {}", app.max_sessions),
+                                    );
+                                    continue;
+                                }
+                                Err(UdpAcquireError::SourceLimit) => {
+                                    app.record_drop("max_sessions_per_source");
+                                    app.log_dropped_datagram(
+                                        source,
+                                        "max_sessions_per_source exceeded",
+                                        format_args!(
+                                            "per-source active session cap is {}",
+                                            app.max_sessions_per_source
+                                        ),
+                                    );
+                                    continue;
+                                }
                             };
+                            app.record_datagram("downstream", "accepted");
                             let payload = buffer[..len].to_vec();
                             let app = app.clone();
                             let socket = socket.clone();
@@ -174,7 +197,15 @@ struct UdpProxyApp {
     response_timeout: Duration,
     max_datagram_bytes: usize,
     max_sessions: usize,
+    max_sessions_per_source: usize,
+    max_responses_per_source_per_second: usize,
+    response_rate_tracked_sources: usize,
     active_sessions: Arc<AtomicUsize>,
+    source_sessions: UdpSourceSessions,
+    response_rate_windows: UdpResponseRateWindows,
+    datagrams_total: AtomicU64,
+    responses_total: AtomicU64,
+    drops_total: AtomicU64,
     next_upstream: AtomicUsize,
     last_drop_log_millis: AtomicU64,
     suppressed_drop_logs: AtomicUsize,
@@ -208,6 +239,26 @@ impl UdpProxyApp {
             ));
         }
 
+        let max_sessions = route.max_sessions;
+        let max_sessions_per_source = route.max_sessions_per_source;
+        let response_rate_tracked_sources = max_sessions
+            .max(max_sessions_per_source)
+            .max(UDP_RESPONSE_RATE_TRACKED_SOURCES_FLOOR);
+
+        if route
+            .listen
+            .iter()
+            .filter_map(|listen| listen.parse::<SocketAddr>().ok())
+            .any(|listen| !listen.ip().is_loopback())
+            && route.mode == UdpRouteMode::DnsLoadBalance
+        {
+            log::warn!(
+                target: "fluxheim::security",
+                "UDP route {} listens on a non-loopback address in dns-load-balance mode; verify ingress filtering and response-rate limits before public exposure",
+                route.name
+            );
+        }
+
         Ok(Self {
             name: Arc::from(route.name.as_str()),
             mode: route.mode,
@@ -215,26 +266,57 @@ impl UdpProxyApp {
             weight_total,
             response_timeout: Duration::from_secs(route.response_timeout_secs),
             max_datagram_bytes: route.max_datagram_bytes,
-            max_sessions: route.max_sessions,
+            max_sessions,
+            max_sessions_per_source,
+            max_responses_per_source_per_second: route.max_responses_per_source_per_second,
+            response_rate_tracked_sources,
             active_sessions: Arc::new(AtomicUsize::new(0)),
+            source_sessions: Arc::new(Mutex::new(HashMap::new())),
+            response_rate_windows: Arc::new(Mutex::new(HashMap::new())),
+            datagrams_total: AtomicU64::new(0),
+            responses_total: AtomicU64::new(0),
+            drops_total: AtomicU64::new(0),
             next_upstream: AtomicUsize::new(0),
             last_drop_log_millis: AtomicU64::new(0),
             suppressed_drop_logs: AtomicUsize::new(0),
         })
     }
 
-    fn acquire_session_slot(&self) -> Option<UdpSessionSlot> {
-        if self.max_sessions == 0 {
-            return Some(UdpSessionSlot::unlimited());
-        }
-        match self
-            .active_sessions
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                (current < self.max_sessions).then_some(current + 1)
-            }) {
-            Ok(_) => Some(UdpSessionSlot::counted(self.active_sessions.clone())),
-            Err(_) => None,
-        }
+    fn acquire_session_slot(&self, source: IpAddr) -> Result<UdpSessionSlot, UdpAcquireError> {
+        let route_counter = if self.max_sessions == 0 {
+            None
+        } else {
+            match self.active_sessions.fetch_update(
+                Ordering::AcqRel,
+                Ordering::Acquire,
+                |current| (current < self.max_sessions).then_some(current + 1),
+            ) {
+                Ok(_) => Some(self.active_sessions.clone()),
+                Err(_) => return Err(UdpAcquireError::RouteLimit),
+            }
+        };
+
+        let source_counter = if self.max_sessions_per_source == 0 {
+            None
+        } else {
+            let mut sessions = self.lock_source_sessions();
+            let current = sessions.get(&source).copied().unwrap_or(0);
+            if current >= self.max_sessions_per_source {
+                if let Some(counter) = &route_counter {
+                    counter.fetch_sub(1, Ordering::AcqRel);
+                }
+                return Err(UdpAcquireError::SourceLimit);
+            }
+            sessions.insert(source, current + 1);
+            Some((self.source_sessions.clone(), source))
+        };
+
+        self.set_active_session_metric();
+        Ok(UdpSessionSlot {
+            route_counter,
+            source_counter,
+            route_name: self.name.clone(),
+        })
     }
 
     async fn process_datagram(
@@ -265,6 +347,7 @@ impl UdpProxyApp {
             }
         };
         if let Err(error) = result {
+            self.record_datagram("upstream", "error");
             log::debug!(
                 target: "fluxheim::udp",
                 "UDP route {} failed to forward datagram via {}: {error}",
@@ -297,6 +380,7 @@ impl UdpProxyApp {
             .connected_upstream_socket(listener_local, upstream)
             .await?;
         upstream_socket.send(payload).await?;
+        self.record_datagram("upstream", "sent");
         let mut response = vec![0u8; self.max_datagram_bytes.saturating_add(1)];
         let response_timeout = self.response_timeout();
         let len = tokio::time::timeout(response_timeout, upstream_socket.recv(&mut response))
@@ -305,12 +389,22 @@ impl UdpProxyApp {
                 io::Error::new(io::ErrorKind::TimedOut, "UDP upstream response timed out")
             })??;
         if len > self.max_datagram_bytes {
+            self.record_drop("oversized_upstream");
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "UDP upstream response exceeded route datagram cap",
             ));
         }
+        if !self.allow_response_to_source(source.ip()) {
+            self.record_drop("response_rate_limited");
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "UDP response rate limit exceeded",
+            ));
+        }
         downstream.send_to(&response[..len], source).await?;
+        self.responses_total.fetch_add(1, Ordering::Relaxed);
+        self.record_datagram("downstream", "sent");
         Ok(())
     }
 
@@ -324,6 +418,7 @@ impl UdpProxyApp {
             .connected_upstream_socket(listener_local, upstream)
             .await?;
         upstream_socket.send(payload).await?;
+        self.record_datagram("upstream", "sent");
         Ok(())
     }
 
@@ -345,6 +440,90 @@ impl UdpProxyApp {
 
     fn response_timeout(&self) -> Duration {
         self.response_timeout
+    }
+
+    fn allow_response_to_source(&self, source: IpAddr) -> bool {
+        if self.max_responses_per_source_per_second == 0 {
+            return true;
+        }
+        let now_secs = udp_log_millis() / 1_000;
+        let mut windows = self.lock_response_rate_windows();
+        windows.retain(|_, window| window.window_secs == now_secs);
+        if !windows.contains_key(&source) && windows.len() >= self.response_rate_tracked_sources {
+            return false;
+        }
+        let window = windows.entry(source).or_insert(UdpResponseRateWindow {
+            window_secs: now_secs,
+            count: 0,
+        });
+        if window.window_secs != now_secs {
+            window.window_secs = now_secs;
+            window.count = 0;
+        }
+        if window.count >= self.max_responses_per_source_per_second {
+            return false;
+        }
+        window.count += 1;
+        true
+    }
+
+    fn lock_source_sessions(&self) -> std::sync::MutexGuard<'_, HashMap<IpAddr, usize>> {
+        match self.source_sessions.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "UDP route {} source session lock poisoned; aborting to avoid inconsistent per-source accounting",
+                    self.name
+                );
+                process::abort();
+            }
+        }
+    }
+
+    fn lock_response_rate_windows(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<IpAddr, UdpResponseRateWindow>> {
+        match self.response_rate_windows.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "UDP route {} response-rate lock poisoned; aborting to avoid inconsistent UDP rate limiting",
+                    self.name
+                );
+                process::abort();
+            }
+        }
+    }
+
+    fn record_datagram(&self, direction: &'static str, outcome: &'static str) {
+        self.datagrams_total.fetch_add(1, Ordering::Relaxed);
+        #[cfg(feature = "metrics")]
+        crate::metrics::record_udp_datagram(
+            &self.name,
+            udp_mode_label(self.mode),
+            direction,
+            outcome,
+        );
+        #[cfg(not(feature = "metrics"))]
+        let _ = (direction, outcome);
+    }
+
+    fn record_drop(&self, reason: &'static str) {
+        self.drops_total.fetch_add(1, Ordering::Relaxed);
+        #[cfg(feature = "metrics")]
+        crate::metrics::record_udp_drop(&self.name, reason);
+        #[cfg(not(feature = "metrics"))]
+        let _ = reason;
+    }
+
+    fn set_active_session_metric(&self) {
+        #[cfg(feature = "metrics")]
+        crate::metrics::set_udp_active_sessions(
+            &self.name,
+            self.active_sessions.load(Ordering::Acquire),
+        );
     }
 
     fn log_dropped_datagram(
@@ -384,27 +563,64 @@ struct RuntimeUdpUpstream {
     weight: usize,
 }
 
-struct UdpSessionSlot {
-    counter: Option<Arc<AtomicUsize>>,
+#[derive(Debug, Clone, Copy)]
+struct UdpResponseRateWindow {
+    window_secs: u64,
+    count: usize,
 }
 
-impl UdpSessionSlot {
-    fn counted(counter: Arc<AtomicUsize>) -> Self {
-        Self {
-            counter: Some(counter),
-        }
-    }
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum UdpAcquireError {
+    RouteLimit,
+    SourceLimit,
+}
 
-    fn unlimited() -> Self {
-        Self { counter: None }
-    }
+struct UdpSessionSlot {
+    route_counter: Option<Arc<AtomicUsize>>,
+    source_counter: Option<(UdpSourceSessions, IpAddr)>,
+    route_name: Arc<str>,
 }
 
 impl Drop for UdpSessionSlot {
     fn drop(&mut self) {
-        if let Some(counter) = &self.counter {
+        if let Some(counter) = &self.route_counter {
             counter.fetch_sub(1, Ordering::AcqRel);
+            #[cfg(feature = "metrics")]
+            crate::metrics::set_udp_active_sessions(
+                &self.route_name,
+                counter.load(Ordering::Acquire),
+            );
         }
+        if let Some((sessions, source)) = &self.source_counter {
+            let mut sessions = match sessions.lock() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    log::error!(
+                        target: "fluxheim::security",
+                        "UDP route {} source session lock poisoned during release; aborting to avoid inconsistent per-source accounting",
+                        self.route_name
+                    );
+                    process::abort();
+                }
+            };
+            match sessions.get_mut(source) {
+                Some(count) if *count > 1 => *count -= 1,
+                Some(_) => {
+                    sessions.remove(source);
+                }
+                None => {}
+            }
+        }
+    }
+}
+
+#[cfg(feature = "metrics")]
+fn udp_mode_label(mode: UdpRouteMode) -> &'static str {
+    match mode {
+        UdpRouteMode::DnsLoadBalance => "dns_load_balance",
+        UdpRouteMode::SyslogForward => "syslog_forward",
+        UdpRouteMode::QuicPassThrough => "quic_pass_through",
+        UdpRouteMode::GameProxy => "game_proxy",
     }
 }
 
@@ -444,7 +660,7 @@ fn udp_log_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{UdpProxyApp, UdpSessionSlot, unspecified_bind_addr};
+    use super::{UdpAcquireError, UdpProxyApp, unspecified_bind_addr};
     use crate::config::{UdpRouteConfig, UdpRouteMode};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::sync::Arc;
@@ -463,6 +679,8 @@ mod tests {
             response_timeout_secs: 1,
             max_datagram_bytes: 512,
             max_sessions: 1,
+            max_sessions_per_source: 1,
+            max_responses_per_source_per_second: 256,
         }
     }
 
@@ -568,11 +786,44 @@ mod tests {
             UdpRouteMode::DnsLoadBalance,
         ))
         .unwrap();
-        let slot = app.acquire_session_slot().unwrap();
-        assert!(matches!(slot, UdpSessionSlot { counter: Some(_) }));
-        assert!(app.acquire_session_slot().is_none());
+        let source = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let slot = app.acquire_session_slot(source).unwrap();
+        assert!(matches!(
+            app.acquire_session_slot(source),
+            Err(UdpAcquireError::RouteLimit)
+        ));
         drop(slot);
-        assert!(app.acquire_session_slot().is_some());
+        assert!(app.acquire_session_slot(source).is_ok());
+    }
+
+    #[test]
+    fn udp_session_slot_enforces_per_source_limit() {
+        let mut route = route("127.0.0.1:53".to_owned(), UdpRouteMode::DnsLoadBalance);
+        route.max_sessions = 2;
+        route.max_sessions_per_source = 1;
+        let app = UdpProxyApp::from_config(&route).unwrap();
+        let source = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let other = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
+
+        let slot = app.acquire_session_slot(source).unwrap();
+        assert!(matches!(
+            app.acquire_session_slot(source),
+            Err(UdpAcquireError::SourceLimit)
+        ));
+        assert!(app.acquire_session_slot(other).is_ok());
+        drop(slot);
+        assert!(app.acquire_session_slot(source).is_ok());
+    }
+
+    #[test]
+    fn udp_response_rate_limit_is_per_source_per_second() {
+        let mut route = route("127.0.0.1:53".to_owned(), UdpRouteMode::DnsLoadBalance);
+        route.max_responses_per_source_per_second = 1;
+        let app = UdpProxyApp::from_config(&route).unwrap();
+        let source = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+        assert!(app.allow_response_to_source(source));
+        assert!(!app.allow_response_to_source(source));
     }
 
     #[test]

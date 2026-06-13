@@ -282,7 +282,7 @@ bytes in each direction.
 
 ## UDP Beta
 
-`[udp]` is disabled by default. In `1.5.16` it is a beta UDP/GSLB exploration
+`[udp]` is disabled by default. In `1.5.21` it is a beta UDP/GSLB exploration
 runtime, not a production UDP platform. Normal release profiles do not enable
 the `udp-proxy` feature, and `udp.enabled = true` fails clearly unless
 Fluxheim is built with that beta feature.
@@ -305,6 +305,8 @@ idle_timeout_secs = 30
 response_timeout_secs = 3
 max_datagram_bytes = 1232
 max_sessions = 4096
+max_sessions_per_source = 64
+max_responses_per_source_per_second = 256
 ```
 
 - `mode` is an explicit runtime target, not a generic protocol parser.
@@ -326,12 +328,25 @@ max_sessions = 4096
   UDP deployments that want conservative fragmentation behavior.
 - `max_sessions` defaults to `4096`. `max_sessions = 0` means unlimited for
   that UDP route. Non-zero values are capped at 1000000.
+- `max_sessions_per_source` defaults to `64`. It limits concurrent in-flight
+  datagram sessions per source IP and is released when the datagram finishes.
+  `0` disables the per-source cap. Non-zero values are capped at 1000000.
+- `max_responses_per_source_per_second` defaults to `256` for response modes.
+  It limits downstream responses per source IP per one-second window, and `0`
+  disables the response-rate cap. Fluxheim prunes old windows and bounds the
+  tracked source table by the larger of the route/session caps and an internal
+  4096-source floor.
 - `dns-load-balance` is beta and can act as a UDP reflector if exposed to
   untrusted networks. Bind beta listeners to loopback or internal interfaces
-  unless the deployment has upstream ingress filtering such as BCP38. Response
-  rate limiting, DNS-specific amplification controls, and GSLB policy are
-  required before this mode is promoted for public DNS-edge use.
-- `1.5.16` does not add QUIC pass-through, game-server UDP proxying, generic
+  unless the deployment has upstream ingress filtering such as BCP38. Fluxheim
+  logs a security warning when a `dns-load-balance` route listens on a
+  non-loopback address, but this is still an operator decision during beta.
+- UDP routes expose Prometheus metrics when the `metrics` feature is compiled:
+  `fluxheim_udp_datagrams_total`, `fluxheim_udp_drops_total`, and
+  `fluxheim_udp_active_sessions`. The admin API exposes configured UDP route
+  status at `GET /_fluxheim/udp/status` when both admin and `udp-proxy` are
+  compiled in.
+- `1.5.21` does not add QUIC pass-through, game-server UDP proxying, generic
   UDP proxying, an authoritative DNS server, WAF, VPN/firewall appliance
   behavior, HTTP/3 ingress, or Wasm/iRules/Lua scripting.
 

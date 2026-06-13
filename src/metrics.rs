@@ -12,6 +12,9 @@ static LOAD_BALANCER_POOLS: OnceLock<IntGaugeVec> = OnceLock::new();
 static RESPONSE_COMPRESSIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static STREAM_CONNECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static STREAM_BYTES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static UDP_DATAGRAMS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static UDP_DROPS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static UDP_ACTIVE_SESSIONS: OnceLock<IntGaugeVec> = OnceLock::new();
 static ADMIN_AUTH_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ACME_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static PHP_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -72,6 +75,9 @@ pub fn init() -> Result<(), prometheus::Error> {
     response_compressions_total()?;
     stream_connections_total()?;
     stream_bytes_total()?;
+    udp_datagrams_total()?;
+    udp_drops_total()?;
+    udp_active_sessions()?;
     admin_auth_events_total()?;
     acme_events_total()?;
     php_requests_total()?;
@@ -297,6 +303,38 @@ pub fn record_stream_bytes(route: &str, direction: &str, bytes: u64) {
             .with_label_values(&[route, stream_direction_label(direction)])
             .inc_by(bytes),
         Err(error) => log::debug!("metrics stream bytes counter unavailable: {error}"),
+    }
+}
+
+pub fn record_udp_datagram(route: &str, mode: &str, direction: &str, outcome: &str) {
+    match udp_datagrams_total() {
+        Ok(counter) => counter
+            .with_label_values(&[
+                route,
+                udp_mode_label(mode),
+                udp_direction_label(direction),
+                udp_outcome_label(outcome),
+            ])
+            .inc(),
+        Err(error) => log::debug!("metrics UDP datagram counter unavailable: {error}"),
+    }
+}
+
+pub fn record_udp_drop(route: &str, reason: &str) {
+    match udp_drops_total() {
+        Ok(counter) => counter
+            .with_label_values(&[route, udp_drop_reason_label(reason)])
+            .inc(),
+        Err(error) => log::debug!("metrics UDP drop counter unavailable: {error}"),
+    }
+}
+
+pub fn set_udp_active_sessions(route: &str, active_sessions: usize) {
+    match udp_active_sessions() {
+        Ok(gauge) => gauge
+            .with_label_values(&[route])
+            .set(usize_to_i64_saturating(active_sessions)),
+        Err(error) => log::debug!("metrics UDP active session gauge unavailable: {error}"),
     }
 }
 
@@ -739,6 +777,78 @@ fn stream_bytes_total() -> Result<&'static IntCounterVec, prometheus::Error> {
     let _ = STREAM_BYTES_TOTAL.set(counter);
     STREAM_BYTES_TOTAL.get().ok_or_else(|| {
         prometheus::Error::Msg("fluxheim_stream_bytes_total failed to initialize".to_owned())
+    })
+}
+
+fn udp_datagrams_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = UDP_DATAGRAMS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_udp_datagrams_total",
+            "Total Fluxheim UDP datagrams by configured route, bounded mode, direction, and bounded outcome.",
+        ),
+        &["route", "mode", "direction", "outcome"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = UDP_DATAGRAMS_TOTAL.set(counter);
+    UDP_DATAGRAMS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("fluxheim_udp_datagrams_total failed to initialize".to_owned())
+    })
+}
+
+fn udp_drops_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = UDP_DROPS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_udp_drops_total",
+            "Total Fluxheim UDP datagram drops by configured route and bounded reason.",
+        ),
+        &["route", "reason"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = UDP_DROPS_TOTAL.set(counter);
+    UDP_DROPS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("fluxheim_udp_drops_total failed to initialize".to_owned())
+    })
+}
+
+fn udp_active_sessions() -> Result<&'static IntGaugeVec, prometheus::Error> {
+    if let Some(gauge) = UDP_ACTIVE_SESSIONS.get() {
+        return Ok(gauge);
+    }
+
+    let gauge = IntGaugeVec::new(
+        Opts::new(
+            "fluxheim_udp_active_sessions",
+            "Current Fluxheim UDP active datagram sessions by configured route.",
+        ),
+        &["route"],
+    )?;
+    match prometheus::default_registry().register(Box::new(gauge.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = UDP_ACTIVE_SESSIONS.set(gauge);
+    UDP_ACTIVE_SESSIONS.get().ok_or_else(|| {
+        prometheus::Error::Msg("fluxheim_udp_active_sessions failed to initialize".to_owned())
     })
 }
 
@@ -1509,6 +1619,44 @@ fn stream_direction_label(direction: &str) -> &'static str {
     fluxheim_observability::metrics_stream_direction_label(direction)
 }
 
+fn udp_mode_label(mode: &str) -> &'static str {
+    match mode {
+        "dns_load_balance" => "dns_load_balance",
+        "syslog_forward" => "syslog_forward",
+        "quic_pass_through" => "quic_pass_through",
+        "game_proxy" => "game_proxy",
+        _ => "other",
+    }
+}
+
+fn udp_direction_label(direction: &str) -> &'static str {
+    match direction {
+        "downstream" => "downstream",
+        "upstream" => "upstream",
+        _ => "other",
+    }
+}
+
+fn udp_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "accepted" => "accepted",
+        "sent" => "sent",
+        "error" => "error",
+        _ => "other",
+    }
+}
+
+fn udp_drop_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "max_sessions" => "max_sessions",
+        "max_sessions_per_source" => "max_sessions_per_source",
+        "oversized_downstream" => "oversized_downstream",
+        "oversized_upstream" => "oversized_upstream",
+        "response_rate_limited" => "response_rate_limited",
+        _ => "other",
+    }
+}
+
 fn acme_event_label(event: &str) -> &'static str {
     fluxheim_observability::metrics_acme_event_label(event)
 }
@@ -1536,7 +1684,8 @@ mod tests {
         record_load_balancer_event, record_load_balancer_queue_wait, record_metrics_otlp_export,
         record_php_fpm_pool_event, record_php_fpm_pool_idle, record_php_fpm_retry,
         record_php_request, record_php_stderr, record_proxy_outcome, record_response_compression,
-        record_stream_bytes, record_stream_connection, status_class,
+        record_stream_bytes, record_stream_connection, record_udp_datagram, record_udp_drop,
+        set_udp_active_sessions, status_class,
     };
 
     #[test]
@@ -1615,6 +1764,54 @@ mod tests {
         assert!(output.contains(r#"direction="other""#));
         assert!(!output.contains("attacker-outcome"));
         assert!(!output.contains("attacker-direction"));
+    }
+
+    #[test]
+    fn records_udp_metrics_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_udp_datagram("dns", "dns_load_balance", "downstream", "accepted");
+        record_udp_datagram("dns", "syslog_forward", "upstream", "sent");
+        record_udp_datagram(
+            "dns",
+            "attacker-mode",
+            "attacker-direction",
+            "attacker-outcome",
+        );
+        record_udp_drop("dns", "max_sessions");
+        record_udp_drop("dns", "max_sessions_per_source");
+        record_udp_drop("dns", "response_rate_limited");
+        record_udp_drop("dns", "attacker-reason");
+        set_udp_active_sessions("dns", 2);
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_udp_datagrams_total"));
+        assert!(output.contains("fluxheim_udp_drops_total"));
+        assert!(output.contains("fluxheim_udp_active_sessions"));
+        assert!(output.contains(r#"route="dns""#));
+        assert!(output.contains(r#"mode="dns_load_balance""#));
+        assert!(output.contains(r#"mode="syslog_forward""#));
+        assert!(output.contains(r#"mode="other""#));
+        assert!(output.contains(r#"direction="downstream""#));
+        assert!(output.contains(r#"direction="upstream""#));
+        assert!(output.contains(r#"direction="other""#));
+        assert!(output.contains(r#"outcome="accepted""#));
+        assert!(output.contains(r#"outcome="sent""#));
+        assert!(output.contains(r#"outcome="other""#));
+        assert!(output.contains(r#"reason="max_sessions""#));
+        assert!(output.contains(r#"reason="max_sessions_per_source""#));
+        assert!(output.contains(r#"reason="response_rate_limited""#));
+        assert!(output.contains(r#"reason="other""#));
+        assert!(!output.contains("attacker-mode"));
+        assert!(!output.contains("attacker-direction"));
+        assert!(!output.contains("attacker-outcome"));
+        assert!(!output.contains("attacker-reason"));
     }
 
     #[test]
