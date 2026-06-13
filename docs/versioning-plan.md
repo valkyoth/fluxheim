@@ -3894,7 +3894,11 @@ the exception while the cache server is being completed as a focused sequence:
   in `crates/fluxheim-cache::object`, again behind root `crate::cache`
   compatibility re-exports. Cache request/key DTOs now live in
   `crates/fluxheim-cache::request`, while root cache-key builders keep their
-  existing behavior and compatibility surface.
+  existing behavior and compatibility surface. Cache purge-index state,
+  purge-entry DTOs, storage-local purge result counters, and cache-key path
+  matching helpers now live in `crates/fluxheim-cache::purge_index`, while the
+  root `crate::cache` module keeps compatibility type names and the Pingora
+  storage implementations remain root runtime adapters.
   The `crates/fluxheim-web` boundary now has static
   directory-listing data/rendering moved behind the existing `crate::web`
   surface, and the `crates/fluxheim-php-fpm` boundary with timeout

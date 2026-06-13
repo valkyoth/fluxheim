@@ -32,6 +32,11 @@ behavior when the change improves security or project direction.
 - Move cache request/key DTOs into `crates/fluxheim-cache::request`, with root
   `crate::cache` re-exports and root cache-key builders preserving the existing
   behavior.
+- Move cache purge-index state, purge-entry DTOs, storage-local purge result
+  counters, and cache-key path matching helpers into
+  `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing
+  compatibility type names while the Pingora storage implementations remain in
+  the root runtime adapter.
 - Start the `fluxheim-web` crate boundary by moving static directory-listing
   data/rendering helpers into `crates/fluxheim-web`. The root `crate::web`
   module re-exports the same types and renderer while keeping Pingora response

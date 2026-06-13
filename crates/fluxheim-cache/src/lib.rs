@@ -8,6 +8,7 @@ pub mod api;
 pub mod headers;
 pub mod object;
 pub mod plan;
+pub mod purge_index;
 pub mod request;
 
 pub use api::{
@@ -22,4 +23,5 @@ pub use api::{
 };
 pub use object::{CacheStoreError, CachedHeader, CachedImageObject};
 pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};
+pub use purge_index::{CachePurgeIndex, CachePurgeIndexEntry};
 pub use request::{CacheKey, CacheRequest, StaticCacheRequest};
