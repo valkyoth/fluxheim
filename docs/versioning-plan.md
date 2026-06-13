@@ -4004,6 +4004,9 @@ the exception while the cache server is being completed as a focused sequence:
   adapter.
   Cache CLI header-name validation now also uses the shared
   `crates/fluxheim-protocol` HTTP token grammar helper.
+  Config HTTP token validation now also uses the shared
+  `crates/fluxheim-protocol` grammar while preserving method-specific
+  uppercase checks.
   Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last

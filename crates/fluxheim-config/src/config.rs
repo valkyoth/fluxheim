@@ -2453,28 +2453,7 @@ fn disabled_proxy_config() -> ProxyConfig {
 }
 
 pub fn valid_http_token(value: &str) -> bool {
-    !value.is_empty()
-        && value.bytes().all(|byte| {
-            matches!(
-                byte,
-                b'!' | b'#'
-                    | b'$'
-                    | b'%'
-                    | b'&'
-                    | b'\''
-                    | b'*'
-                    | b'+'
-                    | b'-'
-                    | b'.'
-                    | b'^'
-                    | b'_'
-                    | b'`'
-                    | b'|'
-                    | b'~'
-                    | b'0'..=b'9'
-                    | b'A'..=b'Z'
-            )
-        })
+    fluxheim_protocol::http_token_valid(value)
 }
 
 pub fn validate_config_list_len(

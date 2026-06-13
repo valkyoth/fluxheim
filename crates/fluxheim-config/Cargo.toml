@@ -28,6 +28,7 @@ traffic-mirror = []
 udp-proxy = []
 
 [dependencies]
+fluxheim-protocol = { path = "../fluxheim-protocol" }
 log = "0.4.32"
 regex = "1.12.4"
 serde = { version = "1.0.228", features = ["derive"] }

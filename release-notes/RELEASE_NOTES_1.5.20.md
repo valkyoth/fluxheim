@@ -208,6 +208,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   adapter.
 - Moved cache CLI header-name validation onto the shared
   `crates/fluxheim-protocol` HTTP token grammar helper.
+- Moved config HTTP token validation onto the shared
+  `crates/fluxheim-protocol` grammar while preserving method-specific
+  uppercase checks.
 
 ## Fixed
 
