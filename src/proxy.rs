@@ -6586,7 +6586,7 @@ fn compose_multipart_slice_body(
     total: u64,
     boundary: &str,
 ) -> Result<Bytes> {
-    let content_type = sanitize_multipart_content_type(
+    let content_type = crate::cache::sanitize_multipart_content_type(
         &slices
             .values()
             .find_map(|slice| first_header_value(slice.meta.headers(), "content-type"))
@@ -6629,19 +6629,6 @@ fn random_multipart_boundary() -> String {
         let _ = write!(&mut boundary, "{byte:02x}");
     }
     boundary
-}
-
-#[cfg(feature = "cache")]
-fn sanitize_multipart_content_type(value: &str) -> String {
-    let sanitized = value
-        .chars()
-        .filter(|character| *character != '\r' && *character != '\n')
-        .collect::<String>();
-    if sanitized.is_empty() {
-        "application/octet-stream".to_owned()
-    } else {
-        sanitized
-    }
 }
 
 #[cfg(feature = "cache")]
@@ -10447,7 +10434,6 @@ mod tests {
         CACHE_PASS_REASON, cache_min_uses_allows_store, cache_pass_record_cacheable,
         cache_pass_record_uncacheable, cache_pass_should_bypass, lookup_proxy_cache_only_object,
         random_multipart_boundary, read_cache_hit_body, response_vary_variance,
-        sanitize_multipart_content_type,
     };
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
@@ -19119,19 +19105,6 @@ mod tests {
         );
         assert_ne!(first, "fluxheim-slice-4096");
         assert_ne!(first, second);
-    }
-
-    #[cfg(feature = "cache")]
-    #[test]
-    fn multipart_slice_content_type_strips_crlf() {
-        assert_eq!(
-            sanitize_multipart_content_type("text/plain\r\nX-Injected: yes"),
-            "text/plainX-Injected: yes"
-        );
-        assert_eq!(
-            sanitize_multipart_content_type("\r\n"),
-            "application/octet-stream"
-        );
     }
 
     #[cfg(feature = "cache")]

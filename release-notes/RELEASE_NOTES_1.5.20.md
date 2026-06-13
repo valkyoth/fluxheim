@@ -195,6 +195,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   leaving root proxy as the Pingora request-header adapter.
 - Moved Fluxheim `Via` header value formatting into `crates/fluxheim-protocol`,
   leaving root proxy as the Pingora header mutation adapter.
+- Moved multipart cache Content-Type sanitization into
+  `crates/fluxheim-cache::headers`, leaving root proxy as the slice response
+  assembly adapter.
 
 ## Fixed
 

@@ -35,6 +35,18 @@ pub fn response_values_forbid_shared_cache<'a>(
         .find_map(response_cache_control_shared_rejection)
 }
 
+pub fn sanitize_multipart_content_type(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .filter(|character| *character != '\r' && *character != '\n')
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "application/octet-stream".to_owned()
+    } else {
+        sanitized
+    }
+}
+
 pub fn cookie_headers_match_cache_bypass<'a>(
     cookie_headers: impl IntoIterator<Item = &'a str>,
     configured_names: &[String],
@@ -927,5 +939,17 @@ mod tests {
             response.headers(),
             &cache
         ));
+    }
+
+    #[test]
+    fn multipart_content_type_sanitizer_strips_crlf() {
+        assert_eq!(
+            super::sanitize_multipart_content_type("text/plain\r\nX-Injected: yes"),
+            "text/plainX-Injected: yes"
+        );
+        assert_eq!(
+            super::sanitize_multipart_content_type("\r\n"),
+            "application/octet-stream"
+        );
     }
 }

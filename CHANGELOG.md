@@ -201,6 +201,9 @@ behavior when the change improves security or project direction.
   leaving root proxy as the Pingora request-header adapter.
 - Move Fluxheim `Via` header value formatting into `crates/fluxheim-protocol`,
   leaving root proxy as the Pingora header mutation adapter.
+- Move multipart cache Content-Type sanitization into
+  `crates/fluxheim-cache::headers`, leaving root proxy as the slice response
+  assembly adapter.
 
 ### Fixed
 
