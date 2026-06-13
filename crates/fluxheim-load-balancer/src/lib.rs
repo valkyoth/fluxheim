@@ -82,6 +82,37 @@ pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
 const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
 pub const MAX_RUNTIME_BACKEND_WEIGHT: usize = 1000;
 
+pub fn parse_load_balancer_runtime_weight(value: &str) -> Result<Option<usize>, &'static str> {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("default")
+        || value.eq_ignore_ascii_case("reset")
+        || value.eq_ignore_ascii_case("clear")
+        || value.eq_ignore_ascii_case("configured")
+    {
+        return Ok(None);
+    }
+    let Ok(weight) = value.parse::<usize>() else {
+        return Err(
+            "load balancer weight must be a number or one of default/reset/clear/configured",
+        );
+    };
+    if weight == 0 || weight > MAX_RUNTIME_BACKEND_WEIGHT {
+        return Err("load balancer weight must be between 1 and 1000");
+    }
+    Ok(Some(weight))
+}
+
+pub fn parse_load_balancer_member_weight(value: &str) -> Result<usize, &'static str> {
+    let value = value.trim();
+    let Ok(weight) = value.parse::<usize>() else {
+        return Err("load balancer member weight must be a number");
+    };
+    if weight == 0 || weight > MAX_RUNTIME_BACKEND_WEIGHT {
+        return Err("load balancer member weight must be between 1 and 1000");
+    }
+    Ok(weight)
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct LoadBalancerMetricLabels {
     vhost: Arc<str>,
@@ -1849,6 +1880,53 @@ mod tests {
     fn install_test_crypto_provider() {
         #[cfg(feature = "tls-rustls-backend")]
         let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
+    #[test]
+    fn runtime_weight_parser_documents_reset_keywords_and_bounds() {
+        assert_eq!(
+            super::parse_load_balancer_runtime_weight("configured"),
+            Ok(None)
+        );
+        assert_eq!(
+            super::parse_load_balancer_runtime_weight("default"),
+            Ok(None)
+        );
+        assert_eq!(super::parse_load_balancer_runtime_weight("reset"), Ok(None));
+        assert_eq!(super::parse_load_balancer_runtime_weight("clear"), Ok(None));
+        assert_eq!(
+            super::parse_load_balancer_runtime_weight(" 7 "),
+            Ok(Some(7))
+        );
+        assert_eq!(
+            super::parse_load_balancer_runtime_weight("bogus"),
+            Err("load balancer weight must be a number or one of default/reset/clear/configured")
+        );
+        assert_eq!(
+            super::parse_load_balancer_runtime_weight("0"),
+            Err("load balancer weight must be between 1 and 1000")
+        );
+        assert_eq!(
+            super::parse_load_balancer_runtime_weight("1001"),
+            Err("load balancer weight must be between 1 and 1000")
+        );
+    }
+
+    #[test]
+    fn member_weight_parser_accepts_only_numeric_configured_weight() {
+        assert_eq!(super::parse_load_balancer_member_weight(" 5 "), Ok(5));
+        assert_eq!(
+            super::parse_load_balancer_member_weight("reset"),
+            Err("load balancer member weight must be a number")
+        );
+        assert_eq!(
+            super::parse_load_balancer_member_weight("0"),
+            Err("load balancer member weight must be between 1 and 1000")
+        );
+        assert_eq!(
+            super::parse_load_balancer_member_weight("1001"),
+            Err("load balancer member weight must be between 1 and 1000")
+        );
     }
 
     fn request() -> RequestHeader {

@@ -180,6 +180,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved reload-impact classification into `crates/fluxheim-config`, with root
   `crate::reload` kept as a compatibility re-export for admin and CLI reload
   reporting.
+- Moved load-balancer runtime/member weight parser helpers into
+  `crates/fluxheim-load-balancer`, leaving root admin as the HTTP/query
+  endpoint adapter.
 
 ## Fixed
 

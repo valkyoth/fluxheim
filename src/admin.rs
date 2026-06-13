@@ -3878,35 +3878,12 @@ fn query_params<'a>(query: Option<&'a str>, name: &str) -> Vec<&'a str> {
 
 #[cfg(feature = "load-balancer")]
 fn parse_load_balancer_runtime_weight(value: &str) -> Result<Option<usize>, &'static str> {
-    let value = value.trim();
-    if value.eq_ignore_ascii_case("default")
-        || value.eq_ignore_ascii_case("reset")
-        || value.eq_ignore_ascii_case("clear")
-        || value.eq_ignore_ascii_case("configured")
-    {
-        return Ok(None);
-    }
-    let Ok(weight) = value.parse::<usize>() else {
-        return Err(
-            "load balancer weight must be a number or one of default/reset/clear/configured",
-        );
-    };
-    if weight == 0 || weight > crate::load_balancer::MAX_RUNTIME_BACKEND_WEIGHT {
-        return Err("load balancer weight must be between 1 and 1000");
-    }
-    Ok(Some(weight))
+    crate::load_balancer::parse_load_balancer_runtime_weight(value)
 }
 
 #[cfg(feature = "load-balancer")]
 fn parse_load_balancer_member_weight(value: &str) -> Result<usize, &'static str> {
-    let value = value.trim();
-    let Ok(weight) = value.parse::<usize>() else {
-        return Err("load balancer member weight must be a number");
-    };
-    if weight == 0 || weight > crate::load_balancer::MAX_RUNTIME_BACKEND_WEIGHT {
-        return Err("load balancer member weight must be between 1 and 1000");
-    }
-    Ok(weight)
+    crate::load_balancer::parse_load_balancer_member_weight(value)
 }
 
 fn cache_purge_paths<'a>(headers: &'a HeaderMap, query: Option<&'a str>) -> Vec<&'a str> {

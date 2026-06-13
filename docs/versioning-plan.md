@@ -3973,6 +3973,9 @@ the exception while the cache server is being completed as a focused sequence:
   writes while root `crate::snapshot` remains a compatibility re-export.
   reload-impact classification in `crates/fluxheim-config`, with root
   `crate::reload` as a compatibility re-export for admin and CLI reporting.
+  Runtime/member weight parsing now also lives in
+  `crates/fluxheim-load-balancer`, with root admin kept as the HTTP/query
+  endpoint adapter.
   Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last

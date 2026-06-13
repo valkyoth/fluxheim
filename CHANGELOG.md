@@ -186,6 +186,9 @@ behavior when the change improves security or project direction.
 - Move reload-impact classification into `crates/fluxheim-config`, with root
   `crate::reload` kept as a compatibility re-export for admin and CLI reload
   reporting.
+- Move load-balancer runtime/member weight parser helpers into
+  `crates/fluxheim-load-balancer`, leaving root admin as the HTTP/query
+  endpoint adapter.
 
 ### Fixed
 
