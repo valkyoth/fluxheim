@@ -194,6 +194,9 @@ behavior when the change improves security or project direction.
 - Move runtime cache-purger `usize` metric saturation into
   `crates/fluxheim-observability`, keeping root runtime as the background-task
   adapter.
+- Move downstream PROXY-protocol trusted-source parsing into
+  `crates/fluxheim-protocol`, leaving root runtime as the Pingora listener
+  adapter.
 
 ### Fixed
 

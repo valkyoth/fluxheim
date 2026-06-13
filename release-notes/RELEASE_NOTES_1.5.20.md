@@ -188,6 +188,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved runtime cache-purger `usize` metric saturation into
   `crates/fluxheim-observability`, keeping root runtime as the background-task
   adapter.
+- Moved downstream PROXY-protocol trusted-source parsing into
+  `crates/fluxheim-protocol`, leaving root runtime as the Pingora listener
+  adapter.
 
 ## Fixed
 

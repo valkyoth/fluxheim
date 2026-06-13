@@ -6,6 +6,50 @@
 
 use std::net::{IpAddr, SocketAddr};
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ProxyProtocolTrustedSource {
+    Ip(IpAddr),
+    Cidr { network: IpAddr, prefix: u8 },
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ProxyProtocolTrustedSourceParseError {
+    InvalidAddress,
+    InvalidPrefix,
+}
+
+impl std::fmt::Display for ProxyProtocolTrustedSourceParseError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidAddress => formatter.write_str("invalid PROXY protocol trusted address"),
+            Self::InvalidPrefix => {
+                formatter.write_str("invalid PROXY protocol trusted CIDR prefix")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProxyProtocolTrustedSourceParseError {}
+
+pub fn parse_proxy_protocol_trusted_source(
+    value: &str,
+) -> Result<ProxyProtocolTrustedSource, ProxyProtocolTrustedSourceParseError> {
+    if let Some((address, prefix)) = value.split_once('/') {
+        let network = address
+            .parse::<IpAddr>()
+            .map_err(|_| ProxyProtocolTrustedSourceParseError::InvalidAddress)?;
+        let prefix = prefix
+            .parse::<u8>()
+            .map_err(|_| ProxyProtocolTrustedSourceParseError::InvalidPrefix)?;
+        return Ok(ProxyProtocolTrustedSource::Cidr { network, prefix });
+    }
+    Ok(ProxyProtocolTrustedSource::Ip(
+        value
+            .parse::<IpAddr>()
+            .map_err(|_| ProxyProtocolTrustedSourceParseError::InvalidAddress)?,
+    ))
+}
+
 pub fn route_method_matches(methods: &[String], method: &str) -> bool {
     methods.is_empty()
         || methods
@@ -95,12 +139,55 @@ pub fn proxy_protocol_v2_header(
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
+    use std::net::{IpAddr, SocketAddr};
 
     use super::{
-        proxy_protocol_v1_header, proxy_protocol_v2_header, route_method_matches,
-        route_prefix_matches_path, route_strip_prefix_suffix,
+        ProxyProtocolTrustedSource, ProxyProtocolTrustedSourceParseError,
+        parse_proxy_protocol_trusted_source, proxy_protocol_v1_header, proxy_protocol_v2_header,
+        route_method_matches, route_prefix_matches_path, route_strip_prefix_suffix,
     };
+
+    #[test]
+    fn parses_proxy_protocol_trusted_ip_and_cidr_sources() {
+        assert_eq!(
+            parse_proxy_protocol_trusted_source("192.0.2.10"),
+            Ok(ProxyProtocolTrustedSource::Ip(IpAddr::from([
+                192, 0, 2, 10
+            ])))
+        );
+        assert_eq!(
+            parse_proxy_protocol_trusted_source("2001:db8::1"),
+            Ok(ProxyProtocolTrustedSource::Ip(
+                "2001:db8::1".parse().expect("valid IPv6")
+            ))
+        );
+        assert_eq!(
+            parse_proxy_protocol_trusted_source("198.51.100.0/24"),
+            Ok(ProxyProtocolTrustedSource::Cidr {
+                network: IpAddr::from([198, 51, 100, 0]),
+                prefix: 24,
+            })
+        );
+        assert_eq!(
+            parse_proxy_protocol_trusted_source("2001:db8::/32"),
+            Ok(ProxyProtocolTrustedSource::Cidr {
+                network: "2001:db8::".parse().expect("valid IPv6 network"),
+                prefix: 32,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_proxy_protocol_trusted_sources() {
+        assert_eq!(
+            parse_proxy_protocol_trusted_source("example.com"),
+            Err(ProxyProtocolTrustedSourceParseError::InvalidAddress)
+        );
+        assert_eq!(
+            parse_proxy_protocol_trusted_source("192.0.2.0/not-a-prefix"),
+            Err(ProxyProtocolTrustedSourceParseError::InvalidPrefix)
+        );
+    }
 
     #[test]
     fn route_method_matching_treats_inbound_case_as_equivalent() {

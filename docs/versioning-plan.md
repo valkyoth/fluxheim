@@ -3982,6 +3982,9 @@ the exception while the cache server is being completed as a focused sequence:
   Runtime cache-purger metric saturation now also lives in
   `crates/fluxheim-observability`, with root runtime kept as the background-task
   adapter.
+  Downstream PROXY-protocol trusted-source parsing now also lives in
+  `crates/fluxheim-protocol`, with root runtime kept as the Pingora listener
+  adapter.
   Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last

@@ -257,7 +257,7 @@ where
         .server
         .trusted_proxies
         .iter()
-        .map(|source| parse_proxy_protocol_trusted_source(source))
+        .map(|source| pingora_proxy_protocol_trusted_source(source))
         .collect::<Result<Vec<_>, _>>()?;
     log::info!(
         "downstream PROXY protocol {:?} receive enabled for {} trusted source(s)",
@@ -281,17 +281,17 @@ where
 }
 
 #[cfg(feature = "proxy")]
-fn parse_proxy_protocol_trusted_source(
+fn pingora_proxy_protocol_trusted_source(
     value: &str,
 ) -> Result<pingora::listeners::ProxyProtocolTrustedSource, Box<dyn Error + Send + Sync>> {
-    if let Some((address, prefix)) = value.split_once('/') {
-        let network = address.parse::<std::net::IpAddr>()?;
-        let prefix = prefix.parse::<u8>()?;
-        return Ok(pingora::listeners::ProxyProtocolTrustedSource::Cidr { network, prefix });
+    match fluxheim_protocol::parse_proxy_protocol_trusted_source(value)? {
+        fluxheim_protocol::ProxyProtocolTrustedSource::Ip(address) => {
+            Ok(pingora::listeners::ProxyProtocolTrustedSource::Ip(address))
+        }
+        fluxheim_protocol::ProxyProtocolTrustedSource::Cidr { network, prefix } => {
+            Ok(pingora::listeners::ProxyProtocolTrustedSource::Cidr { network, prefix })
+        }
     }
-    Ok(pingora::listeners::ProxyProtocolTrustedSource::Ip(
-        value.parse::<std::net::IpAddr>()?,
-    ))
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
