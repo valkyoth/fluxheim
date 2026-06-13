@@ -4182,7 +4182,7 @@ mod tests {
 
     use arc_swap::ArcSwap;
     use http::{HeaderMap, HeaderValue, StatusCode, header};
-    #[cfg(feature = "load-balancer")]
+    #[cfg(any(feature = "load-balancer", feature = "udp-proxy"))]
     use serde_json::Value;
 
     use super::{
@@ -4417,6 +4417,60 @@ mod tests {
                 .unwrap()
                 .contains(r#""pending_validation":null"#)
         );
+    }
+
+    #[cfg(feature = "udp-proxy")]
+    #[test]
+    fn udp_status_endpoint_reports_route_limits() {
+        let mut config = Config::default();
+        config.udp = crate::config::UdpConfig {
+            enabled: true,
+            routes: vec![crate::config::UdpRouteConfig {
+                name: "dns-edge".to_owned(),
+                mode: crate::config::UdpRouteMode::DnsLoadBalance,
+                listen: vec!["127.0.0.1:5353".to_owned()],
+                upstream: Some("127.0.0.1:53".to_owned()),
+                upstreams: Vec::new(),
+                upstream_weights: Vec::new(),
+                upstream_aliases: Vec::new(),
+                idle_timeout_secs: 30,
+                response_timeout_secs: 3,
+                max_datagram_bytes: 1232,
+                max_sessions: 4096,
+                max_sessions_per_source: 64,
+                max_responses_per_source_per_second: 256,
+                passive_health_enabled: true,
+                passive_health_failures: 3,
+                passive_health_ejection_secs: 10,
+            }],
+        };
+        let app = app_with_config(config);
+
+        let unauthenticated = app.handle("GET", "/_fluxheim/udp/status", None, &HeaderMap::new());
+        assert_eq!(unauthenticated.status, StatusCode::UNAUTHORIZED);
+
+        let response = app.handle("GET", "/_fluxheim/udp/status", None, &auth_headers());
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["udp"]["enabled"], true);
+        assert_eq!(body["udp"]["route_count"], 1);
+        let route = &body["udp"]["routes"][0];
+        assert_eq!(route["name"], "dns-edge");
+        assert_eq!(route["mode"], "dns-load-balance");
+        assert_eq!(route["max_datagram_bytes"], 1232);
+        assert_eq!(route["max_sessions"], 4096);
+        assert_eq!(route["max_sessions_per_source"], 64);
+        assert_eq!(route["max_responses_per_source_per_second"], 256);
+        assert_eq!(route["passive_health_enabled"], true);
+        assert_eq!(route["passive_health_failures"], 3);
+        assert_eq!(route["passive_health_ejection_secs"], 10);
+        assert_eq!(route["public_exposure_warning"], false);
+
+        let response = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["udp"]["route_count"], 1);
     }
 
     #[cfg(feature = "load-balancer")]
