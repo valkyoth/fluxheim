@@ -1570,40 +1570,11 @@ fn edge_policy_outcome_label(outcome: &str) -> &'static str {
 }
 
 fn load_balancer_event_label(event: &str) -> &'static str {
-    match event {
-        "selected" => "selected",
-        "unavailable" => "unavailable",
-        "retry" => "retry",
-        "success" => "success",
-        "failure" => "failure",
-        "ejected" => "ejected",
-        "member_state" => "member_state",
-        "member_state_invalid" => "member_state_invalid",
-        "member_state_not_found" => "member_state_not_found",
-        "member_weight" => "member_weight",
-        "member_weight_invalid" => "member_weight_invalid",
-        "member_weight_not_found" => "member_weight_not_found",
-        "persistence_hit" => "persistence_hit",
-        "persistence_miss" => "persistence_miss",
-        "persistence_fallback" => "persistence_fallback",
-        "persistence_clear" => "persistence_clear",
-        "persistence_clear_invalid" => "persistence_clear_invalid",
-        "persistence_clear_not_found" => "persistence_clear_not_found",
-        "queue_waited" => "queue_waited",
-        "queue_full" => "queue_full",
-        "queue_timeout" => "queue_timeout",
-        "discovery_success" => "discovery_success",
-        "discovery_failure" => "discovery_failure",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_load_balancer_event_label(event)
 }
 
 fn load_balancer_queue_outcome_label(outcome: &str) -> &'static str {
-    match outcome {
-        "queue_waited" | "waited" => "waited",
-        "queue_timeout" | "timeout" => "timeout",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_load_balancer_queue_outcome_label(outcome)
 }
 
 fn load_balancer_selection_label(selection: crate::config::LoadBalanceSelection) -> &'static str {
@@ -1641,18 +1612,7 @@ fn load_balancer_selection_label(selection: crate::config::LoadBalanceSelection)
 }
 
 fn load_balancer_upstream_label(upstream: Option<&str>) -> &str {
-    let Some(upstream) = upstream else {
-        return "";
-    };
-    if upstream.is_empty()
-        || upstream.len() > 64
-        || upstream
-            .bytes()
-            .any(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_')))
-    {
-        return "other";
-    }
-    upstream
+    fluxheim_observability::metrics_load_balancer_upstream_label(upstream)
 }
 
 fn cache_event_label(event: &str) -> &'static str {

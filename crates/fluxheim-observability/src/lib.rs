@@ -216,6 +216,58 @@ pub fn metrics_edge_policy_outcome_label(outcome: &str) -> &'static str {
     }
 }
 
+pub fn metrics_load_balancer_event_label(event: &str) -> &'static str {
+    match event {
+        "selected" => "selected",
+        "unavailable" => "unavailable",
+        "retry" => "retry",
+        "success" => "success",
+        "failure" => "failure",
+        "ejected" => "ejected",
+        "member_state" => "member_state",
+        "member_state_invalid" => "member_state_invalid",
+        "member_state_not_found" => "member_state_not_found",
+        "member_weight" => "member_weight",
+        "member_weight_invalid" => "member_weight_invalid",
+        "member_weight_not_found" => "member_weight_not_found",
+        "persistence_hit" => "persistence_hit",
+        "persistence_miss" => "persistence_miss",
+        "persistence_fallback" => "persistence_fallback",
+        "persistence_clear" => "persistence_clear",
+        "persistence_clear_invalid" => "persistence_clear_invalid",
+        "persistence_clear_not_found" => "persistence_clear_not_found",
+        "queue_waited" => "queue_waited",
+        "queue_full" => "queue_full",
+        "queue_timeout" => "queue_timeout",
+        "discovery_success" => "discovery_success",
+        "discovery_failure" => "discovery_failure",
+        _ => "other",
+    }
+}
+
+pub fn metrics_load_balancer_queue_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "queue_waited" | "waited" => "waited",
+        "queue_timeout" | "timeout" => "timeout",
+        _ => "other",
+    }
+}
+
+pub fn metrics_load_balancer_upstream_label(upstream: Option<&str>) -> &str {
+    let Some(upstream) = upstream else {
+        return "";
+    };
+    if upstream.is_empty()
+        || upstream.len() > 64
+        || upstream
+            .bytes()
+            .any(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_')))
+    {
+        return "other";
+    }
+    upstream
+}
+
 pub fn metrics_stream_outcome_label(outcome: &str) -> &'static str {
     match outcome {
         "completed" => "completed",
@@ -908,6 +960,25 @@ mod tests {
         assert_eq!(metrics_edge_policy_label("unknown-policy"), "other");
         assert_eq!(metrics_edge_policy_outcome_label("skipped"), "skipped");
         assert_eq!(metrics_edge_policy_outcome_label("bypassed"), "other");
+        assert_eq!(
+            metrics_load_balancer_event_label("member_weight_invalid"),
+            "member_weight_invalid"
+        );
+        assert_eq!(metrics_load_balancer_event_label("custom"), "other");
+        assert_eq!(
+            metrics_load_balancer_queue_outcome_label("queue_waited"),
+            "waited"
+        );
+        assert_eq!(metrics_load_balancer_queue_outcome_label("other"), "other");
+        assert_eq!(
+            metrics_load_balancer_upstream_label(Some("backend-a_1")),
+            "backend-a_1"
+        );
+        assert_eq!(
+            metrics_load_balancer_upstream_label(Some("bad value")),
+            "other"
+        );
+        assert_eq!(metrics_load_balancer_upstream_label(None), "");
         assert_eq!(metrics_stream_outcome_label("completed"), "completed");
         assert_eq!(metrics_stream_outcome_label("strange"), "error");
         assert_eq!(
