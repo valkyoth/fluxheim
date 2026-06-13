@@ -44,6 +44,10 @@ behavior when the change improves security or project direction.
 - Move static byte-range parsing into `crates/fluxheim-web`, keeping
   `crate::web` compatibility re-exports for the existing static response
   planner and tests.
+- Move static response planning, conditional request evaluation, weak ETag
+  construction, and range response plan DTOs into `crates/fluxheim-web`.
+  `crate::web` keeps the existing `StaticRequestConditions` compatibility
+  adapter so proxy call sites and cache-refresh semantics are unchanged.
 - Start the `fluxheim-php-fpm` crate boundary by moving PHP-FPM timeout
   classification and bounded error-outcome helpers into
   `crates/fluxheim-php-fpm`, with the root PHP-FPM module re-exporting the same

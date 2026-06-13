@@ -5,6 +5,7 @@
 )]
 
 use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 
@@ -24,10 +25,231 @@ pub struct DirectoryEntry {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct StaticResponseFile {
+    pub len: u64,
+    pub modified: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StaticResponsePlan {
+    pub status: u16,
+    pub body: StaticResponseBody,
+    pub content_length: Option<u64>,
+    pub content_range: Option<String>,
+    pub etag: String,
+    pub response_body_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum StaticResponseBody {
+    None,
+    Full,
+    Range { start: u64, len: u64 },
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct StaticResponseConditions<'a> {
+    pub if_match: Option<&'a str>,
+    pub if_unmodified_since: Option<&'a str>,
+    pub if_none_match: Option<&'a str>,
+    pub if_modified_since: Option<&'a str>,
+    pub cache_refresh_forced: bool,
+    pub range: Option<&'a str>,
+    pub if_range: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ByteRangeParse {
     Single { start: u64, len: u64 },
     Unsatisfiable,
     Ignore,
+}
+
+pub fn plan_static_response(
+    file: StaticResponseFile,
+    method: &str,
+    conditions: StaticResponseConditions<'_>,
+) -> StaticResponsePlan {
+    let etag = static_etag(file);
+
+    if if_match_fails(conditions.if_match, &etag)
+        || (conditions.if_match.is_none()
+            && unmodified_since_fails(file.modified, conditions.if_unmodified_since))
+    {
+        return StaticResponsePlan {
+            status: 412,
+            body: StaticResponseBody::None,
+            content_length: Some(0),
+            content_range: None,
+            etag,
+            response_body_bytes: 0,
+        };
+    }
+
+    if !conditions.cache_refresh_forced
+        && (etag_not_modified(conditions.if_none_match, &etag)
+            || (conditions.if_none_match.is_none()
+                && modified_since_not_modified(file.modified, conditions.if_modified_since)))
+    {
+        return StaticResponsePlan {
+            status: 304,
+            body: StaticResponseBody::None,
+            content_length: None,
+            content_range: None,
+            etag,
+            response_body_bytes: 0,
+        };
+    }
+
+    let range = conditions
+        .range
+        .filter(|_| if_range_allows_range(file.modified, &etag, conditions.if_range));
+
+    if let Some(range) = range {
+        return match parse_single_byte_range(range, file.len) {
+            ByteRangeParse::Single { start, len } => StaticResponsePlan {
+                status: 206,
+                body: response_body(method, StaticResponseBody::Range { start, len }),
+                content_length: Some(len),
+                content_range: Some(format!(
+                    "bytes {start}-{}/{}",
+                    start.saturating_add(len).saturating_sub(1),
+                    file.len
+                )),
+                etag,
+                response_body_bytes: response_bytes(method, len),
+            },
+            ByteRangeParse::Unsatisfiable => StaticResponsePlan {
+                status: 416,
+                body: StaticResponseBody::None,
+                content_length: Some(0),
+                content_range: Some(format!("bytes */{}", file.len)),
+                etag,
+                response_body_bytes: 0,
+            },
+            ByteRangeParse::Ignore => full_static_response_plan(file, method, etag),
+        };
+    }
+
+    full_static_response_plan(file, method, etag)
+}
+
+fn full_static_response_plan(
+    file: StaticResponseFile,
+    method: &str,
+    etag: String,
+) -> StaticResponsePlan {
+    StaticResponsePlan {
+        status: 200,
+        body: response_body(method, StaticResponseBody::Full),
+        content_length: Some(file.len),
+        content_range: None,
+        etag,
+        response_body_bytes: response_bytes(method, file.len),
+    }
+}
+
+fn response_body(method: &str, body: StaticResponseBody) -> StaticResponseBody {
+    if method == "HEAD" {
+        StaticResponseBody::None
+    } else {
+        body
+    }
+}
+
+fn response_bytes(method: &str, bytes: u64) -> u64 {
+    if method == "HEAD" { 0 } else { bytes }
+}
+
+fn static_etag(file: StaticResponseFile) -> String {
+    let (seconds, nanos) = file
+        .modified
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| (duration.as_secs(), duration.subsec_nanos()))
+        .unwrap_or((0, 0));
+
+    format!("W/\"{:x}-{seconds:x}-{nanos:x}\"", file.len)
+}
+
+fn etag_not_modified(if_none_match: Option<&str>, etag: &str) -> bool {
+    let Some(value) = if_none_match else {
+        return false;
+    };
+
+    value
+        .split(',')
+        .map(str::trim)
+        .any(|candidate| candidate == "*" || weak_etag_value(candidate) == weak_etag_value(etag))
+}
+
+fn weak_etag_value(value: &str) -> &str {
+    value.strip_prefix("W/").unwrap_or(value)
+}
+
+fn if_match_fails(if_match: Option<&str>, etag: &str) -> bool {
+    let Some(value) = if_match else {
+        return false;
+    };
+
+    !value.split(',').map(str::trim).any(|candidate| {
+        candidate == "*"
+            || (!candidate.starts_with("W/") && !etag.starts_with("W/") && candidate == etag)
+    })
+}
+
+fn modified_since_not_modified(
+    modified: Option<SystemTime>,
+    if_modified_since: Option<&str>,
+) -> bool {
+    let (Some(modified), Some(if_modified_since)) = (modified, if_modified_since) else {
+        return false;
+    };
+    let Ok(if_modified_since) = httpdate::parse_http_date(if_modified_since) else {
+        return false;
+    };
+
+    let modified_seconds = modified
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let requested_seconds = if_modified_since
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+
+    modified_seconds <= requested_seconds
+}
+
+fn unmodified_since_fails(modified: Option<SystemTime>, if_unmodified_since: Option<&str>) -> bool {
+    let (Some(modified), Some(if_unmodified_since)) = (modified, if_unmodified_since) else {
+        return false;
+    };
+    let Ok(if_unmodified_since) = httpdate::parse_http_date(if_unmodified_since) else {
+        return false;
+    };
+
+    let modified_seconds = modified
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let requested_seconds = if_unmodified_since
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+
+    modified_seconds > requested_seconds
+}
+
+fn if_range_allows_range(modified: Option<SystemTime>, etag: &str, if_range: Option<&str>) -> bool {
+    let Some(if_range) = if_range.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+
+    if if_range.starts_with('"') {
+        return !etag.starts_with("W/") && if_range == etag;
+    }
+
+    modified_since_not_modified(modified, Some(if_range))
 }
 
 pub fn parse_single_byte_range(range: &str, file_len: u64) -> ByteRangeParse {
@@ -161,8 +383,9 @@ mod tests {
     use std::time::UNIX_EPOCH;
 
     use super::{
-        ByteRangeParse, DirectoryEntry, DirectoryListing, parse_single_byte_range,
-        render_directory_listing,
+        ByteRangeParse, DirectoryEntry, DirectoryListing, StaticResponseBody,
+        StaticResponseConditions, StaticResponseFile, parse_single_byte_range,
+        plan_static_response, render_directory_listing,
     };
 
     #[test]
@@ -240,5 +463,56 @@ mod tests {
             parse_single_byte_range("items=0-1", 100),
             ByteRangeParse::Unsatisfiable
         );
+    }
+
+    #[test]
+    fn plans_static_etag_revalidation() {
+        let modified = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let file = StaticResponseFile {
+            len: 42,
+            modified: Some(modified),
+        };
+        let first = plan_static_response(file, "GET", StaticResponseConditions::default());
+
+        assert_eq!(first.status, 200);
+        assert_eq!(first.content_length, Some(42));
+        assert_eq!(first.response_body_bytes, 42);
+
+        let revalidated = plan_static_response(
+            file,
+            "GET",
+            StaticResponseConditions {
+                if_none_match: Some(&first.etag),
+                ..StaticResponseConditions::default()
+            },
+        );
+
+        assert_eq!(revalidated.status, 304);
+        assert_eq!(revalidated.content_length, None);
+        assert_eq!(revalidated.body, StaticResponseBody::None);
+        assert_eq!(revalidated.response_body_bytes, 0);
+    }
+
+    #[test]
+    fn forced_refresh_ignores_static_revalidation() {
+        let modified = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let file = StaticResponseFile {
+            len: 42,
+            modified: Some(modified),
+        };
+        let first = plan_static_response(file, "GET", StaticResponseConditions::default());
+
+        let refreshed = plan_static_response(
+            file,
+            "GET",
+            StaticResponseConditions {
+                if_none_match: Some(&first.etag),
+                cache_refresh_forced: true,
+                ..StaticResponseConditions::default()
+            },
+        );
+
+        assert_eq!(refreshed.status, 200);
+        assert_eq!(refreshed.body, StaticResponseBody::Full);
     }
 }
