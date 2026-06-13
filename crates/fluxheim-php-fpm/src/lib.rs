@@ -55,11 +55,28 @@ pub fn php_fpm_error_outcome(error: &io::Error) -> &'static str {
     }
 }
 
+pub fn managed_php_fpm_restart_backoff_secs(restart_failures: usize) -> u64 {
+    2_u64.saturating_pow(restart_failures.min(5) as u32).min(30)
+}
+
+pub fn managed_php_fpm_path_env_from(value: Option<String>) -> String {
+    const DEFAULT_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+    value
+        .filter(|value| {
+            !value.is_empty() && value.bytes().all(|byte| !matches!(byte, 0..=31 | 127))
+        })
+        .unwrap_or_else(|| DEFAULT_PATH.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use std::io;
 
-    use super::{PhpFpmTimeoutKind, php_fpm_error_outcome, php_fpm_timeout_error};
+    use super::{
+        PhpFpmTimeoutKind, managed_php_fpm_path_env_from, managed_php_fpm_restart_backoff_secs,
+        php_fpm_error_outcome, php_fpm_timeout_error,
+    };
 
     #[test]
     fn php_fpm_error_outcomes_are_bounded() {
@@ -90,5 +107,21 @@ mod tests {
             php_fpm_error_outcome(&io::Error::other("backend failed")),
             "fpm_error"
         );
+    }
+
+    #[test]
+    fn managed_php_fpm_path_env_falls_back_for_control_bytes() {
+        assert_eq!(
+            managed_php_fpm_path_env_from(Some("/usr/bin\n/tmp".to_owned())),
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        );
+    }
+
+    #[test]
+    fn managed_php_fpm_restart_backoff_is_bounded() {
+        assert_eq!(managed_php_fpm_restart_backoff_secs(0), 1);
+        assert_eq!(managed_php_fpm_restart_backoff_secs(1), 2);
+        assert_eq!(managed_php_fpm_restart_backoff_secs(4), 16);
+        assert_eq!(managed_php_fpm_restart_backoff_secs(64), 30);
     }
 }

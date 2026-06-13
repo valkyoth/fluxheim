@@ -9,7 +9,8 @@ use crate::http_types::{PingoraResponseHeader as ResponseHeader, StatusCode};
 use crate::config::{PhpConfig, PhpFpmConfig, PhpFpmMode, PhpFpmProcessManager};
 use crate::flux_error::{FluxError, FluxResult};
 pub(crate) use fluxheim_php_fpm::{
-    PhpFpmTimeoutKind, php_fpm_error_outcome, php_fpm_timeout_error, php_fpm_timeout_kind,
+    PhpFpmTimeoutKind, managed_php_fpm_path_env_from, managed_php_fpm_restart_backoff_secs,
+    php_fpm_error_outcome, php_fpm_timeout_error, php_fpm_timeout_kind,
 };
 
 const MANAGED_PHP_FPM_STABLE_RESTART_SECS: u64 = 30;
@@ -1430,24 +1431,8 @@ fn managed_php_fpm_sleep_until_restart(shutdown: &AtomicBool, restart_failures: 
 }
 
 #[cfg(unix)]
-pub(crate) fn managed_php_fpm_restart_backoff_secs(restart_failures: usize) -> u64 {
-    2_u64.saturating_pow(restart_failures.min(5) as u32).min(30)
-}
-
-#[cfg(unix)]
 fn managed_php_fpm_path_env() -> String {
     managed_php_fpm_path_env_from(std::env::var("PATH").ok())
-}
-
-#[cfg(unix)]
-pub(crate) fn managed_php_fpm_path_env_from(value: Option<String>) -> String {
-    const DEFAULT_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-
-    value
-        .filter(|value| {
-            !value.is_empty() && value.bytes().all(|byte| !matches!(byte, 0..=31 | 127))
-        })
-        .unwrap_or_else(|| DEFAULT_PATH.to_owned())
 }
 
 #[cfg(unix)]

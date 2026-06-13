@@ -23,6 +23,9 @@ behavior when the change improves security or project direction.
   classification and bounded error-outcome helpers into
   `crates/fluxheim-php-fpm`, with the root PHP-FPM module re-exporting the same
   names for existing runtime and test code.
+- Move managed PHP-FPM restart-backoff and sanitized `PATH` fallback helpers
+  into `crates/fluxheim-php-fpm`, again keeping the root module as the
+  compatibility surface for existing code.
 
 ### Fixed
 
