@@ -17,7 +17,8 @@ pub(crate) use crate::cache::{
     CacheStaleEvent, VaryCachePolicy, cache_control_freshness_value, cache_control_with_directive,
     cache_should_serve_stale, cache_vary_policy, parse_bounded_single_range,
     parse_cache_client_ranges, parse_cache_content_range, remaining_fresh_ttl_secs,
-    required_slice_bounds, resolve_client_slice_ranges, response_content_type_is_cacheable,
+    required_slice_bounds, resolve_client_slice_ranges, response_content_length_matches_range,
+    response_content_range_matches, response_content_type_is_cacheable,
 };
 #[cfg(test)]
 pub(crate) use crate::cache::{MAX_VARY_FIELDS, cache_stale_status_allows, vary_cache_policy};
@@ -245,10 +246,10 @@ pub(crate) fn range_response_cache_admission_rejection(
             if response.status != StatusCode::PARTIAL_CONTENT {
                 return Some("range-cache-non-partial");
             }
-            if !content_range_matches(response, range) {
+            if !response_content_range_matches(&response.headers, range) {
                 return Some("range-cache-content-range");
             }
-            if !content_length_matches_range(response, range) {
+            if !response_content_length_matches_range(&response.headers, range) {
                 return Some("range-cache-content-length");
             }
             None
@@ -256,27 +257,6 @@ pub(crate) fn range_response_cache_admission_rejection(
         None if response.status == StatusCode::PARTIAL_CONTENT => Some("range-response"),
         None => None,
     }
-}
-
-fn content_range_matches(response: &ResponseHeader, expected: CacheRangeRequest) -> bool {
-    response
-        .headers
-        .get_all("content-range")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .any(|value| {
-            parse_cache_content_range(value)
-                .is_some_and(|range| range.start == expected.start && range.end == expected.end)
-        })
-}
-
-fn content_length_matches_range(response: &ResponseHeader, expected: CacheRangeRequest) -> bool {
-    response
-        .headers
-        .get_all("content-length")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .any(|value| value.trim().parse::<u64>().ok() == Some(expected.len()))
 }
 
 pub(crate) fn response_cache_admission_rejection(

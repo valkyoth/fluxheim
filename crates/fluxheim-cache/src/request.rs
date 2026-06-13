@@ -180,6 +180,31 @@ pub fn parse_cache_client_ranges(value: &str) -> Option<Vec<CacheClientRange>> {
     (!ranges.is_empty()).then_some(ranges)
 }
 
+pub fn response_content_range_matches(
+    headers: &http::HeaderMap,
+    expected: CacheRangeRequest,
+) -> bool {
+    headers
+        .get_all("content-range")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| {
+            parse_cache_content_range(value)
+                .is_some_and(|range| range.start == expected.start && range.end == expected.end)
+        })
+}
+
+pub fn response_content_length_matches_range(
+    headers: &http::HeaderMap,
+    expected: CacheRangeRequest,
+) -> bool {
+    headers
+        .get_all("content-length")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| value.trim().parse::<u64>().ok() == Some(expected.len()))
+}
+
 pub fn resolve_client_slice_ranges(
     ranges: &[CacheClientRange],
     total: u64,
@@ -250,7 +275,8 @@ mod tests {
     use super::{
         CacheClientRange, CacheContentRange, CacheSliceBounds, parse_bounded_single_range,
         parse_cache_client_ranges, parse_cache_content_range, required_slice_bounds,
-        resolve_client_slice_ranges,
+        resolve_client_slice_ranges, response_content_length_matches_range,
+        response_content_range_matches,
     };
 
     #[test]
@@ -292,6 +318,29 @@ mod tests {
         );
         assert_eq!(parse_cache_content_range("bytes 19-10/100"), None);
         assert_eq!(parse_cache_content_range("items 10-19/100"), None);
+    }
+
+    #[test]
+    fn validates_response_range_headers_against_request() {
+        let response = http::Response::builder()
+            .header("content-range", "bytes 10-19/100")
+            .header("content-length", "10")
+            .body(())
+            .unwrap();
+        let expected = super::CacheRangeRequest { start: 10, end: 19 };
+
+        assert!(response_content_range_matches(response.headers(), expected));
+        assert!(response_content_length_matches_range(
+            response.headers(),
+            expected
+        ));
+
+        let wrong = super::CacheRangeRequest { start: 20, end: 29 };
+        assert!(!response_content_range_matches(response.headers(), wrong));
+        assert!(response_content_length_matches_range(
+            response.headers(),
+            wrong
+        ));
     }
 
     #[test]

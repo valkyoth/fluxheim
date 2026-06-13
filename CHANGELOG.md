@@ -57,6 +57,9 @@ behavior when the change improves security or project direction.
 - Move Cache-Control directive merge/replacement into
   `crates/fluxheim-cache::headers`, leaving root response mutation as a
   Pingora header adapter.
+- Move range response `Content-Range` and `Content-Length` validation into
+  `crates/fluxheim-cache::request`, leaving root range-cache admission as the
+  Pingora status/header adapter.
 - Move cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

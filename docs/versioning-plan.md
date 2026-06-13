@@ -3896,9 +3896,10 @@ the exception while the cache server is being completed as a focused sequence:
   `crates/fluxheim-cache::request`, while root cache-key builders keep their
   existing behavior and compatibility surface. Cache range/slice request DTOs,
   single-range parsing, client range parsing, client-range resolution, and
-  required-slice planning plus Content-Range parsing now also live in
+  required-slice planning plus Content-Range parsing and range-response
+  `Content-Range`/`Content-Length` validation now also live in
   `crates/fluxheim-cache::request`, while root `crate::proxy_cache` keeps
-  Pingora request-header and cache-key adaptation. Pure remaining-TTL and
+  Pingora request/response-header and cache-key adaptation. Pure remaining-TTL and
   synthesized Cache-Control freshness helpers now live in
   `crates/fluxheim-cache::headers`, alongside Vary header parsing and
   configured request-header variance policy and cacheable response Content-Type

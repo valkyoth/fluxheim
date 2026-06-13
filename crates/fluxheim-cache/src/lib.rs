@@ -35,5 +35,6 @@ pub use request::{
     CacheClientRange, CacheContentRange, CacheKey, CacheRangeRequest, CacheRequest,
     CacheSliceBounds, CacheSliceRangeRequest, StaticCacheRequest, parse_bounded_single_range,
     parse_cache_client_ranges, parse_cache_content_range, required_slice_bounds,
-    resolve_client_slice_ranges,
+    resolve_client_slice_ranges, response_content_length_matches_range,
+    response_content_range_matches,
 };
