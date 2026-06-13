@@ -1,0 +1,12 @@
+[package]
+name = "fluxheim-observability"
+version = "1.5.20"
+edition = "2024"
+rust-version = "1.96"
+license = "EUPL-1.2"
+publish = false
+description = "Internal Fluxheim observability and trace context boundary."
+
+[dependencies]
+getrandom = "0.4.2"
+log = "0.4.32"

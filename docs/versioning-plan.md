@@ -3893,10 +3893,13 @@ the exception while the cache server is being completed as a focused sequence:
   local MMDB runtime behind root compatibility re-exports. The
   `crates/fluxheim-compression` boundary now owns response compression encoder
   lifecycle and output-limit accounting while the root adapter keeps
-  Pingora-specific header selection and response mutation. Keep Pingora-specific
-  cache/proxy adapters separate from cache core when possible. Do not move the
-  main HTTP proxy orchestrator yet; it should remain last because it still
-  coordinates all subsystems.
+  Pingora-specific header selection and response mutation. The
+  `crates/fluxheim-observability` boundary now owns W3C Trace Context parsing,
+  generation, and traceparent normalization behind the existing
+  `crate::trace_context` surface. Keep Pingora-specific cache/proxy adapters
+  separate from cache core when possible. Do not move the main HTTP proxy
+  orchestrator yet; it should remain last because it still coordinates all
+  subsystems.
 - `v1.5.21`: UDP production-readiness line. Stop at promoting only the scoped
   UDP modes that have reviewed production semantics. Required work before any
   promotion includes per-route UDP metrics/status, explicit public-exposure

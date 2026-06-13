@@ -30,6 +30,10 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   compression encoder lifecycle and output-limit accounting into
   `crates/fluxheim-compression`, while keeping Pingora header selection and
   response mutation in the root adapter.
+- Started the `fluxheim-observability` crate boundary by moving W3C Trace
+  Context parsing, generation, and traceparent normalization into
+  `crates/fluxheim-observability`, with root `crate::trace_context` kept as a
+  compatibility re-export.
 
 ## Fixed
 

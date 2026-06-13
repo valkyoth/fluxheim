@@ -1034,6 +1034,7 @@ dependencies = [
  "fluxheim-config",
  "fluxheim-geoip",
  "fluxheim-load-balancer",
+ "fluxheim-observability",
  "fluxheim-openssl-fips-support",
  "fluxheim-php-fpm",
  "fluxheim-web",
@@ -1138,6 +1139,14 @@ dependencies = [
  "tokio",
  "ureq",
  "zeroize",
+]
+
+[[package]]
+name = "fluxheim-observability"
+version = "1.5.20"
+dependencies = [
+ "getrandom 0.4.2",
+ "log",
 ]
 
 [[package]]

@@ -36,6 +36,10 @@ behavior when the change improves security or project direction.
   compression encoder lifecycle and output-limit accounting into
   `crates/fluxheim-compression`, while keeping Pingora header selection and
   response mutation in the root adapter.
+- Start the `fluxheim-observability` crate boundary by moving W3C Trace Context
+  parsing, generation, and traceparent normalization into
+  `crates/fluxheim-observability`, with root `crate::trace_context` kept as a
+  compatibility re-export.
 
 ### Fixed
 

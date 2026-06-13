@@ -15,6 +15,7 @@ members = [
     "crates/fluxheim-cache",
     "crates/fluxheim-compression",
     "crates/fluxheim-geoip",
+    "crates/fluxheim-observability",
     "crates/fluxheim-web",
     "crates/fluxheim-php-fpm",
     "crates/fluxheim-load-balancer",
@@ -215,6 +216,7 @@ fluxheim-config = { path = "crates/fluxheim-config" }
 fluxheim-cache = { path = "crates/fluxheim-cache" }
 fluxheim-geoip = { path = "crates/fluxheim-geoip" }
 fluxheim-load-balancer = { path = "crates/fluxheim-load-balancer", optional = true }
+fluxheim-observability = { path = "crates/fluxheim-observability" }
 fluxheim-php-fpm = { path = "crates/fluxheim-php-fpm", optional = true }
 fluxheim-web = { path = "crates/fluxheim-web", optional = true }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
