@@ -38,6 +38,8 @@ behavior when the change improves security or project direction.
   Pingora request-header and cache-key adapter.
 - Move Content-Range parsing into `crates/fluxheim-cache::request`, so
   range-cache admission and slice-object reconstruction share one pure parser.
+- Move pure cache freshness helpers for remaining TTL and synthesized
+  Cache-Control freshness directives into `crates/fluxheim-cache::headers`.
 - Move cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

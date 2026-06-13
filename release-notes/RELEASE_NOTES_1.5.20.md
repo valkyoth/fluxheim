@@ -32,6 +32,8 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   Pingora request-header and cache-key adapter.
 - Moved Content-Range parsing into `crates/fluxheim-cache::request`, so
   range-cache admission and slice-object reconstruction share one pure parser.
+- Moved pure cache freshness helpers for remaining TTL and synthesized
+  Cache-Control freshness directives into `crates/fluxheim-cache::headers`.
 - Moved cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

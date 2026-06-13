@@ -47,8 +47,9 @@ pub use fluxheim_cache::{
     CacheObjectHeaderValue, CacheObjectMetadata, CacheObjectTier, CacheRangeRequest, CacheRequest,
     CacheSliceBounds, CacheSliceRangeRequest, CacheStoragePlan, CacheStoreError, CachedHeader,
     CachedImageObject, DiskCacheStats, DiskTierPlan, MemoryCacheStats, MemoryTierPlan,
-    StaticCacheRequest, TieredCacheStats, parse_bounded_single_range, parse_cache_client_ranges,
-    parse_cache_content_range, required_slice_bounds, resolve_client_slice_ranges,
+    StaticCacheRequest, TieredCacheStats, cache_control_freshness_value,
+    parse_bounded_single_range, parse_cache_client_ranges, parse_cache_content_range,
+    remaining_fresh_ttl_secs, required_slice_bounds, resolve_client_slice_ranges,
 };
 
 #[cfg(feature = "proxy")]

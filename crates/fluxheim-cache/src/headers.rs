@@ -35,6 +35,28 @@ pub fn response_values_forbid_shared_cache<'a>(
         .find_map(response_cache_control_shared_rejection)
 }
 
+pub fn remaining_fresh_ttl_secs(ttl_secs: u32, age_secs: u64) -> Option<u32> {
+    let remaining = u64::from(ttl_secs).checked_sub(age_secs)?;
+    u32::try_from(remaining).ok().filter(|ttl| *ttl > 0)
+}
+
+pub fn cache_control_freshness_value(
+    ttl_secs: u32,
+    stale_while_revalidate_secs: Option<u32>,
+    stale_if_error_secs: Option<u32>,
+) -> String {
+    let mut value = format!("max-age={ttl_secs}");
+    if let Some(stale_while_revalidate_secs) = stale_while_revalidate_secs {
+        value.push_str(", stale-while-revalidate=");
+        value.push_str(&stale_while_revalidate_secs.to_string());
+    }
+    if let Some(stale_if_error_secs) = stale_if_error_secs {
+        value.push_str(", stale-if-error=");
+        value.push_str(&stale_if_error_secs.to_string());
+    }
+    value
+}
+
 fn is_pragma_no_cache(value: &str) -> bool {
     value.trim().eq_ignore_ascii_case("no-cache")
 }
@@ -210,6 +232,26 @@ mod tests {
         assert_eq!(
             super::response_values_forbid_shared_cache(["public, max-age=60", "private"]),
             Some("cache-control-private")
+        );
+    }
+
+    #[test]
+    fn computes_remaining_fresh_ttl() {
+        assert_eq!(super::remaining_fresh_ttl_secs(120, 0), Some(120));
+        assert_eq!(super::remaining_fresh_ttl_secs(120, 119), Some(1));
+        assert_eq!(super::remaining_fresh_ttl_secs(120, 120), None);
+        assert_eq!(super::remaining_fresh_ttl_secs(120, 121), None);
+    }
+
+    #[test]
+    fn builds_cache_control_freshness_value() {
+        assert_eq!(
+            super::cache_control_freshness_value(60, Some(5), Some(10)),
+            "max-age=60, stale-while-revalidate=5, stale-if-error=10"
+        );
+        assert_eq!(
+            super::cache_control_freshness_value(60, None, None),
+            "max-age=60"
         );
     }
 }

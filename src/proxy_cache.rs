@@ -16,8 +16,9 @@ const MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES: u64 = 128;
 pub(crate) use crate::cache::CacheClientRange;
 pub(crate) use crate::cache::{
     CacheContentRange, CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest,
-    parse_bounded_single_range, parse_cache_client_ranges, parse_cache_content_range,
-    required_slice_bounds, resolve_client_slice_ranges,
+    cache_control_freshness_value, parse_bounded_single_range, parse_cache_client_ranges,
+    parse_cache_content_range, remaining_fresh_ttl_secs, required_slice_bounds,
+    resolve_client_slice_ranges,
 };
 
 pub(crate) fn cache_request_from_header(request: &RequestHeader) -> crate::cache::CacheRequest<'_> {
@@ -332,11 +333,6 @@ pub(crate) fn cache_response_fresh_ttl_secs(
         .filter(|ttl| *ttl > 0)
 }
 
-pub(crate) fn remaining_fresh_ttl_secs(ttl_secs: u32, age_secs: u64) -> Option<u32> {
-    let remaining = u64::from(ttl_secs).checked_sub(age_secs)?;
-    u32::try_from(remaining).ok().filter(|ttl| *ttl > 0)
-}
-
 pub(crate) fn response_age_secs(response: &ResponseHeader) -> u64 {
     response
         .headers
@@ -555,23 +551,6 @@ pub(crate) fn cache_status_reason_header_value(
             Some(reason.as_str())
         }
     }
-}
-
-pub(crate) fn cache_control_freshness_value(
-    ttl_secs: u32,
-    stale_while_revalidate_secs: Option<u32>,
-    stale_if_error_secs: Option<u32>,
-) -> String {
-    let mut value = format!("max-age={ttl_secs}");
-    if let Some(stale_while_revalidate_secs) = stale_while_revalidate_secs {
-        value.push_str(", stale-while-revalidate=");
-        value.push_str(&stale_while_revalidate_secs.to_string());
-    }
-    if let Some(stale_if_error_secs) = stale_if_error_secs {
-        value.push_str(", stale-if-error=");
-        value.push_str(&stale_if_error_secs.to_string());
-    }
-    value
 }
 
 pub(crate) fn append_cache_control_directive(
