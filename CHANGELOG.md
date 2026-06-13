@@ -43,6 +43,9 @@ behavior when the change improves security or project direction.
 - Move Vary header parsing and configured request-header variance policy into
   `crates/fluxheim-cache::headers`, keeping root `crate::proxy_cache` focused
   on Pingora request hashing and adapter logic.
+- Move Vary request hash material framing into
+  `crates/fluxheim-cache::headers`; root `crate::proxy_cache` now only adapts
+  Pingora request headers and calls the Pingora hash function.
 - Move cacheable response Content-Type matching into
   `crates/fluxheim-cache::headers`, leaving root cache admission as the
   status/header adapter.

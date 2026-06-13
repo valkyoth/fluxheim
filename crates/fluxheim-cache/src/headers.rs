@@ -306,6 +306,28 @@ pub enum VaryCachePolicy {
     Uncacheable(&'static str),
 }
 
+pub struct VaryRequestHashField<'a> {
+    pub name: &'a str,
+    pub values: Vec<&'a [u8]>,
+}
+
+pub fn vary_request_hash_material<'a>(
+    fields: impl IntoIterator<Item = VaryRequestHashField<'a>>,
+) -> Vec<u8> {
+    let mut material = Vec::new();
+    material.extend_from_slice(b"fluxheim-vary-v2");
+
+    for field in fields {
+        append_vary_hash_component(&mut material, field.name.as_bytes());
+        material.extend_from_slice(&(field.values.len() as u32).to_le_bytes());
+        for value in field.values {
+            append_vary_hash_component(&mut material, value);
+        }
+    }
+
+    material
+}
+
 pub fn cache_vary_policy(
     headers: &http::HeaderMap,
     cache: &fluxheim_config::CacheConfig,
@@ -383,6 +405,11 @@ pub fn vary_cache_policy(headers: &http::HeaderMap) -> VaryCachePolicy {
 
 fn is_sensitive_vary_field(field: &str) -> bool {
     matches!(field, "authorization" | "cookie" | "proxy-authorization")
+}
+
+fn append_vary_hash_component(material: &mut Vec<u8>, bytes: &[u8]) {
+    material.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    material.extend_from_slice(bytes);
 }
 
 fn is_pragma_no_cache(value: &str) -> bool {
@@ -819,6 +846,26 @@ mod tests {
                 "user-agent".to_owned(),
             ])
         );
+    }
+
+    #[test]
+    fn vary_hash_material_tracks_repeated_values() {
+        let single = super::vary_request_hash_material([super::VaryRequestHashField {
+            name: "accept-encoding",
+            values: vec![b"br".as_slice()],
+        }]);
+        let repeated = super::vary_request_hash_material([super::VaryRequestHashField {
+            name: "accept-encoding",
+            values: vec![b"br".as_slice(), b"gzip".as_slice()],
+        }]);
+        let different_field = super::vary_request_hash_material([super::VaryRequestHashField {
+            name: "x-mode",
+            values: vec![b"br".as_slice()],
+        }]);
+
+        assert_ne!(single, repeated);
+        assert_ne!(single, different_field);
+        assert!(single.starts_with(b"fluxheim-vary-v2"));
     }
 
     #[test]

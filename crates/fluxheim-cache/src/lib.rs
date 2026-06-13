@@ -22,11 +22,12 @@ pub use api::{
     MemoryCacheStats, TieredCacheStats,
 };
 pub use headers::{
-    CacheStaleEvent, MAX_VARY_FIELDS, VaryCachePolicy, cache_control_freshness_value,
-    cache_control_with_directive, cache_should_serve_stale, cache_stale_status_allows,
-    cache_vary_policy, cookie_headers_match_cache_bypass, query_matches_cache_bypass,
-    remaining_fresh_ttl_secs, response_age_secs, response_cache_control_max_age,
-    response_content_type_is_cacheable, vary_cache_policy,
+    CacheStaleEvent, MAX_VARY_FIELDS, VaryCachePolicy, VaryRequestHashField,
+    cache_control_freshness_value, cache_control_with_directive, cache_should_serve_stale,
+    cache_stale_status_allows, cache_vary_policy, cookie_headers_match_cache_bypass,
+    query_matches_cache_bypass, remaining_fresh_ttl_secs, response_age_secs,
+    response_cache_control_max_age, response_content_type_is_cacheable, vary_cache_policy,
+    vary_request_hash_material,
 };
 pub use object::{CacheStoreError, CachedHeader, CachedImageObject};
 pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};

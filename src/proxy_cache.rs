@@ -14,12 +14,12 @@ const MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES: u64 = 128;
 pub(crate) use crate::cache::CacheClientRange;
 pub(crate) use crate::cache::{
     CacheContentRange, CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest,
-    CacheStaleEvent, VaryCachePolicy, append_cache_key_component, cache_control_freshness_value,
-    cache_control_with_directive, cache_method_temporarily_bypassed, cache_should_serve_stale,
-    cache_vary_policy, parse_bounded_single_range, parse_cache_client_ranges,
-    parse_cache_content_range, remaining_fresh_ttl_secs, required_slice_bounds,
-    resolve_client_slice_ranges, response_content_length_matches_range,
-    response_content_range_matches, response_content_type_is_cacheable,
+    CacheStaleEvent, VaryCachePolicy, VaryRequestHashField, append_cache_key_component,
+    cache_control_freshness_value, cache_control_with_directive, cache_method_temporarily_bypassed,
+    cache_should_serve_stale, cache_vary_policy, parse_bounded_single_range,
+    parse_cache_client_ranges, parse_cache_content_range, remaining_fresh_ttl_secs,
+    required_slice_bounds, resolve_client_slice_ranges, response_content_length_matches_range,
+    response_content_range_matches, response_content_type_is_cacheable, vary_request_hash_material,
 };
 #[cfg(test)]
 pub(crate) use crate::cache::{MAX_VARY_FIELDS, cache_stale_status_allows, vary_cache_policy};
@@ -540,24 +540,18 @@ fn response_headers_match_cache_no_store_value(
 }
 
 pub(crate) fn vary_request_hash(fields: &[String], request: &RequestHeader) -> HashBinary {
-    let mut material = Vec::new();
-    material.extend_from_slice(b"fluxheim-vary-v2");
-
-    for field in fields {
-        append_vary_hash_component(&mut material, field.as_bytes());
-        let values = request.headers.get_all(field.as_str());
-        material.extend_from_slice(&(values.iter().count() as u32).to_le_bytes());
-        for value in request.headers.get_all(field.as_str()).iter() {
-            append_vary_hash_component(&mut material, value.as_bytes());
+    let material = vary_request_hash_material(fields.iter().map(|field| {
+        VaryRequestHashField {
+            name: field.as_str(),
+            values: request
+                .headers
+                .get_all(field.as_str())
+                .iter()
+                .map(|value| value.as_bytes())
+                .collect(),
         }
-    }
-
+    }));
     pingora::cache::key::hash_key(material)
-}
-
-fn append_vary_hash_component(material: &mut Vec<u8>, bytes: &[u8]) {
-    material.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
-    material.extend_from_slice(bytes);
 }
 
 fn request_headers_match_cache_bypass_value(
