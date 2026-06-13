@@ -3911,7 +3911,9 @@ the exception while the cache server is being completed as a focused sequence:
   purge-entry DTOs, storage-local purge result counters, and cache-key path
   matching helpers now live in `crates/fluxheim-cache::purge_index`, while the
   root `crate::cache` module keeps compatibility type names and the Pingora
-  storage implementations remain root runtime adapters.
+  storage implementations remain root runtime adapters. Cache Prometheus label
+  classifiers now also live in `crates/fluxheim-cache`, while root
+  `crate::metrics` remains recorder wiring.
   The `crates/fluxheim-web` boundary now has static
   directory-listing data/rendering plus static byte-range parsing and static
   response planning/conditional request evaluation plus safe relative path and

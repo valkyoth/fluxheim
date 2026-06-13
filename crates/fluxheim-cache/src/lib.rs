@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod headers;
+pub mod metrics;
 pub mod object;
 pub mod plan;
 pub mod purge_index;
@@ -28,6 +29,11 @@ pub use headers::{
     query_matches_cache_bypass, remaining_fresh_ttl_secs, response_age_secs,
     response_cache_control_max_age, response_content_type_is_cacheable, vary_cache_policy,
     vary_request_hash_material,
+};
+pub use metrics::{
+    cache_event_label, cache_operation_label, cache_phase_label, cache_purge_mode_label,
+    cache_purge_operation_label, cache_purger_entry_result_label, cache_purger_outcome_label,
+    cache_scope_label, cache_tier_label,
 };
 pub use object::{CacheStoreError, CachedHeader, CachedImageObject};
 pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};

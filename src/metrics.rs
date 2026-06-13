@@ -1550,16 +1550,11 @@ fn admin_auth_scope_label(scope: &str) -> &'static str {
 }
 
 fn cache_tier_label(tier: &str) -> &'static str {
-    match tier {
-        "memory" => "memory",
-        "disk" => "disk",
-        "policy" => "policy",
-        _ => "other",
-    }
+    fluxheim_cache::cache_tier_label(tier)
 }
 
 fn cache_scope_label(route: Option<&str>) -> &'static str {
-    if route.is_some() { "route" } else { "vhost" }
+    fluxheim_cache::cache_scope_label(route)
 }
 
 fn compression_encoding_label(encoding: &str) -> &'static str {
@@ -1677,91 +1672,31 @@ fn load_balancer_upstream_label(upstream: Option<&str>) -> &str {
 }
 
 fn cache_event_label(event: &str) -> &'static str {
-    match event {
-        "hit" => "hit",
-        "miss" => "miss",
-        "store" => "store",
-        "store_refusal" => "store_refusal",
-        "eviction" => "eviction",
-        "purge" => "purge",
-        "pass" => "pass",
-        "bypass" => "bypass",
-        "stale" => "stale",
-        "revalidate" => "revalidate",
-        "peer_fill_hit" => "peer_fill_hit",
-        "peer_fill_miss" => "peer_fill_miss",
-        "peer_fill_error" => "peer_fill_error",
-        "peer_fill_fallback" => "peer_fill_fallback",
-        "peer_fill_fail_closed" => "peer_fill_fail_closed",
-        _ => "other",
-    }
+    fluxheim_cache::cache_event_label(event)
 }
 
 fn cache_phase_label(phase: &str) -> &'static str {
-    match phase {
-        "disabled" => "disabled",
-        "uninitialized" => "uninitialized",
-        "bypass" => "bypass",
-        "key" => "key",
-        "hit" => "hit",
-        "miss" => "miss",
-        "stale" => "stale",
-        "stale-updating" => "stale-updating",
-        "expired" => "expired",
-        "revalidated" => "revalidated",
-        "revalidated-nocache" => "revalidated-nocache",
-        _ => "other",
-    }
+    fluxheim_cache::cache_phase_label(phase)
 }
 
 fn cache_operation_label(operation: &str) -> &'static str {
-    match operation {
-        "lookup" => "lookup",
-        "lock_wait" => "lock_wait",
-        _ => "other",
-    }
+    fluxheim_cache::cache_operation_label(operation)
 }
 
 fn cache_purge_operation_label(operation: &str) -> &'static str {
-    match operation {
-        "exact" => "exact",
-        "bulk" => "bulk",
-        "index" => "index",
-        "prefix" => "prefix",
-        "tag" => "tag",
-        "stale" => "stale",
-        "wildcard" => "wildcard",
-        _ => "other",
-    }
+    fluxheim_cache::cache_purge_operation_label(operation)
 }
 
 fn cache_purge_mode_label(mode: &str) -> &'static str {
-    match mode {
-        "normal" => "normal",
-        "soft" => "soft",
-        "dry_run" => "dry_run",
-        _ => "other",
-    }
+    fluxheim_cache::cache_purge_mode_label(mode)
 }
 
 fn cache_purger_outcome_label(outcome: &str) -> &'static str {
-    match outcome {
-        "skipped" => "skipped",
-        "clean" => "clean",
-        "purged" => "purged",
-        "truncated" => "truncated",
-        "error" => "error",
-        _ => "other",
-    }
+    fluxheim_cache::cache_purger_outcome_label(outcome)
 }
 
 fn cache_purger_entry_result_label(result: &str) -> &'static str {
-    match result {
-        "scanned" => "scanned",
-        "stale" => "stale",
-        "purged" => "purged",
-        _ => "other",
-    }
+    fluxheim_cache::cache_purger_entry_result_label(result)
 }
 
 fn php_outcome_label(outcome: &str) -> &'static str {
