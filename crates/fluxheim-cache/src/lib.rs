@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod headers;
+pub mod plan;
 
 pub use api::{
     CacheActivityResetResult, CacheActivityStats, CacheBackgroundPurgeResult,
@@ -17,3 +18,4 @@ pub use api::{
     CacheStalePurgeRequest, CacheStalePurgeResult, CacheVhostStats, DiskCacheStats,
     MemoryCacheStats, TieredCacheStats,
 };
+pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};

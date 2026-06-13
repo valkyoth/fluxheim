@@ -3888,7 +3888,9 @@ the exception while the cache server is being completed as a focused sequence:
   metadata, activity stats, tier stats, object lookup, and vhost/route runtime
   stats now also live in `crates/fluxheim-cache::api`, with root
   `crate::cache` and `crate::cache_api` compatibility re-exports preserving the
-  admin, CLI, metrics, and proxy surfaces.
+  admin, CLI, metrics, and proxy surfaces. Cache storage-plan DTOs also moved
+  into `crates/fluxheim-cache::plan`, while the Pingora storage adapters remain
+  in the root cache runtime.
   The `crates/fluxheim-web` boundary now has static
   directory-listing data/rendering moved behind the existing `crate::web`
   surface, and the `crates/fluxheim-php-fpm` boundary with timeout

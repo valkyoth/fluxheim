@@ -23,6 +23,9 @@ behavior when the change improves security or project direction.
   vhost/route runtime stats into `crates/fluxheim-cache::api`. Root
   `crate::cache` and `crate::cache_api` keep compatibility re-exports so admin,
   CLI, metrics, and proxy call sites are unchanged.
+- Move cache storage-plan DTOs into `crates/fluxheim-cache::plan`, keeping
+  root `crate::cache` re-exports while the Pingora storage adapters remain in
+  the root cache runtime.
 - Start the `fluxheim-web` crate boundary by moving static directory-listing
   data/rendering helpers into `crates/fluxheim-web`. The root `crate::web`
   module re-exports the same types and renderer while keeping Pingora response

@@ -32,13 +32,14 @@ use zeroize::Zeroizing;
 #[cfg(feature = "proxy")]
 use crate::config::CacheDiskEncryptionProvider;
 use crate::config::{
-    ByteSize, CacheConfig, CacheDiskBackend, CacheDiskEncryptionConfig, CacheDiskStorageBinConfig,
-    CacheKeyPart, normalize_host,
+    ByteSize, CacheConfig, CacheDiskBackend, CacheDiskEncryptionConfig, CacheKeyPart,
+    normalize_host,
 };
 
 pub use fluxheim_cache::{
     CacheActivityStats, CacheObjectFreshnessState, CacheObjectHeaderValue, CacheObjectMetadata,
-    CacheObjectTier, DiskCacheStats, MemoryCacheStats, TieredCacheStats,
+    CacheObjectTier, CacheStoragePlan, DiskCacheStats, DiskTierPlan, MemoryCacheStats,
+    MemoryTierPlan, TieredCacheStats,
 };
 
 #[cfg(feature = "proxy")]
@@ -94,31 +95,6 @@ const MAX_CACHE_TAGS_PER_OBJECT: usize = 64;
 const MAX_CACHE_TAG_LEN: usize = 128;
 #[cfg(feature = "proxy")]
 const MAX_CACHE_TAG_BYTES_PER_OBJECT: usize = 4096;
-
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
-pub struct CacheStoragePlan {
-    pub memory: Option<MemoryTierPlan>,
-    pub disk: Option<DiskTierPlan>,
-}
-
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
-pub struct MemoryTierPlan {
-    pub max_size_bytes: ByteSize,
-    pub max_object_bytes: ByteSize,
-    pub object_slots: usize,
-    pub cache_tag_headers: Vec<String>,
-}
-
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
-pub struct DiskTierPlan {
-    pub backend: CacheDiskBackend,
-    pub path: PathBuf,
-    pub max_size_bytes: ByteSize,
-    pub max_object_bytes: ByteSize,
-    pub cache_tag_headers: Vec<String>,
-    pub storage_bin: CacheDiskStorageBinConfig,
-    pub encryption: CacheDiskEncryptionConfig,
-}
 
 #[cfg(feature = "proxy")]
 static PINGORA_MEMORY_STORAGE_REGISTRY: OnceLock<
