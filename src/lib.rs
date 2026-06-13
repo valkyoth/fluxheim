@@ -146,7 +146,7 @@ pub mod metrics;
 pub mod metrics_otlp;
 #[cfg(feature = "otel-otlp")]
 pub mod otel_otlp;
-#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+#[cfg(feature = "metrics-otlp")]
 mod otlp_http;
 #[cfg(feature = "proxy")]
 mod path_safety;

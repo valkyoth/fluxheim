@@ -3899,6 +3899,9 @@ the exception while the cache server is being completed as a focused sequence:
   `crate::trace_context` surface, and the shared OTLP HTTP agent plus
   symlink-safe custom CA bundle loader behind an `otlp-http` crate feature
   while the root `crate::otlp_http` module remains the metrics/tracing adapter.
+  The OTLP trace exporter and trace-span payload builder also live behind the
+  `crates/fluxheim-observability` `otlp-trace` feature while root
+  `crate::otel_otlp` remains a compatibility re-export.
   The `crates/fluxheim-protocol` boundary now
   owns PROXY protocol v1/v2 upstream header framing while the root
   `crate::proxy_protocol` adapter keeps Pingora L4 connector wiring. Keep

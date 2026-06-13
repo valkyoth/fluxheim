@@ -121,7 +121,7 @@ otel-otlp = [
     "dep:serde_json",
     "dep:ureq",
     "fluxheim-config/otel-otlp",
-    "fluxheim-observability/otlp-http",
+    "fluxheim-observability/otlp-trace",
 ]
 php = ["proxy", "web"]
 php-fpm = [

@@ -10,10 +10,13 @@ description = "Internal Fluxheim observability and trace context boundary."
 [features]
 default = []
 otlp-http = ["dep:ureq"]
+otlp-trace = ["dep:fluxheim-config", "dep:serde_json", "otlp-http"]
 
 [dependencies]
+fluxheim-config = { path = "../fluxheim-config", optional = true }
 getrandom = "0.4.2"
 log = "0.4.32"
+serde_json = { version = "1.0.150", optional = true }
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"], optional = true }
 
 [dev-dependencies]

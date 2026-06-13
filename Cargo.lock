@@ -1147,8 +1147,10 @@ name = "fluxheim-observability"
 version = "1.5.20"
 dependencies = [
  "fluxheim-common",
+ "fluxheim-config",
  "getrandom 0.4.2",
  "log",
+ "serde_json",
  "ureq",
 ]
 

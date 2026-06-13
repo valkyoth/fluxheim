@@ -8,6 +8,8 @@ use std::fmt::Write as _;
 
 #[cfg(feature = "otlp-http")]
 pub use otlp_http::agent;
+#[cfg(feature = "otlp-trace")]
+pub use otlp_trace::{TraceExporter, TraceSpan};
 
 const TRACEPARENT_VERSION: &str = "00";
 const TRACE_ID_HEX_LEN: usize = 32;
@@ -323,6 +325,9 @@ mod otlp_http {
         }
     }
 }
+
+#[cfg(feature = "otlp-trace")]
+mod otlp_trace;
 
 #[cfg(test)]
 mod tests {
