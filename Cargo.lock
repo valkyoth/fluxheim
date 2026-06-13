@@ -1129,6 +1129,9 @@ dependencies = [
 [[package]]
 name = "fluxheim-php-fpm"
 version = "1.5.20"
+dependencies = [
+ "fluxheim-config",
+]
 
 [[package]]
 name = "fluxheim-web"

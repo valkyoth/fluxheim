@@ -26,6 +26,9 @@ behavior when the change improves security or project direction.
 - Move managed PHP-FPM restart-backoff and sanitized `PATH` fallback helpers
   into `crates/fluxheim-php-fpm`, again keeping the root module as the
   compatibility surface for existing code.
+- Move managed PHP-FPM config rendering and its config-value validators into
+  `crates/fluxheim-php-fpm`, leaving root PHP-FPM process supervision as the
+  compatibility adapter.
 
 ### Fixed
 

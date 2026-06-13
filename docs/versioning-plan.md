@@ -3887,10 +3887,11 @@ the exception while the cache server is being completed as a focused sequence:
   directory-listing data/rendering moved behind the existing `crate::web`
   surface, and the `crates/fluxheim-php-fpm` boundary with timeout
   classification/error-outcome helpers plus managed restart-backoff and
-  sanitized `PATH` fallback helpers moved behind the existing `crate::php_fpm`
-  surface. Keep Pingora-specific cache/proxy adapters separate from cache core
-  when possible. Do not move the main HTTP proxy orchestrator yet; it should
-  remain last because it still coordinates all subsystems.
+  sanitized `PATH` fallback helpers plus managed php-fpm config rendering and
+  config-value validators moved behind the existing `crate::php_fpm` surface.
+  Keep Pingora-specific cache/proxy adapters separate from cache core when
+  possible. Do not move the main HTTP proxy orchestrator yet; it should remain
+  last because it still coordinates all subsystems.
 - `v1.5.21`: UDP production-readiness line. Stop at promoting only the scoped
   UDP modes that have reviewed production semantics. Required work before any
   promotion includes per-route UDP metrics/status, explicit public-exposure

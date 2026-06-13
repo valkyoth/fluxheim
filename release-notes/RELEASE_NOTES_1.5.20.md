@@ -20,6 +20,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved managed PHP-FPM restart-backoff and sanitized `PATH` fallback helpers
   into `crates/fluxheim-php-fpm`, again keeping the root module as the
   compatibility surface for existing code.
+- Moved managed PHP-FPM config rendering and its config-value validators into
+  `crates/fluxheim-php-fpm`, leaving root PHP-FPM process supervision as the
+  compatibility adapter.
 
 ## Fixed
 
