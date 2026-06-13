@@ -46,6 +46,8 @@ behavior when the change improves security or project direction.
 - Move cacheable response Content-Type matching into
   `crates/fluxheim-cache::headers`, leaving root cache admission as the
   status/header adapter.
+- Move cache-bypass cookie and query-string matching, including percent-decoded
+  query comparisons, into `crates/fluxheim-cache::headers`.
 - Move cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

@@ -35,6 +35,126 @@ pub fn response_values_forbid_shared_cache<'a>(
         .find_map(response_cache_control_shared_rejection)
 }
 
+pub fn cookie_headers_match_cache_bypass<'a>(
+    cookie_headers: impl IntoIterator<Item = &'a str>,
+    configured_names: &[String],
+    configured_name_prefixes: &[String],
+    configured_values: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    if configured_names.is_empty()
+        && configured_name_prefixes.is_empty()
+        && configured_values.is_empty()
+    {
+        return false;
+    }
+    cookie_headers
+        .into_iter()
+        .flat_map(cookie_header_pairs)
+        .any(|(name, value)| {
+            configured_names.iter().any(|configured| configured == name)
+                || configured_name_prefixes
+                    .iter()
+                    .any(|configured| name.starts_with(configured))
+                || configured_values
+                    .get(name)
+                    .is_some_and(|configured| configured == value)
+        })
+}
+
+fn cookie_header_pairs(header: &str) -> impl Iterator<Item = (&str, &str)> {
+    header.split(';').filter_map(|part| {
+        let (name, value) = part.trim_start().split_once('=')?;
+        (!name.is_empty()).then_some((name, value))
+    })
+}
+
+pub fn query_matches_cache_bypass(
+    query: &str,
+    configured_params: &[String],
+    configured_values: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    if configured_params.is_empty() && configured_values.is_empty() {
+        return false;
+    }
+    query.split('&').any(|part| {
+        let (name, value) = part.split_once('=').unwrap_or((part, ""));
+        if name.is_empty() {
+            return false;
+        }
+
+        query_component_matches_cache_bypass(name, value, configured_params, configured_values)
+            || percent_decode_query_component(name).is_some_and(|decoded_name| {
+                query_component_matches_cache_bypass(
+                    &decoded_name,
+                    value,
+                    configured_params,
+                    configured_values,
+                ) || percent_decode_query_component(value).is_some_and(|decoded_value| {
+                    query_component_matches_cache_bypass(
+                        &decoded_name,
+                        &decoded_value,
+                        configured_params,
+                        configured_values,
+                    )
+                })
+            })
+            || percent_decode_query_component(value).is_some_and(|decoded_value| {
+                query_component_matches_cache_bypass(
+                    name,
+                    &decoded_value,
+                    configured_params,
+                    configured_values,
+                )
+            })
+    })
+}
+
+fn query_component_matches_cache_bypass(
+    name: &str,
+    value: &str,
+    configured_params: &[String],
+    configured_values: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    configured_params
+        .iter()
+        .any(|configured| configured == name)
+        || configured_values
+            .get(name)
+            .is_some_and(|configured| configured == value)
+}
+
+fn percent_decode_query_component(component: &str) -> Option<String> {
+    if !component.as_bytes().contains(&b'%') {
+        return None;
+    }
+
+    let mut decoded = Vec::with_capacity(component.len());
+    let mut index = 0usize;
+    let bytes = component.as_bytes();
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = bytes.get(index + 1).and_then(|byte| hex_value(*byte))?;
+            let low = bytes.get(index + 2).and_then(|byte| hex_value(*byte))?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 pub fn remaining_fresh_ttl_secs(ttl_secs: u32, age_secs: u64) -> Option<u32> {
     let remaining = u64::from(ttl_secs).checked_sub(age_secs)?;
     u32::try_from(remaining).ok().filter(|ttl| *ttl > 0)
@@ -352,6 +472,62 @@ mod tests {
             super::response_values_forbid_shared_cache(["public, max-age=60", "private"]),
             Some("cache-control-private")
         );
+    }
+
+    #[test]
+    fn cookie_headers_match_configured_bypass_policy() {
+        let values = std::collections::BTreeMap::from([("session".to_owned(), "admin".to_owned())]);
+
+        assert!(super::cookie_headers_match_cache_bypass(
+            ["theme=dark; session=admin"],
+            &[],
+            &[],
+            &values
+        ));
+        assert!(super::cookie_headers_match_cache_bypass(
+            ["theme=dark; wp_logged_in_123=1"],
+            &[],
+            &["wp_logged_in_".to_owned()],
+            &std::collections::BTreeMap::new()
+        ));
+        assert!(super::cookie_headers_match_cache_bypass(
+            ["theme=dark; auth=yes"],
+            &["auth".to_owned()],
+            &[],
+            &std::collections::BTreeMap::new()
+        ));
+        assert!(!super::cookie_headers_match_cache_bypass(
+            ["theme=dark"],
+            &["auth".to_owned()],
+            &[],
+            &values
+        ));
+    }
+
+    #[test]
+    fn query_matches_configured_bypass_policy_with_percent_decoding() {
+        let values = std::collections::BTreeMap::from([("preview".to_owned(), "true".to_owned())]);
+
+        assert!(super::query_matches_cache_bypass(
+            "preview=true",
+            &[],
+            &values
+        ));
+        assert!(super::query_matches_cache_bypass(
+            "preview%5fmode=1",
+            &["preview_mode".to_owned()],
+            &std::collections::BTreeMap::new()
+        ));
+        assert!(super::query_matches_cache_bypass(
+            "preview=t%72ue",
+            &[],
+            &values
+        ));
+        assert!(!super::query_matches_cache_bypass(
+            "preview=false",
+            &[],
+            &values
+        ));
     }
 
     #[test]

@@ -20,6 +20,7 @@ pub(crate) use crate::cache::{
 };
 #[cfg(test)]
 pub(crate) use crate::cache::{MAX_VARY_FIELDS, vary_cache_policy};
+use crate::cache::{cookie_headers_match_cache_bypass, query_matches_cache_bypass};
 
 pub(crate) fn cache_request_from_header(request: &RequestHeader) -> crate::cache::CacheRequest<'_> {
     crate::cache::CacheRequest {
@@ -64,7 +65,7 @@ pub(crate) fn request_cache_bypass_reason(
     if request_headers_match_cache_bypass_value(request, &cache.bypass_request_header_values) {
         return Some("request-header-value");
     }
-    if request_cookies_match_cache_bypass(
+    if cookie_headers_match_cache_bypass(
         request_header_values(request, "cookie"),
         &cache.bypass_cookie_names,
         &cache.bypass_cookie_name_prefixes,
@@ -653,125 +654,6 @@ fn request_headers_match_cache_bypass_value(
         && configured_values.iter().any(|(header, configured)| {
             request_header_values(request, header).any(|value| value == configured)
         })
-}
-
-fn request_cookies_match_cache_bypass<'a>(
-    cookie_headers: impl Iterator<Item = &'a str>,
-    configured_names: &[String],
-    configured_name_prefixes: &[String],
-    configured_values: &std::collections::BTreeMap<String, String>,
-) -> bool {
-    if configured_names.is_empty()
-        && configured_name_prefixes.is_empty()
-        && configured_values.is_empty()
-    {
-        return false;
-    }
-    cookie_headers
-        .flat_map(cookie_header_pairs)
-        .any(|(name, value)| {
-            configured_names.iter().any(|configured| configured == name)
-                || configured_name_prefixes
-                    .iter()
-                    .any(|configured| name.starts_with(configured))
-                || configured_values
-                    .get(name)
-                    .is_some_and(|configured| configured == value)
-        })
-}
-
-fn cookie_header_pairs(header: &str) -> impl Iterator<Item = (&str, &str)> {
-    header.split(';').filter_map(|part| {
-        let (name, value) = part.trim_start().split_once('=')?;
-        (!name.is_empty()).then_some((name, value))
-    })
-}
-
-fn query_matches_cache_bypass(
-    query: &str,
-    configured_params: &[String],
-    configured_values: &std::collections::BTreeMap<String, String>,
-) -> bool {
-    if configured_params.is_empty() && configured_values.is_empty() {
-        return false;
-    }
-    query.split('&').any(|part| {
-        let (name, value) = part.split_once('=').unwrap_or((part, ""));
-        if name.is_empty() {
-            return false;
-        }
-
-        query_component_matches_cache_bypass(name, value, configured_params, configured_values)
-            || percent_decode_query_component(name).is_some_and(|decoded_name| {
-                query_component_matches_cache_bypass(
-                    &decoded_name,
-                    value,
-                    configured_params,
-                    configured_values,
-                ) || percent_decode_query_component(value).is_some_and(|decoded_value| {
-                    query_component_matches_cache_bypass(
-                        &decoded_name,
-                        &decoded_value,
-                        configured_params,
-                        configured_values,
-                    )
-                })
-            })
-            || percent_decode_query_component(value).is_some_and(|decoded_value| {
-                query_component_matches_cache_bypass(
-                    name,
-                    &decoded_value,
-                    configured_params,
-                    configured_values,
-                )
-            })
-    })
-}
-
-fn query_component_matches_cache_bypass(
-    name: &str,
-    value: &str,
-    configured_params: &[String],
-    configured_values: &std::collections::BTreeMap<String, String>,
-) -> bool {
-    configured_params
-        .iter()
-        .any(|configured| configured == name)
-        || configured_values
-            .get(name)
-            .is_some_and(|configured| configured == value)
-}
-
-fn percent_decode_query_component(component: &str) -> Option<String> {
-    if !component.as_bytes().contains(&b'%') {
-        return None;
-    }
-
-    let mut decoded = Vec::with_capacity(component.len());
-    let mut index = 0usize;
-    let bytes = component.as_bytes();
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            let high = bytes.get(index + 1).and_then(|byte| hex_value(*byte))?;
-            let low = bytes.get(index + 2).and_then(|byte| hex_value(*byte))?;
-            decoded.push((high << 4) | low);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
-        }
-    }
-
-    String::from_utf8(decoded).ok()
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 fn request_header_values<'a>(
