@@ -53,6 +53,9 @@ behavior when the change improves security or project direction.
   snapshot store, metadata validation, rollback pointer handling, and
   symlink-safe filesystem writes into `crates/fluxheim-snapshot`, with root
   `crate::snapshot` kept as a compatibility re-export.
+- Move reload-impact classification into `crates/fluxheim-config`, with root
+  `crate::reload` kept as a compatibility re-export for admin and CLI reload
+  reporting.
 
 ### Fixed
 

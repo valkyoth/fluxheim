@@ -47,6 +47,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   snapshot store, metadata validation, rollback pointer handling, and
   symlink-safe filesystem writes into `crates/fluxheim-snapshot`, with root
   `crate::snapshot` kept as a compatibility re-export.
+- Moved reload-impact classification into `crates/fluxheim-config`, with root
+  `crate::reload` kept as a compatibility re-export for admin and CLI reload
+  reporting.
 
 ## Fixed
 

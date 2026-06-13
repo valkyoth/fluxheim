@@ -32,6 +32,7 @@ pub mod fs_trust;
 pub mod internal_crypto;
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 mod otlp_http;
+pub mod reload;
 
 pub use config::*;
 

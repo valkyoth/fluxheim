@@ -3907,7 +3907,10 @@ the exception while the cache server is being completed as a focused sequence:
   `crate::proxy_protocol` adapter keeps Pingora L4 connector wiring. The
   `crates/fluxheim-snapshot` boundary now owns durable config snapshot storage,
   metadata validation, rollback pointer handling, and symlink-safe filesystem
-  writes while root `crate::snapshot` remains a compatibility re-export. Keep
+  writes while root `crate::snapshot` remains a compatibility re-export.
+  reload-impact classification in `crates/fluxheim-config`, with root
+  `crate::reload` as a compatibility re-export for admin and CLI reporting.
+  Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last
   because it still coordinates all subsystems.
