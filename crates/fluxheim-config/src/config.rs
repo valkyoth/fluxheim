@@ -76,6 +76,9 @@ pub use crate::config_logging::{
     AccessLoggingConfig, LoggingConfig, LoggingFileConfig, LoggingFormat, LoggingLevel,
     LoggingTarget,
 };
+pub use crate::config_metrics_summary::{
+    CacheConfigStats, LoadBalancerConfigStats, cache_config_stats, load_balancer_config_stats,
+};
 pub use crate::config_net::{normalize_host, normalize_host_pattern};
 pub use crate::config_observability::{
     MetricsConfig, MetricsOtlpExportConfig, OtlpTraceExportConfig, TracingConfig, TracingMode,

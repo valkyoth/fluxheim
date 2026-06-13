@@ -3954,8 +3954,9 @@ the exception while the cache server is being completed as a focused sequence:
   conversion helpers also now live in the observability crate while root
   `crate::metrics` remains the Prometheus registry/recorder adapter.
   `LoadBalanceSelection` metric-label mapping now lives in `fluxheim-config`,
-  leaving root `crate::metrics` as the compatibility wrapper for selection
-  labels.
+  and config-derived cache/load-balancer metrics summary aggregation now also
+  lives in `fluxheim-config`, leaving root `crate::metrics` as the
+  compatibility wrapper for selection labels and Prometheus gauge publishing.
   The OTLP trace exporter and trace-span payload builder also live behind the
   `crates/fluxheim-observability` `otlp-trace` feature while root
   `crate::otel_otlp` remains a compatibility re-export.

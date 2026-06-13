@@ -121,7 +121,7 @@ pub fn init() -> Result<(), prometheus::Error> {
 }
 
 pub fn record_config(config: &crate::config::Config) {
-    let stats = cache_config_stats(config);
+    let stats = crate::config::cache_config_stats(config);
     set_gauge(cache_vhosts(), stats.vhosts);
     set_gauge(cache_enabled_vhosts(), stats.enabled_vhosts);
     set_gauge(cache_tiered_vhosts(), stats.tiered_vhosts);
@@ -145,7 +145,7 @@ pub fn record_config(config: &crate::config::Config) {
         cache_peer_fill_max_concurrent_requests(),
         stats.peer_fill_max_concurrent_requests,
     );
-    record_load_balancer_config_stats(&load_balancer_config_stats(config));
+    record_load_balancer_config_stats(&crate::config::load_balancer_config_stats(config));
 }
 
 #[cfg(all(feature = "proxy", feature = "cache"))]
@@ -482,89 +482,7 @@ pub fn record_metrics_otlp_export(outcome: &str) {
     }
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
-struct CacheConfigStats {
-    vhosts: u64,
-    enabled_vhosts: u64,
-    tiered_vhosts: u64,
-    configured_routes: u64,
-    policy_routes: u64,
-    enabled_routes: u64,
-    tiered_routes: u64,
-    memory_tiers: u64,
-    disk_tiers: u64,
-    lock_enabled_policies: u64,
-    lock_wait_timeout_max_secs: u64,
-    peer_fill_enabled_policies: u64,
-    peer_fill_peers: u64,
-    peer_fill_max_concurrent_requests: u64,
-}
-
-#[derive(Debug, Default, Eq, PartialEq)]
-struct LoadBalancerConfigStats {
-    pools_by_scope_selection: std::collections::BTreeMap<(&'static str, &'static str), u64>,
-}
-
-fn cache_config_stats(config: &crate::config::Config) -> CacheConfigStats {
-    let mut stats = CacheConfigStats {
-        vhosts: config.vhosts.len() as u64,
-        ..CacheConfigStats::default()
-    };
-    for vhost in &config.vhosts {
-        accumulate_cache_policy(&vhost.cache, true, &mut stats);
-        stats.configured_routes = stats
-            .configured_routes
-            .saturating_add(vhost.routes.len() as u64);
-        for route in &vhost.routes {
-            let Some(cache) = &route.cache else {
-                continue;
-            };
-            stats.policy_routes = stats.policy_routes.saturating_add(1);
-            accumulate_cache_policy(cache, false, &mut stats);
-        }
-    }
-    stats
-}
-
-fn load_balancer_config_stats(config: &crate::config::Config) -> LoadBalancerConfigStats {
-    let mut stats = LoadBalancerConfigStats::default();
-    if config.vhosts.is_empty() {
-        accumulate_load_balancer_pool(&config.proxy, "vhost", &mut stats);
-        return stats;
-    }
-    for vhost in &config.vhosts {
-        accumulate_load_balancer_pool(&vhost.proxy, "vhost", &mut stats);
-        for route in &vhost.routes {
-            if let Some(proxy) = &route.proxy {
-                accumulate_load_balancer_pool(proxy, "route", &mut stats);
-            }
-        }
-    }
-    stats
-}
-
-fn accumulate_load_balancer_pool(
-    proxy: &crate::config::ProxyConfig,
-    scope: &'static str,
-    stats: &mut LoadBalancerConfigStats,
-) {
-    if !load_balancer_pool_configured(proxy) {
-        return;
-    }
-    let selection = load_balancer_selection_label(proxy.load_balance.selection);
-    *stats
-        .pools_by_scope_selection
-        .entry((scope, selection))
-        .or_insert(0) += 1;
-}
-
-fn load_balancer_pool_configured(proxy: &crate::config::ProxyConfig) -> bool {
-    proxy.upstreams.len() >= 2
-        || proxy.upstreams_file.is_some()
-        || proxy.upstream_dns_refresh_secs.is_some()
-}
-
-fn record_load_balancer_config_stats(stats: &LoadBalancerConfigStats) {
+fn record_load_balancer_config_stats(stats: &crate::config::LoadBalancerConfigStats) {
     match load_balancer_pools() {
         Ok(gauge) => {
             gauge.reset();
@@ -575,49 +493,6 @@ fn record_load_balancer_config_stats(stats: &LoadBalancerConfigStats) {
             }
         }
         Err(error) => log::debug!("metrics load balancer pool gauge unavailable: {error}"),
-    }
-}
-
-fn accumulate_cache_policy(
-    cache: &crate::config::CacheConfig,
-    vhost_scope: bool,
-    stats: &mut CacheConfigStats,
-) {
-    if !cache.enabled {
-        return;
-    }
-    if vhost_scope {
-        stats.enabled_vhosts = stats.enabled_vhosts.saturating_add(1);
-    } else {
-        stats.enabled_routes = stats.enabled_routes.saturating_add(1);
-    }
-    if cache.memory.enabled {
-        stats.memory_tiers = stats.memory_tiers.saturating_add(1);
-    }
-    if cache.disk.enabled {
-        stats.disk_tiers = stats.disk_tiers.saturating_add(1);
-    }
-    if (cache.memory.enabled || cache.disk.enabled) && cache.lock.enabled {
-        stats.lock_enabled_policies = stats.lock_enabled_policies.saturating_add(1);
-        stats.lock_wait_timeout_max_secs = stats
-            .lock_wait_timeout_max_secs
-            .max(cache.lock.wait_timeout_secs);
-    }
-    if cache.peer_fill.enabled {
-        stats.peer_fill_enabled_policies = stats.peer_fill_enabled_policies.saturating_add(1);
-        stats.peer_fill_peers = stats
-            .peer_fill_peers
-            .saturating_add(cache.peer_fill.peers.len() as u64);
-        stats.peer_fill_max_concurrent_requests = stats
-            .peer_fill_max_concurrent_requests
-            .max(cache.peer_fill.max_concurrent_requests as u64);
-    }
-    if cache.memory.enabled && cache.disk.enabled {
-        if vhost_scope {
-            stats.tiered_vhosts = stats.tiered_vhosts.saturating_add(1);
-        } else {
-            stats.tiered_routes = stats.tiered_routes.saturating_add(1);
-        }
     }
 }
 
@@ -1574,10 +1449,6 @@ fn load_balancer_queue_outcome_label(outcome: &str) -> &'static str {
     fluxheim_observability::metrics_load_balancer_queue_outcome_label(outcome)
 }
 
-fn load_balancer_selection_label(selection: crate::config::LoadBalanceSelection) -> &'static str {
-    selection.metric_label()
-}
-
 fn load_balancer_upstream_label(upstream: Option<&str>) -> &str {
     fluxheim_observability::metrics_load_balancer_upstream_label(upstream)
 }
@@ -1658,8 +1529,7 @@ mod tests {
     #[cfg(all(feature = "proxy", feature = "cache"))]
     use super::record_cache_runtime_totals;
     use super::{
-        cache_config_stats, init, load_balancer_config_stats, load_balancer_selection_label,
-        method_bucket, record_acme_event, record_admin_auth_event, record_cache_activity,
+        init, method_bucket, record_acme_event, record_admin_auth_event, record_cache_activity,
         record_cache_activity_scope, record_cache_operation_duration, record_cache_purge,
         record_cache_purger_duration, record_cache_purger_entries, record_cache_purger_run,
         record_config, record_edge_policy_event, record_host_routing_rejection,
@@ -2172,50 +2042,6 @@ mod tests {
         assert!(!output.contains("path="));
     }
 
-    #[test]
-    fn load_balancer_selection_labels_include_maglev_variants() {
-        assert_eq!(
-            load_balancer_selection_label(
-                crate::config::LoadBalanceSelection::BoundedLoadConsistentSourceHash
-            ),
-            "bounded_load_consistent_source_hash"
-        );
-        assert_eq!(
-            load_balancer_selection_label(
-                crate::config::LoadBalanceSelection::BoundedLoadConsistentUriHash
-            ),
-            "bounded_load_consistent_uri_hash"
-        );
-        assert_eq!(
-            load_balancer_selection_label(
-                crate::config::LoadBalanceSelection::BoundedLoadConsistentHeaderHash
-            ),
-            "bounded_load_consistent_header_hash"
-        );
-        assert_eq!(
-            load_balancer_selection_label(
-                crate::config::LoadBalanceSelection::BoundedLoadConsistentCookieHash
-            ),
-            "bounded_load_consistent_cookie_hash"
-        );
-        assert_eq!(
-            load_balancer_selection_label(crate::config::LoadBalanceSelection::MaglevSourceHash),
-            "maglev_source_hash"
-        );
-        assert_eq!(
-            load_balancer_selection_label(crate::config::LoadBalanceSelection::MaglevUriHash),
-            "maglev_uri_hash"
-        );
-        assert_eq!(
-            load_balancer_selection_label(crate::config::LoadBalanceSelection::MaglevHeaderHash),
-            "maglev_header_hash"
-        );
-        assert_eq!(
-            load_balancer_selection_label(crate::config::LoadBalanceSelection::MaglevCookieHash),
-            "maglev_cookie_hash"
-        );
-    }
-
     #[cfg(all(feature = "proxy", feature = "cache"))]
     #[test]
     fn records_cache_runtime_storage_pressure_gauges() {
@@ -2470,46 +2296,6 @@ mod tests {
         assert!(output.contains(r#"fluxheim_metrics_otlp_exports_total{outcome="failure"}"#));
         assert!(output.contains(r#"fluxheim_metrics_otlp_exports_total{outcome="other"}"#));
         assert!(!output.contains("attacker-outcome"));
-    }
-
-    #[test]
-    fn cache_configuration_stats_are_cardinality_safe_aggregates() {
-        let stats = cache_config_stats(&cache_metrics_config());
-        assert_eq!(stats.vhosts, 1);
-        assert_eq!(stats.enabled_vhosts, 1);
-        assert_eq!(stats.tiered_vhosts, 1);
-        assert_eq!(stats.configured_routes, 2);
-        assert_eq!(stats.policy_routes, 1);
-        assert_eq!(stats.enabled_routes, 1);
-        assert_eq!(stats.tiered_routes, 0);
-        assert_eq!(stats.memory_tiers, 2);
-        assert_eq!(stats.disk_tiers, 1);
-        assert_eq!(stats.lock_enabled_policies, 2);
-        assert_eq!(stats.lock_wait_timeout_max_secs, 30);
-        assert_eq!(stats.peer_fill_enabled_policies, 2);
-        assert_eq!(stats.peer_fill_peers, 3);
-        assert_eq!(stats.peer_fill_max_concurrent_requests, 128);
-    }
-
-    #[test]
-    fn load_balancer_configuration_stats_are_cardinality_safe_aggregates() {
-        let stats = load_balancer_config_stats(&load_balancer_metrics_config());
-
-        assert_eq!(
-            stats
-                .pools_by_scope_selection
-                .get(&("vhost", "least_time"))
-                .copied(),
-            Some(1)
-        );
-        assert_eq!(
-            stats
-                .pools_by_scope_selection
-                .get(&("route", "consistent_uri_hash"))
-                .copied(),
-            Some(1)
-        );
-        assert_eq!(stats.pools_by_scope_selection.values().sum::<u64>(), 2);
     }
 
     #[test]

@@ -16,6 +16,7 @@ pub mod config_http;
 pub mod config_load_balance;
 pub mod config_loader;
 pub mod config_logging;
+pub mod config_metrics_summary;
 pub mod config_net;
 pub mod config_observability;
 pub mod config_path;

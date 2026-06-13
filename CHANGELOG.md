@@ -165,6 +165,9 @@ behavior when the change improves security or project direction.
   registry/recorder adapter.
 - Move `LoadBalanceSelection` metric-label mapping into `fluxheim-config`,
   keeping root `crate::metrics` as a compatibility wrapper.
+- Move config-derived cache and load-balancer metrics summary aggregation into
+  `fluxheim-config`, leaving root metrics to only publish the Prometheus
+  gauges.
 - Move the OTLP trace exporter and trace-span payload builder into
   `crates/fluxheim-observability` behind its `otlp-trace` feature, with root
   `crate::otel_otlp` kept as a compatibility re-export.
