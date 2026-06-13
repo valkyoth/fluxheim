@@ -1172,6 +1172,7 @@ name = "fluxheim-php-fpm"
 version = "1.5.20"
 dependencies = [
  "fluxheim-config",
+ "getrandom 0.4.2",
 ]
 
 [[package]]

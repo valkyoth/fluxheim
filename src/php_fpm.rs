@@ -11,9 +11,10 @@ use crate::flux_error::{FluxError, FluxResult};
 #[cfg(test)]
 pub(crate) use fluxheim_php_fpm::php_fpm_retry_attempts;
 pub(crate) use fluxheim_php_fpm::{
-    PhpFpmEndpoint, PhpFpmTimeoutKind, managed_php_fpm_config, managed_php_fpm_path_env_from,
-    managed_php_fpm_restart_backoff_secs, php_fpm_effective_connect_timeout,
-    php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
+    PhpFpmEndpoint, PhpFpmTimeoutKind, managed_php_fpm_config, managed_php_fpm_instance_name,
+    managed_php_fpm_path_env_from, managed_php_fpm_restart_backoff_secs,
+    php_fpm_effective_connect_timeout, php_fpm_effective_request_timeout,
+    php_fpm_endpoints_from_config, php_fpm_error_outcome,
     php_fpm_retry_attempts_for_endpoint_count, php_fpm_retry_deadline,
     php_fpm_retry_deadline_allows, php_fpm_retryable_error, php_fpm_retryable_status,
     php_fpm_timeout_error, safe_php_header_name, safe_php_header_value, split_first_colon,
@@ -21,7 +22,6 @@ pub(crate) use fluxheim_php_fpm::{
 };
 
 const MANAGED_PHP_FPM_STABLE_RESTART_SECS: u64 = 30;
-static MANAGED_PHP_FPM_INSTANCE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 static PHP_REQUEST_BODY_SPOOL_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone)]
@@ -1259,35 +1259,6 @@ fn write_managed_php_fpm_config_file(path: &Path, contents: &[u8]) -> io::Result
     let mut file = std::fs::File::from(file);
     file.write_all(contents)?;
     file.sync_all()
-}
-
-#[cfg(unix)]
-fn managed_php_fpm_instance_name(metric_pool: &str) -> io::Result<String> {
-    let counter = MANAGED_PHP_FPM_INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let mut random = [0_u8; 8];
-    getrandom::fill(&mut random).map_err(|error| {
-        io::Error::other(format!(
-            "failed to generate managed php-fpm instance entropy: {error}"
-        ))
-    })?;
-    let random = u64::from_le_bytes(random);
-    let sanitized = metric_pool
-        .bytes()
-        .map(|byte| match byte {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' => byte as char,
-            _ => '-',
-        })
-        .take(48)
-        .collect::<String>();
-    let sanitized = if sanitized.is_empty() {
-        "php".to_owned()
-    } else {
-        sanitized
-    };
-    Ok(format!(
-        "fluxheim-php-fpm-{sanitized}-{}-{counter}-{random:016x}",
-        std::process::id()
-    ))
 }
 
 #[cfg(unix)]

@@ -6,9 +6,12 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
+
+static MANAGED_PHP_FPM_INSTANCE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum PhpFpmEndpoint {
@@ -265,6 +268,50 @@ pub fn managed_php_fpm_path_env_from(value: Option<String>) -> String {
         .unwrap_or_else(|| DEFAULT_PATH.to_owned())
 }
 
+pub fn managed_php_fpm_instance_name(metric_pool: &str) -> io::Result<String> {
+    let counter = MANAGED_PHP_FPM_INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    managed_php_fpm_instance_name_from_parts(
+        metric_pool,
+        std::process::id(),
+        counter,
+        managed_php_fpm_instance_random()?,
+    )
+}
+
+fn managed_php_fpm_instance_random() -> io::Result<u64> {
+    let mut random = [0_u8; 8];
+    getrandom::fill(&mut random).map_err(|error| {
+        io::Error::other(format!(
+            "failed to generate managed php-fpm instance entropy: {error}"
+        ))
+    })?;
+    Ok(u64::from_le_bytes(random))
+}
+
+fn managed_php_fpm_instance_name_from_parts(
+    metric_pool: &str,
+    pid: u32,
+    counter: usize,
+    random: u64,
+) -> io::Result<String> {
+    let sanitized = metric_pool
+        .bytes()
+        .map(|byte| match byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' => byte as char,
+            _ => '-',
+        })
+        .take(48)
+        .collect::<String>();
+    let sanitized = if sanitized.is_empty() {
+        "php".to_owned()
+    } else {
+        sanitized
+    };
+    Ok(format!(
+        "fluxheim-php-fpm-{sanitized}-{pid}-{counter}-{random:016x}"
+    ))
+}
+
 pub fn managed_php_fpm_config(
     socket: &Path,
     pid_path: &Path,
@@ -466,7 +513,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        PhpFpmEndpoint, PhpFpmTimeoutKind, managed_php_fpm_config, managed_php_fpm_path_env_from,
+        PhpFpmEndpoint, PhpFpmTimeoutKind, managed_php_fpm_config,
+        managed_php_fpm_instance_name_from_parts, managed_php_fpm_path_env_from,
         managed_php_fpm_restart_backoff_secs, parse_php_status, php_fpm_effective_connect_timeout,
         php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
         php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
@@ -520,6 +568,23 @@ mod tests {
         assert_eq!(managed_php_fpm_restart_backoff_secs(1), 2);
         assert_eq!(managed_php_fpm_restart_backoff_secs(4), 16);
         assert_eq!(managed_php_fpm_restart_backoff_secs(64), 30);
+    }
+
+    #[test]
+    fn managed_php_fpm_instance_names_are_sanitized_and_bounded() {
+        assert_eq!(
+            managed_php_fpm_instance_name_from_parts("pool/main:php", 42, 7, 0xfeed).unwrap(),
+            "fluxheim-php-fpm-pool-main-php-42-7-000000000000feed"
+        );
+        assert_eq!(
+            managed_php_fpm_instance_name_from_parts("", 42, 7, 0xfeed).unwrap(),
+            "fluxheim-php-fpm-php-42-7-000000000000feed"
+        );
+
+        let long_name =
+            managed_php_fpm_instance_name_from_parts(&"a".repeat(96), 42, 7, 0xfeed).unwrap();
+        assert!(long_name.contains(&"a".repeat(48)));
+        assert!(!long_name.contains(&"a".repeat(49)));
     }
 
     #[test]
