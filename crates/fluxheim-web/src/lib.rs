@@ -4,6 +4,8 @@
     deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -63,6 +65,44 @@ pub enum ByteRangeParse {
     Single { start: u64, len: u64 },
     Unsatisfiable,
     Ignore,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct SafeRelativePath {
+    components: Vec<OsString>,
+}
+
+impl SafeRelativePath {
+    pub fn push(&mut self, component: &str) {
+        self.components.push(OsString::from(component));
+    }
+
+    pub fn as_path(&self) -> PathBuf {
+        self.components.iter().collect()
+    }
+
+    pub fn from_path(path: &Path) -> Option<Self> {
+        let mut safe = Self::default();
+        for component in path.components() {
+            match component {
+                std::path::Component::Normal(component) => safe.components.push(component.into()),
+                _ => return None,
+            }
+        }
+        Some(safe)
+    }
+
+    pub fn from_rooted(root: &Path, candidate: &Path) -> Option<Self> {
+        candidate.strip_prefix(root).ok().and_then(Self::from_path)
+    }
+
+    pub fn contains_component_starting_with(&self, prefix: char) -> bool {
+        self.components.iter().any(|component| {
+            component
+                .to_str()
+                .is_some_and(|component| component.starts_with(prefix))
+        })
+    }
 }
 
 pub fn plan_static_response(
@@ -354,6 +394,23 @@ pub fn render_directory_listing(listing: &DirectoryListing) -> String {
     html
 }
 
+pub fn directory_listing_path(relative: &Path) -> String {
+    let mut path = String::from("/");
+    for component in relative.components() {
+        let std::path::Component::Normal(segment) = component else {
+            continue;
+        };
+        if path.len() > 1 {
+            path.push('/');
+        }
+        path.push_str(&segment.to_string_lossy());
+    }
+    if !path.ends_with('/') {
+        path.push('/');
+    }
+    path
+}
+
 fn format_directory_listing_time(modified: SystemTime, local_time: bool) -> String {
     if local_time {
         let local: chrono::DateTime<chrono::Local> = modified.into();
@@ -380,12 +437,13 @@ fn html_escape(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::time::UNIX_EPOCH;
 
     use super::{
-        ByteRangeParse, DirectoryEntry, DirectoryListing, StaticResponseBody,
-        StaticResponseConditions, StaticResponseFile, parse_single_byte_range,
-        plan_static_response, render_directory_listing,
+        ByteRangeParse, DirectoryEntry, DirectoryListing, SafeRelativePath, StaticResponseBody,
+        StaticResponseConditions, StaticResponseFile, directory_listing_path,
+        parse_single_byte_range, plan_static_response, render_directory_listing,
     };
 
     #[test]
@@ -427,6 +485,30 @@ mod tests {
             "{html}"
         );
         assert!(!html.contains("GMT"));
+    }
+
+    #[test]
+    fn safe_relative_path_rejects_non_normal_components() {
+        assert!(SafeRelativePath::from_path(Path::new("assets/app.css")).is_some());
+        assert!(SafeRelativePath::from_path(Path::new("../secret")).is_none());
+        assert!(SafeRelativePath::from_path(Path::new("/absolute")).is_none());
+    }
+
+    #[test]
+    fn safe_relative_path_detects_prefixed_components() {
+        let path = SafeRelativePath::from_path(Path::new(".well-known/acme-challenge"))
+            .expect("relative path should parse");
+
+        assert!(path.contains_component_starting_with('.'));
+    }
+
+    #[test]
+    fn formats_directory_listing_paths_with_trailing_slash() {
+        assert_eq!(directory_listing_path(Path::new("")), "/");
+        assert_eq!(
+            directory_listing_path(Path::new("assets/css")),
+            "/assets/css/"
+        );
     }
 
     #[test]

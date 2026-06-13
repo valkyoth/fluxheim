@@ -48,6 +48,9 @@ behavior when the change improves security or project direction.
   construction, and range response plan DTOs into `crates/fluxheim-web`.
   `crate::web` keeps the existing `StaticRequestConditions` compatibility
   adapter so proxy call sites and cache-refresh semantics are unchanged.
+- Move safe relative path and directory-listing path helpers into
+  `crates/fluxheim-web`, leaving root static serving responsible for filesystem
+  canonicalization and symlink checks.
 - Start the `fluxheim-php-fpm` crate boundary by moving PHP-FPM timeout
   classification and bounded error-outcome helpers into
   `crates/fluxheim-php-fpm`, with the root PHP-FPM module re-exporting the same

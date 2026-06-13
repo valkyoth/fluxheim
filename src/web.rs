@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 #[cfg(feature = "proxy")]
 use std::fs::OpenOptions;
 use std::io;
@@ -14,10 +13,11 @@ use crate::config::WebConfig;
 use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 #[cfg(feature = "proxy")]
 use crate::http_types::PingoraResponseHeader as ResponseHeader;
+use fluxheim_web::SafeRelativePath;
 use fluxheim_web::StaticResponseConditions;
 pub use fluxheim_web::{
     ByteRangeParse, DirectoryEntry, DirectoryListing, StaticResponseBody, StaticResponseFile,
-    StaticResponsePlan, parse_single_byte_range, render_directory_listing,
+    StaticResponsePlan, directory_listing_path, parse_single_byte_range, render_directory_listing,
 };
 
 #[cfg(unix)]
@@ -151,13 +151,7 @@ impl StaticFileServer {
         let Some(relative_path) = SafeRelativePath::from_rooted(&self.root, path) else {
             return Ok(ResolveResult::Forbidden);
         };
-        if self.deny_dotfiles
-            && relative_path.components.iter().any(|component| {
-                component
-                    .to_str()
-                    .is_some_and(|component| component.starts_with('.'))
-            })
-        {
+        if self.deny_dotfiles && relative_path.contains_component_starting_with('.') {
             return Ok(ResolveResult::Forbidden);
         }
 
@@ -337,36 +331,6 @@ impl StaticFileServer {
 
 const MAX_DIRECTORY_LISTING_ENTRIES: usize = 4096;
 
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-struct SafeRelativePath {
-    components: Vec<OsString>,
-}
-
-impl SafeRelativePath {
-    fn push(&mut self, component: &str) {
-        self.components.push(OsString::from(component));
-    }
-
-    fn as_path(&self) -> PathBuf {
-        self.components.iter().collect()
-    }
-
-    fn from_path(path: &Path) -> Option<Self> {
-        let mut safe = Self::default();
-        for component in path.components() {
-            match component {
-                std::path::Component::Normal(component) => safe.components.push(component.into()),
-                _ => return None,
-            }
-        }
-        Some(safe)
-    }
-
-    fn from_rooted(root: &Path, candidate: &Path) -> Option<Self> {
-        candidate.strip_prefix(root).ok().and_then(Self::from_path)
-    }
-}
-
 fn configured_web_path_contains_symlink(path: &Path) -> io::Result<bool> {
     for component in path.components() {
         match component {
@@ -388,23 +352,6 @@ fn configured_web_path_contains_symlink(path: &Path) -> io::Result<bool> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     }
-}
-
-fn directory_listing_path(relative: &Path) -> String {
-    let mut path = String::from("/");
-    for component in relative.components() {
-        let std::path::Component::Normal(segment) = component else {
-            continue;
-        };
-        if path.len() > 1 {
-            path.push('/');
-        }
-        path.push_str(&segment.to_string_lossy());
-    }
-    if !path.ends_with('/') {
-        path.push('/');
-    }
-    path
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
