@@ -48,13 +48,13 @@ pub use fluxheim_cache::{
     CacheSliceBounds, CacheSliceRangeRequest, CacheStaleEvent, CacheStoragePlan, CacheStoreError,
     CachedHeader, CachedImageObject, DiskCacheStats, DiskTierPlan, MAX_VARY_FIELDS,
     MemoryCacheStats, MemoryTierPlan, StaticCacheRequest, TieredCacheStats, VaryCachePolicy,
-    cache_control_freshness_value, cache_control_with_directive, cache_should_serve_stale,
-    cache_stale_status_allows, cache_vary_policy, cookie_headers_match_cache_bypass,
-    parse_bounded_single_range, parse_cache_client_ranges, parse_cache_content_range,
-    query_matches_cache_bypass, remaining_fresh_ttl_secs, required_slice_bounds,
-    resolve_client_slice_ranges, response_age_secs, response_cache_control_max_age,
-    response_content_length_matches_range, response_content_range_matches,
-    response_content_type_is_cacheable, vary_cache_policy,
+    append_cache_key_component, cache_control_freshness_value, cache_control_with_directive,
+    cache_method_temporarily_bypassed, cache_should_serve_stale, cache_stale_status_allows,
+    cache_vary_policy, cookie_headers_match_cache_bypass, parse_bounded_single_range,
+    parse_cache_client_ranges, parse_cache_content_range, query_matches_cache_bypass,
+    remaining_fresh_ttl_secs, required_slice_bounds, resolve_client_slice_ranges,
+    response_age_secs, response_cache_control_max_age, response_content_length_matches_range,
+    response_content_range_matches, response_content_type_is_cacheable, vary_cache_policy,
 };
 
 #[cfg(feature = "proxy")]

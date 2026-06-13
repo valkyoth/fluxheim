@@ -54,6 +54,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved range response `Content-Range` and `Content-Length` validation into
   `crates/fluxheim-cache::request`, leaving root range-cache admission as the
   Pingora status/header adapter.
+- Moved cache-key component formatting and the temporary HEAD cache bypass
+  predicate into `crates/fluxheim-cache::request`, keeping root compatibility
+  wrappers for existing proxy callers.
 - Moved cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

@@ -33,8 +33,8 @@ pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};
 pub use purge_index::{CachePurgeIndex, CachePurgeIndexEntry};
 pub use request::{
     CacheClientRange, CacheContentRange, CacheKey, CacheRangeRequest, CacheRequest,
-    CacheSliceBounds, CacheSliceRangeRequest, StaticCacheRequest, parse_bounded_single_range,
-    parse_cache_client_ranges, parse_cache_content_range, required_slice_bounds,
-    resolve_client_slice_ranges, response_content_length_matches_range,
-    response_content_range_matches,
+    CacheSliceBounds, CacheSliceRangeRequest, StaticCacheRequest, append_cache_key_component,
+    cache_method_temporarily_bypassed, parse_bounded_single_range, parse_cache_client_ranges,
+    parse_cache_content_range, required_slice_bounds, resolve_client_slice_ranges,
+    response_content_length_matches_range, response_content_range_matches,
 };

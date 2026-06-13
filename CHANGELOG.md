@@ -60,6 +60,9 @@ behavior when the change improves security or project direction.
 - Move range response `Content-Range` and `Content-Length` validation into
   `crates/fluxheim-cache::request`, leaving root range-cache admission as the
   Pingora status/header adapter.
+- Move cache-key component formatting and the temporary HEAD cache bypass
+  predicate into `crates/fluxheim-cache::request`, keeping root compatibility
+  wrappers for existing proxy callers.
 - Move cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

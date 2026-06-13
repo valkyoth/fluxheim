@@ -102,6 +102,15 @@ impl CacheKey {
     }
 }
 
+pub fn append_cache_key_component(key: &mut String, label: &str, value: &str) {
+    use std::fmt::Write as _;
+    let _ = write!(key, "{label}:{}:{value};", value.len());
+}
+
+pub fn cache_method_temporarily_bypassed(method: &str) -> bool {
+    method == "HEAD"
+}
+
 pub fn parse_bounded_single_range(range: &str) -> Option<CacheRangeRequest> {
     let range = range.trim();
     let range = range.strip_prefix("bytes=")?;
@@ -273,11 +282,25 @@ pub fn required_slice_bounds(
 #[cfg(test)]
 mod tests {
     use super::{
-        CacheClientRange, CacheContentRange, CacheSliceBounds, parse_bounded_single_range,
-        parse_cache_client_ranges, parse_cache_content_range, required_slice_bounds,
-        resolve_client_slice_ranges, response_content_length_matches_range,
-        response_content_range_matches,
+        CacheClientRange, CacheContentRange, CacheSliceBounds, append_cache_key_component,
+        cache_method_temporarily_bypassed, parse_bounded_single_range, parse_cache_client_ranges,
+        parse_cache_content_range, required_slice_bounds, resolve_client_slice_ranges,
+        response_content_length_matches_range, response_content_range_matches,
     };
+
+    #[test]
+    fn appends_length_delimited_cache_key_component() {
+        let mut key = String::from("prefix;");
+        append_cache_key_component(&mut key, "range", "bytes=10-19");
+        assert_eq!(key, "prefix;range:11:bytes=10-19;");
+    }
+
+    #[test]
+    fn detects_temporarily_bypassed_cache_methods() {
+        assert!(cache_method_temporarily_bypassed("HEAD"));
+        assert!(!cache_method_temporarily_bypassed("GET"));
+        assert!(!cache_method_temporarily_bypassed("head"));
+    }
 
     #[test]
     fn parses_bounded_single_range() {

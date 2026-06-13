@@ -14,10 +14,11 @@ const MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES: u64 = 128;
 pub(crate) use crate::cache::CacheClientRange;
 pub(crate) use crate::cache::{
     CacheContentRange, CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest,
-    CacheStaleEvent, VaryCachePolicy, cache_control_freshness_value, cache_control_with_directive,
-    cache_should_serve_stale, cache_vary_policy, parse_bounded_single_range,
-    parse_cache_client_ranges, parse_cache_content_range, remaining_fresh_ttl_secs,
-    required_slice_bounds, resolve_client_slice_ranges, response_content_length_matches_range,
+    CacheStaleEvent, VaryCachePolicy, append_cache_key_component, cache_control_freshness_value,
+    cache_control_with_directive, cache_method_temporarily_bypassed, cache_should_serve_stale,
+    cache_vary_policy, parse_bounded_single_range, parse_cache_client_ranges,
+    parse_cache_content_range, remaining_fresh_ttl_secs, required_slice_bounds,
+    resolve_client_slice_ranges, response_content_length_matches_range,
     response_content_range_matches, response_content_type_is_cacheable,
 };
 #[cfg(test)]
@@ -232,11 +233,6 @@ fn try_slice_cache_key(
     Ok(base)
 }
 
-pub(crate) fn append_cache_key_component(key: &mut String, label: &str, value: &str) {
-    use std::fmt::Write as _;
-    let _ = write!(key, "{label}:{}:{value};", value.len());
-}
-
 pub(crate) fn range_response_cache_admission_rejection(
     response: &ResponseHeader,
     range: Option<CacheRangeRequest>,
@@ -405,7 +401,7 @@ pub(crate) fn cache_request_participated(phase: CachePhase) -> bool {
 }
 
 pub(crate) fn proxy_cache_method_temporarily_bypassed(method: &str) -> bool {
-    method == "HEAD"
+    cache_method_temporarily_bypassed(method)
 }
 
 pub(crate) fn cache_stale_error_kind(error: &Error) -> crate::config::CacheStaleErrorKind {
