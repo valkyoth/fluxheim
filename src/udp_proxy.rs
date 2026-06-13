@@ -21,7 +21,7 @@ const UDP_DROP_LOG_INTERVAL_MILLIS: u64 = 1_000;
 const UDP_RESPONSE_RATE_TRACKED_SOURCES_FLOOR: usize = 4_096;
 
 type UdpSourceSessions = Arc<Mutex<HashMap<IpAddr, usize>>>;
-type UdpResponseRateWindows = Arc<Mutex<HashMap<IpAddr, UdpResponseRateWindow>>>;
+type UdpResponseRateWindows = Arc<Mutex<UdpResponseRateState>>;
 
 pub(crate) fn udp_services_from_config(config: &Config) -> io::Result<Vec<UdpProxyService>> {
     if !config.udp.enabled {
@@ -253,12 +253,12 @@ impl UdpProxyApp {
             .iter()
             .filter_map(|listen| listen.parse::<SocketAddr>().ok())
             .any(|listen| !listen.ip().is_loopback())
-            && route.mode == UdpRouteMode::DnsLoadBalance
         {
             log::warn!(
                 target: "fluxheim::security",
-                "UDP route {} listens on a non-loopback address in dns-load-balance mode; verify ingress filtering and response-rate limits before public exposure",
-                route.name
+                "UDP route {} ({:?} mode) listens on a non-loopback address; verify ingress filtering and response-rate limits before public exposure",
+                route.name,
+                route.mode
             );
         }
 
@@ -278,7 +278,7 @@ impl UdpProxyApp {
             response_rate_tracked_sources,
             active_sessions: Arc::new(AtomicUsize::new(0)),
             source_sessions: Arc::new(Mutex::new(HashMap::new())),
-            response_rate_windows: Arc::new(Mutex::new(HashMap::new())),
+            response_rate_windows: Arc::new(Mutex::new(UdpResponseRateState::default())),
             datagrams_total: AtomicU64::new(0),
             responses_total: AtomicU64::new(0),
             drops_total: AtomicU64::new(0),
@@ -370,24 +370,28 @@ impl UdpProxyApp {
     fn select_upstream(&self) -> &RuntimeUdpUpstream {
         let start = self.next_upstream.fetch_add(1, Ordering::Relaxed) % self.weight_total;
         let now = udp_log_millis();
-        for offset in 0..self.weight_total {
-            let slot = (start + offset) % self.weight_total;
-            let upstream = self.upstream_for_weight_slot(slot);
-            if upstream.ready(now) {
-                return upstream;
+        let start_index = self.upstream_index_for_weight_slot(start);
+        for offset in 0..self.upstreams.len() {
+            let index = (start_index + offset) % self.upstreams.len();
+            if self.upstreams[index].ready(now) {
+                return &self.upstreams[index];
             }
         }
         self.upstream_for_weight_slot(start)
     }
 
-    fn upstream_for_weight_slot(&self, mut slot: usize) -> &RuntimeUdpUpstream {
-        for upstream in self.upstreams.iter() {
+    fn upstream_for_weight_slot(&self, slot: usize) -> &RuntimeUdpUpstream {
+        &self.upstreams[self.upstream_index_for_weight_slot(slot)]
+    }
+
+    fn upstream_index_for_weight_slot(&self, mut slot: usize) -> usize {
+        for (index, upstream) in self.upstreams.iter().enumerate() {
             if slot < upstream.weight {
-                return upstream;
+                return index;
             }
             slot -= upstream.weight;
         }
-        &self.upstreams[0]
+        0
     }
 
     async fn forward_request_response(
@@ -469,19 +473,20 @@ impl UdpProxyApp {
             return true;
         }
         let now_secs = udp_log_millis() / 1_000;
-        let mut windows = self.lock_response_rate_windows();
-        windows.retain(|_, window| window.window_secs == now_secs);
-        if !windows.contains_key(&source) && windows.len() >= self.response_rate_tracked_sources {
+        let mut state = self.lock_response_rate_windows();
+        if state.window_secs != now_secs {
+            state.window_secs = now_secs;
+            state.windows.clear();
+        }
+        if !state.windows.contains_key(&source)
+            && state.windows.len() >= self.response_rate_tracked_sources
+        {
             return false;
         }
-        let window = windows.entry(source).or_insert(UdpResponseRateWindow {
-            window_secs: now_secs,
-            count: 0,
-        });
-        if window.window_secs != now_secs {
-            window.window_secs = now_secs;
-            window.count = 0;
-        }
+        let window = state
+            .windows
+            .entry(source)
+            .or_insert(UdpResponseRateWindow { count: 0 });
         if window.count >= self.max_responses_per_source_per_second {
             return false;
         }
@@ -517,6 +522,8 @@ impl UdpProxyApp {
     }
 
     fn lock_source_sessions(&self) -> std::sync::MutexGuard<'_, HashMap<IpAddr, usize>> {
+        // Poisoning would mean per-source UDP accounting is no longer
+        // trustworthy. Keep this critical section free of panic-capable work.
         match self.source_sessions.lock() {
             Ok(guard) => guard,
             Err(_) => {
@@ -530,9 +537,9 @@ impl UdpProxyApp {
         }
     }
 
-    fn lock_response_rate_windows(
-        &self,
-    ) -> std::sync::MutexGuard<'_, HashMap<IpAddr, UdpResponseRateWindow>> {
+    fn lock_response_rate_windows(&self) -> std::sync::MutexGuard<'_, UdpResponseRateState> {
+        // Poisoning would mean UDP response-rate accounting is no longer
+        // trustworthy. Keep this critical section free of panic-capable work.
         match self.response_rate_windows.lock() {
             Ok(guard) => guard,
             Err(_) => {
@@ -625,9 +632,14 @@ impl RuntimeUdpUpstream {
     }
 }
 
+#[derive(Debug, Default)]
+struct UdpResponseRateState {
+    window_secs: u64,
+    windows: HashMap<IpAddr, UdpResponseRateWindow>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct UdpResponseRateWindow {
-    window_secs: u64,
     count: usize,
 }
 
@@ -654,6 +666,8 @@ impl Drop for UdpSessionSlot {
             );
         }
         if let Some((sessions, source)) = &self.source_counter {
+            // Poisoning would mean per-source UDP accounting is no longer
+            // trustworthy. Keep this critical section free of panic-capable work.
             let mut sessions = match sessions.lock() {
                 Ok(guard) => guard,
                 Err(_) => {
@@ -892,6 +906,29 @@ mod tests {
 
         assert!(app.allow_response_to_source(source));
         assert!(!app.allow_response_to_source(source));
+    }
+
+    #[test]
+    fn udp_response_rate_limit_rolls_generation_without_per_packet_scan() {
+        let mut route = route("127.0.0.1:53".to_owned(), UdpRouteMode::DnsLoadBalance);
+        route.max_responses_per_source_per_second = 2;
+        let app = UdpProxyApp::from_config(&route).unwrap();
+        let old_source = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
+        let new_source = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+        {
+            let mut state = app.lock_response_rate_windows();
+            state.window_secs = (super::udp_log_millis() / 1_000).saturating_sub(1);
+            state
+                .windows
+                .insert(old_source, super::UdpResponseRateWindow { count: 2 });
+        }
+
+        assert!(app.allow_response_to_source(new_source));
+        let state = app.lock_response_rate_windows();
+        assert_eq!(state.windows.len(), 1);
+        assert!(state.windows.contains_key(&new_source));
+        assert!(!state.windows.contains_key(&old_source));
     }
 
     #[test]

@@ -33,6 +33,12 @@ controls for safer testing.
 - The stable release gate can run the UDP beta smoke with
   `FLUXHEIM_GATE_UDP=1`; set `FLUXHEIM_UDP_SMOKE_ITERATIONS` for longer local
   soak runs.
+- UDP response-rate limiting no longer scans the full tracked-source map on
+  every response. The route now uses a current-window generation and clears it
+  only when the second changes.
+- UDP passive-health fallback selection now scans at most the configured
+  upstream count instead of the total weighted slot count when members are
+  ejected.
 
 ## Compatibility
 

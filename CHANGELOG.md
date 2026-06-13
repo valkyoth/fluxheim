@@ -33,6 +33,9 @@ behavior when the change improves security or project direction.
   oversized downstream datagrams are dropped before reaching the upstream.
 - Added optional stable-gate UDP beta smoke via `FLUXHEIM_GATE_UDP=1`, with
   `FLUXHEIM_UDP_SMOKE_ITERATIONS` for longer local soak runs.
+- Hardened UDP beta hot paths by removing per-response full-map scans from
+  source response-rate limiting and bounding passive-health fallback selection
+  by upstream count instead of total configured weight.
 
 ## 1.5.20 - 2026-06-13
 
