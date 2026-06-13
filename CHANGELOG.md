@@ -197,6 +197,8 @@ behavior when the change improves security or project direction.
 - Move downstream PROXY-protocol trusted-source parsing into
   `crates/fluxheim-protocol`, leaving root runtime as the Pingora listener
   adapter.
+- Move HTTP Upgrade token grammar validation into `crates/fluxheim-protocol`,
+  leaving root proxy as the Pingora request-header adapter.
 
 ### Fixed
 

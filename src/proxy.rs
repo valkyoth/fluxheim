@@ -8792,32 +8792,9 @@ fn http_upgrade_request_value(request: &RequestHeader) -> Option<&str> {
     }
     request_header_values(request, "upgrade")
         .map(str::trim)
-        .find(|value| valid_http_upgrade_token(value) && value.eq_ignore_ascii_case("websocket"))
-}
-
-fn valid_http_upgrade_token(value: &str) -> bool {
-    !value.is_empty()
-        && value.bytes().all(|byte| {
-            matches!(
-                byte,
-                b'!' | b'#'
-                    | b'$'
-                    | b'%'
-                    | b'&'
-                    | b'\''
-                    | b'*'
-                    | b'+'
-                    | b'-'
-                    | b'.'
-                    | b'^'
-                    | b'_'
-                    | b'`'
-                    | b'|'
-                    | b'~'
-                    | b'0'..=b'9'
-                    | b'A'..=b'Z'
-                    | b'a'..=b'z'
-            )
+        .find(|value| {
+            fluxheim_protocol::http_upgrade_token_valid(value)
+                && value.eq_ignore_ascii_case("websocket")
         })
 }
 
