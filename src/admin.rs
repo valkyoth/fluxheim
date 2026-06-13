@@ -3569,7 +3569,7 @@ fn cache_route_stats_json(routes: &[crate::proxy::CacheRouteStats]) -> Vec<Value
 
 #[cfg(feature = "cache")]
 fn cache_storage_tiers(memory: bool, disk: bool) -> u8 {
-    u8::from(memory).saturating_add(u8::from(disk))
+    crate::cache::cache_storage_tiers(memory, disk)
 }
 
 #[cfg(feature = "cache")]
@@ -3621,28 +3621,22 @@ fn disk_cache_stats_json(stats: Option<&crate::cache::DiskCacheStats>) -> Value 
 
 #[cfg(feature = "cache")]
 fn ratio_per_mille(numerator: u64, denominator: u64) -> u64 {
-    numerator
-        .saturating_mul(1000)
-        .checked_div(denominator)
-        .unwrap_or(0)
+    crate::cache::cache_ratio_per_mille(numerator, denominator)
 }
 
 #[cfg(feature = "cache")]
 fn ratio_per_mille_usize(numerator: usize, denominator: usize) -> u64 {
-    ratio_per_mille(
-        u64::try_from(numerator).unwrap_or(u64::MAX),
-        u64::try_from(denominator).unwrap_or(u64::MAX),
-    )
+    crate::cache::cache_ratio_per_mille_usize(numerator, denominator)
 }
 
 #[cfg(feature = "cache")]
 fn stale_would_purge(dry_run: bool, stale: usize) -> usize {
-    if dry_run { stale } else { 0 }
+    crate::cache::cache_stale_would_purge(dry_run, stale)
 }
 
 #[cfg(feature = "cache")]
 fn average_bytes(total_bytes: u64, entries: u64) -> u64 {
-    total_bytes.checked_div(entries).unwrap_or(0)
+    crate::cache::cache_average_bytes(total_bytes, entries)
 }
 
 #[cfg(feature = "cache")]

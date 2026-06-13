@@ -1,5 +1,31 @@
 use fluxheim_config::ByteSize;
 
+pub fn cache_storage_tiers(memory: bool, disk: bool) -> u8 {
+    u8::from(memory).saturating_add(u8::from(disk))
+}
+
+pub fn cache_ratio_per_mille(numerator: u64, denominator: u64) -> u64 {
+    numerator
+        .saturating_mul(1000)
+        .checked_div(denominator)
+        .unwrap_or(0)
+}
+
+pub fn cache_ratio_per_mille_usize(numerator: usize, denominator: usize) -> u64 {
+    cache_ratio_per_mille(
+        u64::try_from(numerator).unwrap_or(u64::MAX),
+        u64::try_from(denominator).unwrap_or(u64::MAX),
+    )
+}
+
+pub fn cache_average_bytes(total_bytes: u64, entries: u64) -> u64 {
+    total_bytes.checked_div(entries).unwrap_or(0)
+}
+
+pub fn cache_stale_would_purge(dry_run: bool, stale: usize) -> usize {
+    if dry_run { stale } else { 0 }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CachePurgeRequest<'a> {
     pub vhost: Option<&'a str>,
@@ -477,4 +503,32 @@ pub struct CacheRouteStats {
     pub peer_fill_fail_open: bool,
     pub memory: Option<MemoryCacheStats>,
     pub disk: Option<DiskCacheStats>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        cache_average_bytes, cache_ratio_per_mille, cache_ratio_per_mille_usize,
+        cache_stale_would_purge, cache_storage_tiers,
+    };
+
+    #[test]
+    fn cache_admin_math_handles_zero_denominators_and_saturation() {
+        assert_eq!(cache_ratio_per_mille(5, 10), 500);
+        assert_eq!(cache_ratio_per_mille(5, 0), 0);
+        assert_eq!(cache_ratio_per_mille(u64::MAX, 1), u64::MAX);
+        assert_eq!(cache_ratio_per_mille_usize(1, 4), 250);
+        assert_eq!(cache_average_bytes(100, 4), 25);
+        assert_eq!(cache_average_bytes(100, 0), 0);
+    }
+
+    #[test]
+    fn cache_admin_policy_helpers_report_tiers_and_dry_run_counts() {
+        assert_eq!(cache_storage_tiers(false, false), 0);
+        assert_eq!(cache_storage_tiers(true, false), 1);
+        assert_eq!(cache_storage_tiers(false, true), 1);
+        assert_eq!(cache_storage_tiers(true, true), 2);
+        assert_eq!(cache_stale_would_purge(true, 7), 7);
+        assert_eq!(cache_stale_would_purge(false, 7), 0);
+    }
 }

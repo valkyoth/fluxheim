@@ -20,7 +20,8 @@ pub use api::{
     CacheObjectHeaderValue, CacheObjectLookup, CacheObjectMetadata, CacheObjectTier,
     CachePurgeRequest, CachePurgeResult, CacheRouteStats, CacheRuntimeStats, CacheRuntimeTotals,
     CacheStalePurgeRequest, CacheStalePurgeResult, CacheVhostStats, DiskCacheStats,
-    MemoryCacheStats, TieredCacheStats,
+    MemoryCacheStats, TieredCacheStats, cache_average_bytes, cache_ratio_per_mille,
+    cache_ratio_per_mille_usize, cache_stale_would_purge, cache_storage_tiers,
 };
 pub use headers::{
     CacheStaleEvent, MAX_VARY_FIELDS, VaryCachePolicy, VaryRequestHashField,

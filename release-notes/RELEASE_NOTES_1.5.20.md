@@ -183,6 +183,8 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved load-balancer runtime/member weight parser helpers into
   `crates/fluxheim-load-balancer`, leaving root admin as the HTTP/query
   endpoint adapter.
+- Moved cache admin summary math helpers into `crates/fluxheim-cache::api`,
+  leaving root admin JSON assembly as the response adapter.
 
 ## Fixed
 
