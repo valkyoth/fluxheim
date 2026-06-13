@@ -91,6 +91,8 @@ impl CacheSliceBounds {
 }
 
 const MAX_CACHE_CLIENT_RANGES: usize = 128;
+const MULTIPART_SLICE_OVERHEAD_BYTES_PER_RANGE: u64 = 256;
+const MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES: u64 = 128;
 
 impl CacheKey {
     pub fn new(value: impl Into<String>) -> Self {
@@ -279,6 +281,40 @@ pub fn required_slice_bounds(
     slices
 }
 
+pub fn slice_request_within_policy(
+    ranges: &[CacheSliceBounds],
+    max_bytes: u64,
+    max_slices: usize,
+    slice_size: u64,
+) -> bool {
+    let requested_bytes = ranges
+        .iter()
+        .try_fold(0_u64, |sum, range| sum.checked_add(range.len()));
+    let Some(requested_bytes) = requested_bytes else {
+        return false;
+    };
+    if requested_bytes > max_bytes {
+        return false;
+    }
+    if ranges.len() > 1 {
+        let Some(multipart_bytes) = requested_bytes
+            .checked_add(
+                u64::try_from(ranges.len())
+                    .unwrap_or(u64::MAX)
+                    .saturating_mul(MULTIPART_SLICE_OVERHEAD_BYTES_PER_RANGE),
+            )
+            .and_then(|bytes| bytes.checked_add(MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES))
+        else {
+            return false;
+        };
+        if multipart_bytes > max_bytes {
+            return false;
+        }
+    }
+    let slices = required_slice_bounds(ranges, slice_size, u64::MAX);
+    !slices.is_empty() && slices.len() <= max_slices
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -286,6 +322,7 @@ mod tests {
         cache_method_temporarily_bypassed, parse_bounded_single_range, parse_cache_client_ranges,
         parse_cache_content_range, required_slice_bounds, resolve_client_slice_ranges,
         response_content_length_matches_range, response_content_range_matches,
+        slice_request_within_policy,
     };
 
     #[test]
@@ -421,5 +458,36 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn slice_policy_bounds_assembled_bytes_and_slice_count() {
+        assert!(slice_request_within_policy(
+            &[CacheSliceBounds { start: 0, end: 15 }],
+            16,
+            2,
+            8
+        ));
+        assert!(!slice_request_within_policy(
+            &[CacheSliceBounds { start: 0, end: 16 }],
+            16,
+            2,
+            8
+        ));
+        assert!(!slice_request_within_policy(
+            &[CacheSliceBounds { start: 0, end: 23 }],
+            16,
+            2,
+            8
+        ));
+        assert!(!slice_request_within_policy(
+            &[
+                CacheSliceBounds { start: 0, end: 0 },
+                CacheSliceBounds { start: 0, end: 0 },
+            ],
+            16,
+            2,
+            8
+        ));
     }
 }

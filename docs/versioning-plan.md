@@ -3898,7 +3898,8 @@ the exception while the cache server is being completed as a focused sequence:
   single-range parsing, client range parsing, client-range resolution, and
   required-slice planning plus Content-Range parsing and range-response
   `Content-Range`/`Content-Length` validation, cache-key component formatting,
-  and temporary HEAD cache bypass detection now also live in
+  temporary HEAD cache bypass detection, and multipart slice range policy
+  sizing now also live in
   `crates/fluxheim-cache::request`, while root `crate::proxy_cache` keeps
   Pingora request/response-header and cache-key adaptation. Pure remaining-TTL and
   synthesized Cache-Control freshness helpers now live in

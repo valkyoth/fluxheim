@@ -8,8 +8,6 @@ use pingora::{Error, ErrorType};
 
 use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 
-const MULTIPART_SLICE_OVERHEAD_BYTES_PER_RANGE: u64 = 256;
-const MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES: u64 = 128;
 #[cfg(test)]
 pub(crate) use crate::cache::CacheClientRange;
 pub(crate) use crate::cache::{
@@ -157,32 +155,12 @@ pub(crate) fn slice_request_within_policy(
     cache: &crate::config::CacheConfig,
     slice_size: u64,
 ) -> bool {
-    let requested_bytes = ranges
-        .iter()
-        .try_fold(0_u64, |sum, range| sum.checked_add(range.len()));
-    let Some(requested_bytes) = requested_bytes else {
-        return false;
-    };
-    if requested_bytes > cache.range.max_bytes.as_u64() {
-        return false;
-    }
-    if ranges.len() > 1 {
-        let Some(multipart_bytes) = requested_bytes
-            .checked_add(
-                u64::try_from(ranges.len())
-                    .unwrap_or(u64::MAX)
-                    .saturating_mul(MULTIPART_SLICE_OVERHEAD_BYTES_PER_RANGE),
-            )
-            .and_then(|bytes| bytes.checked_add(MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES))
-        else {
-            return false;
-        };
-        if multipart_bytes > cache.range.max_bytes.as_u64() {
-            return false;
-        }
-    }
-    let slices = required_slice_bounds(ranges, slice_size, u64::MAX);
-    !slices.is_empty() && slices.len() <= cache.range.slice.max_slices as usize
+    crate::cache::slice_request_within_policy(
+        ranges,
+        cache.range.max_bytes.as_u64(),
+        cache.range.slice.max_slices as usize,
+        slice_size,
+    )
 }
 
 pub(crate) fn range_cache_key(

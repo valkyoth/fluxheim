@@ -66,6 +66,9 @@ behavior when the change improves security or project direction.
 - Move cache-key component formatting and the temporary HEAD cache bypass
   predicate into `crates/fluxheim-cache::request`, keeping root compatibility
   wrappers for existing proxy callers.
+- Move multipart slice range policy sizing into
+  `crates/fluxheim-cache::request`, leaving root `crate::proxy_cache` as the
+  config adapter.
 - Move cache Prometheus label classifiers into `crates/fluxheim-cache`,
   keeping root `crate::metrics` as recorder wiring.
 - Move cache purge-index state, purge-entry DTOs, storage-local purge result
