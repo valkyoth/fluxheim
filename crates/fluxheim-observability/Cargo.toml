@@ -7,6 +7,14 @@ license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim observability and trace context boundary."
 
+[features]
+default = []
+otlp-http = ["dep:ureq"]
+
 [dependencies]
 getrandom = "0.4.2"
 log = "0.4.32"
+ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"], optional = true }
+
+[dev-dependencies]
+fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }

@@ -34,6 +34,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   Context parsing, generation, and traceparent normalization into
   `crates/fluxheim-observability`, with root `crate::trace_context` kept as a
   compatibility re-export.
+- Moved the shared OTLP HTTP agent and symlink-safe custom CA bundle loader into
+  `crates/fluxheim-observability` behind its `otlp-http` feature, while keeping
+  the root `crate::otlp_http` module as the metrics/tracing adapter.
 - Started the `fluxheim-protocol` crate boundary by moving PROXY protocol v1/v2
   upstream header framing into `crates/fluxheim-protocol`, while the root
   `crate::proxy_protocol` module keeps the Pingora L4 connector adapter.

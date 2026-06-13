@@ -40,6 +40,9 @@ behavior when the change improves security or project direction.
   parsing, generation, and traceparent normalization into
   `crates/fluxheim-observability`, with root `crate::trace_context` kept as a
   compatibility re-export.
+- Move the shared OTLP HTTP agent and symlink-safe custom CA bundle loader into
+  `crates/fluxheim-observability` behind its `otlp-http` feature, while keeping
+  the root `crate::otlp_http` module as the metrics/tracing adapter.
 - Start the `fluxheim-protocol` crate boundary by moving PROXY protocol v1/v2
   upstream header framing into `crates/fluxheim-protocol`, while the root
   `crate::proxy_protocol` module keeps the Pingora L4 connector adapter.

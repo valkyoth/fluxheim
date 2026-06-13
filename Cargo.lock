@@ -1146,8 +1146,10 @@ dependencies = [
 name = "fluxheim-observability"
 version = "1.5.20"
 dependencies = [
+ "fluxheim-common",
  "getrandom 0.4.2",
  "log",
+ "ureq",
 ]
 
 [[package]]
