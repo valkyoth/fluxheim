@@ -158,6 +158,21 @@ pub fn metrics_status_class(status: Option<u16>) -> &'static str {
     status.map(access_log_status_class).unwrap_or("unknown")
 }
 
+pub fn metrics_ratio_per_mille(value: u64, max: u64) -> u64 {
+    if max == 0 {
+        return 0;
+    }
+    value.saturating_mul(1000) / max
+}
+
+pub fn metrics_u64_to_i64_saturating(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+pub fn metrics_usize_to_i64_saturating(value: usize) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
 pub fn metrics_host_routing_reason_label(reason: &str) -> &'static str {
     match reason {
         "missing" => "missing",
@@ -991,6 +1006,16 @@ mod tests {
 
         assert_eq!(metrics_status_class(Some(204)), "2xx");
         assert_eq!(metrics_status_class(None), "unknown");
+    }
+
+    #[test]
+    fn metrics_numeric_helpers_are_bounded() {
+        assert_eq!(metrics_ratio_per_mille(5, 10), 500);
+        assert_eq!(metrics_ratio_per_mille(5, 0), 0);
+        assert_eq!(metrics_ratio_per_mille(u64::MAX, 1), u64::MAX);
+        assert_eq!(metrics_u64_to_i64_saturating(42), 42);
+        assert_eq!(metrics_u64_to_i64_saturating(u64::MAX), i64::MAX);
+        assert_eq!(metrics_usize_to_i64_saturating(42), 42);
     }
 
     #[test]

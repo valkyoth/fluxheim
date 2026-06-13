@@ -630,18 +630,15 @@ fn set_gauge(gauge: Result<&'static IntGauge, prometheus::Error>, value: u64) {
 
 #[cfg(all(feature = "proxy", feature = "cache"))]
 fn ratio_per_mille(value: u64, max: u64) -> u64 {
-    if max == 0 {
-        return 0;
-    }
-    value.saturating_mul(1000) / max
+    fluxheim_observability::metrics_ratio_per_mille(value, max)
 }
 
 fn u64_to_i64_saturating(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
+    fluxheim_observability::metrics_u64_to_i64_saturating(value)
 }
 
 fn usize_to_i64_saturating(value: usize) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
+    fluxheim_observability::metrics_usize_to_i64_saturating(value)
 }
 
 fn proxy_requests_total() -> Result<&'static IntCounterVec, prometheus::Error> {

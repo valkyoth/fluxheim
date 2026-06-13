@@ -154,6 +154,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   compression, edge-policy, load-balancer event/queue/upstream, stream, ACME,
   PHP/PHP-FPM, and metrics-OTLP exporter events into `crates/fluxheim-observability`,
   further narrowing root `crate::metrics` to recorder wiring.
+- Moved Prometheus numeric helper logic for bounded ratios and saturating gauge
+  conversions into `crates/fluxheim-observability`, leaving root metrics as the
+  registry/recorder adapter.
 - Moved `LoadBalanceSelection` metric-label mapping into `fluxheim-config`,
   keeping root `crate::metrics` as a compatibility wrapper.
 - Moved the OTLP trace exporter and trace-span payload builder into

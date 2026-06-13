@@ -3950,8 +3950,9 @@ the exception while the cache server is being completed as a focused sequence:
   method, status-class label bucketing, and general Prometheus label
   classifiers for host-routing, admin-auth, compression, edge-policy,
   load-balancer event/queue/upstream, stream, ACME, PHP/PHP-FPM, and
-  metrics-OTLP exporter events also now live in the observability crate while
-  root `crate::metrics` remains the Prometheus registry/recorder adapter.
+  metrics-OTLP exporter events plus bounded ratio and saturating gauge
+  conversion helpers also now live in the observability crate while root
+  `crate::metrics` remains the Prometheus registry/recorder adapter.
   `LoadBalanceSelection` metric-label mapping now lives in `fluxheim-config`,
   leaving root `crate::metrics` as the compatibility wrapper for selection
   labels.

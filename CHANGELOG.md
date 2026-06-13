@@ -160,6 +160,9 @@ behavior when the change improves security or project direction.
   compression, edge-policy, load-balancer event/queue/upstream, stream, ACME,
   PHP/PHP-FPM, and metrics-OTLP exporter events into `crates/fluxheim-observability`,
   further narrowing root `crate::metrics` to recorder wiring.
+- Move Prometheus numeric helper logic for bounded ratios and saturating gauge
+  conversions into `crates/fluxheim-observability`, leaving root metrics as the
+  registry/recorder adapter.
 - Move `LoadBalanceSelection` metric-label mapping into `fluxheim-config`,
   keeping root `crate::metrics` as a compatibility wrapper.
 - Move the OTLP trace exporter and trace-span payload builder into
