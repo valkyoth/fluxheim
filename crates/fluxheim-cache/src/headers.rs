@@ -211,6 +211,33 @@ pub fn cache_control_freshness_value(
     value
 }
 
+pub fn response_age_secs(headers: &http::HeaderMap) -> u64 {
+    headers
+        .get_all("age")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+pub fn response_cache_control_max_age(headers: &http::HeaderMap) -> Option<u32> {
+    headers
+        .get_all("cache-control")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .find_map(|directive| {
+            let (name, value) = directive.trim().split_once('=')?;
+            if name.trim().eq_ignore_ascii_case("s-maxage")
+                || name.trim().eq_ignore_ascii_case("max-age")
+            {
+                value.trim().trim_matches('"').parse::<u32>().ok()
+            } else {
+                None
+            }
+        })
+}
+
 pub fn response_content_type_is_cacheable(
     headers: &http::HeaderMap,
     cache: &fluxheim_config::CacheConfig,
@@ -649,6 +676,33 @@ mod tests {
         assert_eq!(
             super::cache_control_freshness_value(60, None, None),
             "max-age=60"
+        );
+    }
+
+    #[test]
+    fn parses_response_age_and_max_age_headers() {
+        let response = http::Response::builder()
+            .header("age", "42")
+            .header("cache-control", "public, max-age=60")
+            .body(())
+            .unwrap();
+
+        assert_eq!(super::response_age_secs(response.headers()), 42);
+        assert_eq!(
+            super::response_cache_control_max_age(response.headers()),
+            Some(60)
+        );
+
+        let response = http::Response::builder()
+            .header("age", "not-a-number")
+            .header("cache-control", "public, s-maxage=\"120\"")
+            .body(())
+            .unwrap();
+
+        assert_eq!(super::response_age_secs(response.headers()), 0);
+        assert_eq!(
+            super::response_cache_control_max_age(response.headers()),
+            Some(120)
         );
     }
 

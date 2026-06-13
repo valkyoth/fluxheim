@@ -22,6 +22,10 @@ pub(crate) use crate::cache::{
 #[cfg(test)]
 pub(crate) use crate::cache::{MAX_VARY_FIELDS, cache_stale_status_allows, vary_cache_policy};
 use crate::cache::{cookie_headers_match_cache_bypass, query_matches_cache_bypass};
+use crate::cache::{
+    response_age_secs as response_header_age_secs,
+    response_cache_control_max_age as response_header_cache_control_max_age,
+};
 
 pub(crate) fn cache_request_from_header(request: &RequestHeader) -> crate::cache::CacheRequest<'_> {
     crate::cache::CacheRequest {
@@ -328,32 +332,11 @@ pub(crate) fn cache_response_fresh_ttl_secs(
 }
 
 pub(crate) fn response_age_secs(response: &ResponseHeader) -> u64 {
-    response
-        .headers
-        .get_all("age")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .find_map(|value| value.trim().parse::<u64>().ok())
-        .unwrap_or(0)
+    response_header_age_secs(&response.headers)
 }
 
 pub(crate) fn response_cache_control_max_age(response: &ResponseHeader) -> Option<u32> {
-    response
-        .headers
-        .get_all("cache-control")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .find_map(|directive| {
-            let (name, value) = directive.trim().split_once('=')?;
-            if name.trim().eq_ignore_ascii_case("s-maxage")
-                || name.trim().eq_ignore_ascii_case("max-age")
-            {
-                value.trim().trim_matches('"').parse::<u32>().ok()
-            } else {
-                None
-            }
-        })
+    response_header_cache_control_max_age(&response.headers)
 }
 
 pub(crate) fn ignore_origin_cache_headers(

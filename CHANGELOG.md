@@ -51,6 +51,9 @@ behavior when the change improves security or project direction.
 - Move cache stale-serving event and status/error allow policy into
   `crates/fluxheim-cache::headers`, keeping Pingora error classification in
   root `crate::proxy_cache`.
+- Move response `Age` and `Cache-Control` max-age/s-maxage parsers into
+  `crates/fluxheim-cache::headers`, leaving root response helpers as thin
+  Pingora header adapters.
 - Move cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

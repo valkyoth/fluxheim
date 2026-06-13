@@ -52,7 +52,8 @@ pub use fluxheim_cache::{
     cache_vary_policy, cookie_headers_match_cache_bypass, parse_bounded_single_range,
     parse_cache_client_ranges, parse_cache_content_range, query_matches_cache_bypass,
     remaining_fresh_ttl_secs, required_slice_bounds, resolve_client_slice_ranges,
-    response_content_type_is_cacheable, vary_cache_policy,
+    response_age_secs, response_cache_control_max_age, response_content_type_is_cacheable,
+    vary_cache_policy,
 };
 
 #[cfg(feature = "proxy")]
