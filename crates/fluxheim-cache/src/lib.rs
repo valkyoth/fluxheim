@@ -23,7 +23,7 @@ pub use api::{
 };
 pub use headers::{
     MAX_VARY_FIELDS, VaryCachePolicy, cache_control_freshness_value, cache_vary_policy,
-    remaining_fresh_ttl_secs, vary_cache_policy,
+    remaining_fresh_ttl_secs, response_content_type_is_cacheable, vary_cache_policy,
 };
 pub use object::{CacheStoreError, CachedHeader, CachedImageObject};
 pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};

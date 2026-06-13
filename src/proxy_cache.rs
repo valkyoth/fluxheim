@@ -16,7 +16,7 @@ pub(crate) use crate::cache::{
     CacheContentRange, CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest,
     VaryCachePolicy, cache_control_freshness_value, cache_vary_policy, parse_bounded_single_range,
     parse_cache_client_ranges, parse_cache_content_range, remaining_fresh_ttl_secs,
-    required_slice_bounds, resolve_client_slice_ranges,
+    required_slice_bounds, resolve_client_slice_ranges, response_content_type_is_cacheable,
 };
 #[cfg(test)]
 pub(crate) use crate::cache::{MAX_VARY_FIELDS, vary_cache_policy};
@@ -622,36 +622,6 @@ fn response_headers_match_cache_no_store_value(
         && configured_values.iter().any(|(header, configured)| {
             response_header_values(response, header).any(|value| value == configured)
         })
-}
-
-fn response_content_type_is_cacheable(
-    headers: &http::HeaderMap,
-    cache: &crate::config::CacheConfig,
-) -> bool {
-    let Some(media_type) = headers
-        .get("content-type")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .map(str::trim)
-    else {
-        return false;
-    };
-    cache
-        .content_types
-        .iter()
-        .any(|candidate| content_type_pattern_matches(candidate, media_type))
-}
-
-fn content_type_pattern_matches(pattern: &str, media_type: &str) -> bool {
-    let pattern = pattern.trim();
-    let media_type = media_type.trim();
-    if let Some(prefix) = pattern.strip_suffix("/*") {
-        let Some((kind, _subtype)) = media_type.split_once('/') else {
-            return false;
-        };
-        return kind.eq_ignore_ascii_case(prefix);
-    }
-    pattern.eq_ignore_ascii_case(media_type)
 }
 
 pub(crate) fn vary_request_hash(fields: &[String], request: &RequestHeader) -> HashBinary {

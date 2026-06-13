@@ -3901,7 +3901,8 @@ the exception while the cache server is being completed as a focused sequence:
   Pingora request-header and cache-key adaptation. Pure remaining-TTL and
   synthesized Cache-Control freshness helpers now live in
   `crates/fluxheim-cache::headers`, alongside Vary header parsing and
-  configured request-header variance policy. Cache purge-index state,
+  configured request-header variance policy and cacheable response Content-Type
+  matching. Cache purge-index state,
   purge-entry DTOs, storage-local purge result counters, and cache-key path
   matching helpers now live in `crates/fluxheim-cache::purge_index`, while the
   root `crate::cache` module keeps compatibility type names and the Pingora

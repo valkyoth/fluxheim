@@ -57,6 +57,36 @@ pub fn cache_control_freshness_value(
     value
 }
 
+pub fn response_content_type_is_cacheable(
+    headers: &http::HeaderMap,
+    cache: &fluxheim_config::CacheConfig,
+) -> bool {
+    let Some(media_type) = headers
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim)
+    else {
+        return false;
+    };
+    cache
+        .content_types
+        .iter()
+        .any(|candidate| content_type_pattern_matches(candidate, media_type))
+}
+
+fn content_type_pattern_matches(pattern: &str, media_type: &str) -> bool {
+    let pattern = pattern.trim();
+    let media_type = media_type.trim();
+    if let Some(prefix) = pattern.strip_suffix("/*") {
+        let Some((kind, _subtype)) = media_type.split_once('/') else {
+            return false;
+        };
+        return kind.eq_ignore_ascii_case(prefix);
+    }
+    pattern.eq_ignore_ascii_case(media_type)
+}
+
 pub const MAX_VARY_FIELDS: usize = 16;
 const MAX_VARY_HEADER_BYTES: usize = 2048;
 
@@ -438,5 +468,37 @@ mod tests {
             super::cache_vary_policy(response.headers(), &cache),
             super::VaryCachePolicy::Uncacheable("vary-too-many-fields")
         );
+    }
+
+    #[test]
+    fn response_content_type_matches_exact_and_wildcard_patterns() {
+        let mut cache = fluxheim_config::CacheConfig {
+            content_types: vec!["image/*".to_owned(), "text/css".to_owned()],
+            ..fluxheim_config::CacheConfig::default()
+        };
+        let response = http::Response::builder()
+            .header("content-type", "Image/PNG; charset=binary")
+            .body(())
+            .unwrap();
+
+        assert!(super::response_content_type_is_cacheable(
+            response.headers(),
+            &cache
+        ));
+
+        let response = http::Response::builder()
+            .header("content-type", "text/html")
+            .body(())
+            .unwrap();
+        assert!(!super::response_content_type_is_cacheable(
+            response.headers(),
+            &cache
+        ));
+
+        cache.content_types = vec!["text/html".to_owned()];
+        assert!(super::response_content_type_is_cacheable(
+            response.headers(),
+            &cache
+        ));
     }
 }

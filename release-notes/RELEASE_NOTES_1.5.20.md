@@ -37,6 +37,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved Vary header parsing and configured request-header variance policy into
   `crates/fluxheim-cache::headers`, keeping root `crate::proxy_cache` focused
   on Pingora request hashing and adapter logic.
+- Moved cacheable response Content-Type matching into
+  `crates/fluxheim-cache::headers`, leaving root cache admission as the
+  status/header adapter.
 - Moved cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing
