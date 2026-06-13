@@ -3884,9 +3884,11 @@ the exception while the cache server is being completed as a focused sequence:
   behavior, and feature names must stay compatible. Committed steps so far are
   the `crates/fluxheim-cache` boundary with shared cache-header parsing and
   pure cache admin request/result/preview DTOs, runtime totals, and
-  activity-reset DTOs moved behind root compatibility re-exports. Cache-object
-  lookup plus vhost/route stats stay in the root shim until cache
-  metadata/stats types move behind the cache crate boundary.
+  activity-reset DTOs moved behind root compatibility re-exports. Cache object
+  metadata, activity stats, tier stats, object lookup, and vhost/route runtime
+  stats now also live in `crates/fluxheim-cache::api`, with root
+  `crate::cache` and `crate::cache_api` compatibility re-exports preserving the
+  admin, CLI, metrics, and proxy surfaces.
   The `crates/fluxheim-web` boundary now has static
   directory-listing data/rendering moved behind the existing `crate::web`
   surface, and the `crates/fluxheim-php-fpm` boundary with timeout

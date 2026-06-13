@@ -36,6 +36,11 @@ use crate::config::{
     CacheKeyPart, normalize_host,
 };
 
+pub use fluxheim_cache::{
+    CacheActivityStats, CacheObjectFreshnessState, CacheObjectHeaderValue, CacheObjectMetadata,
+    CacheObjectTier, DiskCacheStats, MemoryCacheStats, TieredCacheStats,
+};
+
 #[cfg(feature = "proxy")]
 const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 8192;
 #[cfg(feature = "proxy")]
@@ -1119,123 +1124,6 @@ pub struct CachedImageObject {
 pub struct CachedHeader {
     pub name: String,
     pub value: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct MemoryCacheStats {
-    pub entries: u64,
-    pub weighted_size_bytes: u64,
-    pub max_size_bytes: ByteSize,
-    pub max_object_bytes: ByteSize,
-    #[cfg(feature = "proxy")]
-    pub purge_index_entries: u64,
-    #[cfg(feature = "proxy")]
-    pub purge_index_max_entries: u64,
-    #[cfg(feature = "proxy")]
-    pub activity: CacheActivityStats,
-}
-
-#[cfg(feature = "proxy")]
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct DiskCacheStats {
-    pub backend: &'static str,
-    pub entries: u64,
-    pub size_bytes: u64,
-    pub allocated_size_bytes: u64,
-    pub free_size_bytes: u64,
-    pub free_range_count: u64,
-    pub largest_free_range_bytes: u64,
-    pub bin_files: u64,
-    pub max_size_bytes: ByteSize,
-    pub max_object_bytes: ByteSize,
-    pub purge_index_entries: u64,
-    pub purge_index_max_entries: u64,
-    pub activity: CacheActivityStats,
-}
-
-#[cfg(feature = "proxy")]
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct TieredCacheStats {
-    pub memory: MemoryCacheStats,
-    pub disk: DiskCacheStats,
-}
-
-#[cfg(feature = "proxy")]
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheObjectHeaderValue {
-    pub name: String,
-    pub value: String,
-}
-
-#[cfg(feature = "proxy")]
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheObjectMetadata {
-    pub tier: CacheObjectTier,
-    pub purge_indexed: bool,
-    pub status: u16,
-    pub fresh: bool,
-    pub freshness_state: CacheObjectFreshnessState,
-    pub serve_stale_while_revalidate: bool,
-    pub serve_stale_if_error: bool,
-    pub body_bytes: u64,
-    pub weight_bytes: u64,
-    pub created_unix_secs: Option<u64>,
-    pub updated_unix_secs: Option<u64>,
-    pub fresh_until_unix_secs: Option<u64>,
-    pub age_secs: u64,
-    pub fresh_ttl_secs: u64,
-    pub stale_while_revalidate_secs: u32,
-    pub stale_if_error_secs: u32,
-    pub cache_tags: Vec<String>,
-    pub header_names: Vec<String>,
-    pub header_values: Vec<CacheObjectHeaderValue>,
-}
-
-#[cfg(feature = "proxy")]
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum CacheObjectFreshnessState {
-    Fresh,
-    Stale,
-    Expired,
-}
-
-#[cfg(feature = "proxy")]
-impl CacheObjectFreshnessState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Fresh => "fresh",
-            Self::Stale => "stale",
-            Self::Expired => "expired",
-        }
-    }
-}
-
-#[cfg(feature = "proxy")]
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum CacheObjectTier {
-    Memory,
-    Disk,
-}
-
-#[cfg(feature = "proxy")]
-impl CacheObjectTier {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Memory => "memory",
-            Self::Disk => "disk",
-        }
-    }
-}
-
-#[cfg(feature = "proxy")]
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
-pub struct CacheActivityStats {
-    pub hits: u64,
-    pub misses: u64,
-    pub stores: u64,
-    pub store_refusals: u64,
-    pub evictions: u64,
-    pub purges: u64,
 }
 
 #[cfg(feature = "proxy")]

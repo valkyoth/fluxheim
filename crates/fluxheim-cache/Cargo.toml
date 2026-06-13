@@ -8,3 +8,4 @@ publish = false
 description = "Internal Fluxheim cache policy and storage boundary."
 
 [dependencies]
+fluxheim-config = { path = "../fluxheim-config" }

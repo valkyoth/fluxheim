@@ -8,9 +8,12 @@ pub mod api;
 pub mod headers;
 
 pub use api::{
-    CacheActivityResetResult, CacheBackgroundPurgeResult, CacheBulkPurgeRequest,
-    CacheBulkPurgeResult, CacheIndexedPathPatternPurgeRequest, CacheIndexedPathPrefixPurgeRequest,
-    CacheIndexedPurgeRequest, CacheIndexedPurgeResult, CacheIndexedTagPurgeRequest,
-    CacheKeyPreview, CacheKeyPreviewScope, CachePurgeRequest, CachePurgeResult, CacheRuntimeTotals,
-    CacheStalePurgeRequest, CacheStalePurgeResult,
+    CacheActivityResetResult, CacheActivityStats, CacheBackgroundPurgeResult,
+    CacheBulkPurgeRequest, CacheBulkPurgeResult, CacheIndexedPathPatternPurgeRequest,
+    CacheIndexedPathPrefixPurgeRequest, CacheIndexedPurgeRequest, CacheIndexedPurgeResult,
+    CacheIndexedTagPurgeRequest, CacheKeyPreview, CacheKeyPreviewScope, CacheObjectFreshnessState,
+    CacheObjectHeaderValue, CacheObjectLookup, CacheObjectMetadata, CacheObjectTier,
+    CachePurgeRequest, CachePurgeResult, CacheRouteStats, CacheRuntimeStats, CacheRuntimeTotals,
+    CacheStalePurgeRequest, CacheStalePurgeResult, CacheVhostStats, DiskCacheStats,
+    MemoryCacheStats, TieredCacheStats,
 };

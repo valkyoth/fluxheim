@@ -1078,6 +1078,9 @@ dependencies = [
 [[package]]
 name = "fluxheim-cache"
 version = "1.5.20"
+dependencies = [
+ "fluxheim-config",
+]
 
 [[package]]
 name = "fluxheim-common"
