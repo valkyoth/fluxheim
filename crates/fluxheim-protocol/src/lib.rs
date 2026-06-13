@@ -6,6 +6,29 @@
 
 use std::net::{IpAddr, SocketAddr};
 
+pub fn route_method_matches(methods: &[String], method: &str) -> bool {
+    methods.is_empty()
+        || methods
+            .iter()
+            .any(|configured| configured.eq_ignore_ascii_case(method))
+}
+
+pub fn route_prefix_matches_path(prefix: &str, path: &str) -> bool {
+    let Some(suffix) = path.strip_prefix(prefix) else {
+        return false;
+    };
+    prefix == "/" || prefix.ends_with('/') || suffix.is_empty() || suffix.starts_with('/')
+}
+
+pub fn route_strip_prefix_suffix<'a>(strip_prefix: &str, path: &'a str) -> Option<&'a str> {
+    let suffix = path.strip_prefix(strip_prefix)?;
+    (strip_prefix == "/"
+        || strip_prefix.ends_with('/')
+        || suffix.is_empty()
+        || suffix.starts_with('/'))
+    .then_some(suffix)
+}
+
 pub fn proxy_protocol_v1_header(
     source: Option<SocketAddr>,
     destination: Option<SocketAddr>,
@@ -74,7 +97,35 @@ pub fn proxy_protocol_v2_header(
 mod tests {
     use std::net::SocketAddr;
 
-    use super::{proxy_protocol_v1_header, proxy_protocol_v2_header};
+    use super::{
+        proxy_protocol_v1_header, proxy_protocol_v2_header, route_method_matches,
+        route_prefix_matches_path, route_strip_prefix_suffix,
+    };
+
+    #[test]
+    fn route_method_matching_treats_inbound_case_as_equivalent() {
+        let methods = vec!["GET".to_owned(), "HEAD".to_owned()];
+
+        assert!(route_method_matches(&methods, "GET"));
+        assert!(route_method_matches(&methods, "get"));
+        assert!(route_method_matches(&methods, "Head"));
+        assert!(!route_method_matches(&methods, "POST"));
+    }
+
+    #[test]
+    fn route_prefixes_require_path_segment_boundary() {
+        assert!(route_prefix_matches_path("/repo", "/repo"));
+        assert!(route_prefix_matches_path("/repo", "/repo/"));
+        assert!(route_prefix_matches_path("/repo", "/repo/file"));
+        assert!(!route_prefix_matches_path("/repo", "/repository"));
+    }
+
+    #[test]
+    fn route_strip_prefix_requires_path_segment_boundary() {
+        assert_eq!(route_strip_prefix_suffix("/api", "/api/v1"), Some("/v1"));
+        assert_eq!(route_strip_prefix_suffix("/", "/api/v1"), Some("api/v1"));
+        assert_eq!(route_strip_prefix_suffix("/api", "/apiv1"), None);
+    }
 
     #[test]
     fn proxy_protocol_v1_header_encodes_matching_ip_families() {

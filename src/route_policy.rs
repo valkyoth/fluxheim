@@ -1,6 +1,8 @@
 use crate::flux_error::{FluxError, FluxResult};
 use crate::http_types::PingoraRequestHeader as RequestHeader;
 use crate::path_safety::safe_forward_path;
+pub(crate) use fluxheim_protocol::route_method_matches;
+use fluxheim_protocol::{route_prefix_matches_path, route_strip_prefix_suffix};
 
 #[derive(Debug, Clone)]
 pub(crate) enum RuntimeRouteMatcher {
@@ -54,13 +56,6 @@ impl RuntimeRouteMatcher {
             _ => None,
         }
     }
-}
-
-pub(crate) fn route_method_matches(methods: &[String], method: &str) -> bool {
-    methods.is_empty()
-        || methods
-            .iter()
-            .any(|configured| configured.eq_ignore_ascii_case(method))
 }
 
 pub(crate) fn route_regex_captures(
@@ -184,22 +179,6 @@ fn route_regex_captures_from_matches(
 fn bounded_route_regex_capture(value: Option<regex::Match<'_>>) -> Option<String> {
     let value = value?.as_str();
     (value.len() <= MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES).then(|| value.to_owned())
-}
-
-fn route_prefix_matches_path(prefix: &str, path: &str) -> bool {
-    let Some(suffix) = path.strip_prefix(prefix) else {
-        return false;
-    };
-    prefix == "/" || prefix.ends_with('/') || suffix.is_empty() || suffix.starts_with('/')
-}
-
-fn route_strip_prefix_suffix<'a>(strip_prefix: &str, path: &'a str) -> Option<&'a str> {
-    let suffix = path.strip_prefix(strip_prefix)?;
-    (strip_prefix == "/"
-        || strip_prefix.ends_with('/')
-        || suffix.is_empty()
-        || suffix.starts_with('/'))
-    .then_some(suffix)
 }
 
 fn append_route_regex_capture_value(rewritten: &mut String, value: &str) {
