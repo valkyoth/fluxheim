@@ -96,6 +96,16 @@ pub fn valid_trusted_proxy(value: &str) -> bool {
     valid_ip_matcher(value) && trusted_proxy_has_safe_scope(value)
 }
 
+pub fn trusted_proxy_ipv6_prefix_broader_than_32(value: &str) -> Option<u8> {
+    let value = value.trim();
+    let (address, prefix) = value.split_once('/')?;
+    let address = address.parse::<IpAddr>().ok()?;
+    let prefix = prefix.parse::<u8>().ok()?;
+    matches!(address, IpAddr::V6(_))
+        .then_some(prefix)
+        .filter(|prefix| *prefix < 32)
+}
+
 fn trusted_proxy_has_safe_scope(value: &str) -> bool {
     let value = value.trim();
     let Some((address, prefix)) = value.split_once('/') else {
@@ -242,4 +252,31 @@ fn valid_dns_hostname(host: &str) -> bool {
     }
 
     !last_label.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{trusted_proxy_ipv6_prefix_broader_than_32, valid_trusted_proxy};
+
+    #[test]
+    fn accepted_broad_ipv6_trusted_proxy_ranges_are_classified_for_warning() {
+        assert_eq!(
+            trusted_proxy_ipv6_prefix_broader_than_32("2a06:98c0::/29"),
+            Some(29)
+        );
+        assert!(valid_trusted_proxy("2a06:98c0::/29"));
+        assert_eq!(
+            trusted_proxy_ipv6_prefix_broader_than_32("2001:db8::/32"),
+            None
+        );
+        assert_eq!(
+            trusted_proxy_ipv6_prefix_broader_than_32("10.0.0.0/8"),
+            None
+        );
+        assert_eq!(
+            trusted_proxy_ipv6_prefix_broader_than_32("2001:db8::/28"),
+            Some(28)
+        );
+        assert!(!valid_trusted_proxy("2001:db8::/28"));
+    }
 }

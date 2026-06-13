@@ -73,6 +73,11 @@ pub fn route_strip_prefix_suffix<'a>(strip_prefix: &str, path: &'a str) -> Optio
     .then_some(suffix)
 }
 
+/// Returns whether `value` is an RFC 7230 HTTP token.
+///
+/// HTTP tokens are case-sensitive octet strings at this layer. Callers that
+/// validate HTTP methods or other uppercase-only policy fields must apply that
+/// case policy separately.
 pub fn http_token_valid(value: &str) -> bool {
     !value.is_empty()
         && value.bytes().all(|byte| {

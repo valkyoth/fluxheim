@@ -225,6 +225,8 @@ behavior when the change improves security or project direction.
 
 ### Fixed
 
+- Document the shared protocol HTTP token grammar as case-permissive and warn
+  when accepted IPv6 trusted-proxy CIDR entries are broader than `/32`.
 - Fix cache-only builds after shared cache stats moved purge-index and activity
   fields into the always-present cache API shape.
 - Allow real provider IPv6 trusted-proxy ranges such as Cloudflare's

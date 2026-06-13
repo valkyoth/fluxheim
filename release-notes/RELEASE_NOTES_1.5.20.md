@@ -220,6 +220,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 
 ## Fixed
 
+- Documented the shared protocol HTTP token grammar as case-permissive and
+  added a warning when accepted IPv6 trusted-proxy CIDR entries are broader
+  than `/32`.
 - Fixed cache-only builds after shared cache stats moved purge-index and
   activity fields into the always-present cache API shape.
 - Allowed real provider IPv6 trusted-proxy ranges such as Cloudflare's

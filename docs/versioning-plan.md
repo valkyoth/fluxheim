@@ -4013,6 +4013,9 @@ the exception while the cache server is being completed as a focused sequence:
   `crates/fluxheim-cache`, leaving the CLI to print the prepared summaries.
   Admin cache status JSON now calls the shared `crates/fluxheim-cache`
   storage-tier helper directly instead of keeping a local wrapper.
+  The shared protocol HTTP token helper now documents that method-specific
+  uppercase policy must be applied by callers, and config validation warns when
+  accepted IPv6 trusted-proxy CIDR ranges are broader than `/32`.
   Keep
   Pingora-specific cache/proxy adapters separate from cache core when possible.
   Do not move the main HTTP proxy orchestrator yet; it should remain last

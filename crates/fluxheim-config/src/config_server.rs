@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ByteSize, ConfigError, validate_config_list_len};
-use crate::config_net::valid_trusted_proxy;
+use crate::config_net::{trusted_proxy_ipv6_prefix_broader_than_32, valid_trusted_proxy};
 use crate::config_path::{validate_optional_process_path, validate_required_process_path};
 
 pub const MAX_SERVER_LISTENERS: usize = 64;
@@ -138,6 +138,12 @@ impl ServerConfig {
                 return Err(ConfigError::InvalidTrustedProxy {
                     value: proxy.clone(),
                 });
+            }
+            if let Some(prefix) = trusted_proxy_ipv6_prefix_broader_than_32(proxy) {
+                log::warn!(
+                    target: "fluxheim::security",
+                    "server.trusted_proxies entry {proxy:?} uses IPv6 prefix /{prefix} (<32); verify this allocation is fully controlled by the intended provider"
+                );
             }
         }
         if self.proxy_protocol != DownstreamProxyProtocol::Off && self.trusted_proxies.is_empty() {
