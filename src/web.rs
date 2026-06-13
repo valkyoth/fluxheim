@@ -14,7 +14,10 @@ use crate::config::WebConfig;
 use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 #[cfg(feature = "proxy")]
 use crate::http_types::PingoraResponseHeader as ResponseHeader;
-pub use fluxheim_web::{DirectoryEntry, DirectoryListing, render_directory_listing};
+pub use fluxheim_web::{
+    ByteRangeParse, DirectoryEntry, DirectoryListing, parse_single_byte_range,
+    render_directory_listing,
+};
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -831,68 +834,6 @@ fn unmodified_since_fails(modified: Option<SystemTime>, if_unmodified_since: Opt
         .unwrap_or(0);
 
     modified_seconds > requested_seconds
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum ByteRangeParse {
-    Single { start: u64, len: u64 },
-    Unsatisfiable,
-    Ignore,
-}
-
-fn parse_single_byte_range(range: &str, file_len: u64) -> ByteRangeParse {
-    let range = range.trim();
-    let Some(range) = range.strip_prefix("bytes=") else {
-        return ByteRangeParse::Unsatisfiable;
-    };
-    if range.contains(',') {
-        return ByteRangeParse::Ignore;
-    }
-    if file_len == 0 {
-        return ByteRangeParse::Unsatisfiable;
-    }
-
-    let Some((start, end)) = range.split_once('-') else {
-        return ByteRangeParse::Unsatisfiable;
-    };
-    if start.is_empty() {
-        let Ok(suffix_len) = end.parse::<u64>() else {
-            return ByteRangeParse::Unsatisfiable;
-        };
-        if suffix_len == 0 {
-            return ByteRangeParse::Unsatisfiable;
-        }
-        let len = suffix_len.min(file_len);
-        return ByteRangeParse::Single {
-            start: file_len - len,
-            len,
-        };
-    }
-
-    let Ok(start) = start.parse::<u64>() else {
-        return ByteRangeParse::Unsatisfiable;
-    };
-    if start >= file_len {
-        return ByteRangeParse::Unsatisfiable;
-    }
-
-    let end = if end.is_empty() {
-        file_len - 1
-    } else {
-        match end.parse::<u64>() {
-            Ok(end) => end.min(file_len - 1),
-            Err(_) => return ByteRangeParse::Unsatisfiable,
-        }
-    };
-
-    if end < start {
-        return ByteRangeParse::Unsatisfiable;
-    }
-
-    ByteRangeParse::Single {
-        start,
-        len: end - start + 1,
-    }
 }
 
 fn if_range_allows_range(modified: Option<SystemTime>, etag: &str, if_range: Option<&str>) -> bool {

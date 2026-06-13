@@ -23,6 +23,68 @@ pub struct DirectoryEntry {
     pub modified: Option<SystemTime>,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ByteRangeParse {
+    Single { start: u64, len: u64 },
+    Unsatisfiable,
+    Ignore,
+}
+
+pub fn parse_single_byte_range(range: &str, file_len: u64) -> ByteRangeParse {
+    let range = range.trim();
+    let Some(range) = range.strip_prefix("bytes=") else {
+        return ByteRangeParse::Unsatisfiable;
+    };
+    if range.contains(',') {
+        return ByteRangeParse::Ignore;
+    }
+    if file_len == 0 {
+        return ByteRangeParse::Unsatisfiable;
+    }
+
+    let Some((start, end)) = range.split_once('-') else {
+        return ByteRangeParse::Unsatisfiable;
+    };
+    if start.is_empty() {
+        let Ok(suffix_len) = end.parse::<u64>() else {
+            return ByteRangeParse::Unsatisfiable;
+        };
+        if suffix_len == 0 {
+            return ByteRangeParse::Unsatisfiable;
+        }
+        let len = suffix_len.min(file_len);
+        return ByteRangeParse::Single {
+            start: file_len - len,
+            len,
+        };
+    }
+
+    let Ok(start) = start.parse::<u64>() else {
+        return ByteRangeParse::Unsatisfiable;
+    };
+    if start >= file_len {
+        return ByteRangeParse::Unsatisfiable;
+    }
+
+    let end = if end.is_empty() {
+        file_len - 1
+    } else {
+        match end.parse::<u64>() {
+            Ok(end) => end.min(file_len - 1),
+            Err(_) => return ByteRangeParse::Unsatisfiable,
+        }
+    };
+
+    if end < start {
+        return ByteRangeParse::Unsatisfiable;
+    }
+
+    ByteRangeParse::Single {
+        start,
+        len: end - start + 1,
+    }
+}
+
 pub fn render_directory_listing(listing: &DirectoryListing) -> String {
     let mut html = String::new();
     html.push_str("<!doctype html><html><head><meta charset=\"utf-8\"><title>Index of ");
@@ -98,7 +160,10 @@ fn html_escape(value: &str) -> String {
 mod tests {
     use std::time::UNIX_EPOCH;
 
-    use super::{DirectoryEntry, DirectoryListing, render_directory_listing};
+    use super::{
+        ByteRangeParse, DirectoryEntry, DirectoryListing, parse_single_byte_range,
+        render_directory_listing,
+    };
 
     #[test]
     fn renders_escaped_directory_listing() {
@@ -139,5 +204,41 @@ mod tests {
             "{html}"
         );
         assert!(!html.contains("GMT"));
+    }
+
+    #[test]
+    fn parses_single_byte_ranges() {
+        assert_eq!(
+            parse_single_byte_range("bytes=10-19", 100),
+            ByteRangeParse::Single { start: 10, len: 10 }
+        );
+        assert_eq!(
+            parse_single_byte_range("bytes=90-", 100),
+            ByteRangeParse::Single { start: 90, len: 10 }
+        );
+        assert_eq!(
+            parse_single_byte_range("bytes=-5", 100),
+            ByteRangeParse::Single { start: 95, len: 5 }
+        );
+        assert_eq!(
+            parse_single_byte_range("bytes=0-999", 10),
+            ByteRangeParse::Single { start: 0, len: 10 }
+        );
+    }
+
+    #[test]
+    fn rejects_unsatisfiable_or_multi_ranges() {
+        assert_eq!(
+            parse_single_byte_range("bytes=100-101", 100),
+            ByteRangeParse::Unsatisfiable
+        );
+        assert_eq!(
+            parse_single_byte_range("bytes=0-1,2-3", 100),
+            ByteRangeParse::Ignore
+        );
+        assert_eq!(
+            parse_single_byte_range("items=0-1", 100),
+            ByteRangeParse::Unsatisfiable
+        );
     }
 }

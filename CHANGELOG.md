@@ -41,6 +41,9 @@ behavior when the change improves security or project direction.
   data/rendering helpers into `crates/fluxheim-web`. The root `crate::web`
   module re-exports the same types and renderer while keeping Pingora response
   serving in the root adapter.
+- Move static byte-range parsing into `crates/fluxheim-web`, keeping
+  `crate::web` compatibility re-exports for the existing static response
+  planner and tests.
 - Start the `fluxheim-php-fpm` crate boundary by moving PHP-FPM timeout
   classification and bounded error-outcome helpers into
   `crates/fluxheim-php-fpm`, with the root PHP-FPM module re-exporting the same
