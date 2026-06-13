@@ -140,8 +140,9 @@ behavior when the change improves security or project direction.
   `crates/fluxheim-observability`, keeping root `crate::metrics` as the
   Prometheus registry/recorder adapter.
 - Move general Prometheus label classifiers for host-routing, admin-auth,
-  compression, stream, and ACME events into `crates/fluxheim-observability`,
-  further narrowing root `crate::metrics` to recorder wiring.
+  compression, edge-policy, stream, ACME, and metrics-OTLP exporter events into
+  `crates/fluxheim-observability`, further narrowing root `crate::metrics` to
+  recorder wiring.
 - Move the OTLP trace exporter and trace-span payload builder into
   `crates/fluxheim-observability` behind its `otlp-trace` feature, with root
   `crate::otel_otlp` kept as a compatibility re-export.

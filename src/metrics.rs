@@ -1562,27 +1562,11 @@ fn compression_encoding_label(encoding: &str) -> &'static str {
 }
 
 fn edge_policy_label(policy: &str) -> &'static str {
-    match policy {
-        "access" => "access",
-        "rate_limit" => "rate_limit",
-        "concurrency" => "concurrency",
-        "auth_request" => "auth_request",
-        "mirror" => "mirror",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_edge_policy_label(policy)
 }
 
 fn edge_policy_outcome_label(outcome: &str) -> &'static str {
-    match outcome {
-        "deny" => "deny",
-        "allow" => "allow",
-        "delay" => "delay",
-        "reject" => "reject",
-        "error" => "error",
-        "success" => "success",
-        "skipped" => "skipped",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_edge_policy_outcome_label(outcome)
 }
 
 fn load_balancer_event_label(event: &str) -> &'static str {
@@ -1747,11 +1731,7 @@ fn php_stderr_state_label(state: &str) -> &'static str {
 }
 
 fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {
-    match outcome {
-        "success" => "success",
-        "failure" => "failure",
-        _ => "other",
-    }
+    fluxheim_observability::metrics_otlp_export_outcome_label(outcome)
 }
 
 fn stream_outcome_label(outcome: &str) -> &'static str {

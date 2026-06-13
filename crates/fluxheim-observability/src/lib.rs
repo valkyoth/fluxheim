@@ -192,6 +192,30 @@ pub fn metrics_compression_encoding_label(encoding: &str) -> &'static str {
     }
 }
 
+pub fn metrics_edge_policy_label(policy: &str) -> &'static str {
+    match policy {
+        "access" => "access",
+        "rate_limit" => "rate_limit",
+        "concurrency" => "concurrency",
+        "auth_request" => "auth_request",
+        "mirror" => "mirror",
+        _ => "other",
+    }
+}
+
+pub fn metrics_edge_policy_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "deny" => "deny",
+        "allow" => "allow",
+        "delay" => "delay",
+        "reject" => "reject",
+        "error" => "error",
+        "success" => "success",
+        "skipped" => "skipped",
+        _ => "other",
+    }
+}
+
 pub fn metrics_stream_outcome_label(outcome: &str) -> &'static str {
     match outcome {
         "completed" => "completed",
@@ -207,6 +231,14 @@ pub fn metrics_stream_direction_label(direction: &str) -> &'static str {
     match direction {
         "downstream_to_upstream" => "downstream_to_upstream",
         "upstream_to_downstream" => "upstream_to_downstream",
+        _ => "other",
+    }
+}
+
+pub fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "success" => "success",
+        "failure" => "failure",
         _ => "other",
     }
 }
@@ -872,6 +904,10 @@ mod tests {
         assert_eq!(metrics_admin_auth_scope_label("route"), "other");
         assert_eq!(metrics_compression_encoding_label("br"), "br");
         assert_eq!(metrics_compression_encoding_label("identity"), "other");
+        assert_eq!(metrics_edge_policy_label("rate_limit"), "rate_limit");
+        assert_eq!(metrics_edge_policy_label("unknown-policy"), "other");
+        assert_eq!(metrics_edge_policy_outcome_label("skipped"), "skipped");
+        assert_eq!(metrics_edge_policy_outcome_label("bypassed"), "other");
         assert_eq!(metrics_stream_outcome_label("completed"), "completed");
         assert_eq!(metrics_stream_outcome_label("strange"), "error");
         assert_eq!(
@@ -879,6 +915,8 @@ mod tests {
             "upstream_to_downstream"
         );
         assert_eq!(metrics_stream_direction_label("sideways"), "other");
+        assert_eq!(metrics_otlp_export_outcome_label("success"), "success");
+        assert_eq!(metrics_otlp_export_outcome_label("delayed"), "other");
         assert_eq!(metrics_acme_event_label("renewed"), "renewed");
         assert_eq!(metrics_acme_event_label("surprise"), "other");
     }
