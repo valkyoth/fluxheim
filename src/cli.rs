@@ -1928,7 +1928,7 @@ fn parse_cache_lookup_header_names(
         .iter()
         .map(|name| {
             let name = name.trim();
-            if name.is_empty() || name.len() > 64 || !name.bytes().all(is_http_token_byte) {
+            if name.is_empty() || name.len() > 64 || !fluxheim_protocol::http_token_valid(name) {
                 return Err(format!(
                     "cache-lookup --expect-header-name must be a valid HTTP header name, got {name:?}"
                 )
@@ -1963,7 +1963,7 @@ fn parse_cache_lookup_header(
         .split_once(':')
         .ok_or("cache-lookup --expect-header must use \"Name: value\" syntax")?;
     let name = name.trim();
-    if name.is_empty() || name.len() > 64 || !name.bytes().all(is_http_token_byte) {
+    if name.is_empty() || name.len() > 64 || !fluxheim_protocol::http_token_valid(name) {
         return Err("cache-lookup --expect-header name must be a valid HTTP header name".into());
     }
     let value = value.trim();
@@ -2790,7 +2790,7 @@ fn parse_cache_cli_header(
         .split_once(':')
         .ok_or_else(|| format!("{command} --header must use \"Name: value\" syntax"))?;
     let name = name.trim();
-    if name.is_empty() || name.len() > 64 || !name.bytes().all(is_http_token_byte) {
+    if name.is_empty() || name.len() > 64 || !fluxheim_protocol::http_token_valid(name) {
         return Err(format!("{command} --header name must be a valid HTTP header name").into());
     }
     let normalized_name = name.to_ascii_lowercase();
@@ -3004,7 +3004,7 @@ fn validate_cache_warm_header_name(name: &str) -> Result<(), Box<dyn Error + Sen
     if name.is_empty() || name.len() > 64 {
         return Err("cache-warm --cache-status-header must be 1-64 bytes".into());
     }
-    if !name.bytes().all(is_http_token_byte) {
+    if !fluxheim_protocol::http_token_valid(name) {
         return Err("cache-warm --cache-status-header must be a valid HTTP header name".into());
     }
     Ok(())
@@ -3108,28 +3108,6 @@ fn cache_warm_safe_label(value: Option<&str>) -> String {
         return "other".to_owned();
     }
     value.to_owned()
-}
-
-#[cfg(feature = "cache")]
-fn is_http_token_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric()
-        || matches!(
-            byte,
-            b'!' | b'#'
-                | b'$'
-                | b'%'
-                | b'&'
-                | b'\''
-                | b'*'
-                | b'+'
-                | b'-'
-                | b'.'
-                | b'^'
-                | b'_'
-                | b'`'
-                | b'|'
-                | b'~'
-        )
 }
 
 #[cfg(feature = "cache")]

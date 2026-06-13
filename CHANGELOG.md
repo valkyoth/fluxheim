@@ -212,6 +212,8 @@ behavior when the change improves security or project direction.
 - Move response header rewrite prefix authority-boundary matching into
   `crates/fluxheim-protocol`, leaving root header policy as the mutation
   adapter.
+- Move cache CLI header-name validation onto the shared
+  `crates/fluxheim-protocol` HTTP token grammar helper.
 
 ### Fixed
 

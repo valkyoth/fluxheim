@@ -206,6 +206,8 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
 - Moved response header rewrite prefix authority-boundary matching into
   `crates/fluxheim-protocol`, leaving root header policy as the mutation
   adapter.
+- Moved cache CLI header-name validation onto the shared
+  `crates/fluxheim-protocol` HTTP token grammar helper.
 
 ## Fixed
 
