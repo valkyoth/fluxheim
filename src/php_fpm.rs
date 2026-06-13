@@ -8,6 +8,9 @@ use crate::http_types::{PingoraResponseHeader as ResponseHeader, StatusCode};
 
 use crate::config::{PhpConfig, PhpFpmConfig, PhpFpmMode, PhpFpmProcessManager};
 use crate::flux_error::{FluxError, FluxResult};
+pub(crate) use fluxheim_php_fpm::{
+    PhpFpmTimeoutKind, php_fpm_error_outcome, php_fpm_timeout_error, php_fpm_timeout_kind,
+};
 
 const MANAGED_PHP_FPM_STABLE_RESTART_SECS: u64 = 30;
 static MANAGED_PHP_FPM_INSTANCE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -696,55 +699,6 @@ impl SplitFirstColon for [u8] {
     fn split_first_colon(&self) -> Option<(&[u8], &[u8])> {
         let index = self.iter().position(|byte| *byte == b':')?;
         Some((&self[..index], &self[index + 1..]))
-    }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum PhpFpmTimeoutKind {
-    Connect,
-    Request,
-}
-
-impl std::fmt::Display for PhpFpmTimeoutKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Connect => write!(formatter, "php-fpm connect timed out"),
-            Self::Request => write!(formatter, "php-fpm request timed out"),
-        }
-    }
-}
-
-impl std::error::Error for PhpFpmTimeoutKind {}
-
-pub(crate) fn php_fpm_timeout_error(kind: PhpFpmTimeoutKind) -> io::Error {
-    io::Error::new(io::ErrorKind::TimedOut, kind)
-}
-
-pub(crate) fn php_fpm_timeout_kind(error: &io::Error) -> Option<PhpFpmTimeoutKind> {
-    error
-        .get_ref()
-        .and_then(|source| source.downcast_ref::<PhpFpmTimeoutKind>())
-        .copied()
-}
-
-pub(crate) fn php_fpm_error_outcome(error: &io::Error) -> &'static str {
-    match error.kind() {
-        io::ErrorKind::TimedOut => match php_fpm_timeout_kind(error) {
-            Some(PhpFpmTimeoutKind::Connect) => "connect_timeout",
-            Some(PhpFpmTimeoutKind::Request) | None => "request_timeout",
-        },
-        io::ErrorKind::ConnectionRefused
-        | io::ErrorKind::ConnectionReset
-        | io::ErrorKind::ConnectionAborted
-        | io::ErrorKind::BrokenPipe
-        | io::ErrorKind::NotConnected
-        | io::ErrorKind::AddrInUse
-        | io::ErrorKind::AddrNotAvailable
-        | io::ErrorKind::NotFound
-        | io::ErrorKind::UnexpectedEof => "connection_error",
-        io::ErrorKind::InvalidInput | io::ErrorKind::Unsupported => "configuration_error",
-        io::ErrorKind::InvalidData => "invalid_response",
-        _ => "fpm_error",
     }
 }
 

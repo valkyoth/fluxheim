@@ -13,6 +13,10 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   data/rendering helpers into `crates/fluxheim-web`. The root `crate::web`
   module re-exports the same types and renderer while keeping Pingora response
   serving in the root adapter.
+- Started the `fluxheim-php-fpm` crate boundary by moving PHP-FPM timeout
+  classification and bounded error-outcome helpers into
+  `crates/fluxheim-php-fpm`, with the root PHP-FPM module re-exporting the same
+  names for existing runtime and test code.
 
 ## Fixed
 

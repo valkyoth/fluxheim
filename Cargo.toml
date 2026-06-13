@@ -14,6 +14,7 @@ members = [
     "crates/fluxheim-config",
     "crates/fluxheim-cache",
     "crates/fluxheim-web",
+    "crates/fluxheim-php-fpm",
     "crates/fluxheim-load-balancer",
 ]
 resolver = "3"
@@ -107,7 +108,14 @@ metrics-otlp = ["metrics", "dep:serde_json", "dep:ureq", "fluxheim-config/metric
 otel-tracing = ["proxy", "fluxheim-config/otel-tracing"]
 otel-otlp = ["otel-tracing", "dep:serde_json", "dep:ureq", "fluxheim-config/otel-otlp"]
 php = ["proxy", "web"]
-php-fpm = ["php", "dep:fastcgi-client", "dep:tokio", "fastcgi-client/runtime-tokio", "fluxheim-config/php-fpm"]
+php-fpm = [
+    "php",
+    "dep:fastcgi-client",
+    "dep:fluxheim-php-fpm",
+    "dep:tokio",
+    "fastcgi-client/runtime-tokio",
+    "fluxheim-config/php-fpm",
+]
 privacy-mode = [
     "proxy",
     "web",
@@ -204,6 +212,7 @@ fluxheim-common = { path = "crates/fluxheim-common" }
 fluxheim-config = { path = "crates/fluxheim-config" }
 fluxheim-cache = { path = "crates/fluxheim-cache" }
 fluxheim-load-balancer = { path = "crates/fluxheim-load-balancer", optional = true }
+fluxheim-php-fpm = { path = "crates/fluxheim-php-fpm", optional = true }
 fluxheim-web = { path = "crates/fluxheim-web", optional = true }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"], optional = true }
