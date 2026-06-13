@@ -16,7 +16,7 @@ pub(crate) use fluxheim_php_fpm::{
     php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
     php_fpm_retry_attempts_for_endpoint_count, php_fpm_retry_deadline,
     php_fpm_retry_deadline_allows, php_fpm_retryable_error, php_fpm_retryable_status,
-    php_fpm_timeout_error,
+    php_fpm_timeout_error, safe_php_header_name, safe_php_header_value,
 };
 
 const MANAGED_PHP_FPM_STABLE_RESTART_SECS: u64 = 30;
@@ -560,36 +560,6 @@ fn trim_ascii(mut value: &[u8]) -> &[u8] {
         value = &value[..value.len() - 1];
     }
     value
-}
-
-fn safe_php_header_name(name: &[u8]) -> bool {
-    !name.is_empty()
-        && name.iter().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(
-                    byte,
-                    b'!' | b'#'
-                        | b'$'
-                        | b'%'
-                        | b'&'
-                        | b'\''
-                        | b'*'
-                        | b'+'
-                        | b'-'
-                        | b'.'
-                        | b'^'
-                        | b'_'
-                        | b'`'
-                        | b'|'
-                        | b'~'
-                )
-        })
-}
-
-pub(crate) fn safe_php_header_value(value: &[u8]) -> bool {
-    value
-        .iter()
-        .all(|byte| matches!(byte, b' ' | b'\t' | 0x21..=0x7E))
 }
 
 trait SplitFirstColon {

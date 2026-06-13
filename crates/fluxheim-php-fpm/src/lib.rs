@@ -166,6 +166,36 @@ pub fn php_fpm_retryable_error(error: &io::Error) -> bool {
     }
 }
 
+pub fn safe_php_header_name(name: &[u8]) -> bool {
+    !name.is_empty()
+        && name.iter().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
+}
+
+pub fn safe_php_header_value(value: &[u8]) -> bool {
+    value
+        .iter()
+        .all(|byte| matches!(byte, b' ' | b'\t' | 0x21..=0x7E))
+}
+
 pub fn managed_php_fpm_restart_backoff_secs(restart_failures: usize) -> u64 {
     2_u64.saturating_pow(restart_failures.min(5) as u32).min(30)
 }
@@ -385,7 +415,8 @@ mod tests {
         managed_php_fpm_restart_backoff_secs, php_fpm_effective_connect_timeout,
         php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
         php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
-        php_fpm_retryable_status, php_fpm_timeout_error,
+        php_fpm_retryable_status, php_fpm_timeout_error, safe_php_header_name,
+        safe_php_header_value,
     };
     use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
 
@@ -512,6 +543,22 @@ mod tests {
         assert!(!php_fpm_retryable_error(&php_fpm_timeout_error(
             PhpFpmTimeoutKind::Request
         )));
+    }
+
+    #[test]
+    fn php_header_guards_reject_injection_bytes() {
+        assert!(safe_php_header_name(b"X-PHP-Header"));
+        assert!(safe_php_header_name(b"X_PHP.Token"));
+        assert!(!safe_php_header_name(b""));
+        assert!(!safe_php_header_name(b"bad:name"));
+        assert!(!safe_php_header_name(b"bad name"));
+
+        assert!(safe_php_header_value(b"session=ok; Path=/"));
+        assert!(safe_php_header_value(b"tab\tallowed"));
+        assert!(!safe_php_header_value(b"bad\x0binject"));
+        assert!(!safe_php_header_value(b"bad\x7fdelete"));
+        assert!(!safe_php_header_value(b"bad\r\ninject"));
+        assert!(!safe_php_header_value("bad-é".as_bytes()));
     }
 
     #[test]

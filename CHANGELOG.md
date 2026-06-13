@@ -74,6 +74,9 @@ behavior when the change improves security or project direction.
 - Move PHP-FPM endpoint selection and endpoint DTOs into
   `crates/fluxheim-php-fpm`, with root `crate::php_fpm` keeping compatibility
   re-exports for the proxy runtime and tests.
+- Move PHP-FPM response-header name/value safety guards into
+  `crates/fluxheim-php-fpm`, keeping root response parsing as the Pingora
+  header adapter.
 - Start the `fluxheim-geoip` crate boundary by moving `GeoContext` and the
   optional local MMDB runtime into `crates/fluxheim-geoip`, with root
   `crate::geo_context` and `crate::geoip` compatibility re-exports.
