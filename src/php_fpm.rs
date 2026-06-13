@@ -11,9 +11,9 @@ use crate::flux_error::{FluxError, FluxResult};
 #[cfg(test)]
 pub(crate) use fluxheim_php_fpm::php_fpm_retry_attempts;
 pub(crate) use fluxheim_php_fpm::{
-    PhpFpmTimeoutKind, managed_php_fpm_config, managed_php_fpm_path_env_from,
+    PhpFpmEndpoint, PhpFpmTimeoutKind, managed_php_fpm_config, managed_php_fpm_path_env_from,
     managed_php_fpm_restart_backoff_secs, php_fpm_effective_connect_timeout,
-    php_fpm_effective_request_timeout, php_fpm_error_outcome,
+    php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
     php_fpm_retry_attempts_for_endpoint_count, php_fpm_retry_deadline,
     php_fpm_retry_deadline_allows, php_fpm_retryable_error, php_fpm_retryable_status,
     php_fpm_timeout_error,
@@ -104,13 +104,6 @@ impl std::fmt::Debug for PhpFpmPool {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) enum PhpFpmEndpoint {
-    Tcp(String),
-    #[cfg(unix)]
-    Unix(PathBuf),
-}
-
 struct PhpFpmPoolEntry {
     client: PhpFpmPooledClient,
     last_used: Instant,
@@ -136,32 +129,6 @@ pub(crate) struct PhpFpmParsedResponse {
     pub(crate) response: ResponseHeader,
     pub(crate) body: Vec<u8>,
     pub(crate) stderr: Option<Vec<u8>>,
-}
-
-pub(crate) fn php_fpm_endpoints_from_config(config: &PhpFpmConfig) -> Vec<PhpFpmEndpoint> {
-    if !config.tcp_upstreams.is_empty() {
-        return config
-            .tcp_upstreams
-            .iter()
-            .cloned()
-            .map(PhpFpmEndpoint::Tcp)
-            .collect();
-    }
-    if let Some(address) = config.tcp.as_deref() {
-        return vec![PhpFpmEndpoint::Tcp(address.to_owned())];
-    }
-    if let Some(socket) = config.socket.as_deref() {
-        #[cfg(unix)]
-        {
-            return vec![PhpFpmEndpoint::Unix(socket.to_path_buf())];
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = socket;
-            return Vec::new();
-        }
-    }
-    Vec::new()
 }
 
 pub(crate) fn php_fpm_keepalive_pools_from_config(

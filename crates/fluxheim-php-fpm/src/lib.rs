@@ -5,10 +5,17 @@
 )]
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum PhpFpmEndpoint {
+    Tcp(String),
+    #[cfg(unix)]
+    Unix(PathBuf),
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum PhpFpmTimeoutKind {
@@ -57,6 +64,32 @@ pub fn php_fpm_error_outcome(error: &io::Error) -> &'static str {
         io::ErrorKind::InvalidData => "invalid_response",
         _ => "fpm_error",
     }
+}
+
+pub fn php_fpm_endpoints_from_config(config: &PhpFpmConfig) -> Vec<PhpFpmEndpoint> {
+    if !config.tcp_upstreams.is_empty() {
+        return config
+            .tcp_upstreams
+            .iter()
+            .cloned()
+            .map(PhpFpmEndpoint::Tcp)
+            .collect();
+    }
+    if let Some(address) = config.tcp.as_deref() {
+        return vec![PhpFpmEndpoint::Tcp(address.to_owned())];
+    }
+    if let Some(socket) = config.socket.as_deref() {
+        #[cfg(unix)]
+        {
+            return vec![PhpFpmEndpoint::Unix(socket.to_path_buf())];
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = socket;
+            return Vec::new();
+        }
+    }
+    Vec::new()
 }
 
 pub fn php_fpm_effective_connect_timeout(
@@ -348,10 +381,10 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        PhpFpmTimeoutKind, managed_php_fpm_config, managed_php_fpm_path_env_from,
+        PhpFpmEndpoint, PhpFpmTimeoutKind, managed_php_fpm_config, managed_php_fpm_path_env_from,
         managed_php_fpm_restart_backoff_secs, php_fpm_effective_connect_timeout,
-        php_fpm_effective_request_timeout, php_fpm_error_outcome, php_fpm_retry_attempts,
-        php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
+        php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
+        php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
         php_fpm_retryable_status, php_fpm_timeout_error,
     };
     use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
@@ -401,6 +434,23 @@ mod tests {
         assert_eq!(managed_php_fpm_restart_backoff_secs(1), 2);
         assert_eq!(managed_php_fpm_restart_backoff_secs(4), 16);
         assert_eq!(managed_php_fpm_restart_backoff_secs(64), 30);
+    }
+
+    #[test]
+    fn php_fpm_endpoints_include_tcp_upstreams() {
+        let fpm = PhpFpmConfig {
+            tcp: Some("127.0.0.1:9000".to_owned()),
+            tcp_upstreams: vec!["127.0.0.1:9000".to_owned(), "127.0.0.1:9001".to_owned()],
+            ..PhpFpmConfig::default()
+        };
+
+        assert_eq!(
+            php_fpm_endpoints_from_config(&fpm),
+            vec![
+                PhpFpmEndpoint::Tcp("127.0.0.1:9000".to_owned()),
+                PhpFpmEndpoint::Tcp("127.0.0.1:9001".to_owned()),
+            ]
+        );
     }
 
     #[test]

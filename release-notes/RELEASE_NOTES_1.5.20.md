@@ -56,6 +56,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   retryable status matching, and retryable error classification into
   `crates/fluxheim-php-fpm`, with root `crate::php_fpm` retaining the
   `StatusCode` compatibility adapter.
+- Moved PHP-FPM endpoint selection and endpoint DTOs into
+  `crates/fluxheim-php-fpm`, with root `crate::php_fpm` keeping compatibility
+  re-exports for the proxy runtime and tests.
 - Started the `fluxheim-geoip` crate boundary by moving `GeoContext` and the
   optional local MMDB runtime into `crates/fluxheim-geoip`, with root
   `crate::geo_context` and `crate::geoip` compatibility re-exports.
