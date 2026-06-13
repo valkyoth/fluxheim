@@ -391,21 +391,21 @@ mod tests {
 
     #[test]
     fn udp_route_rejects_oversized_source_limits() {
-        let mut route = route();
-        route.max_sessions_per_source = super::MAX_UDP_MAX_SESSIONS_PER_SOURCE + 1;
+        let mut config = route();
+        config.max_sessions_per_source = super::MAX_UDP_MAX_SESSIONS_PER_SOURCE + 1;
         assert!(matches!(
-            route.validate(),
+            config.validate(),
             Err(ConfigError::InvalidUdpProxyPolicy {
                 field: "udp.routes.max_sessions_per_source",
                 ..
             })
         ));
 
-        let mut route = route();
-        route.max_responses_per_source_per_second =
+        let mut config = route();
+        config.max_responses_per_source_per_second =
             super::MAX_UDP_MAX_RESPONSES_PER_SOURCE_PER_SECOND + 1;
         assert!(matches!(
-            route.validate(),
+            config.validate(),
             Err(ConfigError::InvalidUdpProxyPolicy {
                 field: "udp.routes.max_responses_per_source_per_second",
                 ..
@@ -415,29 +415,29 @@ mod tests {
 
     #[test]
     fn udp_route_rejects_invalid_passive_health_policy() {
-        let mut route = route();
-        route.passive_health_failures = 0;
+        let mut config = route();
+        config.passive_health_failures = 0;
         assert!(matches!(
-            route.validate(),
+            config.validate(),
             Err(ConfigError::InvalidUdpProxyPolicy {
                 field: "udp.routes.passive_health_failures",
                 ..
             })
         ));
 
-        let mut route = route();
-        route.passive_health_ejection_secs = 0;
+        let mut config = route();
+        config.passive_health_ejection_secs = 0;
         assert!(matches!(
-            route.validate(),
-            Err(ConfigError::InvalidConfig { field, .. })
+            config.validate(),
+            Err(ConfigError::InvalidProxyTimeout { field })
                 if field == "udp.routes.passive_health_ejection_secs"
         ));
 
-        let mut route = route();
-        route.passive_health_enabled = false;
-        route.passive_health_failures = 0;
-        route.passive_health_ejection_secs = 0;
-        route.validate().unwrap();
+        let mut config = route();
+        config.passive_health_enabled = false;
+        config.passive_health_failures = 0;
+        config.passive_health_ejection_secs = 0;
+        config.validate().unwrap();
     }
 
     #[test]
