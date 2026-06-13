@@ -326,6 +326,32 @@ impl LoadBalanceSelection {
         )
     }
 
+    pub fn metric_label(self) -> &'static str {
+        match self {
+            Self::RoundRobin => "round_robin",
+            Self::LeastConnections => "least_connections",
+            Self::LeastSessions => "least_sessions",
+            Self::LeastTime => "least_time",
+            Self::PowerOfTwo => "power_of_two",
+            Self::SourceHash => "source_hash",
+            Self::UriHash => "uri_hash",
+            Self::HeaderHash => "header_hash",
+            Self::CookieHash => "cookie_hash",
+            Self::ConsistentSourceHash => "consistent_source_hash",
+            Self::ConsistentUriHash => "consistent_uri_hash",
+            Self::ConsistentHeaderHash => "consistent_header_hash",
+            Self::ConsistentCookieHash => "consistent_cookie_hash",
+            Self::BoundedLoadConsistentSourceHash => "bounded_load_consistent_source_hash",
+            Self::BoundedLoadConsistentUriHash => "bounded_load_consistent_uri_hash",
+            Self::BoundedLoadConsistentHeaderHash => "bounded_load_consistent_header_hash",
+            Self::BoundedLoadConsistentCookieHash => "bounded_load_consistent_cookie_hash",
+            Self::MaglevSourceHash => "maglev_source_hash",
+            Self::MaglevUriHash => "maglev_uri_hash",
+            Self::MaglevHeaderHash => "maglev_header_hash",
+            Self::MaglevCookieHash => "maglev_cookie_hash",
+        }
+    }
+
     #[cfg(feature = "load-balancer")]
     pub fn supports_runtime_weight_override(self) -> bool {
         matches!(
@@ -1726,4 +1752,45 @@ fn valid_health_check_path(path: &str) -> bool {
 
 fn valid_health_check_host(host: &str) -> bool {
     host.len() <= 255 && normalize_host(host).is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LoadBalanceSelection;
+
+    #[test]
+    fn load_balance_selection_metric_labels_are_stable() {
+        assert_eq!(
+            LoadBalanceSelection::BoundedLoadConsistentSourceHash.metric_label(),
+            "bounded_load_consistent_source_hash"
+        );
+        assert_eq!(
+            LoadBalanceSelection::BoundedLoadConsistentUriHash.metric_label(),
+            "bounded_load_consistent_uri_hash"
+        );
+        assert_eq!(
+            LoadBalanceSelection::BoundedLoadConsistentHeaderHash.metric_label(),
+            "bounded_load_consistent_header_hash"
+        );
+        assert_eq!(
+            LoadBalanceSelection::BoundedLoadConsistentCookieHash.metric_label(),
+            "bounded_load_consistent_cookie_hash"
+        );
+        assert_eq!(
+            LoadBalanceSelection::MaglevSourceHash.metric_label(),
+            "maglev_source_hash"
+        );
+        assert_eq!(
+            LoadBalanceSelection::MaglevUriHash.metric_label(),
+            "maglev_uri_hash"
+        );
+        assert_eq!(
+            LoadBalanceSelection::MaglevHeaderHash.metric_label(),
+            "maglev_header_hash"
+        );
+        assert_eq!(
+            LoadBalanceSelection::MaglevCookieHash.metric_label(),
+            "maglev_cookie_hash"
+        );
+    }
 }

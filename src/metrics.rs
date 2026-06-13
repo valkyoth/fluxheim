@@ -1578,37 +1578,7 @@ fn load_balancer_queue_outcome_label(outcome: &str) -> &'static str {
 }
 
 fn load_balancer_selection_label(selection: crate::config::LoadBalanceSelection) -> &'static str {
-    match selection {
-        crate::config::LoadBalanceSelection::RoundRobin => "round_robin",
-        crate::config::LoadBalanceSelection::LeastConnections => "least_connections",
-        crate::config::LoadBalanceSelection::LeastSessions => "least_sessions",
-        crate::config::LoadBalanceSelection::LeastTime => "least_time",
-        crate::config::LoadBalanceSelection::PowerOfTwo => "power_of_two",
-        crate::config::LoadBalanceSelection::SourceHash => "source_hash",
-        crate::config::LoadBalanceSelection::UriHash => "uri_hash",
-        crate::config::LoadBalanceSelection::HeaderHash => "header_hash",
-        crate::config::LoadBalanceSelection::CookieHash => "cookie_hash",
-        crate::config::LoadBalanceSelection::ConsistentSourceHash => "consistent_source_hash",
-        crate::config::LoadBalanceSelection::ConsistentUriHash => "consistent_uri_hash",
-        crate::config::LoadBalanceSelection::ConsistentHeaderHash => "consistent_header_hash",
-        crate::config::LoadBalanceSelection::ConsistentCookieHash => "consistent_cookie_hash",
-        crate::config::LoadBalanceSelection::BoundedLoadConsistentSourceHash => {
-            "bounded_load_consistent_source_hash"
-        }
-        crate::config::LoadBalanceSelection::BoundedLoadConsistentUriHash => {
-            "bounded_load_consistent_uri_hash"
-        }
-        crate::config::LoadBalanceSelection::BoundedLoadConsistentHeaderHash => {
-            "bounded_load_consistent_header_hash"
-        }
-        crate::config::LoadBalanceSelection::BoundedLoadConsistentCookieHash => {
-            "bounded_load_consistent_cookie_hash"
-        }
-        crate::config::LoadBalanceSelection::MaglevSourceHash => "maglev_source_hash",
-        crate::config::LoadBalanceSelection::MaglevUriHash => "maglev_uri_hash",
-        crate::config::LoadBalanceSelection::MaglevHeaderHash => "maglev_header_hash",
-        crate::config::LoadBalanceSelection::MaglevCookieHash => "maglev_cookie_hash",
-    }
+    selection.metric_label()
 }
 
 fn load_balancer_upstream_label(upstream: Option<&str>) -> &str {

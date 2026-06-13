@@ -3947,6 +3947,9 @@ the exception while the cache server is being completed as a focused sequence:
   load-balancer event/queue/upstream, stream, ACME, PHP/PHP-FPM, and
   metrics-OTLP exporter events also now live in the observability crate while
   root `crate::metrics` remains the Prometheus registry/recorder adapter.
+  `LoadBalanceSelection` metric-label mapping now lives in `fluxheim-config`,
+  leaving root `crate::metrics` as the compatibility wrapper for selection
+  labels.
   The OTLP trace exporter and trace-span payload builder also live behind the
   `crates/fluxheim-observability` `otlp-trace` feature while root
   `crate::otel_otlp` remains a compatibility re-export.
