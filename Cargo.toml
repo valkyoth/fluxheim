@@ -111,10 +111,10 @@ acme-client = [
 metrics = ["dep:prometheus", "fluxheim-load-balancer?/metrics"]
 metrics-otlp = [
     "metrics",
-    "dep:serde_json",
     "dep:ureq",
     "fluxheim-config/metrics-otlp",
     "fluxheim-observability/otlp-http",
+    "fluxheim-observability/otlp-metrics",
 ]
 otel-tracing = ["proxy", "fluxheim-config/otel-tracing"]
 otel-otlp = [

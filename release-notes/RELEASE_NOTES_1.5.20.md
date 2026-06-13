@@ -78,6 +78,9 @@ and carries forward the post-1.5.19 trusted-proxy validation fix.
   the root `crate::otlp_http` module as the metrics/tracing adapter.
 - Moved OTLP HTTP endpoint parsing into `crates/fluxheim-observability`,
   keeping the Prometheus metrics payload conversion in the root metrics adapter.
+- Moved the Prometheus-to-OTLP metrics payload builder into
+  `crates/fluxheim-observability` behind its `otlp-metrics` feature, leaving
+  root metrics OTLP as exporter lifecycle and HTTP post wiring.
 - Moved the OTLP trace exporter and trace-span payload builder into
   `crates/fluxheim-observability` behind its `otlp-trace` feature, with root
   `crate::otel_otlp` kept as a compatibility re-export.
