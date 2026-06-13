@@ -3929,9 +3929,10 @@ the exception while the cache server is being completed as a focused sequence:
   The `crates/fluxheim-geoip` boundary now owns `GeoContext` and the optional
   local MMDB runtime behind root compatibility re-exports. The
   `crates/fluxheim-compression` boundary now owns response compression encoder
-  lifecycle, output-limit accounting, and Accept-Encoding token/qvalue parsing
-  while the root adapter keeps Pingora-specific header selection and response
-  mutation. The
+  lifecycle, output-limit accounting, Accept-Encoding token/qvalue parsing, and
+  response policy string matching for Cache-Control directives and Content-Type
+  eligibility while the root adapter keeps Pingora-specific header selection,
+  header iteration, and response mutation. The
   `crates/fluxheim-observability` boundary now owns W3C Trace Context parsing,
   generation, and traceparent normalization behind the existing
   `crate::trace_context` surface, and the shared OTLP HTTP agent plus

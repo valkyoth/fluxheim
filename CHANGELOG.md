@@ -122,6 +122,9 @@ behavior when the change improves security or project direction.
 - Move Accept-Encoding token and qvalue parsing into
   `crates/fluxheim-compression`, keeping root response-header selection as the
   Pingora adapter.
+- Move compression response policy string matching for Cache-Control directives
+  and Content-Type eligibility into `crates/fluxheim-compression`, leaving root
+  response-header iteration as the adapter.
 - Start the `fluxheim-observability` crate boundary by moving W3C Trace Context
   parsing, generation, and traceparent normalization into
   `crates/fluxheim-observability`, with root `crate::trace_context` kept as a

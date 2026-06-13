@@ -76,6 +76,31 @@ pub fn parse_accept_encoding_qvalue(value: &str) -> Option<u16> {
     }
 }
 
+pub fn cache_control_directive_blocks_compression(directive: &str) -> bool {
+    directive.eq_ignore_ascii_case("no-transform")
+        || directive.eq_ignore_ascii_case("private")
+        || directive.eq_ignore_ascii_case("no-store")
+}
+
+pub fn content_type_is_compressible(content_type: &str) -> bool {
+    let content_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+
+    content_type.as_str().starts_with("text/")
+        || matches!(
+            content_type.as_str(),
+            "application/javascript"
+                | "application/json"
+                | "application/xml"
+                | "image/svg+xml"
+                | "text/javascript"
+        )
+}
+
 #[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
 enum ResponseCompressionEncoderInner {
     #[cfg(feature = "brotli")]
@@ -306,7 +331,10 @@ fn compressed_response_exceeds_limit_error() -> FluxError {
 
 #[cfg(test)]
 mod tests {
-    use super::{encoding_token_allows, parse_accept_encoding_qvalue};
+    use super::{
+        cache_control_directive_blocks_compression, content_type_is_compressible,
+        encoding_token_allows, parse_accept_encoding_qvalue,
+    };
 
     #[cfg(feature = "gzip")]
     use std::io;
@@ -336,6 +364,18 @@ mod tests {
         assert!(!encoding_token_allows("br;q=0", "br"));
         assert!(!encoding_token_allows("gzip;q=banana", "gzip"));
         assert!(!encoding_token_allows("br", "gzip"));
+    }
+
+    #[test]
+    fn classifies_compression_response_policy_tokens() {
+        assert!(cache_control_directive_blocks_compression("no-transform"));
+        assert!(cache_control_directive_blocks_compression("PRIVATE"));
+        assert!(!cache_control_directive_blocks_compression("max-age=60"));
+
+        assert!(content_type_is_compressible("text/plain; charset=utf-8"));
+        assert!(content_type_is_compressible("application/json"));
+        assert!(content_type_is_compressible("image/svg+xml"));
+        assert!(!content_type_is_compressible("image/png"));
     }
 
     #[cfg(feature = "gzip")]

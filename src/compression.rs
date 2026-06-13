@@ -17,7 +17,9 @@ pub(crate) use fluxheim_compression::ResponseCompressionEncoder;
     feature = "compression-gzip",
     feature = "compression-zstd"
 ))]
-use fluxheim_compression::encoding_token_allows;
+use fluxheim_compression::{
+    cache_control_directive_blocks_compression, content_type_is_compressible, encoding_token_allows,
+};
 
 #[cfg(any(
     feature = "compression-brotli",
@@ -205,11 +207,7 @@ fn response_cache_control_blocks_compression(response: &ResponseHeader) -> bool 
         .filter_map(|value| value.to_str().ok())
         .flat_map(|value| value.split(','))
         .map(str::trim)
-        .any(|directive| {
-            directive.eq_ignore_ascii_case("no-transform")
-                || directive.eq_ignore_ascii_case("private")
-                || directive.eq_ignore_ascii_case("no-store")
-        })
+        .any(cache_control_directive_blocks_compression)
 }
 
 #[cfg(any(
@@ -222,27 +220,11 @@ fn response_content_type_is_compressible(response: &ResponseHeader) -> bool {
         .headers
         .get("content-type")
         .and_then(|value| value.to_str().ok())
-        .map(|value| {
-            value
-                .split(';')
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .to_ascii_lowercase()
-        })
     else {
         return false;
     };
 
-    content_type.as_str().starts_with("text/")
-        || matches!(
-            content_type.as_str(),
-            "application/javascript"
-                | "application/json"
-                | "application/xml"
-                | "image/svg+xml"
-                | "text/javascript"
-        )
+    content_type_is_compressible(content_type)
 }
 
 #[cfg(any(
