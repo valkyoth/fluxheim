@@ -28,6 +28,8 @@ controls for safer testing.
   unhealthy.
 - UDP beta docs and smoke tests now describe and exercise the explicit
   per-source pressure controls.
+- UDP smoke coverage now verifies exact-cap responses are accepted and
+  oversized downstream datagrams are dropped before reaching upstreams.
 
 ## Compatibility
 

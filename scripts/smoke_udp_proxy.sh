@@ -77,7 +77,14 @@ sock.bind((host, port))
 while True:
     payload, peer = sock.recvfrom(65535)
     if mode == "dns":
-        sock.sendto(b"dns:" + payload, peer)
+        if log_path:
+            with open(log_path, "ab") as log:
+                log.write(payload + b"\n")
+                log.flush()
+        if payload == b"cap":
+            sock.sendto(b"x" * 512, peer)
+        else:
+            sock.sendto(b"dns:" + payload, peer)
     elif mode == "syslog":
         with open(log_path, "ab") as log:
             log.write(payload + b"\n")
@@ -113,6 +120,35 @@ print(last_error or "UDP request timed out", file=sys.stderr)
 sys.exit(1)
 PY
 
+cat > "$TMP_DIR/udp_request_len.py" <<'PY'
+import socket
+import sys
+import time
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+payload = sys.argv[3].encode("ascii")
+expected_len = int(sys.argv[4])
+deadline = time.monotonic() + 10.0
+last_error = None
+
+while time.monotonic() < deadline:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(0.5)
+            sock.sendto(payload, (host, port))
+            response, _peer = sock.recvfrom(65535)
+        if len(response) == expected_len:
+            sys.exit(0)
+        last_error = f"expected {expected_len} response bytes, got {len(response)}"
+    except OSError as error:
+        last_error = str(error)
+    time.sleep(0.1)
+
+print(last_error or "UDP request timed out", file=sys.stderr)
+sys.exit(1)
+PY
+
 cat > "$TMP_DIR/udp_send.py" <<'PY'
 import socket
 import sys
@@ -123,6 +159,19 @@ payload = sys.argv[3].encode("ascii")
 
 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
     sock.sendto(payload, (host, port))
+PY
+
+cat > "$TMP_DIR/udp_send_bytes.py" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+size = int(sys.argv[3])
+fill = sys.argv[4].encode("ascii")
+
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+    sock.sendto(fill * size, (host, port))
 PY
 
 cat > "$TMP_DIR/wait_file_contains.py" <<'PY'
@@ -143,6 +192,25 @@ print(f"timed out waiting for {expected!r} in {path}", file=sys.stderr)
 if path.exists():
     print(path.read_text(errors="replace"), file=sys.stderr)
 sys.exit(1)
+PY
+
+cat > "$TMP_DIR/wait_file_not_contains.py" <<'PY'
+import pathlib
+import sys
+import time
+
+path = pathlib.Path(sys.argv[1])
+forbidden = sys.argv[2].encode("ascii")
+deadline = time.monotonic() + 1.0
+
+while time.monotonic() < deadline:
+    if path.exists() and forbidden in path.read_bytes():
+        print(f"unexpected {forbidden!r} in {path}", file=sys.stderr)
+        print(path.read_text(errors="replace"), file=sys.stderr)
+        sys.exit(1)
+    time.sleep(0.1)
+
+sys.exit(0)
 PY
 
 cat > "$TMP_DIR/fluxheim.toml" <<EOF
@@ -189,7 +257,7 @@ passive_health_failures = 3
 passive_health_ejection_secs = 2
 EOF
 
-python3 "$TMP_DIR/udp_backend.py" dns 127.0.0.1 "$DNS_UPSTREAM_PORT" >"$TMP_DIR/dns-upstream.log" 2>&1 &
+python3 "$TMP_DIR/udp_backend.py" dns 127.0.0.1 "$DNS_UPSTREAM_PORT" "$TMP_DIR/dns-received.log" >"$TMP_DIR/dns-upstream.log" 2>&1 &
 DNS_UPSTREAM_PID=$!
 python3 "$TMP_DIR/udp_backend.py" syslog 127.0.0.1 "$SYSLOG_UPSTREAM_PORT" "$TMP_DIR/syslog-received.log" >"$TMP_DIR/syslog-upstream.log" 2>&1 &
 SYSLOG_UPSTREAM_PID=$!
@@ -204,6 +272,9 @@ SYSLOG_UPSTREAM_PID=$!
 FLUXHEIM_PID=$!
 
 python3 "$TMP_DIR/udp_request.py" 127.0.0.1 "$DNS_LISTEN_PORT" query dns:query
+python3 "$TMP_DIR/udp_request_len.py" 127.0.0.1 "$DNS_LISTEN_PORT" cap 512
+python3 "$TMP_DIR/udp_send_bytes.py" 127.0.0.1 "$DNS_LISTEN_PORT" 513 z
+python3 "$TMP_DIR/wait_file_not_contains.py" "$TMP_DIR/dns-received.log" zzzzz
 python3 "$TMP_DIR/udp_send.py" 127.0.0.1 "$SYSLOG_LISTEN_PORT" "<13>fluxheim udp smoke"
 python3 "$TMP_DIR/wait_file_contains.py" "$TMP_DIR/syslog-received.log" "fluxheim udp smoke"
 

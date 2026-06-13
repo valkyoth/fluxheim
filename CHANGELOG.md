@@ -29,6 +29,8 @@ behavior when the change improves security or project direction.
   non-loopback listeners during the beta period.
 - Updated UDP beta documentation and smoke coverage for the new production
   readiness guardrails.
+- Extended UDP smoke coverage to verify exact-cap responses are accepted and
+  oversized downstream datagrams are dropped before reaching the upstream.
 
 ## 1.5.20 - 2026-06-13
 
