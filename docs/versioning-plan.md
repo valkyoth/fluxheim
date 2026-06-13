@@ -4030,9 +4030,9 @@ the exception while the cache server is being completed as a focused sequence:
   tests, and clear logging that cannot be turned into packet-rate log spam.
   First pass added per-source session caps, per-source response-rate caps,
   UDP Prometheus counters/gauges, admin UDP status, explicit non-loopback
-  listener warnings for DNS-style routes, and smoke-test coverage for the new
-  knobs. Remaining promotion work should focus on UDP upstream
-  health/readiness, deployment guidance, and deeper packet/truncation tests.
+  listener warnings for DNS-style routes, passive upstream failure ejection,
+  and smoke-test coverage for the new knobs. Remaining promotion work should
+  focus on deployment guidance and deeper packet/truncation tests.
   `syslog-forward` may graduate independently if its one-way semantics are
   reviewed first. Keep QUIC pass-through, game-server UDP proxying, generic
   UDP catchall behavior, authoritative DNS, and GSLB control-plane behavior as

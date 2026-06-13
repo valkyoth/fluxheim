@@ -307,6 +307,9 @@ max_datagram_bytes = 1232
 max_sessions = 4096
 max_sessions_per_source = 64
 max_responses_per_source_per_second = 256
+passive_health_enabled = true
+passive_health_failures = 3
+passive_health_ejection_secs = 10
 ```
 
 - `mode` is an explicit runtime target, not a generic protocol parser.
@@ -336,11 +339,21 @@ max_responses_per_source_per_second = 256
   disables the response-rate cap. Fluxheim prunes old windows and bounds the
   tracked source table by the larger of the route/session caps and an internal
   4096-source floor.
+- `passive_health_enabled` defaults to `true`. In request/response modes,
+  consecutive upstream send/receive failures eject a member from selection for
+  `passive_health_ejection_secs` seconds once `passive_health_failures` is
+  reached. A successful exchange clears the member failure count and ejection
+  state. If all members are ejected, Fluxheim falls back to trying the selected
+  member so a full pool outage does not become a permanent local dead end.
 - `dns-load-balance` is beta and can act as a UDP reflector if exposed to
   untrusted networks. Bind beta listeners to loopback or internal interfaces
   unless the deployment has upstream ingress filtering such as BCP38. Fluxheim
   logs a security warning when a `dns-load-balance` route listens on a
   non-loopback address, but this is still an operator decision during beta.
+- In rootless container deployments, prefer binding UDP beta routes to an
+  explicit host/container IP and publish only the required UDP port. Avoid
+  broad `0.0.0.0:port` or `[::]:port` bindings until the route has ingress
+  filtering, source pressure limits, and operational metrics monitored.
 - UDP routes expose Prometheus metrics when the `metrics` feature is compiled:
   `fluxheim_udp_datagrams_total`, `fluxheim_udp_drops_total`, and
   `fluxheim_udp_active_sessions`. The admin API exposes configured UDP route

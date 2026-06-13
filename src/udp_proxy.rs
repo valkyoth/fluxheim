@@ -195,10 +195,13 @@ struct UdpProxyApp {
     upstreams: Arc<[RuntimeUdpUpstream]>,
     weight_total: usize,
     response_timeout: Duration,
+    passive_health_ejection: Duration,
     max_datagram_bytes: usize,
     max_sessions: usize,
     max_sessions_per_source: usize,
     max_responses_per_source_per_second: usize,
+    passive_health_enabled: bool,
+    passive_health_failures: usize,
     response_rate_tracked_sources: usize,
     active_sessions: Arc<AtomicUsize>,
     source_sessions: UdpSourceSessions,
@@ -265,10 +268,13 @@ impl UdpProxyApp {
             upstreams: upstreams.into(),
             weight_total,
             response_timeout: Duration::from_secs(route.response_timeout_secs),
+            passive_health_ejection: Duration::from_secs(route.passive_health_ejection_secs),
             max_datagram_bytes: route.max_datagram_bytes,
             max_sessions,
             max_sessions_per_source,
             max_responses_per_source_per_second: route.max_responses_per_source_per_second,
+            passive_health_enabled: route.passive_health_enabled,
+            passive_health_failures: route.passive_health_failures,
             response_rate_tracked_sources,
             active_sessions: Arc::new(AtomicUsize::new(0)),
             source_sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -346,19 +352,35 @@ impl UdpProxyApp {
                 Err(io::Error::other("unsupported UDP route mode"))
             }
         };
-        if let Err(error) = result {
-            self.record_datagram("upstream", "error");
-            log::debug!(
-                target: "fluxheim::udp",
-                "UDP route {} failed to forward datagram via {}: {error}",
-                self.name,
-                upstream.alias.as_deref().unwrap_or(upstream.authority.as_str())
-            );
+        match result {
+            Ok(()) => upstream.record_success(),
+            Err(error) => {
+                self.record_datagram("upstream", "error");
+                self.record_upstream_failure(upstream);
+                log::debug!(
+                    target: "fluxheim::udp",
+                    "UDP route {} failed to forward datagram via {}: {error}",
+                    self.name,
+                    upstream.alias.as_deref().unwrap_or(upstream.authority.as_str())
+                );
+            }
         }
     }
 
     fn select_upstream(&self) -> &RuntimeUdpUpstream {
-        let mut slot = self.next_upstream.fetch_add(1, Ordering::Relaxed) % self.weight_total;
+        let start = self.next_upstream.fetch_add(1, Ordering::Relaxed) % self.weight_total;
+        let now = udp_log_millis();
+        for offset in 0..self.weight_total {
+            let slot = (start + offset) % self.weight_total;
+            let upstream = self.upstream_for_weight_slot(slot);
+            if upstream.ready(now) {
+                return upstream;
+            }
+        }
+        self.upstream_for_weight_slot(start)
+    }
+
+    fn upstream_for_weight_slot(&self, mut slot: usize) -> &RuntimeUdpUpstream {
         for upstream in self.upstreams.iter() {
             if slot < upstream.weight {
                 return upstream;
@@ -467,6 +489,33 @@ impl UdpProxyApp {
         true
     }
 
+    fn record_upstream_failure(&self, upstream: &RuntimeUdpUpstream) {
+        if !self.passive_health_enabled {
+            return;
+        }
+        let failures = upstream.failures.fetch_add(1, Ordering::AcqRel) + 1;
+        if failures < self.passive_health_failures {
+            return;
+        }
+        upstream.failures.store(0, Ordering::Release);
+        let ejected_until = udp_log_millis().saturating_add(
+            self.passive_health_ejection
+                .as_millis()
+                .min(u128::from(u64::MAX)) as u64,
+        );
+        upstream
+            .ejected_until_millis
+            .store(ejected_until, Ordering::Release);
+        log::warn!(
+            target: "fluxheim::udp",
+            "UDP route {} passively ejected upstream {} after {} consecutive failures for {} seconds",
+            self.name,
+            upstream.alias.as_deref().unwrap_or(upstream.authority.as_str()),
+            self.passive_health_failures,
+            self.passive_health_ejection.as_secs()
+        );
+    }
+
     fn lock_source_sessions(&self) -> std::sync::MutexGuard<'_, HashMap<IpAddr, usize>> {
         match self.source_sessions.lock() {
             Ok(guard) => guard,
@@ -561,6 +610,19 @@ struct RuntimeUdpUpstream {
     authority: String,
     alias: Option<String>,
     weight: usize,
+    failures: AtomicUsize,
+    ejected_until_millis: AtomicU64,
+}
+
+impl RuntimeUdpUpstream {
+    fn ready(&self, now_millis: u64) -> bool {
+        self.ejected_until_millis.load(Ordering::Acquire) <= now_millis
+    }
+
+    fn record_success(&self) {
+        self.failures.store(0, Ordering::Release);
+        self.ejected_until_millis.store(0, Ordering::Release);
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -632,6 +694,8 @@ fn runtime_udp_upstreams(route: &UdpRouteConfig) -> Vec<RuntimeUdpUpstream> {
             authority: authority.to_owned(),
             alias: route.upstream_aliases.get(index).cloned(),
             weight: route.upstream_weights.get(index).copied().unwrap_or(1),
+            failures: AtomicUsize::new(0),
+            ejected_until_millis: AtomicU64::new(0),
         })
         .collect()
 }
@@ -664,6 +728,7 @@ mod tests {
     use crate::config::{UdpRouteConfig, UdpRouteMode};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
     use tokio::net::UdpSocket;
 
     fn route(upstream: String, mode: UdpRouteMode) -> UdpRouteConfig {
@@ -681,6 +746,9 @@ mod tests {
             max_sessions: 1,
             max_sessions_per_source: 1,
             max_responses_per_source_per_second: 256,
+            passive_health_enabled: true,
+            passive_health_failures: 3,
+            passive_health_ejection_secs: 10,
         }
     }
 
@@ -824,6 +892,39 @@ mod tests {
 
         assert!(app.allow_response_to_source(source));
         assert!(!app.allow_response_to_source(source));
+    }
+
+    #[test]
+    fn udp_selection_skips_passively_ejected_upstream() {
+        let mut route = route("127.0.0.1:53".to_owned(), UdpRouteMode::DnsLoadBalance);
+        route.upstream = None;
+        route.upstreams = vec!["127.0.0.1:53".to_owned(), "127.0.0.1:54".to_owned()];
+        route.upstream_weights = vec![1, 1];
+        route.upstream_aliases = vec!["bad".to_owned(), "good".to_owned()];
+        let app = UdpProxyApp::from_config(&route).unwrap();
+
+        app.upstreams[0].ejected_until_millis.store(
+            super::udp_log_millis().saturating_add(10_000),
+            Ordering::Release,
+        );
+
+        let selected = app.select_upstream();
+        assert_eq!(selected.alias.as_deref(), Some("good"));
+    }
+
+    #[test]
+    fn udp_passive_health_ejects_and_success_restores_upstream() {
+        let mut route = route("127.0.0.1:53".to_owned(), UdpRouteMode::DnsLoadBalance);
+        route.passive_health_failures = 1;
+        let app = UdpProxyApp::from_config(&route).unwrap();
+        let upstream = &app.upstreams[0];
+
+        app.record_upstream_failure(upstream);
+        assert!(upstream.ejected_until_millis.load(Ordering::Acquire) > super::udp_log_millis());
+
+        upstream.record_success();
+        assert_eq!(upstream.failures.load(Ordering::Acquire), 0);
+        assert_eq!(upstream.ejected_until_millis.load(Ordering::Acquire), 0);
     }
 
     #[test]

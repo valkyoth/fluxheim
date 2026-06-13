@@ -169,6 +169,9 @@ max_datagram_bytes = 512
 max_sessions = 32
 max_sessions_per_source = 8
 max_responses_per_source_per_second = 64
+passive_health_enabled = true
+passive_health_failures = 3
+passive_health_ejection_secs = 2
 
 [[udp.routes]]
 name = "syslog-beta"
@@ -181,6 +184,9 @@ max_datagram_bytes = 512
 max_sessions = 32
 max_sessions_per_source = 8
 max_responses_per_source_per_second = 64
+passive_health_enabled = true
+passive_health_failures = 3
+passive_health_ejection_secs = 2
 EOF
 
 python3 "$TMP_DIR/udp_backend.py" dns 127.0.0.1 "$DNS_UPSTREAM_PORT" >"$TMP_DIR/dns-upstream.log" 2>&1 &

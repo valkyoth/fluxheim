@@ -19,6 +19,9 @@ behavior when the change improves security or project direction.
   active route sessions.
 - Added `GET /_fluxheim/udp/status` for admin-visible UDP route configuration,
   listener exposure warnings, and configured UDP limits.
+- Added UDP beta passive upstream health: consecutive request/response
+  failures can temporarily eject a member from route selection, and successful
+  exchanges clear the ejection state.
 
 ### Changed
 

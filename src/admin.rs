@@ -3344,6 +3344,9 @@ fn udp_status_json(config: &Config) -> Value {
                 "max_sessions": route.max_sessions,
                 "max_sessions_per_source": route.max_sessions_per_source,
                 "max_responses_per_source_per_second": route.max_responses_per_source_per_second,
+                "passive_health_enabled": route.passive_health_enabled,
+                "passive_health_failures": route.passive_health_failures,
+                "passive_health_ejection_secs": route.passive_health_ejection_secs,
                 "public_exposure_warning": route.listen.iter().filter_map(|listen| listen.parse::<std::net::SocketAddr>().ok()).any(|listen| !listen.ip().is_loopback()),
             })
         })

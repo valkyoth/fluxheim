@@ -13,6 +13,7 @@ pub const MAX_UDP_MAX_SESSIONS: usize = 1_000_000;
 pub const MAX_UDP_MAX_SESSIONS_PER_SOURCE: usize = 1_000_000;
 pub const MAX_UDP_MAX_RESPONSES_PER_SOURCE_PER_SECOND: usize = 1_000_000;
 pub const MAX_UDP_DATAGRAM_BYTES: usize = 65_507;
+pub const MAX_UDP_PASSIVE_HEALTH_FAILURES: usize = 1000;
 const MAX_UDP_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_UDP_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 
@@ -104,6 +105,12 @@ pub struct UdpRouteConfig {
     pub max_sessions_per_source: usize,
     #[serde(default = "default_udp_max_responses_per_source_per_second")]
     pub max_responses_per_source_per_second: usize,
+    #[serde(default = "default_true")]
+    pub passive_health_enabled: bool,
+    #[serde(default = "default_udp_passive_health_failures")]
+    pub passive_health_failures: usize,
+    #[serde(default = "default_udp_passive_health_ejection_secs")]
+    pub passive_health_ejection_secs: u64,
 }
 
 impl UdpRouteConfig {
@@ -202,6 +209,20 @@ impl UdpRouteConfig {
                 reason: "must be at most 1000000; use 0 for unlimited",
             });
         }
+        if self.passive_health_enabled {
+            if self.passive_health_failures == 0
+                || self.passive_health_failures > MAX_UDP_PASSIVE_HEALTH_FAILURES
+            {
+                return Err(ConfigError::InvalidUdpProxyPolicy {
+                    field: "udp.routes.passive_health_failures",
+                    reason: "must be between 1 and 1000 when passive health is enabled",
+                });
+            }
+            validate_required_timeout_secs(
+                "udp.routes.passive_health_ejection_secs",
+                self.passive_health_ejection_secs,
+            )?;
+        }
         Ok(())
     }
 
@@ -290,6 +311,18 @@ const fn default_udp_max_responses_per_source_per_second() -> usize {
     256
 }
 
+const fn default_udp_passive_health_failures() -> usize {
+    3
+}
+
+const fn default_udp_passive_health_ejection_secs() -> u64 {
+    10
+}
+
+const fn default_true() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::{UdpConfig, UdpRouteConfig, UdpRouteMode};
@@ -310,6 +343,9 @@ mod tests {
             max_sessions: 4096,
             max_sessions_per_source: 64,
             max_responses_per_source_per_second: 256,
+            passive_health_enabled: true,
+            passive_health_failures: 3,
+            passive_health_ejection_secs: 10,
         }
     }
 
@@ -375,6 +411,33 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn udp_route_rejects_invalid_passive_health_policy() {
+        let mut route = route();
+        route.passive_health_failures = 0;
+        assert!(matches!(
+            route.validate(),
+            Err(ConfigError::InvalidUdpProxyPolicy {
+                field: "udp.routes.passive_health_failures",
+                ..
+            })
+        ));
+
+        let mut route = route();
+        route.passive_health_ejection_secs = 0;
+        assert!(matches!(
+            route.validate(),
+            Err(ConfigError::InvalidConfig { field, .. })
+                if field == "udp.routes.passive_health_ejection_secs"
+        ));
+
+        let mut route = route();
+        route.passive_health_enabled = false;
+        route.passive_health_failures = 0;
+        route.passive_health_ejection_secs = 0;
+        route.validate().unwrap();
     }
 
     #[test]

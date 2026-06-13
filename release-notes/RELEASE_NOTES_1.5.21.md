@@ -15,11 +15,17 @@ controls for safer testing.
   `fluxheim_udp_datagrams_total`, `fluxheim_udp_drops_total`, and
   `fluxheim_udp_active_sessions`.
 - Added admin UDP status at `GET /_fluxheim/udp/status`.
+- Added UDP passive upstream health controls:
+  `passive_health_enabled`, `passive_health_failures`, and
+  `passive_health_ejection_secs`.
 
 ## Changed
 
 - `dns-load-balance` UDP routes now log a security warning when a beta route
   listens on a non-loopback address.
+- UDP request/response pools skip passively ejected upstreams while at least
+  one ready member remains, with fallback behavior when the full pool is
+  unhealthy.
 - UDP beta docs and smoke tests now describe and exercise the explicit
   per-source pressure controls.
 
