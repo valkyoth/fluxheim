@@ -219,6 +219,8 @@ behavior when the change improves security or project direction.
 
 ### Fixed
 
+- Fix cache-only builds after shared cache stats moved purge-index and activity
+  fields into the always-present cache API shape.
 - Allow real provider IPv6 trusted-proxy ranges such as Cloudflare's
   `2a06:98c0::/29`. The `1.5.19` config-crate split preserved runtime IPv6
   CIDR support but made config validation too strict by rejecting trusted proxy

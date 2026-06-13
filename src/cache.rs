@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 #[cfg(feature = "proxy")]
 use std::path::Path;
+#[cfg(feature = "proxy")]
 use std::path::PathBuf;
+#[cfg(feature = "proxy")]
 use std::sync::Arc;
 #[cfg(feature = "proxy")]
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,10 +33,9 @@ use zeroize::Zeroizing;
 
 #[cfg(feature = "proxy")]
 use crate::config::CacheDiskEncryptionProvider;
-use crate::config::{
-    ByteSize, CacheConfig, CacheDiskBackend, CacheDiskEncryptionConfig, CacheKeyPart,
-    normalize_host,
-};
+use crate::config::{ByteSize, CacheConfig, CacheKeyPart, normalize_host};
+#[cfg(feature = "proxy")]
+use crate::config::{CacheDiskBackend, CacheDiskEncryptionConfig};
 
 #[cfg(feature = "proxy")]
 pub use fluxheim_cache::purge_index::{
@@ -1282,11 +1283,8 @@ impl MemoryImageCache {
             weighted_size_bytes: self.inner.weighted_size(),
             max_size_bytes: self.max_size_bytes,
             max_object_bytes: self.max_object_bytes,
-            #[cfg(feature = "proxy")]
             purge_index_entries: 0,
-            #[cfg(feature = "proxy")]
             purge_index_max_entries: 0,
-            #[cfg(feature = "proxy")]
             activity: CacheActivityStats::default(),
         }
     }
