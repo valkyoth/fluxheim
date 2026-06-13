@@ -12,6 +12,7 @@ default-run = "fluxheim"
 members = [
     "crates/fluxheim-common",
     "crates/fluxheim-config",
+    "crates/fluxheim-cache",
     "crates/fluxheim-load-balancer",
 ]
 resolver = "3"
@@ -201,6 +202,7 @@ env_logger = "0.11.10"
 fastcgi-client = { version = "0.11.1", default-features = false, optional = true }
 fluxheim-common = { path = "crates/fluxheim-common" }
 fluxheim-config = { path = "crates/fluxheim-config" }
+fluxheim-cache = { path = "crates/fluxheim-cache" }
 fluxheim-load-balancer = { path = "crates/fluxheim-load-balancer", optional = true }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"], optional = true }

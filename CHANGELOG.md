@@ -9,6 +9,13 @@ behavior when the change improves security or project direction.
 
 ## 1.5.20 - 2026-06-13
 
+### Changed
+
+- Start the `fluxheim-cache` crate boundary by moving shared cache-header
+  request/response directive parsing into `crates/fluxheim-cache`. The root
+  crate keeps `crate::cache_headers` as a compatibility re-export, so runtime
+  behavior and call sites are unchanged.
+
 ### Fixed
 
 - Allow real provider IPv6 trusted-proxy ranges such as Cloudflare's
