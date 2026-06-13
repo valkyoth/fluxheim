@@ -134,6 +134,9 @@ behavior when the change improves security or project direction.
   nanosecond timestamps into `crates/fluxheim-observability`, while the root
   access-log module keeps Pingora request-header integration and JSON event
   assembly and Prometheus metrics reuses the shared status-class helper.
+- Move proxy metrics outcome, method, and status-class label bucketing into
+  `crates/fluxheim-observability`, keeping root `crate::metrics` as the
+  Prometheus registry/recorder adapter.
 - Move the OTLP trace exporter and trace-span payload builder into
   `crates/fluxheim-observability` behind its `otlp-trace` feature, with root
   `crate::otel_otlp` kept as a compatibility re-export.

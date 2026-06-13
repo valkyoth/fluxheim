@@ -123,6 +123,41 @@ pub fn access_log_status_class(status: u16) -> &'static str {
     }
 }
 
+pub fn metrics_outcome_class(status: Option<u16>, error: bool) -> &'static str {
+    if error {
+        return "proxy_error";
+    }
+
+    match status {
+        Some(100..=199) => "informational",
+        Some(200..=299) => "success",
+        Some(300..=399) => "redirect",
+        Some(400..=499) => "client_error",
+        Some(500..=599) => "server_error",
+        Some(_) => "other",
+        None => "unknown",
+    }
+}
+
+pub fn metrics_method_bucket(method: &str) -> &'static str {
+    match method {
+        "GET" => "GET",
+        "HEAD" => "HEAD",
+        "POST" => "POST",
+        "PUT" => "PUT",
+        "PATCH" => "PATCH",
+        "DELETE" => "DELETE",
+        "OPTIONS" => "OPTIONS",
+        "TRACE" => "TRACE",
+        "CONNECT" => "CONNECT",
+        _ => "OTHER",
+    }
+}
+
+pub fn metrics_status_class(status: Option<u16>) -> &'static str {
+    status.map(access_log_status_class).unwrap_or("unknown")
+}
+
 pub fn access_log_request_id_valid(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -741,6 +776,24 @@ mod tests {
         assert_eq!(access_log_status_class(404), "4xx");
         assert_eq!(access_log_status_class(503), "5xx");
         assert_eq!(access_log_status_class(700), "other");
+    }
+
+    #[test]
+    fn metrics_proxy_labels_are_low_cardinality() {
+        assert_eq!(metrics_outcome_class(Some(204), false), "success");
+        assert_eq!(metrics_outcome_class(Some(302), false), "redirect");
+        assert_eq!(metrics_outcome_class(Some(404), false), "client_error");
+        assert_eq!(metrics_outcome_class(Some(503), false), "server_error");
+        assert_eq!(metrics_outcome_class(Some(700), false), "other");
+        assert_eq!(metrics_outcome_class(None, false), "unknown");
+        assert_eq!(metrics_outcome_class(Some(200), true), "proxy_error");
+
+        assert_eq!(metrics_method_bucket("GET"), "GET");
+        assert_eq!(metrics_method_bucket("POST"), "POST");
+        assert_eq!(metrics_method_bucket("BREW"), "OTHER");
+
+        assert_eq!(metrics_status_class(Some(204)), "2xx");
+        assert_eq!(metrics_status_class(None), "unknown");
     }
 
     #[test]

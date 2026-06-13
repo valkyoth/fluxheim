@@ -1526,40 +1526,15 @@ fn int_gauge(
 }
 
 fn outcome_class(status: Option<u16>, error: bool) -> &'static str {
-    if error {
-        return "proxy_error";
-    }
-
-    match status {
-        Some(100..=199) => "informational",
-        Some(200..=299) => "success",
-        Some(300..=399) => "redirect",
-        Some(400..=499) => "client_error",
-        Some(500..=599) => "server_error",
-        Some(_) => "other",
-        None => "unknown",
-    }
+    fluxheim_observability::metrics_outcome_class(status, error)
 }
 
 fn method_bucket(method: &str) -> &'static str {
-    match method {
-        "GET" => "GET",
-        "HEAD" => "HEAD",
-        "POST" => "POST",
-        "PUT" => "PUT",
-        "PATCH" => "PATCH",
-        "DELETE" => "DELETE",
-        "OPTIONS" => "OPTIONS",
-        "TRACE" => "TRACE",
-        "CONNECT" => "CONNECT",
-        _ => "OTHER",
-    }
+    fluxheim_observability::metrics_method_bucket(method)
 }
 
 fn status_class(status: Option<u16>) -> &'static str {
-    status
-        .map(fluxheim_observability::access_log_status_class)
-        .unwrap_or("unknown")
+    fluxheim_observability::metrics_status_class(status)
 }
 
 fn host_routing_reason_label(reason: &str) -> &'static str {
