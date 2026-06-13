@@ -40,6 +40,9 @@ behavior when the change improves security or project direction.
   range-cache admission and slice-object reconstruction share one pure parser.
 - Move pure cache freshness helpers for remaining TTL and synthesized
   Cache-Control freshness directives into `crates/fluxheim-cache::headers`.
+- Move Vary header parsing and configured request-header variance policy into
+  `crates/fluxheim-cache::headers`, keeping root `crate::proxy_cache` focused
+  on Pingora request hashing and adapter logic.
 - Move cache purge-index state, purge-entry DTOs, storage-local purge result
   counters, and cache-key path matching helpers into
   `crates/fluxheim-cache::purge_index`. Root `crate::cache` keeps the existing

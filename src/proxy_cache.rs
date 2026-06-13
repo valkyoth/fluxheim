@@ -8,18 +8,18 @@ use pingora::{Error, ErrorType};
 
 use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 
-pub(crate) const MAX_VARY_FIELDS: usize = 16;
-const MAX_VARY_HEADER_BYTES: usize = 2048;
 const MULTIPART_SLICE_OVERHEAD_BYTES_PER_RANGE: u64 = 256;
 const MULTIPART_SLICE_CLOSING_OVERHEAD_BYTES: u64 = 128;
 #[cfg(test)]
 pub(crate) use crate::cache::CacheClientRange;
 pub(crate) use crate::cache::{
     CacheContentRange, CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest,
-    cache_control_freshness_value, parse_bounded_single_range, parse_cache_client_ranges,
-    parse_cache_content_range, remaining_fresh_ttl_secs, required_slice_bounds,
-    resolve_client_slice_ranges,
+    VaryCachePolicy, cache_control_freshness_value, cache_vary_policy, parse_bounded_single_range,
+    parse_cache_client_ranges, parse_cache_content_range, remaining_fresh_ttl_secs,
+    required_slice_bounds, resolve_client_slice_ranges,
 };
+#[cfg(test)]
+pub(crate) use crate::cache::{MAX_VARY_FIELDS, vary_cache_policy};
 
 pub(crate) fn cache_request_from_header(request: &RequestHeader) -> crate::cache::CacheRequest<'_> {
     crate::cache::CacheRequest {
@@ -624,34 +624,6 @@ fn response_headers_match_cache_no_store_value(
         })
 }
 
-pub(crate) fn cache_vary_policy(
-    headers: &http::HeaderMap,
-    cache: &crate::config::CacheConfig,
-) -> VaryCachePolicy {
-    let mut fields = match vary_cache_policy(headers) {
-        VaryCachePolicy::None => Vec::new(),
-        VaryCachePolicy::Fields(fields) => fields,
-        VaryCachePolicy::Uncacheable(reason) => return VaryCachePolicy::Uncacheable(reason),
-    };
-
-    for configured in &cache.vary_request_headers {
-        let field = configured.to_ascii_lowercase();
-        if !fields.contains(&field) {
-            fields.push(field);
-        }
-        if fields.len() > MAX_VARY_FIELDS {
-            return VaryCachePolicy::Uncacheable("vary-too-many-fields");
-        }
-    }
-
-    if fields.is_empty() {
-        VaryCachePolicy::None
-    } else {
-        fields.sort();
-        VaryCachePolicy::Fields(fields)
-    }
-}
-
 fn response_content_type_is_cacheable(
     headers: &http::HeaderMap,
     cache: &crate::config::CacheConfig,
@@ -680,64 +652,6 @@ fn content_type_pattern_matches(pattern: &str, media_type: &str) -> bool {
         return kind.eq_ignore_ascii_case(prefix);
     }
     pattern.eq_ignore_ascii_case(media_type)
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) enum VaryCachePolicy {
-    None,
-    Fields(Vec<String>),
-    Uncacheable(&'static str),
-}
-
-pub(crate) fn vary_cache_policy(headers: &http::HeaderMap) -> VaryCachePolicy {
-    let mut fields = Vec::new();
-    let mut total_bytes = 0usize;
-
-    for value in headers.get_all("vary").iter() {
-        total_bytes = total_bytes.saturating_add(value.as_bytes().len());
-        if total_bytes > MAX_VARY_HEADER_BYTES {
-            return VaryCachePolicy::Uncacheable("vary-too-large");
-        }
-
-        let Ok(line) = value.to_str() else {
-            return VaryCachePolicy::Uncacheable("vary-invalid");
-        };
-
-        for raw_field in line.split(',') {
-            let field = raw_field.trim();
-            if field.is_empty() {
-                return VaryCachePolicy::Uncacheable("vary-invalid");
-            }
-            if field == "*" {
-                return VaryCachePolicy::Uncacheable("vary-star");
-            }
-            if http::header::HeaderName::from_bytes(field.as_bytes()).is_err() {
-                return VaryCachePolicy::Uncacheable("vary-invalid");
-            }
-
-            let field = field.to_ascii_lowercase();
-            if is_sensitive_vary_field(&field) {
-                return VaryCachePolicy::Uncacheable("vary-sensitive-field");
-            }
-            if !fields.contains(&field) {
-                fields.push(field);
-            }
-            if fields.len() > MAX_VARY_FIELDS {
-                return VaryCachePolicy::Uncacheable("vary-too-many-fields");
-            }
-        }
-    }
-
-    if fields.is_empty() {
-        VaryCachePolicy::None
-    } else {
-        fields.sort();
-        VaryCachePolicy::Fields(fields)
-    }
-}
-
-fn is_sensitive_vary_field(field: &str) -> bool {
-    matches!(field, "authorization" | "cookie" | "proxy-authorization")
 }
 
 pub(crate) fn vary_request_hash(fields: &[String], request: &RequestHeader) -> HashBinary {

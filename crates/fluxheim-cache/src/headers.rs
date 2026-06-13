@@ -57,6 +57,95 @@ pub fn cache_control_freshness_value(
     value
 }
 
+pub const MAX_VARY_FIELDS: usize = 16;
+const MAX_VARY_HEADER_BYTES: usize = 2048;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum VaryCachePolicy {
+    None,
+    Fields(Vec<String>),
+    Uncacheable(&'static str),
+}
+
+pub fn cache_vary_policy(
+    headers: &http::HeaderMap,
+    cache: &fluxheim_config::CacheConfig,
+) -> VaryCachePolicy {
+    let mut fields = match vary_cache_policy(headers) {
+        VaryCachePolicy::None => Vec::new(),
+        VaryCachePolicy::Fields(fields) => fields,
+        VaryCachePolicy::Uncacheable(reason) => return VaryCachePolicy::Uncacheable(reason),
+    };
+
+    for configured in &cache.vary_request_headers {
+        let field = configured.to_ascii_lowercase();
+        if !fields.contains(&field) {
+            fields.push(field);
+        }
+        if fields.len() > MAX_VARY_FIELDS {
+            return VaryCachePolicy::Uncacheable("vary-too-many-fields");
+        }
+    }
+
+    if fields.is_empty() {
+        VaryCachePolicy::None
+    } else {
+        fields.sort();
+        VaryCachePolicy::Fields(fields)
+    }
+}
+
+pub fn vary_cache_policy(headers: &http::HeaderMap) -> VaryCachePolicy {
+    let mut fields = Vec::new();
+    let mut total_bytes = 0usize;
+
+    for value in headers.get_all("vary").iter() {
+        total_bytes = total_bytes.saturating_add(value.as_bytes().len());
+        if total_bytes > MAX_VARY_HEADER_BYTES {
+            return VaryCachePolicy::Uncacheable("vary-too-large");
+        }
+
+        let Ok(line) = value.to_str() else {
+            return VaryCachePolicy::Uncacheable("vary-invalid");
+        };
+
+        for raw_field in line.split(',') {
+            let field = raw_field.trim();
+            if field.is_empty() {
+                return VaryCachePolicy::Uncacheable("vary-invalid");
+            }
+            if field == "*" {
+                return VaryCachePolicy::Uncacheable("vary-star");
+            }
+            if http::header::HeaderName::from_bytes(field.as_bytes()).is_err() {
+                return VaryCachePolicy::Uncacheable("vary-invalid");
+            }
+
+            let field = field.to_ascii_lowercase();
+            if is_sensitive_vary_field(&field) {
+                return VaryCachePolicy::Uncacheable("vary-sensitive-field");
+            }
+            if !fields.contains(&field) {
+                fields.push(field);
+            }
+            if fields.len() > MAX_VARY_FIELDS {
+                return VaryCachePolicy::Uncacheable("vary-too-many-fields");
+            }
+        }
+    }
+
+    if fields.is_empty() {
+        VaryCachePolicy::None
+    } else {
+        fields.sort();
+        VaryCachePolicy::Fields(fields)
+    }
+}
+
+fn is_sensitive_vary_field(field: &str) -> bool {
+    matches!(field, "authorization" | "cookie" | "proxy-authorization")
+}
+
 fn is_pragma_no_cache(value: &str) -> bool {
     value.trim().eq_ignore_ascii_case("no-cache")
 }
@@ -252,6 +341,102 @@ mod tests {
         assert_eq!(
             super::cache_control_freshness_value(60, None, None),
             "max-age=60"
+        );
+    }
+
+    #[test]
+    fn vary_cache_policy_rejects_unsafe_vary_headers() {
+        let response = http::Response::builder().body(()).unwrap();
+        assert_eq!(
+            super::vary_cache_policy(response.headers()),
+            super::VaryCachePolicy::None
+        );
+
+        let response = http::Response::builder()
+            .header("vary", "*")
+            .body(())
+            .unwrap();
+        assert_eq!(
+            super::vary_cache_policy(response.headers()),
+            super::VaryCachePolicy::Uncacheable("vary-star")
+        );
+
+        let response = http::Response::builder()
+            .header("vary", "accept-encoding,,user-agent")
+            .body(())
+            .unwrap();
+        assert_eq!(
+            super::vary_cache_policy(response.headers()),
+            super::VaryCachePolicy::Uncacheable("vary-invalid")
+        );
+
+        let mut vary = String::new();
+        for index in 0..super::MAX_VARY_FIELDS {
+            vary.push_str(&format!("x-test-{index},"));
+        }
+        vary.push_str("x-overflow");
+        let response = http::Response::builder()
+            .header("vary", vary)
+            .body(())
+            .unwrap();
+        assert_eq!(
+            super::vary_cache_policy(response.headers()),
+            super::VaryCachePolicy::Uncacheable("vary-too-many-fields")
+        );
+
+        let response = http::Response::builder()
+            .header("vary", "authorization")
+            .body(())
+            .unwrap();
+        assert_eq!(
+            super::vary_cache_policy(response.headers()),
+            super::VaryCachePolicy::Uncacheable("vary-sensitive-field")
+        );
+    }
+
+    #[test]
+    fn vary_cache_policy_normalizes_repeated_vary_fields() {
+        let response = http::Response::builder()
+            .header("vary", "Accept-Encoding, User-Agent")
+            .header("vary", "accept-encoding")
+            .body(())
+            .unwrap();
+
+        assert_eq!(
+            super::vary_cache_policy(response.headers()),
+            super::VaryCachePolicy::Fields(vec![
+                "accept-encoding".to_owned(),
+                "user-agent".to_owned(),
+            ])
+        );
+    }
+
+    #[test]
+    fn cache_vary_policy_merges_configured_request_headers() {
+        let mut cache = fluxheim_config::CacheConfig {
+            vary_request_headers: vec!["Accept-Encoding".to_owned(), "X-Device".to_owned()],
+            ..fluxheim_config::CacheConfig::default()
+        };
+        let response = http::Response::builder()
+            .header("vary", "User-Agent")
+            .body(())
+            .unwrap();
+
+        assert_eq!(
+            super::cache_vary_policy(response.headers(), &cache),
+            super::VaryCachePolicy::Fields(vec![
+                "accept-encoding".to_owned(),
+                "user-agent".to_owned(),
+                "x-device".to_owned(),
+            ])
+        );
+
+        cache.vary_request_headers = (0..super::MAX_VARY_FIELDS)
+            .map(|index| format!("x-config-{index}"))
+            .collect();
+        assert_eq!(
+            super::cache_vary_policy(response.headers(), &cache),
+            super::VaryCachePolicy::Uncacheable("vary-too-many-fields")
         );
     }
 }
