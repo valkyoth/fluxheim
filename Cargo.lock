@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim"
-version = "1.5.19"
+version = "1.5.20"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1071,14 +1071,14 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-common"
-version = "1.5.19"
+version = "1.5.20"
 dependencies = [
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "fluxheim-config"
-version = "1.5.19"
+version = "1.5.20"
 dependencies = [
  "fluxheim-common",
  "log",
@@ -1090,7 +1090,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-load-balancer"
-version = "1.5.19"
+version = "1.5.20"
 dependencies = [
  "arc-swap",
  "async-trait",

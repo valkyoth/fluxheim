@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.19
+Version:        1.5.20
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat Jun 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.20-1
+- Allow provider IPv6 trusted-proxy ranges such as Cloudflare's
+  2a06:98c0::/29 after the 1.5.19 config-crate split tightened validation too
+  far.
+
 * Fri Jun 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.19-1
 - Move the Fluxheim-owned load-balancer core into the internal
   crates/fluxheim-load-balancer workspace crate.
