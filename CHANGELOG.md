@@ -17,6 +17,9 @@ behavior when the change improves security or project direction.
 - Move plaintext disk cache object header sizing, encoding, and parsing into
   `fluxheim-cache`; encrypted disk cache handling remains in the root adapter
   until the native HTTP/cache cutover.
+- Move storage-bin layout, manifest, index-entry, object-location, and free-map
+  allocation helpers into `fluxheim-cache` while leaving safe file opening and
+  symlink checks in the root adapter.
 - Add a Pingora-neutral `FluxCacheStorage` interface in `fluxheim-cache` with
   serialized metadata, hit handlers, miss handlers, purge, and metadata-update
   semantics.

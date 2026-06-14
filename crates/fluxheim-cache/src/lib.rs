@@ -12,6 +12,7 @@ pub mod plan;
 pub mod purge_index;
 pub mod request;
 pub mod storage;
+pub mod storage_bin;
 pub mod tags;
 
 pub use api::{
@@ -67,6 +68,10 @@ pub use request::{
 pub use storage::{
     FluxCacheHitHandler, FluxCacheMissHandler, FluxCacheStorage, FluxCacheTrace, FluxHandleHit,
     FluxHandleMiss, SerializedCacheMeta,
+};
+pub use storage_bin::{
+    STORAGE_BIN_DATA_DIR, STORAGE_BIN_MANIFEST_FILENAME, StorageBinFreeMap, StorageBinFreeRange,
+    StorageBinIndexEntry, StorageBinLayoutPlan, StorageBinManifest, StorageBinObjectLocation,
 };
 pub use tags::{
     MAX_CACHE_TAG_BYTES_PER_OBJECT, MAX_CACHE_TAG_LEN, MAX_CACHE_TAGS_PER_OBJECT,

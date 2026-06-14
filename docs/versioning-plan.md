@@ -2046,9 +2046,10 @@ Beta scope:
   add an adapter for the Pingora HTTP path rather than rewriting the cache
   implementation. `1.6.2` has moved cache key identity, serialized object
   envelopes, cache-tag helpers, disk index types, native cache storage traits,
-  and plaintext disk object header sizing/encoding/parsing into
-  `fluxheim-cache`; encrypted disk-object handling remains in the root adapter
-  until the native HTTP/cache cutover.
+  plaintext disk object header sizing/encoding/parsing, and storage-bin
+  layout/manifest/free-map helpers into `fluxheim-cache`; encrypted disk-object
+  handling and storage-bin safe file opening remain in the root adapter until
+  the native HTTP/cache cutover.
 - `1.6` server-runtime ownership work: replace Pingora `Server`, listener/TLS
   setup, hot-restart fd passing where retained, service registration, signal
   handling, and TLS resolver hooks with a Fluxheim-owned Tokio server

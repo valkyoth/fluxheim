@@ -12,6 +12,9 @@ rather than a behavior change for operators.
 - Moved plaintext disk cache object header sizing, encoding, and parsing into
   `fluxheim-cache`; encrypted disk cache handling remains in the root adapter
   until the native HTTP/cache cutover.
+- Moved storage-bin layout, manifest, index-entry, object-location, and
+  free-map allocation helpers into `fluxheim-cache`. The root adapter still
+  owns safe file opening and symlink checks for storage-bin files.
 - Added a crate-owned `FluxCacheStorage` interface with serialized cache
   metadata, hit handlers, miss handlers, purge operations, and metadata-update
   operations.

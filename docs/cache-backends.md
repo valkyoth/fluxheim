@@ -818,10 +818,13 @@ interfaces for hit, miss, purge, metadata-update, and admission semantics. The
 memory, disk, storage-bin, and tiered memory-plus-disk backends are adapted to
 that crate-owned interface. The crate also owns plaintext disk object header
 sizing, encoding, and parsing; encrypted disk object handling remains in the
-root adapter until the native HTTP/cache cutover. The current Pingora HTTP
-proxy path still requires `Storage`, `HandleHit`, and `HandleMiss`, so
-`cache.rs` keeps a compatibility adapter at that edge until the native HTTP
-runtime cutover removes `pingora-cache` from the build graph.
+root adapter until the native HTTP/cache cutover. Storage-bin layout, manifest,
+index-entry, object-location, and free-map allocation helpers also live in
+`fluxheim-cache`, while safe file opening and symlink checks remain in the root
+adapter. The current Pingora HTTP proxy path still requires `Storage`,
+`HandleHit`, and `HandleMiss`, so `cache.rs` keeps a compatibility adapter at
+that edge until the native HTTP runtime cutover removes `pingora-cache` from the
+build graph.
 
 Request collapsing remains integrated with Pingora cache locks while the HTTP
 proxy path is still Pingora-backed. Disk-only admissions stream response body
