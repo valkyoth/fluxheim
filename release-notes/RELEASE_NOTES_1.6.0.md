@@ -18,6 +18,11 @@ remove Pingora safely in later 1.6.x releases.
   `scripts/capture-runtime-baseline.sh` to record locked dependency trees,
   per-profile Pingora dependency presence, release metadata, and default
   release-binary size before the runtime cutover work begins.
+- Added `scripts/capture-runtime-performance-baseline.sh` and wired it into
+  release-mode runtime baseline capture. It records local startup time, idle
+  RSS/file descriptors, static HTTP latency, cache MISS/HIT latency,
+  load-balancer route timing, keep-alive throughput, and fresh TLS connection
+  timing.
 - Added `docs/pingora-dependency-exceptions.tsv` and
   `scripts/validate-pingora-dependency-policy.sh` so the 1.6 line has a
   release-gated inventory of allowed Pingora crates per official profile.

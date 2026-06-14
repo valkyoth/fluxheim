@@ -46,11 +46,12 @@ scripts/check_latest_crates.sh
 - During the `1.6.x` Pingora-exit line, capture the runtime baseline evidence
   before tagging. `check` mode records locked dependency trees and the
   per-profile Pingora dependency surface; `release` mode also records the
-  default release-binary size:
+  default release-binary size and local performance baseline:
 
 ```bash
 scripts/capture-runtime-baseline.sh check
 scripts/capture-runtime-baseline.sh release
+scripts/capture-runtime-performance-baseline.sh release
 scripts/validate-pingora-dependency-policy.sh check
 scripts/validate-runtime-fixtures.sh check
 ```

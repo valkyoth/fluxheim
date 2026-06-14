@@ -108,6 +108,12 @@ if [ "$mode" = "release" ] || [ "${FLUXHEIM_RUNTIME_BASELINE_BUILD:-0}" = "1" ];
         bytes="$(wc -c <"$binary" | tr -d ' ')"
         printf 'default\t%s\t%s\n' "$binary" "$bytes"
     } >"$out_dir/binary-size.tsv"
+
+    if [ "${FLUXHEIM_RUNTIME_BASELINE_PERFORMANCE:-1}" = "1" ]; then
+        scripts/capture-runtime-performance-baseline.sh release
+    else
+        echo "runtime baseline: skipping performance baseline because FLUXHEIM_RUNTIME_BASELINE_PERFORMANCE=0"
+    fi
 else
     {
         printf 'profile\tpath\tbytes\n'

@@ -34,6 +34,13 @@ The generated files are:
 | `cargo-tree/*.txt` | Locked dependency trees for default, full, cache-edge, proxy-edge, load-balancer-edge, PHP, and privacy profiles. |
 | `pingora-dependency-surface.tsv` | Report-only list of Pingora crates still present per profile. |
 | `binary-size.tsv` | Default release binary size when release/build mode is used. |
+| `startup-time.tsv` | Milliseconds from process spawn to first successful local HTTP response. |
+| `process-idle.tsv` | Idle RSS, file-descriptor count, sample counts, and TLS availability. |
+| `http-latency.tsv` | Local static HTTP request timing samples. |
+| `cache-latency.tsv` | Local static-cache MISS/HIT timing samples and cache status headers. |
+| `load-balancer-latency.tsv` | Local round-robin route timing samples and observed backend labels. |
+| `keepalive-throughput.tsv` | Single-connection HTTP keep-alive throughput samples. |
+| `tls-handshake-latency.tsv` | HTTPS request timing samples that create a fresh TLS connection per sample when OpenSSL is available to generate the local certificate. |
 
 The stricter release policy is tracked in
 [Pingora Dependency Exceptions](pingora-dependency-exceptions.tsv) and checked
@@ -41,6 +48,13 @@ by:
 
 ```bash
 scripts/validate-pingora-dependency-policy.sh check
+```
+
+Release mode invokes the performance baseline automatically. To skip it for a
+local emergency run, set:
+
+```bash
+FLUXHEIM_RUNTIME_BASELINE_PERFORMANCE=0 scripts/capture-runtime-baseline.sh release
 ```
 
 ## Comparison Rules
@@ -55,10 +69,10 @@ Later `1.6.x` releases should compare against this baseline as follows:
 - binary size: default and focused profile binaries should not grow without a
   release-note explanation;
 - behavior: smoke tests and fixture parity are stronger than raw speed numbers;
-- performance: startup time, idle memory, connection cost, HTTP/1.1 latency,
-  keep-alive throughput, cache HIT/MISS latency, load-balancer selection cost,
-  TLS handshake cost, and container image size should be added as measured TSV
-  files before the corresponding runtime component is replaced;
+- performance: startup time, idle memory, file-descriptor count, HTTP/1.1
+  latency, keep-alive throughput, cache HIT/MISS latency, load-balancer route
+  timing, and TLS fresh-connection timing are captured by the 1.6.0 baseline;
+  container image size should be added before container/runtime cutover work;
 - environment: every measurement must record enough host/toolchain information
   to explain differences between local developer machines, CI runners, and
   release builders.
