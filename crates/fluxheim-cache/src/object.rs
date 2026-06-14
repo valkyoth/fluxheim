@@ -26,3 +26,29 @@ pub enum CacheStoreError {
         object_bytes: u64,
     },
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FluxCachePurgeType {
+    Eviction,
+    Invalidation,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FluxCacheMissFinish {
+    Created(usize),
+    Appended(usize, Option<usize>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FluxCacheMissFinish, FluxCachePurgeType};
+
+    #[test]
+    fn cache_storage_interface_enums_are_stable() {
+        assert_eq!(FluxCachePurgeType::Eviction, FluxCachePurgeType::Eviction);
+        assert_eq!(
+            FluxCacheMissFinish::Appended(10, Some(128)),
+            FluxCacheMissFinish::Appended(10, Some(128))
+        );
+    }
+}

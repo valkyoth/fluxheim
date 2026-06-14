@@ -34,6 +34,8 @@ behavior when the change improves security or project direction.
 - Move cache response admission policy for status, content type, response
   no-store headers, Vary handling, and range responses into the cache crate,
   leaving the root proxy cache module as the Pingora response adapter.
+- Move cache storage interface result enums for purge type and miss completion
+  into the cache crate, keeping Pingora conversions in the root adapter layer.
 
 ## 1.5.21 - 2026-06-13
 

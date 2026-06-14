@@ -48,9 +48,10 @@ pub use fluxheim_cache::{
     CacheObjectHeaderValue, CacheObjectMetadata, CacheObjectTier, CacheRangeRequest, CacheRequest,
     CacheRequestView, CacheSliceBounds, CacheSliceRangeRequest, CacheStaleEvent, CacheStoragePlan,
     CacheStoreError, CachedHeader, CachedImageObject, DiskCacheStats, DiskTierPlan,
-    MAX_VARY_FIELDS, MemoryCacheStats, MemoryTierPlan, StaticCacheRequest, TieredCacheStats,
-    VaryCachePolicy, VaryRequestHashField, append_cache_key_component, cache_average_bytes,
-    cache_control_freshness_value, cache_control_with_directive, cache_method_temporarily_bypassed,
+    FluxCacheMissFinish, FluxCachePurgeType, MAX_VARY_FIELDS, MemoryCacheStats, MemoryTierPlan,
+    StaticCacheRequest, TieredCacheStats, VaryCachePolicy, VaryRequestHashField,
+    append_cache_key_component, cache_average_bytes, cache_control_freshness_value,
+    cache_control_with_directive, cache_method_temporarily_bypassed,
     cache_object_lookup_body_bytes_summary, cache_object_lookup_bool_summary,
     cache_object_lookup_cache_tags_summary, cache_object_lookup_fresh_ttl_summary,
     cache_object_lookup_header_names_summary, cache_object_lookup_header_values_summary,
@@ -6291,36 +6292,18 @@ fn decimal_line_len(value: u64) -> u64 {
 }
 
 #[cfg(feature = "proxy")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FluxCachePurgeType {
-    Eviction,
-    Invalidation,
-}
-
-#[cfg(feature = "proxy")]
-impl From<PurgeType> for FluxCachePurgeType {
-    fn from(value: PurgeType) -> Self {
-        match value {
-            PurgeType::Eviction => Self::Eviction,
-            PurgeType::Invalidation => Self::Invalidation,
-        }
+fn flux_cache_purge_type_from_pingora(value: PurgeType) -> FluxCachePurgeType {
+    match value {
+        PurgeType::Eviction => FluxCachePurgeType::Eviction,
+        PurgeType::Invalidation => FluxCachePurgeType::Invalidation,
     }
 }
 
 #[cfg(feature = "proxy")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FluxCacheMissFinish {
-    Created(usize),
-    Appended(usize, Option<usize>),
-}
-
-#[cfg(feature = "proxy")]
-impl From<FluxCacheMissFinish> for MissFinishType {
-    fn from(value: FluxCacheMissFinish) -> Self {
-        match value {
-            FluxCacheMissFinish::Created(size) => Self::Created(size),
-            FluxCacheMissFinish::Appended(size, max_size) => Self::Appended(size, max_size),
-        }
+fn pingora_miss_finish_type(value: FluxCacheMissFinish) -> MissFinishType {
+    match value {
+        FluxCacheMissFinish::Created(size) => MissFinishType::Created(size),
+        FluxCacheMissFinish::Appended(size, max_size) => MissFinishType::Appended(size, max_size),
     }
 }
 
@@ -6496,7 +6479,7 @@ impl pingora::cache::storage::HandleMiss for PingoraMissHandlerAdapter {
     }
 
     async fn finish(self: Box<Self>) -> pingora::Result<MissFinishType> {
-        self.inner.finish_flux().await.map(Into::into)
+        self.inner.finish_flux().await.map(pingora_miss_finish_type)
     }
 
     fn streaming_write_tag(&self) -> Option<&[u8]> {
@@ -6985,7 +6968,8 @@ macro_rules! impl_pingora_storage_adapter {
                 purge_type: PurgeType,
                 trace: &pingora::cache::trace::SpanHandle,
             ) -> pingora::Result<bool> {
-                self.purge_flux(key, purge_type.into(), trace).await
+                self.purge_flux(key, flux_cache_purge_type_from_pingora(purge_type), trace)
+                    .await
             }
 
             async fn update_meta(

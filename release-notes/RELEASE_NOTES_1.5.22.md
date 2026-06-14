@@ -29,6 +29,9 @@ interfaces before the HTTP runtime is replaced.
   no-store policy, Vary handling, and range responses now live in the cache
   crate. The proxy cache module still exposes the same adapter functions for
   the existing Pingora response path.
+- Cache storage interface result enums for purge type and miss completion now
+  live in the cache crate. Pingora `PurgeType` and `MissFinishType` conversion
+  stays in the root adapter layer.
 
 ## Compatibility
 
