@@ -158,6 +158,11 @@ fi
 - Continue cache/load-balancer crate-boundary preparation.
 - Move load-balancer persistence key extraction behind a Fluxheim-owned
   request view while keeping the Pingora request adapter at the API boundary.
+- Move cache request policy, response admission, storage interface enums, and
+  range/slice key component helpers into the cache crate while keeping root
+  Pingora adapters.
+- Harden UDP beta passive health so local downstream drops do not count as
+  upstream failures and rate-limit passive-ejection warning logs.
 
 * Sat Jun 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.21-1
 - Add UDP beta per-source pressure controls, response-rate limiting, metrics,
