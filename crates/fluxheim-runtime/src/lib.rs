@@ -6,6 +6,13 @@
 
 use std::future::Future;
 
+pub mod policy;
+
+pub use policy::{
+    PolicyEpoch, PolicyProof, RuntimeDecision, RuntimeDecisionKind, RuntimeDecisionReason,
+    RuntimeFact, RuntimeFactKind, RuntimeFactVisibility,
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ShutdownReason {
     Signal,

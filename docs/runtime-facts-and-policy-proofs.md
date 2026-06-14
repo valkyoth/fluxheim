@@ -98,7 +98,8 @@ epoch they were made under.
 redaction levels, and epoch terminology. It should not change request behavior.
 
 Early 1.6 releases should introduce small types in a focused crate or
-`fluxheim-common` if the shape is still tiny:
+`fluxheim-common` if the shape is still tiny. `v1.6.0` starts these in
+`fluxheim-runtime`:
 
 - `RuntimeFactKind`
 - `RuntimeDecisionKind`
@@ -106,6 +107,10 @@ Early 1.6 releases should introduce small types in a focused crate or
 - `PolicyProof`
 - `PolicyEpoch`
 - `RuntimeFactVisibility`
+
+The initial types are intentionally not wired into request handling yet. They
+exist so later 1.6 cutovers can migrate one decision path at a time without
+inventing new stringly-typed reasons.
 
 Mid 1.6 releases should route selected decision paths through proof objects
 while replacing Pingora boundaries:

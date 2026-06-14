@@ -24,6 +24,9 @@ remove Pingora safely in later 1.6.x releases.
 - Added initial `fluxheim-runtime` and `fluxheim-server` workspace crates for
   Fluxheim-owned shutdown, background task, listener, and server-runner
   boundary traits. The current Pingora runtime path is unchanged.
+- Added typed `PolicyEpoch`, `PolicyProof`, `RuntimeFact`, decision, reason,
+  and visibility primitives in `fluxheim-runtime` for later policy-proof
+  adoption. They are not wired into request handling in this release.
 - Added `docs/extraction-dependency-graph.md` to record the intended split
   order for `snapshot`, protocol, tracing/observability, headers, ACME,
   runtime/server, cache, proxy, and admin modules before the Pingora cutover.
