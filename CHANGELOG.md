@@ -30,6 +30,10 @@ behavior when the change improves security or project direction.
   default tag-header names into `fluxheim-cache`.
 - Add regression coverage proving memory and tiered cache backends can
   round-trip objects through the native cache interface.
+- Add a Rust integration test that enforces
+  `docs/pingora-dependency-exceptions.tsv` removal targets against
+  `Cargo.lock`, so expired Pingora dependency exceptions fail in normal
+  `cargo test` runs as well as release gates.
 - Keep final `pingora-cache` compile removal scheduled for the native HTTP
   runtime cutover because the current Pingora proxy runtime still imports
   `pingora::cache`.

@@ -52,8 +52,10 @@ scripts/validate-pingora-dependency-policy.sh check
 
 That gate fails when a Pingora crate is present without an exception, when an
 exception is stale, or when the current Fluxheim version has reached the
-exception's `removal_target`. Maintainers can test an upcoming release bump
-before editing `Cargo.toml` with:
+exception's `removal_target`. `cargo test` also runs
+`tests/pingora_dependency_policy.rs`, which checks the same removal targets
+against `Cargo.lock` so deadline drift is visible outside the release gate.
+Maintainers can test an upcoming release bump before editing `Cargo.toml` with:
 
 ```bash
 FLUXHEIM_PINGORA_POLICY_VERSION=1.6.2 scripts/validate-pingora-dependency-policy.sh check
