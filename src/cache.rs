@@ -43,6 +43,13 @@ pub use fluxheim_cache::purge_index::{
 };
 #[cfg(feature = "proxy")]
 use fluxheim_cache::purge_index::{cache_path_wildcard_matches, cache_primary_component};
+#[cfg(feature = "proxy")]
+use fluxheim_cache::storage::{
+    FluxCacheHitHandler as NativeFluxCacheHitHandler,
+    FluxCacheMissHandler as NativeFluxCacheMissHandler, FluxCacheStorage as NativeFluxCacheStorage,
+    FluxCacheTrace as NativeFluxCacheTrace, FluxHandleHit as NativeFluxHandleHit,
+    FluxHandleMiss as NativeFluxHandleMiss, SerializedCacheMeta,
+};
 pub use fluxheim_cache::{
     CacheActivityStats, CacheClientRange, CacheContentRange, CacheKey, CacheObjectFreshnessState,
     CacheObjectHeaderValue, CacheObjectMetadata, CacheObjectTier, CacheRangeRequest, CacheRequest,
@@ -5564,10 +5571,35 @@ impl PingoraStoreKey {
             cache_tags: cache_tags_from_meta(meta, cache_tag_headers),
         }
     }
+
+    fn from_flux_key_parts_and_serialized_meta(
+        key_parts: &FluxCacheKeyParts,
+        meta: &SerializedCacheMeta,
+        cache_tag_headers: &[String],
+    ) -> std::io::Result<Self> {
+        let meta = serialized_cache_meta_to_pingora(meta)?;
+        Ok(Self::from_flux_key_parts_and_meta(
+            key_parts,
+            Some(key_parts.primary()),
+            &meta,
+            cache_tag_headers,
+        ))
+    }
 }
 
 #[cfg(feature = "proxy")]
 type PingoraStoredObject = SerializedCacheObject;
+
+#[cfg(feature = "proxy")]
+fn pingora_cache_error_to_io(context: &'static str, error: Box<pingora::Error>) -> std::io::Error {
+    std::io::Error::other(format!("{context}: {error}"))
+}
+
+#[cfg(feature = "proxy")]
+fn serialized_cache_meta_to_pingora(meta: &SerializedCacheMeta) -> std::io::Result<CacheMeta> {
+    CacheMeta::deserialize(&meta.internal_meta, &meta.response_header)
+        .map_err(|error| pingora_cache_error_to_io("deserialize cache metadata", error))
+}
 
 #[cfg(feature = "proxy")]
 fn cache_purge_entry_from_stored_object(
@@ -6458,6 +6490,120 @@ impl FluxCacheStorage for PingoraMemoryStorage {
 
 #[cfg(feature = "proxy")]
 #[async_trait]
+impl NativeFluxCacheStorage for PingoraMemoryStorage {
+    async fn lookup(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<Option<(SerializedCacheMeta, NativeFluxCacheHitHandler)>> {
+        let Some(object) = self.inner.get(key.combined()) else {
+            self.activity.miss();
+            return Ok(None);
+        };
+        self.activity.hit();
+        let meta = SerializedCacheMeta {
+            internal_meta: object.internal_meta,
+            response_header: object.response_header,
+        };
+        let handler = PingoraMemoryHitHandler {
+            body: object.body,
+            offset: 0,
+            end: None,
+        };
+        Ok(Some((meta, Box::new(handler))))
+    }
+
+    async fn get_miss_handler(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        meta: &SerializedCacheMeta,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<NativeFluxCacheMissHandler> {
+        Ok(Box::new(PingoraMemoryMissHandler {
+            storage: self,
+            store_key: PingoraStoreKey::from_flux_key_parts_and_serialized_meta(
+                key,
+                meta,
+                &self.cache_tag_headers,
+            )?,
+            serialized_meta: (meta.internal_meta.clone(), meta.response_header.clone()),
+            body: Vec::new(),
+            max_object_bytes: self.max_object_bytes.as_u64(),
+            exceeded_limit: false,
+        }))
+    }
+
+    async fn purge(
+        &'static self,
+        combined_key: &str,
+        _purge_type: FluxCachePurgeType,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<bool> {
+        let existed = self.inner.get(combined_key).is_some();
+        self.inner.invalidate(combined_key);
+        self.purge_index.remove_combined(combined_key);
+        self.inner.run_pending_tasks();
+        if existed {
+            self.activity.purge();
+        }
+        Ok(existed)
+    }
+
+    async fn update_meta(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        meta: &SerializedCacheMeta,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<bool> {
+        let Some(mut object) = self.inner.get(key.combined()) else {
+            return Ok(false);
+        };
+        let pingora_meta = serialized_cache_meta_to_pingora(meta)?;
+        let weight_bytes =
+            pingora_object_weight(&meta.internal_meta, &meta.response_header, &object.body);
+        if weight_bytes > self.max_object_bytes.as_u64() {
+            self.inner.invalidate(key.combined());
+            self.purge_index.remove_combined(key.combined());
+            self.inner.run_pending_tasks();
+            self.activity.store_refusal();
+            return Ok(false);
+        }
+        let weight = u32::try_from(weight_bytes).map_err(|_| {
+            self.activity.store_refusal();
+            std::io::Error::other("cache object weight exceeds moka object weight limit")
+        })?;
+
+        object.internal_meta = meta.internal_meta.clone();
+        object.response_header = meta.response_header.clone();
+        object.cache_tags = cache_tags_from_meta(&pingora_meta, &self.cache_tag_headers);
+        object.index_path = cache_primary_component(key.primary(), "path");
+        object.weight = weight;
+        self.purge_index.insert_with_path_and_tags(
+            key.combined().to_owned(),
+            object
+                .primary_key
+                .clone()
+                .unwrap_or_else(|| key.primary().to_owned()),
+            key.user_tag().to_owned(),
+            object.index_path.clone(),
+            object.cache_tags.clone(),
+        );
+        self.inner.insert(key.combined().to_owned(), object);
+        self.activity.store();
+        Ok(true)
+    }
+
+    fn support_streaming_partial_write(&self) -> bool {
+        false
+    }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+        self
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
 impl FluxCacheStorage for PingoraDiskStorage {
     async fn lookup_flux(
         &'static self,
@@ -6912,6 +7058,57 @@ impl FluxHandleHit for PingoraMemoryHitHandler {
 }
 
 #[cfg(feature = "proxy")]
+#[async_trait]
+impl NativeFluxHandleHit for PingoraMemoryHitHandler {
+    async fn read_body(&mut self) -> std::io::Result<Option<Bytes>> {
+        let end = self.end.unwrap_or(self.body.len()).min(self.body.len());
+        if self.offset >= end {
+            return Ok(None);
+        }
+
+        let chunk = Bytes::copy_from_slice(&self.body[self.offset..end]);
+        self.offset = end;
+        Ok(Some(chunk))
+    }
+
+    async fn finish(
+        self: Box<Self>,
+        _key: &FluxCacheKeyParts,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn can_seek(&self) -> bool {
+        true
+    }
+
+    fn seek(&mut self, start: usize, end: Option<usize>) -> std::io::Result<()> {
+        if start > self.body.len() {
+            return Err(std::io::Error::other(format!(
+                "cache seek start out of range: {start} > {}",
+                self.body.len()
+            )));
+        }
+        self.offset = start;
+        self.end = end;
+        Ok(())
+    }
+
+    fn get_eviction_weight(&self) -> usize {
+        self.body.len()
+    }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync) {
+        self
+    }
+}
+
+#[cfg(feature = "proxy")]
 struct PingoraMemoryMissHandler {
     storage: &'static PingoraMemoryStorage,
     store_key: PingoraStoreKey,
@@ -6948,6 +7145,43 @@ impl FluxHandleMiss for PingoraMemoryMissHandler {
         let created =
             self.storage
                 .put_object(self.store_key, meta, Arc::<[u8]>::from(self.body))?;
+        Ok(FluxCacheMissFinish::Created(created))
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
+impl NativeFluxHandleMiss for PingoraMemoryMissHandler {
+    async fn write_body(&mut self, data: Bytes, _eof: bool) -> std::io::Result<()> {
+        if self.exceeded_limit {
+            return Ok(());
+        }
+
+        let next_len = (self.body.len() as u64).saturating_add(data.len() as u64);
+        if next_len > self.max_object_bytes {
+            self.exceeded_limit = true;
+            self.body.clear();
+            return Ok(());
+        }
+        self.body.extend_from_slice(&data);
+        Ok(())
+    }
+
+    async fn finish(self: Box<Self>) -> std::io::Result<FluxCacheMissFinish> {
+        if self.exceeded_limit {
+            return Ok(FluxCacheMissFinish::Created(0));
+        }
+
+        let created = self
+            .storage
+            .put_serialized_object(
+                self.store_key,
+                self.serialized_meta.0,
+                self.serialized_meta.1,
+                Arc::<[u8]>::from(self.body),
+            )
+            .map_err(|error| pingora_cache_error_to_io("store memory cache object", error))?
+            .unwrap_or(0);
         Ok(FluxCacheMissFinish::Created(created))
     }
 }
@@ -10258,6 +10492,101 @@ mod tests {
             Some(Bytes::from_static(b"cached-body"))
         );
         assert_eq!(block_on(hit.read_body()).unwrap(), None);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_memory_storage_round_trips_through_native_cache_trait() {
+        let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(1024),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 2,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        });
+        let pingora_key = pingora::cache::CacheKey::new("fluxheim-test", "native-key", "vhost");
+        let key_parts = super::FluxCacheKeyParts::new(
+            pingora_key.primary(),
+            pingora_key.combined(),
+            pingora_key.user_tag.clone(),
+        );
+        let meta = pingora_meta("max-age=60");
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+        let serialized_meta = super::SerializedCacheMeta {
+            internal_meta,
+            response_header,
+        };
+
+        let mut miss = block_on(
+            <super::PingoraMemoryStorage as fluxheim_cache::storage::FluxCacheStorage>::get_miss_handler(
+                storage,
+                &key_parts,
+                &serialized_meta,
+                fluxheim_cache::storage::FluxCacheTrace,
+            ),
+        )
+        .unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"native-"), false)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+        assert!(matches!(
+            block_on(miss.finish()).unwrap(),
+            FluxCacheMissFinish::Created(11)
+        ));
+
+        let (stored_meta, mut hit) = block_on(
+            <super::PingoraMemoryStorage as fluxheim_cache::storage::FluxCacheStorage>::lookup(
+                storage,
+                &key_parts,
+                fluxheim_cache::storage::FluxCacheTrace,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(stored_meta, serialized_meta);
+        assert_eq!(
+            block_on(hit.read_body()).unwrap(),
+            Some(Bytes::from_static(b"native-body"))
+        );
+        assert_eq!(block_on(hit.read_body()).unwrap(), None);
+
+        let updated_meta = pingora_meta("max-age=120");
+        let (internal_meta, response_header) = updated_meta.serialize().unwrap();
+        let updated_serialized_meta = super::SerializedCacheMeta {
+            internal_meta,
+            response_header,
+        };
+        assert!(
+            block_on(
+                <super::PingoraMemoryStorage as fluxheim_cache::storage::FluxCacheStorage>::update_meta(
+                    storage,
+                    &key_parts,
+                    &updated_serialized_meta,
+                    fluxheim_cache::storage::FluxCacheTrace,
+                ),
+            )
+            .unwrap()
+        );
+        assert!(
+            block_on(
+                <super::PingoraMemoryStorage as fluxheim_cache::storage::FluxCacheStorage>::purge(
+                    storage,
+                    key_parts.combined(),
+                    FluxCachePurgeType::Invalidation,
+                    fluxheim_cache::storage::FluxCacheTrace,
+                ),
+            )
+            .unwrap()
+        );
+        assert!(
+            block_on(
+                <super::PingoraMemoryStorage as fluxheim_cache::storage::FluxCacheStorage>::lookup(
+                    storage,
+                    &key_parts,
+                    fluxheim_cache::storage::FluxCacheTrace,
+                ),
+            )
+            .unwrap()
+            .is_none()
+        );
     }
 
     #[cfg(feature = "proxy")]
