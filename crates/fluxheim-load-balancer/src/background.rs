@@ -1,27 +1,22 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
-#[cfg(unix)]
-use pingora::server::ListenFds;
-use pingora::server::ShutdownWatch;
-use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 use tokio::sync::watch;
 
-pub(crate) struct FluxShutdown {
+pub struct FluxShutdown {
     inner: watch::Receiver<bool>,
 }
 
 impl FluxShutdown {
-    fn new(inner: watch::Receiver<bool>) -> Self {
+    pub fn new(inner: watch::Receiver<bool>) -> Self {
         Self { inner }
     }
 
-    pub(crate) fn is_shutdown(&self) -> bool {
+    pub fn is_shutdown(&self) -> bool {
         *self.inner.borrow()
     }
 
-    pub(crate) async fn sleep_or_shutdown(&mut self, delay: Duration) -> bool {
+    pub async fn sleep_or_shutdown(&mut self, delay: Duration) -> bool {
         match tokio::time::timeout(delay, self.inner.changed()).await {
             Ok(Ok(())) => self.is_shutdown(),
             Ok(Err(_closed)) => true,
@@ -30,41 +25,30 @@ impl FluxShutdown {
     }
 }
 
-pub(crate) struct FluxBackgroundReady {
+pub struct FluxBackgroundReady {
     inner: Option<Box<dyn FnOnce() + Send + 'static>>,
 }
 
 impl FluxBackgroundReady {
-    fn new(notify: impl FnOnce() + Send + 'static) -> Self {
+    pub fn new(notify: impl FnOnce() + Send + 'static) -> Self {
         Self {
             inner: Some(Box::new(notify)),
         }
     }
 
-    pub(crate) fn notify_ready(&mut self) {
+    pub fn notify_ready(&mut self) {
         if let Some(notify) = self.inner.take() {
             notify();
         }
     }
 }
 
-#[async_trait]
-pub(crate) trait FluxBackgroundTask: Send + Sync + 'static {
-    async fn start(&self, shutdown: FluxShutdown, ready: FluxBackgroundReady);
-}
-
-pub(crate) struct FluxBackgroundService<T>
-where
-    T: FluxBackgroundTask,
-{
+pub struct FluxBackgroundService<T> {
     name: String,
     task: Arc<T>,
 }
 
-impl<T> FluxBackgroundService<T>
-where
-    T: FluxBackgroundTask,
-{
+impl<T> FluxBackgroundService<T> {
     pub(crate) fn new(name: impl Into<String>, task: T) -> Self {
         Self {
             name: name.into(),
@@ -75,40 +59,16 @@ where
     pub(crate) fn task(&self) -> Arc<T> {
         self.task.clone()
     }
-}
 
-pub(crate) fn background_service<T>(name: impl Into<String>, task: T) -> FluxBackgroundService<T>
-where
-    T: FluxBackgroundTask,
-{
-    FluxBackgroundService::new(name, task)
-}
-
-#[async_trait]
-impl<T> ServiceWithDependents for FluxBackgroundService<T>
-where
-    T: FluxBackgroundTask,
-{
-    async fn start_service(
-        &mut self,
-        #[cfg(unix)] _fds: Option<ListenFds>,
-        shutdown: ShutdownWatch,
-        _listeners_per_fd: usize,
-        ready: ServiceReadyNotifier,
-    ) {
-        self.task
-            .start(
-                FluxShutdown::new(shutdown),
-                FluxBackgroundReady::new(move || ready.notify_ready()),
-            )
-            .await;
-    }
-
-    fn name(&self) -> &str {
+    pub fn name(&self) -> &str {
         &self.name
     }
 
-    fn threads(&self) -> Option<usize> {
+    pub fn threads(&self) -> Option<usize> {
         Some(1)
     }
+}
+
+pub(crate) fn background_service<T>(name: impl Into<String>, task: T) -> FluxBackgroundService<T> {
+    FluxBackgroundService::new(name, task)
 }

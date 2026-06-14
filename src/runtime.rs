@@ -136,7 +136,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(feature = "load-balancer")]
     for service in load_balancer_services {
         log::info!("load-balancer health-check service enabled");
-        server.add_boxed_service(service);
+        server.add_service(crate::load_balancer::PingoraLoadBalancerService::new(
+            service,
+        ));
     }
 
     #[cfg(feature = "stream-proxy")]

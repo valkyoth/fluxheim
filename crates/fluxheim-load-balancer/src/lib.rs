@@ -13,7 +13,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use pingora::http::RequestHeader;
-use pingora::services::ServiceWithDependents;
 
 use fluxheim_common::FluxError;
 use fluxheim_config::{
@@ -82,11 +81,13 @@ use self::state::{
 pub use self::state::{LoadBalancedConnectionPermit, LoadBalancedUpstreamReporter};
 use self::state_file::{load_runtime_state_file, write_runtime_state_file};
 
+pub use self::background::{FluxBackgroundReady, FluxShutdown};
 pub use self::crypto::set_admin_hmac_sha256;
 #[cfg(feature = "metrics")]
 pub use self::metrics::set_load_balancer_event_recorder;
 
-pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
+pub type UpstreamLoadBalancerService =
+    background::FluxBackgroundService<backend::FluxLoadBalancerRuntime>;
 const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
 pub const MAX_RUNTIME_BACKEND_WEIGHT: usize = 1000;
 
@@ -1472,6 +1473,16 @@ fn runtime_backend_from_member(member: &str, weight: usize) -> io::Result<Backen
     FluxBackend::new_with_weight(member, weight).map_err(FluxError::into_io)
 }
 
+impl UpstreamLoadBalancerService {
+    pub async fn start(
+        &self,
+        shutdown: background::FluxShutdown,
+        ready: background::FluxBackgroundReady,
+    ) {
+        self.task().run(shutdown, ready).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{self, ErrorKind};
@@ -1487,7 +1498,6 @@ mod tests {
         LoadBalanceQueueConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
     };
     use pingora::http::RequestHeader;
-    use pingora::services::ServiceReadyNotifier;
     use tokio::sync::watch;
 
     #[cfg(not(feature = "privacy-mode"))]
@@ -3907,7 +3917,7 @@ mod tests {
     #[tokio::test]
     async fn load_balancer_background_service_notifies_ready_after_initial_update() {
         install_test_crypto_provider();
-        let (_balancer, mut service) = UpstreamLoadBalancer::background_service_from_proxy_config(
+        let (_balancer, service) = UpstreamLoadBalancer::background_service_from_proxy_config(
             "test",
             "test",
             None,
@@ -3923,12 +3933,11 @@ mod tests {
         let (ready_sender, mut ready_receiver) = watch::channel(false);
         let service_task = tokio::spawn(async move {
             service
-                .start_service(
-                    #[cfg(unix)]
-                    None,
-                    shutdown_receiver,
-                    1,
-                    ServiceReadyNotifier::new(ready_sender),
+                .start(
+                    crate::background::FluxShutdown::new(shutdown_receiver),
+                    crate::background::FluxBackgroundReady::new(move || {
+                        ready_sender.send_replace(true);
+                    }),
                 )
                 .await;
         });

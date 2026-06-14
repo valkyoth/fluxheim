@@ -114,7 +114,7 @@ struct FluxBackendDiscoveryRuntimeState {
     last_error: Option<String>,
 }
 
-pub(super) struct FluxLoadBalancerRuntime {
+pub struct FluxLoadBalancerRuntime {
     discovery: Arc<dyn FluxBackendDiscovery>,
     health_check: Option<Arc<dyn FluxHealthCheck>>,
     snapshot: ArcSwap<FluxBackendSnapshot>,
@@ -494,17 +494,6 @@ impl FluxLoadBalancerRuntime {
                 check_one(backend, health_check.clone(), Arc::clone(&snapshot.health)).await;
             }
         }
-    }
-}
-
-#[async_trait]
-impl crate::background::FluxBackgroundTask for FluxLoadBalancerRuntime {
-    async fn start(
-        &self,
-        shutdown: crate::background::FluxShutdown,
-        ready: crate::background::FluxBackgroundReady,
-    ) {
-        self.run(shutdown, ready).await;
     }
 }
 

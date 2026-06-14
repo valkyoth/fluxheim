@@ -534,7 +534,7 @@ where
     let service = crate::background::background_service(format!("LB {name}"), inner);
     let load_balancer =
         UpstreamLoadBalancer::from_inner(wrap(service.task()), config, backend_policy);
-    Ok(Some((load_balancer, Box::new(service))))
+    Ok(Some((load_balancer, service)))
 }
 
 pub(super) fn background_maglev_service_for(
@@ -557,7 +557,7 @@ pub(super) fn background_maglev_service_for(
         config,
         backend_policy,
     );
-    Ok(Some((load_balancer, Box::new(service))))
+    Ok(Some((load_balancer, service)))
 }
 
 fn configured_backends(config: &ProxyConfig) -> FluxResult<FluxBackendSet> {

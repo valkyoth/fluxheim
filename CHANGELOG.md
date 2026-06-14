@@ -28,6 +28,10 @@ behavior when the change improves security or project direction.
 - Split load-balancer API/runtime DTOs and parser helpers into
   `crates/fluxheim-load-balancer/src/api.rs`, keeping public re-exports stable
   while reducing the crate root orchestration surface.
+- Move the Pingora `ServiceWithDependents` adapter for load-balancer discovery
+  and health-check background work into the root runtime crate. The
+  load-balancer crate now exposes Fluxheim-owned shutdown/ready service
+  primitives and no longer imports Pingora service/listener/shutdown types.
 
 ## 1.6.0 - 2026-06-14
 

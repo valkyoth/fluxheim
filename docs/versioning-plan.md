@@ -2489,9 +2489,10 @@ Planned `1.6.x` sequence:
   load-balancer-only `cargo tree` gate proving `pingora-load-balancing` is not
   compiled. Committed work includes the active dependency cut, native backend
   sets and TCP health-check adapter, focused load-balancer container runtime
-  smoke, and the first `fluxheim-load-balancer` API/runtime DTO split; the
-  remaining Pingora service adapter removal is carried into the background
-  runtime cutover.
+  smoke, the first `fluxheim-load-balancer` API/runtime DTO split, and moving
+  the Pingora `ServiceWithDependents` adapter from the load-balancer crate to
+  the root runtime boundary. The remaining Pingora HTTP health-check connector
+  is carried into the HTTP/runtime cutover.
 - `v1.6.2`: cache independence. Move cache interfaces into `fluxheim-cache`
   and replace remaining Pingora cache key/meta/hit/miss/admission adapter
   usage in normal cache builds. Keep a temporary compatibility adapter only for

@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
 publish = false
-description = "Internal Fluxheim load-balancer core and Pingora adapter boundary."
+description = "Internal Fluxheim load-balancer core."
 
 [features]
 metrics = []

@@ -25,11 +25,15 @@ load-balancer container images are again part of normal tag builds for the
   `api.rs` module. Existing public re-exports remain stable; the change is a
   reviewability step for the 1.6 modularity policy, not a config or runtime
   behavior change.
+- Moved the Pingora `ServiceWithDependents` adapter for load-balancer
+  discovery/health background work into the root runtime crate. The
+  load-balancer crate now owns its shutdown/ready primitives and no longer
+  imports Pingora service/listener/shutdown types.
 - Updated workspace, RPM, README, build documentation, and release notes to
   `1.6.1`.
 
 ## Notes
 
 - This release completes the active dependency cut from `pingora-load-balancing`.
-  The `pingora` HTTP health-check connector and current server-service adapter
-  remain scheduled for later HTTP/runtime cutover releases in the 1.6 line.
+  The `pingora` HTTP health-check connector remains scheduled for a later
+  HTTP/runtime cutover release in the 1.6 line.
