@@ -816,10 +816,12 @@ the cache key identity, serialized object envelope, disk index types, and
 Pingora-neutral `FluxCacheStorage`, `FluxHandleHit`, and `FluxHandleMiss`
 interfaces for hit, miss, purge, metadata-update, and admission semantics. The
 memory, disk, storage-bin, and tiered memory-plus-disk backends are adapted to
-that crate-owned interface. The current Pingora HTTP proxy path still requires
-`Storage`, `HandleHit`, and `HandleMiss`, so `cache.rs` keeps a compatibility
-adapter at that edge until the native HTTP runtime cutover removes
-`pingora-cache` from the build graph.
+that crate-owned interface. The crate also owns plaintext disk object header
+sizing, encoding, and parsing; encrypted disk object handling remains in the
+root adapter until the native HTTP/cache cutover. The current Pingora HTTP
+proxy path still requires `Storage`, `HandleHit`, and `HandleMiss`, so
+`cache.rs` keeps a compatibility adapter at that edge until the native HTTP
+runtime cutover removes `pingora-cache` from the build graph.
 
 Request collapsing remains integrated with Pingora cache locks while the HTTP
 proxy path is still Pingora-backed. Disk-only admissions stream response body

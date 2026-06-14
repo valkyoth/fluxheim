@@ -48,8 +48,11 @@ pub use metrics::{
     cache_scope_label, cache_tier_label,
 };
 pub use object::{
-    CacheStoreError, CachedHeader, CachedImageObject, DiskCacheEntry, DiskObjectIndex,
-    DiskObjectLruKey, FluxCacheMissFinish, FluxCachePurgeType, SerializedCacheObject,
+    CacheStoreError, CachedHeader, CachedImageObject, DISK_CACHE_MAGIC_V1, DISK_CACHE_MAGIC_V2,
+    DISK_CACHE_MAGIC_V3, DISK_CACHE_MAGIC_V4, DISK_CACHE_MAGIC_V5, DiskCacheEntry,
+    DiskCacheObjectKey, DiskObjectIndex, DiskObjectLruKey, FluxCacheMissFinish, FluxCachePurgeType,
+    SerializedCacheObject, disk_cache_header_overhead, encode_disk_cache_object,
+    parse_disk_cache_object, write_disk_cache_object_plaintext_prefix,
 };
 pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};
 pub use purge_index::{CachePurgeIndex, CachePurgeIndexEntry};

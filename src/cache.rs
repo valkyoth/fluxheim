@@ -80,8 +80,12 @@ pub use fluxheim_cache::{
 };
 #[cfg(feature = "proxy")]
 use fluxheim_cache::{
-    MAX_CACHE_TAGS_PER_OBJECT, collect_cache_tags, decode_cache_tags,
-    default_cache_tag_headers_for_storage, encode_cache_tags, encoded_cache_tags_len,
+    DiskCacheObjectKey, MAX_CACHE_TAGS_PER_OBJECT, collect_cache_tags,
+    default_cache_tag_headers_for_storage,
+    disk_cache_header_overhead as flux_disk_cache_header_overhead,
+    encode_disk_cache_object as flux_encode_disk_cache_object,
+    parse_disk_cache_object as flux_parse_disk_cache_object,
+    write_disk_cache_object_plaintext_prefix as flux_write_disk_cache_object_plaintext_prefix,
 };
 
 #[cfg(feature = "proxy")]
@@ -93,16 +97,6 @@ const DISK_CACHE_INDEX_CHECKPOINT_DEBOUNCE: std::time::Duration = std::time::Dur
 #[cfg(all(feature = "proxy", test))]
 const DISK_CACHE_INDEX_CHECKPOINT_DEBOUNCE: std::time::Duration =
     std::time::Duration::from_millis(200);
-#[cfg(feature = "proxy")]
-const DISK_CACHE_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-v1\n";
-#[cfg(feature = "proxy")]
-const DISK_CACHE_MAGIC_V2: &[u8] = b"FLUXHEIM-CACHE-v2\n";
-#[cfg(feature = "proxy")]
-const DISK_CACHE_MAGIC_V3: &[u8] = b"FLUXHEIM-CACHE-v3\n";
-#[cfg(feature = "proxy")]
-const DISK_CACHE_MAGIC_V4: &[u8] = b"FLUXHEIM-CACHE-v4\n";
-#[cfg(feature = "proxy")]
-const DISK_CACHE_MAGIC_V5: &[u8] = b"FLUXHEIM-CACHE-v5\n";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_ENCRYPTED_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-ENC-v1\n";
 #[cfg(feature = "proxy")]
@@ -5596,6 +5590,16 @@ impl PingoraStoreKey {
             cache_tag_headers,
         ))
     }
+
+    fn disk_cache_object_key(&self) -> DiskCacheObjectKey {
+        DiskCacheObjectKey {
+            combined: self.combined.clone(),
+            primary: self.primary.clone(),
+            user_tag: self.user_tag.clone(),
+            index_path: self.index_path.clone(),
+            cache_tags: self.cache_tags.clone(),
+        }
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -6158,27 +6162,7 @@ fn stale_cache_meta(internal_meta: &[u8], response_header: &[u8]) -> pingora::Re
 
 #[cfg(feature = "proxy")]
 fn disk_cache_header_overhead(store_key: &PingoraStoreKey) -> u64 {
-    let combined_len = store_key.combined.len() as u64;
-    let primary_len = store_key.primary.len() as u64;
-    let user_tag_len = store_key.user_tag.len() as u64;
-    let cache_tags_len = encoded_cache_tags_len(&store_key.cache_tags) as u64;
-    let index_path_len = store_key.index_path.as_deref().unwrap_or_default().len() as u64;
-    (DISK_CACHE_MAGIC_V5.len() as u64)
-        .saturating_add(decimal_line_len(combined_len))
-        .saturating_add(decimal_line_len(primary_len))
-        .saturating_add(decimal_line_len(user_tag_len))
-        .saturating_add(decimal_line_len(cache_tags_len))
-        .saturating_add(decimal_line_len(index_path_len))
-        .saturating_add(combined_len)
-        .saturating_add(primary_len)
-        .saturating_add(user_tag_len)
-        .saturating_add(cache_tags_len)
-        .saturating_add(index_path_len)
-}
-
-#[cfg(feature = "proxy")]
-fn decimal_line_len(value: u64) -> u64 {
-    value.to_string().len() as u64 + 1
+    flux_disk_cache_header_overhead(&store_key.disk_cache_object_key())
 }
 
 #[cfg(feature = "proxy")]
@@ -7967,33 +7951,12 @@ fn encode_disk_cache_object(
     response_header: &[u8],
     body: &[u8],
 ) -> std::io::Result<Vec<u8>> {
-    use std::io::Write as _;
-
-    let encoded_cache_tags = encode_cache_tags(&store_key.cache_tags);
-
-    let index_path = store_key.index_path.as_deref().unwrap_or_default();
-
-    let mut encoded = Vec::with_capacity(
-        DISK_CACHE_MAGIC_V5.len()
-            + 128
-            + store_key.combined.len()
-            + store_key.primary.len()
-            + store_key.user_tag.len()
-            + encoded_cache_tags.len()
-            + index_path.len()
-            + internal_meta.len()
-            + response_header.len()
-            + body.len(),
-    );
-    write_disk_cache_object_plaintext_prefix(
-        &mut encoded,
-        store_key,
+    flux_encode_disk_cache_object(
+        &store_key.disk_cache_object_key(),
         internal_meta,
         response_header,
-        body.len() as u64,
-    )?;
-    encoded.write_all(body)?;
-    Ok(encoded)
+        body,
+    )
 }
 
 #[cfg(feature = "proxy")]
@@ -8004,26 +7967,13 @@ fn write_disk_cache_object_plaintext_prefix<W: std::io::Write>(
     response_header: &[u8],
     body_len: u64,
 ) -> std::io::Result<()> {
-    let encoded_cache_tags = encode_cache_tags(&store_key.cache_tags);
-    let index_path = store_key.index_path.as_deref().unwrap_or_default();
-
-    writer.write_all(DISK_CACHE_MAGIC_V5)?;
-    writeln!(writer, "{}", store_key.combined.len())?;
-    writeln!(writer, "{}", store_key.primary.len())?;
-    writeln!(writer, "{}", store_key.user_tag.len())?;
-    writeln!(writer, "{}", encoded_cache_tags.len())?;
-    writeln!(writer, "{}", index_path.len())?;
-    writeln!(writer, "{}", internal_meta.len())?;
-    writeln!(writer, "{}", response_header.len())?;
-    writeln!(writer, "{body_len}")?;
-    writer.write_all(store_key.combined.as_bytes())?;
-    writer.write_all(store_key.primary.as_bytes())?;
-    writer.write_all(store_key.user_tag.as_bytes())?;
-    writer.write_all(encoded_cache_tags.as_bytes())?;
-    writer.write_all(index_path.as_bytes())?;
-    writer.write_all(internal_meta)?;
-    writer.write_all(response_header)?;
-    Ok(())
+    flux_write_disk_cache_object_plaintext_prefix(
+        writer,
+        &store_key.disk_cache_object_key(),
+        internal_meta,
+        response_header,
+        body_len,
+    )
 }
 
 #[cfg(feature = "proxy")]
@@ -8870,143 +8820,7 @@ fn parse_disk_cache_object(
     bytes: &[u8],
     max_object_bytes: ByteSize,
 ) -> std::io::Result<PingoraStoredObject> {
-    let (mut offset, format_version) =
-        if bytes.get(..DISK_CACHE_MAGIC_V5.len()) == Some(DISK_CACHE_MAGIC_V5) {
-            (DISK_CACHE_MAGIC_V5.len(), 5_u8)
-        } else if bytes.get(..DISK_CACHE_MAGIC_V4.len()) == Some(DISK_CACHE_MAGIC_V4) {
-            (DISK_CACHE_MAGIC_V4.len(), 4_u8)
-        } else if bytes.get(..DISK_CACHE_MAGIC_V3.len()) == Some(DISK_CACHE_MAGIC_V3) {
-            (DISK_CACHE_MAGIC_V3.len(), 3_u8)
-        } else if bytes.get(..DISK_CACHE_MAGIC_V2.len()) == Some(DISK_CACHE_MAGIC_V2) {
-            (DISK_CACHE_MAGIC_V2.len(), 2_u8)
-        } else if bytes.get(..DISK_CACHE_MAGIC_V1.len()) == Some(DISK_CACHE_MAGIC_V1) {
-            (DISK_CACHE_MAGIC_V1.len(), 1_u8)
-        } else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "invalid cache object magic",
-            ));
-        };
-
-    let combined_key_len = if format_version >= 3 {
-        parse_disk_cache_len(bytes, &mut offset)?
-    } else {
-        0
-    };
-    let primary_key_len = if format_version >= 2 {
-        parse_disk_cache_len(bytes, &mut offset)?
-    } else {
-        0
-    };
-    let user_tag_len = if format_version >= 3 {
-        parse_disk_cache_len(bytes, &mut offset)?
-    } else {
-        0
-    };
-    let cache_tags_len = if format_version >= 4 {
-        parse_disk_cache_len(bytes, &mut offset)?
-    } else {
-        0
-    };
-    let index_path_len = if format_version >= 5 {
-        parse_disk_cache_len(bytes, &mut offset)?
-    } else {
-        0
-    };
-    let internal_meta_len = parse_disk_cache_len(bytes, &mut offset)?;
-    let response_header_len = parse_disk_cache_len(bytes, &mut offset)?;
-    let body_len = parse_disk_cache_len(bytes, &mut offset)?;
-    let object_bytes = (internal_meta_len as u64)
-        .saturating_add(response_header_len as u64)
-        .saturating_add(body_len as u64);
-    if object_bytes > max_object_bytes.as_u64() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "cache object exceeds max object size",
-        ));
-    }
-
-    let total_len = offset
-        .checked_add(combined_key_len)
-        .and_then(|value| value.checked_add(primary_key_len))
-        .and_then(|value| value.checked_add(user_tag_len))
-        .and_then(|value| value.checked_add(cache_tags_len))
-        .and_then(|value| value.checked_add(index_path_len))
-        .and_then(|value| value.checked_add(internal_meta_len))
-        .and_then(|value| value.checked_add(response_header_len))
-        .and_then(|value| value.checked_add(body_len))
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "cache object size overflow",
-            )
-        })?;
-    if total_len != bytes.len() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "cache object length mismatch",
-        ));
-    }
-
-    let weight = u32::try_from(object_bytes).map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "cache object weight exceeds u32",
-        )
-    })?;
-    let combined_key_end = offset + combined_key_len;
-    let primary_key_end = combined_key_end + primary_key_len;
-    let user_tag_end = primary_key_end + user_tag_len;
-    let cache_tags_end = user_tag_end + cache_tags_len;
-    let index_path_end = cache_tags_end + index_path_len;
-    let internal_meta_end = index_path_end + internal_meta_len;
-    let response_header_end = internal_meta_end + response_header_len;
-    let combined_key = if format_version >= 3 {
-        Some(cache_object_utf8(
-            &bytes[offset..combined_key_end],
-            "combined key",
-        )?)
-    } else {
-        None
-    };
-    let primary_key = if format_version >= 2 {
-        Some(cache_object_utf8(
-            &bytes[combined_key_end..primary_key_end],
-            "primary key",
-        )?)
-    } else {
-        None
-    };
-    let user_tag = if format_version >= 3 {
-        Some(cache_object_utf8(
-            &bytes[primary_key_end..user_tag_end],
-            "user tag",
-        )?)
-    } else {
-        None
-    };
-    let cache_tags = if format_version >= 4 {
-        decode_cache_tags(&bytes[user_tag_end..cache_tags_end])?
-    } else {
-        Vec::new()
-    };
-    let index_path = if format_version >= 5 {
-        let value = cache_object_utf8(&bytes[cache_tags_end..index_path_end], "index path")?;
-        (!value.is_empty()).then_some(value)
-    } else {
-        None
-    };
-    Ok(PingoraStoredObject {
-        combined_key,
-        primary_key,
-        user_tag,
-        index_path,
-        cache_tags,
-        internal_meta: bytes[index_path_end..internal_meta_end].to_vec(),
-        response_header: bytes[internal_meta_end..response_header_end].to_vec(),
-        body: Arc::from(&bytes[response_header_end..][..]),
-        weight,
-    })
+    flux_parse_disk_cache_object(bytes, max_object_bytes)
 }
 
 #[cfg(feature = "proxy")]
@@ -14155,9 +13969,9 @@ mod tests {
             .write(true)
             .open(path)
             .unwrap();
-        let encoded_cache_tags = super::encode_cache_tags(&store_key.cache_tags);
+        let encoded_cache_tags = fluxheim_cache::encode_cache_tags(&store_key.cache_tags);
 
-        file.write_all(super::DISK_CACHE_MAGIC_V4).unwrap();
+        file.write_all(fluxheim_cache::DISK_CACHE_MAGIC_V4).unwrap();
         writeln!(file, "{}", store_key.combined.len()).unwrap();
         writeln!(file, "{}", store_key.primary.len()).unwrap();
         writeln!(file, "{}", store_key.user_tag.len()).unwrap();
