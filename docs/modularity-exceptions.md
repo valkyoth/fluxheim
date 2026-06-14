@@ -16,7 +16,7 @@ documents why the exception is temporary and how it will be removed.
 | --- | ---: | --- | --- |
 | `src/proxy.rs` | 19210 | Legacy Pingora `ProxyHttp` orchestration and cross-domain adapter hub. | Split during `1.6.8`-`1.6.12` native HTTP proxy work. |
 | `crates/fluxheim-config/src/config_tests.rs` | 13913 | Legacy central config regression suite. | Split by config domain as crates stabilize. |
-| `src/cache.rs` | 13456 | Legacy Pingora cache storage/runtime adapter plus remaining cache orchestration. | Continue moving pure cache runtime into `fluxheim-cache` in `1.6.2`. |
+| `src/cache.rs` | 14249 | Legacy Pingora cache storage/runtime adapter plus remaining cache orchestration. The 1.6.2 native cache adapter temporarily increases this file until the Pingora HTTP runtime edge is removed. | Continue moving pure cache runtime into `fluxheim-cache`; shrink the compatibility adapter during the native HTTP/cache cutover. |
 | `src/admin.rs` | 8059 | Legacy admin HTTP endpoint router over every domain. | Reduce after domain APIs stabilize; possible `fluxheim-admin` after `1.6.12`. |
 | `src/cli.rs` | 5544 | Legacy command dispatch and release/admin/cache tooling. | Split command handlers by domain after runtime crates settle. |
 | `crates/fluxheim-load-balancer/src/lib.rs` | 3961 | Load-balancer orchestration root still hosts many domain pieces; API/runtime DTOs moved to `api.rs` in `1.6.1`. | Continue splitting orchestration, runtime mutation, and Pingora service adapter code during the remaining `1.6` load-balancer/background cutovers. |
@@ -56,4 +56,4 @@ documents why the exception is temporary and how it will be removed.
 | `src/stream_tls.rs` | 657 | Stream upstream TLS adapter. | Move with stream runtime cutover. |
 | `crates/fluxheim-config/src/config_route.rs` | 641 | Route config and validation. | Split redirect, methods, cache, and path policy helpers. |
 | `src/edge_policy.rs` | 532 | Edge access/rate/geo policy. | Split policy decisions and runtime proof types. |
-| `crates/fluxheim-cache/src/request.rs` | 503 | Cache request/range/slice planning. | Split range/slice planning if it grows. |
+| `crates/fluxheim-cache/src/request.rs` | 545 | Cache request/range/slice planning plus native cache key identity. | Split key identity and range/slice planning if it grows further. |

@@ -811,14 +811,15 @@ Checked on 2026-05-05:
 - Rust version: `1.85`
 - Fluxheim use: fixed-length disk cache object paths.
 
-Fluxheim owns the cache implementation and, since `1.5.13`, the internal cache
-storage interface. `FluxCacheStorage`, `FluxHandleHit`, and `FluxHandleMiss`
-capture the hit, miss, purge, metadata-update, and admission semantics used by
-the memory, disk, storage-bin, and tiered memory-plus-disk backends. The current
-Pingora HTTP proxy path still requires `Storage`, `HandleHit`, and
-`HandleMiss`, so `cache.rs` exposes a narrow adapter layer for that edge rather
-than letting the rest of the cache module depend on Pingora session-bound
-traits.
+Fluxheim owns the cache implementation. Since `1.6.2`, `fluxheim-cache` owns
+the cache key identity, serialized object envelope, disk index types, and
+Pingora-neutral `FluxCacheStorage`, `FluxHandleHit`, and `FluxHandleMiss`
+interfaces for hit, miss, purge, metadata-update, and admission semantics. The
+memory, disk, storage-bin, and tiered memory-plus-disk backends are adapted to
+that crate-owned interface. The current Pingora HTTP proxy path still requires
+`Storage`, `HandleHit`, and `HandleMiss`, so `cache.rs` keeps a compatibility
+adapter at that edge until the native HTTP runtime cutover removes
+`pingora-cache` from the build graph.
 
 Request collapsing remains integrated with Pingora cache locks while the HTTP
 proxy path is still Pingora-backed. Disk-only admissions stream response body

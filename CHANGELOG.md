@@ -7,6 +7,25 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.2 - 2026-06-14
+
+### Changed
+
+- Start the cache-independence release in the 1.6 Pingora-exit line.
+- Move cache key identity, serialized object envelopes, disk index entries, and
+  disk index management into `fluxheim-cache`.
+- Add a Pingora-neutral `FluxCacheStorage` interface in `fluxheim-cache` with
+  serialized metadata, hit handlers, miss handlers, purge, and metadata-update
+  semantics.
+- Adapt memory, filesystem disk, storage-bin disk, disk-backend, and tiered
+  cache storage to the crate-owned cache interface while preserving the current
+  Pingora HTTP runtime adapter.
+- Add regression coverage proving memory and tiered cache backends can
+  round-trip objects through the native cache interface.
+- Keep final `pingora-cache` compile removal scheduled for the native HTTP
+  runtime cutover because the current Pingora proxy runtime still imports
+  `pingora::cache`.
+
 ## 1.6.1 - 2026-06-14
 
 ### Changed

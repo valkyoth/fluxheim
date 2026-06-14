@@ -2502,6 +2502,11 @@ Planned `1.6.x` sequence:
   Pingora facade still requires `pingora/cache` while the legacy proxy runtime
   imports `pingora::cache`; keep that exception explicit and track final
   `pingora-cache` compile removal under the native HTTP/runtime cutover.
+  Committed work includes cache key identity, serialized object envelopes,
+  disk index entries, disk index management, a crate-owned
+  `FluxCacheStorage`/hit/miss interface, and native-interface adapters for
+  memory, filesystem disk, storage-bin disk, disk-backend, and tiered cache
+  storage.
 - `v1.6.3`: stream runtime cutover. Move TCP stream proxying to
   `fluxheim-stream` or `fluxheim-proxy` using direct Tokio listeners and
   connectors, including upstream TLS/mTLS through rustls and OpenSSL. Remove

@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.1
+Version:        1.6.2
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -48,11 +48,11 @@ Requires:       ca-certificates
 
 %description
 Fluxheim is a modular Rust edge gateway for websites, applications, caching,
-and load balancing. The 1.5 line adds the enterprise HTTP/TCP load-balancer
-control-plane track while keeping the packaged native build on the full
-production feature set: proxy, static web serving, cache, load balancing,
-managed ACME, Prometheus metrics, OpenTelemetry export support, GeoIP policy,
-stream proxying, and PHP-FPM support.
+and load balancing. The 1.6 line is the staged Pingora-exit line while keeping
+the packaged native build on the full production feature set: proxy, static web
+serving, cache, load balancing, managed ACME, Prometheus metrics,
+OpenTelemetry export support, GeoIP policy, stream proxying, and PHP-FPM
+support.
 
 This spec builds from vendored Cargo dependencies and uses Cargo offline mode.
 It intentionally does not download crates during the RPM build.
@@ -154,6 +154,14 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jun 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.2-1
+- Continue the Pingora-exit line with cache independence work.
+- Move cache key identity, serialized object envelopes, disk cache index
+  entries, and disk index management into fluxheim-cache.
+- Add and exercise a crate-owned FluxCacheStorage interface for memory, disk,
+  storage-bin, disk-backend, and tiered cache storage while keeping the current
+  Pingora HTTP runtime adapter.
+
 * Sun Jun 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.1-1
 - Start the first Pingora-exit implementation release after the 1.6.0
   foundation tag.
