@@ -21,6 +21,11 @@ remove Pingora safely in later 1.6.x releases.
 - Added `docs/pingora-dependency-exceptions.tsv` and
   `scripts/validate-pingora-dependency-policy.sh` so the 1.6 line has a
   release-gated inventory of allowed Pingora crates per official profile.
+- Added `docs/runtime-parity-fixtures.md`,
+  `docs/runtime-parity-fixtures.tsv`, and
+  `scripts/validate-runtime-fixtures.sh` to pin the smoke scripts, examples,
+  and TLS fixtures that define runtime parity before HTTP/cache/LB/TLS
+  cutovers begin.
 - Added initial `fluxheim-runtime` and `fluxheim-server` workspace crates for
   Fluxheim-owned shutdown, background task, listener, and server-runner
   boundary traits. The current Pingora runtime path is unchanged.

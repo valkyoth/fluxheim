@@ -30,6 +30,9 @@ fi
 echo "stable release gate: Pingora dependency policy"
 scripts/validate-pingora-dependency-policy.sh check
 
+echo "stable release gate: runtime parity fixture inventory"
+scripts/validate-runtime-fixtures.sh check
+
 if [ "$mode" = "release" ]; then
     echo "stable release gate: compatible crate freshness"
     scripts/check_latest_crates.sh

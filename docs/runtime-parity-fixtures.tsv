@@ -1,0 +1,30 @@
+# path	kind	target	reason
+scripts/smoke_1_0_core.sh	script	1.6.8-1.6.11	Core HTTP/static/proxy/TLS behavior parity before native HTTP cutover.
+scripts/smoke_request_framing.sh	script	1.6.8-1.6.11	HTTP request framing and parser safety parity.
+scripts/smoke_static_local.sh	script	1.6.8-1.6.9	Static serving, headers, and local static-cache parity.
+scripts/smoke_proxy_cache.sh	script	1.6.2-1.6.11	Proxy cache HIT/MISS/stale/purge/range behavior parity.
+scripts/smoke_storage_bin_cache.sh	script	1.6.2	Storage-bin cache backend parity.
+scripts/smoke_cache_encryption_local.sh	script	1.6.2	Encrypted local disk-cache parity.
+scripts/smoke_peer_fill_cache.sh	script	1.6.2	Peer-fill cache behavior parity.
+scripts/smoke_load_balancer.sh	script	1.6.1	Load-balancer selection, persistence, mutation, and metrics parity.
+scripts/smoke_stream_proxy.sh	script	1.6.3	TCP stream listener, limits, PROXY protocol, and upstream TLS parity.
+scripts/smoke_observability_local.sh	script	1.6.4-1.6.12	Metrics/tracing/logging adapter parity.
+scripts/validate-1-0-core.sh	script	1.6.8-1.6.11	Representative stable-core config validation parity.
+scripts/validate-1-0-fixtures.sh	script	1.6.8-1.6.11	Gateway fixture validation parity.
+scripts/validate-tls-backends.sh	script	1.6.6	TLS backend build/config parity.
+scripts/validate-fips-openssl.sh	script	1.6.6	OpenSSL FIPS candidate validation parity.
+scripts/validate-fips-rustls.sh	script	1.6.6	rustls/AWS-LC FIPS candidate validation parity.
+scripts/podman_smoke.sh	script	1.6.13	Container image runtime parity.
+scripts/podman_smoke_variants.sh	script	1.6.13	Focused container variant parity.
+examples/fluxheim.toml	config	1.6.8-1.6.11	Default development config parity.
+examples/gateway-1-0	directory	1.6.8-1.6.11	Representative multi-vhost gateway config set.
+examples/load-balancer-enterprise.toml	config	1.6.1	Enterprise load-balancer fixture parity.
+examples/cache-storage-bin.toml	config	1.6.2	Storage-bin cache config parity.
+examples/cache-encryption-local.toml	config	1.6.2	Local encrypted-cache config parity.
+examples/cache-peer-fill.toml	config	1.6.2	Peer-fill cache config parity.
+examples/stream-tcp.toml	config	1.6.3	Stream proxy config parity.
+examples/tls-modern.toml	config	1.6.6	Modern TLS policy config parity.
+examples/tls-intermediate.toml	config	1.6.6	Intermediate TLS policy config parity.
+examples/php-fpm.toml	config	1.6.9	PHP-FPM adapter parity.
+tests/fixtures/tls/localhost-cert.pem	fixture	1.6.6	TLS listener/upstream test certificate fixture.
+tests/fixtures/tls/localhost-key.pem	fixture	1.6.6	TLS listener/upstream test key fixture.
