@@ -114,6 +114,7 @@ config_tester() {
 cargo fmt --all --check
 scripts/validate-release-metadata.sh
 scripts/validate-modularity-policy.sh check
+scripts/capture-runtime-baseline.sh check
 perl scripts/check-doc-links.pl
 cargo clippy --all-targets -- -D warnings
 cargo clippy --no-default-features --features tls-rustls --all-targets -- -D warnings

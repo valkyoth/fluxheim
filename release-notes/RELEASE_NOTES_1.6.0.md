@@ -14,6 +14,10 @@ remove Pingora safely in later 1.6.x releases.
 - Added `scripts/validate-modularity-policy.sh` to report and validate the
   current oversized Rust-file inventory against
   `docs/modularity-exceptions.md`.
+- Added `docs/runtime-baseline.md` and
+  `scripts/capture-runtime-baseline.sh` to record locked dependency trees,
+  per-profile Pingora dependency presence, release metadata, and default
+  release-binary size before the runtime cutover work begins.
 - Added the runtime-facts and policy-proofs planning model. The goal is typed,
   bounded, redacted evidence for Fluxheim decisions such as config promotion,
   route policy, cache admission, load-balancer selection, and admin mutation

@@ -2458,7 +2458,9 @@ Planned `1.6.x` sequence:
   HTTP fixtures, cache fixtures, TLS fixtures, and release gates. Add
   dependency-graph checks that can fail the release once a target Pingora crate
   is expected to be gone. Add repeatable runtime baseline tooling before any
-  replacement runtime ships: capture current binary size, startup time, memory,
+  replacement runtime ships: first capture locked dependency trees, per-profile
+  Pingora dependency presence, release metadata, and default release-binary
+  size; then extend the same evidence format to startup time, memory,
   file-descriptor use, idle connection cost, loopback HTTP/1.1 latency,
   keep-alive throughput, cache HIT/MISS latency, load-balancer selection cost,
   TLS handshake cost for rustls and OpenSSL where available, and representative

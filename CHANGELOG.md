@@ -18,6 +18,10 @@ behavior when the change improves security or project direction.
   `scripts/validate-modularity-policy.sh` to make the 500-line modularity
   policy measurable at release time. Existing oversized Rust files are listed
   as legacy exceptions with split targets instead of hidden as normal debt.
+- Add `docs/runtime-baseline.md` and
+  `scripts/capture-runtime-baseline.sh` to record locked dependency trees,
+  per-profile Pingora dependency presence, release metadata, and default
+  release-binary size before the runtime cutover work begins.
 - Add `docs/runtime-facts-and-policy-proofs.md` to guide typed, bounded,
   redacted decision evidence for route policy, cache admission,
   load-balancer selection, admin mutation, config promotion, and future Wasm

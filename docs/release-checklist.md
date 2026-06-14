@@ -43,6 +43,16 @@ cargo install --locked cargo-sbom --version 0.10.0
 scripts/check_latest_crates.sh
 ```
 
+- During the `1.6.x` Pingora-exit line, capture the runtime baseline evidence
+  before tagging. `check` mode records locked dependency trees and the
+  per-profile Pingora dependency surface; `release` mode also records the
+  default release-binary size:
+
+```bash
+scripts/capture-runtime-baseline.sh check
+scripts/capture-runtime-baseline.sh release
+```
+
 - Review every new dependency for maintenance status and SPDX license metadata.
 - Review every new build script, procedural macro, `*-sys` crate, vendored
   native source, native tool invocation, Cargo alias, and CI workflow edit as

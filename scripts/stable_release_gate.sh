@@ -20,6 +20,14 @@ echo "stable release gate: modularity policy"
 scripts/validate-modularity-policy.sh check
 
 if [ "$mode" = "release" ]; then
+    echo "stable release gate: runtime baseline"
+    scripts/capture-runtime-baseline.sh release
+else
+    echo "stable release gate: runtime baseline dependency surface"
+    scripts/capture-runtime-baseline.sh check
+fi
+
+if [ "$mode" = "release" ]; then
     echo "stable release gate: compatible crate freshness"
     scripts/check_latest_crates.sh
 else
