@@ -8,5 +8,10 @@ publish = false
 description = "Internal Fluxheim cache policy and storage boundary."
 
 [dependencies]
+async-trait = "0.1.89"
+bytes = "1.11.1"
 fluxheim-config = { path = "../fluxheim-config" }
 http = "1.4.2"
+
+[dev-dependencies]
+tokio = { version = "1.52.3", features = ["macros", "rt"] }

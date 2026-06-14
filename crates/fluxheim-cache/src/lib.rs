@@ -11,6 +11,7 @@ pub mod object;
 pub mod plan;
 pub mod purge_index;
 pub mod request;
+pub mod storage;
 
 pub use api::{
     CacheActivityResetResult, CacheActivityStats, CacheBackgroundPurgeResult,
@@ -58,4 +59,8 @@ pub use request::{
     parse_bounded_single_range, parse_cache_client_ranges, parse_cache_content_range,
     required_slice_bounds, resolve_client_slice_ranges, response_content_length_matches_range,
     response_content_range_matches, slice_request_within_policy,
+};
+pub use storage::{
+    FluxCacheHitHandler, FluxCacheMissHandler, FluxCacheStorage, FluxCacheTrace, FluxHandleHit,
+    FluxHandleMiss, SerializedCacheMeta,
 };
