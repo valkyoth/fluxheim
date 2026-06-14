@@ -1,3 +1,5 @@
+use crate::request::{parse_bounded_single_range, parse_cache_client_ranges};
+
 pub fn request_forces_cache_refresh(cache_control: Option<&str>, pragma: Option<&str>) -> bool {
     pragma.is_some_and(is_pragma_no_cache)
         || cache_control.is_some_and(cache_control_forces_refresh)
@@ -25,6 +27,122 @@ pub fn request_values_forbid_cache_store<'a>(
     cache_control: impl IntoIterator<Item = &'a str>,
 ) -> bool {
     cache_control.into_iter().any(cache_control_forbids_store)
+}
+
+pub trait CacheRequestView {
+    fn method(&self) -> &str;
+
+    fn path(&self) -> &str;
+
+    fn query(&self) -> Option<&str>;
+
+    fn contains_header(&self, name: &str) -> bool;
+
+    fn visit_header_values(&self, name: &str, visitor: &mut dyn FnMut(&str));
+}
+
+pub fn request_cache_bypass_reason(
+    request: &impl CacheRequestView,
+    cache: &fluxheim_config::CacheConfig,
+) -> Option<&'static str> {
+    let path = request.path();
+    if cache
+        .bypass_path_exact
+        .iter()
+        .any(|configured| configured == path)
+        || cache
+            .bypass_path_prefixes
+            .iter()
+            .any(|configured| path.starts_with(configured))
+    {
+        return Some("request-path");
+    }
+    if cache
+        .bypass_request_headers
+        .iter()
+        .any(|header| request.contains_header(header.as_str()))
+    {
+        return Some("request-header");
+    }
+    if request_headers_match_cache_bypass_value(request, &cache.bypass_request_header_values) {
+        return Some("request-header-value");
+    }
+    if request_cookie_headers_match_cache_bypass(request, cache) {
+        return Some("request-cookie");
+    }
+    if request.query().is_some_and(|query| {
+        cache.bypass_query
+            || query_matches_cache_bypass(
+                query,
+                &cache.bypass_query_params,
+                &cache.bypass_query_values,
+            )
+    }) {
+        return Some("request-query");
+    }
+
+    request_values_match(request, "cache-control", cache_control_forbids_store)
+        .then_some("request-no-store")
+}
+
+pub fn request_cache_revalidation_requested(
+    request: &impl CacheRequestView,
+    cache: &fluxheim_config::CacheConfig,
+) -> bool {
+    cache.allow_client_cache_refresh
+        && (request_values_match(request, "pragma", is_pragma_no_cache)
+            || request_values_match(request, "cache-control", cache_control_forces_revalidation))
+}
+
+pub fn selected_cache_range_request(
+    request: &impl CacheRequestView,
+    cache: &fluxheim_config::CacheConfig,
+) -> Option<crate::CacheRangeRequest> {
+    if !cache.range.enabled || request.method() != "GET" {
+        return None;
+    }
+    let mut range = None;
+    let mut multiple_ranges = false;
+    request.visit_header_values("range", &mut |value| {
+        if range.is_some() {
+            multiple_ranges = true;
+        } else {
+            range = Some(value.to_owned());
+        }
+    });
+    if multiple_ranges {
+        return None;
+    }
+    if request_has_header_value(request, "if-range") {
+        return None;
+    }
+    let parsed = parse_bounded_single_range(range.as_deref()?)?;
+    (parsed.len() <= cache.range.max_bytes.as_u64()).then_some(parsed)
+}
+
+pub fn selected_cache_slice_range_request(
+    request: &impl CacheRequestView,
+    cache: &fluxheim_config::CacheConfig,
+) -> Option<crate::CacheSliceRangeRequest> {
+    if !cache.range.enabled || !cache.range.slice.enabled || request.method() != "GET" {
+        return None;
+    }
+    let mut range = None;
+    let mut multiple_ranges = false;
+    request.visit_header_values("range", &mut |value| {
+        if range.is_some() {
+            multiple_ranges = true;
+        } else {
+            range = Some(value.to_owned());
+        }
+    });
+    if multiple_ranges {
+        return None;
+    }
+    parse_cache_client_ranges(range.as_deref()?).map(|ranges| crate::CacheSliceRangeRequest {
+        ranges,
+        if_range: request_header_values_joined(request, "if-range"),
+    })
 }
 
 pub fn response_values_forbid_shared_cache<'a>(
@@ -176,6 +294,76 @@ fn query_component_matches_cache_bypass(
         || configured_values
             .get(name)
             .is_some_and(|configured| configured == value)
+}
+
+fn request_headers_match_cache_bypass_value(
+    request: &impl CacheRequestView,
+    configured_values: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    !configured_values.is_empty()
+        && configured_values.iter().any(|(header, configured)| {
+            let mut matched = false;
+            request.visit_header_values(header, &mut |value| {
+                matched |= value == configured;
+            });
+            matched
+        })
+}
+
+fn request_cookie_headers_match_cache_bypass(
+    request: &impl CacheRequestView,
+    cache: &fluxheim_config::CacheConfig,
+) -> bool {
+    if cache.bypass_cookie_names.is_empty()
+        && cache.bypass_cookie_name_prefixes.is_empty()
+        && cache.bypass_cookie_values.is_empty()
+    {
+        return false;
+    }
+
+    let mut matched = false;
+    request.visit_header_values("cookie", &mut |value| {
+        matched |= cookie_headers_match_cache_bypass(
+            [value],
+            &cache.bypass_cookie_names,
+            &cache.bypass_cookie_name_prefixes,
+            &cache.bypass_cookie_values,
+        );
+    });
+    matched
+}
+
+fn request_values_match(
+    request: &impl CacheRequestView,
+    name: &str,
+    predicate: impl Fn(&str) -> bool,
+) -> bool {
+    let mut matched = false;
+    request.visit_header_values(name, &mut |value| {
+        matched |= predicate(value);
+    });
+    matched
+}
+
+fn request_has_header_value(request: &impl CacheRequestView, name: &str) -> bool {
+    let mut found = false;
+    request.visit_header_values(name, &mut |_| {
+        found = true;
+    });
+    found
+}
+
+fn request_header_values_joined(request: &impl CacheRequestView, name: &str) -> Option<String> {
+    let mut joined = None::<String>;
+    request.visit_header_values(name, &mut |value| {
+        if let Some(joined) = &mut joined {
+            joined.push_str(", ");
+            joined.push_str(value);
+        } else {
+            joined = Some(value.to_owned());
+        }
+    });
+    joined
 }
 
 fn percent_decode_query_component(component: &str) -> Option<String> {
@@ -499,6 +687,67 @@ fn response_cache_control_shared_rejection(value: &str) -> Option<&'static str> 
 mod tests {
     use super::request_forces_cache_refresh;
 
+    struct TestRequest {
+        method: &'static str,
+        path: &'static str,
+        query: Option<&'static str>,
+        headers: Vec<(&'static str, &'static str)>,
+    }
+
+    impl TestRequest {
+        fn new(path: &'static str) -> Self {
+            Self {
+                method: "GET",
+                path,
+                query: None,
+                headers: Vec::new(),
+            }
+        }
+
+        fn with_method(mut self, method: &'static str) -> Self {
+            self.method = method;
+            self
+        }
+
+        fn with_query(mut self, query: &'static str) -> Self {
+            self.query = Some(query);
+            self
+        }
+
+        fn with_header(mut self, name: &'static str, value: &'static str) -> Self {
+            self.headers.push((name, value));
+            self
+        }
+    }
+
+    impl super::CacheRequestView for TestRequest {
+        fn method(&self) -> &str {
+            self.method
+        }
+
+        fn path(&self) -> &str {
+            self.path
+        }
+
+        fn query(&self) -> Option<&str> {
+            self.query
+        }
+
+        fn contains_header(&self, name: &str) -> bool {
+            self.headers
+                .iter()
+                .any(|(header, _)| header.eq_ignore_ascii_case(name))
+        }
+
+        fn visit_header_values(&self, name: &str, visitor: &mut dyn FnMut(&str)) {
+            for (header, value) in &self.headers {
+                if header.eq_ignore_ascii_case(name) {
+                    visitor(value);
+                }
+            }
+        }
+    }
+
     #[test]
     fn detects_request_cache_refresh_directives() {
         for value in [
@@ -665,6 +914,89 @@ mod tests {
             &[],
             &values
         ));
+    }
+
+    #[test]
+    fn request_view_reports_cache_bypass_reasons() {
+        let cache = fluxheim_config::CacheConfig {
+            bypass_path_prefixes: vec!["/admin/".to_owned()],
+            bypass_request_header_values: std::collections::BTreeMap::from([(
+                "x-preview".to_owned(),
+                "1".to_owned(),
+            )]),
+            bypass_cookie_names: vec!["session".to_owned()],
+            bypass_query_values: std::collections::BTreeMap::from([(
+                "preview".to_owned(),
+                "true".to_owned(),
+            )]),
+            ..fluxheim_config::CacheConfig::default()
+        };
+
+        assert_eq!(
+            super::request_cache_bypass_reason(&TestRequest::new("/admin/panel"), &cache),
+            Some("request-path")
+        );
+        assert_eq!(
+            super::request_cache_bypass_reason(
+                &TestRequest::new("/").with_header("x-preview", "1"),
+                &cache
+            ),
+            Some("request-header-value")
+        );
+        assert_eq!(
+            super::request_cache_bypass_reason(
+                &TestRequest::new("/").with_header("cookie", "theme=dark; session=yes"),
+                &cache
+            ),
+            Some("request-cookie")
+        );
+        assert_eq!(
+            super::request_cache_bypass_reason(
+                &TestRequest::new("/").with_query("preview=true"),
+                &cache
+            ),
+            Some("request-query")
+        );
+        assert_eq!(
+            super::request_cache_bypass_reason(
+                &TestRequest::new("/").with_header("cache-control", "no-store"),
+                &cache
+            ),
+            Some("request-no-store")
+        );
+    }
+
+    #[test]
+    fn request_view_handles_revalidation_and_range_selection() {
+        let cache = fluxheim_config::CacheConfig {
+            allow_client_cache_refresh: true,
+            range: fluxheim_config::CacheRangeConfig {
+                enabled: true,
+                max_bytes: fluxheim_config::ByteSize::from_bytes(512),
+                ..fluxheim_config::CacheRangeConfig::default()
+            },
+            ..fluxheim_config::CacheConfig::default()
+        };
+        let request = TestRequest::new("/asset")
+            .with_header("cache-control", "max-age=0")
+            .with_header("range", "bytes=10-19");
+
+        assert!(super::request_cache_revalidation_requested(
+            &request, &cache
+        ));
+        assert_eq!(
+            super::selected_cache_range_request(&request, &cache),
+            Some(crate::CacheRangeRequest { start: 10, end: 19 })
+        );
+        assert_eq!(
+            super::selected_cache_range_request(
+                &TestRequest::new("/asset")
+                    .with_method("HEAD")
+                    .with_header("range", "bytes=10-19"),
+                &cache
+            ),
+            None
+        );
     }
 
     #[test]

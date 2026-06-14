@@ -21,6 +21,10 @@ interfaces before the HTTP runtime is replaced.
 - Cleartext TCP health checks now use a Fluxheim-owned Tokio connect probe.
   TLS TCP health checks intentionally keep the existing Pingora transport
   connector so SNI/TLS handshake behavior stays unchanged in `1.5.22`.
+- Cache request bypass, client revalidation, and range-selection decisions now
+  run through a Fluxheim-owned cache request view. The root proxy cache module
+  keeps a small Pingora `RequestHeader` adapter, so cache behavior is intended
+  to remain unchanged while the cache crate owns more policy logic.
 
 ## Compatibility
 

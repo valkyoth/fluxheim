@@ -14,18 +14,47 @@ pub(crate) use crate::cache::{
     CacheContentRange, CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest,
     CacheStaleEvent, VaryCachePolicy, VaryRequestHashField, append_cache_key_component,
     cache_control_freshness_value, cache_control_with_directive, cache_method_temporarily_bypassed,
-    cache_should_serve_stale, cache_vary_policy, parse_bounded_single_range,
-    parse_cache_client_ranges, parse_cache_content_range, remaining_fresh_ttl_secs,
-    required_slice_bounds, resolve_client_slice_ranges, response_content_length_matches_range,
-    response_content_range_matches, response_content_type_is_cacheable, vary_request_hash_material,
+    cache_should_serve_stale, cache_vary_policy, parse_cache_content_range,
+    remaining_fresh_ttl_secs, required_slice_bounds, resolve_client_slice_ranges,
+    response_content_length_matches_range, response_content_range_matches,
+    response_content_type_is_cacheable, vary_request_hash_material,
 };
 #[cfg(test)]
 pub(crate) use crate::cache::{MAX_VARY_FIELDS, cache_stale_status_allows, vary_cache_policy};
-use crate::cache::{cookie_headers_match_cache_bypass, query_matches_cache_bypass};
+#[cfg(test)]
+pub(crate) use crate::cache::{parse_bounded_single_range, parse_cache_client_ranges};
 use crate::cache::{
     response_age_secs as response_header_age_secs,
     response_cache_control_max_age as response_header_cache_control_max_age,
 };
+
+struct PingoraCacheRequestView<'a>(&'a RequestHeader);
+
+impl crate::cache::CacheRequestView for PingoraCacheRequestView<'_> {
+    fn method(&self) -> &str {
+        self.0.method.as_str()
+    }
+
+    fn path(&self) -> &str {
+        self.0.uri.path()
+    }
+
+    fn query(&self) -> Option<&str> {
+        self.0.uri.query()
+    }
+
+    fn contains_header(&self, name: &str) -> bool {
+        self.0.headers.contains_key(name)
+    }
+
+    fn visit_header_values(&self, name: &str, visitor: &mut dyn FnMut(&str)) {
+        for value in self.0.headers.get_all(name).iter() {
+            if let Ok(value) = value.to_str() {
+                visitor(value);
+            }
+        }
+    }
+}
 
 pub(crate) fn cache_request_from_header(request: &RequestHeader) -> crate::cache::CacheRequest<'_> {
     crate::cache::CacheRequest {
@@ -48,65 +77,14 @@ pub(crate) fn request_cache_bypass_reason(
     request: &RequestHeader,
     cache: &crate::config::CacheConfig,
 ) -> Option<&'static str> {
-    let path = request.uri.path();
-    if cache
-        .bypass_path_exact
-        .iter()
-        .any(|configured| configured == path)
-        || cache
-            .bypass_path_prefixes
-            .iter()
-            .any(|configured| path.starts_with(configured))
-    {
-        return Some("request-path");
-    }
-    if cache
-        .bypass_request_headers
-        .iter()
-        .any(|header| request.headers.contains_key(header.as_str()))
-    {
-        return Some("request-header");
-    }
-    if request_headers_match_cache_bypass_value(request, &cache.bypass_request_header_values) {
-        return Some("request-header-value");
-    }
-    if cookie_headers_match_cache_bypass(
-        request_header_values(request, "cookie"),
-        &cache.bypass_cookie_names,
-        &cache.bypass_cookie_name_prefixes,
-        &cache.bypass_cookie_values,
-    ) {
-        return Some("request-cookie");
-    }
-    if request.uri.query().is_some_and(|query| {
-        cache.bypass_query
-            || query_matches_cache_bypass(
-                query,
-                &cache.bypass_query_params,
-                &cache.bypass_query_values,
-            )
-    }) {
-        return Some("request-query");
-    }
-
-    crate::cache_headers::request_values_forbid_cache_store(request_header_values(
-        request,
-        "cache-control",
-    ))
-    .then_some("request-no-store")
+    crate::cache::request_cache_bypass_reason(&PingoraCacheRequestView(request), cache)
 }
 
 pub(crate) fn request_cache_revalidation_requested(
     request: &RequestHeader,
     cache: &crate::config::CacheConfig,
 ) -> bool {
-    if !cache.allow_client_cache_refresh {
-        return false;
-    }
-    crate::cache_headers::request_values_force_cache_revalidation(
-        request_header_values(request, "cache-control"),
-        request_header_values(request, "pragma"),
-    )
+    crate::cache::request_cache_revalidation_requested(&PingoraCacheRequestView(request), cache)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -119,35 +97,14 @@ pub(crate) fn selected_cache_range_request(
     request: &RequestHeader,
     cache: &crate::config::CacheConfig,
 ) -> Option<CacheRangeRequest> {
-    if !cache.range.enabled || request.method.as_str() != "GET" {
-        return None;
-    }
-    let mut values = request_header_values(request, "range");
-    let range = values.next()?;
-    if values.next().is_some() {
-        return None;
-    }
-    if request_header_values(request, "if-range").next().is_some() {
-        return None;
-    }
-    let parsed = parse_bounded_single_range(range)?;
-    (parsed.len() <= cache.range.max_bytes.as_u64()).then_some(parsed)
+    crate::cache::selected_cache_range_request(&PingoraCacheRequestView(request), cache)
 }
 
 pub(crate) fn selected_cache_slice_range_request(
     request: &RequestHeader,
     cache: &crate::config::CacheConfig,
 ) -> Option<CacheSliceRangeRequest> {
-    if !cache.range.enabled || !cache.range.slice.enabled || request.method.as_str() != "GET" {
-        return None;
-    }
-    let mut values = request_header_values(request, "range");
-    let range = values.next()?;
-    if values.next().is_some() {
-        return None;
-    }
-    let if_range = request_header_values_joined(request, "if-range");
-    parse_cache_client_ranges(range).map(|ranges| CacheSliceRangeRequest { ranges, if_range })
+    crate::cache::selected_cache_slice_range_request(&PingoraCacheRequestView(request), cache)
 }
 
 pub(crate) fn slice_request_within_policy(
@@ -530,37 +487,6 @@ pub(crate) fn vary_request_hash(fields: &[String], request: &RequestHeader) -> H
         }
     }));
     pingora::cache::key::hash_key(material)
-}
-
-fn request_headers_match_cache_bypass_value(
-    request: &RequestHeader,
-    configured_values: &std::collections::BTreeMap<String, String>,
-) -> bool {
-    !configured_values.is_empty()
-        && configured_values.iter().any(|(header, configured)| {
-            request_header_values(request, header).any(|value| value == configured)
-        })
-}
-
-fn request_header_values<'a>(
-    request: &'a RequestHeader,
-    name: &'a str,
-) -> impl Iterator<Item = &'a str> + 'a {
-    request
-        .headers
-        .get_all(name)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-}
-
-fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<String> {
-    let mut values = request_header_values(request, name);
-    let first = values.next()?.to_owned();
-    Some(values.fold(first, |mut joined, value| {
-        joined.push_str(", ");
-        joined.push_str(value);
-        joined
-    }))
 }
 
 fn response_header_values<'a>(

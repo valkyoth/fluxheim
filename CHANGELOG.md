@@ -27,6 +27,10 @@ behavior when the change improves security or project direction.
   TLS TCP health checks still use the existing Pingora transport connector for
   SNI/TLS handshake compatibility until the larger `1.6.x` connector-removal
   work.
+- Move cache request bypass, client revalidation, and range-selection
+  decisions behind a Fluxheim-owned cache request view. The root proxy cache
+  module now adapts Pingora request headers into that view, keeping runtime
+  behavior unchanged while shrinking the Pingora-facing cache surface.
 
 ## 1.5.21 - 2026-06-13
 
