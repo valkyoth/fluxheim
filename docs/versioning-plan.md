@@ -4062,7 +4062,10 @@ the exception while the cache server is being completed as a focused sequence:
   metadata, store validation, listing, and rollback file operations if those
   pieces can move without pulling in admin, runtime, or proxy orchestration.
   Keep live reload classification and admin HTTP handlers in the root crate
-  until their dependencies are clearer.
+  until their dependencies are clearer. Implemented `1.5.22` cache slices
+  include Fluxheim-owned request views for bypass/revalidation/range selection
+  and cache-owned response admission policy for status, content type,
+  no-store/Vary, and range-response checks, with root Pingora adapters kept.
 - `v1.5.23`: cache-aware origin protection service line. Stop at one small
   differentiator that combines cache and load-balancer state without becoming a
   new proxy runtime: route-scoped origin-fill budgets that apply only to cache
