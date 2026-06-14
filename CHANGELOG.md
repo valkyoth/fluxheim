@@ -36,6 +36,9 @@ behavior when the change improves security or project direction.
   `LoadBalancerRequestView` trait. The root proxy now adapts Pingora request
   headers at the runtime boundary, keeping load-balancer selection and
   persistence logic transport-neutral.
+- Bound native TLS TCP health-check handshakes with the configured connect
+  timeout so a backend that accepts TCP and stalls TLS cannot freeze the
+  load-balancer health/discovery loop.
 
 ## 1.6.0 - 2026-06-14
 

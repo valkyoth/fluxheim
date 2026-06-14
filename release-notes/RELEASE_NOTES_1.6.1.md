@@ -33,6 +33,9 @@ load-balancer container images are again part of normal tag builds for the
   `LoadBalancerRequestView` trait. Pingora request headers are now adapted at
   the root proxy boundary, while selection and persistence code stays
   transport-neutral.
+- Bounded native TLS TCP health-check handshakes with the configured connect
+  timeout. This prevents a backend that accepts TCP but stalls during TLS from
+  blocking the load-balancer health/discovery loop.
 - Updated workspace, RPM, README, build documentation, and release notes to
   `1.6.1`.
 
