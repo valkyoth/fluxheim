@@ -7,6 +7,19 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.22 - 2026-06-14
+
+### Changed
+
+- Start the next cache/load-balancer crate-boundary pass by moving
+  load-balancer persistence key extraction behind a Fluxheim-owned request
+  view trait. The Pingora `RequestHeader` adapter remains at the
+  load-balancer API boundary, so routing, persistence, managed-cookie, header,
+  cookie, URI, and source-IP selection behavior is unchanged.
+- Add persistence-module tests that exercise managed-cookie validation through
+  the Fluxheim request view directly, reducing Pingora coupling in unit-level
+  load-balancer coverage.
+
 ## 1.5.21 - 2026-06-13
 
 ### Added

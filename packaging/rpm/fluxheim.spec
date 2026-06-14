@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.21
+Version:        1.5.22
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jun 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.22-1
+- Continue cache/load-balancer crate-boundary preparation.
+- Move load-balancer persistence key extraction behind a Fluxheim-owned
+  request view while keeping the Pingora request adapter at the API boundary.
+
 * Sat Jun 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.21-1
 - Add UDP beta per-source pressure controls, response-rate limiting, metrics,
   and admin status visibility.

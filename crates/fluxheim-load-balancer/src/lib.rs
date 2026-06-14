@@ -57,7 +57,7 @@ use self::discovery::{
 pub(crate) use self::key::backend_key;
 use self::persistence::{
     LoadBalanceKeySource, LoadBalancerPersistenceSnapshot, LoadBalancerPersistenceState,
-    ManagedAffinityCookie,
+    LoadBalancerRequestView, ManagedAffinityCookie,
 };
 use self::policy::{
     BackendSelectionPolicy, BackendStatsInputs, RuntimeBackendPolicySnapshot, backend_aliases,
@@ -81,6 +81,30 @@ pub use self::metrics::set_load_balancer_event_recorder;
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
 const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
 pub const MAX_RUNTIME_BACKEND_WEIGHT: usize = 1000;
+
+impl LoadBalancerRequestView for RequestHeader {
+    fn uri_key(&self) -> Vec<u8> {
+        self.uri.to_string().into_bytes()
+    }
+
+    fn header_values<'a>(&'a self, name: &str) -> Box<dyn Iterator<Item = &'a [u8]> + 'a> {
+        Box::new(
+            self.headers
+                .get_all(name)
+                .into_iter()
+                .map(|value| value.as_bytes()),
+        )
+    }
+
+    fn cookie_headers<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
+        Box::new(
+            self.headers
+                .get_all("cookie")
+                .into_iter()
+                .filter_map(|value| value.to_str().ok()),
+        )
+    }
+}
 
 pub fn parse_load_balancer_runtime_weight(value: &str) -> Result<Option<usize>, &'static str> {
     let value = value.trim();

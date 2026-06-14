@@ -9,13 +9,20 @@ use fluxheim_config::{
     LoadBalanceManagedCookieSameSite, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
     LoadBalanceSelection, ProxyConfig,
 };
-use pingora::http::RequestHeader;
 
 pub(super) const MAX_PERSISTENCE_KEY_BYTES: usize = 512;
 const MANAGED_COOKIE_KEY_BYTES: usize = 16;
 const MANAGED_COOKIE_TAG_BYTES: usize = 32;
 const MANAGED_COOKIE_TOKEN_BYTES: usize = MANAGED_COOKIE_KEY_BYTES + MANAGED_COOKIE_TAG_BYTES;
 const MANAGED_COOKIE_HMAC_ROTATION: Duration = Duration::from_secs(86_400);
+
+pub(crate) trait LoadBalancerRequestView {
+    fn uri_key(&self) -> Vec<u8>;
+
+    fn header_values<'a>(&'a self, name: &str) -> Box<dyn Iterator<Item = &'a [u8]> + 'a>;
+
+    fn cookie_headers<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a>;
+}
 
 #[derive(Debug)]
 pub(super) struct LoadBalancerPersistenceState {
@@ -103,7 +110,7 @@ impl LoadBalancerPersistenceState {
 
     pub(super) fn key(
         &self,
-        request: &RequestHeader,
+        request: &impl LoadBalancerRequestView,
         client_ip: Option<IpAddr>,
     ) -> Option<Vec<u8>> {
         match self.mode {
@@ -392,23 +399,25 @@ impl LoadBalanceKeySource {
 
     pub(super) fn request_key(
         &self,
-        request: &RequestHeader,
+        request: &impl LoadBalancerRequestView,
         client_ip: Option<IpAddr>,
     ) -> Option<Vec<u8>> {
         match self {
             Self::None => None,
             Self::SourceIp => client_ip.map(|ip| ip.to_string().into_bytes()),
-            Self::Uri => Some(request.uri.to_string().into_bytes()),
+            Self::Uri => Some(request.uri_key()),
             Self::Header(name) => request_header_key(request, name),
             Self::Cookie(name) => cookie_key(request, name),
         }
     }
 }
 
-pub(super) fn request_header_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
+pub(super) fn request_header_key(
+    request: &impl LoadBalancerRequestView,
+    name: &str,
+) -> Option<Vec<u8>> {
     let mut key = Vec::new();
-    for value in request.headers.get_all(name) {
-        let bytes = value.as_bytes();
+    for bytes in request.header_values(name) {
         key.extend_from_slice(&bytes.len().to_le_bytes());
         key.extend_from_slice(bytes);
         if key.len() > MAX_PERSISTENCE_KEY_BYTES {
@@ -418,11 +427,8 @@ pub(super) fn request_header_key(request: &RequestHeader, name: &str) -> Option<
     (!key.is_empty()).then_some(key)
 }
 
-pub(super) fn cookie_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
-    for header in request.headers.get_all("cookie") {
-        let Ok(header) = header.to_str() else {
-            continue;
-        };
+pub(super) fn cookie_key(request: &impl LoadBalancerRequestView, name: &str) -> Option<Vec<u8>> {
+    for header in request.cookie_headers() {
         for part in header.split(';') {
             let Some((candidate, value)) = part.trim().split_once('=') else {
                 continue;
@@ -439,7 +445,7 @@ pub(super) fn cookie_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>>
     None
 }
 
-fn managed_cookie_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
+fn managed_cookie_key(request: &impl LoadBalancerRequestView, name: &str) -> Option<Vec<u8>> {
     let encoded = cookie_key(request, name)?;
     let token = base64_ng::URL_SAFE_NO_PAD.decode_vec(&encoded).ok()?;
     if token.len() != MANAGED_COOKIE_TOKEN_BYTES {
@@ -584,6 +590,42 @@ fn random_managed_cookie_hmac_key() -> [u8; 32] {
 mod tests {
     use super::*;
 
+    #[derive(Default)]
+    struct TestRequest {
+        uri: String,
+        headers: Vec<(String, Vec<u8>)>,
+    }
+
+    impl TestRequest {
+        fn with_header(mut self, name: &str, value: impl Into<Vec<u8>>) -> Self {
+            self.headers.push((name.to_ascii_lowercase(), value.into()));
+            self
+        }
+    }
+
+    impl LoadBalancerRequestView for TestRequest {
+        fn uri_key(&self) -> Vec<u8> {
+            self.uri.as_bytes().to_vec()
+        }
+
+        fn header_values<'a>(&'a self, name: &str) -> Box<dyn Iterator<Item = &'a [u8]> + 'a> {
+            let name = name.to_ascii_lowercase();
+            Box::new(
+                self.headers
+                    .iter()
+                    .filter(move |(header, _)| header == &name)
+                    .map(|(_, value)| value.as_slice()),
+            )
+        }
+
+        fn cookie_headers<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
+            Box::new(
+                self.header_values("cookie")
+                    .filter_map(|value| std::str::from_utf8(value).ok()),
+            )
+        }
+    }
+
     #[test]
     fn runtime_counts_filter_removed_backend_keys_without_pruning() {
         let state = LoadBalancerPersistenceState::from_config(&LoadBalancePersistenceConfig {
@@ -697,10 +739,7 @@ mod tests {
     fn managed_cookie_hmac_binds_cookie_name() {
         let key = [9_u8; MANAGED_COOKIE_KEY_BYTES];
         let token = managed_cookie_token(b"fluxheim_lb", &key).unwrap();
-        let mut request = RequestHeader::build("GET", b"/", None).unwrap();
-        request
-            .append_header("cookie", format!("fluxheim_lb={token}"))
-            .unwrap();
+        let request = TestRequest::default().with_header("cookie", format!("fluxheim_lb={token}"));
 
         assert_eq!(
             managed_cookie_key(&request, "fluxheim_lb").as_deref(),
@@ -708,10 +747,7 @@ mod tests {
         );
         assert_eq!(managed_cookie_key(&request, "other_lb"), None);
 
-        let mut replay = RequestHeader::build("GET", b"/", None).unwrap();
-        replay
-            .append_header("cookie", format!("other_lb={token}"))
-            .unwrap();
+        let replay = TestRequest::default().with_header("cookie", format!("other_lb={token}"));
         assert_eq!(managed_cookie_key(&replay, "other_lb"), None);
     }
 }
