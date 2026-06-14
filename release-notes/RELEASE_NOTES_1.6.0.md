@@ -54,6 +54,12 @@ remove Pingora safely in later 1.6.x releases.
 - Refreshed `ROADMAP.md` so `1.6.x` is consistently documented as the
   Pingora-exit line, shared Wasm extensibility is moved to `1.7`, and HTTP/3
   remains after the runtime boundary is stable.
+- Hardened `scripts/validate-pingora-dependency-policy.sh` so documented
+  Pingora removal targets are enforced against the current Fluxheim version
+  instead of acting as a set-membership inventory only.
+- Tightened release-gate scripts by requiring modularity exceptions to be
+  listed as structured table rows and by giving the UDP smoke negative
+  assertion a longer observation window.
 
 ## Notes
 

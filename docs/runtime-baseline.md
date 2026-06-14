@@ -50,6 +50,15 @@ by:
 scripts/validate-pingora-dependency-policy.sh check
 ```
 
+That gate fails when a Pingora crate is present without an exception, when an
+exception is stale, or when the current Fluxheim version has reached the
+exception's `removal_target`. Maintainers can test an upcoming release bump
+before editing `Cargo.toml` with:
+
+```bash
+FLUXHEIM_PINGORA_POLICY_VERSION=1.6.1 scripts/validate-pingora-dependency-policy.sh check
+```
+
 Release mode invokes the performance baseline automatically. To skip it for a
 local emergency run, set:
 
@@ -87,4 +96,6 @@ and macOS developer builds.
 Temporary compatibility shims are acceptable only while an old and new runtime
 path are being compared. New internal APIs should not introduce fresh Pingora
 types unless the same release documents the exception and target removal
-release.
+release. If a removal slips, the exception file must be updated explicitly with
+a new target and release-note rationale; the gate must not stay green by
+accident.

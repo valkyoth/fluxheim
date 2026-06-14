@@ -214,7 +214,7 @@ import time
 
 path = pathlib.Path(sys.argv[1])
 forbidden = sys.argv[2].encode("ascii")
-deadline = time.monotonic() + 1.0
+deadline = time.monotonic() + 3.0
 
 while time.monotonic() < deadline:
     if path.exists() and forbidden in path.read_bytes():

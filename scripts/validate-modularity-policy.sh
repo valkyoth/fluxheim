@@ -35,7 +35,7 @@ git ls-files '*.rs' | while IFS= read -r path; do
         continue
     fi
     printf 'modularity policy: %s lines %s\n' "$lines" "$path"
-    if [ "$mode" = "check" ] && ! grep -Fq "\`$path\`" "$exceptions"; then
+    if [ "$mode" = "check" ] && ! grep -Fq "| \`$path\` |" "$exceptions"; then
         echo "modularity policy: $path exceeds $limit lines and is not listed in $exceptions" >&2
         printf '%s\n' "$path" >> "$tmp"
     fi
