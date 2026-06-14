@@ -14,6 +14,10 @@ interfaces before the HTTP runtime is replaced.
 - Managed-cookie persistence tests now run against a local Fluxheim request
   view, proving the persistence module can validate cookies without a Pingora
   request object.
+- `fluxheim-web` symlink-detection tests now use repository-local,
+  component-validated test paths from the shared test-support helpers. This
+  resolves CodeQL path-expression alerts in test setup/cleanup code without
+  changing static-web runtime behavior.
 
 ## Compatibility
 

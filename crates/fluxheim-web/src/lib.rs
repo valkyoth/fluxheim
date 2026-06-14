@@ -493,6 +493,8 @@ mod tests {
     use std::path::Path;
     use std::time::UNIX_EPOCH;
 
+    use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
+
     use super::{
         ByteRangeParse, DirectoryEntry, DirectoryListing, SafeRelativePath, StaticCacheIdentity,
         StaticResponseBody, StaticResponseConditions, StaticResponseFile,
@@ -572,8 +574,7 @@ mod tests {
 
     #[test]
     fn configured_web_path_allows_missing_plain_path() {
-        let missing =
-            std::env::temp_dir().join(format!("fluxheim-web-missing-{}", std::process::id()));
+        let missing = unique_temp_path("fluxheim-web-missing");
 
         assert!(!configured_web_path_contains_symlink(&missing).unwrap());
     }
@@ -581,20 +582,18 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn configured_web_path_detects_symlinked_parent() {
-        let root = std::env::temp_dir().join(format!(
-            "fluxheim-web-symlink-parent-{}",
-            std::process::id()
-        ));
-        let real = root.join("real");
-        let linked = root.join("linked");
-        let public = linked.join("public");
-        std::fs::create_dir_all(real.join("public")).unwrap();
+        let root = unique_temp_path("fluxheim-web-symlink-parent");
+        let real = safe_child_path(&root, "real");
+        let linked = safe_child_path(&root, "linked");
+        let real_public = safe_child_path(&real, "public");
+        let public = safe_child_path(&linked, "public");
+        std::fs::create_dir_all(&real_public).unwrap();
         std::os::unix::fs::symlink(&real, &linked).unwrap();
 
         assert!(configured_web_path_contains_symlink(&public).unwrap());
 
-        let _ = std::fs::remove_file(linked);
-        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_file(&linked);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

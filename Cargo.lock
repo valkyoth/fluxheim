@@ -1196,6 +1196,7 @@ name = "fluxheim-web"
 version = "1.5.22"
 dependencies = [
  "chrono",
+ "fluxheim-common",
  "httpdate",
  "percent-encoding",
 ]

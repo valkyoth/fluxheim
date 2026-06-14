@@ -19,6 +19,10 @@ behavior when the change improves security or project direction.
 - Add persistence-module tests that exercise managed-cookie validation through
   the Fluxheim request view directly, reducing Pingora coupling in unit-level
   load-balancer coverage.
+- Harden `fluxheim-web` filesystem tests that exercise symlink detection by
+  using repository-local, component-validated test paths instead of raw
+  `temp_dir()`-derived paths, resolving CodeQL path-expression alerts without
+  changing runtime web behavior.
 
 ## 1.5.21 - 2026-06-13
 
