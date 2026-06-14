@@ -21,6 +21,10 @@ behavior when the change improves security or project direction.
   Fluxheim-native backend sets in `fluxheim-load-balancer`.
 - Replace Pingora's TCP health-check backend adapter with a Fluxheim-owned TCP
   connector and rustls/OpenSSL handshake paths.
+- Add a focused Podman load-balancer runtime smoke that builds the
+  load-balancer-edge image, runs it against two local origins, verifies
+  round-robin/header persistence behavior, and checks that the image profile
+  does not compile Pingora load-balancing crates.
 
 ## 1.6.0 - 2026-06-14
 

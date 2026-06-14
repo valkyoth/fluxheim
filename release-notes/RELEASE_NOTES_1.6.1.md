@@ -16,6 +16,11 @@ load-balancer container images are again part of normal tag builds for the
   Fluxheim-native backend types.
 - Replaced the Pingora TCP health-check adapter with a Fluxheim-owned TCP
   connector and rustls/OpenSSL TLS handshake paths.
+- Added `scripts/smoke_load_balancer_container.sh` so release testing can build
+  the focused load-balancer image and prove round-robin plus header persistence
+  behavior through a real container, while also checking that
+  `pingora-load-balancing` and `pingora-ketama` are absent from that profile's
+  dependency tree.
 - Updated workspace, RPM, README, build documentation, and release notes to
   `1.6.1`.
 

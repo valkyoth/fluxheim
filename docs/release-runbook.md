@@ -36,6 +36,7 @@ scripts/reproducible_build_check.sh
 scripts/validate-release-metadata.sh
 scripts/validate-owasp-top10-2025.sh check
 scripts/podman_smoke.sh
+scripts/smoke_load_balancer_container.sh
 FLUXHEIM_CONTAINER_VARIANTS="debian alpine" scripts/podman_smoke_variants.sh
 ```
 
@@ -69,6 +70,9 @@ variant image smokes before a tag should be pushed. Use
 `FLUXHEIM_GATE_IMAGE_VARIANTS="debian alpine wolfi suse-micro"` when the release
 needs full local variant evidence. Use `FLUXHEIM_SKIP_IMAGE_GATE=1` only when
 equivalent image evidence has already been collected on another builder.
+Set `FLUXHEIM_GATE_LOAD_BALANCER_CONTAINER=1`, or use
+`scripts/stable_release_deep_gate.sh release`, to also build and run the
+focused load-balancer image against two local origins before tagging.
 
 For the `1.3` and later lines this stable gate includes the proxy cache and
 local observability smoke suites, plus compile and packaged-config checks for

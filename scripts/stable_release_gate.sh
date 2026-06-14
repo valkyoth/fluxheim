@@ -126,6 +126,13 @@ else
     echo "stable release gate: skipping local load smoke; set FLUXHEIM_GATE_LOAD=1 to enable"
 fi
 
+if [ "${FLUXHEIM_GATE_LOAD_BALANCER_CONTAINER:-0}" = "1" ]; then
+    echo "stable release gate: load-balancer container runtime smoke"
+    scripts/smoke_load_balancer_container.sh
+else
+    echo "stable release gate: skipping load-balancer container runtime smoke; set FLUXHEIM_GATE_LOAD_BALANCER_CONTAINER=1 to enable"
+fi
+
 if [ "${FLUXHEIM_GATE_UDP:-0}" = "1" ]; then
     echo "stable release gate: UDP beta smoke"
     scripts/smoke_udp_proxy.sh

@@ -15,6 +15,9 @@ sh scripts/smoke_observability_local.sh
 
 if [ "${FLUXHEIM_RELEASE_PODMAN:-0}" = "1" ]; then
     scripts/podman_smoke.sh
+    if [ "${FLUXHEIM_RELEASE_LOAD_BALANCER_CONTAINER:-0}" = "1" ]; then
+        scripts/smoke_load_balancer_container.sh
+    fi
     if [ "${FLUXHEIM_RELEASE_PODMAN_VARIANTS:-0}" = "1" ]; then
         scripts/podman_smoke_variants.sh
     fi

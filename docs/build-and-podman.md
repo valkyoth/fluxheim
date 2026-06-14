@@ -391,6 +391,18 @@ scripts/podman_smoke.sh
 The smoke script builds the image, validates the packaged config, and confirms
 the runtime user is `65532`.
 
+Run the focused load-balancer image as a real container and verify
+round-robin plus header persistence through two local origins:
+
+```bash
+scripts/smoke_load_balancer_container.sh
+```
+
+This smoke builds the `profile-load-balancer-edge,acme-client` image by
+default, starts Fluxheim with host networking, and fails if the
+load-balancer-edge dependency tree compiles `pingora-load-balancing` or
+`pingora-ketama`.
+
 Run every runtime variant smoke:
 
 ```bash
