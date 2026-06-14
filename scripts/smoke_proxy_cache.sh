@@ -538,6 +538,10 @@ size_bytes = "8B"
 max_slices = 8
 fill_missing = true
 
+[vhosts.routes.cache.origin_protection]
+enabled = true
+max_concurrent_fills = 2
+
 [vhosts.routes.cache.memory]
 enabled = true
 max_size_bytes = "16MiB"
@@ -716,6 +720,19 @@ fi
     --expect-namespace fluxheim-image-v1 \
     --expect-key-namespace cache-route-swr-v1 \
     --expect-user-tag cache.test:route:swr
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-key \
+    --host cache.test \
+    --path /slice.bin \
+    --expect-eligible \
+    --expect-origin-protection-enabled \
+    --expect-origin-protection-max-concurrent-fills 2 \
+    --expect-scope route \
+    --expect-vhost cache.test \
+    --expect-route slice-range \
+    --expect-namespace fluxheim-image-v1 \
+    --expect-key-namespace cache-route-slice-v1 \
+    --expect-user-tag cache.test:route:slice-range
 
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
     --host cache.test \
