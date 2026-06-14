@@ -159,6 +159,11 @@ fi
   foundation tag.
 - Fix container image workflow handling so load-balancer images build for
   normal v1.6.x tag pushes.
+- Remove active pingora-load-balancing usage from full and load-balancer
+  image profiles with native backend sets, TCP health checks, and bounded TLS
+  TCP health-check handshakes.
+- Move load-balancer background service and request-view adapters to the root
+  runtime boundary.
 
 * Sun Jun 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.0-1
 - Start the Pingora-exit foundation line with versioned 1.6.0 metadata.

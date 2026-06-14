@@ -1314,16 +1314,17 @@ mod tests {
     use super::Backend;
     use super::FluxHealthCheck;
     use super::HealthDerivedWeights;
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+    use super::{FluxTcpHealthCheck, configured_tcp_health_check_tls_inner};
     use super::{
-        FluxTcpHealthCheck, POSTGRES_HEALTH_CHECK_SSL_REQUEST, REDIS_HEALTH_CHECK_REQUEST,
+        POSTGRES_HEALTH_CHECK_SSL_REQUEST, REDIS_HEALTH_CHECK_REQUEST,
         configured_exec_health_check, configured_health_check, configured_http_health_check,
         configured_mysql_health_check, configured_postgres_health_check,
-        configured_redis_health_check, configured_tcp_health_check_tls_inner, grpc_frame,
-        grpc_health_request_body, record_health_weight, validate_grpc_health_response_body,
-        validate_grpc_health_response_header, validate_http_health_response,
-        validate_http_health_response_body, validate_http_health_response_body_json,
-        validate_mysql_health_handshake, validate_postgres_health_response,
-        validate_redis_health_response,
+        configured_redis_health_check, grpc_frame, grpc_health_request_body, record_health_weight,
+        validate_grpc_health_response_body, validate_grpc_health_response_header,
+        validate_http_health_response, validate_http_health_response_body,
+        validate_http_health_response_body_json, validate_mysql_health_handshake,
+        validate_postgres_health_response, validate_redis_health_response,
     };
     use fluxheim_config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,

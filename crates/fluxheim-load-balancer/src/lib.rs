@@ -2889,7 +2889,7 @@ mod tests {
         .unwrap();
 
         let first = balancer.select(&request(), None).unwrap();
-        let first_addr = first.backend.addr.clone();
+        let first_addr = first.backend.addr;
         let second = balancer.select(&request(), None).unwrap();
         assert_ne!(&first_addr, &second.backend.addr);
         drop(first);
@@ -3355,7 +3355,7 @@ mod tests {
         .unwrap();
 
         let failed = balancer.select(&request(), None).unwrap();
-        let failed_addr = failed.backend.addr.clone();
+        let failed_addr = failed.backend.addr;
         let outcome = failed.reporter.unwrap().record_status(503, None);
         assert!(outcome.failed);
         assert!(outcome.ejected);
@@ -3395,10 +3395,10 @@ mod tests {
         .unwrap();
 
         let first = balancer.select(&request(), None).unwrap();
-        let first_addr = first.backend.addr.clone();
+        let first_addr = first.backend.addr;
         assert!(first.reporter.unwrap().record_failure().ejected);
         let second = balancer.select(&request(), None).unwrap();
-        let second_addr = second.backend.addr.clone();
+        let second_addr = second.backend.addr;
         assert_ne!(first_addr, second_addr);
         assert!(second.reporter.unwrap().record_failure().ejected);
 
@@ -3562,7 +3562,7 @@ mod tests {
         .unwrap();
 
         let failed = balancer.select(&request(), None).unwrap();
-        let failed_addr = failed.backend.addr.clone();
+        let failed_addr = failed.backend.addr;
         let outcome = failed
             .reporter
             .unwrap()
