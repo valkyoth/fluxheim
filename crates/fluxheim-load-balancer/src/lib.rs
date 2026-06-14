@@ -4213,7 +4213,7 @@ mod tests {
     }
 
     #[test]
-    fn configures_pingora_tcp_health_check() {
+    fn configures_tcp_health_check() {
         install_test_crypto_provider();
         let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
             upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],

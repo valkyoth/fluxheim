@@ -42,20 +42,34 @@ pub(super) fn configured_health_check(
 
     match config.load_balance.health_check.protocol {
         LoadBalanceHealthCheckProtocol::Tcp => {
-            let mut health_check = if config.upstream_tls {
-                TcpHealthCheck::new_tls(&config.upstream_sni())
-            } else {
-                TcpHealthCheck::new()
-            };
-            health_check.consecutive_success = config.load_balance.health_check.consecutive_success;
-            health_check.consecutive_failure = config.load_balance.health_check.consecutive_failure;
-            apply_health_check_peer_timeouts(
-                &mut health_check.peer_template.options.connection_timeout,
-                None,
-                config,
+            let consecutive_success = config.load_balance.health_check.consecutive_success;
+            let consecutive_failure = config.load_balance.health_check.consecutive_failure;
+            let connect_timeout = Duration::from_secs(
+                config
+                    .load_balance
+                    .health_check
+                    .connect_timeout_secs
+                    .or(config.connect_timeout_secs)
+                    .unwrap_or(1),
             );
+            let inner = if config.upstream_tls {
+                let mut health_check = TcpHealthCheck::new_tls(&config.upstream_sni());
+                health_check.consecutive_success = consecutive_success;
+                health_check.consecutive_failure = consecutive_failure;
+                apply_health_check_peer_timeouts(
+                    &mut health_check.peer_template.options.connection_timeout,
+                    None,
+                    config,
+                );
+                Some(health_check)
+            } else {
+                None
+            };
             Ok(Box::new(FluxTcpHealthCheck {
-                inner: health_check,
+                consecutive_success,
+                consecutive_failure,
+                connect_timeout,
+                inner,
             }))
         }
         LoadBalanceHealthCheckProtocol::Http | LoadBalanceHealthCheckProtocol::Grpc => {
@@ -79,28 +93,57 @@ pub(super) fn configured_health_check(
 }
 
 struct FluxTcpHealthCheck {
-    inner: Box<TcpHealthCheck>,
+    consecutive_success: usize,
+    consecutive_failure: usize,
+    connect_timeout: Duration,
+    inner: Option<Box<TcpHealthCheck>>,
 }
 
 #[async_trait]
 impl FluxHealthCheck for FluxTcpHealthCheck {
     async fn check(&self, target: &Backend) -> FluxResult<()> {
-        self.inner
-            .check(target)
-            .await
-            .map_err(pingora_health_error("TCP health check failed"))
+        if let Some(inner) = &self.inner {
+            return inner
+                .check(target)
+                .await
+                .map_err(pingora_health_error("TLS TCP health check failed"));
+        }
+
+        let authority = target.addr.to_string();
+        tokio::time::timeout(
+            self.connect_timeout,
+            tokio::net::TcpStream::connect(authority.as_str()),
+        )
+        .await
+        .map_err(|_| {
+            FluxError::timeout(
+                "connect TCP health check upstream",
+                format!("timeout after {}s", self.connect_timeout.as_secs()),
+            )
+        })?
+        .map_err(|error| FluxError::io("connect TCP health check upstream", error))?;
+        Ok(())
     }
 
     fn health_threshold(&self, success: bool) -> usize {
-        self.inner.health_threshold(success)
+        if success {
+            self.consecutive_success
+        } else {
+            self.consecutive_failure
+        }
     }
 
     async fn health_status_change(&self, target: &Backend, healthy: bool) {
-        self.inner.health_status_change(target, healthy).await;
+        if let Some(inner) = &self.inner {
+            inner.health_status_change(target, healthy).await;
+        }
     }
 
     fn backend_summary(&self, target: &Backend) -> String {
-        self.inner.backend_summary(target)
+        if let Some(inner) = &self.inner {
+            return inner.backend_summary(target);
+        }
+        format!("{target:?}")
     }
 }
 
@@ -1146,13 +1189,13 @@ mod tests {
     use super::HealthDerivedWeights;
     use super::{
         POSTGRES_HEALTH_CHECK_SSL_REQUEST, REDIS_HEALTH_CHECK_REQUEST,
-        configured_exec_health_check, configured_http_health_check, configured_mysql_health_check,
-        configured_postgres_health_check, configured_redis_health_check, grpc_frame,
-        grpc_health_request_body, record_health_weight, validate_grpc_health_response_body,
-        validate_grpc_health_response_header, validate_http_health_response,
-        validate_http_health_response_body, validate_http_health_response_body_json,
-        validate_mysql_health_handshake, validate_postgres_health_response,
-        validate_redis_health_response,
+        configured_exec_health_check, configured_health_check, configured_http_health_check,
+        configured_mysql_health_check, configured_postgres_health_check,
+        configured_redis_health_check, grpc_frame, grpc_health_request_body, record_health_weight,
+        validate_grpc_health_response_body, validate_grpc_health_response_header,
+        validate_http_health_response, validate_http_health_response_body,
+        validate_http_health_response_body_json, validate_mysql_health_handshake,
+        validate_postgres_health_response, validate_redis_health_response,
     };
     use fluxheim_config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
@@ -1165,6 +1208,40 @@ mod tests {
     fn install_test_crypto_provider() {
         #[cfg(feature = "tls-rustls-backend")]
         let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
+    #[tokio::test]
+    async fn tcp_health_check_uses_fluxheim_plain_connect() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream = listener.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+        let health_check = configured_health_check(
+            &ProxyConfig {
+                upstreams: vec![upstream.to_string(), "127.0.0.1:1".to_owned()],
+                load_balance: LoadBalanceConfig {
+                    health_check: LoadBalanceHealthCheckConfig {
+                        enabled: true,
+                        protocol: LoadBalanceHealthCheckProtocol::Tcp,
+                        consecutive_success: 2,
+                        consecutive_failure: 3,
+                        connect_timeout_secs: Some(1),
+                        ..LoadBalanceHealthCheckConfig::default()
+                    },
+                    ..LoadBalanceConfig::default()
+                },
+                ..ProxyConfig::default()
+            },
+            Arc::new(HealthDerivedWeights::default()),
+        )
+        .unwrap();
+        let backend = Backend::new(&upstream.to_string()).unwrap();
+
+        health_check.check(&backend).await.unwrap();
+        assert_eq!(health_check.health_threshold(true), 2);
+        assert_eq!(health_check.health_threshold(false), 3);
+        accept.await.unwrap();
     }
 
     #[test]

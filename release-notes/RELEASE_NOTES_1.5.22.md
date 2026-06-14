@@ -18,6 +18,9 @@ interfaces before the HTTP runtime is replaced.
   component-validated test paths from the shared test-support helpers. This
   resolves CodeQL path-expression alerts in test setup/cleanup code without
   changing static-web runtime behavior.
+- Cleartext TCP health checks now use a Fluxheim-owned Tokio connect probe.
+  TLS TCP health checks intentionally keep the existing Pingora transport
+  connector so SNI/TLS handshake behavior stays unchanged in `1.5.22`.
 
 ## Compatibility
 

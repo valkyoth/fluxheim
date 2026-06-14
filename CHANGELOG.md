@@ -23,6 +23,10 @@ behavior when the change improves security or project direction.
   using repository-local, component-validated test paths instead of raw
   `temp_dir()`-derived paths, resolving CodeQL path-expression alerts without
   changing runtime web behavior.
+- Move cleartext TCP health checks to a Fluxheim-owned Tokio connect probe.
+  TLS TCP health checks still use the existing Pingora transport connector for
+  SNI/TLS handshake compatibility until the larger `1.6.x` connector-removal
+  work.
 
 ## 1.5.21 - 2026-06-13
 
