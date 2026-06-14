@@ -18,6 +18,7 @@ use crate::flux_error::{FluxError, FluxResult};
 
 const UDP_RECEIVE_BUFFER_BYTES: usize = 65_507;
 const UDP_DROP_LOG_INTERVAL_MILLIS: u64 = 1_000;
+const UDP_EJECTION_LOG_INTERVAL_MILLIS: u64 = 1_000;
 const UDP_RESPONSE_RATE_TRACKED_SOURCES_FLOOR: usize = 4_096;
 
 type UdpSourceSessions = Arc<Mutex<HashMap<IpAddr, usize>>>;
@@ -212,6 +213,8 @@ struct UdpProxyApp {
     next_upstream: AtomicUsize,
     last_drop_log_millis: AtomicU64,
     suppressed_drop_logs: AtomicUsize,
+    last_ejection_log_millis: AtomicU64,
+    suppressed_ejection_logs: AtomicUsize,
 }
 
 impl UdpProxyApp {
@@ -285,6 +288,8 @@ impl UdpProxyApp {
             next_upstream: AtomicUsize::new(0),
             last_drop_log_millis: AtomicU64::new(0),
             suppressed_drop_logs: AtomicUsize::new(0),
+            last_ejection_log_millis: AtomicU64::new(0),
+            suppressed_ejection_logs: AtomicUsize::new(0),
         })
     }
 
@@ -356,7 +361,9 @@ impl UdpProxyApp {
             Ok(()) => upstream.record_success(),
             Err(error) => {
                 self.record_datagram("upstream", "error");
-                self.record_upstream_failure(upstream);
+                if udp_error_counts_for_passive_health(&error) {
+                    self.record_upstream_failure(upstream);
+                }
                 log::debug!(
                     target: "fluxheim::udp",
                     "UDP route {} failed to forward datagram via {}: {error}",
@@ -511,9 +518,32 @@ impl UdpProxyApp {
         upstream
             .ejected_until_millis
             .store(ejected_until, Ordering::Release);
+        self.log_passive_ejection(upstream);
+    }
+
+    fn log_passive_ejection(&self, upstream: &RuntimeUdpUpstream) {
+        let now = udp_log_millis();
+        let last = self.last_ejection_log_millis.load(Ordering::Relaxed);
+        if now.saturating_sub(last) < UDP_EJECTION_LOG_INTERVAL_MILLIS {
+            self.suppressed_ejection_logs
+                .fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+
+        if self
+            .last_ejection_log_millis
+            .compare_exchange(last, now, Ordering::AcqRel, Ordering::Relaxed)
+            .is_err()
+        {
+            self.suppressed_ejection_logs
+                .fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+
+        let suppressed = self.suppressed_ejection_logs.swap(0, Ordering::AcqRel);
         log::warn!(
             target: "fluxheim::udp",
-            "UDP route {} passively ejected upstream {} after {} consecutive failures for {} seconds",
+            "UDP route {} passively ejected upstream {} after {} consecutive failures for {} seconds; suppressed_since_last={suppressed}",
             self.name,
             upstream.alias.as_deref().unwrap_or(upstream.authority.as_str()),
             self.passive_health_failures,
@@ -611,6 +641,13 @@ impl UdpProxyApp {
             self.name
         );
     }
+}
+
+fn udp_error_counts_for_passive_health(error: &io::Error) -> bool {
+    !matches!(
+        error.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::InvalidData
+    )
 }
 
 struct RuntimeUdpUpstream {
@@ -738,8 +775,11 @@ fn udp_log_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{UdpAcquireError, UdpProxyApp, unspecified_bind_addr};
+    use super::{
+        UdpAcquireError, UdpProxyApp, udp_error_counts_for_passive_health, unspecified_bind_addr,
+    };
     use crate::config::{UdpRouteConfig, UdpRouteMode};
+    use std::io;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
@@ -962,6 +1002,26 @@ mod tests {
         upstream.record_success();
         assert_eq!(upstream.failures.load(Ordering::Acquire), 0);
         assert_eq!(upstream.ejected_until_millis.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn udp_passive_health_ignores_local_drop_errors() {
+        assert!(!udp_error_counts_for_passive_health(&io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "response rate limit exceeded"
+        )));
+        assert!(!udp_error_counts_for_passive_health(&io::Error::new(
+            io::ErrorKind::InvalidData,
+            "upstream response exceeded datagram cap"
+        )));
+        assert!(udp_error_counts_for_passive_health(&io::Error::new(
+            io::ErrorKind::TimedOut,
+            "upstream response timed out"
+        )));
+        assert!(udp_error_counts_for_passive_health(&io::Error::new(
+            io::ErrorKind::ConnectionRefused,
+            "upstream refused datagram"
+        )));
     }
 
     #[test]

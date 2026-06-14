@@ -35,6 +35,10 @@ interfaces before the HTTP runtime is replaced.
 - Range and slice cache-key component construction now uses a cache-crate
   helper, leaving the proxy cache module to adapt only Pingora's cache-key
   container.
+- UDP beta passive health now ignores local downstream drop conditions such as
+  per-source response-rate limiting and oversized upstream responses. Only
+  genuine upstream connectivity/timeout failures can contribute to passive
+  ejection, and passive-ejection warning logs are rate-limited.
 
 ## Compatibility
 

@@ -343,8 +343,11 @@ passive_health_ejection_secs = 10
   consecutive upstream send/receive failures eject a member from selection for
   `passive_health_ejection_secs` seconds once `passive_health_failures` is
   reached. A successful exchange clears the member failure count and ejection
-  state. If all members are ejected, Fluxheim falls back to trying the selected
-  member so a full pool outage does not become a permanent local dead end.
+  state. Local downstream drops, including per-source response-rate limiting
+  and oversized upstream responses rejected by Fluxheim's datagram cap, do not
+  count as upstream passive-health failures. If all members are ejected,
+  Fluxheim falls back to trying the selected member so a full pool outage does
+  not become a permanent local dead end.
 - `dns-load-balance` is beta and can act as a UDP reflector if exposed to
   untrusted networks. Bind beta listeners to loopback or internal interfaces
   unless the deployment has upstream ingress filtering such as BCP38. Fluxheim

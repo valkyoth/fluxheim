@@ -38,6 +38,9 @@ behavior when the change improves security or project direction.
   into the cache crate, keeping Pingora conversions in the root adapter layer.
 - Move range/slice cache-key component construction into the cache crate so
   the proxy cache module only adapts the Pingora cache-key container.
+- Harden UDP beta passive health so local downstream drop conditions
+  (`response_rate_limited` and oversized upstream responses) do not count as
+  upstream failures, and rate-limit passive-ejection warning logs.
 
 ## 1.5.21 - 2026-06-13
 
