@@ -25,6 +25,9 @@ behavior when the change improves security or project direction.
   load-balancer-edge image, runs it against two local origins, verifies
   round-robin/header persistence behavior, and checks that the image profile
   does not compile Pingora load-balancing crates.
+- Split load-balancer API/runtime DTOs and parser helpers into
+  `crates/fluxheim-load-balancer/src/api.rs`, keeping public re-exports stable
+  while reducing the crate root orchestration surface.
 
 ## 1.6.0 - 2026-06-14
 

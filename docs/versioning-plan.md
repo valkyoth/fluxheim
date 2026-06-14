@@ -2487,7 +2487,11 @@ Planned `1.6.x` sequence:
   Pingora background/listen/shutdown service traits in
   `fluxheim-load-balancer` with Fluxheim/Tokio task handles. Add a
   load-balancer-only `cargo tree` gate proving `pingora-load-balancing` is not
-  compiled.
+  compiled. Committed work includes the active dependency cut, native backend
+  sets and TCP health-check adapter, focused load-balancer container runtime
+  smoke, and the first `fluxheim-load-balancer` API/runtime DTO split; the
+  remaining Pingora service adapter removal is carried into the background
+  runtime cutover.
 - `v1.6.2`: cache independence. Move cache interfaces into `fluxheim-cache`
   and replace remaining Pingora cache key/meta/hit/miss/admission adapter
   usage in normal cache builds. Keep a temporary compatibility adapter only for

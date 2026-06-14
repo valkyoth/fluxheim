@@ -21,6 +21,10 @@ load-balancer container images are again part of normal tag builds for the
   behavior through a real container, while also checking that
   `pingora-load-balancing` and `pingora-ketama` are absent from that profile's
   dependency tree.
+- Split load-balancer API/runtime DTOs and parser helpers into a focused
+  `api.rs` module. Existing public re-exports remain stable; the change is a
+  reviewability step for the 1.6 modularity policy, not a config or runtime
+  behavior change.
 - Updated workspace, RPM, README, build documentation, and release notes to
   `1.6.1`.
 
@@ -28,4 +32,4 @@ load-balancer container images are again part of normal tag builds for the
 
 - This release completes the active dependency cut from `pingora-load-balancing`.
   The `pingora` HTTP health-check connector and current server-service adapter
-  remain scheduled for the later HTTP/runtime cutover releases in the 1.6 line.
+  remain scheduled for later HTTP/runtime cutover releases in the 1.6 line.

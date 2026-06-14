@@ -19,7 +19,7 @@ documents why the exception is temporary and how it will be removed.
 | `src/cache.rs` | 13456 | Legacy Pingora cache storage/runtime adapter plus remaining cache orchestration. | Continue moving pure cache runtime into `fluxheim-cache` in `1.6.2`. |
 | `src/admin.rs` | 8059 | Legacy admin HTTP endpoint router over every domain. | Reduce after domain APIs stabilize; possible `fluxheim-admin` after `1.6.12`. |
 | `src/cli.rs` | 5544 | Legacy command dispatch and release/admin/cache tooling. | Split command handlers by domain after runtime crates settle. |
-| `crates/fluxheim-load-balancer/src/lib.rs` | 4358 | Load-balancer orchestration root still hosts many domain pieces. | Split while removing remaining Pingora LB boundaries in `1.6.1`. |
+| `crates/fluxheim-load-balancer/src/lib.rs` | 3961 | Load-balancer orchestration root still hosts many domain pieces; API/runtime DTOs moved to `api.rs` in `1.6.1`. | Continue splitting orchestration, runtime mutation, and Pingora service adapter code during the remaining `1.6` load-balancer/background cutovers. |
 | `src/acme.rs` | 3909 | ACME account/order/install/renewal and filesystem safety in one root adapter. | Move to `fluxheim-acme` around `1.6.6`. |
 | `src/metrics.rs` | 2761 | Root metrics registry/export adapter over many domains. | Move remaining pure metrics into `fluxheim-observability`. |
 | `crates/fluxheim-config/src/config.rs` | 2512 | Config root, validation helpers, and shared parsing glue. | Split by shared config primitives. |
