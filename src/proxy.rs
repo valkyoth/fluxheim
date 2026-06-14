@@ -151,6 +151,8 @@ const SLICE_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
 #[cfg(feature = "cache")]
 const ORIGIN_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
 #[cfg(feature = "cache")]
+static SLICE_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> = OnceLock::new();
+#[cfg(feature = "cache")]
 static PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> = OnceLock::new();
 #[cfg(feature = "cache")]
 static ORIGIN_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> =
@@ -4310,28 +4312,25 @@ struct CacheSliceIdentity {
 }
 
 #[cfg(feature = "cache")]
-struct SliceFillPermit {
+struct CacheFillConcurrencyPermit {
     counter: Arc<AtomicUsize>,
 }
 
 #[cfg(feature = "cache")]
-impl Drop for SliceFillPermit {
+impl Drop for CacheFillConcurrencyPermit {
     fn drop(&mut self) {
         self.counter.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
 #[cfg(feature = "cache")]
-struct OriginFillPermit {
-    counter: Arc<AtomicUsize>,
-}
+type SliceFillPermit = CacheFillConcurrencyPermit;
 
 #[cfg(feature = "cache")]
-impl Drop for OriginFillPermit {
-    fn drop(&mut self) {
-        self.counter.fetch_sub(1, Ordering::AcqRel);
-    }
-}
+type OriginFillPermit = CacheFillConcurrencyPermit;
+
+#[cfg(feature = "cache")]
+type PeerFillConcurrencyPermit = CacheFillConcurrencyPermit;
 
 #[cfg(feature = "cache")]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -6767,44 +6766,13 @@ fn slice_416_response(total: u64) -> Result<CacheSliceComposedResponse> {
 
 #[cfg(feature = "cache")]
 fn acquire_slice_fill_permit(key: String) -> Option<SliceFillPermit> {
-    static SLICE_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> =
-        OnceLock::new();
-    let counter = {
-        let mut counters = match SLICE_FILL_CONCURRENCY
-            .get_or_init(|| Mutex::new(HashMap::new()))
-            .lock()
-        {
-            Ok(guard) => guard,
-            Err(_) => {
-                log::error!(
-                    target: "fluxheim::security",
-                    "slice-fill concurrency lock poisoned; aborting to avoid inconsistent cache-fill limits"
-                );
-                std::process::abort();
-            }
-        };
-        prune_inactive_cache_fill_concurrency_counters(
-            &mut counters,
-            SLICE_FILL_CONCURRENCY_MAX_KEYS,
-        );
-        if counters.len() >= SLICE_FILL_CONCURRENCY_MAX_KEYS && !counters.contains_key(&key) {
-            return None;
-        }
-        counters
-            .entry(key.clone())
-            .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
-            .clone()
-    };
-    let mut current = counter.load(Ordering::Acquire);
-    loop {
-        if current >= 1 {
-            return None;
-        }
-        match counter.compare_exchange_weak(current, 1, Ordering::AcqRel, Ordering::Acquire) {
-            Ok(_) => return Some(SliceFillPermit { counter }),
-            Err(observed) => current = observed,
-        }
-    }
+    acquire_cache_fill_concurrency_permit(
+        &SLICE_FILL_CONCURRENCY,
+        SLICE_FILL_CONCURRENCY_MAX_KEYS,
+        key,
+        1,
+        "slice-fill",
+    )
 }
 
 #[cfg(feature = "cache")]
@@ -6820,62 +6788,13 @@ fn acquire_origin_fill_budget_permit(
     key: String,
     max_concurrent_fills: usize,
 ) -> Option<OriginFillPermit> {
-    let counter = {
-        let mut counters = match ORIGIN_FILL_CONCURRENCY
-            .get_or_init(|| Mutex::new(HashMap::new()))
-            .lock()
-        {
-            Ok(guard) => guard,
-            Err(_) => {
-                log::error!(
-                    target: "fluxheim::security",
-                    "origin-fill concurrency lock poisoned; aborting to avoid inconsistent cache-fill limits"
-                );
-                process::abort();
-            }
-        };
-        prune_inactive_cache_fill_concurrency_counters(
-            &mut counters,
-            ORIGIN_FILL_CONCURRENCY_MAX_KEYS,
-        );
-        if counters.len() >= ORIGIN_FILL_CONCURRENCY_MAX_KEYS && !counters.contains_key(&key) {
-            return None;
-        }
-        counters
-            .entry(key.clone())
-            .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
-            .clone()
-    };
-
-    let mut current = counter.load(Ordering::Acquire);
-    loop {
-        if current >= max_concurrent_fills {
-            return None;
-        }
-        let Some(next) = current.checked_add(1) else {
-            log::error!(
-                target: "fluxheim::security",
-                "origin-fill concurrency counter saturated for {key}; refusing permit"
-            );
-            return None;
-        };
-        match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
-            Ok(_) => return Some(OriginFillPermit { counter }),
-            Err(observed) => current = observed,
-        }
-    }
-}
-
-#[cfg(feature = "cache")]
-struct PeerFillConcurrencyPermit {
-    counter: Arc<AtomicUsize>,
-}
-
-#[cfg(feature = "cache")]
-impl Drop for PeerFillConcurrencyPermit {
-    fn drop(&mut self) {
-        self.counter.fetch_sub(1, Ordering::AcqRel);
-    }
+    acquire_cache_fill_concurrency_permit(
+        &ORIGIN_FILL_CONCURRENCY,
+        ORIGIN_FILL_CONCURRENCY_MAX_KEYS,
+        key,
+        max_concurrent_fills,
+        "origin-fill",
+    )
 }
 
 #[cfg(feature = "cache")]
@@ -6891,25 +6810,36 @@ fn acquire_peer_fill_concurrency_permit(
     key: String,
     max_concurrent_requests: usize,
 ) -> Option<PeerFillConcurrencyPermit> {
+    acquire_cache_fill_concurrency_permit(
+        &PEER_FILL_CONCURRENCY,
+        PEER_FILL_CONCURRENCY_MAX_KEYS,
+        key,
+        max_concurrent_requests,
+        "peer-fill",
+    )
+}
+
+#[cfg(feature = "cache")]
+fn acquire_cache_fill_concurrency_permit(
+    registry: &'static OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>>,
+    max_keys: usize,
+    key: String,
+    max_concurrent: usize,
+    label: &'static str,
+) -> Option<CacheFillConcurrencyPermit> {
     let counter = {
-        let mut counters = match PEER_FILL_CONCURRENCY
-            .get_or_init(|| Mutex::new(HashMap::new()))
-            .lock()
-        {
+        let mut counters = match registry.get_or_init(|| Mutex::new(HashMap::new())).lock() {
             Ok(guard) => guard,
             Err(_) => {
                 log::error!(
                     target: "fluxheim::security",
-                    "peer-fill concurrency lock poisoned; aborting to avoid inconsistent cache-fill limits"
+                    "{label} concurrency lock poisoned; aborting to avoid inconsistent cache-fill limits"
                 );
-                std::process::abort();
+                process::abort();
             }
         };
-        prune_inactive_cache_fill_concurrency_counters(
-            &mut counters,
-            PEER_FILL_CONCURRENCY_MAX_KEYS,
-        );
-        if counters.len() >= PEER_FILL_CONCURRENCY_MAX_KEYS && !counters.contains_key(&key) {
+        prune_inactive_cache_fill_concurrency_counters(&mut counters, max_keys);
+        if counters.len() >= max_keys && !counters.contains_key(&key) {
             return None;
         }
         counters
@@ -6920,18 +6850,18 @@ fn acquire_peer_fill_concurrency_permit(
 
     let mut current = counter.load(Ordering::Acquire);
     loop {
-        if current >= max_concurrent_requests {
+        if current >= max_concurrent {
             return None;
         }
         let Some(next) = current.checked_add(1) else {
             log::error!(
                 target: "fluxheim::security",
-                "peer-fill concurrency counter saturated for {key}; refusing permit"
+                "{label} concurrency counter saturated for {key}; refusing permit"
             );
             return None;
         };
         match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
-            Ok(_) => return Some(PeerFillConcurrencyPermit { counter }),
+            Ok(_) => return Some(CacheFillConcurrencyPermit { counter }),
             Err(observed) => current = observed,
         }
     }

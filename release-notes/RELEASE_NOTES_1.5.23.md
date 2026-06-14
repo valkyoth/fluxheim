@@ -21,6 +21,12 @@ operator-controlled origin-fill budget for Fluxheim-owned cache fill paths.
   `--expect-origin-protection-enabled` and
   `--expect-origin-protection-max-concurrent-fills` release-gate checks.
 
+## Changed
+
+- Consolidated slice-fill, peer-fill, and origin-fill cache concurrency permits
+  into one shared limiter implementation so future hardening of the cache-fill
+  DoS budget primitive applies uniformly.
+
 ## Notes
 
 - Origin protection is disabled by default.

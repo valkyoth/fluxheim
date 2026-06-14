@@ -24,6 +24,12 @@ behavior when the change improves security or project direction.
 - Extend `fluxheim cache-key` and `fluxheim cache-lookup` previews with
   origin-protection policy state and expectation flags for release gates.
 
+### Changed
+
+- Consolidate slice-fill, peer-fill, and origin-fill cache concurrency permits
+  into one shared limiter implementation so future hardening of the DoS budget
+  primitive applies uniformly.
+
 ## 1.5.22 - 2026-06-14
 
 ### Changed
