@@ -12,7 +12,7 @@ on:
         required: false
         default: ""
       include_load_balancer:
-        description: Build the load-balancer image profile for non-v1.5 manual dispatches.
+        description: Build the load-balancer image profile for manual dispatches before the normal load-balancer image line.
         required: true
         default: false
         type: boolean
@@ -109,13 +109,13 @@ jobs:
           set -euo pipefail
           build="true"
           if [[ "${PROFILE}" == "load-balancer" ]]; then
-            if [[ ! "${GITHUB_REF_NAME}" =~ ^v1\.5 && "${INCLUDE_LOAD_BALANCER}" != "true" ]]; then
+            if [[ "${GITHUB_EVENT_NAME}" != "push" && ! "${GITHUB_REF_NAME}" =~ ^v1\.[5-9] && "${INCLUDE_LOAD_BALANCER}" != "true" ]]; then
               build="false"
             fi
           fi
           echo "build=${build}" >> "${GITHUB_OUTPUT}"
           if [[ "${build}" == "false" ]]; then
-            echo "Skipping ${PROFILE} image profile for non-v1.5 ref without include_load_balancer=true."
+            echo "Skipping ${PROFILE} image profile for manual non-v1.5+ ref without include_load_balancer=true."
           fi
 
       - name: Checkout repository

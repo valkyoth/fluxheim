@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.0
+Version:        1.6.1
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jun 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.1-1
+- Start the first Pingora-exit implementation release after the 1.6.0
+  foundation tag.
+- Fix container image workflow handling so load-balancer images build for
+  normal v1.6.x tag pushes.
+
 * Sun Jun 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.0-1
 - Start the Pingora-exit foundation line with versioned 1.6.0 metadata.
 - Add modularity policy validation and a legacy oversized-file exception

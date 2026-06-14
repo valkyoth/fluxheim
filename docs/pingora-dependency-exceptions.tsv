@@ -17,8 +17,8 @@ full	pingora-core	1.6.13	Transitive through Pingora proxy/runtime.
 full	pingora-error	1.6.5	Internal error adapters still bridge Pingora errors.
 full	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
 full	pingora-http	1.6.5	Internal HTTP adapters still bridge Pingora HTTP types.
-full	pingora-ketama	1.6.1	Transitive through pingora-load-balancing.
-full	pingora-load-balancing	1.6.1	Load-balancer edge still carries Pingora LB dependency.
+full	pingora-ketama	1.6.2	Transitive through pingora-load-balancing.
+full	pingora-load-balancing	1.6.2	Load-balancer edge still carries Pingora LB dependency.
 full	pingora-lru	1.6.13	Transitive through Pingora runtime/cache.
 full	pingora-pool	1.6.12	Upstream pooling still uses Pingora runtime path.
 full	pingora-proxy	1.6.11	HTTP proxy lifecycle still uses Pingora ProxyHttp.
@@ -55,8 +55,8 @@ load-balancer-edge	pingora-core	1.6.13	Transitive through Pingora proxy/runtime.
 load-balancer-edge	pingora-error	1.6.5	Internal error adapters still bridge Pingora errors.
 load-balancer-edge	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
 load-balancer-edge	pingora-http	1.6.5	Internal HTTP adapters still bridge Pingora HTTP types.
-load-balancer-edge	pingora-ketama	1.6.1	Transitive through pingora-load-balancing.
-load-balancer-edge	pingora-load-balancing	1.6.1	Load-balancer edge still carries Pingora LB dependency.
+load-balancer-edge	pingora-ketama	1.6.2	Transitive through pingora-load-balancing.
+load-balancer-edge	pingora-load-balancing	1.6.2	Load-balancer edge still carries Pingora LB dependency.
 load-balancer-edge	pingora-lru	1.6.13	Transitive through Pingora runtime/cache.
 load-balancer-edge	pingora-pool	1.6.12	Upstream pooling still uses Pingora runtime path.
 load-balancer-edge	pingora-proxy	1.6.11	HTTP proxy lifecycle still uses Pingora ProxyHttp.

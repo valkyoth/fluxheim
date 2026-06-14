@@ -7,6 +7,19 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.1 - 2026-06-14
+
+### Changed
+
+- Start the first Pingora-exit implementation release after the `1.6.0`
+  foundation tag.
+- Fix the container image workflow so load-balancer images are built for
+  normal `v1.6.x` tag pushes instead of being limited to `v1.5.x` refs.
+- Bump workspace, RPM, release notes, and image documentation to `1.6.1`.
+- Keep the `pingora-load-balancing` dependency exception active until the
+  first load-balancer extraction patch lands, while preserving the 1.6 line's
+  gated removal plan.
+
 ## 1.6.0 - 2026-06-14
 
 ### Added
