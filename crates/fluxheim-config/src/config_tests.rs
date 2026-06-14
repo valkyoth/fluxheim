@@ -18,7 +18,7 @@ use super::{
     validate_dynamic_header_template,
 };
 #[cfg(feature = "cache")]
-use super::{CachePeerConfig, CachePeerFillConfig};
+use super::{CacheOriginProtectionConfig, CachePeerConfig, CachePeerFillConfig};
 use crate::config_net::valid_authority;
 use crate::config_proxy::{
     DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS,
@@ -8926,6 +8926,86 @@ fn rejects_invalid_cache_predictor_capacity() {
     assert_eq!(
         config.validate(),
         Err(ConfigError::InvalidCachePredictorCapacity { scope: "cache" })
+    );
+}
+
+#[test]
+#[cfg(feature = "cache")]
+fn parses_cache_origin_protection_config() {
+    let config: Config = toml::from_str(
+        r#"
+            [cache]
+            enabled = true
+            max_object_bytes = "8MiB"
+
+            [cache.memory]
+            enabled = true
+            max_size_bytes = "16MiB"
+
+            [cache.origin_protection]
+            enabled = true
+            max_concurrent_fills = 8
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.cache.origin_protection,
+        CacheOriginProtectionConfig {
+            enabled: true,
+            max_concurrent_fills: 8,
+        }
+    );
+    config.validate().unwrap();
+}
+
+#[test]
+#[cfg(feature = "cache")]
+fn rejects_cache_origin_protection_without_enabled_cache_policy() {
+    let config: Config = toml::from_str(
+        r#"
+            [cache.origin_protection]
+            enabled = true
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidCacheOriginProtectionPolicy {
+            scope: "cache",
+            field: "origin_protection.enabled",
+            reason: "origin protection requires the cache policy to be enabled",
+        })
+    );
+}
+
+#[test]
+#[cfg(feature = "cache")]
+fn rejects_invalid_cache_origin_protection_fill_budget() {
+    let config: Config = toml::from_str(
+        r#"
+            [cache]
+            enabled = true
+
+            [cache.memory]
+            enabled = true
+            max_size_bytes = "16MiB"
+
+            [cache.origin_protection]
+            enabled = true
+            max_concurrent_fills = 0
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidCacheOriginProtectionPolicy {
+            scope: "cache",
+            field: "origin_protection.max_concurrent_fills",
+            reason: "max concurrent fills must be between 1 and 1024",
+        })
     );
 }
 

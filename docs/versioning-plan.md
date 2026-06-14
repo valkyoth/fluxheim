@@ -4076,6 +4076,11 @@ the exception while the cache server is being completed as a focused sequence:
   useful for stampede control and brownout handling, and is intentionally
   narrower than a general WAF, scripting system, or global traffic manager. Do
   not add cross-node cache replication or distributed consensus in this stop.
+  Implemented first slice: `cache.origin_protection` with per-vhost/route
+  `max_concurrent_fills` budgets for Fluxheim-owned range slice fills, plus
+  admin status and metrics for rollout visibility. Generic Pingora proxy-cache
+  miss/revalidation integration remains a follow-up because it crosses the
+  runtime boundary that the `1.6.x` Pingora-removal line will replace.
   Use this final `1.5.x` workspace pass to finish or defer any small leaf-crate
   boundaries started in `v1.5.20`-`v1.5.22` so the `1.6.x` Pingora-removal line
   starts from stable crate APIs. Possible deferrals include `fluxheim-acme`,

@@ -28,6 +28,7 @@ pub fn cache_event_label(event: &str) -> &'static str {
         "peer_fill_error" => "peer_fill_error",
         "peer_fill_fallback" => "peer_fill_fallback",
         "peer_fill_fail_closed" => "peer_fill_fail_closed",
+        "origin_protected" => "origin_protected",
         _ => "other",
     }
 }
@@ -110,6 +111,7 @@ mod tests {
         assert_eq!(cache_scope_label(Some("route-a")), "route");
         assert_eq!(cache_scope_label(None), "vhost");
         assert_eq!(cache_event_label("peer_fill_hit"), "peer_fill_hit");
+        assert_eq!(cache_event_label("origin_protected"), "origin_protected");
         assert_eq!(cache_event_label("custom"), "other");
         assert_eq!(
             cache_phase_label("revalidated-nocache"),

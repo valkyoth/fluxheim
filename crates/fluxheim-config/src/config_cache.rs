@@ -200,6 +200,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub predictor: CachePredictorConfig,
     #[serde(default)]
+    pub origin_protection: CacheOriginProtectionConfig,
+    #[serde(default)]
     pub peer_fill: CachePeerFillConfig,
 }
 
@@ -249,6 +251,7 @@ pub struct CacheConfigFragment {
     disk: Option<CacheDiskConfigFragment>,
     lock: Option<CacheLockConfigFragment>,
     predictor: Option<CachePredictorConfigFragment>,
+    origin_protection: Option<CacheOriginProtectionConfigFragment>,
     peer_fill: Option<CachePeerFillConfigFragment>,
 }
 
@@ -310,6 +313,7 @@ impl Default for CacheConfig {
             disk: CacheDiskConfig::default(),
             lock: CacheLockConfig::default(),
             predictor: CachePredictorConfig::default(),
+            origin_protection: CacheOriginProtectionConfig::default(),
             peer_fill: CachePeerFillConfig::default(),
         }
     }
@@ -442,6 +446,9 @@ impl CacheConfig {
         }
         if let Some(predictor) = fragment.predictor {
             self.predictor.merge(predictor);
+        }
+        if let Some(origin_protection) = fragment.origin_protection {
+            self.origin_protection.merge(origin_protection);
         }
         if let Some(peer_fill) = fragment.peer_fill {
             self.peer_fill.merge(peer_fill);
@@ -822,10 +829,18 @@ impl CacheConfig {
         self.range.validate(scope, self.max_object_bytes)?;
         self.lock.validate(scope)?;
         self.predictor.validate(scope)?;
+        self.origin_protection.validate(scope)?;
         self.peer_fill.validate(scope)?;
 
         if self.enabled && !self.has_enabled_tier() {
             return Err(ConfigError::CacheEnabledWithoutStorageTier { scope });
+        }
+        if self.origin_protection.enabled && !self.enabled {
+            return Err(ConfigError::InvalidCacheOriginProtectionPolicy {
+                scope,
+                field: "origin_protection.enabled",
+                reason: "origin protection requires the cache policy to be enabled",
+            });
         }
         if self.peer_fill.enabled && !self.enabled {
             return Err(ConfigError::InvalidCachePeerFillPolicy {
@@ -1390,6 +1405,62 @@ impl CachePredictorConfig {
 
 fn default_cache_predictor_capacity() -> usize {
     65_536
+}
+
+pub const CACHE_ORIGIN_PROTECTION_MAX_CONCURRENT_FILLS: usize = 1024;
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheOriginProtectionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_cache_origin_protection_max_concurrent_fills")]
+    pub max_concurrent_fills: usize,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheOriginProtectionConfigFragment {
+    enabled: Option<bool>,
+    max_concurrent_fills: Option<usize>,
+}
+
+impl Default for CacheOriginProtectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_concurrent_fills: default_cache_origin_protection_max_concurrent_fills(),
+        }
+    }
+}
+
+impl CacheOriginProtectionConfig {
+    fn merge(&mut self, fragment: CacheOriginProtectionConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(max_concurrent_fills) = fragment.max_concurrent_fills {
+            self.max_concurrent_fills = max_concurrent_fills;
+        }
+    }
+
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        if self.enabled
+            && (self.max_concurrent_fills == 0
+                || self.max_concurrent_fills > CACHE_ORIGIN_PROTECTION_MAX_CONCURRENT_FILLS)
+        {
+            return Err(ConfigError::InvalidCacheOriginProtectionPolicy {
+                scope,
+                field: "origin_protection.max_concurrent_fills",
+                reason: "max concurrent fills must be between 1 and 1024",
+            });
+        }
+        Ok(())
+    }
+}
+
+fn default_cache_origin_protection_max_concurrent_fills() -> usize {
+    32
 }
 
 const CACHE_PEER_FILL_MAX_PEERS: usize = 32;

@@ -27,9 +27,9 @@ pub use crate::config_cache::{
 pub use crate::config_cache::{
     CacheConfig, CacheDiskBackend, CacheDiskConfig, CacheDiskEncryptionAlgorithm,
     CacheDiskEncryptionConfig, CacheDiskEncryptionOpenBaoConfig, CacheDiskEncryptionProvider,
-    CacheDiskStorageBinConfig, CacheKeyPart, CacheLockConfig, CacheMemoryConfig, CachePeerConfig,
-    CachePeerFillConfig, CachePredictorConfig, CachePreset, CachePurgerConfig, CacheRangeConfig,
-    CacheRangeSliceConfig, CacheStaleErrorKind,
+    CacheDiskStorageBinConfig, CacheKeyPart, CacheLockConfig, CacheMemoryConfig,
+    CacheOriginProtectionConfig, CachePeerConfig, CachePeerFillConfig, CachePredictorConfig,
+    CachePreset, CachePurgerConfig, CacheRangeConfig, CacheRangeSliceConfig, CacheStaleErrorKind,
 };
 use crate::config_cache::{CacheConfigFragment, CachePurgerConfigFragment};
 #[cfg(test)]
@@ -1446,6 +1446,11 @@ pub enum ConfigError {
     InvalidCachePredictorCapacity {
         scope: &'static str,
     },
+    InvalidCacheOriginProtectionPolicy {
+        scope: &'static str,
+        field: &'static str,
+        reason: &'static str,
+    },
     InvalidCachePeerFillPolicy {
         scope: &'static str,
         field: &'static str,
@@ -2217,6 +2222,11 @@ impl Display for ConfigError {
                 formatter,
                 "{scope}.predictor.capacity must be between 1 and {CACHE_PREDICTOR_MAX_CAPACITY} when the predictor is enabled"
             ),
+            Self::InvalidCacheOriginProtectionPolicy {
+                scope,
+                field,
+                reason,
+            } => write!(formatter, "{scope}.{field} is invalid: {reason}"),
             Self::InvalidCachePeerFillPolicy {
                 scope,
                 field,

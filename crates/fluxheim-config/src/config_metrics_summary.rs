@@ -17,6 +17,8 @@ pub struct CacheConfigStats {
     pub disk_tiers: u64,
     pub lock_enabled_policies: u64,
     pub lock_wait_timeout_max_secs: u64,
+    pub origin_protection_enabled_policies: u64,
+    pub origin_protection_max_concurrent_fills: u64,
     pub peer_fill_enabled_policies: u64,
     pub peer_fill_peers: u64,
     pub peer_fill_max_concurrent_requests: u64,
@@ -107,6 +109,13 @@ fn accumulate_cache_policy(cache: &CacheConfig, vhost_scope: bool, stats: &mut C
             .lock_wait_timeout_max_secs
             .max(cache.lock.wait_timeout_secs);
     }
+    if cache.origin_protection.enabled {
+        stats.origin_protection_enabled_policies =
+            stats.origin_protection_enabled_policies.saturating_add(1);
+        stats.origin_protection_max_concurrent_fills = stats
+            .origin_protection_max_concurrent_fills
+            .max(cache.origin_protection.max_concurrent_fills as u64);
+    }
     if cache.peer_fill.enabled {
         stats.peer_fill_enabled_policies = stats.peer_fill_enabled_policies.saturating_add(1);
         stats.peer_fill_peers = stats
@@ -128,10 +137,10 @@ fn accumulate_cache_policy(cache: &CacheConfig, vhost_scope: bool, stats: &mut C
 #[cfg(test)]
 mod tests {
     use crate::config::{
-        CacheConfig, CacheDiskConfig, CacheMemoryConfig, CachePeerConfig, CachePeerFillConfig,
-        Config, LoadBalanceConfig, LoadBalanceSelection, ProxyConfig, RouteConfig,
-        VhostAcmeChallengeConfig, VhostConfig, VhostHeaderPolicyConfig, VhostRedirectConfig,
-        VhostTlsConfig, WebConfig,
+        CacheConfig, CacheDiskConfig, CacheMemoryConfig, CacheOriginProtectionConfig,
+        CachePeerConfig, CachePeerFillConfig, Config, LoadBalanceConfig, LoadBalanceSelection,
+        ProxyConfig, RouteConfig, VhostAcmeChallengeConfig, VhostConfig, VhostHeaderPolicyConfig,
+        VhostRedirectConfig, VhostTlsConfig, WebConfig,
     };
 
     use super::{cache_config_stats, load_balancer_config_stats};
@@ -150,6 +159,8 @@ mod tests {
         assert_eq!(stats.disk_tiers, 1);
         assert_eq!(stats.lock_enabled_policies, 2);
         assert_eq!(stats.lock_wait_timeout_max_secs, 30);
+        assert_eq!(stats.origin_protection_enabled_policies, 2);
+        assert_eq!(stats.origin_protection_max_concurrent_fills, 96);
         assert_eq!(stats.peer_fill_enabled_policies, 2);
         assert_eq!(stats.peer_fill_peers, 3);
         assert_eq!(stats.peer_fill_max_concurrent_requests, 128);
@@ -213,6 +224,10 @@ mod tests {
                         ],
                         max_concurrent_requests: 128,
                         ..CachePeerFillConfig::default()
+                    },
+                    origin_protection: CacheOriginProtectionConfig {
+                        enabled: true,
+                        max_concurrent_fills: 64,
                     },
                     ..CacheConfig::default()
                 },
@@ -355,6 +370,10 @@ mod tests {
                         base_url: "https://route-cache.example:8443".to_owned(),
                     }],
                     ..CachePeerFillConfig::default()
+                },
+                origin_protection: CacheOriginProtectionConfig {
+                    enabled: true,
+                    max_concurrent_fills: 96,
                 },
                 ..CacheConfig::default()
             }),

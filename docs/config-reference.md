@@ -2084,6 +2084,30 @@ policy reasons are intentionally skipped so settings such as `min_uses`,
 configured request bypasses, and explicit response-header refusal policies stay
 controlled by Fluxheim's own policy counters.
 
+`[cache.origin_protection]`, `[vhosts.cache.origin_protection]`, and
+route-scoped `origin_protection` configure a cache-aware origin-fill budget for
+Fluxheim-owned cache fill paths. It is disabled by default and requires the
+owning cache policy to be enabled. The first protected path is range slice
+fill: when a requested slice is missing locally and Fluxheim would fetch it
+from origin, the request must acquire a per-vhost or per-route fill permit.
+
+```toml
+[cache.origin_protection]
+enabled = true
+max_concurrent_fills = 32
+```
+
+`max_concurrent_fills` is bounded to 1-1024. When the budget is saturated,
+Fluxheim refuses the protected slice fill with `503` instead of falling through
+to the normal origin path. This is intentionally fail-closed for origin
+protection: operators should enable it only on cache policies where protecting
+origin capacity is preferable to serving an uncached slice during brownout.
+Existing cache locks still coalesce same-key fills; origin protection is a
+route/vhost-level budget across distinct cache keys. Metrics builds expose
+`fluxheim_cache_origin_protection_enabled_policies` and
+`fluxheim_cache_origin_protection_max_concurrent_fills`, and policy activity
+records `origin_protected` when the budget rejects a fill.
+
 `[cache.peer_fill]`, `[vhosts.cache.peer_fill]`, and route-scoped
 `peer_fill` configure the distributed-cache peer-fill contract used by the
 `1.2.4` line. Peer fill is disabled by default and currently requires the
@@ -2133,7 +2157,9 @@ peer-fill requests carry `X-Fluxheim-Peer-Fill: 1`; inbound requests with that
 marker are not allowed to launch another peer-fill fetch, which prevents
 recursive peer-fill loops in cyclic peer topologies.
 `examples/cache-peer-fill.toml` shows the focused validated fixture. Metrics
-builds expose aggregate peer-fill configuration through
+builds expose aggregate origin-protection and peer-fill configuration through
+`fluxheim_cache_origin_protection_enabled_policies`,
+`fluxheim_cache_origin_protection_max_concurrent_fills`,
 `fluxheim_cache_peer_fill_enabled_policies`,
 `fluxheim_cache_peer_fill_peers`, and
 `fluxheim_cache_peer_fill_max_concurrent_requests`.

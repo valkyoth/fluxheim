@@ -100,6 +100,8 @@ Current cache baseline:
 - `fluxheim_cache_disk_tiers`
 - `fluxheim_cache_lock_enabled_policies`
 - `fluxheim_cache_lock_wait_timeout_max_seconds`
+- `fluxheim_cache_origin_protection_enabled_policies`
+- `fluxheim_cache_origin_protection_max_concurrent_fills`
 - `fluxheim_cache_peer_fill_enabled_policies`
 - `fluxheim_cache_peer_fill_peers`
 - `fluxheim_cache_peer_fill_max_concurrent_requests`

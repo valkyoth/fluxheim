@@ -3465,6 +3465,21 @@ fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> Value {
         )),
     );
     object.insert(
+        "origin_protection_enabled_policies".to_owned(),
+        json!(totals.origin_protection_enabled_policies),
+    );
+    object.insert(
+        "origin_protection_enabled_policy_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(
+            totals.origin_protection_enabled_policies,
+            totals.enabled_cache_policies()
+        )),
+    );
+    object.insert(
+        "origin_protection_max_concurrent_fills".to_owned(),
+        json!(totals.origin_protection_max_concurrent_fills),
+    );
+    object.insert(
         "peer_fill_enabled_policies".to_owned(),
         json!(totals.peer_fill_enabled_policies),
     );
@@ -3601,6 +3616,8 @@ fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> Vec<Value
                 "tiered": vhost.tiered,
                 "lock_enabled": vhost.lock_enabled,
                 "lock_wait_timeout_secs": vhost.lock_wait_timeout_secs,
+                "origin_protection_enabled": vhost.origin_protection_enabled,
+                "origin_protection_max_concurrent_fills": vhost.origin_protection_max_concurrent_fills,
                 "peer_fill_enabled": vhost.peer_fill_enabled,
                 "peer_fill_peers": vhost.peer_fill_peers,
                 "peer_fill_max_concurrent_requests": vhost.peer_fill_max_concurrent_requests,
@@ -3632,6 +3649,8 @@ fn cache_route_stats_json(routes: &[crate::proxy::CacheRouteStats]) -> Vec<Value
                 "tiered": route.tiered,
                 "lock_enabled": route.lock_enabled,
                 "lock_wait_timeout_secs": route.lock_wait_timeout_secs,
+                "origin_protection_enabled": route.origin_protection_enabled,
+                "origin_protection_max_concurrent_fills": route.origin_protection_max_concurrent_fills,
                 "peer_fill_enabled": route.peer_fill_enabled,
                 "peer_fill_peers": route.peer_fill_peers,
                 "peer_fill_max_concurrent_requests": route.peer_fill_max_concurrent_requests,
@@ -6431,6 +6450,10 @@ mod tests {
                         max_concurrent_requests: 128,
                         ..crate::config::CachePeerFillConfig::default()
                     },
+                    origin_protection: crate::config::CacheOriginProtectionConfig {
+                        enabled: true,
+                        max_concurrent_fills: 16,
+                    },
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
@@ -6467,6 +6490,12 @@ mod tests {
         assert_eq!(totals["tiered_route_ratio_per_mille"], 0);
         assert_eq!(totals["lock_enabled_policies"], 2);
         assert_eq!(totals["lock_enabled_policy_ratio_per_mille"], 1000);
+        assert_eq!(totals["origin_protection_enabled_policies"], 1);
+        assert_eq!(
+            totals["origin_protection_enabled_policy_ratio_per_mille"],
+            500
+        );
+        assert_eq!(totals["origin_protection_max_concurrent_fills"], 16);
         assert_eq!(totals["peer_fill_enabled_policies"], 1);
         assert_eq!(totals["peer_fill_enabled_policy_ratio_per_mille"], 500);
         assert_eq!(totals["peer_fill_peers"], 1);
@@ -6500,6 +6529,8 @@ mod tests {
         assert_eq!(vhost["tiered"], true);
         assert_eq!(vhost["lock_enabled"], true);
         assert_eq!(vhost["lock_wait_timeout_secs"], 30);
+        assert_eq!(vhost["origin_protection_enabled"], true);
+        assert_eq!(vhost["origin_protection_max_concurrent_fills"], 16);
         assert_eq!(vhost["peer_fill_enabled"], true);
         assert_eq!(vhost["peer_fill_peers"], 1);
         assert_eq!(vhost["peer_fill_max_concurrent_requests"], 128);
@@ -6536,6 +6567,8 @@ mod tests {
         assert_eq!(route["tiered"], false);
         assert_eq!(route["lock_enabled"], true);
         assert_eq!(route["lock_wait_timeout_secs"], 30);
+        assert_eq!(route["origin_protection_enabled"], false);
+        assert_eq!(route["origin_protection_max_concurrent_fills"], 32);
         assert_eq!(route["peer_fill_enabled"], false);
         assert_eq!(route["peer_fill_peers"], 0);
         assert_eq!(route["peer_fill_max_concurrent_requests"], 64);

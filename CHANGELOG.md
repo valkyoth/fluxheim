@@ -7,6 +7,21 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.23 - 2026-06-14
+
+### Added
+
+- Add cache origin-protection configuration with per-vhost or per-route
+  `max_concurrent_fills` budgets for Fluxheim-owned origin fill paths. The
+  first protected path is range slice fill: when the budget is saturated,
+  Fluxheim refuses the protected fill with `503` instead of falling through to
+  origin.
+- Expose cache origin-protection rollout through admin cache status and
+  low-cardinality metrics:
+  `fluxheim_cache_origin_protection_enabled_policies`,
+  `fluxheim_cache_origin_protection_max_concurrent_fills`, and bounded
+  `origin_protected` cache policy activity.
+
 ## 1.5.22 - 2026-06-14
 
 ### Changed

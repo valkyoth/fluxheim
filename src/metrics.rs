@@ -34,6 +34,8 @@ static CACHE_MEMORY_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_LOCK_ENABLED_POLICIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_LOCK_WAIT_TIMEOUT_MAX_SECONDS: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_ORIGIN_PROTECTION_ENABLED_POLICIES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_ORIGIN_PROTECTION_MAX_CONCURRENT_FILLS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_PEER_FILL_ENABLED_POLICIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_PEER_FILL_PEERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_PEER_FILL_MAX_CONCURRENT_REQUESTS: OnceLock<IntGauge> = OnceLock::new();
@@ -141,6 +143,14 @@ pub fn record_config(config: &crate::config::Config) {
     set_gauge(
         cache_lock_wait_timeout_max_seconds(),
         stats.lock_wait_timeout_max_secs,
+    );
+    set_gauge(
+        cache_origin_protection_enabled_policies(),
+        stats.origin_protection_enabled_policies,
+    );
+    set_gauge(
+        cache_origin_protection_max_concurrent_fills(),
+        stats.origin_protection_max_concurrent_fills,
     );
     set_gauge(
         cache_peer_fill_enabled_policies(),
@@ -1058,6 +1068,22 @@ fn cache_lock_wait_timeout_max_seconds() -> Result<&'static IntGauge, prometheus
         &CACHE_LOCK_WAIT_TIMEOUT_MAX_SECONDS,
         "fluxheim_cache_lock_wait_timeout_max_seconds",
         "Maximum configured Fluxheim cache request-collapsing wait timeout across lock-enabled cache policies.",
+    )
+}
+
+fn cache_origin_protection_enabled_policies() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_ORIGIN_PROTECTION_ENABLED_POLICIES,
+        "fluxheim_cache_origin_protection_enabled_policies",
+        "Configured Fluxheim cache policies with origin fill protection enabled.",
+    )
+}
+
+fn cache_origin_protection_max_concurrent_fills() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_ORIGIN_PROTECTION_MAX_CONCURRENT_FILLS,
+        "fluxheim_cache_origin_protection_max_concurrent_fills",
+        "Maximum configured Fluxheim cache origin-fill concurrency budget across protected cache policies.",
     )
 }
 

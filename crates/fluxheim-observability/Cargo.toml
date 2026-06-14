@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-observability"
-version = "1.5.22"
+version = "1.5.23"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"

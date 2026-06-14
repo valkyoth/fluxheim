@@ -149,7 +149,12 @@ const PEER_FILL_MARKER_HEADER: &str = "x-fluxheim-peer-fill";
 #[cfg(feature = "cache")]
 const SLICE_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
 #[cfg(feature = "cache")]
+const ORIGIN_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
+#[cfg(feature = "cache")]
 static PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> = OnceLock::new();
+#[cfg(feature = "cache")]
+static ORIGIN_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> =
+    OnceLock::new();
 #[cfg(feature = "cache")]
 static CACHE_PREDICTOR_REGISTRY: OnceLock<
     Mutex<HashMap<usize, &'static (dyn CacheablePredictor + Sync)>>,
@@ -1483,6 +1488,7 @@ impl ProxySnapshot {
             if vhost.pingora_cache_lock.is_some() {
                 totals.lock_enabled_policies = totals.lock_enabled_policies.saturating_add(1);
             }
+            accumulate_origin_protection_stats(&mut totals, &vhost.cache);
             accumulate_peer_fill_stats(&mut totals, &vhost.cache);
             let configured_routes = vhost.routes.len() as u64;
             totals.configured_routes = totals.configured_routes.saturating_add(configured_routes);
@@ -1513,6 +1519,7 @@ impl ProxySnapshot {
                 if cache.pingora_cache_lock.is_some() {
                     totals.lock_enabled_policies = totals.lock_enabled_policies.saturating_add(1);
                 }
+                accumulate_origin_protection_stats(&mut totals, &cache.config);
                 accumulate_peer_fill_stats(&mut totals, &cache.config);
                 let route_memory = cache.pingora_memory_storage.map(|storage| storage.stats());
                 let route_disk = cache
@@ -1526,6 +1533,11 @@ impl ProxySnapshot {
                     tiered: cache.pingora_tiered_storage.is_some(),
                     lock_enabled: cache.pingora_cache_lock.is_some(),
                     lock_wait_timeout_secs: cache.cache_lock_wait_timeout.as_secs(),
+                    origin_protection_enabled: cache.config.origin_protection.enabled,
+                    origin_protection_max_concurrent_fills: cache
+                        .config
+                        .origin_protection
+                        .max_concurrent_fills,
                     peer_fill_enabled: cache.config.peer_fill.enabled,
                     peer_fill_peers: cache.config.peer_fill.peers.len(),
                     peer_fill_max_concurrent_requests: cache
@@ -1544,6 +1556,11 @@ impl ProxySnapshot {
                 tiered: vhost.pingora_tiered_storage.is_some(),
                 lock_enabled: vhost.pingora_cache_lock.is_some(),
                 lock_wait_timeout_secs: vhost.cache_lock_wait_timeout.as_secs(),
+                origin_protection_enabled: vhost.cache.origin_protection.enabled,
+                origin_protection_max_concurrent_fills: vhost
+                    .cache
+                    .origin_protection
+                    .max_concurrent_fills,
                 peer_fill_enabled: vhost.cache.peer_fill.enabled,
                 peer_fill_peers: vhost.cache.peer_fill.peers.len(),
                 peer_fill_max_concurrent_requests: vhost.cache.peer_fill.max_concurrent_requests,
@@ -2459,6 +2476,21 @@ fn accumulate_peer_fill_stats(totals: &mut CacheRuntimeTotals, cache: &crate::co
     totals.peer_fill_max_concurrent_requests = totals
         .peer_fill_max_concurrent_requests
         .max(cache.peer_fill.max_concurrent_requests as u64);
+}
+
+#[cfg(feature = "cache")]
+fn accumulate_origin_protection_stats(
+    totals: &mut CacheRuntimeTotals,
+    cache: &crate::config::CacheConfig,
+) {
+    if !cache.origin_protection.enabled {
+        return;
+    }
+    totals.origin_protection_enabled_policies =
+        totals.origin_protection_enabled_policies.saturating_add(1);
+    totals.origin_protection_max_concurrent_fills = totals
+        .origin_protection_max_concurrent_fills
+        .max(cache.origin_protection.max_concurrent_fills as u64);
 }
 
 impl ProxyRuntimeState {
@@ -4283,6 +4315,18 @@ impl Drop for SliceFillPermit {
 }
 
 #[cfg(feature = "cache")]
+struct OriginFillPermit {
+    counter: Arc<AtomicUsize>,
+}
+
+#[cfg(feature = "cache")]
+impl Drop for OriginFillPermit {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[cfg(feature = "cache")]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct Revalidation304Headers {
     last_modified: Vec<::http::HeaderValue>,
@@ -5943,13 +5987,19 @@ async fn respond_proxy_slice_cache_request(
     let proxy = selected_runtime_proxy(vhost, ctx);
     let response_headers = selected_response_headers(vhost, ctx);
     let Some(response) = proxy_slice_cache_response(
-        session.req_header(),
-        storage,
         base_key,
-        cache,
-        proxy,
-        ctx.route_index.map(|index| vhost.route(index)),
-        slice_request,
+        ProxySliceCacheRequest {
+            request: session.req_header(),
+            storage,
+            cache,
+            proxy,
+            route: ctx.route_index.map(|index| vhost.route(index)),
+            origin_fill_budget_key: cache_origin_fill_budget_key(
+                vhost.name.as_str(),
+                ctx.route_index,
+            ),
+            slice_request,
+        },
     )
     .await?
     else {
@@ -6003,42 +6053,39 @@ struct CacheSliceComposedResponse {
 
 #[cfg(feature = "cache")]
 async fn proxy_slice_cache_response(
-    request: &RequestHeader,
-    storage: &'static crate::cache::PingoraCacheStorageAdapter,
     base_key: PingoraCacheKey,
-    cache: &crate::config::CacheConfig,
-    proxy: &RuntimeProxy,
-    route: Option<&RuntimeRoute>,
-    slice_request: CacheSliceRangeRequest,
+    request_context: ProxySliceCacheRequest<'_>,
 ) -> Result<Option<CacheSliceComposedResponse>> {
     let trace = pingora::cache::trace::Span::inactive().handle();
     let fill_context = CacheSliceFillContext {
-        request,
-        storage,
-        cache,
-        proxy,
-        route,
+        request: request_context.request,
+        storage: request_context.storage,
+        cache: request_context.cache,
+        proxy: request_context.proxy,
+        route: request_context.route,
+        origin_fill_budget_key: &request_context.origin_fill_budget_key,
         trace: &trace,
     };
-    let slice_size = cache.range.slice.size_bytes.as_u64();
+    let slice_size = request_context.cache.range.slice.size_bytes.as_u64();
     let Some((total, first_slice, first_filled)) =
         discover_slice_total(&fill_context, base_key.clone(), slice_size).await?
     else {
         return Ok(None);
     };
 
-    let Some(ranges) = resolve_client_slice_ranges(&slice_request.ranges, total) else {
+    let Some(ranges) = resolve_client_slice_ranges(&request_context.slice_request.ranges, total)
+    else {
         return Ok(Some(slice_416_response(total)?));
     };
     if ranges.is_empty() {
         return Ok(Some(slice_416_response(total)?));
     }
-    if !slice_request_within_policy(&ranges, cache, slice_size) {
+    if !slice_request_within_policy(&ranges, request_context.cache, slice_size) {
         return Ok(None);
     }
 
     let first_identity = slice_identity(&first_slice);
-    if let Some(if_range) = slice_request.if_range.as_deref()
+    if let Some(if_range) = request_context.slice_request.if_range.as_deref()
         && !if_range_matches_slice_identity(if_range, &first_identity)
     {
         return Ok(None);
@@ -6069,6 +6116,17 @@ async fn proxy_slice_cache_response(
 }
 
 #[cfg(feature = "cache")]
+struct ProxySliceCacheRequest<'a> {
+    request: &'a RequestHeader,
+    storage: &'static crate::cache::PingoraCacheStorageAdapter,
+    cache: &'a crate::config::CacheConfig,
+    proxy: &'a RuntimeProxy,
+    route: Option<&'a RuntimeRoute>,
+    origin_fill_budget_key: String,
+    slice_request: CacheSliceRangeRequest,
+}
+
+#[cfg(feature = "cache")]
 struct CacheSliceLookupResult {
     object: CacheSliceObject,
     filled: bool,
@@ -6081,6 +6139,7 @@ struct CacheSliceFillContext<'a> {
     cache: &'a crate::config::CacheConfig,
     proxy: &'a RuntimeProxy,
     route: Option<&'a RuntimeRoute>,
+    origin_fill_budget_key: &'a str,
     trace: &'a pingora::cache::trace::SpanHandle,
 }
 
@@ -6213,6 +6272,22 @@ async fn fetch_and_store_slice(
     slice_key: PingoraCacheKey,
     bounds: CacheSliceBounds,
 ) -> Result<Option<CacheSliceObject>> {
+    let _origin_fill_permit = if context.cache.origin_protection.enabled {
+        let Some(permit) = acquire_origin_fill_budget_permit(
+            context.origin_fill_budget_key.to_owned(),
+            context.cache.origin_protection.max_concurrent_fills,
+        ) else {
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_cache_activity("policy", "origin_protected");
+            return Error::e_explain(
+                ErrorType::HTTPStatus(503),
+                "cache origin fill budget exhausted",
+            );
+        };
+        Some(permit)
+    } else {
+        None
+    };
     let max_body_bytes = context.cache.range.slice.size_bytes.as_u64();
     let response = match fetch_origin_slice(
         context.request,
@@ -6720,6 +6795,65 @@ fn acquire_slice_fill_permit(key: String) -> Option<SliceFillPermit> {
         }
         match counter.compare_exchange_weak(current, 1, Ordering::AcqRel, Ordering::Acquire) {
             Ok(_) => return Some(SliceFillPermit { counter }),
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+#[cfg(feature = "cache")]
+fn cache_origin_fill_budget_key(vhost_name: &str, route_index: Option<usize>) -> String {
+    match route_index {
+        Some(route_index) => format!("vhost:{vhost_name}:route:{route_index}"),
+        None => format!("vhost:{vhost_name}:route:_"),
+    }
+}
+
+#[cfg(feature = "cache")]
+fn acquire_origin_fill_budget_permit(
+    key: String,
+    max_concurrent_fills: usize,
+) -> Option<OriginFillPermit> {
+    let counter = {
+        let mut counters = match ORIGIN_FILL_CONCURRENCY
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+        {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "origin-fill concurrency lock poisoned; aborting to avoid inconsistent cache-fill limits"
+                );
+                process::abort();
+            }
+        };
+        prune_inactive_cache_fill_concurrency_counters(
+            &mut counters,
+            ORIGIN_FILL_CONCURRENCY_MAX_KEYS,
+        );
+        if counters.len() >= ORIGIN_FILL_CONCURRENCY_MAX_KEYS && !counters.contains_key(&key) {
+            return None;
+        }
+        counters
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
+            .clone()
+    };
+
+    let mut current = counter.load(Ordering::Acquire);
+    loop {
+        if current >= max_concurrent_fills {
+            return None;
+        }
+        let Some(next) = current.checked_add(1) else {
+            log::error!(
+                target: "fluxheim::security",
+                "origin-fill concurrency counter saturated for {key}; refusing permit"
+            );
+            return None;
+        };
+        match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return Some(OriginFillPermit { counter }),
             Err(observed) => current = observed,
         }
     }
@@ -10457,8 +10591,9 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use super::{
-        PeerFillResponse, acquire_peer_fill_concurrency_permit, origin_slice_request_from_header,
-        origin_slice_url, peer_fill_concurrency_key, peer_fill_request_from_header, peer_fill_url,
+        PeerFillResponse, acquire_origin_fill_budget_permit, acquire_peer_fill_concurrency_permit,
+        cache_origin_fill_budget_key, origin_slice_request_from_header, origin_slice_url,
+        peer_fill_concurrency_key, peer_fill_request_from_header, peer_fill_url,
         prune_inactive_cache_fill_concurrency_counters, request_is_peer_fill,
     };
     #[cfg(any(
@@ -17284,6 +17419,27 @@ mod tests {
         let route_key = peer_fill_concurrency_key("concurrency.test", Some(8));
         let route_permit = acquire_peer_fill_concurrency_permit(route_key, 1)
             .expect("different route has separate concurrency budget");
+        drop(route_permit);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn origin_fill_budget_permit_respects_policy_limit() {
+        let key = cache_origin_fill_budget_key("origin-budget.test", Some(7));
+        let first = acquire_origin_fill_budget_permit(key.clone(), 1)
+            .expect("first origin fill permit available");
+
+        assert!(acquire_origin_fill_budget_permit(key.clone(), 1).is_none());
+
+        drop(first);
+
+        let second = acquire_origin_fill_budget_permit(key.clone(), 1)
+            .expect("origin fill permit released on drop");
+        drop(second);
+
+        let route_key = cache_origin_fill_budget_key("origin-budget.test", Some(8));
+        let route_permit = acquire_origin_fill_budget_permit(route_key, 1)
+            .expect("different route has separate origin fill budget");
         drop(route_permit);
     }
 
