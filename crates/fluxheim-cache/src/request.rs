@@ -109,6 +109,12 @@ pub fn append_cache_key_component(key: &mut String, label: &str, value: &str) {
     let _ = write!(key, "{label}:{}:{value};", value.len());
 }
 
+pub fn cache_key_with_component(primary: &str, label: &str, value: &str) -> String {
+    let mut key = primary.to_owned();
+    append_cache_key_component(&mut key, label, value);
+    key
+}
+
 pub fn cache_method_temporarily_bypassed(method: &str) -> bool {
     method == "HEAD"
 }
@@ -330,6 +336,10 @@ mod tests {
         let mut key = String::from("prefix;");
         append_cache_key_component(&mut key, "range", "bytes=10-19");
         assert_eq!(key, "prefix;range:11:bytes=10-19;");
+        assert_eq!(
+            super::cache_key_with_component("prefix;", "slice", "bytes=10-19"),
+            "prefix;slice:11:bytes=10-19;"
+        );
     }
 
     #[test]

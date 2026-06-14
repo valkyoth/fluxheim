@@ -51,7 +51,7 @@ pub use fluxheim_cache::{
     FluxCacheMissFinish, FluxCachePurgeType, MAX_VARY_FIELDS, MemoryCacheStats, MemoryTierPlan,
     StaticCacheRequest, TieredCacheStats, VaryCachePolicy, VaryRequestHashField,
     append_cache_key_component, cache_average_bytes, cache_control_freshness_value,
-    cache_control_with_directive, cache_method_temporarily_bypassed,
+    cache_control_with_directive, cache_key_with_component, cache_method_temporarily_bypassed,
     cache_object_lookup_body_bytes_summary, cache_object_lookup_bool_summary,
     cache_object_lookup_cache_tags_summary, cache_object_lookup_fresh_ttl_summary,
     cache_object_lookup_header_names_summary, cache_object_lookup_header_values_summary,

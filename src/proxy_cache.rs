@@ -12,8 +12,8 @@ use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
 pub(crate) use crate::cache::CacheClientRange;
 pub(crate) use crate::cache::{
     CacheContentRange, CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest,
-    CacheStaleEvent, VaryCachePolicy, VaryRequestHashField, append_cache_key_component,
-    cache_control_freshness_value, cache_control_with_directive, cache_method_temporarily_bypassed,
+    CacheStaleEvent, VaryCachePolicy, VaryRequestHashField, cache_control_freshness_value,
+    cache_control_with_directive, cache_key_with_component, cache_method_temporarily_bypassed,
     cache_should_serve_stale, cache_vary_policy, parse_cache_content_range,
     remaining_fresh_ttl_secs, required_slice_bounds, resolve_client_slice_ranges,
     vary_request_hash_material,
@@ -137,8 +137,7 @@ fn try_range_cache_key(
             "cache range key requires utf-8 primary key material",
         ));
     };
-    let mut primary = primary.to_owned();
-    append_cache_key_component(&mut primary, "range", &range.component());
+    let primary = cache_key_with_component(primary, "range", &range.component());
     base = PingoraCacheKey::new(namespace, primary, user_tag);
     Ok(base)
 }
@@ -161,8 +160,7 @@ fn try_slice_cache_key(
             "cache slice key requires utf-8 primary key material",
         ));
     };
-    let mut primary = primary.to_owned();
-    append_cache_key_component(&mut primary, "slice", &range.component());
+    let primary = cache_key_with_component(primary, "slice", &range.component());
     base = PingoraCacheKey::new(namespace, primary, user_tag);
     Ok(base)
 }

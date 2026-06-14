@@ -36,6 +36,8 @@ behavior when the change improves security or project direction.
   leaving the root proxy cache module as the Pingora response adapter.
 - Move cache storage interface result enums for purge type and miss completion
   into the cache crate, keeping Pingora conversions in the root adapter layer.
+- Move range/slice cache-key component construction into the cache crate so
+  the proxy cache module only adapts the Pingora cache-key container.
 
 ## 1.5.21 - 2026-06-13
 

@@ -32,6 +32,9 @@ interfaces before the HTTP runtime is replaced.
 - Cache storage interface result enums for purge type and miss completion now
   live in the cache crate. Pingora `PurgeType` and `MissFinishType` conversion
   stays in the root adapter layer.
+- Range and slice cache-key component construction now uses a cache-crate
+  helper, leaving the proxy cache module to adapt only Pingora's cache-key
+  container.
 
 ## Compatibility
 
