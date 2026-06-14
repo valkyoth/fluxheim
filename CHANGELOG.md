@@ -31,6 +31,9 @@ behavior when the change improves security or project direction.
   decisions behind a Fluxheim-owned cache request view. The root proxy cache
   module now adapts Pingora request headers into that view, keeping runtime
   behavior unchanged while shrinking the Pingora-facing cache surface.
+- Move cache response admission policy for status, content type, response
+  no-store headers, Vary handling, and range responses into the cache crate,
+  leaving the root proxy cache module as the Pingora response adapter.
 
 ## 1.5.21 - 2026-06-13
 

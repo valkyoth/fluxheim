@@ -1,4 +1,7 @@
-use crate::request::{parse_bounded_single_range, parse_cache_client_ranges};
+use crate::request::{
+    parse_bounded_single_range, parse_cache_client_ranges, response_content_length_matches_range,
+    response_content_range_matches,
+};
 
 pub fn request_forces_cache_refresh(cache_control: Option<&str>, pragma: Option<&str>) -> bool {
     pragma.is_some_and(is_pragma_no_cache)
@@ -493,6 +496,112 @@ pub fn response_content_type_is_cacheable(
         .any(|candidate| content_type_pattern_matches(candidate, media_type))
 }
 
+pub fn range_response_cache_admission_rejection(
+    status: u16,
+    headers: &http::HeaderMap,
+    range: Option<crate::CacheRangeRequest>,
+) -> Option<&'static str> {
+    match range {
+        Some(range) => {
+            if status != 206 {
+                return Some("range-cache-non-partial");
+            }
+            if !response_content_range_matches(headers, range) {
+                return Some("range-cache-content-range");
+            }
+            if !response_content_length_matches_range(headers, range) {
+                return Some("range-cache-content-length");
+            }
+            None
+        }
+        None if status == 206 => Some("range-response"),
+        None => None,
+    }
+}
+
+pub fn response_cache_admission_rejection(
+    status: u16,
+    headers: &http::HeaderMap,
+    cache: &fluxheim_config::CacheConfig,
+) -> Option<&'static str> {
+    let status_has_ttl =
+        cache.status_ttls.contains_key(&status) || cache.default_status_ttl_secs.is_some();
+    if status != 200 && !status_has_ttl {
+        return Some("status-not-cacheable");
+    }
+
+    if status == 200 && !response_content_type_is_cacheable(headers, cache) {
+        return if headers.contains_key("content-type") {
+            Some("content-type-not-cacheable")
+        } else {
+            Some("content-type-missing")
+        };
+    }
+
+    response_cache_header_policy_rejection(headers, cache)
+}
+
+pub fn response_range_cache_admission_rejection(
+    headers: &http::HeaderMap,
+    cache: &fluxheim_config::CacheConfig,
+) -> Option<&'static str> {
+    if !response_content_type_is_cacheable(headers, cache) {
+        return if headers.contains_key("content-type") {
+            Some("content-type-not-cacheable")
+        } else {
+            Some("content-type-missing")
+        };
+    }
+
+    response_cache_header_policy_rejection(headers, cache)
+}
+
+pub fn response_cache_header_policy_rejection(
+    headers: &http::HeaderMap,
+    cache: &fluxheim_config::CacheConfig,
+) -> Option<&'static str> {
+    if headers.contains_key("set-cookie") {
+        return Some("set-cookie");
+    }
+    if cache
+        .no_store_response_headers
+        .iter()
+        .any(|header| headers.contains_key(header.as_str()))
+    {
+        return Some("configured-no-store-response-header");
+    }
+    if response_headers_match_cache_no_store_value(headers, &cache.no_store_response_header_values)
+    {
+        return Some("configured-no-store-response-header-value");
+    }
+    if let Some(reason) = response_values_forbid_shared_cache(
+        headers
+            .get_all("cache-control")
+            .iter()
+            .filter_map(|value| value.to_str().ok()),
+    ) {
+        return Some(reason);
+    }
+    match cache_vary_policy(headers, cache) {
+        VaryCachePolicy::Uncacheable(reason) => Some(reason),
+        VaryCachePolicy::None | VaryCachePolicy::Fields(_) => None,
+    }
+}
+
+fn response_headers_match_cache_no_store_value(
+    headers: &http::HeaderMap,
+    configured_values: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    !configured_values.is_empty()
+        && configured_values.iter().any(|(header, configured)| {
+            headers
+                .get_all(header.as_str())
+                .iter()
+                .filter_map(|value| value.to_str().ok())
+                .any(|value| value == configured)
+        })
+}
+
 fn content_type_pattern_matches(pattern: &str, media_type: &str) -> bool {
     let pattern = pattern.trim();
     let media_type = media_type.trim();
@@ -857,6 +966,69 @@ mod tests {
         assert_eq!(
             super::response_values_forbid_shared_cache(["public, max-age=60", "private"]),
             Some("cache-control-private")
+        );
+    }
+
+    #[test]
+    fn response_admission_policy_checks_status_headers_and_ranges() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert("content-type", http::HeaderValue::from_static("image/png"));
+        assert_eq!(
+            super::response_cache_admission_rejection(
+                302,
+                &headers,
+                &fluxheim_config::CacheConfig::default()
+            ),
+            Some("status-not-cacheable")
+        );
+
+        let cache = fluxheim_config::CacheConfig {
+            default_status_ttl_secs: Some(30),
+            ..fluxheim_config::CacheConfig::default()
+        };
+        assert_eq!(
+            super::response_cache_admission_rejection(302, &headers, &cache),
+            None
+        );
+
+        headers.insert("set-cookie", http::HeaderValue::from_static("session=1"));
+        assert_eq!(
+            super::response_cache_admission_rejection(200, &headers, &cache),
+            Some("set-cookie")
+        );
+
+        let mut headers = http::HeaderMap::new();
+        headers.insert("content-type", http::HeaderValue::from_static("image/png"));
+        headers.insert("x-cache-mode", http::HeaderValue::from_static("private"));
+        let cache = fluxheim_config::CacheConfig {
+            no_store_response_header_values: std::collections::BTreeMap::from([(
+                "x-cache-mode".to_owned(),
+                "private".to_owned(),
+            )]),
+            ..fluxheim_config::CacheConfig::default()
+        };
+        assert_eq!(
+            super::response_cache_admission_rejection(200, &headers, &cache),
+            Some("configured-no-store-response-header-value")
+        );
+
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            "content-range",
+            http::HeaderValue::from_static("bytes 10-19/100"),
+        );
+        headers.insert("content-length", http::HeaderValue::from_static("10"));
+        assert_eq!(
+            super::range_response_cache_admission_rejection(
+                206,
+                &headers,
+                Some(crate::CacheRangeRequest { start: 10, end: 19 })
+            ),
+            None
+        );
+        assert_eq!(
+            super::range_response_cache_admission_rejection(206, &headers, None),
+            Some("range-response")
         );
     }
 

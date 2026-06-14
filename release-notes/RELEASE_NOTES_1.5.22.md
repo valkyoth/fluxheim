@@ -25,6 +25,10 @@ interfaces before the HTTP runtime is replaced.
   run through a Fluxheim-owned cache request view. The root proxy cache module
   keeps a small Pingora `RequestHeader` adapter, so cache behavior is intended
   to remain unchanged while the cache crate owns more policy logic.
+- Cache response admission decisions for status, content type, response
+  no-store policy, Vary handling, and range responses now live in the cache
+  crate. The proxy cache module still exposes the same adapter functions for
+  the existing Pingora response path.
 
 ## Compatibility
 

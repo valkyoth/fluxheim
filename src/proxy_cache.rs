@@ -1,5 +1,5 @@
 use crate::http_types::{
-    PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader, StatusCode,
+    PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader,
 };
 use pingora::cache::key::HashBinary;
 use pingora::cache::{CacheKey as PingoraCacheKey, CachePhase, NoCacheReason};
@@ -16,8 +16,7 @@ pub(crate) use crate::cache::{
     cache_control_freshness_value, cache_control_with_directive, cache_method_temporarily_bypassed,
     cache_should_serve_stale, cache_vary_policy, parse_cache_content_range,
     remaining_fresh_ttl_secs, required_slice_bounds, resolve_client_slice_ranges,
-    response_content_length_matches_range, response_content_range_matches,
-    response_content_type_is_cacheable, vary_request_hash_material,
+    vary_request_hash_material,
 };
 #[cfg(test)]
 pub(crate) use crate::cache::{MAX_VARY_FIELDS, cache_stale_status_allows, vary_cache_policy};
@@ -172,61 +171,29 @@ pub(crate) fn range_response_cache_admission_rejection(
     response: &ResponseHeader,
     range: Option<CacheRangeRequest>,
 ) -> Option<&'static str> {
-    match range {
-        Some(range) => {
-            if response.status != StatusCode::PARTIAL_CONTENT {
-                return Some("range-cache-non-partial");
-            }
-            if !response_content_range_matches(&response.headers, range) {
-                return Some("range-cache-content-range");
-            }
-            if !response_content_length_matches_range(&response.headers, range) {
-                return Some("range-cache-content-length");
-            }
-            None
-        }
-        None if response.status == StatusCode::PARTIAL_CONTENT => Some("range-response"),
-        None => None,
-    }
+    crate::cache::range_response_cache_admission_rejection(
+        response.status.as_u16(),
+        &response.headers,
+        range,
+    )
 }
 
 pub(crate) fn response_cache_admission_rejection(
     response: &ResponseHeader,
     cache: &crate::config::CacheConfig,
 ) -> Option<&'static str> {
-    let headers = &response.headers;
-    let status = response.status.as_u16();
-    let status_has_ttl =
-        cache.status_ttls.contains_key(&status) || cache.default_status_ttl_secs.is_some();
-    if response.status != StatusCode::OK && !status_has_ttl {
-        return Some("status-not-cacheable");
-    }
-
-    if response.status == StatusCode::OK && !response_content_type_is_cacheable(headers, cache) {
-        return if headers.contains_key("content-type") {
-            Some("content-type-not-cacheable")
-        } else {
-            Some("content-type-missing")
-        };
-    }
-
-    response_cache_header_policy_rejection(response, cache)
+    crate::cache::response_cache_admission_rejection(
+        response.status.as_u16(),
+        &response.headers,
+        cache,
+    )
 }
 
 pub(crate) fn response_range_cache_admission_rejection(
     response: &ResponseHeader,
     cache: &crate::config::CacheConfig,
 ) -> Option<&'static str> {
-    let headers = &response.headers;
-    if !response_content_type_is_cacheable(headers, cache) {
-        return if headers.contains_key("content-type") {
-            Some("content-type-not-cacheable")
-        } else {
-            Some("content-type-missing")
-        };
-    }
-
-    response_cache_header_policy_rejection(response, cache)
+    crate::cache::response_range_cache_admission_rejection(&response.headers, cache)
 }
 
 pub(crate) fn cache_response_fresh_ttl_secs(
@@ -277,7 +244,8 @@ pub(crate) fn apply_cache_status_ttl(
         .copied()
         .or(cache.default_status_ttl_secs)
     {
-        if response_cache_header_policy_rejection(response, cache).is_some() {
+        if crate::cache::response_cache_header_policy_rejection(&response.headers, cache).is_some()
+        {
             return Ok(());
         }
         response.remove_header("expires");
@@ -434,46 +402,6 @@ pub(crate) fn append_cache_control_directive(
     )
 }
 
-fn response_cache_header_policy_rejection(
-    response: &ResponseHeader,
-    cache: &crate::config::CacheConfig,
-) -> Option<&'static str> {
-    let headers = &response.headers;
-    if headers.contains_key("set-cookie") {
-        return Some("set-cookie");
-    }
-    if cache
-        .no_store_response_headers
-        .iter()
-        .any(|header| headers.contains_key(header.as_str()))
-    {
-        return Some("configured-no-store-response-header");
-    }
-    if response_headers_match_cache_no_store_value(response, &cache.no_store_response_header_values)
-    {
-        return Some("configured-no-store-response-header-value");
-    }
-    if let Some(reason) = crate::cache_headers::response_values_forbid_shared_cache(
-        response_header_values(response, "cache-control"),
-    ) {
-        return Some(reason);
-    }
-    match cache_vary_policy(headers, cache) {
-        VaryCachePolicy::Uncacheable(reason) => Some(reason),
-        VaryCachePolicy::None | VaryCachePolicy::Fields(_) => None,
-    }
-}
-
-fn response_headers_match_cache_no_store_value(
-    response: &ResponseHeader,
-    configured_values: &std::collections::BTreeMap<String, String>,
-) -> bool {
-    !configured_values.is_empty()
-        && configured_values.iter().any(|(header, configured)| {
-            response_header_values(response, header).any(|value| value == configured)
-        })
-}
-
 pub(crate) fn vary_request_hash(fields: &[String], request: &RequestHeader) -> HashBinary {
     let material = vary_request_hash_material(fields.iter().map(|field| {
         VaryRequestHashField {
@@ -487,17 +415,6 @@ pub(crate) fn vary_request_hash(fields: &[String], request: &RequestHeader) -> H
         }
     }));
     pingora::cache::key::hash_key(material)
-}
-
-fn response_header_values<'a>(
-    response: &'a ResponseHeader,
-    name: &'a str,
-) -> impl Iterator<Item = &'a str> + 'a {
-    response
-        .headers
-        .get_all(name)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
 }
 
 fn request_host_header(request: &RequestHeader) -> Option<&str> {
