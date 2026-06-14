@@ -750,12 +750,14 @@ matching object has an allowed stored fresh TTL, repeated `--expect-body-bytes`
 flags fail when no matching object has an allowed stored body size,
 `--expect-cache-lock-enabled`, `--expect-cache-lock-wait-timeout-secs`,
 `--expect-cache-predictor-enabled`,
+`--expect-origin-protection-enabled`,
+`--expect-origin-protection-max-concurrent-fills`,
 `--expect-peer-fill-enabled`, `--expect-peer-fill-peers`,
 `--expect-peer-fill-max-concurrent-requests`,
 `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`, and
 `--expect-storage-tiers` fail when the selected cache policy does not match the
-required stampede-protection, peer-fill, or tier layout, `--expect-scope`,
-`--expect-vhost`, and `--expect-route` fail when the
+required stampede-protection, origin-protection, peer-fill, or tier layout,
+`--expect-scope`, `--expect-vhost`, and `--expect-route` fail when the
 selected cache policy is not the intended scope, vhost, or route,
 `--expect-namespace` fails when the internal cache namespace is not expected,
 and `--expect-key-namespace` / `--expect-user-tag` fail when the selected

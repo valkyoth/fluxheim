@@ -21,6 +21,8 @@ behavior when the change improves security or project direction.
   `fluxheim_cache_origin_protection_enabled_policies`,
   `fluxheim_cache_origin_protection_max_concurrent_fills`, and bounded
   `origin_protected` cache policy activity.
+- Extend `fluxheim cache-key` and `fluxheim cache-lookup` previews with
+  origin-protection policy state and expectation flags for release gates.
 
 ## 1.5.22 - 2026-06-14
 

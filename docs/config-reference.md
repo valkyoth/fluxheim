@@ -2169,8 +2169,11 @@ For offline debugging, `fluxheim cache-key --host example.com --path
 without contacting the upstream. `cache-key` can fail closed with
 `--expect-eligible`, `--expect-ineligible`, `--expect-reason`,
 `--expect-cache-lock-enabled`, `--expect-cache-lock-wait-timeout-secs`,
-`--expect-cache-predictor-enabled`, `--expect-peer-fill-enabled`,
-`--expect-peer-fill-peers`, `--expect-peer-fill-max-concurrent-requests`,
+`--expect-cache-predictor-enabled`,
+`--expect-origin-protection-enabled`,
+`--expect-origin-protection-max-concurrent-fills`,
+`--expect-peer-fill-enabled`, `--expect-peer-fill-peers`,
+`--expect-peer-fill-max-concurrent-requests`,
 `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`, and
 `--expect-storage-tiers` when a deploy requires a specific cache policy layout.
 Use `--expect-scope vhost|route`, `--expect-vhost NAME`, and
@@ -2191,6 +2194,8 @@ the Host header. `cache-lookup` can fail closed for deploy scripts with
 `--expect-header-name`, `--expect-header "Name: value"`, `--expect-objects`,
 `--expect-cache-lock-enabled`,
 `--expect-cache-lock-wait-timeout-secs`, `--expect-cache-predictor-enabled`,
+`--expect-origin-protection-enabled`,
+`--expect-origin-protection-max-concurrent-fills`,
 `--expect-peer-fill-enabled`, `--expect-peer-fill-peers`,
 `--expect-peer-fill-max-concurrent-requests`, `--expect-memory-tier-enabled`,
 `--expect-disk-tier-enabled`,

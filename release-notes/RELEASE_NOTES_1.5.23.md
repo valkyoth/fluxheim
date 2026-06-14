@@ -16,6 +16,10 @@ operator-controlled origin-fill budget for Fluxheim-owned cache fill paths.
   `fluxheim_cache_origin_protection_enabled_policies`,
   `fluxheim_cache_origin_protection_max_concurrent_fills`, and the bounded
   cache policy activity event `origin_protected`.
+- Extended `fluxheim cache-key` and `fluxheim cache-lookup` previews with
+  origin-protection policy state plus
+  `--expect-origin-protection-enabled` and
+  `--expect-origin-protection-max-concurrent-fills` release-gate checks.
 
 ## Notes
 

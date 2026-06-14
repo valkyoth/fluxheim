@@ -931,6 +931,9 @@ impl ProxySnapshot {
         let cache_predictor_enabled = route_cache
             .map(|cache| cache.pingora_cache_predictor.is_some())
             .unwrap_or(vhost.pingora_cache_predictor.is_some());
+        let origin_protection_enabled = cache_config.origin_protection.enabled;
+        let origin_protection_max_concurrent_fills =
+            cache_config.origin_protection.max_concurrent_fills;
         let peer_fill_enabled = cache_config.peer_fill.enabled;
         let peer_fill_peer_count = cache_config.peer_fill.peers.len();
         let peer_fill_max_concurrent_requests = cache_config.peer_fill.max_concurrent_requests;
@@ -951,6 +954,8 @@ impl ProxySnapshot {
                 cache_lock_enabled,
                 cache_lock_wait_timeout_secs,
                 cache_predictor_enabled,
+                origin_protection_enabled,
+                origin_protection_max_concurrent_fills,
                 peer_fill_enabled,
                 peer_fill_peer_count,
                 peer_fill_max_concurrent_requests,
@@ -975,6 +980,8 @@ impl ProxySnapshot {
                 cache_lock_enabled,
                 cache_lock_wait_timeout_secs,
                 cache_predictor_enabled,
+                origin_protection_enabled,
+                origin_protection_max_concurrent_fills,
                 peer_fill_enabled,
                 peer_fill_peer_count,
                 peer_fill_max_concurrent_requests,

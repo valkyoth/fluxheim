@@ -247,6 +247,17 @@ pub enum CliCommand {
         #[arg(long)]
         expect_cache_predictor_enabled: bool,
 
+        /// Require the selected cache policy to have origin protection enabled.
+        #[arg(long)]
+        expect_origin_protection_enabled: bool,
+
+        /// Required origin-protection max concurrent fills for the selected cache policy.
+        #[arg(
+            long = "expect-origin-protection-max-concurrent-fills",
+            value_name = "COUNT"
+        )]
+        expect_origin_protection_max_concurrent_fills: Option<usize>,
+
         /// Require the selected cache policy to have peer fill enabled.
         #[arg(long)]
         expect_peer_fill_enabled: bool,
@@ -384,6 +395,17 @@ pub enum CliCommand {
         /// Require the selected cache policy to have the cacheability predictor enabled.
         #[arg(long)]
         expect_cache_predictor_enabled: bool,
+
+        /// Require the selected cache policy to have origin protection enabled.
+        #[arg(long)]
+        expect_origin_protection_enabled: bool,
+
+        /// Required origin-protection max concurrent fills for the selected cache policy.
+        #[arg(
+            long = "expect-origin-protection-max-concurrent-fills",
+            value_name = "COUNT"
+        )]
+        expect_origin_protection_max_concurrent_fills: Option<usize>,
 
         /// Require the selected cache policy to have peer fill enabled.
         #[arg(long)]
@@ -815,6 +837,8 @@ fn run_command(
             expect_cache_lock_enabled,
             expect_cache_lock_wait_timeout_secs,
             expect_cache_predictor_enabled,
+            expect_origin_protection_enabled,
+            expect_origin_protection_max_concurrent_fills,
             expect_peer_fill_enabled,
             expect_peer_fill_peers,
             expect_peer_fill_max_concurrent_requests,
@@ -840,6 +864,9 @@ fn run_command(
             expect_cache_lock_enabled: *expect_cache_lock_enabled,
             expect_cache_lock_wait_timeout_secs: *expect_cache_lock_wait_timeout_secs,
             expect_cache_predictor_enabled: *expect_cache_predictor_enabled,
+            expect_origin_protection_enabled: *expect_origin_protection_enabled,
+            expect_origin_protection_max_concurrent_fills:
+                *expect_origin_protection_max_concurrent_fills,
             expect_peer_fill_enabled: *expect_peer_fill_enabled,
             expect_peer_fill_peers: *expect_peer_fill_peers,
             expect_peer_fill_max_concurrent_requests: *expect_peer_fill_max_concurrent_requests,
@@ -875,6 +902,8 @@ fn run_command(
             expect_cache_lock_enabled,
             expect_cache_lock_wait_timeout_secs,
             expect_cache_predictor_enabled,
+            expect_origin_protection_enabled,
+            expect_origin_protection_max_concurrent_fills,
             expect_peer_fill_enabled,
             expect_peer_fill_peers,
             expect_peer_fill_max_concurrent_requests,
@@ -912,6 +941,9 @@ fn run_command(
             expect_cache_lock_enabled: *expect_cache_lock_enabled,
             expect_cache_lock_wait_timeout_secs: *expect_cache_lock_wait_timeout_secs,
             expect_cache_predictor_enabled: *expect_cache_predictor_enabled,
+            expect_origin_protection_enabled: *expect_origin_protection_enabled,
+            expect_origin_protection_max_concurrent_fills:
+                *expect_origin_protection_max_concurrent_fills,
             expect_peer_fill_enabled: *expect_peer_fill_enabled,
             expect_peer_fill_peers: *expect_peer_fill_peers,
             expect_peer_fill_max_concurrent_requests: *expect_peer_fill_max_concurrent_requests,
@@ -1123,6 +1155,8 @@ struct CacheKeyOptions<'a> {
     expect_cache_lock_enabled: bool,
     expect_cache_lock_wait_timeout_secs: Option<u64>,
     expect_cache_predictor_enabled: bool,
+    expect_origin_protection_enabled: bool,
+    expect_origin_protection_max_concurrent_fills: Option<usize>,
     expect_peer_fill_enabled: bool,
     expect_peer_fill_peers: Option<usize>,
     expect_peer_fill_max_concurrent_requests: Option<usize>,
@@ -1161,6 +1195,8 @@ struct CacheLookupOptions<'a> {
     expect_cache_lock_enabled: bool,
     expect_cache_lock_wait_timeout_secs: Option<u64>,
     expect_cache_predictor_enabled: bool,
+    expect_origin_protection_enabled: bool,
+    expect_origin_protection_max_concurrent_fills: Option<usize>,
     expect_peer_fill_enabled: bool,
     expect_peer_fill_peers: Option<usize>,
     expect_peer_fill_max_concurrent_requests: Option<usize>,
@@ -1462,6 +1498,9 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
             expect_cache_lock_enabled: options.expect_cache_lock_enabled,
             expected_cache_lock_wait_timeout_secs: options.expect_cache_lock_wait_timeout_secs,
             expect_cache_predictor_enabled: options.expect_cache_predictor_enabled,
+            expect_origin_protection_enabled: options.expect_origin_protection_enabled,
+            expected_origin_protection_max_concurrent_fills: options
+                .expect_origin_protection_max_concurrent_fills,
             expect_peer_fill_enabled: options.expect_peer_fill_enabled,
             expected_peer_fill_peers: options.expect_peer_fill_peers,
             expected_peer_fill_max_concurrent_requests: options
@@ -1493,6 +1532,14 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
     println!(
         "cache_predictor_enabled: {}",
         preview.cache_predictor_enabled
+    );
+    println!(
+        "origin_protection_enabled: {}",
+        preview.origin_protection_enabled
+    );
+    println!(
+        "origin_protection_max_concurrent_fills: {}",
+        preview.origin_protection_max_concurrent_fills
     );
     println!("peer_fill_enabled: {}", preview.peer_fill_enabled);
     println!("peer_fill_peers: {}", preview.peer_fill_peer_count);
@@ -1541,6 +1588,8 @@ struct CacheKeyPreviewExpectations<'a> {
     expect_cache_lock_enabled: bool,
     expected_cache_lock_wait_timeout_secs: Option<u64>,
     expect_cache_predictor_enabled: bool,
+    expect_origin_protection_enabled: bool,
+    expected_origin_protection_max_concurrent_fills: Option<usize>,
     expect_peer_fill_enabled: bool,
     expected_peer_fill_peers: Option<usize>,
     expected_peer_fill_max_concurrent_requests: Option<usize>,
@@ -1587,6 +1636,18 @@ fn validate_cache_key_preview_expectations(
     }
     if expectations.expect_cache_predictor_enabled && !preview.cache_predictor_enabled {
         return Err("cache-key expected cache predictor enabled, found false".into());
+    }
+    if expectations.expect_origin_protection_enabled && !preview.origin_protection_enabled {
+        return Err("cache-key expected origin protection enabled, found false".into());
+    }
+    if let Some(expected_concurrency) = expectations.expected_origin_protection_max_concurrent_fills
+        && preview.origin_protection_max_concurrent_fills != expected_concurrency
+    {
+        return Err(format!(
+            "cache-key expected origin protection max concurrent fills {expected_concurrency}, found {}",
+            preview.origin_protection_max_concurrent_fills
+        )
+        .into());
     }
     if expectations.expect_peer_fill_enabled && !preview.peer_fill_enabled {
         return Err("cache-key expected peer fill enabled, found false".into());
@@ -1693,6 +1754,8 @@ fn run_cache_lookup_command(
         expect_cache_lock_enabled: false,
         expect_cache_lock_wait_timeout_secs: None,
         expect_cache_predictor_enabled: false,
+        expect_origin_protection_enabled: false,
+        expect_origin_protection_max_concurrent_fills: None,
         expect_peer_fill_enabled: false,
         expect_peer_fill_peers: None,
         expect_peer_fill_max_concurrent_requests: None,
@@ -1768,6 +1831,9 @@ fn run_cache_lookup_command(
         expect_cache_lock_enabled: options.expect_cache_lock_enabled,
         expected_cache_lock_wait_timeout_secs: options.expect_cache_lock_wait_timeout_secs,
         expect_cache_predictor_enabled: options.expect_cache_predictor_enabled,
+        expect_origin_protection_enabled: options.expect_origin_protection_enabled,
+        expected_origin_protection_max_concurrent_fills: options
+            .expect_origin_protection_max_concurrent_fills,
         expect_peer_fill_enabled: options.expect_peer_fill_enabled,
         expected_peer_fill_peers: options.expect_peer_fill_peers,
         expected_peer_fill_max_concurrent_requests: options
@@ -1801,6 +1867,14 @@ fn run_cache_lookup_command(
     println!(
         "cache_predictor_enabled: {}",
         lookup.preview.cache_predictor_enabled
+    );
+    println!(
+        "origin_protection_enabled: {}",
+        lookup.preview.origin_protection_enabled
+    );
+    println!(
+        "origin_protection_max_concurrent_fills: {}",
+        lookup.preview.origin_protection_max_concurrent_fills
     );
     println!("peer_fill_enabled: {}", lookup.preview.peer_fill_enabled);
     println!("peer_fill_peers: {}", lookup.preview.peer_fill_peer_count);
@@ -2010,6 +2084,8 @@ struct CacheLookupExpectations<'a> {
     expect_cache_lock_enabled: bool,
     expected_cache_lock_wait_timeout_secs: Option<u64>,
     expect_cache_predictor_enabled: bool,
+    expect_origin_protection_enabled: bool,
+    expected_origin_protection_max_concurrent_fills: Option<usize>,
     expect_peer_fill_enabled: bool,
     expected_peer_fill_peers: Option<usize>,
     expected_peer_fill_max_concurrent_requests: Option<usize>,
@@ -2048,6 +2124,8 @@ fn validate_cache_lookup_expectations(
         expect_cache_lock_enabled,
         expected_cache_lock_wait_timeout_secs,
         expect_cache_predictor_enabled,
+        expect_origin_protection_enabled,
+        expected_origin_protection_max_concurrent_fills,
         expect_peer_fill_enabled,
         expected_peer_fill_peers,
         expected_peer_fill_max_concurrent_requests,
@@ -2073,6 +2151,9 @@ fn validate_cache_lookup_expectations(
             expect_cache_lock_enabled: *expect_cache_lock_enabled,
             expected_cache_lock_wait_timeout_secs: *expected_cache_lock_wait_timeout_secs,
             expect_cache_predictor_enabled: *expect_cache_predictor_enabled,
+            expect_origin_protection_enabled: *expect_origin_protection_enabled,
+            expected_origin_protection_max_concurrent_fills:
+                *expected_origin_protection_max_concurrent_fills,
             expect_peer_fill_enabled: *expect_peer_fill_enabled,
             expected_peer_fill_peers: *expected_peer_fill_peers,
             expected_peer_fill_max_concurrent_requests: *expected_peer_fill_max_concurrent_requests,
@@ -2445,6 +2526,8 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         expect_cache_lock_enabled,
         expect_cache_lock_wait_timeout_secs,
         expect_cache_predictor_enabled,
+        expect_origin_protection_enabled,
+        expect_origin_protection_max_concurrent_fills,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
@@ -2471,6 +2554,8 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         expect_cache_lock_enabled,
         expect_cache_lock_wait_timeout_secs,
         expect_cache_predictor_enabled,
+        expect_origin_protection_enabled,
+        expect_origin_protection_max_concurrent_fills,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
@@ -2514,6 +2599,8 @@ fn run_cache_lookup_command(
         expect_cache_lock_enabled,
         expect_cache_lock_wait_timeout_secs,
         expect_cache_predictor_enabled,
+        expect_origin_protection_enabled,
+        expect_origin_protection_max_concurrent_fills,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
@@ -2547,6 +2634,8 @@ fn run_cache_lookup_command(
         expect_cache_lock_enabled,
         expect_cache_lock_wait_timeout_secs,
         expect_cache_predictor_enabled,
+        expect_origin_protection_enabled,
+        expect_origin_protection_max_concurrent_fills,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
@@ -4205,6 +4294,8 @@ mod tests {
             expect_cache_lock_enabled: false,
             expected_cache_lock_wait_timeout_secs: None,
             expect_cache_predictor_enabled: false,
+            expect_origin_protection_enabled: false,
+            expected_origin_protection_max_concurrent_fills: None,
             expect_peer_fill_enabled: false,
             expected_peer_fill_peers: None,
             expected_peer_fill_max_concurrent_requests: None,
@@ -4237,6 +4328,8 @@ mod tests {
                     expect_cache_lock_enabled: true,
                     expected_cache_lock_wait_timeout_secs: Some(30),
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4560,6 +4653,8 @@ mod tests {
                     expect_cache_lock_enabled: true,
                     expected_cache_lock_wait_timeout_secs: Some(30),
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4590,9 +4685,42 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: true,
                     expected_peer_fill_peers: Some(2),
                     expected_peer_fill_max_concurrent_requests: Some(128),
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: None,
+                    expected_scope: None,
+                    expected_vhost: None,
+                    expected_route: None,
+                    expected_namespace: None,
+                    expected_key_namespace: None,
+                    expected_user_tag: None,
+                }
+            )
+            .is_ok()
+        );
+        let mut origin_preview = preview.clone();
+        origin_preview.origin_protection_enabled = true;
+        origin_preview.origin_protection_max_concurrent_fills = 96;
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &origin_preview,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_ineligible: false,
+                    expected_reason: None,
+                    expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
+                    expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: true,
+                    expected_origin_protection_max_concurrent_fills: Some(96),
+                    expect_peer_fill_enabled: false,
+                    expected_peer_fill_peers: None,
+                    expected_peer_fill_max_concurrent_requests: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: None,
@@ -4616,6 +4744,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: true,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4644,6 +4774,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4672,6 +4804,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: Some(5),
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4700,6 +4834,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4728,6 +4864,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4756,6 +4894,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4784,6 +4924,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4812,6 +4954,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4840,6 +4984,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4868,6 +5014,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4896,6 +5044,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4927,6 +5077,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -4953,6 +5105,8 @@ mod tests {
                     expect_cache_lock_enabled: false,
                     expected_cache_lock_wait_timeout_secs: None,
                     expect_cache_predictor_enabled: false,
+                    expect_origin_protection_enabled: false,
+                    expected_origin_protection_max_concurrent_fills: None,
                     expect_peer_fill_enabled: false,
                     expected_peer_fill_peers: None,
                     expected_peer_fill_max_concurrent_requests: None,
@@ -5350,6 +5504,8 @@ mod tests {
                 cache_lock_enabled: true,
                 cache_lock_wait_timeout_secs: 30,
                 cache_predictor_enabled: false,
+                origin_protection_enabled: false,
+                origin_protection_max_concurrent_fills: 32,
                 peer_fill_enabled: false,
                 peer_fill_peer_count: 0,
                 peer_fill_max_concurrent_requests: 64,

@@ -158,6 +158,7 @@ fi
 - Add cache origin-protection configuration for route/vhost-scoped
   origin-fill budgets.
 - Expose origin-protection rollout in cache status and metrics.
+- Include origin-protection state in cache-key/cache-lookup release gates.
 
 * Sun Jun 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.22-1
 - Continue cache/load-balancer crate-boundary preparation.
