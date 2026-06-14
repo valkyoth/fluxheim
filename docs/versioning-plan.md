@@ -2497,9 +2497,11 @@ Planned `1.6.x` sequence:
   health-check connector is carried into the HTTP/runtime cutover.
 - `v1.6.2`: cache independence. Move cache interfaces into `fluxheim-cache`
   and replace remaining Pingora cache key/meta/hit/miss/admission adapter
-  usage in normal cache builds. Keep a temporary compatibility adapter only for
-  the old HTTP runtime. Add a cache profile gate proving `pingora-cache` is not
-  compiled.
+  usage where the cache domain itself can be made transport-neutral. Keep a
+  temporary compatibility adapter only for the old HTTP runtime. The current
+  Pingora facade still requires `pingora/cache` while the legacy proxy runtime
+  imports `pingora::cache`; keep that exception explicit and track final
+  `pingora-cache` compile removal under the native HTTP/runtime cutover.
 - `v1.6.3`: stream runtime cutover. Move TCP stream proxying to
   `fluxheim-stream` or `fluxheim-proxy` using direct Tokio listeners and
   connectors, including upstream TLS/mTLS through rustls and OpenSSL. Remove
@@ -2574,6 +2576,14 @@ Planned `1.6.x` sequence:
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
   checks, long-running soak tests, and documentation clarity.
+- `v1.6.15`: native load-balancer compatibility polish after Pingora is gone
+  from normal builds. Add a Fluxheim-owned nginx/Ketama-compatible consistent
+  hash selection mode for operators migrating from nginx or Pingora Ketama
+  behavior. Keep the existing rendezvous consistent-hash and bounded-load
+  consistent modes as the default Fluxheim algorithms, but document that the
+  compatibility mode is for matching nginx-style request-to-backend mapping.
+  Do not depend on `pingora-ketama`; implement and test the ring behavior in
+  Fluxheim with golden vectors and membership-change remapping tests.
 
 Stable exit criteria:
 

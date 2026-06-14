@@ -18,6 +18,39 @@ pub struct StaticCacheRequest<'a> {
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct CacheKey(String);
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct FluxCacheKeyParts {
+    primary: String,
+    combined: String,
+    user_tag: String,
+}
+
+impl FluxCacheKeyParts {
+    pub fn new(
+        primary: impl Into<String>,
+        combined: impl Into<String>,
+        user_tag: impl Into<String>,
+    ) -> Self {
+        Self {
+            primary: primary.into(),
+            combined: combined.into(),
+            user_tag: user_tag.into(),
+        }
+    }
+
+    pub fn primary(&self) -> &str {
+        &self.primary
+    }
+
+    pub fn combined(&self) -> &str {
+        &self.combined
+    }
+
+    pub fn user_tag(&self) -> &str {
+        &self.user_tag
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CacheRangeRequest {
     pub start: u64,
@@ -324,11 +357,11 @@ pub fn slice_request_within_policy(
 #[cfg(test)]
 mod tests {
     use super::{
-        CacheClientRange, CacheContentRange, CacheSliceBounds, append_cache_key_component,
-        cache_method_temporarily_bypassed, parse_bounded_single_range, parse_cache_client_ranges,
-        parse_cache_content_range, required_slice_bounds, resolve_client_slice_ranges,
-        response_content_length_matches_range, response_content_range_matches,
-        slice_request_within_policy,
+        CacheClientRange, CacheContentRange, CacheSliceBounds, FluxCacheKeyParts,
+        append_cache_key_component, cache_method_temporarily_bypassed, parse_bounded_single_range,
+        parse_cache_client_ranges, parse_cache_content_range, required_slice_bounds,
+        resolve_client_slice_ranges, response_content_length_matches_range,
+        response_content_range_matches, slice_request_within_policy,
     };
 
     #[test]
@@ -499,5 +532,14 @@ mod tests {
             2,
             8
         ));
+    }
+
+    #[test]
+    fn flux_cache_key_parts_preserve_identity_fields() {
+        let key = FluxCacheKeyParts::new("primary", "combined", "tag");
+
+        assert_eq!(key.primary(), "primary");
+        assert_eq!(key.combined(), "combined");
+        assert_eq!(key.user_tag(), "tag");
     }
 }

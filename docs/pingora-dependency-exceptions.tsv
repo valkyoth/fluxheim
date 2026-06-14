@@ -1,6 +1,6 @@
 # profile	crate	removal_target	reason
 default	pingora	1.6.13	Root proxy/runtime still uses Pingora.
-default	pingora-cache	1.6.2	Cache adapter still compiles through Pingora cache.
+default	pingora-cache	1.6.13	Transitive through Pingora proxy runtime until native HTTP cutover.
 default	pingora-core	1.6.13	Transitive through Pingora proxy/runtime.
 default	pingora-error	1.6.5	Internal error adapters still bridge Pingora errors.
 default	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
@@ -12,7 +12,7 @@ default	pingora-runtime	1.6.7	Server bootstrap still uses Pingora runtime.
 default	pingora-rustls	1.6.6	TLS listener path still uses Pingora rustls adapter.
 default	pingora-timeout	1.6.13	Transitive through Pingora runtime.
 full	pingora	1.6.13	Root proxy/runtime still uses Pingora.
-full	pingora-cache	1.6.2	Cache adapter still compiles through Pingora cache.
+full	pingora-cache	1.6.13	Transitive through Pingora proxy runtime until native HTTP cutover.
 full	pingora-core	1.6.13	Transitive through Pingora proxy/runtime.
 full	pingora-error	1.6.5	Internal error adapters still bridge Pingora errors.
 full	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
@@ -24,7 +24,7 @@ full	pingora-runtime	1.6.7	Server bootstrap still uses Pingora runtime.
 full	pingora-rustls	1.6.6	TLS listener path still uses Pingora rustls adapter.
 full	pingora-timeout	1.6.13	Transitive through Pingora runtime.
 cache-edge	pingora	1.6.13	Root proxy/runtime still uses Pingora.
-cache-edge	pingora-cache	1.6.2	Cache adapter still compiles through Pingora cache.
+cache-edge	pingora-cache	1.6.13	Transitive through Pingora proxy runtime until native HTTP cutover.
 cache-edge	pingora-core	1.6.13	Transitive through Pingora proxy/runtime.
 cache-edge	pingora-error	1.6.5	Internal error adapters still bridge Pingora errors.
 cache-edge	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
@@ -36,7 +36,7 @@ cache-edge	pingora-runtime	1.6.7	Server bootstrap still uses Pingora runtime.
 cache-edge	pingora-rustls	1.6.6	TLS listener path still uses Pingora rustls adapter.
 cache-edge	pingora-timeout	1.6.13	Transitive through Pingora runtime.
 proxy-edge	pingora	1.6.13	Root proxy/runtime still uses Pingora.
-proxy-edge	pingora-cache	1.6.2	Cache adapter still compiles through Pingora cache.
+proxy-edge	pingora-cache	1.6.13	Transitive through Pingora proxy runtime until native HTTP cutover.
 proxy-edge	pingora-core	1.6.13	Transitive through Pingora proxy/runtime.
 proxy-edge	pingora-error	1.6.5	Internal error adapters still bridge Pingora errors.
 proxy-edge	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
@@ -48,7 +48,7 @@ proxy-edge	pingora-runtime	1.6.7	Server bootstrap still uses Pingora runtime.
 proxy-edge	pingora-rustls	1.6.6	TLS listener path still uses Pingora rustls adapter.
 proxy-edge	pingora-timeout	1.6.13	Transitive through Pingora runtime.
 load-balancer-edge	pingora	1.6.13	Root proxy/runtime still uses Pingora.
-load-balancer-edge	pingora-cache	1.6.2	Cache adapter still compiles through Pingora cache.
+load-balancer-edge	pingora-cache	1.6.13	Transitive through Pingora proxy runtime until native HTTP cutover.
 load-balancer-edge	pingora-core	1.6.13	Transitive through Pingora proxy/runtime.
 load-balancer-edge	pingora-error	1.6.5	Internal error adapters still bridge Pingora errors.
 load-balancer-edge	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
@@ -60,7 +60,7 @@ load-balancer-edge	pingora-runtime	1.6.7	Server bootstrap still uses Pingora run
 load-balancer-edge	pingora-rustls	1.6.6	TLS listener path still uses Pingora rustls adapter.
 load-balancer-edge	pingora-timeout	1.6.13	Transitive through Pingora runtime.
 php	pingora	1.6.13	Root proxy/runtime still uses Pingora.
-php	pingora-cache	1.6.2	Cache adapter still compiles through Pingora cache.
+php	pingora-cache	1.6.13	Transitive through Pingora proxy runtime until native HTTP cutover.
 php	pingora-core	1.6.13	Transitive through Pingora proxy/runtime.
 php	pingora-error	1.6.5	Internal error adapters still bridge Pingora errors.
 php	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
@@ -72,7 +72,7 @@ php	pingora-runtime	1.6.7	Server bootstrap still uses Pingora runtime.
 php	pingora-rustls	1.6.6	TLS listener path still uses Pingora rustls adapter.
 php	pingora-timeout	1.6.13	Transitive through Pingora runtime.
 privacy	pingora	1.6.13	Root proxy/runtime still uses Pingora.
-privacy	pingora-cache	1.6.2	Cache adapter still compiles through Pingora cache.
+privacy	pingora-cache	1.6.13	Transitive through Pingora proxy runtime until native HTTP cutover.
 privacy	pingora-core	1.6.13	Transitive through Pingora proxy/runtime.
 privacy	pingora-error	1.6.5	Internal error adapters still bridge Pingora errors.
 privacy	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.

@@ -48,8 +48,8 @@ pub use fluxheim_cache::{
     CacheObjectHeaderValue, CacheObjectMetadata, CacheObjectTier, CacheRangeRequest, CacheRequest,
     CacheRequestView, CacheSliceBounds, CacheSliceRangeRequest, CacheStaleEvent, CacheStoragePlan,
     CacheStoreError, CachedHeader, CachedImageObject, DiskCacheStats, DiskTierPlan,
-    FluxCacheMissFinish, FluxCachePurgeType, MAX_VARY_FIELDS, MemoryCacheStats, MemoryTierPlan,
-    StaticCacheRequest, TieredCacheStats, VaryCachePolicy, VaryRequestHashField,
+    FluxCacheKeyParts, FluxCacheMissFinish, FluxCachePurgeType, MAX_VARY_FIELDS, MemoryCacheStats,
+    MemoryTierPlan, StaticCacheRequest, TieredCacheStats, VaryCachePolicy, VaryRequestHashField,
     append_cache_key_component, cache_average_bytes, cache_control_freshness_value,
     cache_control_with_directive, cache_key_with_component, cache_method_temporarily_bypassed,
     cache_object_lookup_body_bytes_summary, cache_object_lookup_bool_summary,
@@ -5540,13 +5540,26 @@ impl PingoraStoreKey {
         meta: &CacheMeta,
         cache_tag_headers: &[String],
     ) -> Self {
+        let key_parts = FluxCacheKeyParts::new(key.primary(), key.combined(), key.user_tag.clone());
+        Self::from_flux_key_parts_and_meta(
+            &key_parts,
+            key.primary_key_str(),
+            meta,
+            cache_tag_headers,
+        )
+    }
+
+    fn from_flux_key_parts_and_meta(
+        key_parts: &FluxCacheKeyParts,
+        primary_key: Option<&str>,
+        meta: &CacheMeta,
+        cache_tag_headers: &[String],
+    ) -> Self {
         Self {
-            combined: key.combined(),
-            primary: key.primary(),
-            user_tag: key.user_tag.clone(),
-            index_path: key
-                .primary_key_str()
-                .and_then(|primary| cache_primary_component(primary, "path")),
+            combined: key_parts.combined().to_owned(),
+            primary: key_parts.primary().to_owned(),
+            user_tag: key_parts.user_tag().to_owned(),
+            index_path: primary_key.and_then(|primary| cache_primary_component(primary, "path")),
             cache_tags: cache_tags_from_meta(meta, cache_tag_headers),
         }
     }

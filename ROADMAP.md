@@ -139,6 +139,13 @@ extensibility moves to `1.7`; it should cover the operational jobs normally
 solved with F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-style
 cache logic, but only after the Pingora-free runtime boundary is stable. HTTP/3
 and QUIC remain a later Fluxheim-owned protocol milestone after that.
+After Pingora is removed from normal builds, add a native
+nginx/Ketama-compatible consistent-hash selection mode implemented by
+Fluxheim, not by depending on `pingora-ketama`. The current Fluxheim-owned
+rendezvous consistent-hash modes should remain available because they are
+valid and per-boot-secret hardened, but operators migrating from nginx should
+also have an explicit compatibility mode whose request-to-backend mapping
+matches nginx-style consistent hashing.
 Future "edge firewall" and "TLS VPN gateway" modes are realistic only as
 separate product modes, not as accidental load-balancer options. They would
 need dedicated compile profiles, threat models, packet/routing ownership,
