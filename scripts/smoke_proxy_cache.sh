@@ -625,6 +625,7 @@ stop_origin() {
 }
 
 admin_status_body="$TMP_DIR/admin-status.json"
+admin_cache_status_body="$TMP_DIR/admin-cache-status.json"
 admin_bulk_purge_body="$TMP_DIR/admin-bulk-purge.json"
 admin_exact_purge_body="$TMP_DIR/admin-exact-purge.json"
 admin_stale_dry_run_body="$TMP_DIR/admin-stale-dry-run.json"
@@ -669,6 +670,24 @@ if ! grep -q '"status":"ok"' "$admin_status_body"; then
     exit 1
 fi
 
+if ! curl -sS --max-time "$CURL_MAX_TIME" -o "$admin_cache_status_body" \
+    -H "Authorization: Bearer secret-token" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/cache/status"; then
+    echo "proxy cache smoke failed: admin cache-status endpoint did not become reachable" >&2
+    cat "$TMP_DIR/fluxheim.log" >&2 || true
+    exit 1
+fi
+if ! grep -q '"origin_protection_enabled_policies":1' "$admin_cache_status_body"; then
+    echo "proxy cache smoke failed: admin status missed origin-protection policy count" >&2
+    cat "$admin_cache_status_body" >&2
+    exit 1
+fi
+if ! grep -q '"origin_protection_max_concurrent_fills":2' "$admin_cache_status_body"; then
+    echo "proxy cache smoke failed: admin status missed origin-protection fill budget" >&2
+    cat "$admin_cache_status_body" >&2
+    exit 1
+fi
+
 if ! curl -sS --max-time "$CURL_MAX_TIME" -o "$metrics_body" \
     "http://127.0.0.1:$METRICS_PORT/metrics"; then
     echo "proxy cache smoke failed: metrics endpoint did not become reachable" >&2
@@ -678,6 +697,16 @@ fi
 if ! grep -q 'fluxheim_proxy_requests_total' "$metrics_body"; then
     echo "proxy cache smoke failed: metrics endpoint did not expose Fluxheim metrics" >&2
     head -n 40 "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -q '^fluxheim_cache_origin_protection_enabled_policies 1$' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed origin-protection policy count" >&2
+    grep 'fluxheim_cache_origin_protection' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -q '^fluxheim_cache_origin_protection_max_concurrent_fills 2$' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed origin-protection fill budget" >&2
+    grep 'fluxheim_cache_origin_protection' "$metrics_body" >&2 || true
     exit 1
 fi
 
