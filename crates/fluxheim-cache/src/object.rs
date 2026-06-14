@@ -1,4 +1,6 @@
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use fluxheim_config::ByteSize;
 
@@ -30,6 +32,32 @@ pub struct SerializedCacheObject {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DiskCacheEntry {
+    pub combined_key: Option<String>,
+    pub path: PathBuf,
+    pub size: u64,
+    pub modified: SystemTime,
+    pub accessed: SystemTime,
+}
+
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
+pub struct DiskObjectLruKey {
+    pub accessed: SystemTime,
+    pub modified: SystemTime,
+    pub path: PathBuf,
+}
+
+impl DiskObjectLruKey {
+    pub fn from_entry(entry: &DiskCacheEntry) -> Self {
+        Self {
+            accessed: entry.accessed,
+            modified: entry.modified,
+            path: entry.path.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum CacheStoreError {
     ObjectTooLarge {
         object_bytes: u64,
@@ -54,9 +82,14 @@ pub enum FluxCacheMissFinish {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::sync::Arc;
+    use std::time::SystemTime;
 
-    use super::{FluxCacheMissFinish, FluxCachePurgeType, SerializedCacheObject};
+    use super::{
+        DiskCacheEntry, DiskObjectLruKey, FluxCacheMissFinish, FluxCachePurgeType,
+        SerializedCacheObject,
+    };
 
     #[test]
     fn cache_storage_interface_enums_are_stable() {
@@ -90,5 +123,24 @@ mod tests {
         assert_eq!(object.response_header, [3, 4]);
         assert_eq!(object.body.as_ref(), [5, 6]);
         assert_eq!(object.weight, 6);
+    }
+
+    #[test]
+    fn disk_object_lru_key_matches_entry_ordering_fields() {
+        let modified = SystemTime::UNIX_EPOCH;
+        let accessed = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(5);
+        let entry = DiskCacheEntry {
+            combined_key: Some("combined".to_owned()),
+            path: PathBuf::from("/cache/object"),
+            size: 42,
+            modified,
+            accessed,
+        };
+
+        let key = DiskObjectLruKey::from_entry(&entry);
+
+        assert_eq!(key.accessed, accessed);
+        assert_eq!(key.modified, modified);
+        assert_eq!(key.path, PathBuf::from("/cache/object"));
     }
 }

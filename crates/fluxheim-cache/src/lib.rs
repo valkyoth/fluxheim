@@ -46,8 +46,8 @@ pub use metrics::{
     cache_scope_label, cache_tier_label,
 };
 pub use object::{
-    CacheStoreError, CachedHeader, CachedImageObject, FluxCacheMissFinish, FluxCachePurgeType,
-    SerializedCacheObject,
+    CacheStoreError, CachedHeader, CachedImageObject, DiskCacheEntry, DiskObjectLruKey,
+    FluxCacheMissFinish, FluxCachePurgeType, SerializedCacheObject,
 };
 pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};
 pub use purge_index::{CachePurgeIndex, CachePurgeIndexEntry};

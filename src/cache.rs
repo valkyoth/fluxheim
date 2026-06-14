@@ -47,9 +47,10 @@ pub use fluxheim_cache::{
     CacheActivityStats, CacheClientRange, CacheContentRange, CacheKey, CacheObjectFreshnessState,
     CacheObjectHeaderValue, CacheObjectMetadata, CacheObjectTier, CacheRangeRequest, CacheRequest,
     CacheRequestView, CacheSliceBounds, CacheSliceRangeRequest, CacheStaleEvent, CacheStoragePlan,
-    CacheStoreError, CachedHeader, CachedImageObject, DiskCacheStats, DiskTierPlan,
-    FluxCacheKeyParts, FluxCacheMissFinish, FluxCachePurgeType, MAX_VARY_FIELDS, MemoryCacheStats,
-    MemoryTierPlan, SerializedCacheObject, StaticCacheRequest, TieredCacheStats, VaryCachePolicy,
+    CacheStoreError, CachedHeader, CachedImageObject, DiskCacheEntry as FluxDiskCacheEntry,
+    DiskCacheStats, DiskObjectLruKey as FluxDiskObjectLruKey, DiskTierPlan, FluxCacheKeyParts,
+    FluxCacheMissFinish, FluxCachePurgeType, MAX_VARY_FIELDS, MemoryCacheStats, MemoryTierPlan,
+    SerializedCacheObject, StaticCacheRequest, TieredCacheStats, VaryCachePolicy,
     VaryRequestHashField, append_cache_key_component, cache_average_bytes,
     cache_control_freshness_value, cache_control_with_directive, cache_key_with_component,
     cache_method_temporarily_bypassed, cache_object_lookup_body_bytes_summary,
@@ -5593,33 +5594,10 @@ fn cache_purge_entry_from_stored_object(
 }
 
 #[cfg(feature = "proxy")]
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct DiskCacheEntry {
-    combined_key: Option<String>,
-    path: PathBuf,
-    size: u64,
-    modified: std::time::SystemTime,
-    accessed: std::time::SystemTime,
-}
+type DiskCacheEntry = FluxDiskCacheEntry;
 
 #[cfg(feature = "proxy")]
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
-struct DiskObjectLruKey {
-    accessed: std::time::SystemTime,
-    modified: std::time::SystemTime,
-    path: PathBuf,
-}
-
-#[cfg(feature = "proxy")]
-impl DiskObjectLruKey {
-    fn from_entry(entry: &DiskCacheEntry) -> Self {
-        Self {
-            accessed: entry.accessed,
-            modified: entry.modified,
-            path: entry.path.clone(),
-        }
-    }
-}
+type DiskObjectLruKey = FluxDiskObjectLruKey;
 
 #[cfg(feature = "proxy")]
 #[derive(Debug, Clone)]
