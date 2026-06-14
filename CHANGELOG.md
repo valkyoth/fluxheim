@@ -54,6 +54,9 @@ behavior when the change improves security or project direction.
 - Update README wording so the 1.5 load-balancer line is closed and future
   load-balancer health-check work is no longer described as a later 1.5.x
   item.
+- Refresh `ROADMAP.md` so `1.6.x` is consistently documented as the
+  Pingora-exit line, shared Wasm extensibility is moved to `1.7`, and HTTP/3
+  remains after the runtime boundary is stable.
 
 ## 1.5.23 - 2026-06-14
 

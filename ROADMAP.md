@@ -10,10 +10,19 @@ Larger modules still graduate through later minor releases.
 
 ## Current Release Goal
 
-Fluxheim `1.0.0` is the first gateway-ready baseline: static sites, SNI-backed
-TLS vhosts, route redirects, location-style proxying, websocket-safe proxy
-headers, directory listing, static aliases, cleartext ACME challenge
-exceptions, default HTTP service packaging, and native systemd deployment.
+Fluxheim `1.6.x` is the Pingora-exit line. Its goal is to remove Pingora from
+every normal Fluxheim build by replacing the server/listener/TLS, cache,
+load-balancer, stream, HTTP type/error, upstream pooling, and HTTP proxy runtime
+boundaries with Fluxheim-owned crates and standard Rust protocol libraries,
+while preserving behavior with baseline evidence and parity fixtures.
+
+Historical milestones:
+
+Fluxheim `1.0.0` was the first gateway-ready baseline: static sites,
+SNI-backed TLS vhosts, route redirects, location-style proxying,
+websocket-safe proxy headers, directory listing, static aliases, cleartext ACME
+challenge exceptions, default HTTP service packaging, and native systemd
+deployment.
 
 Fluxheim `1.1.0` added TLS policy hardening plus ACME runtime issuance and
 renewal for Let's Encrypt and Actalis, so deployments do not depend on manual
@@ -121,16 +130,15 @@ game-server UDP proxying; DNS/GSLB traffic steering as a separate control-plane
 track for health-aware DNS answers, regional policy, TTL behavior, failover,
 and DNSSEC/evidence requirements; and xDS/Kubernetes/Consul discovery after
 runtime backend mutation has proven safe locally.
-`1.6` is planned as the shared Wasm extensibility release for the kinds of
-operator policy normally solved with F5 iRules, nginx Lua/OpenResty, HAProxy
-Lua/SPOE, and VCL-style cache logic. It should support conditional routing,
-pool selection, persistence-key decisions, request denial/synthetic responses,
-header mutation, logging/redaction, and cache policy through one sandboxed
-runtime. It is not meant to be syntax-compatible with iRules or Lua, but it
-should cover the same operational jobs with typed Fluxheim context and strict
-resource limits. Sentinel Mesh/WireGuard, advanced certificate automation, and
-larger application-server features remain later minor releases according to the
-versioning plan.
+`1.6` is the Pingora-exit release line. It starts with baseline evidence,
+crate-boundary policy, runtime parity fixtures, dependency exception gates, and
+small Fluxheim-owned runtime proof primitives, then removes Pingora dependency
+surface profile by profile. The line should keep behavior stable while moving
+code into focused crates where that reduces review surface. Shared Wasm
+extensibility moves to `1.7`; it should cover the operational jobs normally
+solved with F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-style
+cache logic, but only after the Pingora-free runtime boundary is stable. HTTP/3
+and QUIC remain a later Fluxheim-owned protocol milestone after that.
 Future "edge firewall" and "TLS VPN gateway" modes are realistic only as
 separate product modes, not as accidental load-balancer options. They would
 need dedicated compile profiles, threat models, packet/routing ownership,
@@ -211,14 +219,14 @@ upstream TLS material loading, and load-balancer factory/background wiring are
 tracked in the future native stream, load-balancer core, server/listener/TLS,
 and HTTP proxy runtime milestones instead of being treated as forgotten
 leftovers.
-After the smaller `1.5` dependency-reduction work and the `1.6` Wasm runtime,
-track two larger architecture lines separately: a Fluxheim-owned server
-bootstrap/listener/TLS runtime to replace Pingora `Server`, service
-registration, signal handling, hot-restart fd passing, and TLS listener
-configuration where that control is worth the complexity; and a later
-Fluxheim-owned HTTP proxy runtime to replace Pingora `ProxyHttp`/`Session` with
-a linear request/response pipeline. These are major-release-sized projects, not
-minor cleanup items.
+After the smaller `1.5` dependency-reduction work, `1.6` owns the larger
+architecture cleanup: a Fluxheim-owned server bootstrap/listener/TLS runtime to
+replace Pingora `Server`, service registration, signal handling, hot-restart fd
+passing, and TLS listener configuration where that control is worth the
+complexity; plus a Fluxheim-owned HTTP proxy runtime to replace Pingora
+`ProxyHttp`/`Session` with a linear request/response pipeline. The work is split
+across the `1.6.x` line with baseline and parity gates instead of being treated
+as incidental cleanup.
 Active load-balancer health checks should grow in focused slices before the
 larger protocol/runtime work: first close the HTTP request-header gap, add the
 standard gRPC Health Checking Protocol, add simple JSON field validation for
@@ -1675,7 +1683,7 @@ without parsing text fixtures for every module.
 24. **Future WASM Extensibility**
    - Architecture and security plan documented in
      [WASM Extensibility](docs/wasm-extensibility.md).
-   - Target release: `1.6` as one shared extension runtime, not a partial
+   - Target release: `1.7` as one shared extension runtime, not a partial
      cache-only `1.2.x` implementation.
    - WASM support must be optional, compile-time gated, and disabled by
      default. Planned features:
