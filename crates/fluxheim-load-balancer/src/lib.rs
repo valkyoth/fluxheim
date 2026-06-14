@@ -12,8 +12,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use pingora::http::RequestHeader;
-
 use fluxheim_common::FluxError;
 use fluxheim_config::{
     LoadBalanceHealthCheckProtocol, LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig,
@@ -64,9 +62,7 @@ use self::discovery::{
     configured_maglev_table,
 };
 pub(crate) use self::key::backend_key;
-use self::persistence::{
-    LoadBalanceKeySource, LoadBalancerPersistenceState, LoadBalancerRequestView,
-};
+use self::persistence::{LoadBalanceKeySource, LoadBalancerPersistenceState};
 use self::policy::{
     BackendSelectionPolicy, BackendStatsInputs, backend_aliases, load_balancer_backend_stats,
 };
@@ -85,35 +81,12 @@ pub use self::background::{FluxBackgroundReady, FluxShutdown};
 pub use self::crypto::set_admin_hmac_sha256;
 #[cfg(feature = "metrics")]
 pub use self::metrics::set_load_balancer_event_recorder;
+pub use self::persistence::LoadBalancerRequestView;
 
 pub type UpstreamLoadBalancerService =
     background::FluxBackgroundService<backend::FluxLoadBalancerRuntime>;
 const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
 pub const MAX_RUNTIME_BACKEND_WEIGHT: usize = 1000;
-
-impl LoadBalancerRequestView for RequestHeader {
-    fn uri_key(&self) -> Vec<u8> {
-        self.uri.to_string().into_bytes()
-    }
-
-    fn header_values<'a>(&'a self, name: &str) -> Box<dyn Iterator<Item = &'a [u8]> + 'a> {
-        Box::new(
-            self.headers
-                .get_all(name)
-                .into_iter()
-                .map(|value| value.as_bytes()),
-        )
-    }
-
-    fn cookie_headers<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
-        Box::new(
-            self.headers
-                .get_all("cookie")
-                .into_iter()
-                .filter_map(|value| value.to_str().ok()),
-        )
-    }
-}
 
 #[derive(Clone)]
 pub struct UpstreamLoadBalancer {
@@ -365,11 +338,10 @@ impl UpstreamLoadBalancer {
         }
     }
 
-    pub fn select(
-        &self,
-        request: &RequestHeader,
-        client_ip: Option<IpAddr>,
-    ) -> Option<SelectedUpstream> {
+    pub fn select<R>(&self, request: &R, client_ip: Option<IpAddr>) -> Option<SelectedUpstream>
+    where
+        R: LoadBalancerRequestView,
+    {
         let persistence_key = self
             .persistence
             .as_ref()
@@ -411,21 +383,27 @@ impl UpstreamLoadBalancer {
         )
     }
 
-    pub async fn select_or_wait(
+    pub async fn select_or_wait<R>(
         &self,
-        request: &RequestHeader,
+        request: &R,
         client_ip: Option<IpAddr>,
-    ) -> Option<SelectedUpstream> {
+    ) -> Option<SelectedUpstream>
+    where
+        R: LoadBalancerRequestView,
+    {
         self.select_or_wait_result(request, client_ip)
             .await
             .selected
     }
 
-    pub async fn select_or_wait_result(
+    pub async fn select_or_wait_result<R>(
         &self,
-        request: &RequestHeader,
+        request: &R,
         client_ip: Option<IpAddr>,
-    ) -> LoadBalancerSelectionResult {
+    ) -> LoadBalancerSelectionResult
+    where
+        R: LoadBalancerRequestView,
+    {
         if let Some(selected) = self.select(request, client_ip) {
             return LoadBalancerSelectionResult {
                 selected: Some(selected),
@@ -495,13 +473,16 @@ impl UpstreamLoadBalancer {
         }
     }
 
-    fn select_fresh(
+    fn select_fresh<R>(
         &self,
-        request: &RequestHeader,
+        request: &R,
         client_ip: Option<IpAddr>,
         persistence_key: Option<&[u8]>,
         persistence_outcome: Option<LoadBalancerPersistenceOutcome>,
-    ) -> Option<SelectedUpstream> {
+    ) -> Option<SelectedUpstream>
+    where
+        R: LoadBalancerRequestView,
+    {
         self.prune_stale_backend_state_periodically();
         let key = self.key_source.request_key(request, client_ip);
         let persistence_entry_counts = self
@@ -1497,7 +1478,6 @@ mod tests {
         LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
         LoadBalanceQueueConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
     };
-    use pingora::http::RequestHeader;
     use tokio::sync::watch;
 
     #[cfg(not(feature = "privacy-mode"))]
@@ -1508,7 +1488,7 @@ mod tests {
     use super::state::PassiveBackendHealth;
     use super::{
         LoadBalancedUpstreamReporter, LoadBalancerDiscoveryMode, LoadBalancerPersistenceOutcome,
-        LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendSetOperation,
+        LoadBalancerQueueOutcome, LoadBalancerRequestView, LoadBalancerRuntimeBackendSetOperation,
         LoadBalancerRuntimeBackendState, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
         backend_key,
     };
@@ -1566,8 +1546,53 @@ mod tests {
         );
     }
 
-    fn request() -> RequestHeader {
-        RequestHeader::build("GET", b"/app?id=42", None).unwrap()
+    #[derive(Clone, Debug)]
+    struct TestRequest {
+        uri: String,
+        headers: Vec<(String, String)>,
+    }
+
+    impl TestRequest {
+        fn insert_header(
+            &mut self,
+            name: impl Into<String>,
+            value: impl ToString,
+        ) -> Result<(), &'static str> {
+            self.headers.push((name.into(), value.to_string()));
+            Ok(())
+        }
+    }
+
+    impl LoadBalancerRequestView for TestRequest {
+        fn uri_key(&self) -> Vec<u8> {
+            self.uri.as_bytes().to_vec()
+        }
+
+        fn header_values<'a>(&'a self, name: &str) -> Box<dyn Iterator<Item = &'a [u8]> + 'a> {
+            let name = name.to_owned();
+            Box::new(
+                self.headers
+                    .iter()
+                    .filter(move |(candidate, _)| candidate.eq_ignore_ascii_case(&name))
+                    .map(|(_, value)| value.as_bytes()),
+            )
+        }
+
+        fn cookie_headers<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
+            Box::new(
+                self.headers
+                    .iter()
+                    .filter(|(candidate, _)| candidate.eq_ignore_ascii_case("cookie"))
+                    .map(|(_, value)| value.as_str()),
+            )
+        }
+    }
+
+    fn request() -> TestRequest {
+        TestRequest {
+            uri: "/app?id=42".to_owned(),
+            headers: Vec::new(),
+        }
     }
 
     fn slow_start_blocking_sample(backend: &impl BackendIdentity) -> u64 {

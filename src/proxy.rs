@@ -4751,11 +4751,9 @@ impl ProxyHttp for FluxProxy {
 
         #[cfg(feature = "load-balancer")]
         if let Some(load_balancer) = selected_upstream_load_balancer(vhost, ctx) {
+            let request_view = crate::load_balancer::PingoraRequestView::new(session.req_header());
             let selection = load_balancer
-                .select_or_wait_result(
-                    session.req_header(),
-                    effective_acl_client_ip(session, &state),
-                )
+                .select_or_wait_result(&request_view, effective_acl_client_ip(session, &state))
                 .await;
             #[cfg(feature = "metrics")]
             if let Some(outcome) = selection.queue_outcome {

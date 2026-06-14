@@ -16,7 +16,7 @@ const MANAGED_COOKIE_TAG_BYTES: usize = 32;
 const MANAGED_COOKIE_TOKEN_BYTES: usize = MANAGED_COOKIE_KEY_BYTES + MANAGED_COOKIE_TAG_BYTES;
 const MANAGED_COOKIE_HMAC_ROTATION: Duration = Duration::from_secs(86_400);
 
-pub(crate) trait LoadBalancerRequestView {
+pub trait LoadBalancerRequestView {
     fn uri_key(&self) -> Vec<u8>;
 
     fn header_values<'a>(&'a self, name: &str) -> Box<dyn Iterator<Item = &'a [u8]> + 'a>;

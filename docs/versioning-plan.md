@@ -2491,8 +2491,10 @@ Planned `1.6.x` sequence:
   sets and TCP health-check adapter, focused load-balancer container runtime
   smoke, the first `fluxheim-load-balancer` API/runtime DTO split, and moving
   the Pingora `ServiceWithDependents` adapter from the load-balancer crate to
-  the root runtime boundary. The remaining Pingora HTTP health-check connector
-  is carried into the HTTP/runtime cutover.
+  the root runtime boundary. Request-key extraction now uses a
+  Fluxheim-owned `LoadBalancerRequestView` so Pingora request headers are
+  adapted only at the root proxy boundary. The remaining Pingora HTTP
+  health-check connector is carried into the HTTP/runtime cutover.
 - `v1.6.2`: cache independence. Move cache interfaces into `fluxheim-cache`
   and replace remaining Pingora cache key/meta/hit/miss/admission adapter
   usage in normal cache builds. Keep a temporary compatibility adapter only for

@@ -29,11 +29,16 @@ load-balancer container images are again part of normal tag builds for the
   discovery/health background work into the root runtime crate. The
   load-balancer crate now owns its shutdown/ready primitives and no longer
   imports Pingora service/listener/shutdown types.
+- Moved load-balancer request-key extraction behind a Fluxheim-owned
+  `LoadBalancerRequestView` trait. Pingora request headers are now adapted at
+  the root proxy boundary, while selection and persistence code stays
+  transport-neutral.
 - Updated workspace, RPM, README, build documentation, and release notes to
   `1.6.1`.
 
 ## Notes
 
 - This release completes the active dependency cut from `pingora-load-balancing`.
-  The `pingora` HTTP health-check connector remains scheduled for a later
+  The `pingora` HTTP health-check connector remains the only Pingora import
+  inside `fluxheim-load-balancer` production code and is scheduled for a later
   HTTP/runtime cutover release in the 1.6 line.

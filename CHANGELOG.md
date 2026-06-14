@@ -32,6 +32,10 @@ behavior when the change improves security or project direction.
   and health-check background work into the root runtime crate. The
   load-balancer crate now exposes Fluxheim-owned shutdown/ready service
   primitives and no longer imports Pingora service/listener/shutdown types.
+- Move load-balancer request-key extraction behind a public
+  `LoadBalancerRequestView` trait. The root proxy now adapts Pingora request
+  headers at the runtime boundary, keeping load-balancer selection and
+  persistence logic transport-neutral.
 
 ## 1.6.0 - 2026-06-14
 
