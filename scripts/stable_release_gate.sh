@@ -16,6 +16,9 @@ echo "stable release gate: metadata"
 scripts/validate-release-metadata.sh
 perl scripts/check-doc-links.pl
 
+echo "stable release gate: modularity policy"
+scripts/validate-modularity-policy.sh check
+
 if [ "$mode" = "release" ]; then
     echo "stable release gate: compatible crate freshness"
     scripts/check_latest_crates.sh

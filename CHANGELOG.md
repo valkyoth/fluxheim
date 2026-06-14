@@ -7,6 +7,29 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.0 - 2026-06-14
+
+### Added
+
+- Start the 1.6 Pingora-exit foundation line. Runtime behavior is intended to
+  remain unchanged in this first 1.6 release while the project records baseline
+  evidence and guardrails for staged dependency removal.
+- Add `docs/modularity-exceptions.md` and
+  `scripts/validate-modularity-policy.sh` to make the 500-line modularity
+  policy measurable at release time. Existing oversized Rust files are listed
+  as legacy exceptions with split targets instead of hidden as normal debt.
+- Add `docs/runtime-facts-and-policy-proofs.md` to guide typed, bounded,
+  redacted decision evidence for route policy, cache admission,
+  load-balancer selection, admin mutation, config promotion, and future Wasm
+  host calls.
+
+### Changed
+
+- Bump workspace, RPM, release notes, and image documentation to `1.6.0`.
+- Update README wording so the 1.5 load-balancer line is closed and future
+  load-balancer health-check work is no longer described as a later 1.5.x
+  item.
+
 ## 1.5.23 - 2026-06-14
 
 ### Added

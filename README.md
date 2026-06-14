@@ -91,7 +91,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | File-refreshed upstream pools | ✅ | `1.4.1`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
 | HTTP control-plane upstream discovery | ✅ | `1.5.11`; `upstreams_http_url` for bounded pull-based JSON discovery with optional bearer-token authentication. See `examples/load-balancer-http-discovery.toml`. |
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection with circuit-open status visibility. |
-| Active health checks | ✅ | TCP/TLS, HTTP, standard gRPC, Redis `PING`, MySQL/MariaDB handshake, PostgreSQL SSLRequest, exact JSON scalar body validation, `X-Health-Weight` degraded weight signals, and opt-in bounded local exec checks. Agent checks and additional database protocol probes are planned across later `1.5.x` health-check lines. |
+| Active health checks | ✅ | TCP/TLS, HTTP, standard gRPC, Redis `PING`, MySQL/MariaDB handshake, PostgreSQL SSLRequest, exact JSON scalar body validation, `X-Health-Weight` degraded weight signals, and opt-in bounded local exec checks. Agent checks and additional database protocol probes remain future load-balancer health-check work. |
 | Load-balancer status | ✅ | Admin status includes configured pools, discovery mode/refresh health, selection/health/retry policy metadata, ready/available summary counts, runtime override counts/timestamps, backend readiness, disabled/drained state, in-flight counts, persistence-entry skew, passive failure/ejection and circuit state, slow-start, and least-time latency state; discovery refreshes also emit bounded success/failure events. |
 | Load-balancer 1.5.x boundaries | Limited | Local persistence and runtime overrides can be restart-persisted with `proxy.load_balance.runtime_state_file`; managed affinity cookie signing keys remain process-local; Fluxheim does not yet add/remove members at runtime, apply runtime weights to hash/ring selectors, share managed-cookie keys, or sync state across active-active nodes. |
 | Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
@@ -339,8 +339,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.5.23-wolfi`, `v1.5.23-cache-wolfi`, `v1.5.23-proxy-wolfi`,
-`v1.5.23-load-balancer-wolfi`, and `v1.5.23-php-wolfi`.
+`v1.6.0-wolfi`, `v1.6.0-cache-wolfi`, `v1.6.0-proxy-wolfi`,
+`v1.6.0-load-balancer-wolfi`, and `v1.6.0-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
@@ -410,11 +410,10 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Release: 1.5 Load Balancer
+## Current Release: 1.6 Pingora Exit
 
 Fluxheim does not treat every planned idea as stable. The current release line
-is `1.5.x`, starting with the `1.5.0` enterprise load-balancer/control-plane
-release.
+is `1.6.x`, starting with the `1.6.0` Pingora-exit foundation release.
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
   proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
@@ -456,6 +455,10 @@ release.
   iRules-compatible scripting release. See
   [Load Balancer Migration Notes](docs/load-balancer-migration.md) for HAProxy,
   nginx, and F5 pool mappings.
+- `1.6.x` is the Pingora-exit line. It starts with baseline evidence,
+  modularity gates, runtime-fact/policy-proof planning, and crate-boundary
+  guardrails, then removes Pingora from normal Fluxheim builds in staged
+  releases while preserving current operator-facing behavior.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
@@ -463,8 +466,7 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Config Reference](docs/config-reference.md), and
 [Production Readiness](docs/production-readiness.md).
 
-Next lines are planned separately after `1.5`: `1.6` for the full Pingora exit
-so normal Fluxheim builds no longer compile Pingora, `1.7` for shared Wasm
+Next lines are planned separately after `1.6`: `1.7` for shared Wasm
 extensibility covering nginx-Lua-style hooks and VCL-like cache policy hooks,
 and `1.8` for HTTP/3/QUIC based on the Rust `quinn`/`h3` stack. See
 [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
