@@ -2389,6 +2389,20 @@ extractions: proxy and runtime move only when the native HTTP/server runtime is
 ready, and admin moves only after domain crates expose stable APIs so the admin
 crate does not become a circular dependency hub.
 
+The 1.6 line also adopts two security-engineering policies learned from the
+smaller Aesynx and Skrifheim workspace models:
+
+- [Fluxheim Modularity Policy](modularity-policy.md): large files and unclear
+  crate boundaries are security review risk. New Rust implementation files
+  should target 300 lines and stay under 500 lines. Existing large files get a
+  staged exception inventory and split plan instead of an immediate blocking
+  gate.
+- [Runtime Facts And Policy Proofs](runtime-facts-and-policy-proofs.md):
+  Fluxheim should become more aware of its own runtime decisions through typed,
+  bounded, redacted facts and small policy-proof objects. This is not a
+  database in the request path; it is a safer internal decision shape for logs,
+  metrics, traces, admin status, future Wasm hooks, and pentest review.
+
 Pre-planning dependency map:
 
 | Current Pingora surface | Replacement direction | Notes |
@@ -2421,6 +2435,15 @@ Replacement rules for 1.6:
   `load-balancer`, `stream-proxy`, `php-fpm`, `tls-rustls`, and `tls-openssl`
   map to matching sub-crate features. Avoid hidden default features that pull
   Pingora back into the graph.
+- New substantial code should follow the 300-line target / 500-line hard target
+  from the modularity policy. If an existing large legacy file must be touched,
+  avoid making it larger unless the same release records an exception update or
+  a split step.
+- New security-sensitive decisions should prefer typed decision/proof structs
+  over ad hoc booleans and string reasons where practical. The proof model may
+  start small, but the direction should be consistent: bounded reason enums,
+  explicit policy epochs, redaction classification, and deterministic
+  allow/deny/redact/defer outcomes.
 - Every cutover release gets a dependency gate that knows which Pingora crate
   should already be gone. By the final 1.6 release, all official profile
   `cargo tree` runs and container builds must fail if any Pingora crate appears.
@@ -2449,6 +2472,13 @@ Planned `1.6.x` sequence:
   `snapshot.rs`, `acme.rs`, `headers.rs`, `proxy_protocol.rs`,
   `trace_context.rs`, `runtime.rs`, `proxy.rs`, and `admin.rs`, so later
   cutovers are ordered by dependencies rather than file size.
+  Add the first report-only modularity gate: list non-generated Rust files over
+  500 lines, create a legacy exception inventory with split targets, and fail
+  only for new oversized files or legacy files that grow without an exception
+  update. Add the initial runtime-fact and policy-proof design inventory:
+  fact kinds, decision kinds, bounded reason enums, policy epoch terminology,
+  redaction/visibility levels, and the first candidate subsystems to adopt
+  proof-shaped decisions.
 - `v1.6.1`: load-balancer independence. Remove `pingora-load-balancing` from
   normal builds. Replace remaining
   Pingora background/listen/shutdown service traits in
@@ -2561,6 +2591,12 @@ Stable exit criteria:
   preserved.
 - The root `fluxheim` crate remains orchestration glue; large runtime domains
   live in focused workspace crates.
+- New or split Rust implementation files stay under the modularity policy's
+  500-line hard target unless documented as a temporary exception with a split
+  plan. Legacy oversized files have an actively shrinking exception inventory.
+- Security-sensitive decision paths increasingly return typed policy proofs or
+  runtime facts that are bounded, redacted, and safe for logs/metrics/traces or
+  explicitly marked internal-only.
 - Pingora-removal work does not add Wasm, HTTP/3/QUIC, UDP/GSLB, WAF, or
   VPN/firewall appliance behavior.
 

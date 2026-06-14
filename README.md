@@ -475,6 +475,8 @@ full release ladder.
 - [Roadmap](ROADMAP.md)
 - [Changelog](CHANGELOG.md)
 - [Versioning Plan](docs/versioning-plan.md)
+- [Modularity Policy](docs/modularity-policy.md)
+- [Runtime Facts And Policy Proofs](docs/runtime-facts-and-policy-proofs.md)
 - [Release Runbook](docs/release-runbook.md)
 - [Release Checklist](docs/release-checklist.md)
 - [Build, Containers, And Rootless Podman](docs/build-and-podman.md)
