@@ -3003,6 +3003,18 @@ impl PingoraDiskStorageBackend {
         }
     }
 
+    fn lookup_object_by_flux_key_parts(
+        &self,
+        key: &FluxCacheKeyParts,
+    ) -> pingora::Result<Option<PingoraStoredObject>> {
+        match self {
+            Self::Filesystem(storage) => storage.lookup_object_by_combined(key.combined()),
+            Self::StorageBin(storage) => {
+                storage.object_for_combined_without_activity(key.combined())
+            }
+        }
+    }
+
     pub fn purge_cache_key(&self, key: &pingora::cache::CacheKey) -> std::io::Result<bool> {
         match self {
             Self::Filesystem(storage) => storage.purge_cache_key(key),
@@ -6693,6 +6705,106 @@ impl FluxCacheStorage for PingoraDiskStorage {
 
 #[cfg(feature = "proxy")]
 #[async_trait]
+impl NativeFluxCacheStorage for PingoraDiskStorage {
+    async fn lookup(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<Option<(SerializedCacheMeta, NativeFluxCacheHitHandler)>> {
+        let Some(object) = self
+            .lookup_object_by_combined(key.combined())
+            .map_err(|error| pingora_cache_error_to_io("lookup disk cache object", error))?
+        else {
+            self.activity.miss();
+            return Ok(None);
+        };
+        self.activity.hit();
+        let meta = SerializedCacheMeta {
+            internal_meta: object.internal_meta,
+            response_header: object.response_header,
+        };
+        let handler = PingoraMemoryHitHandler {
+            body: object.body,
+            offset: 0,
+            end: None,
+        };
+        Ok(Some((meta, Box::new(handler))))
+    }
+
+    async fn get_miss_handler(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        meta: &SerializedCacheMeta,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<NativeFluxCacheMissHandler> {
+        let store_key = PingoraStoreKey::from_flux_key_parts_and_serialized_meta(
+            key,
+            meta,
+            &self.cache_tag_headers,
+        )?;
+        let (temp_path, temp_file) = self.create_body_temp()?;
+        Ok(Box::new(PingoraDiskMissHandler {
+            storage: self,
+            store_key,
+            serialized_meta: (meta.internal_meta.clone(), meta.response_header.clone()),
+            temp_path: Some(temp_path),
+            temp_file: Some(temp_file),
+            body_len: 0,
+            max_object_bytes: self.max_object_bytes.as_u64(),
+            exceeded_limit: false,
+        }))
+    }
+
+    async fn purge(
+        &'static self,
+        combined_key: &str,
+        _purge_type: FluxCachePurgeType,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<bool> {
+        let path = self.path_for_combined_key(combined_key);
+        let purged = self.purge_object_path(path)?;
+        self.purge_index.remove_combined(combined_key);
+        Ok(purged)
+    }
+
+    async fn update_meta(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        meta: &SerializedCacheMeta,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<bool> {
+        let Some(object) = self
+            .lookup_object_by_combined(key.combined())
+            .map_err(|error| pingora_cache_error_to_io("lookup disk cache object", error))?
+        else {
+            return Ok(false);
+        };
+        Ok(self
+            .put_serialized_object(
+                PingoraStoreKey::from_flux_key_parts_and_serialized_meta(
+                    key,
+                    meta,
+                    &self.cache_tag_headers,
+                )?,
+                meta.internal_meta.clone(),
+                meta.response_header.clone(),
+                object.body,
+            )
+            .map_err(|error| pingora_cache_error_to_io("update disk cache object", error))?
+            .is_some())
+    }
+
+    fn support_streaming_partial_write(&self) -> bool {
+        false
+    }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+        self
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
 impl FluxCacheStorage for StorageBinDiskStorage {
     async fn lookup_flux(
         &'static self,
@@ -6768,6 +6880,97 @@ impl FluxCacheStorage for StorageBinDiskStorage {
 
 #[cfg(feature = "proxy")]
 #[async_trait]
+impl NativeFluxCacheStorage for StorageBinDiskStorage {
+    async fn lookup(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<Option<(SerializedCacheMeta, NativeFluxCacheHitHandler)>> {
+        let Some(object) = self
+            .lookup_object_by_combined(key.combined())
+            .map_err(|error| pingora_cache_error_to_io("lookup storage-bin cache object", error))?
+        else {
+            return Ok(None);
+        };
+        let meta = SerializedCacheMeta {
+            internal_meta: object.internal_meta,
+            response_header: object.response_header,
+        };
+        let handler = PingoraMemoryHitHandler {
+            body: object.body,
+            offset: 0,
+            end: None,
+        };
+        Ok(Some((meta, Box::new(handler))))
+    }
+
+    async fn get_miss_handler(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        meta: &SerializedCacheMeta,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<NativeFluxCacheMissHandler> {
+        Ok(Box::new(StorageBinMissHandler {
+            storage: self,
+            store_key: PingoraStoreKey::from_flux_key_parts_and_serialized_meta(
+                key,
+                meta,
+                &self.cache_tag_headers,
+            )?,
+            serialized_meta: (meta.internal_meta.clone(), meta.response_header.clone()),
+            body: Vec::new(),
+            max_object_bytes: self.max_object_bytes.as_u64(),
+            exceeded_limit: false,
+        }))
+    }
+
+    async fn purge(
+        &'static self,
+        combined_key: &str,
+        _purge_type: FluxCachePurgeType,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<bool> {
+        self.purge_combined(combined_key)
+    }
+
+    async fn update_meta(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        meta: &SerializedCacheMeta,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<bool> {
+        let Some(object) = self
+            .lookup_object_by_combined(key.combined())
+            .map_err(|error| pingora_cache_error_to_io("lookup storage-bin cache object", error))?
+        else {
+            return Ok(false);
+        };
+        Ok(self
+            .put_object(
+                PingoraStoreKey::from_flux_key_parts_and_serialized_meta(
+                    key,
+                    meta,
+                    &self.cache_tag_headers,
+                )?,
+                meta.internal_meta.clone(),
+                meta.response_header.clone(),
+                object.body,
+            )
+            .map_err(|error| pingora_cache_error_to_io("update storage-bin cache object", error))?
+            .is_some())
+    }
+
+    fn support_streaming_partial_write(&self) -> bool {
+        false
+    }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+        self
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
 impl FluxCacheStorage for PingoraDiskStorageBackend {
     async fn lookup_flux(
         &'static self,
@@ -6821,6 +7024,83 @@ impl FluxCacheStorage for PingoraDiskStorageBackend {
     }
 
     fn as_flux_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+        self
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
+impl NativeFluxCacheStorage for PingoraDiskStorageBackend {
+    async fn lookup(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<Option<(SerializedCacheMeta, NativeFluxCacheHitHandler)>> {
+        match self {
+            Self::Filesystem(storage) => {
+                NativeFluxCacheStorage::lookup(storage.as_ref(), key, trace).await
+            }
+            Self::StorageBin(storage) => {
+                NativeFluxCacheStorage::lookup(storage.as_ref(), key, trace).await
+            }
+        }
+    }
+
+    async fn get_miss_handler(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        meta: &SerializedCacheMeta,
+        trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<NativeFluxCacheMissHandler> {
+        match self {
+            Self::Filesystem(storage) => {
+                NativeFluxCacheStorage::get_miss_handler(storage.as_ref(), key, meta, trace).await
+            }
+            Self::StorageBin(storage) => {
+                NativeFluxCacheStorage::get_miss_handler(storage.as_ref(), key, meta, trace).await
+            }
+        }
+    }
+
+    async fn purge(
+        &'static self,
+        combined_key: &str,
+        purge_type: FluxCachePurgeType,
+        trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<bool> {
+        match self {
+            Self::Filesystem(storage) => {
+                NativeFluxCacheStorage::purge(storage.as_ref(), combined_key, purge_type, trace)
+                    .await
+            }
+            Self::StorageBin(storage) => {
+                NativeFluxCacheStorage::purge(storage.as_ref(), combined_key, purge_type, trace)
+                    .await
+            }
+        }
+    }
+
+    async fn update_meta(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        meta: &SerializedCacheMeta,
+        trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<bool> {
+        match self {
+            Self::Filesystem(storage) => {
+                NativeFluxCacheStorage::update_meta(storage.as_ref(), key, meta, trace).await
+            }
+            Self::StorageBin(storage) => {
+                NativeFluxCacheStorage::update_meta(storage.as_ref(), key, meta, trace).await
+            }
+        }
+    }
+
+    fn support_streaming_partial_write(&self) -> bool {
+        false
+    }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
         self
     }
 }
@@ -6925,6 +7205,124 @@ impl FluxCacheStorage for PingoraTieredStorage {
     }
 
     fn as_flux_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+        self
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
+impl NativeFluxCacheStorage for PingoraTieredStorage {
+    async fn lookup(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<Option<(SerializedCacheMeta, NativeFluxCacheHitHandler)>> {
+        if let Some(object) = self.memory.inner.get(key.combined()) {
+            self.memory.activity.hit();
+            let meta = SerializedCacheMeta {
+                internal_meta: object.internal_meta,
+                response_header: object.response_header,
+            };
+            let handler = PingoraMemoryHitHandler {
+                body: object.body,
+                offset: 0,
+                end: None,
+            };
+            return Ok(Some((meta, Box::new(handler))));
+        }
+        self.memory.activity.miss();
+
+        let Some(object) = self
+            .disk
+            .lookup_object_by_flux_key_parts(key)
+            .map_err(|error| pingora_cache_error_to_io("lookup tiered disk cache object", error))?
+        else {
+            self.disk.record_miss();
+            return Ok(None);
+        };
+        self.disk.record_hit();
+        let meta = SerializedCacheMeta {
+            internal_meta: object.internal_meta.clone(),
+            response_header: object.response_header.clone(),
+        };
+        let primary_key = object
+            .primary_key
+            .clone()
+            .unwrap_or_else(|| key.primary().to_owned());
+        let _promoted = self.memory.put_serialized_object(
+            PingoraStoreKey {
+                combined: key.combined().to_owned(),
+                primary: primary_key,
+                user_tag: key.user_tag().to_owned(),
+                index_path: cache_primary_component(key.primary(), "path"),
+                cache_tags: object.cache_tags.clone(),
+            },
+            object.internal_meta.clone(),
+            object.response_header.clone(),
+            Arc::clone(&object.body),
+        );
+        let handler = PingoraMemoryHitHandler {
+            body: object.body,
+            offset: 0,
+            end: None,
+        };
+        Ok(Some((meta, Box::new(handler))))
+    }
+
+    async fn get_miss_handler(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        meta: &SerializedCacheMeta,
+        _trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<NativeFluxCacheMissHandler> {
+        Ok(Box::new(PingoraTieredMissHandler {
+            storage: self,
+            store_key: PingoraStoreKey::from_flux_key_parts_and_serialized_meta(
+                key,
+                meta,
+                &self.memory.cache_tag_headers,
+            )?,
+            serialized_meta: (meta.internal_meta.clone(), meta.response_header.clone()),
+            body: Vec::new(),
+            max_object_bytes: self
+                .memory
+                .max_object_bytes
+                .as_u64()
+                .min(self.disk.max_object_bytes().as_u64()),
+            exceeded_limit: false,
+        }))
+    }
+
+    async fn purge(
+        &'static self,
+        combined_key: &str,
+        purge_type: FluxCachePurgeType,
+        trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<bool> {
+        let memory_purged =
+            NativeFluxCacheStorage::purge(self.memory, combined_key, purge_type, trace).await?;
+        let disk_purged =
+            NativeFluxCacheStorage::purge(self.disk, combined_key, purge_type, trace).await?;
+        Ok(memory_purged || disk_purged)
+    }
+
+    async fn update_meta(
+        &'static self,
+        key: &FluxCacheKeyParts,
+        meta: &SerializedCacheMeta,
+        trace: NativeFluxCacheTrace,
+    ) -> std::io::Result<bool> {
+        let memory_updated =
+            NativeFluxCacheStorage::update_meta(self.memory, key, meta, trace).await?;
+        let disk_updated = NativeFluxCacheStorage::update_meta(self.disk, key, meta, trace).await?;
+        Ok(memory_updated || disk_updated)
+    }
+
+    fn support_streaming_partial_write(&self) -> bool {
+        false
+    }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
         self
     }
 }
@@ -7276,6 +7674,65 @@ impl FluxHandleMiss for PingoraDiskMissHandler {
 }
 
 #[cfg(feature = "proxy")]
+#[async_trait]
+impl NativeFluxHandleMiss for PingoraDiskMissHandler {
+    async fn write_body(&mut self, data: Bytes, _eof: bool) -> std::io::Result<()> {
+        if self.exceeded_limit {
+            return Ok(());
+        }
+
+        let next_len = self.body_len.saturating_add(data.len() as u64);
+        if next_len > self.max_object_bytes {
+            self.exceeded_limit = true;
+            self.cleanup_temp();
+            return Ok(());
+        }
+        let Some(file) = self.temp_file.as_mut() else {
+            return Err(std::io::Error::other(
+                "disk cache streamed body temp file is closed",
+            ));
+        };
+        use std::io::Write as _;
+        file.write_all(&data)?;
+        self.body_len = next_len;
+        Ok(())
+    }
+
+    async fn finish(self: Box<Self>) -> std::io::Result<FluxCacheMissFinish> {
+        let mut this = *self;
+        if this.exceeded_limit {
+            this.cleanup_temp();
+            return Ok(FluxCacheMissFinish::Created(0));
+        }
+
+        if let Some(file) = this.temp_file.take() {
+            file.sync_all()?;
+        }
+        let Some(temp_path) = this.temp_path.as_deref() else {
+            return Err(std::io::Error::other(
+                "disk cache streamed body temp file is missing",
+            ));
+        };
+        let Some(created) = this
+            .storage
+            .put_streamed_object(
+                this.store_key.clone(),
+                this.serialized_meta.0.clone(),
+                this.serialized_meta.1.clone(),
+                temp_path,
+                this.body_len,
+            )
+            .map_err(|error| pingora_cache_error_to_io("store disk cache object", error))?
+        else {
+            this.cleanup_temp();
+            return Ok(FluxCacheMissFinish::Created(0));
+        };
+        this.cleanup_temp();
+        Ok(FluxCacheMissFinish::Created(created))
+    }
+}
+
+#[cfg(feature = "proxy")]
 struct StorageBinMissHandler {
     storage: &'static StorageBinDiskStorage,
     store_key: PingoraStoreKey,
@@ -7315,6 +7772,46 @@ impl FluxHandleMiss for StorageBinMissHandler {
             self.serialized_meta.1,
             body,
         )?
+        else {
+            return Ok(FluxCacheMissFinish::Created(0));
+        };
+        Ok(FluxCacheMissFinish::Created(created))
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
+impl NativeFluxHandleMiss for StorageBinMissHandler {
+    async fn write_body(&mut self, data: Bytes, _eof: bool) -> std::io::Result<()> {
+        if self.exceeded_limit {
+            return Ok(());
+        }
+
+        let next_len = (self.body.len() as u64).saturating_add(data.len() as u64);
+        if next_len > self.max_object_bytes {
+            self.exceeded_limit = true;
+            self.body.clear();
+            return Ok(());
+        }
+        self.body.extend_from_slice(&data);
+        Ok(())
+    }
+
+    async fn finish(self: Box<Self>) -> std::io::Result<FluxCacheMissFinish> {
+        if self.exceeded_limit {
+            return Ok(FluxCacheMissFinish::Created(0));
+        }
+
+        let body = Arc::<[u8]>::from(self.body);
+        let Some(created) = self
+            .storage
+            .put_object(
+                self.store_key,
+                self.serialized_meta.0,
+                self.serialized_meta.1,
+                body,
+            )
+            .map_err(|error| pingora_cache_error_to_io("store storage-bin cache object", error))?
         else {
             return Ok(FluxCacheMissFinish::Created(0));
         };
@@ -7368,6 +7865,58 @@ impl FluxHandleMiss for PingoraTieredMissHandler {
             self.serialized_meta.1,
             body,
         )?;
+        Ok(FluxCacheMissFinish::Created(
+            memory_created.or(disk_created).unwrap_or(0),
+        ))
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
+impl NativeFluxHandleMiss for PingoraTieredMissHandler {
+    async fn write_body(&mut self, data: Bytes, _eof: bool) -> std::io::Result<()> {
+        if self.exceeded_limit {
+            return Ok(());
+        }
+
+        let next_len = (self.body.len() as u64).saturating_add(data.len() as u64);
+        if next_len > self.max_object_bytes {
+            self.exceeded_limit = true;
+            self.body.clear();
+            return Ok(());
+        }
+        self.body.extend_from_slice(&data);
+        Ok(())
+    }
+
+    async fn finish(self: Box<Self>) -> std::io::Result<FluxCacheMissFinish> {
+        if self.exceeded_limit {
+            return Ok(FluxCacheMissFinish::Created(0));
+        }
+
+        let body = Arc::<[u8]>::from(self.body);
+        let memory_created = self
+            .storage
+            .memory
+            .put_serialized_object(
+                self.store_key.clone(),
+                self.serialized_meta.0.clone(),
+                self.serialized_meta.1.clone(),
+                Arc::clone(&body),
+            )
+            .map_err(|error| {
+                pingora_cache_error_to_io("store tiered memory cache object", error)
+            })?;
+        let disk_created = self
+            .storage
+            .disk
+            .put_serialized_object(
+                self.store_key,
+                self.serialized_meta.0,
+                self.serialized_meta.1,
+                body,
+            )
+            .map_err(|error| pingora_cache_error_to_io("store tiered disk cache object", error))?;
         Ok(FluxCacheMissFinish::Created(
             memory_created.or(disk_created).unwrap_or(0),
         ))
@@ -13389,6 +13938,74 @@ mod tests {
         assert_eq!(
             block_on(hit.read_body()).unwrap(),
             Some(Bytes::from_static(b"tiered-body"))
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_tiered_storage_round_trips_through_native_cache_trait() {
+        let root = unique_test_cache_dir("tiered-native-write");
+        let memory = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(1024),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 2,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        });
+        let disk = super::pingora_disk_storage_backend_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
+        })
+        .unwrap();
+        let storage = super::pingora_tiered_storage_from_parts(memory, disk);
+        let pingora_key = pingora::cache::CacheKey::new("fluxheim-test", "tiered-native", "vhost");
+        let key_parts = super::FluxCacheKeyParts::new(
+            pingora_key.primary(),
+            pingora_key.combined(),
+            pingora_key.user_tag.clone(),
+        );
+        let meta = pingora_meta("max-age=60");
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+        let serialized_meta = super::SerializedCacheMeta {
+            internal_meta,
+            response_header,
+        };
+
+        let mut miss = block_on(
+            <super::PingoraTieredStorage as fluxheim_cache::storage::FluxCacheStorage>::get_miss_handler(
+                storage,
+                &key_parts,
+                &serialized_meta,
+                fluxheim_cache::storage::FluxCacheTrace,
+            ),
+        )
+        .unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"native-tiered"), true)).unwrap();
+        assert!(matches!(
+            block_on(miss.finish()).unwrap(),
+            FluxCacheMissFinish::Created(13)
+        ));
+
+        assert_eq!(memory.stats().entries, 1);
+        assert_eq!(disk.stats().unwrap().entries, 1);
+        let (_meta, mut hit) = block_on(
+            <super::PingoraTieredStorage as fluxheim_cache::storage::FluxCacheStorage>::lookup(
+                storage,
+                &key_parts,
+                fluxheim_cache::storage::FluxCacheTrace,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            block_on(hit.read_body()).unwrap(),
+            Some(Bytes::from_static(b"native-tiered"))
         );
 
         std::fs::remove_dir_all(root).unwrap();
