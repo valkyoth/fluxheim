@@ -51,6 +51,7 @@ scripts/check_latest_crates.sh
 ```bash
 scripts/capture-runtime-baseline.sh check
 scripts/capture-runtime-baseline.sh release
+scripts/validate-pingora-dependency-policy.sh check
 ```
 
 - Review every new dependency for maintenance status and SPDX license metadata.

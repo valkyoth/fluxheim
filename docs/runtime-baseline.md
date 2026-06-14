@@ -35,6 +35,14 @@ The generated files are:
 | `pingora-dependency-surface.tsv` | Report-only list of Pingora crates still present per profile. |
 | `binary-size.tsv` | Default release binary size when release/build mode is used. |
 
+The stricter release policy is tracked in
+[Pingora Dependency Exceptions](pingora-dependency-exceptions.tsv) and checked
+by:
+
+```bash
+scripts/validate-pingora-dependency-policy.sh check
+```
+
 ## Comparison Rules
 
 The first `1.6.0` baseline is not a pass/fail performance benchmark. It is the

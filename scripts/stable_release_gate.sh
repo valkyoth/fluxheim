@@ -27,6 +27,9 @@ else
     scripts/capture-runtime-baseline.sh check
 fi
 
+echo "stable release gate: Pingora dependency policy"
+scripts/validate-pingora-dependency-policy.sh check
+
 if [ "$mode" = "release" ]; then
     echo "stable release gate: compatible crate freshness"
     scripts/check_latest_crates.sh

@@ -22,6 +22,9 @@ behavior when the change improves security or project direction.
   `scripts/capture-runtime-baseline.sh` to record locked dependency trees,
   per-profile Pingora dependency presence, release metadata, and default
   release-binary size before the runtime cutover work begins.
+- Add `docs/pingora-dependency-exceptions.tsv` and
+  `scripts/validate-pingora-dependency-policy.sh` so the 1.6 line has a
+  release-gated inventory of allowed Pingora crates per official profile.
 - Add initial `fluxheim-runtime` and `fluxheim-server` workspace crates for
   Fluxheim-owned shutdown, background task, listener, and server-runner
   boundary traits. The current Pingora runtime path is unchanged.
