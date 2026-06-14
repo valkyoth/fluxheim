@@ -77,6 +77,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Static-file cache | ✅ | Optional local static-file caching. |
 | Range and slice cache | ✅ | Bounded range caching and fixed-slice composition for large objects. |
 | Peer fill | ✅ | Optional peer-assisted cache fill for cache-edge deployments. |
+| Origin protection | ✅ | `1.5.23`; opt-in vhost/route origin-fill budgets for protected cache fill paths, with cache-key/cache-lookup release-gate assertions. |
 | Cache operations | ✅ | Hit/miss headers, cache locks, stale serving, cache warming, protected purge/status endpoints, and key/lookup diagnostics. |
 
 ### Proxy, TLS, And Edge Policy
