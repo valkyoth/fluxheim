@@ -12,6 +12,7 @@ pub mod plan;
 pub mod purge_index;
 pub mod request;
 pub mod storage;
+pub mod tags;
 
 pub use api::{
     CacheActivityResetResult, CacheActivityStats, CacheBackgroundPurgeResult,
@@ -63,4 +64,9 @@ pub use request::{
 pub use storage::{
     FluxCacheHitHandler, FluxCacheMissHandler, FluxCacheStorage, FluxCacheTrace, FluxHandleHit,
     FluxHandleMiss, SerializedCacheMeta,
+};
+pub use tags::{
+    MAX_CACHE_TAG_BYTES_PER_OBJECT, MAX_CACHE_TAG_LEN, MAX_CACHE_TAGS_PER_OBJECT,
+    collect_cache_tags, decode_cache_tags, default_cache_tag_headers_for_storage,
+    encode_cache_tags, encoded_cache_tags_len, is_valid_cache_tag,
 };

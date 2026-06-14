@@ -78,6 +78,11 @@ pub use fluxheim_cache::{
     selected_cache_slice_range_request, slice_request_within_policy, vary_cache_policy,
     vary_request_hash_material,
 };
+#[cfg(feature = "proxy")]
+use fluxheim_cache::{
+    MAX_CACHE_TAGS_PER_OBJECT, collect_cache_tags, decode_cache_tags,
+    default_cache_tag_headers_for_storage, encode_cache_tags, encoded_cache_tags_len,
+};
 
 #[cfg(feature = "proxy")]
 const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 8192;
@@ -126,12 +131,6 @@ const STORAGE_BIN_INDEX_MAGIC_V1: &str = "FLUXHEIM-STORAGE-BIN-INDEX-v1";
 const STORAGE_BIN_INDEX_FILENAME: &str = ".fluxheim-storage-bin-index-v1";
 #[cfg(feature = "proxy")]
 const STORAGE_BIN_DATA_DIR: &str = "bins";
-#[cfg(feature = "proxy")]
-const MAX_CACHE_TAGS_PER_OBJECT: usize = 64;
-#[cfg(feature = "proxy")]
-const MAX_CACHE_TAG_LEN: usize = 128;
-#[cfg(feature = "proxy")]
-const MAX_CACHE_TAG_BYTES_PER_OBJECT: usize = 4096;
 
 #[cfg(feature = "proxy")]
 static PINGORA_MEMORY_STORAGE_REGISTRY: OnceLock<
@@ -9029,14 +9028,6 @@ fn cache_object_utf8(bytes: &[u8], field: &str) -> std::io::Result<String> {
         })
 }
 
-#[cfg_attr(not(feature = "proxy"), allow(dead_code))]
-fn default_cache_tag_headers_for_storage() -> Vec<String> {
-    ["surrogate-key", "cache-tag", "x-cache-tags"]
-        .into_iter()
-        .map(str::to_owned)
-        .collect()
-}
-
 #[cfg(feature = "proxy")]
 fn cache_tags_from_meta(meta: &CacheMeta, header_names: &[String]) -> Vec<String> {
     let mut tags = Vec::new();
@@ -9053,57 +9044,6 @@ fn cache_tags_from_meta(meta: &CacheMeta, header_names: &[String]) -> Vec<String
         }
     }
     tags
-}
-
-#[cfg(feature = "proxy")]
-fn collect_cache_tags(value: &str, tags: &mut Vec<String>, total_bytes: &mut usize) {
-    for candidate in value.split(|character: char| character == ',' || character.is_whitespace()) {
-        if tags.len() >= MAX_CACHE_TAGS_PER_OBJECT || *total_bytes >= MAX_CACHE_TAG_BYTES_PER_OBJECT
-        {
-            return;
-        }
-        let candidate = candidate.trim();
-        if !is_valid_cache_tag(candidate) || tags.iter().any(|tag| tag == candidate) {
-            continue;
-        }
-        let next_bytes = total_bytes.saturating_add(candidate.len());
-        if next_bytes > MAX_CACHE_TAG_BYTES_PER_OBJECT {
-            return;
-        }
-        tags.push(candidate.to_owned());
-        *total_bytes = next_bytes;
-    }
-}
-
-#[cfg(feature = "proxy")]
-fn is_valid_cache_tag(tag: &str) -> bool {
-    !tag.is_empty()
-        && tag.len() <= MAX_CACHE_TAG_LEN
-        && tag.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':' | b'/' | b'=')
-        })
-}
-
-#[cfg(feature = "proxy")]
-fn encode_cache_tags(tags: &[String]) -> String {
-    tags.join("\n")
-}
-
-#[cfg(feature = "proxy")]
-fn encoded_cache_tags_len(tags: &[String]) -> usize {
-    encode_cache_tags(tags).len()
-}
-
-#[cfg(feature = "proxy")]
-fn decode_cache_tags(bytes: &[u8]) -> std::io::Result<Vec<String>> {
-    if bytes.is_empty() {
-        return Ok(Vec::new());
-    }
-    let tags = cache_object_utf8(bytes, "cache tags")?;
-    let mut decoded = Vec::new();
-    let mut total_bytes = 0_usize;
-    collect_cache_tags(&tags, &mut decoded, &mut total_bytes);
-    Ok(decoded)
 }
 
 #[cfg(feature = "proxy")]

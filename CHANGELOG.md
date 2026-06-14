@@ -20,6 +20,8 @@ behavior when the change improves security or project direction.
 - Adapt memory, filesystem disk, storage-bin disk, disk-backend, and tiered
   cache storage to the crate-owned cache interface while preserving the current
   Pingora HTTP runtime adapter.
+- Move cache-tag grammar, normalization, encoding, decoding, limits, and
+  default tag-header names into `fluxheim-cache`.
 - Add regression coverage proving memory and tiered cache backends can
   round-trip objects through the native cache interface.
 - Keep final `pingora-cache` compile removal scheduled for the native HTTP

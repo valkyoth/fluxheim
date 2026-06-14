@@ -15,6 +15,8 @@ rather than a behavior change for operators.
 - Adapted memory, filesystem disk, storage-bin disk, disk-backend, and tiered
   cache storage to the native cache interface while preserving the current
   Pingora HTTP runtime adapter.
+- Moved cache-tag grammar, normalization, encoding, decoding, limits, and
+  default tag-header names into `fluxheim-cache`.
 - Added regression tests proving memory and tiered memory-plus-disk cache
   storage can round-trip cached objects through the native interface.
 - Updated workspace, RPM, README, build documentation, and release notes to
