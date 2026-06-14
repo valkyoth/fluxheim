@@ -49,18 +49,18 @@ pub use fluxheim_cache::{
     CacheRequestView, CacheSliceBounds, CacheSliceRangeRequest, CacheStaleEvent, CacheStoragePlan,
     CacheStoreError, CachedHeader, CachedImageObject, DiskCacheStats, DiskTierPlan,
     FluxCacheKeyParts, FluxCacheMissFinish, FluxCachePurgeType, MAX_VARY_FIELDS, MemoryCacheStats,
-    MemoryTierPlan, StaticCacheRequest, TieredCacheStats, VaryCachePolicy, VaryRequestHashField,
-    append_cache_key_component, cache_average_bytes, cache_control_freshness_value,
-    cache_control_with_directive, cache_key_with_component, cache_method_temporarily_bypassed,
-    cache_object_lookup_body_bytes_summary, cache_object_lookup_bool_summary,
-    cache_object_lookup_cache_tags_summary, cache_object_lookup_fresh_ttl_summary,
-    cache_object_lookup_header_names_summary, cache_object_lookup_header_values_summary,
-    cache_ratio_per_mille, cache_ratio_per_mille_usize, cache_should_serve_stale,
-    cache_stale_status_allows, cache_stale_would_purge, cache_storage_tiers, cache_vary_policy,
-    cache_warm_counts_summary, cache_warm_increment_count, cache_warm_safe_label,
-    cookie_headers_match_cache_bypass, first_header_value, parse_bounded_single_range,
-    parse_cache_client_ranges, parse_cache_content_range, query_matches_cache_bypass,
-    range_response_cache_admission_rejection, remaining_fresh_ttl_secs,
+    MemoryTierPlan, SerializedCacheObject, StaticCacheRequest, TieredCacheStats, VaryCachePolicy,
+    VaryRequestHashField, append_cache_key_component, cache_average_bytes,
+    cache_control_freshness_value, cache_control_with_directive, cache_key_with_component,
+    cache_method_temporarily_bypassed, cache_object_lookup_body_bytes_summary,
+    cache_object_lookup_bool_summary, cache_object_lookup_cache_tags_summary,
+    cache_object_lookup_fresh_ttl_summary, cache_object_lookup_header_names_summary,
+    cache_object_lookup_header_values_summary, cache_ratio_per_mille, cache_ratio_per_mille_usize,
+    cache_should_serve_stale, cache_stale_status_allows, cache_stale_would_purge,
+    cache_storage_tiers, cache_vary_policy, cache_warm_counts_summary, cache_warm_increment_count,
+    cache_warm_safe_label, cookie_headers_match_cache_bypass, first_header_value,
+    parse_bounded_single_range, parse_cache_client_ranges, parse_cache_content_range,
+    query_matches_cache_bypass, range_response_cache_admission_rejection, remaining_fresh_ttl_secs,
     request_cache_bypass_reason, request_cache_revalidation_requested, required_slice_bounds,
     resolve_client_slice_ranges, response_age_secs, response_cache_admission_rejection,
     response_cache_control_max_age, response_cache_header_policy_rejection,
@@ -5566,18 +5566,7 @@ impl PingoraStoreKey {
 }
 
 #[cfg(feature = "proxy")]
-#[derive(Debug, Clone)]
-struct PingoraStoredObject {
-    combined_key: Option<String>,
-    primary_key: Option<String>,
-    user_tag: Option<String>,
-    index_path: Option<String>,
-    cache_tags: Vec<String>,
-    internal_meta: Vec<u8>,
-    response_header: Vec<u8>,
-    body: Arc<[u8]>,
-    weight: u32,
-}
+type PingoraStoredObject = SerializedCacheObject;
 
 #[cfg(feature = "proxy")]
 fn cache_purge_entry_from_stored_object(

@@ -47,6 +47,7 @@ pub use metrics::{
 };
 pub use object::{
     CacheStoreError, CachedHeader, CachedImageObject, FluxCacheMissFinish, FluxCachePurgeType,
+    SerializedCacheObject,
 };
 pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};
 pub use purge_index::{CachePurgeIndex, CachePurgeIndexEntry};
