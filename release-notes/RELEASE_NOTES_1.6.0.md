@@ -18,6 +18,9 @@ remove Pingora safely in later 1.6.x releases.
   `scripts/capture-runtime-baseline.sh` to record locked dependency trees,
   per-profile Pingora dependency presence, release metadata, and default
   release-binary size before the runtime cutover work begins.
+- Added initial `fluxheim-runtime` and `fluxheim-server` workspace crates for
+  Fluxheim-owned shutdown, background task, listener, and server-runner
+  boundary traits. The current Pingora runtime path is unchanged.
 - Added the runtime-facts and policy-proofs planning model. The goal is typed,
   bounded, redacted evidence for Fluxheim decisions such as config promotion,
   route policy, cache admission, load-balancer selection, and admin mutation

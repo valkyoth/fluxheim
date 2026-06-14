@@ -26,10 +26,10 @@ Target crates include:
 - `fluxheim-observability`
 - `fluxheim-protocol`
 - `fluxheim-snapshot`
-- `fluxheim-acme`
-- `fluxheim-headers` or `fluxheim-http-policy`
 - `fluxheim-runtime`
 - `fluxheim-server`
+- `fluxheim-acme`
+- `fluxheim-headers` or `fluxheim-http-policy`
 - `fluxheim-proxy`
 - future `fluxheim-wasm`, `fluxheim-http3`, and ecosystem crates
 

@@ -1181,6 +1181,17 @@ name = "fluxheim-protocol"
 version = "1.6.0"
 
 [[package]]
+name = "fluxheim-runtime"
+version = "1.6.0"
+
+[[package]]
+name = "fluxheim-server"
+version = "1.6.0"
+dependencies = [
+ "fluxheim-runtime",
+]
+
+[[package]]
 name = "fluxheim-snapshot"
 version = "1.6.0"
 dependencies = [

@@ -18,6 +18,8 @@ members = [
     "crates/fluxheim-observability",
     "crates/fluxheim-protocol",
     "crates/fluxheim-snapshot",
+    "crates/fluxheim-runtime",
+    "crates/fluxheim-server",
     "crates/fluxheim-web",
     "crates/fluxheim-php-fpm",
     "crates/fluxheim-load-balancer",
