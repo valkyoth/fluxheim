@@ -16,9 +16,11 @@ behavior when the change improves security or project direction.
 - Fix the container image workflow so load-balancer images are built for
   normal `v1.6.x` tag pushes instead of being limited to `v1.5.x` refs.
 - Bump workspace, RPM, release notes, and image documentation to `1.6.1`.
-- Keep the `pingora-load-balancing` dependency exception active until the
-  first load-balancer extraction patch lands, while preserving the 1.6 line's
-  gated removal plan.
+- Remove the remaining `pingora-load-balancing` and `pingora-ketama`
+  dependencies from full and load-balancer image profiles by storing
+  Fluxheim-native backend sets in `fluxheim-load-balancer`.
+- Replace Pingora's TCP health-check backend adapter with a Fluxheim-owned TCP
+  connector and rustls/OpenSSL handshake paths.
 
 ## 1.6.0 - 2026-06-14
 

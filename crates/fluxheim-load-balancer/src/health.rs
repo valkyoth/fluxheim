@@ -6,7 +6,6 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use pingora::connectors::http::Connector as HttpConnector;
-use pingora::lb::health_check::{HealthCheck as PingoraHealthCheck, TcpHealthCheck};
 use pingora::protocols::http::client::HttpSession;
 use pingora::upstreams::peer::{HttpPeer, Peer};
 use pingora::{Error, ErrorType};
@@ -52,24 +51,12 @@ pub(super) fn configured_health_check(
                     .or(config.connect_timeout_secs)
                     .unwrap_or(1),
             );
-            let inner = if config.upstream_tls {
-                let mut health_check = TcpHealthCheck::new_tls(&config.upstream_sni());
-                health_check.consecutive_success = consecutive_success;
-                health_check.consecutive_failure = consecutive_failure;
-                apply_health_check_peer_timeouts(
-                    &mut health_check.peer_template.options.connection_timeout,
-                    None,
-                    config,
-                );
-                Some(health_check)
-            } else {
-                None
-            };
+            let tls = configured_tcp_health_check_tls(config).map_err(FluxError::into_io)?;
             Ok(Box::new(FluxTcpHealthCheck {
                 consecutive_success,
                 consecutive_failure,
                 connect_timeout,
-                inner,
+                tls,
             }))
         }
         LoadBalanceHealthCheckProtocol::Http | LoadBalanceHealthCheckProtocol::Grpc => {
@@ -96,21 +83,29 @@ struct FluxTcpHealthCheck {
     consecutive_success: usize,
     consecutive_failure: usize,
     connect_timeout: Duration,
-    inner: Option<Box<TcpHealthCheck>>,
+    tls: Option<FluxTcpHealthCheckTls>,
 }
+
+#[cfg(feature = "tls-rustls-backend")]
+struct FluxTcpHealthCheckTls {
+    server_name: rustls::pki_types::ServerName<'static>,
+    config: Arc<rustls::ClientConfig>,
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+struct FluxTcpHealthCheckTls {
+    domain: String,
+    connector: openssl::ssl::SslConnector,
+}
+
+#[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
+struct FluxTcpHealthCheckTls;
 
 #[async_trait]
 impl FluxHealthCheck for FluxTcpHealthCheck {
     async fn check(&self, target: &Backend) -> FluxResult<()> {
-        if let Some(inner) = &self.inner {
-            return inner
-                .check(target)
-                .await
-                .map_err(pingora_health_error("TLS TCP health check failed"));
-        }
-
         let authority = target.addr.to_string();
-        tokio::time::timeout(
+        let stream = tokio::time::timeout(
             self.connect_timeout,
             tokio::net::TcpStream::connect(authority.as_str()),
         )
@@ -122,6 +117,9 @@ impl FluxHealthCheck for FluxTcpHealthCheck {
             )
         })?
         .map_err(|error| FluxError::io("connect TCP health check upstream", error))?;
+        if let Some(tls) = &self.tls {
+            return tls.handshake(stream).await;
+        }
         Ok(())
     }
 
@@ -133,18 +131,144 @@ impl FluxHealthCheck for FluxTcpHealthCheck {
         }
     }
 
-    async fn health_status_change(&self, target: &Backend, healthy: bool) {
-        if let Some(inner) = &self.inner {
-            inner.health_status_change(target, healthy).await;
-        }
-    }
+    async fn health_status_change(&self, _target: &Backend, _healthy: bool) {}
 
     fn backend_summary(&self, target: &Backend) -> String {
-        if let Some(inner) = &self.inner {
-            return inner.backend_summary(target);
-        }
         format!("{target:?}")
     }
+}
+
+impl FluxTcpHealthCheckTls {
+    #[cfg(feature = "tls-rustls-backend")]
+    async fn handshake(&self, stream: tokio::net::TcpStream) -> FluxResult<()> {
+        let connector = tokio_rustls::TlsConnector::from(self.config.clone());
+        connector
+            .connect(self.server_name.clone(), stream)
+            .await
+            .map_err(|error| FluxError::io("TLS TCP health check handshake failed", error))?;
+        Ok(())
+    }
+
+    #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+    async fn handshake(&self, stream: tokio::net::TcpStream) -> FluxResult<()> {
+        let ssl = self
+            .connector
+            .configure()
+            .and_then(|config| config.into_ssl(self.domain.as_str()))
+            .map_err(|error| {
+                FluxError::io(
+                    "build OpenSSL TCP health check session",
+                    io::Error::other(error.to_string()),
+                )
+            })?;
+        let mut stream = tokio_openssl::SslStream::new(ssl, stream).map_err(|error| {
+            FluxError::io(
+                "build OpenSSL TCP health check stream",
+                io::Error::other(error.to_string()),
+            )
+        })?;
+        std::pin::Pin::new(&mut stream)
+            .connect()
+            .await
+            .map_err(|error| {
+                FluxError::io(
+                    "TLS TCP health check handshake failed",
+                    io::Error::other(error.to_string()),
+                )
+            })?;
+        Ok(())
+    }
+
+    #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
+    async fn handshake(&self, _stream: tokio::net::TcpStream) -> FluxResult<()> {
+        Err(FluxError::InvalidInput(
+            "TLS TCP health checks require a TLS backend feature",
+        ))
+    }
+}
+
+fn configured_tcp_health_check_tls(
+    config: &ProxyConfig,
+) -> FluxResult<Option<FluxTcpHealthCheckTls>> {
+    if !config.upstream_tls {
+        return Ok(None);
+    }
+    configured_tcp_health_check_tls_inner(config).map(Some)
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+fn configured_tcp_health_check_tls_inner(
+    config: &ProxyConfig,
+) -> FluxResult<FluxTcpHealthCheckTls> {
+    let server_name =
+        rustls::pki_types::ServerName::try_from(config.upstream_sni()).map_err(|error| {
+            FluxError::io(
+                "build TCP health check TLS server name",
+                io::Error::new(io::ErrorKind::InvalidInput, error),
+            )
+        })?;
+    let native_certs = rustls_native_certs::load_native_certs();
+    if !native_certs.errors.is_empty() {
+        log::warn!(
+            target: "fluxheim::security",
+            "TCP health check TLS trust store loaded with {} certificate errors",
+            native_certs.errors.len()
+        );
+    }
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in native_certs.certs {
+        roots.add(cert).map_err(|error| {
+            FluxError::io(
+                "load TCP health check TLS root certificate",
+                io::Error::new(io::ErrorKind::InvalidData, error),
+            )
+        })?;
+    }
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(FluxTcpHealthCheckTls {
+        server_name,
+        config: Arc::new(config),
+    })
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+fn configured_tcp_health_check_tls_inner(
+    config: &ProxyConfig,
+) -> FluxResult<FluxTcpHealthCheckTls> {
+    let domain = config.upstream_sni();
+    if domain.is_empty() {
+        return Err(FluxError::InvalidInput(
+            "TCP health check TLS SNI is required for OpenSSL",
+        ));
+    }
+    let mut builder = openssl::ssl::SslConnector::builder(openssl::ssl::SslMethod::tls_client())
+        .map_err(|error| {
+            FluxError::io(
+                "build OpenSSL TCP health check connector",
+                io::Error::other(error.to_string()),
+            )
+        })?;
+    builder.set_default_verify_paths().map_err(|error| {
+        FluxError::io(
+            "load OpenSSL TCP health check trust store",
+            io::Error::other(error.to_string()),
+        )
+    })?;
+    Ok(FluxTcpHealthCheckTls {
+        domain,
+        connector: builder.build(),
+    })
+}
+
+#[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
+fn configured_tcp_health_check_tls_inner(
+    _config: &ProxyConfig,
+) -> FluxResult<FluxTcpHealthCheckTls> {
+    Err(FluxError::InvalidInput(
+        "TLS TCP health checks require a TLS backend feature",
+    ))
 }
 
 struct FluxExecHealthCheck {
@@ -160,22 +284,18 @@ impl FluxHealthCheck for FluxExecHealthCheck {
     async fn check(&self, target: &Backend) -> FluxResult<()> {
         let mut command = tokio::process::Command::new(&self.command);
         let backend_addr = target.addr.to_string();
-        let backend_inet = target.addr.as_inet();
+        let backend_inet = target.addr;
         command
             .args(self.args.iter().map(String::as_str))
             .env_clear()
             .env("FLUXHEIM_HEALTH_BACKEND_ADDR", backend_addr)
             .env(
                 "FLUXHEIM_HEALTH_BACKEND_HOST",
-                backend_inet
-                    .map(|addr| addr.ip().to_string())
-                    .unwrap_or_default(),
+                backend_inet.ip().to_string(),
             )
             .env(
                 "FLUXHEIM_HEALTH_BACKEND_PORT",
-                backend_inet
-                    .map(|addr| addr.port().to_string())
-                    .unwrap_or_default(),
+                backend_inet.port().to_string(),
             )
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -555,7 +675,7 @@ impl FluxHealthCheck for FluxHttpHealthCheck {
 
     async fn check(&self, target: &Backend) -> FluxResult<()> {
         let mut peer = self.peer_template.clone();
-        peer._address = target.addr.clone();
+        peer._address = pingora::protocols::l4::socket::SocketAddr::Inet(target.addr);
         if let Some(port) = self.port_override {
             peer._address.set_port(port);
         }

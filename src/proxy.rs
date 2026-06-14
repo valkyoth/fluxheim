@@ -4782,7 +4782,7 @@ impl ProxyHttp for FluxProxy {
                 ctx.upstream_load_balancer_permit = selected.permit;
                 ctx.upstream_load_balancer_reporter = selected.reporter;
                 ctx.upstream_load_balancer_selected_at = Some(Instant::now());
-                let mut peer = http_peer_for_runtime_proxy(selected.backend, proxy)?;
+                let mut peer = http_peer_for_runtime_proxy(selected.backend.addr, proxy)?;
                 apply_upstream_proxy_protocol(&mut peer, &proxy.config, session, &state);
                 return Ok(Box::new(peer));
             }

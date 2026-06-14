@@ -62,7 +62,6 @@ load-balancer = [
     "proxy",
     "dep:fluxheim-load-balancer",
     "fluxheim-config/load-balancer",
-    "pingora/lb",
 ]
 stream-proxy = ["proxy", "fluxheim-config/stream-proxy"]
 udp-proxy = ["proxy", "fluxheim-config/udp-proxy"]
@@ -89,7 +88,14 @@ tls-rustls-backend = [
 tls-rustls = ["tls-rustls-backend", "rustls/ring"]
 tls-rustls-fips = ["tls-rustls-backend", "dep:aws-lc-rs", "fluxheim-config/tls-rustls-fips", "rustls/fips"]
 tls-rustls-iso19790 = ["tls-rustls-fips"]
-tls-openssl = ["tls", "fluxheim-config/tls-openssl", "pingora/openssl", "dep:openssl", "dep:tokio-openssl"]
+tls-openssl = [
+    "tls",
+    "fluxheim-config/tls-openssl",
+    "fluxheim-load-balancer?/tls-openssl-backend",
+    "pingora/openssl",
+    "dep:openssl",
+    "dep:tokio-openssl",
+]
 tls-openssl-fips = ["tls-openssl", "dep:fluxheim-openssl-fips-support", "dep:openssl", "fluxheim-config/tls-openssl-fips"]
 tls-openssl-iso19790 = ["tls-openssl-fips"]
 acme = [

@@ -15,9 +15,8 @@ use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use fluxheim_common::{FluxError, FluxResult};
 use futures::future;
-use pingora::lb::Backend;
 
-pub(super) type RuntimeBackend = Backend;
+pub type RuntimeBackend = FluxBackend;
 
 pub(super) const MAX_RUNTIME_BACKEND_COUNT: usize = 256;
 const MAX_DISCOVERY_ERROR_BYTES: usize = 256;
@@ -29,13 +28,13 @@ pub(super) trait FluxBackendDiscovery: Send + Sync + 'static {
 
 #[async_trait]
 pub(super) trait FluxHealthCheck: Send + Sync + 'static {
-    async fn check(&self, target: &Backend) -> FluxResult<()>;
+    async fn check(&self, target: &RuntimeBackend) -> FluxResult<()>;
 
     fn health_threshold(&self, success: bool) -> usize;
 
-    async fn health_status_change(&self, _target: &Backend, _healthy: bool) {}
+    async fn health_status_change(&self, _target: &RuntimeBackend, _healthy: bool) {}
 
-    fn backend_summary(&self, target: &Backend) -> String {
+    fn backend_summary(&self, target: &RuntimeBackend) -> String {
         format!("{target:?}")
     }
 }
@@ -91,7 +90,7 @@ impl FluxBackendHealth {
 
 #[derive(Default)]
 struct FluxBackendSnapshot {
-    backends: Arc<BTreeSet<Backend>>,
+    backends: Arc<BTreeSet<RuntimeBackend>>,
     health: Arc<HashMap<u64, FluxBackendHealth>>,
 }
 
@@ -170,7 +169,7 @@ impl FluxLoadBalancerRuntime {
 
     async fn update_inner(&self) -> FluxResult<()> {
         let discovered = self.discovery.discover_flux_backends().await?;
-        let (new_backends, enablement) = discovered.into_pingora_parts()?;
+        let (new_backends, enablement) = discovered.into_parts();
         let snapshot = self.snapshot.load();
         if *snapshot.backends != new_backends {
             let old_health = Arc::clone(&snapshot.health);
@@ -252,7 +251,7 @@ impl FluxLoadBalancerRuntime {
         }
     }
 
-    pub(super) fn set_enable(&self, backend: &Backend, enabled: bool) {
+    pub(super) fn set_enable(&self, backend: &RuntimeBackend, enabled: bool) {
         if let Some(backend_health) = self.snapshot.load().health.get(&backend_key(backend)) {
             backend_health.enable(enabled);
         }
@@ -262,7 +261,7 @@ impl FluxLoadBalancerRuntime {
         self.update_frequency.is_none()
     }
 
-    pub(super) fn add_runtime_backend(&self, backend: Backend) -> io::Result<usize> {
+    pub(super) fn add_runtime_backend(&self, backend: RuntimeBackend) -> io::Result<usize> {
         if !self.runtime_backend_set_mutable() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -304,7 +303,7 @@ impl FluxLoadBalancerRuntime {
         Ok(backend_count)
     }
 
-    pub(super) fn remove_runtime_backend(&self, backend: &Backend) -> io::Result<usize> {
+    pub(super) fn remove_runtime_backend(&self, backend: &RuntimeBackend) -> io::Result<usize> {
         if !self.runtime_backend_set_mutable() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -348,8 +347,8 @@ impl FluxLoadBalancerRuntime {
 
     pub(super) fn update_runtime_backend(
         &self,
-        current: &Backend,
-        updated: Backend,
+        current: &RuntimeBackend,
+        updated: RuntimeBackend,
     ) -> io::Result<usize> {
         if !self.runtime_backend_set_mutable() {
             return Err(io::Error::new(
@@ -456,7 +455,7 @@ impl FluxLoadBalancerRuntime {
 
     pub(super) async fn run_health_check(&self, parallel: bool) {
         async fn check_one(
-            backend: Backend,
+            backend: RuntimeBackend,
             check: Arc<dyn FluxHealthCheck>,
             health: Arc<HashMap<u64, FluxBackendHealth>>,
         ) {
@@ -558,9 +557,9 @@ pub(crate) trait BackendIdentity {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub(super) struct FluxBackend {
-    address: SocketAddr,
-    weight: usize,
+pub struct FluxBackend {
+    pub addr: SocketAddr,
+    pub weight: usize,
 }
 
 impl FluxBackend {
@@ -575,30 +574,14 @@ impl FluxBackend {
                 io::Error::new(io::ErrorKind::InvalidInput, error),
             )
         })?;
-        Ok(Self { address, weight })
-    }
-
-    pub(super) fn to_pingora_backend(&self) -> FluxResult<Backend> {
-        Backend::new_with_weight(&self.authority(), self.weight).map_err(|error| {
-            FluxError::io(
-                "load-balancer backend cannot be adapted to Pingora",
-                io::Error::other(error.to_string()),
-            )
+        Ok(Self {
+            addr: address,
+            weight,
         })
     }
 }
 
 impl BackendIdentity for FluxBackend {
-    fn authority(&self) -> String {
-        self.address.to_string()
-    }
-
-    fn weight(&self) -> usize {
-        self.weight
-    }
-}
-
-impl BackendIdentity for Backend {
     fn authority(&self) -> String {
         self.addr.to_string()
     }
@@ -645,12 +628,8 @@ impl FluxBackendSet {
         self.ready.insert(backend.key(), ready);
     }
 
-    pub(super) fn into_pingora_parts(self) -> FluxResult<(BTreeSet<Backend>, HashMap<u64, bool>)> {
-        let mut backends = BTreeSet::new();
-        for backend in self.backends {
-            backends.insert(backend.to_pingora_backend()?);
-        }
-        Ok((backends, self.ready))
+    pub(super) fn into_parts(self) -> (BTreeSet<RuntimeBackend>, HashMap<u64, bool>) {
+        (self.backends, self.ready)
     }
 }
 
@@ -682,11 +661,11 @@ pub(super) struct BackendContainerSnapshot {
 }
 
 impl BackendContainerSnapshot {
-    pub(super) fn backends(&self) -> &BTreeSet<Backend> {
+    pub(super) fn backends(&self) -> &BTreeSet<RuntimeBackend> {
         &self.snapshot.backends
     }
 
-    pub(super) fn ready(&self, backend: &Backend) -> bool {
+    pub(super) fn ready(&self, backend: &RuntimeBackend) -> bool {
         self.snapshot
             .health
             .get(&backend_key(backend))
@@ -757,13 +736,13 @@ mod tests {
     }
 
     #[test]
-    fn flux_backend_set_adapts_to_pingora_parts() {
+    fn flux_backend_set_preserves_native_parts() {
         let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
         let mut set = FluxBackendSet::default();
         set.insert(backend.clone());
         set.set_ready(&backend, false);
 
-        let (backends, ready) = set.into_pingora_parts().unwrap();
+        let (backends, ready) = set.into_parts();
         assert_eq!(backends.len(), 1);
         assert_eq!(ready.get(&backend.key()), Some(&false));
         assert_eq!(
@@ -783,9 +762,8 @@ mod tests {
         runtime.update().await.unwrap();
 
         let snapshot = runtime.snapshot.load();
-        let pingora_backend = backend.to_pingora_backend().unwrap();
-        let key = backend_key(&pingora_backend);
-        assert!(snapshot.backends.contains(&pingora_backend));
+        let key = backend_key(&backend);
+        assert!(snapshot.backends.contains(&backend));
         assert!(snapshot.health.contains_key(&key));
         assert!(!snapshot.health.get(&key).unwrap().ready());
     }
@@ -799,19 +777,17 @@ mod tests {
         let runtime = FluxLoadBalancerRuntime::new(Box::new(TestDiscovery::new(set)));
 
         runtime.update().await.unwrap();
-        let current = backend.to_pingora_backend().unwrap();
-        let replacement = updated.to_pingora_backend().unwrap();
-        runtime.set_enable(&current, false);
+        runtime.set_enable(&backend, false);
 
         runtime
-            .update_runtime_backend(&current, replacement.clone())
+            .update_runtime_backend(&backend, updated.clone())
             .unwrap();
 
         let snapshot = runtime.snapshot.load();
-        let current_key = backend_key(&current);
-        let updated_key = backend_key(&replacement);
-        assert!(!snapshot.backends.contains(&current));
-        assert!(snapshot.backends.contains(&replacement));
+        let current_key = backend_key(&backend);
+        let updated_key = backend_key(&updated);
+        assert!(!snapshot.backends.contains(&backend));
+        assert!(snapshot.backends.contains(&updated));
         assert!(!snapshot.health.contains_key(&current_key));
         assert!(snapshot.health.get(&updated_key).unwrap().ready());
     }
@@ -854,10 +830,7 @@ mod tests {
         let runtime = FluxLoadBalancerRuntime::new(Box::new(TestDiscovery::new(set)));
 
         runtime.update().await.unwrap();
-        let pingora_backend = backend.to_pingora_backend().unwrap();
-        let error = runtime
-            .remove_runtime_backend(&pingora_backend)
-            .unwrap_err();
+        let error = runtime.remove_runtime_backend(&backend).unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert!(error.to_string().contains("at least one backend"));
@@ -873,10 +846,7 @@ mod tests {
         let runtime = FluxLoadBalancerRuntime::new(Box::new(TestDiscovery::new(set)));
 
         runtime.update().await.unwrap();
-        let extra = FluxBackend::new("127.0.0.1:20000")
-            .unwrap()
-            .to_pingora_backend()
-            .unwrap();
+        let extra = FluxBackend::new("127.0.0.1:20000").unwrap();
         let error = runtime.add_runtime_backend(extra).unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);

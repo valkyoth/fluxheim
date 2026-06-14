@@ -1864,9 +1864,7 @@ fn runtime_backend_from_member(member: &str, weight: usize) -> io::Result<Backen
             "load balancer member weight must be between 1 and 1000",
         ));
     }
-    FluxBackend::new_with_weight(member, weight)
-        .and_then(|backend| backend.to_pingora_backend())
-        .map_err(FluxError::into_io)
+    FluxBackend::new_with_weight(member, weight).map_err(FluxError::into_io)
 }
 
 #[cfg(test)]

@@ -111,9 +111,7 @@ fn apply_disabled_backend_enablement(
     config: &ProxyConfig,
 ) {
     for upstream in &config.disabled_upstreams {
-        if let Ok(backend) =
-            FluxBackend::new(upstream).and_then(|backend| backend.to_pingora_backend())
-        {
+        if let Ok(backend) = FluxBackend::new(upstream) {
             load_balancer.set_enable(&backend, false);
         }
     }
