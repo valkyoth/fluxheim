@@ -479,6 +479,7 @@ full release ladder.
 - [Versioning Plan](docs/versioning-plan.md)
 - [Modularity Policy](docs/modularity-policy.md)
 - [Runtime Baseline](docs/runtime-baseline.md)
+- [Extraction Dependency Graph](docs/extraction-dependency-graph.md)
 - [Runtime Facts And Policy Proofs](docs/runtime-facts-and-policy-proofs.md)
 - [Release Runbook](docs/release-runbook.md)
 - [Release Checklist](docs/release-checklist.md)

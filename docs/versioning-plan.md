@@ -2470,7 +2470,8 @@ Planned `1.6.x` sequence:
   comparison rules in a tracked documentation file such as
   `docs/runtime-baseline.md`. Add the first `fluxheim-runtime` /
   `fluxheim-server` traits and keep runtime behavior unchanged. Also record the
-  extraction dependency graph for the remaining large root modules:
+  extraction dependency graph in `docs/extraction-dependency-graph.md` for the
+  remaining large root modules:
   `snapshot.rs`, `acme.rs`, `headers.rs`, `proxy_protocol.rs`,
   `trace_context.rs`, `runtime.rs`, `proxy.rs`, and `admin.rs`, so later
   cutovers are ordered by dependencies rather than file size.
