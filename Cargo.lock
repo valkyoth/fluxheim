@@ -1039,6 +1039,7 @@ dependencies = [
  "fluxheim-php-fpm",
  "fluxheim-protocol",
  "fluxheim-snapshot",
+ "fluxheim-stream",
  "fluxheim-web",
  "futures",
  "getrandom 0.4.2",
@@ -1207,6 +1208,15 @@ dependencies = [
  "log",
  "serde",
  "toml",
+]
+
+[[package]]
+name = "fluxheim-stream"
+version = "1.6.2"
+dependencies = [
+ "fluxheim-common",
+ "fluxheim-config",
+ "tokio",
 ]
 
 [[package]]

@@ -20,6 +20,7 @@ members = [
     "crates/fluxheim-snapshot",
     "crates/fluxheim-runtime",
     "crates/fluxheim-server",
+    "crates/fluxheim-stream",
     "crates/fluxheim-web",
     "crates/fluxheim-php-fpm",
     "crates/fluxheim-load-balancer",
@@ -63,7 +64,7 @@ load-balancer = [
     "dep:fluxheim-load-balancer",
     "fluxheim-config/load-balancer",
 ]
-stream-proxy = ["proxy", "fluxheim-config/stream-proxy"]
+stream-proxy = ["proxy", "dep:fluxheim-stream", "fluxheim-config/stream-proxy"]
 udp-proxy = ["proxy", "fluxheim-config/udp-proxy"]
 traffic-mirror = ["proxy", "fluxheim-config/traffic-mirror"]
 geoip = ["proxy", "fluxheim-config/geoip", "fluxheim-geoip/runtime"]
@@ -242,6 +243,7 @@ fluxheim-observability = { path = "crates/fluxheim-observability" }
 fluxheim-php-fpm = { path = "crates/fluxheim-php-fpm", optional = true }
 fluxheim-protocol = { path = "crates/fluxheim-protocol" }
 fluxheim-snapshot = { path = "crates/fluxheim-snapshot" }
+fluxheim-stream = { path = "crates/fluxheim-stream", optional = true }
 fluxheim-web = { path = "crates/fluxheim-web", optional = true }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
 futures = "0.3.32"

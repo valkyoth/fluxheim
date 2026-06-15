@@ -5,7 +5,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::process;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -22,6 +22,11 @@ use crate::stream_tls::StreamUpstreamTlsConnector;
 use crate::{
     config_stream::{StreamConnectionSlot, acquire_stream_connection_slot},
     flux_error::{FluxError, FluxResult},
+};
+use fluxheim_stream::{
+    StreamSelectedUpstream, StreamSourcePolicy, StreamTrustedSource, StreamUpstreamSelector,
+    copy_bidirectional_with_limits, parse_stream_trusted_sources,
+    stream_dns_resolved_address_allowed, stream_error_outcome,
 };
 
 pub(crate) trait StreamIo: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -175,19 +180,14 @@ impl ServiceWithDependents for StreamProxyService {
 
 pub(crate) struct StreamProxyApp {
     name: Arc<str>,
-    upstreams: Arc<[RuntimeStreamUpstream]>,
-    primary_indices: Arc<[usize]>,
-    backup_indices: Arc<[usize]>,
-    primary_weight_total: usize,
+    upstream_selector: StreamUpstreamSelector,
     connect_timeout: Duration,
     idle_timeout: Duration,
     max_connection_lifetime: Option<Duration>,
     max_connection_bytes: Option<u64>,
     max_connections: usize,
     active_connections: Arc<AtomicUsize>,
-    next_upstream: AtomicUsize,
-    source_allow: Arc<[StreamSourceMatcher]>,
-    source_deny: Arc<[StreamSourceMatcher]>,
+    source_policy: StreamSourcePolicy,
     upstream_proxy_protocol: UpstreamProxyProtocol,
     upstream_tls: bool,
     upstream_dns_allow_private_addresses: bool,
@@ -197,55 +197,22 @@ pub(crate) struct StreamProxyApp {
 
 impl StreamProxyApp {
     fn from_config(route: &StreamRouteConfig) -> FluxResult<Self> {
-        let upstreams = runtime_stream_upstreams(route);
-        if upstreams.is_empty() {
-            return Err(FluxError::InvalidInput(
-                "stream route requires at least one upstream",
-            ));
-        }
-        let primary_indices = upstreams
-            .iter()
-            .enumerate()
-            .filter_map(|(index, upstream)| {
-                (!upstream.backup && !upstream.drained).then_some(index)
-            })
-            .collect::<Vec<_>>();
-        if primary_indices.is_empty() {
-            return Err(FluxError::InvalidInput(
-                "stream route requires at least one selectable primary upstream",
-            ));
-        }
-        let backup_indices = upstreams
-            .iter()
-            .enumerate()
-            .filter_map(|(index, upstream)| (upstream.backup && !upstream.drained).then_some(index))
-            .collect::<Vec<_>>();
-        let primary_weight_total = primary_indices
-            .iter()
-            .map(|index| upstreams[*index].weight)
-            .sum::<usize>()
-            .max(1);
-        let source_allow = parse_stream_source_matchers(&route.allow_sources, "allow source")?;
-        let source_deny = parse_stream_source_matchers(&route.deny_sources, "deny source")?;
+        let upstream_selector = StreamUpstreamSelector::from_route(route)?;
+        let source_policy = StreamSourcePolicy::from_route(route)?;
 
         #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
         let upstream_tls_connector = StreamUpstreamTlsConnector::from_route(route)?;
 
         Ok(Self {
             name: Arc::from(route.name.as_str()),
-            upstreams: upstreams.into(),
-            primary_indices: primary_indices.into(),
-            backup_indices: backup_indices.into(),
-            primary_weight_total,
+            upstream_selector,
             connect_timeout: Duration::from_secs(route.connect_timeout_secs),
             idle_timeout: Duration::from_secs(route.idle_timeout_secs),
             max_connection_lifetime: route.max_connection_secs.map(Duration::from_secs),
             max_connection_bytes: route.max_connection_bytes,
             max_connections: route.max_connections,
             active_connections: Arc::new(AtomicUsize::new(0)),
-            next_upstream: AtomicUsize::new(0),
-            source_allow: source_allow.into(),
-            source_deny: source_deny.into(),
+            source_policy,
             upstream_proxy_protocol: route.upstream_proxy_protocol,
             upstream_tls: route.upstream_tls,
             upstream_dns_allow_private_addresses: route.upstream_dns_allow_private_addresses,
@@ -259,36 +226,7 @@ impl StreamProxyApp {
     }
 
     fn select_upstream_candidates(&self) -> Vec<StreamSelectedUpstream> {
-        let weighted_index =
-            self.next_upstream.fetch_add(1, Ordering::Relaxed) % self.primary_weight_total;
-        let first = self
-            .primary_indices
-            .iter()
-            .copied()
-            .scan(0usize, |seen, index| {
-                *seen = seen.saturating_add(self.upstreams[index].weight);
-                Some((index, *seen))
-            })
-            .find_map(|(index, seen)| (weighted_index < seen).then_some(index))
-            .unwrap_or(self.primary_indices[0]);
-
-        self.primary_indices
-            .iter()
-            .copied()
-            .filter(move |index| *index == first)
-            .chain(
-                self.primary_indices
-                    .iter()
-                    .copied()
-                    .filter(move |index| *index != first),
-            )
-            .chain(self.backup_indices.iter().copied())
-            .map(|index| StreamSelectedUpstream {
-                authority: self.upstreams[index].authority.clone(),
-                alias: self.upstreams[index].alias.clone(),
-                backup: self.upstreams[index].backup,
-            })
-            .collect()
+        self.upstream_selector.select_candidates()
     }
 
     fn connection_options(&self) -> StreamProxyConnectionOptions {
@@ -306,22 +244,7 @@ impl StreamProxyApp {
     }
 
     fn source_allowed(&self, source: Option<SocketAddr>) -> bool {
-        let Some(source) = source else {
-            return self.source_allow.is_empty();
-        };
-        let source_ip = source.ip();
-        if self
-            .source_deny
-            .iter()
-            .any(|matcher| matcher.matches(source_ip))
-        {
-            return false;
-        }
-        self.source_allow.is_empty()
-            || self
-                .source_allow
-                .iter()
-                .any(|matcher| matcher.matches(source_ip))
+        self.source_policy.source_allowed(source)
     }
 
     async fn process_downstream(
@@ -468,58 +391,6 @@ impl StreamProxyApp {
     }
 }
 
-#[derive(Debug, Clone)]
-struct RuntimeStreamUpstream {
-    authority: Arc<str>,
-    alias: Option<Arc<str>>,
-    weight: usize,
-    backup: bool,
-    drained: bool,
-}
-
-#[derive(Debug, Clone)]
-struct StreamSelectedUpstream {
-    authority: Arc<str>,
-    alias: Option<Arc<str>>,
-    backup: bool,
-}
-
-impl StreamSelectedUpstream {
-    fn label(&self) -> &str {
-        self.alias.as_deref().unwrap_or(self.authority.as_ref())
-    }
-}
-
-fn runtime_stream_upstreams(route: &StreamRouteConfig) -> Vec<RuntimeStreamUpstream> {
-    let backup = route
-        .backup_upstreams
-        .iter()
-        .map(|upstream| upstream.to_ascii_lowercase())
-        .collect::<std::collections::HashSet<_>>();
-    let drain = route
-        .drain_upstreams
-        .iter()
-        .map(|upstream| upstream.to_ascii_lowercase())
-        .collect::<std::collections::HashSet<_>>();
-    route
-        .upstreams()
-        .enumerate()
-        .map(|(index, authority)| {
-            let normalized = authority.to_ascii_lowercase();
-            RuntimeStreamUpstream {
-                authority: Arc::from(authority),
-                alias: route
-                    .upstream_aliases
-                    .get(index)
-                    .map(|alias| Arc::<str>::from(alias.as_str())),
-                weight: route.upstream_weights.get(index).copied().unwrap_or(1),
-                backup: backup.contains(&normalized),
-                drained: drain.contains(&normalized),
-            }
-        })
-        .collect()
-}
-
 #[cfg(feature = "metrics")]
 fn record_stream_connection(route: &str, outcome: &str) {
     crate::metrics::record_stream_connection(route, outcome);
@@ -535,29 +406,6 @@ fn record_stream_bytes(route: &str, direction: &str, bytes: u64) {
 
 #[cfg(not(feature = "metrics"))]
 fn record_stream_bytes(_route: &str, _direction: &str, _bytes: u64) {}
-
-fn stream_error_outcome(error: &FluxError) -> &'static str {
-    let kind = match error {
-        FluxError::Io { source, .. } | FluxError::WriteProxyHeader(source) => source.kind(),
-        FluxError::Timeout { .. } => io::ErrorKind::TimedOut,
-        FluxError::InvalidInput(_) | FluxError::InvalidInputMessage(_) => {
-            io::ErrorKind::InvalidInput
-        }
-    };
-    match kind {
-        io::ErrorKind::Interrupted => "shutdown",
-        io::ErrorKind::TimedOut => "timeout",
-        io::ErrorKind::ConnectionRefused
-        | io::ErrorKind::ConnectionReset
-        | io::ErrorKind::ConnectionAborted
-        | io::ErrorKind::AddrNotAvailable
-        | io::ErrorKind::AddrInUse
-        | io::ErrorKind::HostUnreachable
-        | io::ErrorKind::NetworkUnreachable
-        | io::ErrorKind::NotConnected => "connect_error",
-        _ => "error",
-    }
-}
 
 #[cfg(test)]
 async fn proxy_stream_connection(
@@ -619,89 +467,6 @@ struct StreamProxyConnectionOptions {
     upstream_tls_connector: Option<StreamUpstreamTlsConnector>,
 }
 
-enum StreamCopyEvent {
-    DownstreamTotal(u64),
-    UpstreamTotal(u64),
-    DownstreamEof,
-    UpstreamEof,
-}
-
-async fn copy_bidirectional_with_limits(
-    downstream: &mut (impl AsyncRead + AsyncWrite + Unpin),
-    upstream: &mut (impl AsyncRead + AsyncWrite + Unpin),
-    idle_timeout: Duration,
-    max_connection_bytes: Option<u64>,
-) -> FluxResult<(u64, u64)> {
-    let (mut downstream_reader, mut downstream_writer) = tokio::io::split(downstream);
-    let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream);
-    let mut downstream_buffer = [0u8; 16 * 1024];
-    let mut upstream_buffer = [0u8; 16 * 1024];
-    let mut downstream_to_upstream = 0u64;
-    let mut upstream_to_downstream = 0u64;
-    let mut downstream_eof = false;
-    let mut upstream_eof = false;
-
-    while !downstream_eof || !upstream_eof {
-        let event = tokio::select! {
-            result = async {
-                let bytes = read_with_idle_timeout(
-                    &mut downstream_reader,
-                    &mut downstream_buffer,
-                    idle_timeout,
-                ).await?;
-                if bytes == 0 {
-                    shutdown_with_idle_timeout(&mut upstream_writer, idle_timeout).await?;
-                    Ok::<_, FluxError>(StreamCopyEvent::DownstreamEof)
-                } else {
-                    let next = checked_stream_byte_count(
-                        downstream_to_upstream,
-                        bytes as u64,
-                        max_connection_bytes,
-                    )?;
-                    write_with_idle_timeout(
-                        &mut upstream_writer,
-                        &downstream_buffer[..bytes],
-                        idle_timeout,
-                    ).await?;
-                    Ok::<_, FluxError>(StreamCopyEvent::DownstreamTotal(next))
-                }
-            }, if !downstream_eof => result,
-            result = async {
-                let bytes = read_with_idle_timeout(
-                    &mut upstream_reader,
-                    &mut upstream_buffer,
-                    idle_timeout,
-                ).await?;
-                if bytes == 0 {
-                    shutdown_with_idle_timeout(&mut downstream_writer, idle_timeout).await?;
-                    Ok::<_, FluxError>(StreamCopyEvent::UpstreamEof)
-                } else {
-                    let next = checked_stream_byte_count(
-                        upstream_to_downstream,
-                        bytes as u64,
-                        max_connection_bytes,
-                    )?;
-                    write_with_idle_timeout(
-                        &mut downstream_writer,
-                        &upstream_buffer[..bytes],
-                        idle_timeout,
-                    ).await?;
-                    Ok::<_, FluxError>(StreamCopyEvent::UpstreamTotal(next))
-                }
-            }, if !upstream_eof => result,
-        }?;
-
-        match event {
-            StreamCopyEvent::DownstreamTotal(total) => downstream_to_upstream = total,
-            StreamCopyEvent::UpstreamTotal(total) => upstream_to_downstream = total,
-            StreamCopyEvent::DownstreamEof => downstream_eof = true,
-            StreamCopyEvent::UpstreamEof => upstream_eof = true,
-        }
-    }
-
-    Ok((downstream_to_upstream, upstream_to_downstream))
-}
-
 async fn read_with_idle_timeout<R>(
     reader: &mut R,
     buffer: &mut [u8],
@@ -734,45 +499,6 @@ where
             "stream write timeout elapsed",
         )),
     }
-}
-
-async fn shutdown_with_idle_timeout<W>(writer: &mut W, idle_timeout: Duration) -> FluxResult<()>
-where
-    W: AsyncWrite + Unpin,
-{
-    match tokio::time::timeout(idle_timeout, writer.shutdown()).await {
-        Ok(result) => result.map_err(|error| FluxError::io("shutdown stream", error)),
-        Err(_) => Err(FluxError::timeout(
-            "stream shutdown timeout",
-            "stream shutdown timeout elapsed",
-        )),
-    }
-}
-
-fn checked_stream_byte_count(
-    current: u64,
-    additional: u64,
-    max_connection_bytes: Option<u64>,
-) -> FluxResult<u64> {
-    let next = current.checked_add(additional).ok_or_else(|| {
-        FluxError::io(
-            "count stream bytes",
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "stream copied byte counter overflowed",
-            ),
-        )
-    })?;
-    if max_connection_bytes.is_some_and(|limit| next > limit) {
-        return Err(FluxError::io(
-            "enforce stream byte limit",
-            io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "stream max connection bytes exceeded",
-            ),
-        ));
-    }
-    Ok(next)
 }
 
 async fn connect_upstream(
@@ -888,38 +614,6 @@ async fn resolve_upstream_socket_addr(
     ))
 }
 
-fn stream_dns_resolved_address_allowed(address: IpAddr) -> bool {
-    match address {
-        IpAddr::V4(address) => stream_dns_resolved_ipv4_address_allowed(address),
-        IpAddr::V6(address) => stream_dns_resolved_ipv6_address_allowed(address),
-    }
-}
-
-fn stream_dns_resolved_ipv4_address_allowed(address: Ipv4Addr) -> bool {
-    let [first, second, ..] = address.octets();
-    !(address.is_unspecified()
-        || address.is_loopback()
-        || address.is_private()
-        || address.is_link_local()
-        || address.is_multicast()
-        || address.is_broadcast()
-        || address.is_documentation()
-        || first >= 240
-        || first == 0
-        || (first == 100 && (64..=127).contains(&second))
-        || (first == 198 && matches!(second, 18 | 19)))
-}
-
-fn stream_dns_resolved_ipv6_address_allowed(address: Ipv6Addr) -> bool {
-    let segments = address.segments();
-    !(address.is_unspecified()
-        || address.is_loopback()
-        || address.is_multicast()
-        || address.is_unique_local()
-        || address.is_unicast_link_local()
-        || (segments[0] == 0x2001 && segments[1] == 0x0db8))
-}
-
 async fn write_upstream_proxy_protocol(
     upstream: &mut (impl AsyncWrite + Unpin),
     protocol: UpstreamProxyProtocol,
@@ -939,77 +633,10 @@ async fn write_upstream_proxy_protocol(
     write_with_idle_timeout(upstream, &header, idle_timeout).await
 }
 
-#[derive(Debug, Clone)]
-enum StreamSourceMatcher {
-    Ip(IpAddr),
-    Cidr { network: IpAddr, prefix: u8 },
-}
-
-impl StreamSourceMatcher {
-    fn matches(&self, address: IpAddr) -> bool {
-        match self {
-            Self::Ip(trusted) => *trusted == address,
-            Self::Cidr { network, prefix } => ip_in_prefix(address, *network, *prefix),
-        }
-    }
-}
-
-type StreamTrustedSource = StreamSourceMatcher;
-
 const PROXY_PROTOCOL_V1_MAX_LINE: usize = 108;
 const PROXY_PROTOCOL_V2_HEADER_LEN: usize = 16;
 const PROXY_PROTOCOL_V2_MAX_PAYLOAD: usize = 4096;
 const PROXY_PROTOCOL_V2_SIGNATURE: &[u8; 12] = b"\r\n\r\n\0\r\nQUIT\n";
-
-fn parse_stream_trusted_sources(route: &StreamRouteConfig) -> FluxResult<Vec<StreamTrustedSource>> {
-    if route.downstream_proxy_protocol == DownstreamProxyProtocol::Off {
-        return Ok(Vec::new());
-    }
-    route
-        .trusted_proxies
-        .iter()
-        .map(|source| parse_stream_source_matcher(source, "trusted proxy"))
-        .collect::<FluxResult<Vec<_>>>()
-}
-
-fn parse_stream_source_matchers(
-    values: &[String],
-    field: &'static str,
-) -> FluxResult<Vec<StreamSourceMatcher>> {
-    values
-        .iter()
-        .map(|source| parse_stream_source_matcher(source, field))
-        .collect::<FluxResult<Vec<_>>>()
-}
-
-fn parse_stream_source_matcher(
-    value: &str,
-    field: &'static str,
-) -> FluxResult<StreamSourceMatcher> {
-    if let Some((address, prefix)) = value.split_once('/') {
-        let network = address.parse::<IpAddr>().map_err(|error| {
-            FluxError::invalid_input(format!("invalid stream {field} network {value:?}: {error}"))
-        })?;
-        let prefix = prefix.parse::<u8>().map_err(|error| {
-            FluxError::invalid_input(format!("invalid stream {field} prefix {value:?}: {error}"))
-        })?;
-        let max_prefix = match network {
-            IpAddr::V4(_) => 32,
-            IpAddr::V6(_) => 128,
-        };
-        if prefix > max_prefix {
-            return Err(FluxError::invalid_input(format!(
-                "invalid stream {field} prefix {value:?}: prefix exceeds address family width"
-            )));
-        }
-        return Ok(StreamSourceMatcher::Cidr { network, prefix });
-    }
-    Ok(StreamSourceMatcher::Ip(value.parse::<IpAddr>().map_err(
-        |error| {
-            FluxError::invalid_input(format!("invalid stream {field} address {value:?}: {error}"))
-        },
-    )?))
-}
 
 async fn apply_downstream_proxy_protocol_to_stream(
     downstream: &mut TcpStream,
@@ -1224,28 +851,6 @@ fn parse_proxy_protocol_port(value: &str) -> FluxResult<u16> {
         .map_err(|_| FluxError::InvalidInput("stream downstream PROXY port is invalid"))
 }
 
-fn ip_in_prefix(address: IpAddr, network: IpAddr, prefix: u8) -> bool {
-    match (address, network) {
-        (IpAddr::V4(address), IpAddr::V4(network)) => {
-            let mask = prefix_mask(prefix, 32) as u32;
-            u32::from(address) & mask == u32::from(network) & mask
-        }
-        (IpAddr::V6(address), IpAddr::V6(network)) => {
-            let mask = prefix_mask(prefix, 128);
-            u128::from(address) & mask == u128::from(network) & mask
-        }
-        _ => false,
-    }
-}
-
-fn prefix_mask(prefix: u8, bits: u8) -> u128 {
-    if prefix == 0 {
-        0
-    } else {
-        u128::MAX << u32::from(bits.saturating_sub(prefix))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{StreamProxyApp, proxy_stream_connection};
@@ -1361,15 +966,19 @@ mod tests {
 
     #[test]
     fn stream_trusted_sources_match_exact_and_cidr() {
-        let exact = super::parse_stream_source_matcher("127.0.0.1", "trusted proxy").unwrap();
+        let exact =
+            fluxheim_stream::StreamSourceMatcher::parse("127.0.0.1", "trusted proxy").unwrap();
         assert!(exact.matches("127.0.0.1".parse().unwrap()));
         assert!(!exact.matches("127.0.0.2".parse().unwrap()));
 
-        let cidr = super::parse_stream_source_matcher("10.0.0.0/24", "trusted proxy").unwrap();
+        let cidr =
+            fluxheim_stream::StreamSourceMatcher::parse("10.0.0.0/24", "trusted proxy").unwrap();
         assert!(cidr.matches("10.0.0.42".parse().unwrap()));
         assert!(!cidr.matches("10.0.1.42".parse().unwrap()));
 
-        assert!(super::parse_stream_source_matcher("10.0.0.0/64", "trusted proxy").is_err());
+        assert!(
+            fluxheim_stream::StreamSourceMatcher::parse("10.0.0.0/64", "trusted proxy").is_err()
+        );
     }
 
     #[test]
@@ -1404,37 +1013,37 @@ mod tests {
 
     #[test]
     fn stream_dns_rebind_guard_rejects_private_resolved_addresses() {
-        assert!(!super::stream_dns_resolved_address_allowed(
+        assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
             "127.0.0.1".parse().unwrap()
         ));
-        assert!(!super::stream_dns_resolved_address_allowed(
+        assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
             "10.0.0.1".parse().unwrap()
         ));
-        assert!(!super::stream_dns_resolved_address_allowed(
+        assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
             "169.254.169.254".parse().unwrap()
         ));
-        assert!(!super::stream_dns_resolved_address_allowed(
+        assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
             "100.64.0.1".parse().unwrap()
         ));
-        assert!(!super::stream_dns_resolved_address_allowed(
+        assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
             "198.18.0.1".parse().unwrap()
         ));
-        assert!(!super::stream_dns_resolved_address_allowed(
+        assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
             "240.0.0.1".parse().unwrap()
         ));
-        assert!(!super::stream_dns_resolved_address_allowed(
+        assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
             "::1".parse().unwrap()
         ));
-        assert!(!super::stream_dns_resolved_address_allowed(
+        assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
             "fc00::1".parse().unwrap()
         ));
-        assert!(!super::stream_dns_resolved_address_allowed(
+        assert!(!fluxheim_stream::stream_dns_resolved_address_allowed(
             "2001:db8::1".parse().unwrap()
         ));
-        assert!(super::stream_dns_resolved_address_allowed(
+        assert!(fluxheim_stream::stream_dns_resolved_address_allowed(
             "1.1.1.1".parse().unwrap()
         ));
-        assert!(super::stream_dns_resolved_address_allowed(
+        assert!(fluxheim_stream::stream_dns_resolved_address_allowed(
             "2606:4700:4700::1111".parse().unwrap()
         ));
     }
