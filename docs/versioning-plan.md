@@ -2514,10 +2514,14 @@ Planned `1.6.x` sequence:
   storage.
 - `v1.6.3`: stream runtime cutover. Move TCP stream proxying to
   `fluxheim-stream` or `fluxheim-proxy` using direct Tokio listeners and
-  connectors, including upstream TLS/mTLS through rustls and OpenSSL. Remove
-  Pingora stream service entrypoints from stream builds and keep stream smoke
-  tests for source ACL, SNI verification, PROXY protocol, limits, and timeout
-  behavior.
+  connectors, including upstream TLS/mTLS through rustls and OpenSSL.
+  Committed work includes `fluxheim-stream`, stream upstream selection,
+  source allow/deny policy, trusted PROXY source parsing, DNS-rebinding guard
+  decisions, copied-byte accounting, byte-limited copy-loop timeout handling,
+  and PROXY protocol parsing/writing. Keep the root stream adapter as the
+  temporary Pingora service-registration boundary until background/runtime
+  supervision is replaced, and keep stream smoke tests for source ACL, SNI
+  verification, PROXY protocol, limits, and timeout behavior.
 - `v1.6.4`: background runtime cutover. Replace Pingora background service
   wiring with Fluxheim-owned Tokio task supervision, cancellation, readiness,
   and shutdown handling for cache metrics, ACME renewal, stale purging,
