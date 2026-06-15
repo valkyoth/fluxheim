@@ -12,8 +12,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use fluxheim_common::{FluxError, FluxResult};
+use fluxheim_config::config::{DownstreamProxyProtocol, UpstreamProxyProtocol};
 use fluxheim_config::config_stream::StreamRouteConfig;
+use fluxheim_protocol::{proxy_protocol_v1_header, proxy_protocol_v2_header};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+
+pub const PROXY_PROTOCOL_V1_MAX_LINE: usize = 108;
+pub const PROXY_PROTOCOL_V2_HEADER_LEN: usize = 16;
+pub const PROXY_PROTOCOL_V2_MAX_PAYLOAD: usize = 4096;
+pub const PROXY_PROTOCOL_V2_SIGNATURE: &[u8; 12] = b"\r\n\r\n\0\r\nQUIT\n";
 
 #[derive(Debug)]
 pub struct StreamUpstreamSelector {
@@ -408,6 +415,207 @@ pub async fn copy_bidirectional_with_limits(
     Ok((downstream_to_upstream, upstream_to_downstream))
 }
 
+pub async fn write_upstream_proxy_protocol(
+    upstream: &mut (impl AsyncWrite + Unpin),
+    protocol: UpstreamProxyProtocol,
+    source: Option<SocketAddr>,
+    destination: Option<SocketAddr>,
+    idle_timeout: Duration,
+) -> FluxResult<()> {
+    let header = match protocol {
+        UpstreamProxyProtocol::Off => return Ok(()),
+        UpstreamProxyProtocol::V1 => proxy_protocol_v1_header(source, destination),
+        UpstreamProxyProtocol::V2 => proxy_protocol_v2_header(source, destination),
+    };
+    write_with_idle_timeout(upstream, &header, idle_timeout).await
+}
+
+pub async fn apply_downstream_proxy_protocol_to_stream(
+    downstream: &mut (impl AsyncRead + Unpin),
+    protocol: DownstreamProxyProtocol,
+    trusted_sources: &[StreamTrustedSource],
+    direct_source: Option<SocketAddr>,
+    idle_timeout: Duration,
+) -> FluxResult<Option<SocketAddr>> {
+    if protocol == DownstreamProxyProtocol::Off {
+        return Ok(direct_source);
+    }
+    let Some(direct_source) = direct_source else {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY protocol requires a TCP peer address",
+        ));
+    };
+    if !trusted_sources
+        .iter()
+        .any(|source| source.matches(direct_source.ip()))
+    {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY protocol peer is not trusted",
+        ));
+    }
+    match protocol {
+        DownstreamProxyProtocol::Off => Ok(Some(direct_source)),
+        DownstreamProxyProtocol::V1 => {
+            read_downstream_proxy_protocol_v1(downstream, idle_timeout).await
+        }
+        DownstreamProxyProtocol::V2 => {
+            read_downstream_proxy_protocol_v2(downstream, idle_timeout).await
+        }
+    }
+}
+
+async fn read_downstream_proxy_protocol_v1(
+    downstream: &mut (impl AsyncRead + Unpin),
+    idle_timeout: Duration,
+) -> FluxResult<Option<SocketAddr>> {
+    let mut line = Vec::with_capacity(PROXY_PROTOCOL_V1_MAX_LINE);
+    loop {
+        let mut byte = [0u8; 1];
+        let read = read_with_idle_timeout(downstream, &mut byte, idle_timeout).await?;
+        if read == 0 {
+            return Err(FluxError::InvalidInput(
+                "stream downstream PROXY protocol v1 header ended early",
+            ));
+        }
+        line.push(byte[0]);
+        if byte[0] == b'\n' {
+            break;
+        }
+        if line.len() >= PROXY_PROTOCOL_V1_MAX_LINE {
+            return Err(FluxError::InvalidInput(
+                "stream downstream PROXY protocol v1 header exceeds size limit",
+            ));
+        }
+    }
+    parse_downstream_proxy_protocol_v1(&line)
+}
+
+pub fn parse_downstream_proxy_protocol_v1(line: &[u8]) -> FluxResult<Option<SocketAddr>> {
+    let line = std::str::from_utf8(line)
+        .map_err(|_| FluxError::InvalidInput("stream downstream PROXY v1 header is not UTF-8"))?;
+    let line = line.strip_suffix("\r\n").ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing CRLF",
+    ))?;
+    let mut fields = line.split_whitespace();
+    if fields.next() != Some("PROXY") {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY v1 header is missing prefix",
+        ));
+    }
+    let family = fields.next().ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing family",
+    ))?;
+    if family == "UNKNOWN" {
+        return Ok(None);
+    }
+    let source_addr = fields.next().ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing source address",
+    ))?;
+    let destination_addr = fields.next().ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing destination address",
+    ))?;
+    let source_port = fields.next().ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing source port",
+    ))?;
+    let destination_port = fields.next().ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing destination port",
+    ))?;
+    if fields.next().is_some() {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY v1 header has unexpected fields",
+        ));
+    }
+    let source_ip = source_addr.parse::<IpAddr>().map_err(|_| {
+        FluxError::InvalidInput("stream downstream PROXY v1 source address is invalid")
+    })?;
+    let destination_ip = destination_addr.parse::<IpAddr>().map_err(|_| {
+        FluxError::InvalidInput("stream downstream PROXY v1 destination address is invalid")
+    })?;
+    match (family, source_ip, destination_ip) {
+        ("TCP4", IpAddr::V4(_), IpAddr::V4(_)) | ("TCP6", IpAddr::V6(_), IpAddr::V6(_)) => {}
+        _ => {
+            return Err(FluxError::InvalidInput(
+                "stream downstream PROXY v1 family does not match address types",
+            ));
+        }
+    }
+    let source_port = parse_proxy_protocol_port(source_port)?;
+    let _destination_port = parse_proxy_protocol_port(destination_port)?;
+    Ok(Some(SocketAddr::new(source_ip, source_port)))
+}
+
+async fn read_downstream_proxy_protocol_v2(
+    downstream: &mut (impl AsyncRead + Unpin),
+    idle_timeout: Duration,
+) -> FluxResult<Option<SocketAddr>> {
+    let mut header = [0u8; PROXY_PROTOCOL_V2_HEADER_LEN];
+    read_exact_with_idle_timeout(downstream, &mut header, idle_timeout).await?;
+    if &header[..PROXY_PROTOCOL_V2_SIGNATURE.len()] != PROXY_PROTOCOL_V2_SIGNATURE {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY v2 header has invalid signature",
+        ));
+    }
+    let payload_len = u16::from_be_bytes([header[14], header[15]]) as usize;
+    if payload_len > PROXY_PROTOCOL_V2_MAX_PAYLOAD {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY v2 payload exceeds size limit",
+        ));
+    }
+    let mut payload = vec![0u8; payload_len];
+    if payload_len > 0 {
+        read_exact_with_idle_timeout(downstream, &mut payload, idle_timeout).await?;
+    }
+    parse_downstream_proxy_protocol_v2(&header, &payload)
+}
+
+pub fn parse_downstream_proxy_protocol_v2(
+    header: &[u8; PROXY_PROTOCOL_V2_HEADER_LEN],
+    payload: &[u8],
+) -> FluxResult<Option<SocketAddr>> {
+    if header[12] >> 4 != 0x2 {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY v2 header has invalid version",
+        ));
+    }
+    match header[12] & 0x0f {
+        0x00 => return Ok(None),
+        0x01 => {}
+        _ => {
+            return Err(FluxError::InvalidInput(
+                "stream downstream PROXY v2 header has invalid command",
+            ));
+        }
+    }
+    match header[13] {
+        0x11 => {
+            if payload.len() < 12 {
+                return Err(FluxError::InvalidInput(
+                    "stream downstream PROXY v2 TCP4 address is truncated",
+                ));
+            }
+            let source = Ipv4Addr::new(payload[0], payload[1], payload[2], payload[3]);
+            let port = u16::from_be_bytes([payload[8], payload[9]]);
+            Ok(Some(SocketAddr::new(IpAddr::V4(source), port)))
+        }
+        0x21 => {
+            if payload.len() < 36 {
+                return Err(FluxError::InvalidInput(
+                    "stream downstream PROXY v2 TCP6 address is truncated",
+                ));
+            }
+            let source = Ipv6Addr::from(<[u8; 16]>::try_from(&payload[0..16]).map_err(|_| {
+                FluxError::InvalidInput("stream downstream PROXY v2 TCP6 source is invalid")
+            })?);
+            let port = u16::from_be_bytes([payload[32], payload[33]]);
+            Ok(Some(SocketAddr::new(IpAddr::V6(source), port)))
+        }
+        0x00 => Ok(None),
+        _ => Err(FluxError::InvalidInput(
+            "stream downstream PROXY v2 address family is unsupported",
+        )),
+    }
+}
+
 async fn read_with_idle_timeout<R>(
     reader: &mut R,
     buffer: &mut [u8],
@@ -453,6 +661,33 @@ where
             "stream shutdown timeout elapsed",
         )),
     }
+}
+
+async fn read_exact_with_idle_timeout<R>(
+    reader: &mut R,
+    buffer: &mut [u8],
+    idle_timeout: Duration,
+) -> FluxResult<()>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut offset = 0usize;
+    while offset < buffer.len() {
+        let read = read_with_idle_timeout(reader, &mut buffer[offset..], idle_timeout).await?;
+        if read == 0 {
+            return Err(FluxError::InvalidInput(
+                "stream downstream PROXY protocol header ended early",
+            ));
+        }
+        offset = offset.saturating_add(read);
+    }
+    Ok(())
+}
+
+fn parse_proxy_protocol_port(value: &str) -> FluxResult<u16> {
+    value
+        .parse::<u16>()
+        .map_err(|_| FluxError::InvalidInput("stream downstream PROXY port is invalid"))
 }
 
 fn ip_in_prefix(address: IpAddr, network: IpAddr, prefix: u8) -> bool {
@@ -639,6 +874,57 @@ mod tests {
         assert!(stream_dns_resolved_address_allowed(
             "2606:4700:4700::1111".parse().unwrap()
         ));
+    }
+
+    #[test]
+    fn stream_downstream_proxy_protocol_v1_parser_extracts_source() {
+        let parsed =
+            parse_downstream_proxy_protocol_v1(b"PROXY TCP4 203.0.113.10 192.0.2.20 42300 443\r\n")
+                .unwrap();
+
+        assert_eq!(parsed, Some("203.0.113.10:42300".parse().unwrap()));
+        assert_eq!(
+            parse_downstream_proxy_protocol_v1(b"PROXY UNKNOWN\r\n").unwrap(),
+            None
+        );
+        assert_eq!(
+            parse_downstream_proxy_protocol_v1(
+                b"PROXY UNKNOWN 192.0.2.20 203.0.113.10 443 42300\r\n"
+            )
+            .unwrap(),
+            None
+        );
+        assert!(
+            parse_downstream_proxy_protocol_v1(b"PROXY TCP4 2001:db8::10 192.0.2.20 42300 443\r\n")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn stream_downstream_proxy_protocol_v2_parser_extracts_source() {
+        let mut header = [0u8; PROXY_PROTOCOL_V2_HEADER_LEN];
+        header[..PROXY_PROTOCOL_V2_SIGNATURE.len()].copy_from_slice(PROXY_PROTOCOL_V2_SIGNATURE);
+        header[12] = 0x21;
+        header[13] = 0x11;
+        header[14..16].copy_from_slice(&12u16.to_be_bytes());
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&[203, 0, 113, 10]);
+        payload.extend_from_slice(&[192, 0, 2, 20]);
+        payload.extend_from_slice(&42300u16.to_be_bytes());
+        payload.extend_from_slice(&443u16.to_be_bytes());
+
+        assert_eq!(
+            parse_downstream_proxy_protocol_v2(&header, &payload).unwrap(),
+            Some("203.0.113.10:42300".parse().unwrap())
+        );
+
+        header[12] = 0x20;
+        header[13] = 0x00;
+        header[14..16].copy_from_slice(&0u16.to_be_bytes());
+        assert_eq!(
+            parse_downstream_proxy_protocol_v2(&header, &[]).unwrap(),
+            None
+        );
     }
 
     #[test]

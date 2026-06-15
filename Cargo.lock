@@ -1216,6 +1216,7 @@ version = "1.6.2"
 dependencies = [
  "fluxheim-common",
  "fluxheim-config",
+ "fluxheim-protocol",
  "tokio",
 ]
 
