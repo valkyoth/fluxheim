@@ -11503,11 +11503,23 @@ mod tests {
             .unwrap();
         let mut buffer = Vec::new();
         let mut scratch = [0_u8; 1024];
+        let mut expected_len = None;
         loop {
             let read = stream.read(&mut scratch).unwrap();
             assert!(read > 0, "mock OpenBao connection closed early");
             buffer.extend_from_slice(&scratch[..read]);
-            if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+            if expected_len.is_none()
+                && let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n")
+            {
+                let headers = String::from_utf8_lossy(&buffer[..header_end]).to_lowercase();
+                let content_len = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length: "))
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                expected_len = Some(header_end + 4 + content_len);
+            }
+            if expected_len.is_some_and(|len| buffer.len() >= len) {
                 break;
             }
         }

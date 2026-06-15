@@ -24,6 +24,8 @@ connector wiring.
 - Kept the current root stream adapter as the Pingora service-registration
   boundary until the `1.6.4` background-runtime and later server-bootstrap
   cutovers.
+- Updated workspace crate versions, RPM metadata, README image examples, build
+  documentation, changelog, and release notes to `1.6.3`.
 
 ## Tests
 

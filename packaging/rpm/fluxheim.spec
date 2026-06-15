@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.2
+Version:        1.6.3
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Mon Jun 15 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.3-1
+- Continue the Pingora-exit line with the fluxheim-stream crate.
+- Move stream upstream selection, source policy, DNS guards, byte accounting,
+  copy-loop limits, and PROXY protocol parsing/writing into fluxheim-stream.
+- Keep the root stream adapter as the temporary Pingora service-registration
+  and TLS connector boundary until later runtime cutovers.
+
 * Sun Jun 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.2-1
 - Continue the Pingora-exit line with cache independence work.
 - Move cache key identity, serialized object envelopes, disk cache index

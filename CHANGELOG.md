@@ -7,6 +7,27 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.3 - 2026-06-15
+
+### Changed
+
+- Continue the 1.6 Pingora-exit line by adding `fluxheim-stream` as the
+  internal TCP stream proxy runtime boundary.
+- Move stream upstream selection, weighted primary ordering, backup/drain
+  policy, selected-upstream labels, source allow/deny matching, and trusted
+  PROXY source parsing into `fluxheim-stream`.
+- Move stream DNS-rebinding guard decisions, copied-byte accounting,
+  byte-limited copy-loop timeout handling, and max-connection-byte enforcement
+  into `fluxheim-stream`.
+- Move downstream PROXY protocol v1/v2 parsing and upstream PROXY protocol
+  header writing into `fluxheim-stream` while reusing the shared
+  `fluxheim-protocol` header builders.
+- Keep the root stream adapter as the temporary Pingora service-registration,
+  socket accept/connect, and TLS connector boundary until the broader
+  background/runtime cutovers.
+- Add direct `fluxheim-stream` unit coverage and preserve the stream proxy
+  smoke/runtime tests for PROXY protocol, limits, and timeout behavior.
+
 ## 1.6.2 - 2026-06-14
 
 ### Changed
