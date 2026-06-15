@@ -33,7 +33,10 @@ use crate::proxy::{
     LoadBalancerPersistenceClearRequest,
 };
 use crate::reload::{ReloadReason, classify_reload};
-use crate::snapshot::{ConfigSnapshot, SnapshotError, SnapshotStore};
+use crate::snapshot::{
+    ConfigSnapshot, PendingValidation, SnapshotApplyMode, SnapshotError,
+    SnapshotHealthSignalOutcome, SnapshotRuntimeState, SnapshotStore,
+};
 
 const MAX_ADMIN_TOKEN_BYTES: usize = 8 * 1024;
 const MAX_ADMIN_TOKEN_FILE_BYTES: u64 = MAX_ADMIN_TOKEN_BYTES as u64;
@@ -76,7 +79,7 @@ pub struct AdminApp {
     validation_window_secs: u64,
     min_successful_checks: usize,
     max_error_rate_per_mille: u16,
-    state: Arc<Mutex<AdminRuntimeState>>,
+    state: Arc<Mutex<SnapshotRuntimeState>>,
     auth_throttle: AdminAuthThrottle,
 }
 
@@ -127,23 +130,6 @@ struct AdminResponse {
     status: StatusCode,
     content_type: &'static str,
     body: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-struct AdminRuntimeState {
-    runtime_snapshot: Option<String>,
-    known_good_snapshot: Option<String>,
-    pending_validation: Option<PendingValidation>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct PendingValidation {
-    target_snapshot: String,
-    previous_snapshot: Option<String>,
-    impact: String,
-    expires_unix_secs: u64,
-    successful_checks: usize,
-    failed_checks: usize,
 }
 
 #[derive(Clone)]
@@ -471,7 +457,7 @@ impl AdminApp {
             validation_window_secs: config.admin.self_healing.validation_window_secs,
             min_successful_checks: config.admin.self_healing.min_successful_checks,
             max_error_rate_per_mille: config.admin.self_healing.max_error_rate_per_mille,
-            state: Arc::new(Mutex::new(AdminRuntimeState {
+            state: Arc::new(Mutex::new(SnapshotRuntimeState {
                 runtime_snapshot: runtime_snapshot.clone(),
                 known_good_snapshot: runtime_snapshot,
                 pending_validation: None,
@@ -1823,7 +1809,7 @@ impl AdminApp {
             Ok(config) => config,
             Err(error) => return error_response(StatusCode::BAD_REQUEST, &error.to_string()),
         };
-        let impact = match self.apply_snapshot(&snapshot, new_config, ApplyMode::Rollback) {
+        let impact = match self.apply_snapshot(&snapshot, new_config, SnapshotApplyMode::Rollback) {
             Ok(impact) => impact,
             Err(response) => return response,
         };
@@ -1859,7 +1845,7 @@ impl AdminApp {
             Ok(config) => config,
             Err(error) => return error_response(StatusCode::BAD_REQUEST, &error.to_string()),
         };
-        let impact = match self.apply_snapshot(&snapshot, new_config, ApplyMode::Reload) {
+        let impact = match self.apply_snapshot(&snapshot, new_config, SnapshotApplyMode::Reload) {
             Ok(impact) => impact,
             Err(response) => return response,
         };
@@ -2490,7 +2476,7 @@ impl AdminApp {
         &self,
         snapshot: &ConfigSnapshot,
         new_config: Config,
-        mode: ApplyMode,
+        mode: SnapshotApplyMode,
     ) -> Result<String, AdminResponse> {
         let old_config = self.current_config.load_full();
         let impact = classify_reload(&old_config, &new_config);
@@ -2540,18 +2526,16 @@ impl AdminApp {
         }
 
         let mut state = self.lock_runtime_state();
-        let Some(pending) = state.pending_validation.take() else {
+        let Some(snapshot) = state.confirm_pending_validation() else {
             return error_response(StatusCode::BAD_REQUEST, "no pending validation");
         };
-        state.known_good_snapshot = Some(pending.target_snapshot.clone());
-        state.runtime_snapshot = Some(pending.target_snapshot.clone());
 
         json_response_value(
             StatusCode::OK,
             &json!({
                 "status": "ok",
-                "known_good_snapshot": pending.target_snapshot,
-                "confirmed_snapshot": pending.target_snapshot,
+                "known_good_snapshot": snapshot,
+                "confirmed_snapshot": snapshot,
             }),
         )
     }
@@ -2581,11 +2565,16 @@ impl AdminApp {
             );
         };
 
-        match self.record_health_signal(healthy) {
-            HealthSignalOutcome::NoPendingValidation => {
+        let outcome = self.lock_runtime_state().record_health_signal(
+            healthy,
+            self.min_successful_checks,
+            self.max_error_rate_per_mille,
+        );
+        match outcome {
+            SnapshotHealthSignalOutcome::NoPendingValidation => {
                 error_response(StatusCode::BAD_REQUEST, "no pending validation")
             }
-            HealthSignalOutcome::Recorded { snapshot, metrics } => json_response_value(
+            SnapshotHealthSignalOutcome::Recorded { snapshot, metrics } => json_response_value(
                 StatusCode::OK,
                 &json!({
                     "status": "ok",
@@ -2596,7 +2585,7 @@ impl AdminApp {
                     "error_rate_per_mille": metrics.error_rate_per_mille(),
                 }),
             ),
-            HealthSignalOutcome::Confirm { snapshot, metrics } => json_response_value(
+            SnapshotHealthSignalOutcome::Confirm { snapshot, metrics } => json_response_value(
                 StatusCode::OK,
                 &json!({
                     "status": "ok",
@@ -2607,47 +2596,10 @@ impl AdminApp {
                     "error_rate_per_mille": metrics.error_rate_per_mille(),
                 }),
             ),
-            HealthSignalOutcome::Rollback(pending) => {
+            SnapshotHealthSignalOutcome::Rollback(pending) => {
                 self.rollback_pending_validation(&pending, "error-rate")
             }
         }
-    }
-
-    fn record_health_signal(&self, healthy: bool) -> HealthSignalOutcome {
-        let mut state = self.lock_runtime_state();
-        let Some(mut pending) = state.pending_validation.take() else {
-            return HealthSignalOutcome::NoPendingValidation;
-        };
-
-        if healthy {
-            pending.successful_checks = pending.successful_checks.saturating_add(1);
-        } else {
-            pending.failed_checks = pending.failed_checks.saturating_add(1);
-        }
-
-        let metrics = ValidationMetrics {
-            successful_checks: pending.successful_checks,
-            failed_checks: pending.failed_checks,
-        };
-
-        if metrics.failed_checks > 0
-            && metrics.error_rate_per_mille() > u64::from(self.max_error_rate_per_mille)
-        {
-            return HealthSignalOutcome::Rollback(pending);
-        }
-
-        if metrics.successful_checks >= self.min_successful_checks {
-            state.known_good_snapshot = Some(pending.target_snapshot.clone());
-            state.runtime_snapshot = Some(pending.target_snapshot.clone());
-            return HealthSignalOutcome::Confirm {
-                snapshot: pending.target_snapshot,
-                metrics,
-            };
-        }
-
-        let snapshot = pending.target_snapshot.clone();
-        state.pending_validation = Some(pending);
-        HealthSignalOutcome::Recorded { snapshot, metrics }
     }
 
     fn enforce_self_healing_deadline(&self) -> Option<AdminResponse> {
@@ -2655,27 +2607,11 @@ impl AdminApp {
             return None;
         }
 
-        let rollback = {
-            let mut state = self.lock_runtime_state();
-            let pending = state.pending_validation.as_ref()?;
-            let metrics = ValidationMetrics {
-                successful_checks: pending.successful_checks,
-                failed_checks: pending.failed_checks,
-            };
-            let reason = if metrics.failed_checks > 0
-                && metrics.error_rate_per_mille() > u64::from(self.max_error_rate_per_mille)
-            {
-                Some("error-rate")
-            } else if pending.expires_unix_secs <= unix_secs() {
-                Some("expired")
-            } else {
-                None
-            }?;
-            let pending = state.pending_validation.take()?;
-            (pending, reason)
-        };
+        let rollback = self
+            .lock_runtime_state()
+            .expired_or_unhealthy_pending(unix_secs(), self.max_error_rate_per_mille)?;
 
-        Some(self.rollback_pending_validation(&rollback.0, rollback.1))
+        Some(self.rollback_pending_validation(&rollback.0, rollback.1.as_str()))
     }
 
     fn watchdog_interval_secs(&self) -> u64 {
@@ -2698,10 +2634,11 @@ impl AdminApp {
             Ok(config) => config,
             Err(error) => return error_response(StatusCode::BAD_REQUEST, &error.to_string()),
         };
-        let impact = match self.apply_snapshot(&snapshot, new_config, ApplyMode::SelfHealRollback) {
-            Ok(impact) => impact,
-            Err(response) => return response,
-        };
+        let impact =
+            match self.apply_snapshot(&snapshot, new_config, SnapshotApplyMode::SelfHealRollback) {
+                Ok(impact) => impact,
+                Err(response) => return response,
+            };
         if let Err(error) = self.store.set_current_snapshot(&snapshot.id) {
             return internal_error_response(&error);
         }
@@ -2719,34 +2656,18 @@ impl AdminApp {
         )
     }
 
-    fn record_applied_snapshot(&self, snapshot: String, impact: String, mode: ApplyMode) {
-        let mut state = self.lock_runtime_state();
-        let previous = state.runtime_snapshot.clone();
-        state.runtime_snapshot = Some(snapshot.clone());
-
-        match mode {
-            ApplyMode::Reload if self.self_healing_enabled => {
-                state.pending_validation = Some(PendingValidation {
-                    target_snapshot: snapshot,
-                    previous_snapshot: previous.or_else(|| state.known_good_snapshot.clone()),
-                    impact,
-                    expires_unix_secs: unix_secs().saturating_add(self.validation_window_secs),
-                    successful_checks: 0,
-                    failed_checks: 0,
-                });
-            }
-            ApplyMode::Reload => {
-                state.known_good_snapshot = Some(snapshot);
-                state.pending_validation = None;
-            }
-            ApplyMode::Rollback | ApplyMode::SelfHealRollback => {
-                state.known_good_snapshot = Some(snapshot);
-                state.pending_validation = None;
-            }
-        }
+    fn record_applied_snapshot(&self, snapshot: String, impact: String, mode: SnapshotApplyMode) {
+        self.lock_runtime_state().record_applied_snapshot(
+            snapshot,
+            impact,
+            mode,
+            self.self_healing_enabled,
+            self.validation_window_secs,
+            unix_secs(),
+        );
     }
 
-    fn runtime_state(&self) -> AdminRuntimeState {
+    fn runtime_state(&self) -> SnapshotRuntimeState {
         self.lock_runtime_state().clone()
     }
 
@@ -2754,7 +2675,7 @@ impl AdminApp {
         self.lock_runtime_state().pending_validation.take()
     }
 
-    fn lock_runtime_state(&self) -> std::sync::MutexGuard<'_, AdminRuntimeState> {
+    fn lock_runtime_state(&self) -> std::sync::MutexGuard<'_, SnapshotRuntimeState> {
         match self.state.lock() {
             Ok(guard) => guard,
             Err(_) => {
@@ -2766,43 +2687,6 @@ impl AdminApp {
             }
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum ApplyMode {
-    Reload,
-    Rollback,
-    SelfHealRollback,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-struct ValidationMetrics {
-    successful_checks: usize,
-    failed_checks: usize,
-}
-
-impl ValidationMetrics {
-    fn error_rate_per_mille(&self) -> u64 {
-        let total = self.successful_checks.saturating_add(self.failed_checks);
-        if total == 0 {
-            return 0;
-        }
-        (self.failed_checks as u64).saturating_mul(1000) / (total as u64)
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-enum HealthSignalOutcome {
-    NoPendingValidation,
-    Recorded {
-        snapshot: String,
-        metrics: ValidationMetrics,
-    },
-    Confirm {
-        snapshot: String,
-        metrics: ValidationMetrics,
-    },
-    Rollback(PendingValidation),
 }
 
 #[async_trait]
@@ -3306,6 +3190,8 @@ fn pending_validation_json(pending: Option<&PendingValidation>) -> Value {
         return Value::Null;
     };
 
+    let metrics = pending.metrics();
+
     json!({
         "target_snapshot": pending.target_snapshot,
         "previous_snapshot": pending.previous_snapshot.as_deref(),
@@ -3313,11 +3199,7 @@ fn pending_validation_json(pending: Option<&PendingValidation>) -> Value {
         "expires_unix_secs": pending.expires_unix_secs,
         "successful_checks": pending.successful_checks,
         "failed_checks": pending.failed_checks,
-        "error_rate_per_mille": ValidationMetrics {
-            successful_checks: pending.successful_checks,
-            failed_checks: pending.failed_checks,
-        }
-        .error_rate_per_mille(),
+        "error_rate_per_mille": metrics.error_rate_per_mille(),
     })
 }
 
@@ -4205,7 +4087,7 @@ mod tests {
     use serde_json::Value;
 
     use super::{
-        AdminApp, AdminAuthThrottle, AdminRuntimeState, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
+        AdminApp, AdminAuthThrottle, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
         admin_services_from_config, authorized, constant_time_eq, error_response, json_response,
         read_bounded_secret_file, read_secret_file,
     };
@@ -4222,6 +4104,7 @@ mod tests {
     use crate::config_route::RouteConfig;
     use crate::proxy::FluxProxy;
     use crate::snapshot::SnapshotStore;
+    use crate::snapshot::{PendingValidation, SnapshotRuntimeState};
     #[cfg(feature = "load-balancer")]
     use crate::test_support::safe_child_path;
     use crate::test_support::unique_temp_path;
@@ -4287,7 +4170,7 @@ mod tests {
             validation_window_secs: AdminSelfHealingConfig::default().validation_window_secs,
             min_successful_checks: AdminSelfHealingConfig::default().min_successful_checks,
             max_error_rate_per_mille: AdminSelfHealingConfig::default().max_error_rate_per_mille,
-            state: Arc::new(std::sync::Mutex::new(AdminRuntimeState::default())),
+            state: Arc::new(std::sync::Mutex::new(SnapshotRuntimeState::default())),
             auth_throttle,
         }
     }
@@ -4335,7 +4218,7 @@ mod tests {
         app: &AdminApp,
         runtime_snapshot: Option<String>,
         known_good_snapshot: Option<String>,
-        pending_validation: Option<super::PendingValidation>,
+        pending_validation: Option<PendingValidation>,
     ) {
         let mut state = app.state.lock().unwrap();
         state.runtime_snapshot = runtime_snapshot;
@@ -7298,7 +7181,7 @@ mod tests {
             &app,
             None,
             None,
-            Some(super::PendingValidation {
+            Some(PendingValidation {
                 target_snapshot: snapshot.id.clone(),
                 previous_snapshot: None,
                 impact: "noop".to_owned(),
@@ -7333,7 +7216,7 @@ mod tests {
             &app,
             None,
             None,
-            Some(super::PendingValidation {
+            Some(PendingValidation {
                 target_snapshot: snapshot.id.clone(),
                 previous_snapshot: None,
                 impact: "noop".to_owned(),
@@ -7433,7 +7316,7 @@ mod tests {
             &app,
             Some(candidate.id.clone()),
             Some(baseline.id.clone()),
-            Some(super::PendingValidation {
+            Some(PendingValidation {
                 target_snapshot: candidate.id.clone(),
                 previous_snapshot: Some(baseline.id.clone()),
                 impact: "snapshot".to_owned(),
@@ -7518,7 +7401,7 @@ mod tests {
             &app,
             Some(candidate.id.clone()),
             Some(baseline.id.clone()),
-            Some(super::PendingValidation {
+            Some(PendingValidation {
                 target_snapshot: candidate.id.clone(),
                 previous_snapshot: Some(baseline.id.clone()),
                 impact: "snapshot".to_owned(),
@@ -7596,7 +7479,7 @@ mod tests {
             &app,
             Some(candidate.id.clone()),
             Some(baseline.id.clone()),
-            Some(super::PendingValidation {
+            Some(PendingValidation {
                 target_snapshot: candidate.id.clone(),
                 previous_snapshot: Some(baseline.id.clone()),
                 impact: "snapshot".to_owned(),
@@ -7674,7 +7557,7 @@ mod tests {
             &app,
             Some(candidate.id.clone()),
             Some(baseline.id.clone()),
-            Some(super::PendingValidation {
+            Some(PendingValidation {
                 target_snapshot: candidate.id.clone(),
                 previous_snapshot: Some(baseline.id.clone()),
                 impact: "snapshot".to_owned(),

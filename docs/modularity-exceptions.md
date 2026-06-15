@@ -35,7 +35,7 @@ documents why the exception is temporary and how it will be removed.
 | `src/web.rs` | 1507 | Root static web adapter over `fluxheim-web`. | Reduce to adapter glue after native HTTP runtime lands. |
 | `crates/fluxheim-cache/src/headers.rs` | 1482 | Cache directive parsing and policy helpers. | Split request/response directive modules. |
 | `src/php_fpm.rs` | 1348 | Root PHP-FPM proxy adapter and response handling. | Move remaining pure pieces into `fluxheim-php-fpm`. |
-| `crates/fluxheim-snapshot/src/lib.rs` | 1269 | Snapshot store implementation in crate root. | Split into store, id, metadata, rollback, and fs modules. |
+| `crates/fluxheim-snapshot/src/lib.rs` | 1570 | Snapshot store implementation plus self-healing snapshot runtime state in crate root. | Split into store, id, metadata, runtime state, rollback, and fs modules. |
 | `crates/fluxheim-observability/src/lib.rs` | 1139 | Observability crate root still hosts multiple exporters/helpers. | Split metrics, tracing, OTLP, and access-log modules. |
 | `crates/fluxheim-config/src/config_header.rs` | 1060 | Header policy config and validation. | Move with header-policy crate work. |
 | `crates/fluxheim-load-balancer/src/selection.rs` | 1050 | Selection algorithms grouped in one reviewed module. | Keep grouped until algorithm API stabilizes, then split tests/helpers. |

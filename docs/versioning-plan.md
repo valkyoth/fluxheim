@@ -2529,7 +2529,10 @@ Planned `1.6.x` sequence:
   Committed work includes moving the shared Fluxheim shutdown, readiness,
   background-task trait, and background-service handle into `fluxheim-runtime`,
   replacing the root implementation with a narrow Pingora registration adapter,
-  and making the load-balancer crate reuse the same runtime primitives.
+  and making the load-balancer crate reuse the same runtime primitives. It
+  also moves admin self-healing snapshot runtime state, pending validation,
+  validation metrics, health-signal outcomes, and expiry/error-rate rollback
+  decisions into `fluxheim-snapshot`.
   This is the right point to move durable config snapshot IDs, metadata, store
   validation, listing, rollback file operations, and known-good state helpers
   into `fluxheim-snapshot`, with the root admin/runtime modules left as API

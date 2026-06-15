@@ -17,6 +17,11 @@ shutdown, readiness, and service handles.
 - Kept the load-balancer service as a local wrapper so existing root adapter,
   status, and discovery code keep the same API while the task lifecycle is now
   owned by `fluxheim-runtime`.
+- Moved admin self-healing snapshot runtime state into `fluxheim-snapshot`:
+  runtime/known-good snapshot IDs, pending validation, validation metrics,
+  health-signal outcomes, expiry checks, and applied-snapshot state
+  transitions now live with the snapshot domain instead of the admin HTTP
+  adapter.
 
 ## Tests
 
@@ -25,3 +30,5 @@ shutdown, readiness, and service handles.
   task specs, policy epochs, facts, and proofs.
 - Verified the root proxy/load-balancer/cache/ACME/metrics feature path still
   compiles with the Pingora service adapter boundary.
+- Added direct `fluxheim-snapshot` unit coverage for pending validation,
+  confirm, error-rate rollback, and expired validation decisions.
