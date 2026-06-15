@@ -17,6 +17,9 @@ shutdown, readiness, and service handles.
 - Kept the load-balancer service as a local wrapper so existing root adapter,
   status, and discovery code keep the same API while the task lifecycle is now
   owned by `fluxheim-runtime`.
+- Added typed background task kind metadata to the runtime service handle and
+  tagged cache metrics, stale purging, ACME renewal, admin watchdog, and
+  load-balancer refresh services without changing scheduling behavior.
 - Moved admin self-healing snapshot runtime state into `fluxheim-snapshot`:
   runtime/known-good snapshot IDs, pending validation, validation metrics,
   health-signal outcomes, expiry checks, and applied-snapshot state
@@ -27,7 +30,8 @@ shutdown, readiness, and service handles.
 
 - Added direct `fluxheim-runtime` unit coverage for shutdown signaling,
   closed-sender shutdown behavior, delayed sleep, one-shot readiness, runtime
-  task specs, policy epochs, facts, and proofs.
+  task specs, typed background service metadata, policy epochs, facts, and
+  proofs.
 - Verified the root proxy/load-balancer/cache/ACME/metrics feature path still
   compiles with the Pingora service adapter boundary.
 - Added direct `fluxheim-snapshot` unit coverage for pending validation,

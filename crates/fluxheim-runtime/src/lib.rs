@@ -163,6 +163,8 @@ pub trait FluxBackgroundTask: Send + Sync + 'static {
 
 pub struct FluxBackgroundService<T> {
     name: String,
+    kind: Option<BackgroundTaskKind>,
+    critical: bool,
     task: Arc<T>,
 }
 
@@ -170,6 +172,26 @@ impl<T> FluxBackgroundService<T> {
     pub fn new(name: impl Into<String>, task: T) -> Self {
         Self {
             name: name.into(),
+            kind: None,
+            critical: false,
+            task: Arc::new(task),
+        }
+    }
+
+    pub fn from_spec(spec: BackgroundTaskSpec, task: T) -> Self {
+        Self {
+            name: spec.name().to_owned(),
+            kind: Some(spec.kind()),
+            critical: spec.is_critical(),
+            task: Arc::new(task),
+        }
+    }
+
+    pub fn with_kind(name: impl Into<String>, kind: BackgroundTaskKind, task: T) -> Self {
+        Self {
+            name: name.into(),
+            kind: Some(kind),
+            critical: false,
             task: Arc::new(task),
         }
     }
@@ -182,6 +204,14 @@ impl<T> FluxBackgroundService<T> {
         &self.name
     }
 
+    pub fn kind(&self) -> Option<BackgroundTaskKind> {
+        self.kind
+    }
+
+    pub fn is_critical(&self) -> bool {
+        self.critical
+    }
+
     pub fn threads(&self) -> Option<usize> {
         Some(1)
     }
@@ -189,6 +219,14 @@ impl<T> FluxBackgroundService<T> {
 
 pub fn background_service<T>(name: impl Into<String>, task: T) -> FluxBackgroundService<T> {
     FluxBackgroundService::new(name, task)
+}
+
+pub fn background_service_with_kind<T>(
+    name: impl Into<String>,
+    kind: BackgroundTaskKind,
+    task: T,
+) -> FluxBackgroundService<T> {
+    FluxBackgroundService::with_kind(name, kind, task)
 }
 
 #[cfg(test)]
@@ -231,6 +269,18 @@ mod tests {
         assert_eq!(spec.name(), "load-balancer-refresh");
         assert_eq!(spec.kind(), BackgroundTaskKind::LoadBalancerRefresh);
         assert!(spec.is_critical());
+    }
+
+    #[test]
+    fn background_service_preserves_task_kind() {
+        struct Task;
+
+        let service =
+            FluxBackgroundService::with_kind("cache", BackgroundTaskKind::CacheMetrics, Task);
+
+        assert_eq!(service.name(), "cache");
+        assert_eq!(service.kind(), Some(BackgroundTaskKind::CacheMetrics));
+        assert!(!service.is_critical());
     }
 
     #[tokio::test]

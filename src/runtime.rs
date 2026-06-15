@@ -113,8 +113,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             config.cache_purger.limit,
             config.cache_purger.batches
         );
-        server.add_service(crate::background::background_service(
+        server.add_service(crate::background::background_service_with_kind(
             "Cache stale disk purger",
+            crate::background::BackgroundTaskKind::CacheStalePurge,
             CacheStalePurgerBackgroundService {
                 config: config.cache_purger.clone(),
                 proxy: admin_proxy.clone(),
@@ -177,8 +178,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         #[cfg(feature = "cache")]
         {
             record_cache_runtime_metrics(&metrics_proxy);
-            server.add_service(crate::background::background_service(
+            server.add_service(crate::background::background_service_with_kind(
                 "Cache runtime metrics",
+                crate::background::BackgroundTaskKind::CacheMetrics,
                 CacheRuntimeMetricsBackgroundService {
                     proxy: metrics_proxy.clone(),
                 },
@@ -205,8 +207,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             "ACME renewal service enabled; interval={}s",
             config.tls.acme.renewal.check_interval_secs
         );
-        server.add_service(crate::background::background_service(
+        server.add_service(crate::background::background_service_with_kind(
             "ACME renewal",
+            crate::background::BackgroundTaskKind::AcmeRenewal,
             AcmeRenewalBackgroundService {
                 config: config.clone(),
                 certificate_reloader: certificate_reloader.clone(),

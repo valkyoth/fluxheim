@@ -4,7 +4,9 @@ use pingora::server::ListenFds;
 use pingora::server::ShutdownWatch;
 use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 
-pub(crate) use fluxheim_runtime::{FluxBackgroundReady, FluxBackgroundTask, FluxShutdown};
+pub(crate) use fluxheim_runtime::{
+    BackgroundTaskKind, FluxBackgroundReady, FluxBackgroundTask, FluxShutdown,
+};
 
 pub(crate) struct FluxBackgroundService<T>
 where
@@ -17,18 +19,22 @@ impl<T> FluxBackgroundService<T>
 where
     T: FluxBackgroundTask,
 {
-    pub(crate) fn new(name: impl Into<String>, task: T) -> Self {
+    pub(crate) fn with_kind(name: impl Into<String>, kind: BackgroundTaskKind, task: T) -> Self {
         Self {
-            inner: fluxheim_runtime::background_service(name, task),
+            inner: fluxheim_runtime::background_service_with_kind(name, kind, task),
         }
     }
 }
 
-pub(crate) fn background_service<T>(name: impl Into<String>, task: T) -> FluxBackgroundService<T>
+pub(crate) fn background_service_with_kind<T>(
+    name: impl Into<String>,
+    kind: BackgroundTaskKind,
+    task: T,
+) -> FluxBackgroundService<T>
 where
     T: FluxBackgroundTask,
 {
-    FluxBackgroundService::new(name, task)
+    FluxBackgroundService::with_kind(name, kind, task)
 }
 
 #[async_trait]
