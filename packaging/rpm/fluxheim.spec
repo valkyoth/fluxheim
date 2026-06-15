@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.3
+Version:        1.6.4
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,15 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Mon Jun 15 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.4-1
+- Continue the Pingora-exit line with Fluxheim-owned background runtime
+  primitives in fluxheim-runtime.
+- Move OTLP metrics export and certificate reload control socket handling into
+  the Fluxheim background task lifecycle.
+- Move self-healing snapshot runtime state into fluxheim-snapshot.
+- Harden reload socket concurrency, shared timeout bounds, and HTTP discovery
+  embedded-IPv4 filtering.
+
 * Mon Jun 15 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.3-1
 - Continue the Pingora-exit line with the fluxheim-stream crate.
 - Move stream upstream selection, source policy, DNS guards, byte accounting,

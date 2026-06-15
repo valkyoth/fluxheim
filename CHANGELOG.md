@@ -7,6 +7,25 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.4 - 2026-06-15
+
+### Changed
+
+- Continue the 1.6 Pingora-exit line by moving shared background task lifecycle
+  primitives into `fluxheim-runtime`.
+- Replace the root background implementation with a narrow Pingora
+  service-registration adapter around Fluxheim-owned shutdown, readiness, and
+  background-service handles.
+- Reuse the shared runtime background primitives from the load-balancer crate
+  and tag background services with typed task metadata.
+- Move OTLP metrics export and the ACME certificate reload control socket into
+  the Fluxheim background task lifecycle.
+- Move admin self-healing snapshot runtime state, pending validation, validation
+  metrics, and rollback decisions into `fluxheim-snapshot`.
+- Harden the local certificate reload control socket with a concurrency cap,
+  reject over-one-day shared timeout values, and extend HTTP discovery
+  private-backend filtering for 6to4/Teredo embedded IPv4 literals.
+
 ## 1.6.3 - 2026-06-15
 
 ### Changed
