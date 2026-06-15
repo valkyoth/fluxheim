@@ -193,7 +193,15 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
         #[cfg(feature = "metrics-otlp")]
         if config.metrics.otlp.enabled {
-            crate::metrics_otlp::spawn_from_config(&config.metrics.otlp)?;
+            if let Some(exporter) =
+                crate::metrics_otlp::MetricsOtlpExporter::from_config(&config.metrics.otlp)?
+            {
+                server.add_service(crate::background::background_service_with_kind(
+                    "OTLP metrics export",
+                    crate::background::BackgroundTaskKind::MetricsExport,
+                    MetricsOtlpBackgroundService { exporter },
+                ));
+            }
             log::info!(
                 "OTLP metrics export enabled to {}",
                 config.metrics.otlp.endpoint
@@ -567,6 +575,31 @@ fn record_cache_stale_purge_metrics(
 struct AcmeRenewalBackgroundService {
     config: Config,
     certificate_reloader: Option<DownstreamCertificateReloader>,
+}
+
+#[cfg(all(feature = "proxy", feature = "metrics-otlp"))]
+struct MetricsOtlpBackgroundService {
+    exporter: crate::metrics_otlp::MetricsOtlpExporter,
+}
+
+#[cfg(all(feature = "proxy", feature = "metrics-otlp"))]
+#[async_trait::async_trait]
+impl crate::background::FluxBackgroundTask for MetricsOtlpBackgroundService {
+    async fn start(
+        &self,
+        mut shutdown: crate::background::FluxShutdown,
+        mut ready: crate::background::FluxBackgroundReady,
+    ) {
+        ready.notify_ready();
+        let interval = self.exporter.interval();
+
+        loop {
+            if shutdown.sleep_or_shutdown(interval).await {
+                break;
+            }
+            self.exporter.export_once();
+        }
+    }
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client"))]

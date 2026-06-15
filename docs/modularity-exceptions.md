@@ -25,7 +25,7 @@ documents why the exception is temporary and how it will be removed.
 | `crates/fluxheim-config/src/config.rs` | 2512 | Config root, validation helpers, and shared parsing glue. | Split by shared config primitives. |
 | `crates/fluxheim-config/src/config_cache.rs` | 2495 | Cache config, validation, and merge behavior. | Split cache config primitives when `fluxheim-cache` owns more runtime. |
 | `src/headers.rs` | 2125 | Header mutation, forwarding, rewriting, and cookie policy. | Move to `fluxheim-headers`/`fluxheim-http-policy` in `1.6.5`. |
-| `src/runtime.rs` | 2098 | Pingora server/bootstrap/listener orchestration. | Replace through `fluxheim-runtime`/`fluxheim-server` in `1.6.4`-`1.6.7`. |
+| `src/runtime.rs` | 2131 | Pingora server/bootstrap/listener orchestration. | Replace through `fluxheim-runtime`/`fluxheim-server` in `1.6.4`-`1.6.7`. |
 | `src/tls.rs` | 1834 | TLS config/runtime helper surface for current listener adapter. | Split with listener/TLS abstraction in `1.6.6`. |
 | `crates/fluxheim-config/src/config_proxy.rs` | 1807 | Proxy config and validation. | Split proxy/load-balancer subdomains as native proxy APIs land. |
 | `crates/fluxheim-config/src/config_load_balance.rs` | 1796 | Load-balancer config and validation. | Split with `fluxheim-load-balancer` independence in `1.6.1`. |

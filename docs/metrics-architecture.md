@@ -249,10 +249,10 @@ Baseline:
 
 Optional push:
 
-- initial implementation spawns a background exporter thread when
-  `[metrics.otlp]` is enabled.
-- future Pingora service integration can add richer lifecycle and health
-  reporting.
+- `[metrics.otlp]` uses the Fluxheim background task lifecycle when enabled,
+  so exporter sleep/shutdown behavior follows the same runtime boundary as
+  cache purging, ACME renewal, admin watchdog, and load-balancer refresh tasks.
+- future lifecycle work can add richer exporter health reporting.
 - push failure must never block request workers.
 - failed push keeps metrics locally available.
 - do not buffer infinite historical metrics in memory.

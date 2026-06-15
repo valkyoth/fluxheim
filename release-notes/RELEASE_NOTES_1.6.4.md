@@ -20,6 +20,9 @@ shutdown, readiness, and service handles.
 - Added typed background task kind metadata to the runtime service handle and
   tagged cache metrics, stale purging, ACME renewal, admin watchdog, and
   load-balancer refresh services without changing scheduling behavior.
+- Moved OTLP metrics export from an unmanaged raw thread to the Fluxheim
+  background task lifecycle, preserving the existing interval/timeout behavior
+  while adding shutdown awareness and typed task metadata.
 - Moved admin self-healing snapshot runtime state into `fluxheim-snapshot`:
   runtime/known-good snapshot IDs, pending validation, validation metrics,
   health-signal outcomes, expiry checks, and applied-snapshot state
@@ -34,5 +37,7 @@ shutdown, readiness, and service handles.
   proofs.
 - Verified the root proxy/load-balancer/cache/ACME/metrics feature path still
   compiles with the Pingora service adapter boundary.
+- Added OTLP metrics exporter construction tests for disabled and invalid
+  endpoint configurations.
 - Added direct `fluxheim-snapshot` unit coverage for pending validation,
   confirm, error-rate rollback, and expired validation decisions.
