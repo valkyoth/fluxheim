@@ -33,6 +33,8 @@ const DOWNSTREAM_H2_MAX_HEADER_LIST_SIZE: u32 = 64 * 1024;
 const DOWNSTREAM_H2_MAX_CONCURRENT_STREAMS: u32 = 32;
 #[cfg(feature = "proxy")]
 const DOWNSTREAM_H2_INITIAL_WINDOW_SIZE: u32 = 64 * 1024;
+#[cfg(all(feature = "proxy", feature = "acme-client", unix))]
+const MAX_CONCURRENT_CERTIFICATE_RELOAD_REQUESTS: usize = 4;
 #[cfg(feature = "proxy")]
 const DOWNSTREAM_H2_MAX_FRAME_SIZE: u32 = 16 * 1024;
 #[cfg(feature = "proxy")]
@@ -349,7 +351,13 @@ fn certificate_reload_control_service(
     Ok(Some(crate::background::background_service_with_kind(
         "Certificate reload control socket",
         crate::background::BackgroundTaskKind::CertificateReload,
-        CertificateReloadControlBackgroundService { listener, reloader },
+        CertificateReloadControlBackgroundService {
+            listener,
+            reloader,
+            semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+                MAX_CONCURRENT_CERTIFICATE_RELOAD_REQUESTS,
+            )),
+        },
     )))
 }
 
@@ -411,6 +419,7 @@ fn handle_certificate_reload_control_request(
 struct CertificateReloadControlBackgroundService {
     listener: std::os::unix::net::UnixListener,
     reloader: Option<DownstreamCertificateReloader>,
+    semaphore: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
@@ -431,8 +440,13 @@ impl crate::background::FluxBackgroundTask for CertificateReloadControlBackgroun
 
             match self.listener.accept() {
                 Ok((mut stream, _addr)) => {
+                    let Ok(permit) = self.semaphore.clone().try_acquire_owned() else {
+                        log::debug!("certificate reload control request dropped: concurrency cap");
+                        continue;
+                    };
                     let reloader = self.reloader.clone();
                     tokio::task::spawn_blocking(move || {
+                        let _permit = permit;
                         if let Err(error) = stream.set_nonblocking(false) {
                             log::warn!("certificate reload control request setup failed: {error}");
                             return;

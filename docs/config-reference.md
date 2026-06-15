@@ -1199,7 +1199,8 @@ contain whitespace after trimming surrounding whitespace. Fluxheim sends
 `Content-Type` values when the discovery endpoint includes that header; missing
 `Content-Type` is accepted so small internal sidecars can stay simple.
 Returned IP-literal backends in private, loopback, link-local, multicast,
-reserved, documentation, or metadata ranges are rejected by default. Set
+reserved, documentation, metadata, IPv4-mapped IPv6, IPv4-compatible IPv6,
+6to4, or Teredo-embedded private ranges are rejected by default. Set
 `upstreams_http_allow_private_backends = true` only when the configured
 discovery endpoint is trusted to return private service-network members and the
 route is intended to reach those networks.
@@ -1654,7 +1655,10 @@ refresh is invalid. The same `proxy.load_balance` policy applies inside
 selection, passive-health, retry, and health-check state.
 `connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs` are
 optional. They map to the upstream connection timeout, upstream response/read
-timeout, and upstream request-body/write timeout.
+timeout, and upstream request-body/write timeout. Optional and required
+second-based proxy/PHP/load-balancer health-check timeout fields reject `0` and
+values above `86400` seconds so a malformed config cannot pin connections or
+workers indefinitely.
 `websocket = true` enables HTTP/1.1 upgrade forwarding for websocket-style or
 other token-based upgrade requests on that proxy block. Fluxheim validates this
 with `upstream_http_version = "http1"` because HTTP/2 origins do not use the

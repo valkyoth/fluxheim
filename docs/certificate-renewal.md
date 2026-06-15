@@ -338,6 +338,8 @@ owns a local Unix-domain certificate reload socket at
 The socket accepts only the narrow `reload-certificates` operation and is
 created with owner-only permissions by the running gateway. It is intended for
 the same runtime user or container pod, not remote administration. The
+long-running gateway caps concurrent reload-control requests, and each accepted
+request still uses a short fixed read timeout. The
 companion reads the gateway response with a small fixed bound so a compromised
 or replaced local socket cannot grow companion memory without limit.
 

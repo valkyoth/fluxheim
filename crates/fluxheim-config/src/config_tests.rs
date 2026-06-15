@@ -2033,6 +2033,45 @@ fn rejects_zero_proxy_timeouts() {
 }
 
 #[test]
+fn rejects_unbounded_proxy_timeouts() {
+    let config: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "127.0.0.1:3000"
+            read_timeout_secs = 86401
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidProxyTimeout {
+            field: "proxy.read_timeout_secs"
+        })
+    );
+
+    let config: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "127.0.0.1:3000"
+
+            [proxy.auth_request]
+            enabled = true
+            url = "http://127.0.0.1:3001/auth"
+            read_timeout_secs = 86401
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidProxyTimeout {
+            field: "proxy.auth_request.read_timeout_secs"
+        })
+    );
+}
+
+#[test]
 fn rejects_invalid_proxy_error_pages() {
     let config: Config = toml::from_str(
         r#"

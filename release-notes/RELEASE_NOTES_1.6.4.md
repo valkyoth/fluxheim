@@ -25,12 +25,23 @@ shutdown, readiness, and service handles.
   while adding shutdown awareness and typed task metadata.
 - Moved the ACME certificate reload control socket from an unmanaged raw thread
   to the Fluxheim background task lifecycle. Startup path validation and socket
-  binding remain fail-fast; the accept loop now honors runtime shutdown.
+  binding remain fail-fast; the accept loop now honors runtime shutdown and
+  caps concurrent local reload requests.
 - Moved admin self-healing snapshot runtime state into `fluxheim-snapshot`:
   runtime/known-good snapshot IDs, pending validation, validation metrics,
   health-signal outcomes, expiry checks, and applied-snapshot state
   transitions now live with the snapshot domain instead of the admin HTTP
   adapter.
+
+## Security Hardening
+
+- Bounded concurrent handling for the local certificate reload control socket
+  so a same-user local client cannot create unbounded blocking reload tasks.
+- Added a one-day upper bound for second-based proxy, PHP-FPM, and
+  load-balancer health-check timeouts that use the shared timeout validator.
+- Extended HTTP discovery private-backend filtering to reject 6to4 and Teredo
+  IPv6 literals that embed private, loopback, link-local, documentation, or
+  otherwise restricted IPv4 addresses.
 
 ## Tests
 
@@ -44,3 +55,5 @@ shutdown, readiness, and service handles.
   endpoint configurations.
 - Added direct `fluxheim-snapshot` unit coverage for pending validation,
   confirm, error-rate rollback, and expired validation decisions.
+- Added regression coverage for unbounded timeout rejection and HTTP discovery
+  IPv6 literals that encode restricted IPv4 addresses.

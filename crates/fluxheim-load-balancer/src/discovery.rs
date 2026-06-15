@@ -460,6 +460,24 @@ fn restricted_http_discovery_ipv6(ip: Ipv6Addr) -> bool {
         return restricted_http_discovery_ipv4(compatible);
     }
     let segments = ip.segments();
+    if segments[0] == 0x2002 {
+        let embedded = Ipv4Addr::new(
+            (segments[1] >> 8) as u8,
+            (segments[1] & 0xff) as u8,
+            (segments[2] >> 8) as u8,
+            (segments[2] & 0xff) as u8,
+        );
+        if restricted_http_discovery_ipv4(embedded) {
+            return true;
+        }
+    }
+    if segments[0] == 0x2001 && segments[1] == 0x0000 {
+        let raw = ((segments[6] as u32) << 16) | u32::from(segments[7]);
+        let embedded = Ipv4Addr::from(!raw);
+        if restricted_http_discovery_ipv4(embedded) {
+            return true;
+        }
+    }
     ip.is_unspecified()
         || ip.is_loopback()
         || ip.is_multicast()
@@ -703,6 +721,9 @@ mod tests {
             "[::ffff:127.0.0.1]:3001",
             "[::ffff:10.0.0.1]:3001",
             "[::169.254.169.254]:80",
+            "[2002:7f00:1::1]:3001",
+            "[2002:a00:1::1]:3001",
+            "[2001:0000::ffff:80ff:fffe]:3001",
         ] {
             let body = format!(r#"["{upstream}","8.8.8.8:3002"]"#);
             assert!(

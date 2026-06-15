@@ -2466,6 +2466,8 @@ pub fn valid_http_token(value: &str) -> bool {
     fluxheim_protocol::http_token_valid(value)
 }
 
+const MAX_TIMEOUT_SECS: u64 = 24 * 60 * 60;
+
 pub fn validate_config_list_len(
     field: impl Into<String>,
     len: usize,
@@ -2484,14 +2486,14 @@ pub fn validate_optional_timeout_secs(
     field: &'static str,
     value: Option<u64>,
 ) -> Result<(), ConfigError> {
-    if value.is_some_and(|seconds| seconds == 0) {
+    if value.is_some_and(|seconds| seconds == 0 || seconds > MAX_TIMEOUT_SECS) {
         return Err(ConfigError::InvalidProxyTimeout { field });
     }
     Ok(())
 }
 
 pub fn validate_required_timeout_secs(field: &'static str, value: u64) -> Result<(), ConfigError> {
-    if value == 0 {
+    if value == 0 || value > MAX_TIMEOUT_SECS {
         return Err(ConfigError::InvalidProxyTimeout { field });
     }
     Ok(())
