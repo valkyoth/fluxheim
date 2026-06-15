@@ -83,8 +83,36 @@ pub use self::crypto::set_admin_hmac_sha256;
 pub use self::metrics::set_load_balancer_event_recorder;
 pub use self::persistence::LoadBalancerRequestView;
 
-pub type UpstreamLoadBalancerService =
-    background::FluxBackgroundService<backend::FluxLoadBalancerRuntime>;
+pub struct UpstreamLoadBalancerService {
+    inner: background::FluxBackgroundService<backend::FluxLoadBalancerRuntime>,
+}
+
+impl UpstreamLoadBalancerService {
+    fn new(inner: background::FluxBackgroundService<backend::FluxLoadBalancerRuntime>) -> Self {
+        Self { inner }
+    }
+
+    fn task(&self) -> Arc<backend::FluxLoadBalancerRuntime> {
+        self.inner.task()
+    }
+
+    pub async fn start(
+        &self,
+        shutdown: background::FluxShutdown,
+        ready: background::FluxBackgroundReady,
+    ) {
+        self.inner.task().run(shutdown, ready).await;
+    }
+
+    pub fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    pub fn threads(&self) -> Option<usize> {
+        self.inner.threads()
+    }
+}
+
 const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
 pub const MAX_RUNTIME_BACKEND_WEIGHT: usize = 1000;
 
@@ -1452,16 +1480,6 @@ fn runtime_backend_from_member(member: &str, weight: usize) -> io::Result<Backen
         ));
     }
     FluxBackend::new_with_weight(member, weight).map_err(FluxError::into_io)
-}
-
-impl UpstreamLoadBalancerService {
-    pub async fn start(
-        &self,
-        shutdown: background::FluxShutdown,
-        ready: background::FluxBackgroundReady,
-    ) {
-        self.task().run(shutdown, ready).await;
-    }
 }
 
 #[cfg(test)]

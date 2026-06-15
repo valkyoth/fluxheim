@@ -1038,6 +1038,7 @@ dependencies = [
  "fluxheim-openssl-fips-support",
  "fluxheim-php-fpm",
  "fluxheim-protocol",
+ "fluxheim-runtime",
  "fluxheim-snapshot",
  "fluxheim-stream",
  "fluxheim-web",
@@ -1137,6 +1138,7 @@ dependencies = [
  "bytes",
  "fluxheim-common",
  "fluxheim-config",
+ "fluxheim-runtime",
  "futures",
  "getrandom 0.4.2",
  "log",
@@ -1191,6 +1193,10 @@ version = "1.6.3"
 [[package]]
 name = "fluxheim-runtime"
 version = "1.6.3"
+dependencies = [
+ "async-trait",
+ "tokio",
+]
 
 [[package]]
 name = "fluxheim-server"

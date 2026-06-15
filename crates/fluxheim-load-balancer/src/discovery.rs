@@ -531,7 +531,10 @@ where
     };
     inner.set_metric_labels(metric_labels);
 
-    let service = crate::background::background_service(format!("LB {name}"), inner);
+    let service = UpstreamLoadBalancerService::new(crate::background::background_service(
+        format!("LB {name}"),
+        inner,
+    ));
     let load_balancer =
         UpstreamLoadBalancer::from_inner(wrap(service.task()), config, backend_policy);
     Ok(Some((load_balancer, service)))
@@ -548,7 +551,10 @@ pub(super) fn background_maglev_service_for(
     };
     inner.set_metric_labels(metric_labels);
     let table = Arc::new(configured_maglev_table(config)?);
-    let service = crate::background::background_service(format!("LB {name}"), inner);
+    let service = UpstreamLoadBalancerService::new(crate::background::background_service(
+        format!("LB {name}"),
+        inner,
+    ));
     let load_balancer = UpstreamLoadBalancer::from_inner(
         UpstreamLoadBalancerInner::MaglevHash {
             inner: service.task(),

@@ -19,7 +19,7 @@ documents why the exception is temporary and how it will be removed.
 | `src/cache.rs` | 13486 | Legacy Pingora cache storage/runtime adapter plus remaining cache orchestration. The 1.6.2 native cache adapter temporarily increases this file until the Pingora HTTP runtime edge is removed. | Continue moving pure cache runtime into `fluxheim-cache`; shrink the compatibility adapter during the native HTTP/cache cutover. |
 | `src/admin.rs` | 8059 | Legacy admin HTTP endpoint router over every domain. | Reduce after domain APIs stabilize; possible `fluxheim-admin` after `1.6.12`. |
 | `src/cli.rs` | 5544 | Legacy command dispatch and release/admin/cache tooling. | Split command handlers by domain after runtime crates settle. |
-| `crates/fluxheim-load-balancer/src/lib.rs` | 3995 | Load-balancer orchestration root still hosts many domain pieces; API/runtime DTOs moved to `api.rs` in `1.6.1`. | Continue splitting orchestration, runtime mutation, and Pingora service adapter code during the remaining `1.6` load-balancer/background cutovers. |
+| `crates/fluxheim-load-balancer/src/lib.rs` | 4013 | Load-balancer orchestration root still hosts many domain pieces; API/runtime DTOs moved to `api.rs` in `1.6.1`. | Continue splitting orchestration and runtime mutation code during the remaining `1.6` load-balancer/background cutovers. |
 | `src/acme.rs` | 3909 | ACME account/order/install/renewal and filesystem safety in one root adapter. | Move to `fluxheim-acme` around `1.6.6`. |
 | `src/metrics.rs` | 2761 | Root metrics registry/export adapter over many domains. | Move remaining pure metrics into `fluxheim-observability`. |
 | `crates/fluxheim-config/src/config.rs` | 2512 | Config root, validation helpers, and shared parsing glue. | Split by shared config primitives. |
@@ -44,7 +44,7 @@ documents why the exception is temporary and how it will be removed.
 | `crates/fluxheim-load-balancer/src/policy.rs` | 977 | Runtime backend policy overrides and keys. | Split keys, snapshots, and mutation policy. |
 | `crates/fluxheim-config/src/config_stream.rs` | 947 | Stream proxy config and TLS validation. | Split with stream runtime cutover. |
 | `crates/fluxheim-load-balancer/src/backend.rs` | 848 | Backend snapshots and runtime mutation surface. | Split backend set, health snapshot, and mutation helpers. |
-| `crates/fluxheim-load-balancer/src/discovery.rs` | 845 | File/DNS/HTTP discovery and validation. | Split discovery backends. |
+| `crates/fluxheim-load-balancer/src/discovery.rs` | 851 | File/DNS/HTTP discovery and validation. | Split discovery backends. |
 | `crates/fluxheim-cache/src/api.rs` | 819 | Cache admin/status DTOs. | Split status, lookup, purge, and preview DTOs. |
 | `crates/fluxheim-config/src/reload.rs` | 809 | Reload classification and diff behavior. | Move snapshot/reload-safe classification into dedicated modules. |
 | `crates/fluxheim-php-fpm/src/lib.rs` | 778 | PHP-FPM crate root still holds several pure domains. | Split params, response, retry, and managed runtime helpers. |

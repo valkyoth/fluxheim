@@ -2526,6 +2526,10 @@ Planned `1.6.x` sequence:
   wiring with Fluxheim-owned Tokio task supervision, cancellation, readiness,
   and shutdown handling for cache metrics, ACME renewal, stale purging,
   admin/self-healing work, discovery refresh loops, and load-balancer updates.
+  Committed work includes moving the shared Fluxheim shutdown, readiness,
+  background-task trait, and background-service handle into `fluxheim-runtime`,
+  replacing the root implementation with a narrow Pingora registration adapter,
+  and making the load-balancer crate reuse the same runtime primitives.
   This is the right point to move durable config snapshot IDs, metadata, store
   validation, listing, rollback file operations, and known-good state helpers
   into `fluxheim-snapshot`, with the root admin/runtime modules left as API
