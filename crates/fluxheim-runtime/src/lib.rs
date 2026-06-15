@@ -68,6 +68,7 @@ pub enum BackgroundTaskKind {
     AcmeRenewal,
     CacheMetrics,
     CacheStalePurge,
+    CertificateReload,
     LoadBalancerRefresh,
     MetricsExport,
     RuntimeWatchdog,

@@ -23,6 +23,9 @@ shutdown, readiness, and service handles.
 - Moved OTLP metrics export from an unmanaged raw thread to the Fluxheim
   background task lifecycle, preserving the existing interval/timeout behavior
   while adding shutdown awareness and typed task metadata.
+- Moved the ACME certificate reload control socket from an unmanaged raw thread
+  to the Fluxheim background task lifecycle. Startup path validation and socket
+  binding remain fail-fast; the accept loop now honors runtime shutdown.
 - Moved admin self-healing snapshot runtime state into `fluxheim-snapshot`:
   runtime/known-good snapshot IDs, pending validation, validation metrics,
   health-signal outcomes, expiry checks, and applied-snapshot state

@@ -132,7 +132,11 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(not(feature = "acme-client"))]
     let _ = &certificate_reloader;
     #[cfg(all(feature = "acme-client", unix))]
-    start_certificate_reload_control_socket(&config, certificate_reloader.clone())?;
+    if let Some(service) =
+        certificate_reload_control_service(&config, certificate_reloader.clone())?
+    {
+        server.add_service(service);
+    }
 
     #[cfg(feature = "load-balancer")]
     for service in load_balancer_services {
@@ -308,12 +312,15 @@ fn pingora_proxy_protocol_trusted_source(
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
-fn start_certificate_reload_control_socket(
+fn certificate_reload_control_service(
     config: &Config,
     reloader: Option<DownstreamCertificateReloader>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<
+    Option<crate::background::FluxBackgroundService<CertificateReloadControlBackgroundService>>,
+    Box<dyn Error + Send + Sync>,
+> {
     if !config.tls.acme.enabled || !config.tls.acme.renewal.reload_after_renewal {
-        return Ok(());
+        return Ok(None);
     }
 
     let path = config.server.process.certificate_reload_sock.clone();
@@ -333,32 +340,17 @@ fn start_certificate_reload_control_socket(
     }
 
     let listener = bind_private_unix_listener(&path)?;
+    listener.set_nonblocking(true)?;
     log::info!(
         "certificate reload control socket enabled at {}",
         path.display()
     );
 
-    std::thread::Builder::new()
-        .name("fluxheim-cert-reload-control".to_owned())
-        .spawn(move || {
-            for stream in listener.incoming() {
-                match stream {
-                    Ok(mut stream) => {
-                        if let Err(error) = handle_certificate_reload_control_request(
-                            &mut stream,
-                            reloader.as_ref(),
-                        ) {
-                            log::warn!("certificate reload control request failed: {error}");
-                        }
-                    }
-                    Err(error) => {
-                        log::warn!("certificate reload control socket accept failed: {error}");
-                    }
-                }
-            }
-        })?;
-
-    Ok(())
+    Ok(Some(crate::background::background_service_with_kind(
+        "Certificate reload control socket",
+        crate::background::BackgroundTaskKind::CertificateReload,
+        CertificateReloadControlBackgroundService { listener, reloader },
+    )))
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
@@ -413,6 +405,60 @@ fn handle_certificate_reload_control_request(
         }
     }
     Ok(())
+}
+
+#[cfg(all(feature = "proxy", feature = "acme-client", unix))]
+struct CertificateReloadControlBackgroundService {
+    listener: std::os::unix::net::UnixListener,
+    reloader: Option<DownstreamCertificateReloader>,
+}
+
+#[cfg(all(feature = "proxy", feature = "acme-client", unix))]
+#[async_trait::async_trait]
+impl crate::background::FluxBackgroundTask for CertificateReloadControlBackgroundService {
+    async fn start(
+        &self,
+        mut shutdown: crate::background::FluxShutdown,
+        mut ready: crate::background::FluxBackgroundReady,
+    ) {
+        ready.notify_ready();
+        let retry_delay = std::time::Duration::from_millis(100);
+
+        loop {
+            if shutdown.is_shutdown() {
+                break;
+            }
+
+            match self.listener.accept() {
+                Ok((mut stream, _addr)) => {
+                    let reloader = self.reloader.clone();
+                    tokio::task::spawn_blocking(move || {
+                        if let Err(error) = stream.set_nonblocking(false) {
+                            log::warn!("certificate reload control request setup failed: {error}");
+                            return;
+                        }
+                        if let Err(error) = handle_certificate_reload_control_request(
+                            &mut stream,
+                            reloader.as_ref(),
+                        ) {
+                            log::warn!("certificate reload control request failed: {error}");
+                        }
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if shutdown.sleep_or_shutdown(retry_delay).await {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    log::warn!("certificate reload control socket accept failed: {error}");
+                    if shutdown.sleep_or_shutdown(retry_delay).await {
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
@@ -1019,6 +1065,18 @@ mod tests {
         config.tls.acme.automation = crate::config::AcmeAutomationMode::External;
 
         assert!(!super::acme_background_service_enabled(&config));
+    }
+
+    #[cfg(all(feature = "acme-client", unix))]
+    #[test]
+    fn certificate_reload_control_service_skips_when_acme_disabled() {
+        let config = crate::config::Config::default();
+
+        assert!(
+            super::certificate_reload_control_service(&config, None)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
