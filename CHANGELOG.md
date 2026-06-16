@@ -122,6 +122,8 @@ behavior when the change improves security or project direction.
   listener lookup.
 - Extend `fluxheim-server` background-task inventory coverage to include the
   planned admin self-healing watchdog.
+- Split server background-task inventory tests into a focused module so the
+  main server test file stays comfortably below the 500-line target.
 
 ## 1.6.6 - 2026-06-16
 

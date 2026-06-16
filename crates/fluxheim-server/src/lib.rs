@@ -234,6 +234,10 @@ impl std::error::Error for ServerPlanError {}
 #[path = "server_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "server_background_tests.rs"]
+mod background_tests;
+
 #[cfg(all(test, unix))]
 #[path = "server_unix_tests.rs"]
 mod unix_tests;

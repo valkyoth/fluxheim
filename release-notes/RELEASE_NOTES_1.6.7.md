@@ -50,6 +50,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added `fluxheim-server` regression coverage for service-owned listener address lookup.
 - Added `fluxheim-server` regression coverage for protocol-filtered service listener lookup.
 - Extended `fluxheim-server` background-task inventory coverage to include the planned admin self-healing watchdog.
+- Split server background-task inventory tests into a focused module so the main server test file stays comfortably below the 500-line target.
 
 ## Verification
 
