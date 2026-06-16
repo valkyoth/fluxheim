@@ -35,6 +35,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added an admin ops-socket endpoint plan to `ServerPlan` and updated the admin adapter to consume planned socket path and mode values.
 - Added a first-service-listener lookup to `ServerPlan` and updated admin service construction/logging to use the planned admin listener.
 - Added borrow-based service listener iterators to `ServerPlan`, keeping the allocation-based address helpers as adapter conveniences.
+- Updated proxy HTTP and metrics listener registration to consume the borrow-based service listener views directly before adapting into Pingora.
 
 ## Tests
 

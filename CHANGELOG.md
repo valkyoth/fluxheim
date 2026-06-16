@@ -92,6 +92,8 @@ behavior when the change improves security or project direction.
   construction/logging to use the planned admin listener.
 - Add borrow-based service listener iterators to `ServerPlan`, keeping the
   allocation-based address helpers as adapter conveniences.
+- Update proxy HTTP and metrics listener registration to consume the
+  borrow-based service listener views directly before adapting into Pingora.
 
 ### Tests
 
