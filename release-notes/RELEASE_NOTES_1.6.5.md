@@ -31,8 +31,9 @@ pure header rewrite and forwarded-client-IP helpers now live in
   background I/O.
 - Moved repeated-header value joining for auth subrequest forwarding into the
   same `fluxheim-headers` helper, including the cookie-specific separator rule.
-- Made the new `fluxheim-headers` privacy-sensitive client-IP helpers obey the
-  workspace `privacy-mode` feature at the crate boundary.
+- Made the new `fluxheim-headers` privacy-sensitive client-IP helpers,
+  including X-Forwarded-For IP parsing, obey the workspace `privacy-mode`
+  feature at the crate boundary.
 - Hardened PROXY-protocol trusted-source parsing by rejecting CIDR prefixes
   wider than the address family allows.
 - Aligned access-policy and header-forwarding X-Forwarded-For parsing so both

@@ -4,6 +4,7 @@
     deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 
+#[cfg(not(feature = "privacy-mode"))]
 use std::net::IpAddr;
 
 use fluxheim_config::{ResponseHeaderRewriteConfig, ResponseHeaderRewriteRuleConfig};
@@ -278,6 +279,7 @@ pub fn effective_client_ip(
     last_valid_hop.unwrap_or(direct_ip)
 }
 
+#[cfg(not(feature = "privacy-mode"))]
 pub fn parse_x_forwarded_for_ip(value: &str) -> Option<IpAddr> {
     let value = value.trim().trim_matches('"');
     if value.is_empty() {
@@ -330,15 +332,16 @@ fn quote_forwarded_value(value: &str) -> String {
 mod tests {
     #[cfg(not(feature = "privacy-mode"))]
     use std::net::Ipv6Addr;
+    #[cfg(not(feature = "privacy-mode"))]
     use std::net::{IpAddr, Ipv4Addr};
 
     use fluxheim_config::{ResponseHeaderRewriteConfig, ResponseHeaderRewriteRuleConfig};
 
     #[cfg(not(feature = "privacy-mode"))]
-    use super::{build_forwarded_header, effective_client_ip};
+    use super::{build_forwarded_header, effective_client_ip, parse_x_forwarded_for_ip};
     use super::{
-        join_header_values, join_header_values_with_separator, parse_x_forwarded_for_ip,
-        rewrite_header_prefix, rewrite_refresh_url, rewrite_set_cookie_value,
+        join_header_values, join_header_values_with_separator, rewrite_header_prefix,
+        rewrite_refresh_url, rewrite_set_cookie_value,
     };
 
     #[test]
@@ -405,6 +408,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn parses_forwarded_for_ip_shapes() {
         assert_eq!(
