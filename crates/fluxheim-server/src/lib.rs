@@ -11,6 +11,11 @@ use fluxheim_config::{AcmeAutomationMode, Config, DownstreamProxyProtocol};
 use fluxheim_runtime::{BackgroundTaskSpec, ShutdownView};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeAdapterKind {
+    PingoraCompatibility,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ListenerProtocol {
     AdminHttp,
     Http,
@@ -90,6 +95,7 @@ impl ListenerSpec {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ServerPlan {
+    runtime_adapter: RuntimeAdapterKind,
     process: ProcessSpec,
     listeners: Vec<ListenerSpec>,
     services: Vec<ServiceSpec>,
@@ -99,6 +105,7 @@ pub struct ServerPlan {
 impl ServerPlan {
     pub fn new(listeners: Vec<ListenerSpec>, background_tasks: Vec<BackgroundTaskSpec>) -> Self {
         Self {
+            runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process: ProcessSpec::default(),
             listeners,
             services: Vec::new(),
@@ -113,6 +120,7 @@ impl ServerPlan {
         background_tasks: Vec<BackgroundTaskSpec>,
     ) -> Self {
         Self {
+            runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process,
             listeners,
             services,
@@ -122,6 +130,10 @@ impl ServerPlan {
 
     pub fn process(&self) -> &ProcessSpec {
         &self.process
+    }
+
+    pub const fn runtime_adapter(&self) -> RuntimeAdapterKind {
+        self.runtime_adapter
     }
 
     pub fn listeners(&self) -> &[ListenerSpec] {
@@ -200,6 +212,7 @@ impl ServerPlan {
         }
 
         Ok(Self {
+            runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process: ProcessSpec::from_config(config),
             listeners,
             services: service_specs_from_config(config),

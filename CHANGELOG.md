@@ -27,6 +27,9 @@ behavior when the change improves security or project direction.
 - Add Fluxheim-owned foreground service intent metadata for proxy, admin, ops
   socket, metrics, stream proxy, and UDP proxy service registration, then make
   the root Pingora adapter consume those gates for non-proxy services.
+- Add an explicit `RuntimeAdapterKind::PingoraCompatibility` marker to the
+  server plan so the current Pingora runtime remains a named adapter boundary
+  before the native server cutover.
 
 ### Tests
 

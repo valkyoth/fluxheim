@@ -98,6 +98,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     );
 
     let server_plan = fluxheim_server::ServerPlan::from_config(&config)?;
+    match server_plan.runtime_adapter() {
+        fluxheim_server::RuntimeAdapterKind::PingoraCompatibility => {}
+    }
     let pingora_conf = pingora_server_conf(&server_plan);
     let mut server = pingora::server::Server::new_with_opt_and_conf(None, pingora_conf);
     server.bootstrap();

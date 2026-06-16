@@ -107,6 +107,10 @@ fn server_plan_from_config_collects_listener_inventory() {
     }];
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert_eq!(
+        plan.runtime_adapter(),
+        RuntimeAdapterKind::PingoraCompatibility
+    );
     let protocols = plan
         .listeners()
         .iter()
