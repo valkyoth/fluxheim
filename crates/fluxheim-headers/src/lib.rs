@@ -28,10 +28,17 @@ pub const SPOOFABLE_CLIENT_IP_HEADERS: &[&str] = &[
 pub const DEFAULT_SERVER_HEADER: &str = "fluxheim";
 
 pub fn join_header_values<'a>(values: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    join_header_values_with_separator(values, ", ")
+}
+
+pub fn join_header_values_with_separator<'a>(
+    values: impl IntoIterator<Item = &'a str>,
+    separator: &str,
+) -> Option<String> {
     let mut values = values.into_iter();
     let first = values.next()?.to_owned();
     Some(values.fold(first, |mut joined, value| {
-        joined.push_str(", ");
+        joined.push_str(separator);
         joined.push_str(value);
         joined
     }))
@@ -322,8 +329,9 @@ mod tests {
     use fluxheim_config::{ResponseHeaderRewriteConfig, ResponseHeaderRewriteRuleConfig};
 
     use super::{
-        build_forwarded_header, effective_client_ip, join_header_values, parse_x_forwarded_for_ip,
-        rewrite_header_prefix, rewrite_refresh_url, rewrite_set_cookie_value,
+        build_forwarded_header, effective_client_ip, join_header_values,
+        join_header_values_with_separator, parse_x_forwarded_for_ip, rewrite_header_prefix,
+        rewrite_refresh_url, rewrite_set_cookie_value,
     };
 
     #[test]
@@ -451,6 +459,10 @@ mod tests {
         assert_eq!(
             join_header_values(["one", "two", "three"]),
             Some("one, two, three".to_owned())
+        );
+        assert_eq!(
+            join_header_values_with_separator(["a=1", "b=2"], "; "),
+            Some("a=1; b=2".to_owned())
         );
     }
 }

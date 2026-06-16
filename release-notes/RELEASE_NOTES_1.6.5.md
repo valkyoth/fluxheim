@@ -29,6 +29,8 @@ pure header rewrite and forwarded-client-IP helpers now live in
 - Moved repeated-header value joining for traffic-mirror forwarding into
   `fluxheim-headers`; the mirror module still owns request access and
   background I/O.
+- Moved repeated-header value joining for auth subrequest forwarding into the
+  same `fluxheim-headers` helper, including the cookie-specific separator rule.
 
 ## Validation
 

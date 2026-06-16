@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use crate::http_types::PingoraRequestHeader as RequestHeader;
 use bytes::Bytes;
+use fluxheim_headers::join_header_values_with_separator;
 use zeroize::Zeroizing;
 
 use crate::flux_error::{FluxError, FluxResult};
@@ -147,20 +148,17 @@ fn trusted_context_header_value(name: &str, context: AuthRequestContext<'_>) -> 
 }
 
 fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<String> {
-    let mut values = request
-        .headers
-        .get_all(name)
-        .iter()
-        .filter_map(|value| value.to_str().ok());
-    let first = values.next()?.to_owned();
     let separator = if name.eq_ignore_ascii_case("cookie") {
         "; "
     } else {
         ", "
     };
-    Some(values.fold(first, |mut joined, value| {
-        joined.push_str(separator);
-        joined.push_str(value);
-        joined
-    }))
+    join_header_values_with_separator(
+        request
+            .headers
+            .get_all(name)
+            .iter()
+            .filter_map(|value| value.to_str().ok()),
+        separator,
+    )
 }
