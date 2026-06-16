@@ -9,13 +9,17 @@ use std::net::SocketAddr;
 use fluxheim_config::{AcmeAutomationMode, Config, DownstreamProxyProtocol};
 use fluxheim_runtime::{BackgroundTaskSpec, ShutdownView};
 
+mod listener;
 mod process;
 mod proxy_protocol;
+mod service;
 #[cfg(unix)]
 mod unix_listener;
 
+pub use listener::{ListenerProtocol, ListenerSpec};
 pub use process::ProcessSpec;
 pub use proxy_protocol::{ProxyProtocolPolicy, ProxyProtocolTrustedSource};
+pub use service::{ServiceKind, ServiceSpec};
 #[cfg(unix)]
 pub use unix_listener::replace_private_unix_listener;
 
@@ -24,84 +28,6 @@ use proxy_protocol::proxy_protocol_policy_from_config;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeAdapterKind {
     PingoraCompatibility,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ListenerProtocol {
-    AdminHttp,
-    Http,
-    Https,
-    MetricsHttp,
-    StreamTcp,
-    Udp,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ServiceKind {
-    AdminControlPlane,
-    AdminOpsSocket,
-    MetricsHttp,
-    ProxyHttp,
-    StreamProxy,
-    UdpProxy,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ServiceSpec {
-    name: &'static str,
-    kind: ServiceKind,
-}
-
-impl ServiceSpec {
-    pub const fn new(name: &'static str, kind: ServiceKind) -> Self {
-        Self { name, kind }
-    }
-
-    pub const fn name(self) -> &'static str {
-        self.name
-    }
-
-    pub const fn kind(self) -> ServiceKind {
-        self.kind
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ListenerSpec {
-    addr: SocketAddr,
-    protocol: ListenerProtocol,
-    proxy_protocol: bool,
-}
-
-impl ListenerSpec {
-    pub const fn new(addr: SocketAddr, protocol: ListenerProtocol) -> Self {
-        Self {
-            addr,
-            protocol,
-            proxy_protocol: false,
-        }
-    }
-
-    pub const fn with_proxy_protocol(mut self, enabled: bool) -> Self {
-        self.proxy_protocol = enabled;
-        self
-    }
-
-    pub const fn addr(self) -> SocketAddr {
-        self.addr
-    }
-
-    pub const fn protocol(self) -> ListenerProtocol {
-        self.protocol
-    }
-
-    pub const fn proxy_protocol_enabled(self) -> bool {
-        self.proxy_protocol
-    }
-
-    pub fn is_loopback(self) -> bool {
-        self.addr.ip().is_loopback()
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

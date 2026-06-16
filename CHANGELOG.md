@@ -45,6 +45,9 @@ behavior when the change improves security or project direction.
 - Move private Unix listener creation for the certificate reload control socket
   into `fluxheim-server`, including stale socket replacement, mode `0600`, and
   nonblocking setup.
+- Split server listener and foreground service inventory types into focused
+  `fluxheim-server` modules before the native bootstrap work adds more runtime
+  state.
 
 ### Tests
 
