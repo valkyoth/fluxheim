@@ -27,6 +27,16 @@ pub const SPOOFABLE_CLIENT_IP_HEADERS: &[&str] = &[
 
 pub const DEFAULT_SERVER_HEADER: &str = "fluxheim";
 
+pub fn join_header_values<'a>(values: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    let mut values = values.into_iter();
+    let first = values.next()?.to_owned();
+    Some(values.fold(first, |mut joined, value| {
+        joined.push_str(", ");
+        joined.push_str(value);
+        joined
+    }))
+}
+
 pub fn rewrite_header_prefix(
     value: &str,
     rules: &[ResponseHeaderRewriteRuleConfig],
@@ -312,7 +322,7 @@ mod tests {
     use fluxheim_config::{ResponseHeaderRewriteConfig, ResponseHeaderRewriteRuleConfig};
 
     use super::{
-        build_forwarded_header, effective_client_ip, parse_x_forwarded_for_ip,
+        build_forwarded_header, effective_client_ip, join_header_values, parse_x_forwarded_for_ip,
         rewrite_header_prefix, rewrite_refresh_url, rewrite_set_cookie_value,
     };
 
@@ -432,6 +442,15 @@ mod tests {
         assert_eq!(
             build_forwarded_header(IpAddr::V6(Ipv6Addr::LOCALHOST), None, "https"),
             "for=\"[::1]\";proto=https"
+        );
+    }
+
+    #[test]
+    fn joins_repeated_header_values_for_forwarding() {
+        assert_eq!(join_header_values(std::iter::empty()), None);
+        assert_eq!(
+            join_header_values(["one", "two", "three"]),
+            Some("one, two, three".to_owned())
         );
     }
 }

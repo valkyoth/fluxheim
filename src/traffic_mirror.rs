@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::http_types::PingoraRequestHeader as RequestHeader;
+use fluxheim_headers::join_header_values;
 use sha2::{Digest, Sha256};
 
 use crate::flux_error::{FluxError, FluxResult};
@@ -303,17 +304,13 @@ fn traffic_mirror_io_error(error: impl std::fmt::Display) -> FluxError {
 }
 
 fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<String> {
-    let mut values = request
-        .headers
-        .get_all(name)
-        .iter()
-        .filter_map(|value| value.to_str().ok());
-    let first = values.next()?.to_owned();
-    Some(values.fold(first, |mut joined, value| {
-        joined.push_str(", ");
-        joined.push_str(value);
-        joined
-    }))
+    join_header_values(
+        request
+            .headers
+            .get_all(name)
+            .iter()
+            .filter_map(|value| value.to_str().ok()),
+    )
 }
 
 fn request_host_header(request: &RequestHeader) -> Option<&str> {

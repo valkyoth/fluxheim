@@ -26,6 +26,9 @@ pure header rewrite and forwarded-client-IP helpers now live in
 - Moved upstream hop-by-hop request header policy calculation into
   `fluxheim-headers`; the root `headers` module now only applies the resulting
   plan to Pingora request headers.
+- Moved repeated-header value joining for traffic-mirror forwarding into
+  `fluxheim-headers`; the mirror module still owns request access and
+  background I/O.
 
 ## Validation
 
@@ -42,3 +45,5 @@ pure header rewrite and forwarded-client-IP helpers now live in
   Pingora HTTP/error bridge surface explicit during the `1.6.x` removal line.
 - Added direct `fluxheim-headers` unit coverage for hop-by-hop request header
   policy extraction and chunked body framing preservation.
+- Added direct `fluxheim-headers` unit coverage for repeated-header forwarding
+  value joining.
