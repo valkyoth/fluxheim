@@ -14,13 +14,12 @@ use std::time::Duration;
 use fluxheim_common::{FluxError, FluxResult};
 use fluxheim_config::config::{DownstreamProxyProtocol, UpstreamProxyProtocol};
 use fluxheim_config::config_stream::StreamRouteConfig;
-use fluxheim_protocol::{proxy_protocol_v1_header, proxy_protocol_v2_header};
+use fluxheim_protocol::{
+    DownstreamProxyProtocolParseError, PROXY_PROTOCOL_V1_MAX_LINE, PROXY_PROTOCOL_V2_HEADER_LEN,
+    PROXY_PROTOCOL_V2_MAX_PAYLOAD, PROXY_PROTOCOL_V2_SIGNATURE, parse_downstream_proxy_protocol_v1,
+    parse_downstream_proxy_protocol_v2, proxy_protocol_v1_header, proxy_protocol_v2_header,
+};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-
-pub const PROXY_PROTOCOL_V1_MAX_LINE: usize = 108;
-pub const PROXY_PROTOCOL_V2_HEADER_LEN: usize = 16;
-pub const PROXY_PROTOCOL_V2_MAX_PAYLOAD: usize = 4096;
-pub const PROXY_PROTOCOL_V2_SIGNATURE: &[u8; 12] = b"\r\n\r\n\0\r\nQUIT\n";
 
 #[derive(Debug)]
 pub struct StreamUpstreamSelector {
@@ -487,61 +486,7 @@ async fn read_downstream_proxy_protocol_v1(
             ));
         }
     }
-    parse_downstream_proxy_protocol_v1(&line)
-}
-
-pub fn parse_downstream_proxy_protocol_v1(line: &[u8]) -> FluxResult<Option<SocketAddr>> {
-    let line = std::str::from_utf8(line)
-        .map_err(|_| FluxError::InvalidInput("stream downstream PROXY v1 header is not UTF-8"))?;
-    let line = line.strip_suffix("\r\n").ok_or(FluxError::InvalidInput(
-        "stream downstream PROXY v1 header is missing CRLF",
-    ))?;
-    let mut fields = line.split_whitespace();
-    if fields.next() != Some("PROXY") {
-        return Err(FluxError::InvalidInput(
-            "stream downstream PROXY v1 header is missing prefix",
-        ));
-    }
-    let family = fields.next().ok_or(FluxError::InvalidInput(
-        "stream downstream PROXY v1 header is missing family",
-    ))?;
-    if family == "UNKNOWN" {
-        return Ok(None);
-    }
-    let source_addr = fields.next().ok_or(FluxError::InvalidInput(
-        "stream downstream PROXY v1 header is missing source address",
-    ))?;
-    let destination_addr = fields.next().ok_or(FluxError::InvalidInput(
-        "stream downstream PROXY v1 header is missing destination address",
-    ))?;
-    let source_port = fields.next().ok_or(FluxError::InvalidInput(
-        "stream downstream PROXY v1 header is missing source port",
-    ))?;
-    let destination_port = fields.next().ok_or(FluxError::InvalidInput(
-        "stream downstream PROXY v1 header is missing destination port",
-    ))?;
-    if fields.next().is_some() {
-        return Err(FluxError::InvalidInput(
-            "stream downstream PROXY v1 header has unexpected fields",
-        ));
-    }
-    let source_ip = source_addr.parse::<IpAddr>().map_err(|_| {
-        FluxError::InvalidInput("stream downstream PROXY v1 source address is invalid")
-    })?;
-    let destination_ip = destination_addr.parse::<IpAddr>().map_err(|_| {
-        FluxError::InvalidInput("stream downstream PROXY v1 destination address is invalid")
-    })?;
-    match (family, source_ip, destination_ip) {
-        ("TCP4", IpAddr::V4(_), IpAddr::V4(_)) | ("TCP6", IpAddr::V6(_), IpAddr::V6(_)) => {}
-        _ => {
-            return Err(FluxError::InvalidInput(
-                "stream downstream PROXY v1 family does not match address types",
-            ));
-        }
-    }
-    let source_port = parse_proxy_protocol_port(source_port)?;
-    let _destination_port = parse_proxy_protocol_port(destination_port)?;
-    Ok(Some(SocketAddr::new(source_ip, source_port)))
+    parse_downstream_proxy_protocol_v1(&line).map_err(proxy_protocol_parse_error)
 }
 
 async fn read_downstream_proxy_protocol_v2(
@@ -565,55 +510,7 @@ async fn read_downstream_proxy_protocol_v2(
     if payload_len > 0 {
         read_exact_with_idle_timeout(downstream, &mut payload, idle_timeout).await?;
     }
-    parse_downstream_proxy_protocol_v2(&header, &payload)
-}
-
-pub fn parse_downstream_proxy_protocol_v2(
-    header: &[u8; PROXY_PROTOCOL_V2_HEADER_LEN],
-    payload: &[u8],
-) -> FluxResult<Option<SocketAddr>> {
-    if header[12] >> 4 != 0x2 {
-        return Err(FluxError::InvalidInput(
-            "stream downstream PROXY v2 header has invalid version",
-        ));
-    }
-    match header[12] & 0x0f {
-        0x00 => return Ok(None),
-        0x01 => {}
-        _ => {
-            return Err(FluxError::InvalidInput(
-                "stream downstream PROXY v2 header has invalid command",
-            ));
-        }
-    }
-    match header[13] {
-        0x11 => {
-            if payload.len() < 12 {
-                return Err(FluxError::InvalidInput(
-                    "stream downstream PROXY v2 TCP4 address is truncated",
-                ));
-            }
-            let source = Ipv4Addr::new(payload[0], payload[1], payload[2], payload[3]);
-            let port = u16::from_be_bytes([payload[8], payload[9]]);
-            Ok(Some(SocketAddr::new(IpAddr::V4(source), port)))
-        }
-        0x21 => {
-            if payload.len() < 36 {
-                return Err(FluxError::InvalidInput(
-                    "stream downstream PROXY v2 TCP6 address is truncated",
-                ));
-            }
-            let source = Ipv6Addr::from(<[u8; 16]>::try_from(&payload[0..16]).map_err(|_| {
-                FluxError::InvalidInput("stream downstream PROXY v2 TCP6 source is invalid")
-            })?);
-            let port = u16::from_be_bytes([payload[32], payload[33]]);
-            Ok(Some(SocketAddr::new(IpAddr::V6(source), port)))
-        }
-        0x00 => Ok(None),
-        _ => Err(FluxError::InvalidInput(
-            "stream downstream PROXY v2 address family is unsupported",
-        )),
-    }
+    parse_downstream_proxy_protocol_v2(&header, &payload).map_err(proxy_protocol_parse_error)
 }
 
 async fn read_with_idle_timeout<R>(
@@ -684,10 +581,8 @@ where
     Ok(())
 }
 
-fn parse_proxy_protocol_port(value: &str) -> FluxResult<u16> {
-    value
-        .parse::<u16>()
-        .map_err(|_| FluxError::InvalidInput("stream downstream PROXY port is invalid"))
+fn proxy_protocol_parse_error(error: DownstreamProxyProtocolParseError) -> FluxError {
+    FluxError::invalid_input(error.to_string())
 }
 
 fn ip_in_prefix(address: IpAddr, network: IpAddr, prefix: u8) -> bool {

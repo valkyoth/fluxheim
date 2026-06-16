@@ -17,12 +17,17 @@ pure header rewrite and forwarded-client-IP helpers now live in
   construction into `fluxheim-headers`.
 - Kept the root `headers` module as the Pingora request/response adapter for
   now, so proxy runtime behavior and public configuration stay unchanged.
+- Moved stream downstream PROXY protocol v1/v2 byte parsers and size constants
+  into `fluxheim-protocol`. The stream crate now keeps only trusted-peer
+  checks, timed reads, and runtime error conversion around those pure parsers.
 
 ## Validation
 
 - Added direct `fluxheim-headers` unit coverage for header-prefix rewrites,
   refresh URL rewrites, cookie Domain/Path rewrites, forwarded-header parsing,
   trusted client-IP restoration, and `Forwarded` header construction.
+- Added direct `fluxheim-protocol` unit coverage for downstream PROXY protocol
+  v1/v2 parsing while preserving the existing stream crate parser tests through
+  the new boundary.
 - Preserved the existing root proxy header-policy tests across the new crate
   boundary.
-
