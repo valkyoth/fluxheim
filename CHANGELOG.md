@@ -48,6 +48,9 @@ behavior when the change improves security or project direction.
 - Split server listener and foreground service inventory types into focused
   `fluxheim-server` modules before the native bootstrap work adds more runtime
   state.
+- Move downstream HTTP/2 hardening limits into a Pingora-neutral
+  `fluxheim-server` policy plan, with the root runtime only adapting those
+  values into Pingora `H2Options`.
 
 ### Tests
 
@@ -66,6 +69,8 @@ behavior when the change improves security or project direction.
 - Add a `fluxheim-server` regression test proving private Unix listener paths
   replace stale sockets, reject non-socket files, and enforce private
   permissions.
+- Add a `fluxheim-server` regression test for the downstream HTTP/2 hardening
+  defaults consumed by the runtime adapter.
 
 ## 1.6.6 - 2026-06-16
 

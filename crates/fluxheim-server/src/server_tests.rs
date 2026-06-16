@@ -45,6 +45,18 @@ fn server_plan_reports_public_listeners() {
 }
 
 #[test]
+fn downstream_http2_policy_uses_hardened_defaults() {
+    let policy = DownstreamHttp2Policy::default();
+
+    assert_eq!(policy.max_header_list_size(), 64 * 1024);
+    assert_eq!(policy.max_concurrent_streams(), 32);
+    assert_eq!(policy.initial_window_size(), 64 * 1024);
+    assert_eq!(policy.max_frame_size(), 16 * 1024);
+    assert_eq!(policy.max_send_buffer_size(), 256 * 1024);
+    assert_eq!(policy.max_pending_accept_reset_streams(), 8);
+}
+
+#[test]
 fn server_runner_boundary_accepts_shutdown_view() {
     let plan = ServerPlan::new(
         Vec::new(),

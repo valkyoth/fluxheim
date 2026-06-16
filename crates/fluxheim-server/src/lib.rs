@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use fluxheim_config::{AcmeAutomationMode, Config, DownstreamProxyProtocol};
 use fluxheim_runtime::{BackgroundTaskSpec, ShutdownView};
 
+mod http2;
 mod listener;
 mod process;
 mod proxy_protocol;
@@ -16,6 +17,7 @@ mod service;
 #[cfg(unix)]
 mod unix_listener;
 
+pub use http2::DownstreamHttp2Policy;
 pub use listener::{ListenerProtocol, ListenerSpec};
 pub use process::ProcessSpec;
 pub use proxy_protocol::{ProxyProtocolPolicy, ProxyProtocolTrustedSource};
@@ -35,6 +37,7 @@ pub struct ServerPlan {
     runtime_adapter: RuntimeAdapterKind,
     process: ProcessSpec,
     proxy_protocol: ProxyProtocolPolicy,
+    downstream_http2: DownstreamHttp2Policy,
     listeners: Vec<ListenerSpec>,
     services: Vec<ServiceSpec>,
     background_tasks: Vec<BackgroundTaskSpec>,
@@ -46,6 +49,7 @@ impl ServerPlan {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process: ProcessSpec::default(),
             proxy_protocol: ProxyProtocolPolicy::Off,
+            downstream_http2: DownstreamHttp2Policy::default(),
             listeners,
             services: Vec::new(),
             background_tasks,
@@ -62,6 +66,7 @@ impl ServerPlan {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process,
             proxy_protocol: ProxyProtocolPolicy::Off,
+            downstream_http2: DownstreamHttp2Policy::default(),
             listeners,
             services,
             background_tasks,
@@ -78,6 +83,10 @@ impl ServerPlan {
 
     pub fn proxy_protocol(&self) -> &ProxyProtocolPolicy {
         &self.proxy_protocol
+    }
+
+    pub const fn downstream_http2(&self) -> &DownstreamHttp2Policy {
+        &self.downstream_http2
     }
 
     pub fn listeners(&self) -> &[ListenerSpec] {
@@ -174,6 +183,7 @@ impl ServerPlan {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process: ProcessSpec::from_config(config),
             proxy_protocol: proxy_protocol_policy_from_config(config)?,
+            downstream_http2: DownstreamHttp2Policy::default(),
             listeners,
             services: service_specs_from_config(config),
             background_tasks: background_task_specs_from_config(config),
