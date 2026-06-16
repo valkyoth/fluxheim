@@ -1,5 +1,6 @@
 use fluxheim_config::{TlsAlpnPolicy, TlsCipherSuite, TlsConfig, TlsCurvePreference};
 
+#[cfg(feature = "tls-rustls-backend")]
 use crate::TlsRuntimeError;
 
 pub fn rustls_alpn_protocols(

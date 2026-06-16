@@ -58,6 +58,13 @@ use crate::config::TlsAlpnPolicy;
     )
 ))]
 use crate::config::{TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference};
+#[cfg(all(
+    feature = "proxy",
+    any(
+        all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
+        feature = "tls-openssl"
+    )
+))]
 use crate::config::{TlsConfig, TlsProtocolVersion};
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 use pingora::tls::{

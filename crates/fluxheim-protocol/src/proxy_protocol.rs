@@ -9,6 +9,7 @@ pub enum ProxyProtocolTrustedSource {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ProxyProtocolTrustedSourceParseError {
     InvalidAddress,
+    InvalidNetwork,
     InvalidPrefix,
 }
 
@@ -16,6 +17,9 @@ impl std::fmt::Display for ProxyProtocolTrustedSourceParseError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidAddress => formatter.write_str("invalid PROXY protocol trusted address"),
+            Self::InvalidNetwork => {
+                formatter.write_str("invalid PROXY protocol trusted CIDR network address")
+            }
             Self::InvalidPrefix => {
                 formatter.write_str("invalid PROXY protocol trusted CIDR prefix")
             }
@@ -41,6 +45,9 @@ pub fn parse_proxy_protocol_trusted_source(
         };
         if prefix > max_prefix {
             return Err(ProxyProtocolTrustedSourceParseError::InvalidPrefix);
+        }
+        if !cidr_network_address_is_canonical(network, prefix) {
+            return Err(ProxyProtocolTrustedSourceParseError::InvalidNetwork);
         }
         return Ok(ProxyProtocolTrustedSource::Cidr { network, prefix });
     }
@@ -133,6 +140,7 @@ pub enum DownstreamProxyProtocolParseError {
     V1InvalidDestinationAddress,
     V1FamilyAddressMismatch,
     InvalidPort,
+    V2InvalidSignature,
     V2InvalidVersion,
     V2InvalidCommand,
     V2TruncatedTcp4,
@@ -176,6 +184,7 @@ impl DownstreamProxyProtocolParseError {
             }
             Self::InvalidPort => "stream downstream PROXY port is invalid",
             Self::V2InvalidVersion => "stream downstream PROXY v2 header has invalid version",
+            Self::V2InvalidSignature => "stream downstream PROXY v2 header has invalid signature",
             Self::V2InvalidCommand => "stream downstream PROXY v2 header has invalid command",
             Self::V2TruncatedTcp4 => "stream downstream PROXY v2 TCP4 address is truncated",
             Self::V2TruncatedTcp6 => "stream downstream PROXY v2 TCP6 address is truncated",
@@ -239,11 +248,9 @@ pub fn parse_downstream_proxy_protocol_v2(
     header: &[u8; PROXY_PROTOCOL_V2_HEADER_LEN],
     payload: &[u8],
 ) -> Result<Option<SocketAddr>, DownstreamProxyProtocolParseError> {
-    debug_assert_eq!(
-        &header[..PROXY_PROTOCOL_V2_SIGNATURE.len()],
-        &PROXY_PROTOCOL_V2_SIGNATURE[..],
-        "caller must verify PROXY v2 signature before parsing"
-    );
+    if &header[..PROXY_PROTOCOL_V2_SIGNATURE.len()] != PROXY_PROTOCOL_V2_SIGNATURE {
+        return Err(DownstreamProxyProtocolParseError::V2InvalidSignature);
+    }
     if header[12] >> 4 != 0x2 {
         return Err(DownstreamProxyProtocolParseError::V2InvalidVersion);
     }
@@ -281,6 +288,29 @@ fn parse_proxy_protocol_port(value: &str) -> Result<u16, DownstreamProxyProtocol
     value
         .parse::<u16>()
         .map_err(|_| DownstreamProxyProtocolParseError::InvalidPort)
+}
+
+fn cidr_network_address_is_canonical(network: IpAddr, prefix: u8) -> bool {
+    match network {
+        IpAddr::V4(address) => {
+            let address = u32::from(address);
+            let mask = if prefix == 0 {
+                0
+            } else {
+                u32::MAX << (32 - u32::from(prefix))
+            };
+            address & !mask == 0
+        }
+        IpAddr::V6(address) => {
+            let address = u128::from(address);
+            let mask = if prefix == 0 {
+                0
+            } else {
+                u128::MAX << (128 - u32::from(prefix))
+            };
+            address & !mask == 0
+        }
+    }
 }
 
 #[cfg(test)]
@@ -342,6 +372,14 @@ mod tests {
         assert_eq!(
             parse_proxy_protocol_trusted_source("2001:db8::/129"),
             Err(ProxyProtocolTrustedSourceParseError::InvalidPrefix)
+        );
+        assert_eq!(
+            parse_proxy_protocol_trusted_source("192.0.2.1/24"),
+            Err(ProxyProtocolTrustedSourceParseError::InvalidNetwork)
+        );
+        assert_eq!(
+            parse_proxy_protocol_trusted_source("2001:db8::1/32"),
+            Err(ProxyProtocolTrustedSourceParseError::InvalidNetwork)
         );
     }
 
@@ -458,6 +496,16 @@ mod tests {
         assert_eq!(
             parse_downstream_proxy_protocol_v2(&header, &[]).expect("valid local command"),
             None
+        );
+    }
+
+    #[test]
+    fn proxy_protocol_v2_parser_rejects_invalid_signature() {
+        let header = [0u8; PROXY_PROTOCOL_V2_HEADER_LEN];
+
+        assert_eq!(
+            parse_downstream_proxy_protocol_v2(&header, &[]),
+            Err(DownstreamProxyProtocolParseError::V2InvalidSignature)
         );
     }
 }

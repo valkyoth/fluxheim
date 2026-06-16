@@ -72,6 +72,7 @@ pub enum DownstreamTlsPlanError {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DownstreamCertificateSelector {
     certificates: Vec<StaticCertificateConfig>,
+    fallback_certificate: StaticCertificateConfig,
     managed_acme: Vec<bool>,
     default_index: usize,
     exact_hosts: HashMap<String, usize>,
@@ -85,7 +86,8 @@ impl DownstreamCertificateSelector {
     ) -> Option<Self> {
         let default = default_downstream_certificate(config, &resolver)?;
         let mut selector = Self {
-            certificates: vec![default.certificate],
+            certificates: vec![default.certificate.clone()],
+            fallback_certificate: default.certificate,
             managed_acme: vec![default.managed_acme],
             default_index: 0,
             exact_hosts: HashMap::new(),
@@ -169,7 +171,11 @@ impl DownstreamCertificateSelector {
     }
 
     pub fn certificate_for_sni(&self, sni: Option<&str>) -> &StaticCertificateConfig {
-        &self.certificates[self.certificate_index_for_sni(sni)]
+        let index = self.certificate_index_for_sni(sni);
+        self.certificates
+            .get(index)
+            .or_else(|| self.certificates.get(self.default_index))
+            .unwrap_or(&self.fallback_certificate)
     }
 }
 
