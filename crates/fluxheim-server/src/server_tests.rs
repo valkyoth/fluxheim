@@ -210,6 +210,27 @@ fn server_plan_from_config_collects_listener_inventory() {
         plan.service(ServiceKind::ProxyHttp).map(ServiceSpec::name),
         Some("Fluxheim HTTP Proxy")
     );
+    assert_eq!(
+        plan.service(ServiceKind::ProxyHttp)
+            .map(ServiceSpec::listener_protocols),
+        Some(&[ListenerProtocol::Http, ListenerProtocol::Https][..])
+    );
+    assert_eq!(
+        plan.service_listener_addrs(ServiceKind::ProxyHttp),
+        vec!["127.0.0.1:8080".to_owned(), "127.0.0.1:8443".to_owned()]
+    );
+    assert_eq!(
+        plan.service_listener_addrs(ServiceKind::AdminControlPlane),
+        vec!["127.0.0.1:8081".to_owned()]
+    );
+    assert_eq!(
+        plan.service_listener_addrs(ServiceKind::MetricsHttp),
+        vec!["127.0.0.1:9090".to_owned()]
+    );
+    assert_eq!(
+        plan.service_listener_addrs(ServiceKind::LoadBalancerHealthChecks),
+        Vec::<String>::new()
+    );
 }
 
 #[test]

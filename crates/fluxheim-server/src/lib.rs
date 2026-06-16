@@ -132,6 +132,18 @@ impl ServerPlan {
         self.service(kind).is_some()
     }
 
+    pub fn service_listener_addrs(&self, kind: ServiceKind) -> Vec<String> {
+        let Some(service) = self.service(kind) else {
+            return Vec::new();
+        };
+        service
+            .listener_protocols()
+            .iter()
+            .flat_map(|protocol| self.listeners_for(*protocol))
+            .map(|listener| listener.addr().to_string())
+            .collect()
+    }
+
     pub fn background_tasks(&self) -> &[BackgroundTaskSpec] {
         &self.background_tasks
     }

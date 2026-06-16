@@ -68,6 +68,9 @@ behavior when the change improves security or project direction.
   out of the server crate root.
 - Move certificate reload control-plan construction into the focused
   `fluxheim-server` control module beside the control socket policy type.
+- Add listener-protocol ownership to foreground service specs so the server
+  plan can map proxy, admin, metrics, stream, and UDP services back to their
+  planned listeners.
 
 ### Tests
 
@@ -100,6 +103,8 @@ behavior when the change improves security or project direction.
   the live admin listener smoke.
 - Split private Unix listener regression coverage into a focused Unix-only test
   module so the main server test module remains well below the 500-line target.
+- Add `fluxheim-server` regression coverage for service-owned listener address
+  lookup.
 
 ## 1.6.6 - 2026-06-16
 

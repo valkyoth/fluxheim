@@ -1,5 +1,14 @@
 use fluxheim_config::{Config, ProxyConfig};
 
+use crate::ListenerProtocol;
+
+const PROXY_HTTP_LISTENERS: &[ListenerProtocol] =
+    &[ListenerProtocol::Http, ListenerProtocol::Https];
+const ADMIN_CONTROL_PLANE_LISTENERS: &[ListenerProtocol] = &[ListenerProtocol::AdminHttp];
+const METRICS_HTTP_LISTENERS: &[ListenerProtocol] = &[ListenerProtocol::MetricsHttp];
+const STREAM_PROXY_LISTENERS: &[ListenerProtocol] = &[ListenerProtocol::StreamTcp];
+const UDP_PROXY_LISTENERS: &[ListenerProtocol] = &[ListenerProtocol::Udp];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ServiceKind {
     AdminControlPlane,
@@ -15,11 +24,20 @@ pub enum ServiceKind {
 pub struct ServiceSpec {
     name: &'static str,
     kind: ServiceKind,
+    listener_protocols: &'static [ListenerProtocol],
 }
 
 impl ServiceSpec {
-    pub const fn new(name: &'static str, kind: ServiceKind) -> Self {
-        Self { name, kind }
+    pub const fn new(
+        name: &'static str,
+        kind: ServiceKind,
+        listener_protocols: &'static [ListenerProtocol],
+    ) -> Self {
+        Self {
+            name,
+            kind,
+            listener_protocols,
+        }
     }
 
     pub const fn name(self) -> &'static str {
@@ -28,6 +46,10 @@ impl ServiceSpec {
 
     pub const fn kind(self) -> ServiceKind {
         self.kind
+    }
+
+    pub const fn listener_protocols(self) -> &'static [ListenerProtocol] {
+        self.listener_protocols
     }
 }
 
@@ -38,23 +60,27 @@ pub(crate) fn service_specs_from_config(config: &Config) -> Vec<ServiceSpec> {
         services.push(ServiceSpec::new(
             "Fluxheim HTTP Proxy",
             ServiceKind::ProxyHttp,
+            PROXY_HTTP_LISTENERS,
         ));
     }
     if any_load_balancer_pool_configured(config) {
         services.push(ServiceSpec::new(
             "Fluxheim Load Balancer Health Checks",
             ServiceKind::LoadBalancerHealthChecks,
+            &[],
         ));
     }
     if config.admin.enabled {
         services.push(ServiceSpec::new(
             "Fluxheim Admin Control Plane",
             ServiceKind::AdminControlPlane,
+            ADMIN_CONTROL_PLANE_LISTENERS,
         ));
         if config.admin.ops_socket.enabled {
             services.push(ServiceSpec::new(
                 "Fluxheim Local Ops Socket",
                 ServiceKind::AdminOpsSocket,
+                &[],
             ));
         }
     }
@@ -62,18 +88,21 @@ pub(crate) fn service_specs_from_config(config: &Config) -> Vec<ServiceSpec> {
         services.push(ServiceSpec::new(
             "Fluxheim Metrics HTTP",
             ServiceKind::MetricsHttp,
+            METRICS_HTTP_LISTENERS,
         ));
     }
     if config.stream.enabled {
         services.push(ServiceSpec::new(
             "Fluxheim Stream Proxy",
             ServiceKind::StreamProxy,
+            STREAM_PROXY_LISTENERS,
         ));
     }
     if config.udp.enabled {
         services.push(ServiceSpec::new(
             "Fluxheim UDP Proxy",
             ServiceKind::UdpProxy,
+            UDP_PROXY_LISTENERS,
         ));
     }
 

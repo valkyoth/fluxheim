@@ -24,6 +24,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Split server service-intent and background-task intent detection into focused `fluxheim-server` modules, reducing the server crate root while preserving the same runtime plan.
 - Split listener inventory construction into the `fluxheim-server` listener module, keeping HTTP, HTTPS, admin, metrics, stream, and UDP listener parsing out of the server crate root.
 - Moved certificate reload control-plan construction into the focused `fluxheim-server` control module beside the control socket policy type.
+- Added listener-protocol ownership to foreground service specs so the server plan can map proxy, admin, metrics, stream, and UDP services back to their planned listeners.
 
 ## Tests
 
@@ -40,6 +41,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Kept the split server intent modules covered by `cargo test -p fluxheim-server` and the release-gated modularity policy check.
 - Verified the listener-planning split with `cargo test -p fluxheim-server` and the live admin listener smoke.
 - Split private Unix listener regression coverage into a focused Unix-only test module so the main server test module remains well below the 500-line target.
+- Added `fluxheim-server` regression coverage for service-owned listener address lookup.
 
 ## Verification
 
