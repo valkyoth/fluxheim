@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.6
+Version:        1.6.7
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,14 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue Jun 16 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.7-1
+- Continue the Pingora-exit line with Fluxheim-owned server plan boundaries.
+- Move listener inventory, service intent, background-task intent, process
+  settings, downstream HTTP/2 policy, PROXY protocol listener policy, and
+  admin control socket planning into fluxheim-server.
+- Harden private Unix listener setup with a temporary private umask and
+  fd-based permission handling.
+
 * Tue Jun 16 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.6-1
 - Continue the Pingora-exit line with the dedicated fluxheim-tls crate.
 - Move downstream TLS listener planning, SNI certificate selection, ALPN and

@@ -80,3 +80,5 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - `scripts/smoke_observability_local.sh`
 - `scripts/smoke_stream_proxy.sh`
 - `scripts/smoke_udp_proxy.sh`
+- `scripts/stable_release_gate.sh`
+- `scripts/podman_smoke.sh`
