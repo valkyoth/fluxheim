@@ -2549,14 +2549,14 @@ Planned `1.6.x` sequence:
   shims where a not-yet-replaced outer runtime still needs them. Add a
   lint/search gate that blocks new internal `pingora::http` and
   `pingora::Error` usage outside adapters.
-- `v1.6.6`: listener/TLS abstraction. Introduce Fluxheim-owned listener,
-  certificate resolver, SNI, ALPN, mTLS/client-auth, OCSP, and upstream-peer
-  abstractions backed by rustls and OpenSSL. Keep Pingora listeners active only
-  as the old adapter while parity tests run. Move ACME order/account/certificate
-  installation, renewal scheduling inputs, filesystem safety helpers, and
-  certificate-install rollback logic behind `fluxheim-acme` APIs once the new
-  TLS/listener abstractions can consume them without depending on the old
-  Pingora runtime.
+- `v1.6.6`: listener/TLS abstraction. Introduce `fluxheim-tls` for
+  Fluxheim-owned downstream TLS listener planning, certificate selection, SNI
+  matching, ALPN/cipher policy, TLS provider setup, and FIPS runtime checks.
+  Keep Pingora listeners active only as the old adapter while parity tests run.
+  Move ACME order/account/certificate installation, renewal scheduling inputs,
+  filesystem safety helpers, and certificate-install rollback logic behind
+  `fluxheim-acme` APIs once the native listener/server cutover can consume them
+  without depending on the old Pingora runtime.
 - `v1.6.7`: server bootstrap cutover. Replace Pingora server bootstrap, worker
   setup, service registration, signal handling, log-rotation signal behavior,
   hot-restart file-descriptor passing where retained, listener creation, and

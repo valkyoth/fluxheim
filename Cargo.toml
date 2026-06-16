@@ -22,6 +22,7 @@ members = [
     "crates/fluxheim-runtime",
     "crates/fluxheim-server",
     "crates/fluxheim-stream",
+    "crates/fluxheim-tls",
     "crates/fluxheim-web",
     "crates/fluxheim-php-fpm",
     "crates/fluxheim-load-balancer",
@@ -81,28 +82,31 @@ tls = ["ingress", "dep:rustix"]
 tls-rustls-backend = [
     "tls",
     "fluxheim-config/tls-rustls-backend",
+    "fluxheim-tls/tls-rustls-backend",
     "pingora/rustls",
     "dep:rustls",
     "dep:rustls-native-certs",
     "dep:tokio-rustls",
     "fluxheim-load-balancer?/tls-rustls-backend",
 ]
-tls-rustls = ["tls-rustls-backend", "rustls/ring"]
-tls-rustls-fips = ["tls-rustls-backend", "dep:aws-lc-rs", "fluxheim-config/tls-rustls-fips", "rustls/fips"]
+tls-rustls = ["tls-rustls-backend", "rustls/ring", "fluxheim-tls/tls-rustls"]
+tls-rustls-fips = ["tls-rustls-backend", "dep:aws-lc-rs", "fluxheim-config/tls-rustls-fips", "fluxheim-tls/tls-rustls-fips", "rustls/fips"]
 tls-rustls-iso19790 = ["tls-rustls-fips"]
 tls-openssl = [
     "tls",
     "fluxheim-config/tls-openssl",
+    "fluxheim-tls/tls-openssl",
     "fluxheim-load-balancer?/tls-openssl-backend",
     "pingora/openssl",
     "dep:openssl",
     "dep:tokio-openssl",
 ]
-tls-openssl-fips = ["tls-openssl", "dep:fluxheim-openssl-fips-support", "dep:openssl", "fluxheim-config/tls-openssl-fips"]
+tls-openssl-fips = ["tls-openssl", "dep:fluxheim-openssl-fips-support", "dep:openssl", "fluxheim-config/tls-openssl-fips", "fluxheim-tls/tls-openssl-fips"]
 tls-openssl-iso19790 = ["tls-openssl-fips"]
 acme = [
     "tls",
     "fluxheim-config/acme",
+    "fluxheim-tls/acme",
     "dep:instant-acme",
     "dep:serde_json",
     "dep:sha2",
@@ -248,6 +252,7 @@ fluxheim-protocol = { path = "crates/fluxheim-protocol" }
 fluxheim-runtime = { path = "crates/fluxheim-runtime" }
 fluxheim-snapshot = { path = "crates/fluxheim-snapshot" }
 fluxheim-stream = { path = "crates/fluxheim-stream", optional = true }
+fluxheim-tls = { path = "crates/fluxheim-tls" }
 fluxheim-web = { path = "crates/fluxheim-web", optional = true }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
 futures = "0.3.32"

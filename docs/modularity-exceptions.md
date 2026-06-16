@@ -25,8 +25,8 @@ documents why the exception is temporary and how it will be removed.
 | `crates/fluxheim-config/src/config.rs` | 2514 | Config root, validation helpers, and shared parsing glue. | Split by shared config primitives. |
 | `crates/fluxheim-config/src/config_cache.rs` | 2495 | Cache config, validation, and merge behavior. | Split cache config primitives when `fluxheim-cache` owns more runtime. |
 | `src/headers.rs` | 1829 | Remaining Pingora request/response header mutation adapter after the first `fluxheim-headers` extraction. | Keep shrinking with native HTTP/header-policy cutovers. |
-| `src/runtime.rs` | 2203 | Pingora server/bootstrap/listener orchestration. | Replace through `fluxheim-runtime`/`fluxheim-server` in `1.6.4`-`1.6.7`. |
-| `src/tls.rs` | 1834 | TLS config/runtime helper surface for current listener adapter. | Split with listener/TLS abstraction in `1.6.6`. |
+| `src/runtime.rs` | 1992 | Pingora server/bootstrap/listener orchestration; TLS listener planning now comes from `fluxheim-tls`. | Replace through `fluxheim-runtime`/`fluxheim-server` in `1.6.7`. |
+| `src/tls.rs` | 1456 | Root TLS storage, ACME path resolution, and compatibility glue after `fluxheim-tls` extracted listener planning, provider, ALPN, cipher, and SNI selector policy. | Move remaining ACME/storage helpers to focused crates after native listener cutover. |
 | `crates/fluxheim-config/src/config_proxy.rs` | 1807 | Proxy config and validation. | Split proxy/load-balancer subdomains as native proxy APIs land. |
 | `crates/fluxheim-config/src/config_load_balance.rs` | 1796 | Load-balancer config and validation. | Split with `fluxheim-load-balancer` independence in `1.6.1`. |
 | `crates/fluxheim-load-balancer/src/health.rs` | 1911 | Multiple active health-check protocols in one file. | Split by protocol after Pingora health adapters are gone. |

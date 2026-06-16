@@ -3,246 +3,67 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::config::{AcmeConfig, Config, StaticCertificateConfig, normalize_host};
+use crate::config::{AcmeConfig, Config, StaticCertificateConfig};
 
 pub const PRIVATE_KEY_MODE: u32 = 0o600;
 pub const ACME_STORAGE_MODE: u32 = 0o700;
 
 #[cfg(feature = "tls-rustls-backend")]
 pub fn install_rustls_crypto_provider() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    ensure_rustls_crypto_provider_installed().map_err(|error| {
-        std::io::Error::other(format!(
-            "rustls CryptoProvider installation failed: {error}"
-        ))
-        .into()
-    })
+    fluxheim_tls::install_rustls_crypto_provider().map_err(Into::into)
 }
 
 #[cfg(feature = "tls-rustls-backend")]
 pub fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
-    #[cfg(feature = "tls-rustls-fips")]
-    {
-        rustls::crypto::default_fips_provider()
-    }
-    #[cfg(not(feature = "tls-rustls-fips"))]
-    {
-        rustls::crypto::ring::default_provider()
-    }
-}
-
-#[cfg(feature = "tls-rustls-backend")]
-fn ensure_rustls_crypto_provider_installed() -> Result<(), String> {
-    match rustls_crypto_provider().install_default() {
-        Ok(()) => Ok(()),
-        Err(candidate) => {
-            let installed = rustls::crypto::CryptoProvider::get_default()
-                .ok_or_else(|| {
-                    format!(
-                        "rustls rejected candidate CryptoProvider but no installed provider is visible; candidate_fips={}",
-                        candidate.fips()
-                    )
-                })?;
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                if !installed.fips() {
-                    return Err(format!(
-                        "non-FIPS process-default CryptoProvider is already installed; installed_provider_fips={}, candidate_provider_fips={}",
-                        installed.fips(),
-                        candidate.fips()
-                    ));
-                }
-                log::debug!(
-                    "rustls process-default CryptoProvider is already installed and reports FIPS mode"
-                );
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                log::debug!(
-                    "rustls process-default CryptoProvider is already installed; installed_provider_fips={}, candidate_provider_fips={}",
-                    installed.fips(),
-                    candidate.fips()
-                );
-            }
-            Ok(())
-        }
-    }
+    fluxheim_tls::rustls_crypto_provider()
 }
 
 #[cfg(feature = "tls-rustls-fips")]
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct RustlsFipsStatus {
-    pub provider_fips: bool,
-}
+pub use fluxheim_tls::RustlsFipsStatus;
 
 #[cfg(feature = "tls-rustls-fips")]
 pub fn probe_rustls_fips_provider() -> Result<RustlsFipsStatus, String> {
-    ensure_rustls_crypto_provider_installed()?;
-    let provider = rustls::crypto::CryptoProvider::get_default()
-        .ok_or_else(|| "no process-default rustls CryptoProvider is installed".to_owned())?;
-    let provider_fips = provider.fips();
-    if !provider_fips {
-        return Err("installed rustls CryptoProvider does not report FIPS mode".to_owned());
-    }
-    Ok(RustlsFipsStatus { provider_fips })
+    fluxheim_tls::probe_rustls_fips_provider()
 }
 
 #[cfg(feature = "tls-openssl-fips")]
-static OPENSSL_FIPS_PROVIDER_RESULT: std::sync::OnceLock<Result<(), String>> =
-    std::sync::OnceLock::new();
-
-#[cfg(feature = "tls-openssl-fips")]
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct OpenSslFipsStatus {
-    pub openssl_version: String,
-    pub default_properties_fips_enabled: bool,
-}
+pub use fluxheim_tls::OpenSslFipsStatus;
 
 #[cfg(feature = "tls-openssl-fips")]
 pub fn probe_openssl_fips_provider() -> Result<OpenSslFipsStatus, String> {
-    let openssl_version = openssl::version::version().to_owned();
-    load_openssl_fips_providers_once()?;
-    openssl_fips_property_query_check()?;
-
-    Ok(OpenSslFipsStatus {
-        openssl_version,
-        default_properties_fips_enabled:
-            fluxheim_openssl_fips_support::default_properties_fips_enabled(),
-    })
+    fluxheim_tls::probe_openssl_fips_provider()
 }
 
 #[cfg(feature = "tls-openssl-fips")]
 pub fn activate_openssl_fips_provider() -> Result<OpenSslFipsStatus, String> {
-    let openssl_version = openssl::version::version().to_owned();
-    load_openssl_fips_providers_once()?;
-
-    fluxheim_openssl_fips_support::enable_default_properties_fips()
-        .map_err(|error| format!("OpenSSL FIPS default-property enable failed: {error}"))?;
-    let default_properties_fips_enabled =
-        fluxheim_openssl_fips_support::default_properties_fips_enabled();
-    if !default_properties_fips_enabled {
-        return Err("OpenSSL FIPS default properties are not enabled".to_owned());
-    }
-
-    openssl_fips_property_query_check()?;
-    openssl_fips_default_fetch_check()?;
-    openssl_non_fips_default_fetch_rejected()?;
-    Ok(OpenSslFipsStatus {
-        openssl_version,
-        default_properties_fips_enabled,
-    })
-}
-
-#[cfg(feature = "tls-openssl-fips")]
-fn load_openssl_fips_providers_once() -> Result<(), String> {
-    OPENSSL_FIPS_PROVIDER_RESULT
-        .get_or_init(|| {
-            // OpenSSL provider handles must remain loaded for the process
-            // lifetime. Serialize loading so concurrent diagnostics/startup
-            // checks cannot double-load or cache inconsistent global state.
-            let fips_provider = openssl::provider::Provider::try_load(None, "fips", true)
-                .map_err(|error| format!("OpenSSL FIPS provider could not be loaded: {error}"))?;
-            let base_provider = openssl::provider::Provider::try_load(None, "base", true).ok();
-            let _ = Box::leak(Box::new(fips_provider));
-            if let Some(base_provider) = base_provider {
-                let _ = Box::leak(Box::new(base_provider));
-            }
-            Ok(())
-        })
-        .clone()
-}
-
-#[cfg(feature = "tls-openssl-fips")]
-fn openssl_fips_property_query_check() -> Result<(), String> {
-    openssl::cipher::Cipher::fetch(None, "AES-256-GCM", Some("fips=yes"))
-        .map(|_| ())
-        .map_err(|error| {
-            format!("OpenSSL FIPS property query failed for AES-256-GCM with fips=yes: {error}")
-        })
-}
-
-#[cfg(feature = "tls-openssl-fips")]
-fn openssl_fips_default_fetch_check() -> Result<(), String> {
-    openssl::cipher::Cipher::fetch(None, "AES-256-GCM", None)
-        .map(|_| ())
-        .map_err(|error| {
-            format!("OpenSSL FIPS default-property fetch failed for AES-256-GCM: {error}")
-        })
-}
-
-#[cfg(feature = "tls-openssl-fips")]
-fn openssl_non_fips_default_fetch_rejected() -> Result<(), String> {
-    match openssl::cipher::Cipher::fetch(None, "CHACHA20-POLY1305", None) {
-        Ok(_) => Err(
-            "OpenSSL FIPS default properties still allow CHACHA20-POLY1305 without an explicit property query"
-                .to_owned(),
-        ),
-        Err(error) => {
-            log::debug!(
-                "OpenSSL FIPS default properties rejected CHACHA20-POLY1305 as expected: {error}"
-            );
-            Ok(())
-        }
-    }
+    fluxheim_tls::activate_openssl_fips_provider()
 }
 
 pub fn validate_fips_runtime_config(
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let compliance_mode = config.tls.compliance_mode();
-    if !compliance_mode.required() {
-        return Ok(());
-    }
+    fluxheim_tls::validate_fips_runtime_config(config).map_err(Into::into)
+}
 
-    #[cfg(feature = "tls-rustls-fips")]
-    if config.tls.backend == crate::config::TlsBackend::Rustls {
-        let status = probe_rustls_fips_provider().map_err(|error| {
-            format!(
-                "{} required mode rustls/AWS-LC provider check failed: {error}",
-                compliance_mode.label()
-            )
-        })?;
-        log::info!(
-            "{} required mode rustls/AWS-LC provider check passed; provider_fips={}",
-            compliance_mode.label(),
-            status.provider_fips
-        );
-        return Ok(());
-    }
+pub fn downstream_tls_listener_plan(
+    config: &Config,
+) -> Result<Option<fluxheim_tls::DownstreamTlsListenerPlan>, Box<dyn std::error::Error + Send + Sync>>
+{
+    fluxheim_tls::DownstreamTlsListenerPlan::from_config_with_acme_resolver(
+        config,
+        managed_acme_certificate_source,
+    )
+    .map_err(Into::into)
+}
 
-    #[cfg(feature = "tls-openssl-fips")]
-    if config.tls.backend == crate::config::TlsBackend::Openssl {
-        let status = activate_openssl_fips_provider().map_err(|error| {
-            format!(
-                "{} required mode OpenSSL provider check failed: {error}",
-                compliance_mode.label()
-            )
-        })?;
-        log::info!(
-            "{} required mode OpenSSL provider check passed using {}; default_properties_fips_enabled={}",
-            compliance_mode.label(),
-            status.openssl_version,
-            status.default_properties_fips_enabled
-        );
-        return Ok(());
-    }
+pub type DownstreamCertificateSelector = fluxheim_tls::DownstreamCertificateSelector;
+pub type DownstreamCertificateSource = fluxheim_tls::DownstreamCertificateSource;
 
-    #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
-    {
-        Err(format!(
-            "{} required mode is not supported by the configured TLS backend in this build",
-            compliance_mode.label()
-        )
-        .into())
-    }
-
-    #[cfg(not(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips")))]
-    {
-        Err(format!(
-            "{} required mode requires a FIPS/ISO-capable TLS backend feature such as tls-rustls-fips, tls-openssl-fips, or tls-openssl-iso19790",
-            compliance_mode.label()
-        )
-        .into())
-    }
+pub fn downstream_certificate_selector(config: &Config) -> Option<DownstreamCertificateSelector> {
+    DownstreamCertificateSelector::from_config_with_acme_resolver(
+        config,
+        managed_acme_certificate_source,
+    )
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -529,144 +350,6 @@ pub fn recommended_acme_storage_mode() -> u32 {
     ACME_STORAGE_MODE
 }
 
-pub fn default_downstream_certificate(config: &Config) -> Option<DownstreamCertificateSource> {
-    config
-        .tls
-        .certificates
-        .first()
-        .cloned()
-        .map(|certificate| DownstreamCertificateSource {
-            certificate,
-            managed_acme: false,
-        })
-        .or_else(|| default_vhost_certificate_source(config))
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct DownstreamCertificateSelector {
-    certificates: Vec<StaticCertificateConfig>,
-    managed_acme: Vec<bool>,
-    default_index: usize,
-    exact_hosts: std::collections::HashMap<String, usize>,
-    wildcard_hosts: Vec<WildcardCertificate>,
-}
-
-impl DownstreamCertificateSelector {
-    pub fn from_config(config: &Config) -> Option<Self> {
-        let default = default_downstream_certificate(config)?;
-        let mut selector = Self {
-            certificates: vec![default.certificate],
-            managed_acme: vec![default.managed_acme],
-            default_index: 0,
-            exact_hosts: std::collections::HashMap::new(),
-            wildcard_hosts: Vec::new(),
-        };
-
-        for vhost in &config.vhosts {
-            if !vhost.tls.enabled {
-                continue;
-            }
-            let Some(certificate) = vhost_certificate_source(config, vhost) else {
-                continue;
-            };
-            let certificate_index = selector
-                .certificates
-                .iter()
-                .position(|existing| existing == &certificate.certificate)
-                .unwrap_or_else(|| {
-                    let index = selector.certificates.len();
-                    selector.certificates.push(certificate.certificate.clone());
-                    selector.managed_acme.push(certificate.managed_acme);
-                    index
-                });
-            if !certificate.managed_acme {
-                selector.managed_acme[certificate_index] = false;
-            }
-
-            for host in vhost.normalized_hosts() {
-                if let Some(suffix) = host.strip_prefix("*.") {
-                    selector.wildcard_hosts.push(WildcardCertificate {
-                        suffix: suffix.to_owned(),
-                        certificate_index,
-                    });
-                } else {
-                    selector.exact_hosts.insert(host, certificate_index);
-                }
-            }
-        }
-
-        selector
-            .wildcard_hosts
-            .sort_by_key(|wildcard| std::cmp::Reverse(wildcard.suffix.len()));
-
-        Some(selector)
-    }
-
-    pub fn has_sni_certificates(&self) -> bool {
-        !self.exact_hosts.is_empty() || !self.wildcard_hosts.is_empty()
-    }
-
-    pub fn certificates(&self) -> &[StaticCertificateConfig] {
-        &self.certificates
-    }
-
-    pub fn certificate_is_managed_acme(&self, index: usize) -> bool {
-        self.managed_acme.get(index).copied().unwrap_or(false)
-    }
-
-    pub fn default_certificate_index(&self) -> usize {
-        self.default_index
-    }
-
-    pub fn certificate_index_for_sni(&self, sni: Option<&str>) -> usize {
-        let Some(host) = sni.and_then(normalize_host) else {
-            return self.default_index;
-        };
-
-        if let Some(index) = self.exact_hosts.get(&host) {
-            return *index;
-        }
-
-        self.wildcard_hosts
-            .iter()
-            .find(|wildcard| wildcard.matches(&host))
-            .map(|wildcard| wildcard.certificate_index)
-            .unwrap_or(self.default_index)
-    }
-
-    pub fn certificate_for_sni(&self, sni: Option<&str>) -> &StaticCertificateConfig {
-        &self.certificates[self.certificate_index_for_sni(sni)]
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct DownstreamCertificateSource {
-    pub certificate: StaticCertificateConfig,
-    pub managed_acme: bool,
-}
-
-fn default_vhost_certificate_source(config: &Config) -> Option<DownstreamCertificateSource> {
-    let default_vhost = config.server.default_vhost.as_ref()?;
-    config
-        .vhosts
-        .iter()
-        .find(|vhost| &vhost.name == default_vhost && vhost.tls.enabled)
-        .and_then(|vhost| vhost_certificate_source(config, vhost))
-}
-
-fn vhost_certificate_source(
-    config: &Config,
-    vhost: &crate::config::VhostConfig,
-) -> Option<DownstreamCertificateSource> {
-    if let Some(certificate) = vhost.tls.certificate.clone() {
-        return Some(DownstreamCertificateSource {
-            certificate,
-            managed_acme: false,
-        });
-    }
-    managed_acme_certificate_source(config, vhost)
-}
-
 #[cfg(feature = "acme")]
 fn managed_acme_certificate_source(
     config: &Config,
@@ -680,7 +363,7 @@ fn managed_acme_certificate_source(
     let owner = if vhost.tls.acme.enabled {
         vhost.name.as_str()
     } else {
-        shared_managed_acme_certificate_owner(config, vhost)?
+        fluxheim_tls::shared_managed_acme_certificate_owner(config, vhost)?
     };
     let paths = crate::acme::managed_certificate_paths(storage, owner);
     Some(DownstreamCertificateSource {
@@ -698,67 +381,6 @@ fn managed_acme_certificate_source(
     _vhost: &crate::config::VhostConfig,
 ) -> Option<DownstreamCertificateSource> {
     None
-}
-
-#[cfg(feature = "acme")]
-fn shared_managed_acme_certificate_owner<'a>(
-    config: &'a Config,
-    vhost: &crate::config::VhostConfig,
-) -> Option<&'a str> {
-    let hosts = vhost
-        .hosts
-        .iter()
-        .filter(|host| !host.starts_with("*."))
-        .filter_map(|host| normalize_host(host))
-        .collect::<Vec<_>>();
-    if hosts.is_empty() {
-        return None;
-    }
-
-    config
-        .vhosts
-        .iter()
-        .find(|candidate| {
-            candidate.name != vhost.name
-                && candidate.tls.enabled
-                && candidate.tls.acme.enabled
-                && managed_acme_domains_for_vhost(candidate)
-                    .is_some_and(|domains| hosts.iter().all(|host| domains.contains(host)))
-        })
-        .map(|candidate| candidate.name.as_str())
-}
-
-#[cfg(feature = "acme")]
-fn managed_acme_domains_for_vhost(
-    vhost: &crate::config::VhostConfig,
-) -> Option<std::collections::HashSet<String>> {
-    let domains = if vhost.tls.acme.domains.is_empty() {
-        &vhost.hosts
-    } else {
-        &vhost.tls.acme.domains
-    };
-    let domains = domains
-        .iter()
-        .filter(|domain| !domain.starts_with("*."))
-        .filter_map(|domain| normalize_host(domain))
-        .collect::<std::collections::HashSet<_>>();
-    (!domains.is_empty()).then_some(domains)
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct WildcardCertificate {
-    suffix: String,
-    certificate_index: usize,
-}
-
-impl WildcardCertificate {
-    fn matches(&self, host: &str) -> bool {
-        let Some(prefix) = host.strip_suffix(self.suffix.as_str()) else {
-            return false;
-        };
-
-        prefix.ends_with('.') && !prefix[..prefix.len() - 1].contains('.')
-    }
 }
 
 fn validate_static_certificate_storage(
@@ -1166,7 +788,7 @@ mod tests {
     use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
 
     use super::{
-        DownstreamCertificateSelector, TlsStorageIssue, recommended_acme_storage_mode,
+        TlsStorageIssue, downstream_certificate_selector, recommended_acme_storage_mode,
         recommended_private_key_mode, secure_acme_storage_mode, secure_private_key_mode,
         validate_tls_storage,
     };
@@ -1542,7 +1164,7 @@ mod tests {
             ..Config::default()
         };
 
-        let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
+        let selector = downstream_certificate_selector(&config).unwrap();
 
         assert!(selector.has_sni_certificates());
         assert_eq!(
@@ -1628,7 +1250,7 @@ mod tests {
             ..Config::default()
         };
 
-        let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
+        let selector = downstream_certificate_selector(&config).unwrap();
 
         assert_eq!(selector.certificate_for_sni(None), &default_cert);
         assert_eq!(
@@ -1740,7 +1362,7 @@ mod tests {
             ..Config::default()
         };
 
-        let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
+        let selector = downstream_certificate_selector(&config).unwrap();
         let default_paths = crate::acme::managed_certificate_paths(&storage, "default");
         let other_paths = crate::acme::managed_certificate_paths(&storage, "other");
 

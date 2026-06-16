@@ -31,6 +31,7 @@ and service types. Domain crates should not depend on those adapters.
 | `proxy_protocol.rs` | `fluxheim-protocol` | Pure framing plus the current Pingora L4 connector adapter; split protocol bytes before stream/server replacement. |
 | `trace_context.rs` and OTLP helpers | `fluxheim-observability` | Pure parsing/export formatting can move before HTTP runtime changes. |
 | `headers.rs` | `fluxheim-headers` or `fluxheim-http-policy` | Security-sensitive but mostly request/response policy; extract pure rules before replacing Pingora HTTP types. |
+| `tls.rs` listener/provider policy | `fluxheim-tls` | Own downstream listener planning, certificate selection, SNI matching, ALPN/cipher policy, and TLS provider/FIPS checks before replacing the Pingora listener adapter. |
 | `acme.rs` | `fluxheim-acme` | Large filesystem/TLS/runtime integration surface; extract after listener/TLS boundary traits exist. |
 | `runtime.rs` | `fluxheim-runtime` and `fluxheim-server` | Own task, shutdown, listener, TLS, and server bootstrap abstractions before removing Pingora server services. |
 | `cache.rs` | `fluxheim-cache` | Continue moving admission, keys, headers, storage plans, and purge logic; keep only Pingora cache adapters in root until HTTP proxy cutover. |

@@ -1042,6 +1042,7 @@ dependencies = [
  "fluxheim-runtime",
  "fluxheim-snapshot",
  "fluxheim-stream",
+ "fluxheim-tls",
  "fluxheim-web",
  "futures",
  "getrandom 0.4.2",
@@ -1233,6 +1234,18 @@ dependencies = [
  "fluxheim-config",
  "fluxheim-protocol",
  "tokio",
+]
+
+[[package]]
+name = "fluxheim-tls"
+version = "1.6.5"
+dependencies = [
+ "fluxheim-config",
+ "fluxheim-openssl-fips-support",
+ "log",
+ "openssl",
+ "rustls",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

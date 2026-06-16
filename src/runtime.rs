@@ -48,7 +48,8 @@ const DOWNSTREAM_H2_MAX_PENDING_ACCEPT_RESET_STREAMS: usize = 8;
         feature = "tls-openssl"
     )
 ))]
-use crate::config::{TlsAlpnPolicy, TlsConfig, TlsProtocolVersion};
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+use crate::config::TlsAlpnPolicy;
 #[cfg(all(
     feature = "proxy",
     any(
@@ -57,6 +58,7 @@ use crate::config::{TlsAlpnPolicy, TlsConfig, TlsProtocolVersion};
     )
 ))]
 use crate::config::{TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference};
+use crate::config::{TlsConfig, TlsProtocolVersion};
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 use pingora::tls::{
     pkey::{PKey, Private},
@@ -1181,8 +1183,8 @@ mod tests {
             },
             ..crate::config::Config::default()
         };
-        let selector =
-            crate::tls::DownstreamCertificateSelector::from_config(&config).ok_or_else(|| {
+        let selector = fluxheim_tls::DownstreamCertificateSelector::from_config(&config)
+            .ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "expected downstream certificate selector",
@@ -1213,6 +1215,7 @@ mod tests {
         let config = crate::config::Config {
             server: crate::config::ServerConfig {
                 default_vhost: Some("default".to_owned()),
+                tls_listen: vec!["127.0.0.1:8443".to_owned()],
                 ..crate::config::ServerConfig::default()
             },
             tls: crate::config::TlsConfig {
@@ -1253,9 +1256,11 @@ mod tests {
             }],
             ..crate::config::Config::default()
         };
-        let selector = crate::tls::DownstreamCertificateSelector::from_config(&config).unwrap();
-
-        let resolver = super::RustlsSniCertificateResolver::new(&selector, &config.tls).unwrap();
+        let plan = crate::tls::downstream_tls_listener_plan(&config)
+            .unwrap()
+            .unwrap();
+        let resolver =
+            super::RustlsSniCertificateResolver::new(plan.selector(), &config.tls).unwrap();
 
         assert_eq!(resolver.certificates.load().len(), 2);
         assert!(resolver.certificates.load()[0].is_some());
@@ -1276,22 +1281,17 @@ fn add_tls_listeners<S>(
 where
     S: Send + Sync + 'static,
 {
-    if config.server.tls_listen.is_empty() {
+    let Some(plan) = crate::tls::downstream_tls_listener_plan(config)? else {
         return Ok(None);
-    }
-    if !config.tls.enabled {
-        return Err("server.tls_listen requires tls.enabled = true".into());
-    }
-
-    let Some(selector) = crate::tls::DownstreamCertificateSelector::from_config(config) else {
-        return Err(
-            "server.tls_listen requires a global certificate or a static/ACME certificate source on server.default_vhost"
-                .into(),
-        );
     };
 
-    let reloader =
-        add_downstream_tls_listeners(service, &config.server.tls_listen, &selector, &config.tls)?;
+    let reloader = add_downstream_tls_listeners(
+        service,
+        plan.listens(),
+        plan.selector(),
+        plan.requires_certificate_resolver(),
+        &config.tls,
+    )?;
     Ok(reloader)
 }
 
@@ -1414,22 +1414,15 @@ fn rustls_client_cert_verifier(
     not(feature = "tls-openssl")
 ))]
 fn rustls_alpn_protocols(tls: &TlsConfig) -> Vec<Vec<u8>> {
-    let protocols = match tls.effective_alpn() {
-        TlsAlpnPolicy::Http1 => vec![b"http/1.1".to_vec()],
-        TlsAlpnPolicy::Http2 => vec![b"h2".to_vec()],
-        TlsAlpnPolicy::Http1AndHttp2 => vec![b"h2".to_vec(), b"http/1.1".to_vec()],
-    };
     #[cfg(feature = "acme")]
     {
-        let mut protocols = protocols;
-        if tls.acme.enabled && tls.acme.challenge == AcmeChallenge::TlsAlpn01 {
-            protocols.insert(0, crate::acme::acme_tls_alpn_protocol().to_vec());
-        }
-        protocols
+        let acme_protocol = (tls.acme.enabled && tls.acme.challenge == AcmeChallenge::TlsAlpn01)
+            .then_some(crate::acme::acme_tls_alpn_protocol());
+        fluxheim_tls::rustls_alpn_protocols(tls, acme_protocol)
     }
     #[cfg(not(feature = "acme"))]
     {
-        protocols
+        fluxheim_tls::rustls_alpn_protocols(tls, None)
     }
 }
 
@@ -1442,113 +1435,7 @@ fn rustls_cipher_suite(
     cipher: TlsCipherSuite,
     fips_required: bool,
 ) -> Result<rustls::SupportedCipherSuite, Box<dyn Error + Send + Sync>> {
-    #[cfg(not(feature = "tls-rustls-fips"))]
-    let _ = fips_required;
-
-    match cipher {
-        TlsCipherSuite::Tls13Aes256GcmSha384 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_256_GCM_SHA384)
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::cipher_suite::TLS13_AES_256_GCM_SHA384)
-            }
-        }
-        TlsCipherSuite::Tls13Chacha20Poly1305Sha256 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                if fips_required {
-                    Err("TLS_CHACHA20_POLY1305_SHA256 is not allowed when rustls FIPS/ISO mode is required".into())
-                } else {
-                    Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256)
-                }
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256)
-            }
-        }
-        TlsCipherSuite::Tls13Aes128GcmSha256 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_128_GCM_SHA256)
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256)
-            }
-        }
-        TlsCipherSuite::TlsEcdheEcdsaWithAes128GcmSha256 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256)
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256)
-            }
-        }
-        TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
-            }
-        }
-        TlsCipherSuite::TlsEcdheEcdsaWithAes256GcmSha384 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384)
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384)
-            }
-        }
-        TlsCipherSuite::TlsEcdheRsaWithAes256GcmSha384 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384)
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384)
-            }
-        }
-        TlsCipherSuite::TlsEcdheEcdsaWithChacha20Poly1305Sha256 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                if fips_required {
-                    Err("TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 is not allowed when rustls FIPS/ISO mode is required".into())
-                } else {
-                    Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256)
-                }
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256)
-            }
-        }
-        TlsCipherSuite::TlsEcdheRsaWithChacha20Poly1305Sha256 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                if fips_required {
-                    Err("TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 is not allowed when rustls FIPS/ISO mode is required".into())
-                } else {
-                    Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256)
-                }
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256)
-            }
-        }
-    }
+    fluxheim_tls::rustls_cipher_suite(cipher, fips_required).map_err(Into::into)
 }
 
 #[cfg(all(
@@ -1560,62 +1447,7 @@ fn rustls_kx_group(
     curve: TlsCurvePreference,
     fips_required: bool,
 ) -> Result<&'static dyn rustls::crypto::SupportedKxGroup, Box<dyn Error + Send + Sync>> {
-    #[cfg(not(feature = "tls-rustls-fips"))]
-    let _ = fips_required;
-
-    match curve {
-        TlsCurvePreference::X25519 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                if fips_required {
-                    Err("X25519 is not allowed when rustls FIPS/ISO mode is required".into())
-                } else {
-                    Ok(rustls::crypto::aws_lc_rs::kx_group::X25519)
-                }
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::kx_group::X25519)
-            }
-        }
-        TlsCurvePreference::P256 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                Ok(rustls::crypto::aws_lc_rs::kx_group::SECP256R1)
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::kx_group::SECP256R1)
-            }
-        }
-        TlsCurvePreference::P384 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                Ok(rustls::crypto::aws_lc_rs::kx_group::SECP384R1)
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Ok(rustls::crypto::ring::kx_group::SECP384R1)
-            }
-        }
-        TlsCurvePreference::X25519MlKem768 => {
-            #[cfg(feature = "tls-rustls-fips")]
-            {
-                if fips_required {
-                    Err(
-                        "X25519MLKEM768 is not allowed when rustls FIPS/ISO mode is required"
-                            .into(),
-                    )
-                } else {
-                    Ok(rustls::crypto::aws_lc_rs::kx_group::X25519MLKEM768)
-                }
-            }
-            #[cfg(not(feature = "tls-rustls-fips"))]
-            {
-                Err("X25519MLKEM768 is not available with the default rustls/ring backend".into())
-            }
-        }
-    }
+    fluxheim_tls::rustls_kx_group(curve, fips_required).map_err(Into::into)
 }
 
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
@@ -1670,50 +1502,12 @@ fn apply_openssl_client_auth(
 
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 fn openssl_curve_list(curves: &[TlsCurvePreference]) -> String {
-    curves
-        .iter()
-        .map(|curve| match curve {
-            TlsCurvePreference::X25519 => "X25519",
-            TlsCurvePreference::P256 => "P-256",
-            TlsCurvePreference::P384 => "P-384",
-            TlsCurvePreference::X25519MlKem768 => "X25519MLKEM768",
-        })
-        .collect::<Vec<_>>()
-        .join(":")
+    fluxheim_tls::openssl_curve_list(curves)
 }
 
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 fn openssl_cipher_lists(ciphers: &[TlsCipherSuite]) -> (String, String) {
-    let mut tls12 = Vec::new();
-    let mut tls13 = Vec::new();
-    for cipher in ciphers {
-        match cipher {
-            TlsCipherSuite::Tls13Aes256GcmSha384 => tls13.push("TLS_AES_256_GCM_SHA384"),
-            TlsCipherSuite::Tls13Chacha20Poly1305Sha256 => {
-                tls13.push("TLS_CHACHA20_POLY1305_SHA256");
-            }
-            TlsCipherSuite::Tls13Aes128GcmSha256 => tls13.push("TLS_AES_128_GCM_SHA256"),
-            TlsCipherSuite::TlsEcdheEcdsaWithAes128GcmSha256 => {
-                tls12.push("ECDHE-ECDSA-AES128-GCM-SHA256");
-            }
-            TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256 => {
-                tls12.push("ECDHE-RSA-AES128-GCM-SHA256");
-            }
-            TlsCipherSuite::TlsEcdheEcdsaWithAes256GcmSha384 => {
-                tls12.push("ECDHE-ECDSA-AES256-GCM-SHA384");
-            }
-            TlsCipherSuite::TlsEcdheRsaWithAes256GcmSha384 => {
-                tls12.push("ECDHE-RSA-AES256-GCM-SHA384");
-            }
-            TlsCipherSuite::TlsEcdheEcdsaWithChacha20Poly1305Sha256 => {
-                tls12.push("ECDHE-ECDSA-CHACHA20-POLY1305");
-            }
-            TlsCipherSuite::TlsEcdheRsaWithChacha20Poly1305Sha256 => {
-                tls12.push("ECDHE-RSA-CHACHA20-POLY1305");
-            }
-        }
-    }
-    (tls12.join(":"), tls13.join(":"))
+    fluxheim_tls::openssl_cipher_lists(ciphers)
 }
 
 #[cfg(feature = "proxy")]
@@ -1749,13 +1543,14 @@ impl DownstreamCertificateReloader {
 fn add_downstream_tls_listeners<S>(
     service: &mut pingora::services::listening::Service<S>,
     listens: &[String],
-    selector: &crate::tls::DownstreamCertificateSelector,
+    selector: &fluxheim_tls::DownstreamCertificateSelector,
+    requires_certificate_resolver: bool,
     tls: &TlsConfig,
 ) -> Result<Option<DownstreamCertificateReloader>, Box<dyn Error + Send + Sync>>
 where
     S: Send + Sync + 'static,
 {
-    if selector.has_sni_certificates() {
+    if requires_certificate_resolver {
         let callback = std::sync::Arc::new(SniCertificateCallback::new(selector)?);
         for listen in listens {
             log::info!("proxy TLS listener enabled on {listen}");
@@ -1789,13 +1584,14 @@ where
 fn add_downstream_tls_listeners<S>(
     service: &mut pingora::services::listening::Service<S>,
     listens: &[String],
-    selector: &crate::tls::DownstreamCertificateSelector,
+    selector: &fluxheim_tls::DownstreamCertificateSelector,
+    requires_certificate_resolver: bool,
     tls: &TlsConfig,
 ) -> Result<Option<DownstreamCertificateReloader>, Box<dyn Error + Send + Sync>>
 where
     S: Send + Sync + 'static,
 {
-    if selector.has_sni_certificates() || rustls_acme_tls_alpn_enabled(tls) {
+    if requires_certificate_resolver {
         let resolver = std::sync::Arc::new(RustlsSniCertificateResolver::new(selector, tls)?);
         for listen in listens {
             log::info!("proxy TLS listener enabled on {listen}");
@@ -1824,7 +1620,7 @@ where
     not(feature = "tls-openssl")
 ))]
 struct RustlsSniCertificateResolver {
-    selector: crate::tls::DownstreamCertificateSelector,
+    selector: fluxheim_tls::DownstreamCertificateSelector,
     certificates: arc_swap::ArcSwap<Vec<Option<std::sync::Arc<rustls::sign::CertifiedKey>>>>,
     #[cfg(feature = "acme")]
     tls_alpn_01_store: Option<crate::acme::AcmeTlsAlpn01ChallengeStore>,
@@ -1851,7 +1647,7 @@ impl std::fmt::Debug for RustlsSniCertificateResolver {
 ))]
 impl RustlsSniCertificateResolver {
     fn new(
-        selector: &crate::tls::DownstreamCertificateSelector,
+        selector: &fluxheim_tls::DownstreamCertificateSelector,
         tls: &TlsConfig,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         #[cfg(not(feature = "acme"))]
@@ -1913,18 +1709,11 @@ impl rustls::server::ResolvesServerCert for RustlsSniCertificateResolver {
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
+    feature = "acme",
     not(feature = "tls-openssl")
 ))]
 fn rustls_acme_tls_alpn_enabled(tls: &TlsConfig) -> bool {
-    #[cfg(feature = "acme")]
-    {
-        tls.acme.enabled && tls.acme.challenge == AcmeChallenge::TlsAlpn01
-    }
-    #[cfg(not(feature = "acme"))]
-    {
-        let _ = tls;
-        false
-    }
+    tls.acme.enabled && tls.acme.challenge == AcmeChallenge::TlsAlpn01
 }
 
 #[cfg(all(
@@ -1982,7 +1771,7 @@ fn load_rustls_certified_key(
     not(feature = "tls-openssl")
 ))]
 fn load_rustls_certified_keys(
-    selector: &crate::tls::DownstreamCertificateSelector,
+    selector: &fluxheim_tls::DownstreamCertificateSelector,
 ) -> Result<Vec<Option<std::sync::Arc<rustls::sign::CertifiedKey>>>, Box<dyn Error + Send + Sync>> {
     let mut certificates = Vec::with_capacity(selector.certificates().len());
     for (index, certificate) in selector.certificates().iter().enumerate() {
@@ -2031,14 +1820,14 @@ fn load_rustls_certified_key_from_paths(
 
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 struct SniCertificateCallback {
-    selector: crate::tls::DownstreamCertificateSelector,
+    selector: fluxheim_tls::DownstreamCertificateSelector,
     certificates: arc_swap::ArcSwap<Vec<Option<CallbackCertificate>>>,
 }
 
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 impl SniCertificateCallback {
     fn new(
-        selector: &crate::tls::DownstreamCertificateSelector,
+        selector: &fluxheim_tls::DownstreamCertificateSelector,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let certificates = load_callback_certificates(selector)?;
 
@@ -2057,7 +1846,7 @@ impl SniCertificateCallback {
 
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 fn load_callback_certificates(
-    selector: &crate::tls::DownstreamCertificateSelector,
+    selector: &fluxheim_tls::DownstreamCertificateSelector,
 ) -> Result<Vec<Option<CallbackCertificate>>, Box<dyn Error + Send + Sync>> {
     let mut certificates = Vec::with_capacity(selector.certificates().len());
     for (index, certificate) in selector.certificates().iter().enumerate() {
