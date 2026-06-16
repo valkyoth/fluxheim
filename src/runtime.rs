@@ -151,17 +151,19 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     #[cfg(feature = "stream-proxy")]
-    if server_plan.has_service(fluxheim_server::ServiceKind::StreamProxy) {
+    if let Some(stream_service_spec) =
+        server_plan.service(fluxheim_server::ServiceKind::StreamProxy)
+    {
         for stream_service in crate::stream_proxy::stream_services_from_config(&config)? {
-            log::info!("stream proxy service enabled");
+            log::info!("{} enabled", stream_service_spec.name());
             server.add_service(stream_service);
         }
     }
 
     #[cfg(feature = "udp-proxy")]
-    if server_plan.has_service(fluxheim_server::ServiceKind::UdpProxy) {
+    if let Some(udp_service_spec) = server_plan.service(fluxheim_server::ServiceKind::UdpProxy) {
         for udp_service in crate::udp_proxy::udp_services_from_config(&config)? {
-            log::info!("UDP proxy service enabled");
+            log::info!("{} enabled", udp_service_spec.name());
             server.add_service(udp_service);
         }
     }
@@ -195,7 +197,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     #[cfg(feature = "metrics")]
-    if server_plan.has_service(fluxheim_server::ServiceKind::MetricsHttp) {
+    if let Some(metrics_service_spec) =
+        server_plan.service(fluxheim_server::ServiceKind::MetricsHttp)
+    {
         crate::metrics::init()?;
         crate::metrics::record_config(&config);
         #[cfg(feature = "cache")]
@@ -213,7 +217,10 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         }
         let mut metrics_service = pingora::services::listening::Service::prometheus_http_service();
         for listen in server_plan.listener_addrs(fluxheim_server::ListenerProtocol::MetricsHttp) {
-            log::info!("metrics listener enabled on {listen}");
+            log::info!(
+                "{} listener enabled on {listen}",
+                metrics_service_spec.name()
+            );
             metrics_service.add_tcp(&listen);
         }
         server.add_service(metrics_service);
