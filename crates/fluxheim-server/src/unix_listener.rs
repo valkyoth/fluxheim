@@ -11,6 +11,14 @@ const PRIVATE_UNIX_LISTENER_UMASK: rustix::fs::Mode =
 
 static UMASK_LOCK: Mutex<()> = Mutex::new(());
 
+struct UmaskGuard(rustix::fs::Mode);
+
+impl Drop for UmaskGuard {
+    fn drop(&mut self) {
+        rustix::process::umask(self.0);
+    }
+}
+
 pub fn replace_private_unix_listener(path: &Path) -> io::Result<UnixListener> {
     match rustix::fs::lstat(path) {
         Ok(metadata) if rustix::fs::FileType::from_raw_mode(metadata.st_mode).is_socket() => {
@@ -61,10 +69,8 @@ fn bind_private_socket_path(
         .lock()
         .map_err(|_| io::Error::other("private Unix listener umask lock poisoned"))?;
     // Unix socket pathname permissions are derived from the process umask at
-    // bind time. Hold the global umask lock so the socket is private before
-    // any path-visible chmod/fchmod step can run.
-    let previous_umask = rustix::process::umask(PRIVATE_UNIX_LISTENER_UMASK);
-    let bind_result = rustix::net::bind(socket, address);
-    rustix::process::umask(previous_umask);
-    bind_result.map_err(io::Error::from)
+    // bind time. This lock only serializes Fluxheim callers of this helper;
+    // the listener is created during startup before worker services run.
+    let _umask = UmaskGuard(rustix::process::umask(PRIVATE_UNIX_LISTENER_UMASK));
+    rustix::net::bind(socket, address).map_err(io::Error::from)
 }
