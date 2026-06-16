@@ -148,9 +148,11 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     let _ = &certificate_reloader;
     #[cfg(all(feature = "acme-client", unix))]
     if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::CertificateReload) {
-        if let Some(service) =
-            certificate_reload_control_service(&config, certificate_reloader.clone())?
-        {
+        if let Some(service) = certificate_reload_control_service(
+            &config,
+            server_plan.process(),
+            certificate_reloader.clone(),
+        )? {
             server.add_service(service);
         }
     }
@@ -345,6 +347,7 @@ fn pingora_proxy_protocol_trusted_source(
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
 fn certificate_reload_control_service(
     config: &Config,
+    process: &fluxheim_server::ProcessSpec,
     reloader: Option<DownstreamCertificateReloader>,
 ) -> Result<
     Option<crate::background::FluxBackgroundService<CertificateReloadControlBackgroundService>>,
@@ -354,7 +357,7 @@ fn certificate_reload_control_service(
         return Ok(None);
     }
 
-    let path = config.server.process.certificate_reload_sock.clone();
+    let path = process.certificate_reload_sock().to_path_buf();
     match std::fs::symlink_metadata(&path) {
         Ok(metadata) if metadata.file_type().is_socket() => {
             std::fs::remove_file(&path)?;
@@ -1027,6 +1030,10 @@ mod tests {
         );
         assert_eq!(pingora.pid_file, "/run/fluxheim/fluxheim.pid");
         assert_eq!(pingora.upgrade_sock, "/run/fluxheim/fluxheim-upgrade.sock");
+        assert_eq!(
+            plan.process().certificate_reload_sock(),
+            std::path::Path::new("/run/fluxheim/fluxheim-cert-reload.sock")
+        );
         assert_eq!(pingora.threads, 4);
         assert_eq!(pingora.listener_tasks_per_fd, 2);
         assert!(!pingora.work_stealing);
@@ -1117,9 +1124,10 @@ mod tests {
     #[test]
     fn certificate_reload_control_service_skips_when_acme_disabled() {
         let config = crate::config::Config::default();
+        let server_plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
 
         assert!(
-            super::certificate_reload_control_service(&config, None)
+            super::certificate_reload_control_service(&config, server_plan.process(), None)
                 .unwrap()
                 .is_none()
         );

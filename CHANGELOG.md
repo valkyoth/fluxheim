@@ -16,6 +16,9 @@ behavior when the change improves security or project direction.
 - Move HTTP, HTTPS, admin, metrics, stream, and UDP listener inventory plus
   process bootstrap settings into `fluxheim-server` plan types while keeping
   the current Pingora server as the compatibility adapter.
+- Route the ACME certificate-reload control socket path through
+  `fluxheim-server` process planning instead of reading it directly from root
+  runtime config.
 - Update root runtime to consume the server plan for process configuration and
   HTTP, HTTPS, admin, and metrics listener registration.
 - Update root background-service registration gates to consume Fluxheim

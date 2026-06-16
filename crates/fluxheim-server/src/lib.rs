@@ -214,6 +214,7 @@ pub struct ProcessSpec {
     error_log: Option<PathBuf>,
     pid_file: PathBuf,
     upgrade_sock: PathBuf,
+    certificate_reload_sock: PathBuf,
     threads: usize,
     listener_tasks_per_fd: usize,
     work_stealing: bool,
@@ -230,6 +231,7 @@ impl Default for ProcessSpec {
             error_log: None,
             pid_file: PathBuf::from("/run/fluxheim/fluxheim.pid"),
             upgrade_sock: PathBuf::from("/run/fluxheim/fluxheim-upgrade.sock"),
+            certificate_reload_sock: PathBuf::from("/run/fluxheim/fluxheim-cert-reload.sock"),
             threads: 1,
             listener_tasks_per_fd: 1,
             work_stealing: true,
@@ -249,6 +251,7 @@ impl ProcessSpec {
             error_log: process.error_log.clone(),
             pid_file: process.pid_file.clone(),
             upgrade_sock: process.upgrade_sock.clone(),
+            certificate_reload_sock: process.certificate_reload_sock.clone(),
             threads: process.threads,
             listener_tasks_per_fd: process.listener_tasks_per_fd,
             work_stealing: process.work_stealing,
@@ -273,6 +276,10 @@ impl ProcessSpec {
 
     pub fn upgrade_sock(&self) -> &Path {
         &self.upgrade_sock
+    }
+
+    pub fn certificate_reload_sock(&self) -> &Path {
+        &self.certificate_reload_sock
     }
 
     pub const fn threads(&self) -> usize {
