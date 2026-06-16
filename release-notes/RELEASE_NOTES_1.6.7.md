@@ -19,6 +19,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Split server listener and foreground service inventory types into focused `fluxheim-server` modules before the native bootstrap work adds more runtime state.
 - Moved downstream HTTP/2 hardening limits into a Pingora-neutral `fluxheim-server` policy plan, with the root runtime only adapting those values into Pingora `H2Options`.
 - Moved certificate reload control socket policy into `fluxheim-server` so the socket path, concurrency cap, and request read timeout are planned outside the Pingora runtime adapter.
+- Added server-plan lookup helpers for foreground services and background tasks, then made the root runtime adapter consume planned names when registering services.
 
 ## Tests
 
@@ -30,6 +31,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added a `fluxheim-server` regression test proving private Unix listener paths replace stale sockets, reject non-socket files, and enforce private permissions.
 - Added a `fluxheim-server` regression test for the downstream HTTP/2 hardening defaults consumed by the runtime adapter.
 - Added a `fluxheim-server` regression test for the certificate reload control socket plan and kept the live admin listener smoke in the verification set.
+- Extended `fluxheim-server` tests to cover planned service and background-task lookup by kind.
 
 ## Verification
 

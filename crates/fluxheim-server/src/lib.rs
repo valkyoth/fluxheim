@@ -121,16 +121,33 @@ impl ServerPlan {
         &self.services
     }
 
+    pub fn service(&self, kind: ServiceKind) -> Option<ServiceSpec> {
+        self.services
+            .iter()
+            .copied()
+            .find(|service| service.kind() == kind)
+    }
+
     pub fn has_service(&self, kind: ServiceKind) -> bool {
-        self.services.iter().any(|service| service.kind() == kind)
+        self.service(kind).is_some()
     }
 
     pub fn background_tasks(&self) -> &[BackgroundTaskSpec] {
         &self.background_tasks
     }
 
+    pub fn background_task(
+        &self,
+        kind: fluxheim_runtime::BackgroundTaskKind,
+    ) -> Option<BackgroundTaskSpec> {
+        self.background_tasks
+            .iter()
+            .copied()
+            .find(|task| task.kind() == kind)
+    }
+
     pub fn has_background_task(&self, kind: fluxheim_runtime::BackgroundTaskKind) -> bool {
-        self.background_tasks.iter().any(|task| task.kind() == kind)
+        self.background_task(kind).is_some()
     }
 
     pub fn has_public_listener(&self) -> bool {

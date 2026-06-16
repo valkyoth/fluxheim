@@ -103,7 +103,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     harden_proxy_service_http2_options(&mut proxy_service, server_plan.downstream_http2())?;
 
     #[cfg(feature = "cache")]
-    if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::CacheStalePurge) {
+    if let Some(task) =
+        server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::CacheStalePurge)
+    {
         log::info!(
             "cache stale disk purger enabled; interval={}s limit={} batches={}",
             config.cache_purger.interval_secs,
@@ -111,7 +113,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             config.cache_purger.batches
         );
         server.add_service(crate::background::background_service_with_kind(
-            "Cache stale disk purger",
+            task.name(),
             crate::background::BackgroundTaskKind::CacheStalePurge,
             CacheStalePurgerBackgroundService {
                 config: config.cache_purger.clone(),
@@ -129,8 +131,10 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(not(feature = "acme-client"))]
     let _ = &certificate_reloader;
     #[cfg(all(feature = "acme-client", unix))]
-    if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::CertificateReload)
+    if let Some(task) =
+        server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::CertificateReload)
         && let Some(service) = certificate_reload_control_service(
+            task,
             server_plan.certificate_reload_control(),
             certificate_reloader.clone(),
         )?
@@ -162,21 +166,27 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
 
-    if server_plan.has_service(fluxheim_server::ServiceKind::AdminControlPlane)
+    if let Some(admin_service) =
+        server_plan.service(fluxheim_server::ServiceKind::AdminControlPlane)
         && let Some(admin_services) =
             crate::admin::admin_services_from_config(&config, admin_proxy, &server_plan)?
     {
-        log::info!("admin control plane enabled on {}", config.admin.listen);
+        log::info!(
+            "{} enabled on {}",
+            admin_service.name(),
+            config.admin.listen
+        );
         if let Some(watchdog) = admin_services.watchdog {
             log::info!("admin self-healing watchdog enabled");
             server.add_service(watchdog);
         }
         #[cfg(unix)]
-        if server_plan.has_service(fluxheim_server::ServiceKind::AdminOpsSocket)
+        if let Some(ops_service) = server_plan.service(fluxheim_server::ServiceKind::AdminOpsSocket)
             && let Some(ops_socket) = admin_services.ops_socket
         {
             log::info!(
-                "admin read-only ops socket enabled on {}",
+                "{} enabled on {}",
+                ops_service.name(),
                 config.admin.ops_socket.path.display()
             );
             server.add_service(ops_socket);
@@ -189,10 +199,12 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         crate::metrics::init()?;
         crate::metrics::record_config(&config);
         #[cfg(feature = "cache")]
-        if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::CacheMetrics) {
+        if let Some(task) =
+            server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::CacheMetrics)
+        {
             record_cache_runtime_metrics(&metrics_proxy);
             server.add_service(crate::background::background_service_with_kind(
-                "Cache runtime metrics",
+                task.name(),
                 crate::background::BackgroundTaskKind::CacheMetrics,
                 CacheRuntimeMetricsBackgroundService {
                     proxy: metrics_proxy.clone(),
@@ -207,12 +219,14 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         server.add_service(metrics_service);
 
         #[cfg(feature = "metrics-otlp")]
-        if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::MetricsExport) {
+        if let Some(task) =
+            server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::MetricsExport)
+        {
             if let Some(exporter) =
                 crate::metrics_otlp::MetricsOtlpExporter::from_config(&config.metrics.otlp)?
             {
                 server.add_service(crate::background::background_service_with_kind(
-                    "OTLP metrics export",
+                    task.name(),
                     crate::background::BackgroundTaskKind::MetricsExport,
                     MetricsOtlpBackgroundService { exporter },
                 ));
@@ -225,13 +239,15 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     #[cfg(feature = "acme-client")]
-    if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::AcmeRenewal) {
+    if let Some(task) =
+        server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::AcmeRenewal)
+    {
         log::info!(
             "ACME renewal service enabled; interval={}s",
             config.tls.acme.renewal.check_interval_secs
         );
         server.add_service(crate::background::background_service_with_kind(
-            "ACME renewal",
+            task.name(),
             crate::background::BackgroundTaskKind::AcmeRenewal,
             AcmeRenewalBackgroundService {
                 config: config.clone(),
@@ -329,6 +345,7 @@ fn pingora_proxy_protocol_trusted_sources(
 
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
 fn certificate_reload_control_service(
+    task: fluxheim_runtime::BackgroundTaskSpec,
     control_plan: Option<&fluxheim_server::CertificateReloadControlPlan>,
     reloader: Option<DownstreamCertificateReloader>,
 ) -> Result<
@@ -346,7 +363,7 @@ fn certificate_reload_control_service(
     );
 
     Ok(Some(crate::background::background_service_with_kind(
-        "Certificate reload control socket",
+        task.name(),
         crate::background::BackgroundTaskKind::CertificateReload,
         CertificateReloadControlBackgroundService {
             listener,

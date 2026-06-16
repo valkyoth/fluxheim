@@ -203,6 +203,10 @@ fn server_plan_from_config_collects_listener_inventory() {
     );
     assert!(plan.has_service(ServiceKind::ProxyHttp));
     assert!(!plan.has_service(ServiceKind::AdminOpsSocket));
+    assert_eq!(
+        plan.service(ServiceKind::ProxyHttp).map(ServiceSpec::name),
+        Some("Fluxheim HTTP Proxy")
+    );
 }
 
 #[test]
@@ -267,6 +271,11 @@ fn server_plan_from_config_collects_background_task_inventory() {
     );
     assert!(plan.has_background_task(BackgroundTaskKind::CacheMetrics));
     assert!(!plan.has_background_task(BackgroundTaskKind::LoadBalancerRefresh));
+    assert_eq!(
+        plan.background_task(BackgroundTaskKind::AcmeRenewal)
+            .map(BackgroundTaskSpec::name),
+        Some("ACME renewal")
+    );
 }
 
 #[test]

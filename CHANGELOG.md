@@ -54,6 +54,9 @@ behavior when the change improves security or project direction.
 - Move certificate reload control socket policy into `fluxheim-server` so the
   socket path, concurrency cap, and request read timeout are planned outside
   the Pingora runtime adapter.
+- Add server-plan lookup helpers for foreground services and background tasks,
+  then make the root runtime adapter consume planned names when registering
+  services.
 
 ### Tests
 
@@ -76,6 +79,8 @@ behavior when the change improves security or project direction.
   defaults consumed by the runtime adapter.
 - Add a `fluxheim-server` regression test for the certificate reload control
   socket plan and keep the live admin listener smoke in the verification set.
+- Extend `fluxheim-server` tests to cover planned service and background-task
+  lookup by kind.
 
 ## 1.6.6 - 2026-06-16
 
