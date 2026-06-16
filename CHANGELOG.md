@@ -7,6 +7,26 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.7 - 2026-06-16
+
+### Changed
+
+- Start the 1.6.7 server bootstrap cutover by making `fluxheim-server` build
+  a Fluxheim-owned `ServerPlan` from validated config.
+- Move HTTP, HTTPS, admin, metrics, stream, and UDP listener inventory plus
+  process bootstrap settings into `fluxheim-server` plan types while keeping
+  the current Pingora server as the compatibility adapter.
+- Update root runtime to consume the server plan for process configuration and
+  HTTP/metrics listener registration.
+
+### Tests
+
+- Add focused `fluxheim-server` tests for listener inventory, background-task
+  intent, process-plan adaptation, invalid listener handling, and shutdown
+  runner boundaries.
+- Split `fluxheim-server` tests into a separate module so new server code stays
+  under the 500-line modularity target.
+
 ## 1.6.6 - 2026-06-16
 
 ### Changed

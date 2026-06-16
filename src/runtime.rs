@@ -99,7 +99,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         crate::metrics::record_load_balancer_event,
     );
 
-    let pingora_conf = pingora_server_conf(&config);
+    let server_plan = fluxheim_server::ServerPlan::from_config(&config)?;
+    let pingora_conf = pingora_server_conf(&server_plan);
     let mut server = pingora::server::Server::new_with_opt_and_conf(None, pingora_conf);
     server.bootstrap();
 
@@ -134,9 +135,14 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         ));
     }
 
-    for listen in &config.server.listen {
+    for listener in server_plan
+        .listeners()
+        .iter()
+        .filter(|listener| listener.protocol() == fluxheim_server::ListenerProtocol::Http)
+    {
+        let listen = listener.addr().to_string();
         log::info!("proxy listener enabled on {listen}");
-        proxy_service.add_tcp(listen);
+        proxy_service.add_tcp(&listen);
     }
     let certificate_reloader = add_tls_listeners(&mut proxy_service, &config)?;
     apply_downstream_proxy_protocol(&mut proxy_service, &config)?;
@@ -202,8 +208,13 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             ));
         }
         let mut metrics_service = pingora::services::listening::Service::prometheus_http_service();
-        log::info!("metrics listener enabled on {}", config.metrics.listen);
-        metrics_service.add_tcp(&config.metrics.listen);
+        for listener in server_plan.listeners().iter().filter(|listener| {
+            listener.protocol() == fluxheim_server::ListenerProtocol::MetricsHttp
+        }) {
+            let listen = listener.addr().to_string();
+            log::info!("metrics listener enabled on {listen}");
+            metrics_service.add_tcp(&listen);
+        }
         server.add_service(metrics_service);
 
         #[cfg(feature = "metrics-otlp")]
@@ -764,23 +775,24 @@ async fn run_acme_renewal_tick(config: &Config, reloader: Option<&DownstreamCert
 }
 
 #[cfg(feature = "proxy")]
-fn pingora_server_conf(config: &Config) -> pingora::server::configuration::ServerConf {
-    let process = &config.server.process;
+fn pingora_server_conf(
+    plan: &fluxheim_server::ServerPlan,
+) -> pingora::server::configuration::ServerConf {
+    let process = plan.process();
     pingora::server::configuration::ServerConf {
-        daemon: process.daemon,
+        daemon: process.daemon(),
         error_log: process
-            .error_log
-            .as_ref()
+            .error_log()
             .map(|path| path.to_string_lossy().into_owned()),
-        pid_file: process.pid_file.to_string_lossy().into_owned(),
-        upgrade_sock: process.upgrade_sock.to_string_lossy().into_owned(),
-        threads: process.threads,
-        listener_tasks_per_fd: process.listener_tasks_per_fd,
-        work_stealing: process.work_stealing,
-        upstream_keepalive_pool_size: process.upstream_keepalive_pool_size,
-        max_retries: process.max_retries,
-        grace_period_seconds: process.grace_period_seconds,
-        graceful_shutdown_timeout_seconds: process.graceful_shutdown_timeout_seconds,
+        pid_file: process.pid_file().to_string_lossy().into_owned(),
+        upgrade_sock: process.upgrade_sock().to_string_lossy().into_owned(),
+        threads: process.threads(),
+        listener_tasks_per_fd: process.listener_tasks_per_fd(),
+        work_stealing: process.work_stealing(),
+        upstream_keepalive_pool_size: process.upstream_keepalive_pool_size(),
+        max_retries: process.max_retries(),
+        grace_period_seconds: process.grace_period_seconds(),
+        graceful_shutdown_timeout_seconds: process.graceful_shutdown_timeout_seconds(),
         ..pingora::server::configuration::ServerConf::default()
     }
 }
@@ -996,7 +1008,8 @@ mod tests {
             ..crate::config::Config::default()
         };
 
-        let pingora = pingora_server_conf(&config);
+        let plan = fluxheim_server::ServerPlan::from_config(&config).expect("valid server plan");
+        let pingora = pingora_server_conf(&plan);
 
         assert!(pingora.daemon);
         assert_eq!(
@@ -1021,7 +1034,8 @@ mod tests {
 
         let config = crate::config::Config::default();
         let proxy = crate::proxy::FluxProxy::from_config(&config).unwrap();
-        let pingora_conf = std::sync::Arc::new(pingora_server_conf(&config));
+        let plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
+        let pingora_conf = std::sync::Arc::new(pingora_server_conf(&plan));
         let mut service = pingora::proxy::http_proxy_service(&pingora_conf, proxy);
 
         assert!(

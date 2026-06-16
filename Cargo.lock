@@ -1040,6 +1040,7 @@ dependencies = [
  "fluxheim-php-fpm",
  "fluxheim-protocol",
  "fluxheim-runtime",
+ "fluxheim-server",
  "fluxheim-snapshot",
  "fluxheim-stream",
  "fluxheim-tls",
@@ -1212,6 +1213,7 @@ dependencies = [
 name = "fluxheim-server"
 version = "1.6.6"
 dependencies = [
+ "fluxheim-config",
  "fluxheim-runtime",
 ]
 

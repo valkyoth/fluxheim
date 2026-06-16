@@ -8,4 +8,5 @@ publish = false
 description = "Internal Fluxheim listener and server boundary types."
 
 [dependencies]
+fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-runtime = { path = "../fluxheim-runtime" }

@@ -250,6 +250,7 @@ fluxheim-observability = { path = "crates/fluxheim-observability" }
 fluxheim-php-fpm = { path = "crates/fluxheim-php-fpm", optional = true }
 fluxheim-protocol = { path = "crates/fluxheim-protocol" }
 fluxheim-runtime = { path = "crates/fluxheim-runtime" }
+fluxheim-server = { path = "crates/fluxheim-server" }
 fluxheim-snapshot = { path = "crates/fluxheim-snapshot" }
 fluxheim-stream = { path = "crates/fluxheim-stream", optional = true }
 fluxheim-tls = { path = "crates/fluxheim-tls" }
