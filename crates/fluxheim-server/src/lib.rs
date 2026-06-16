@@ -26,6 +26,7 @@ pub use service::{ServiceKind, ServiceSpec};
 #[cfg(unix)]
 pub use unix_listener::replace_private_unix_listener;
 
+use control::certificate_reload_control_plan_from_config;
 use proxy_protocol::proxy_protocol_policy_from_config;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -171,18 +172,6 @@ impl ServerPlan {
             background_tasks: background::background_task_specs_from_config(config),
         })
     }
-}
-
-fn certificate_reload_control_plan_from_config(
-    config: &Config,
-    process: &ProcessSpec,
-) -> Option<CertificateReloadControlPlan> {
-    if config.tls.acme.enabled && config.tls.acme.renewal.reload_after_renewal {
-        return Some(CertificateReloadControlPlan::new(
-            process.certificate_reload_sock().to_path_buf(),
-        ));
-    }
-    None
 }
 
 pub trait ServerRunner {

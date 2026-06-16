@@ -66,6 +66,8 @@ behavior when the change improves security or project direction.
 - Split listener inventory construction into the `fluxheim-server` listener
   module, keeping HTTP, HTTPS, admin, metrics, stream, and UDP listener parsing
   out of the server crate root.
+- Move certificate reload control-plan construction into the focused
+  `fluxheim-server` control module beside the control socket policy type.
 
 ### Tests
 

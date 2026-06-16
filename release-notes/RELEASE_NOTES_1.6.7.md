@@ -23,6 +23,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added load-balancer health-check service intent to `ServerPlan` so load-balancer foreground registration is planned alongside proxy, admin, metrics, stream, and UDP services.
 - Split server service-intent and background-task intent detection into focused `fluxheim-server` modules, reducing the server crate root while preserving the same runtime plan.
 - Split listener inventory construction into the `fluxheim-server` listener module, keeping HTTP, HTTPS, admin, metrics, stream, and UDP listener parsing out of the server crate root.
+- Moved certificate reload control-plan construction into the focused `fluxheim-server` control module beside the control socket policy type.
 
 ## Tests
 
