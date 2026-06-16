@@ -1,4 +1,4 @@
-# Fluxheim 1.6.5
+# Fluxheim 1.6.5 Release Notes
 
 Fluxheim 1.6.5 continues the Pingora-exit line with the first dedicated
 header-policy crate boundary. Runtime behavior is intended to remain unchanged:

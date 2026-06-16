@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.4
+Version:        1.6.5
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,16 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue Jun 16 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.5-1
+- Continue the Pingora-exit line with the first dedicated header-policy crate
+  boundary.
+- Move pure header rewrite, forwarded-client-IP, hop-by-hop, and repeated
+  header joining helpers into fluxheim-headers.
+- Move downstream PROXY protocol parsers into fluxheim-protocol and harden
+  trusted-source CIDR validation.
+- Broaden Pingora boundary policy checks and gate client-IP parsing helpers in
+  privacy-mode builds.
+
 * Mon Jun 15 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.4-1
 - Continue the Pingora-exit line with Fluxheim-owned background runtime
   primitives in fluxheim-runtime.

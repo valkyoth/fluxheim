@@ -7,6 +7,27 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.5 - 2026-06-16
+
+### Changed
+
+- Continue the 1.6 Pingora-exit line with the first dedicated
+  `fluxheim-headers` boundary for header policy helpers that do not need
+  Pingora session or header types.
+- Move response `Location`, `Refresh`, and `Set-Cookie` rewrite algorithms,
+  spoofable client-IP header constants, trusted X-Forwarded-For restoration,
+  `Forwarded` header construction, hop-by-hop request header policy, and
+  repeated-header joining helpers into `fluxheim-headers`.
+- Move stream downstream PROXY protocol v1/v2 byte parsers and size constants
+  into `fluxheim-protocol`.
+- Broaden the Pingora boundary policy gate so direct `pingora::` usage remains
+  documented at adapter boundaries during the 1.6 removal line.
+- Gate privacy-sensitive forwarded-client-IP parsing helpers in privacy-mode
+  builds and reject PROXY-protocol trusted CIDR prefixes that exceed the
+  address family width.
+- Align access-policy and header-forwarding X-Forwarded-For parsing so both
+  skip malformed hops and continue walking the trusted chain.
+
 ## 1.6.4 - 2026-06-15
 
 ### Changed
