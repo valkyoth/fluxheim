@@ -2013,7 +2013,10 @@ where
     S: Send + Sync + 'static,
 {
     if server_plan
-        .listener_addrs(fluxheim_server::ListenerProtocol::Https)
+        .service_listener_addrs_for_protocol(
+            fluxheim_server::ServiceKind::ProxyHttp,
+            fluxheim_server::ListenerProtocol::Https,
+        )
         .is_empty()
     {
         Ok(None)
