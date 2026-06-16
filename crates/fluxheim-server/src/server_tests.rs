@@ -1,5 +1,5 @@
 use super::*;
-use fluxheim_config::{StreamRouteConfig, UdpRouteConfig};
+use fluxheim_config::{CacheConfig, RouteConfig, StreamRouteConfig, UdpRouteConfig, VhostConfig};
 use fluxheim_runtime::{BackgroundTaskKind, ShutdownReason, ShutdownState};
 
 struct StaticShutdown(ShutdownState);
@@ -166,6 +166,61 @@ fn server_plan_from_config_collects_background_task_inventory() {
     );
     assert!(plan.has_background_task(BackgroundTaskKind::CacheMetrics));
     assert!(!plan.has_background_task(BackgroundTaskKind::LoadBalancerRefresh));
+}
+
+#[test]
+fn server_plan_schedules_cache_metrics_for_route_cache_policy() {
+    let mut config = Config::default();
+    config.cache.enabled = false;
+    config.metrics.enabled = true;
+    config.vhosts = vec![VhostConfig {
+        name: "cache.test".to_owned(),
+        hosts: vec!["cache.test".to_owned()],
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: Default::default(),
+        proxy: Default::default(),
+        cache: CacheConfig::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: Default::default(),
+        routes: vec![RouteConfig {
+            name: "asset".to_owned(),
+            path_exact: Some("/asset.css".to_owned()),
+            path_prefix: None,
+            path_regex: None,
+            methods: Vec::new(),
+            fallback: false,
+            https_redirect_exempt: false,
+            strip_prefix: None,
+            rewrite_prefix: None,
+            rewrite_template: None,
+            max_request_body_bytes: None,
+            access: Default::default(),
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            grpc: Default::default(),
+            redirect: None,
+            proxy: None,
+            web: None,
+            php: None,
+            cache: Some(CacheConfig {
+                enabled: true,
+                ..CacheConfig::default()
+            }),
+            compression: None,
+            headers: Default::default(),
+        }],
+    }];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert!(plan.has_background_task(BackgroundTaskKind::CacheMetrics));
 }
 
 #[test]

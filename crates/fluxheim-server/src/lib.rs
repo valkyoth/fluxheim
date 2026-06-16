@@ -302,7 +302,7 @@ fn background_task_specs_from_config(config: &Config) -> Vec<BackgroundTaskSpec>
         ));
     }
     if config.metrics.enabled {
-        if config.cache.enabled {
+        if any_cache_policy_enabled(config) {
             tasks.push(BackgroundTaskSpec::new(
                 "Cache runtime metrics",
                 fluxheim_runtime::BackgroundTaskKind::CacheMetrics,
@@ -332,6 +332,18 @@ fn background_task_specs_from_config(config: &Config) -> Vec<BackgroundTaskSpec>
     }
 
     tasks
+}
+
+fn any_cache_policy_enabled(config: &Config) -> bool {
+    config.cache.enabled
+        || config
+            .vhosts
+            .iter()
+            .any(|vhost| vhost.cache.enabled || vhost.routes.iter().any(route_cache_enabled))
+}
+
+fn route_cache_enabled(route: &fluxheim_config::RouteConfig) -> bool {
+    route.cache.as_ref().is_some_and(|cache| cache.enabled)
 }
 
 #[cfg(test)]
