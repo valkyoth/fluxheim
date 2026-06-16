@@ -164,19 +164,24 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     #[cfg(feature = "stream-proxy")]
-    for stream_service in crate::stream_proxy::stream_services_from_config(&config)? {
-        log::info!("stream proxy service enabled");
-        server.add_service(stream_service);
+    if server_plan.has_service(fluxheim_server::ServiceKind::StreamProxy) {
+        for stream_service in crate::stream_proxy::stream_services_from_config(&config)? {
+            log::info!("stream proxy service enabled");
+            server.add_service(stream_service);
+        }
     }
 
     #[cfg(feature = "udp-proxy")]
-    for udp_service in crate::udp_proxy::udp_services_from_config(&config)? {
-        log::info!("UDP proxy service enabled");
-        server.add_service(udp_service);
+    if server_plan.has_service(fluxheim_server::ServiceKind::UdpProxy) {
+        for udp_service in crate::udp_proxy::udp_services_from_config(&config)? {
+            log::info!("UDP proxy service enabled");
+            server.add_service(udp_service);
+        }
     }
 
-    if let Some(admin_services) =
-        crate::admin::admin_services_from_config(&config, admin_proxy, &server_plan)?
+    if server_plan.has_service(fluxheim_server::ServiceKind::AdminControlPlane)
+        && let Some(admin_services) =
+            crate::admin::admin_services_from_config(&config, admin_proxy, &server_plan)?
     {
         log::info!("admin control plane enabled on {}", config.admin.listen);
         if let Some(watchdog) = admin_services.watchdog {
@@ -184,7 +189,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             server.add_service(watchdog);
         }
         #[cfg(unix)]
-        if let Some(ops_socket) = admin_services.ops_socket {
+        if server_plan.has_service(fluxheim_server::ServiceKind::AdminOpsSocket)
+            && let Some(ops_socket) = admin_services.ops_socket
+        {
             log::info!(
                 "admin read-only ops socket enabled on {}",
                 config.admin.ops_socket.path.display()
@@ -195,7 +202,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     #[cfg(feature = "metrics")]
-    if config.metrics.enabled {
+    if server_plan.has_service(fluxheim_server::ServiceKind::MetricsHttp) {
         crate::metrics::init()?;
         crate::metrics::record_config(&config);
         #[cfg(feature = "cache")]

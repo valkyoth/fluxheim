@@ -21,6 +21,9 @@ behavior when the change improves security or project direction.
 - Update root background-service registration gates to consume Fluxheim
   server-plan task metadata for cache purging, cache metrics, OTLP metrics
   export, ACME renewal, and certificate reload control.
+- Add Fluxheim-owned foreground service intent metadata for proxy, admin, ops
+  socket, metrics, stream proxy, and UDP proxy service registration, then make
+  the root Pingora adapter consume those gates for non-proxy services.
 
 ### Tests
 
@@ -29,6 +32,8 @@ behavior when the change improves security or project direction.
   runner boundaries.
 - Add a live admin-listener smoke test that starts Fluxheim and verifies both
   the normal HTTP listener and the admin health/status endpoints.
+- Verify plan-gated foreground service registration with live admin,
+  observability, stream proxy, and UDP proxy smokes.
 - Split `fluxheim-server` tests into a separate module so new server code stays
   under the 500-line modularity target.
 

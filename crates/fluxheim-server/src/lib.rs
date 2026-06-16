@@ -21,6 +21,36 @@ pub enum ListenerProtocol {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ServiceKind {
+    AdminControlPlane,
+    AdminOpsSocket,
+    MetricsHttp,
+    ProxyHttp,
+    StreamProxy,
+    UdpProxy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ServiceSpec {
+    name: &'static str,
+    kind: ServiceKind,
+}
+
+impl ServiceSpec {
+    pub const fn new(name: &'static str, kind: ServiceKind) -> Self {
+        Self { name, kind }
+    }
+
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+
+    pub const fn kind(self) -> ServiceKind {
+        self.kind
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ListenerSpec {
     addr: SocketAddr,
     protocol: ListenerProtocol,
@@ -62,6 +92,7 @@ impl ListenerSpec {
 pub struct ServerPlan {
     process: ProcessSpec,
     listeners: Vec<ListenerSpec>,
+    services: Vec<ServiceSpec>,
     background_tasks: Vec<BackgroundTaskSpec>,
 }
 
@@ -70,6 +101,7 @@ impl ServerPlan {
         Self {
             process: ProcessSpec::default(),
             listeners,
+            services: Vec::new(),
             background_tasks,
         }
     }
@@ -77,11 +109,13 @@ impl ServerPlan {
     pub fn with_process(
         process: ProcessSpec,
         listeners: Vec<ListenerSpec>,
+        services: Vec<ServiceSpec>,
         background_tasks: Vec<BackgroundTaskSpec>,
     ) -> Self {
         Self {
             process,
             listeners,
+            services,
             background_tasks,
         }
     }
@@ -92,6 +126,14 @@ impl ServerPlan {
 
     pub fn listeners(&self) -> &[ListenerSpec] {
         &self.listeners
+    }
+
+    pub fn services(&self) -> &[ServiceSpec] {
+        &self.services
+    }
+
+    pub fn has_service(&self, kind: ServiceKind) -> bool {
+        self.services.iter().any(|service| service.kind() == kind)
     }
 
     pub fn background_tasks(&self) -> &[BackgroundTaskSpec] {
@@ -160,6 +202,7 @@ impl ServerPlan {
         Ok(Self {
             process: ProcessSpec::from_config(config),
             listeners,
+            services: service_specs_from_config(config),
             background_tasks: background_task_specs_from_config(config),
         })
     }
@@ -290,6 +333,49 @@ fn parse_listener(value: &str) -> Result<SocketAddr, ServerPlanError> {
         .map_err(|_| ServerPlanError::InvalidListenerAddress {
             address: value.to_owned(),
         })
+}
+
+fn service_specs_from_config(config: &Config) -> Vec<ServiceSpec> {
+    let mut services = Vec::new();
+
+    if !config.server.listen.is_empty() || !config.server.tls_listen.is_empty() {
+        services.push(ServiceSpec::new(
+            "Fluxheim HTTP Proxy",
+            ServiceKind::ProxyHttp,
+        ));
+    }
+    if config.admin.enabled {
+        services.push(ServiceSpec::new(
+            "Fluxheim Admin Control Plane",
+            ServiceKind::AdminControlPlane,
+        ));
+        if config.admin.ops_socket.enabled {
+            services.push(ServiceSpec::new(
+                "Fluxheim Local Ops Socket",
+                ServiceKind::AdminOpsSocket,
+            ));
+        }
+    }
+    if config.metrics.enabled {
+        services.push(ServiceSpec::new(
+            "Fluxheim Metrics HTTP",
+            ServiceKind::MetricsHttp,
+        ));
+    }
+    if config.stream.enabled {
+        services.push(ServiceSpec::new(
+            "Fluxheim Stream Proxy",
+            ServiceKind::StreamProxy,
+        ));
+    }
+    if config.udp.enabled {
+        services.push(ServiceSpec::new(
+            "Fluxheim UDP Proxy",
+            ServiceKind::UdpProxy,
+        ));
+    }
+
+    services
 }
 
 fn background_task_specs_from_config(config: &Config) -> Vec<BackgroundTaskSpec> {

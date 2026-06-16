@@ -136,6 +136,23 @@ fn server_plan_from_config_collects_listener_inventory() {
             .skip(2)
             .all(|listener| !listener.proxy_protocol_enabled())
     );
+    let services = plan
+        .services()
+        .iter()
+        .map(|service| service.kind())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        services,
+        vec![
+            ServiceKind::ProxyHttp,
+            ServiceKind::AdminControlPlane,
+            ServiceKind::MetricsHttp,
+            ServiceKind::StreamProxy,
+            ServiceKind::UdpProxy,
+        ]
+    );
+    assert!(plan.has_service(ServiceKind::ProxyHttp));
+    assert!(!plan.has_service(ServiceKind::AdminOpsSocket));
 }
 
 #[test]
