@@ -143,11 +143,15 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     #[cfg(feature = "load-balancer")]
-    for service in load_balancer_services {
-        log::info!("load-balancer health-check service enabled");
-        server.add_service(crate::load_balancer::PingoraLoadBalancerService::new(
-            service,
-        ));
+    if let Some(load_balancer_service_spec) =
+        server_plan.service(fluxheim_server::ServiceKind::LoadBalancerHealthChecks)
+    {
+        for service in load_balancer_services {
+            log::info!("{} enabled", load_balancer_service_spec.name());
+            server.add_service(crate::load_balancer::PingoraLoadBalancerService::new(
+                service,
+            ));
+        }
     }
 
     #[cfg(feature = "stream-proxy")]

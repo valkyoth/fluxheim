@@ -6,7 +6,7 @@
 
 use std::net::SocketAddr;
 
-use fluxheim_config::{AcmeAutomationMode, Config, DownstreamProxyProtocol};
+use fluxheim_config::{AcmeAutomationMode, Config, DownstreamProxyProtocol, ProxyConfig};
 use fluxheim_runtime::{BackgroundTaskSpec, ShutdownView};
 
 mod control;
@@ -281,6 +281,12 @@ fn service_specs_from_config(config: &Config) -> Vec<ServiceSpec> {
             ServiceKind::ProxyHttp,
         ));
     }
+    if any_load_balancer_pool_configured(config) {
+        services.push(ServiceSpec::new(
+            "Fluxheim Load Balancer Health Checks",
+            ServiceKind::LoadBalancerHealthChecks,
+        ));
+    }
     if config.admin.enabled {
         services.push(ServiceSpec::new(
             "Fluxheim Admin Control Plane",
@@ -367,6 +373,29 @@ fn any_cache_policy_enabled(config: &Config) -> bool {
 
 fn route_cache_enabled(route: &fluxheim_config::RouteConfig) -> bool {
     route.cache.as_ref().is_some_and(|cache| cache.enabled)
+}
+
+fn any_load_balancer_pool_configured(config: &Config) -> bool {
+    if config.vhosts.is_empty() {
+        return load_balancer_pool_configured(&config.proxy);
+    }
+
+    config.vhosts.iter().any(|vhost| {
+        load_balancer_pool_configured(&vhost.proxy)
+            || vhost.routes.iter().any(|route| {
+                route
+                    .proxy
+                    .as_ref()
+                    .is_some_and(load_balancer_pool_configured)
+            })
+    })
+}
+
+fn load_balancer_pool_configured(proxy: &ProxyConfig) -> bool {
+    proxy.upstreams.len() >= 2
+        || proxy.upstreams_file.is_some()
+        || proxy.upstreams_http_url.is_some()
+        || proxy.upstream_dns_refresh_secs.is_some()
 }
 
 #[cfg(test)]

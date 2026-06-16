@@ -210,6 +210,68 @@ fn server_plan_from_config_collects_listener_inventory() {
 }
 
 #[test]
+fn server_plan_collects_load_balancer_service_intent() {
+    let mut config = Config::default();
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert_eq!(
+        plan.service(ServiceKind::LoadBalancerHealthChecks)
+            .map(ServiceSpec::name),
+        Some("Fluxheim Load Balancer Health Checks")
+    );
+
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
+    config.vhosts = vec![VhostConfig {
+        name: "route-lb.test".to_owned(),
+        hosts: vec!["route-lb.test".to_owned()],
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: Default::default(),
+        proxy: Default::default(),
+        cache: CacheConfig::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: Default::default(),
+        routes: vec![RouteConfig {
+            name: "api".to_owned(),
+            path_exact: None,
+            path_prefix: Some("/api/".to_owned()),
+            path_regex: None,
+            methods: Vec::new(),
+            fallback: false,
+            https_redirect_exempt: false,
+            strip_prefix: None,
+            rewrite_prefix: None,
+            rewrite_template: None,
+            max_request_body_bytes: None,
+            access: Default::default(),
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            grpc: Default::default(),
+            redirect: None,
+            proxy: Some(fluxheim_config::ProxyConfig {
+                upstreams_http_url: Some("https://discovery.example/upstreams".to_owned()),
+                ..Default::default()
+            }),
+            web: None,
+            php: None,
+            cache: None,
+            compression: None,
+            headers: Default::default(),
+        }],
+    }];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert!(plan.has_service(ServiceKind::LoadBalancerHealthChecks));
+}
+
+#[test]
 fn server_plan_parses_proxy_protocol_trusted_sources() {
     let mut config = Config::default();
     config.server.proxy_protocol = DownstreamProxyProtocol::V1;

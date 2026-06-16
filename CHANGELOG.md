@@ -57,6 +57,9 @@ behavior when the change improves security or project direction.
 - Add server-plan lookup helpers for foreground services and background tasks,
   then make the root runtime adapter consume planned names when registering
   services.
+- Add load-balancer health-check service intent to `ServerPlan` so load-balancer
+  foreground registration is planned alongside proxy, admin, metrics, stream,
+  and UDP services.
 
 ### Tests
 
@@ -81,6 +84,8 @@ behavior when the change improves security or project direction.
   socket plan and keep the live admin listener smoke in the verification set.
 - Extend `fluxheim-server` tests to cover planned service and background-task
   lookup by kind.
+- Add a `fluxheim-server` regression test for load-balancer service intent and
+  verify the runtime path with the live load-balancer smoke.
 
 ## 1.6.6 - 2026-06-16
 

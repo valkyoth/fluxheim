@@ -2,6 +2,7 @@
 pub enum ServiceKind {
     AdminControlPlane,
     AdminOpsSocket,
+    LoadBalancerHealthChecks,
     MetricsHttp,
     ProxyHttp,
     StreamProxy,

@@ -20,6 +20,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Moved downstream HTTP/2 hardening limits into a Pingora-neutral `fluxheim-server` policy plan, with the root runtime only adapting those values into Pingora `H2Options`.
 - Moved certificate reload control socket policy into `fluxheim-server` so the socket path, concurrency cap, and request read timeout are planned outside the Pingora runtime adapter.
 - Added server-plan lookup helpers for foreground services and background tasks, then made the root runtime adapter consume planned names when registering services.
+- Added load-balancer health-check service intent to `ServerPlan` so load-balancer foreground registration is planned alongside proxy, admin, metrics, stream, and UDP services.
 
 ## Tests
 
@@ -32,6 +33,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added a `fluxheim-server` regression test for the downstream HTTP/2 hardening defaults consumed by the runtime adapter.
 - Added a `fluxheim-server` regression test for the certificate reload control socket plan and kept the live admin listener smoke in the verification set.
 - Extended `fluxheim-server` tests to cover planned service and background-task lookup by kind.
+- Added a `fluxheim-server` regression test for load-balancer service intent and verified the runtime path with the live load-balancer smoke.
 
 ## Verification
 
