@@ -6,9 +6,10 @@
 
 use std::net::SocketAddr;
 
-use fluxheim_config::{AcmeAutomationMode, Config, DownstreamProxyProtocol, ProxyConfig};
+use fluxheim_config::{Config, DownstreamProxyProtocol};
 use fluxheim_runtime::{BackgroundTaskSpec, ShutdownView};
 
+mod background;
 mod control;
 mod http2;
 mod listener;
@@ -216,8 +217,8 @@ impl ServerPlan {
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control,
             listeners,
-            services: service_specs_from_config(config),
-            background_tasks: background_task_specs_from_config(config),
+            services: service::service_specs_from_config(config),
+            background_tasks: background::background_task_specs_from_config(config),
         })
     }
 }
@@ -270,132 +271,6 @@ fn parse_listener(value: &str) -> Result<SocketAddr, ServerPlanError> {
         .map_err(|_| ServerPlanError::InvalidListenerAddress {
             address: value.to_owned(),
         })
-}
-
-fn service_specs_from_config(config: &Config) -> Vec<ServiceSpec> {
-    let mut services = Vec::new();
-
-    if !config.server.listen.is_empty() || !config.server.tls_listen.is_empty() {
-        services.push(ServiceSpec::new(
-            "Fluxheim HTTP Proxy",
-            ServiceKind::ProxyHttp,
-        ));
-    }
-    if any_load_balancer_pool_configured(config) {
-        services.push(ServiceSpec::new(
-            "Fluxheim Load Balancer Health Checks",
-            ServiceKind::LoadBalancerHealthChecks,
-        ));
-    }
-    if config.admin.enabled {
-        services.push(ServiceSpec::new(
-            "Fluxheim Admin Control Plane",
-            ServiceKind::AdminControlPlane,
-        ));
-        if config.admin.ops_socket.enabled {
-            services.push(ServiceSpec::new(
-                "Fluxheim Local Ops Socket",
-                ServiceKind::AdminOpsSocket,
-            ));
-        }
-    }
-    if config.metrics.enabled {
-        services.push(ServiceSpec::new(
-            "Fluxheim Metrics HTTP",
-            ServiceKind::MetricsHttp,
-        ));
-    }
-    if config.stream.enabled {
-        services.push(ServiceSpec::new(
-            "Fluxheim Stream Proxy",
-            ServiceKind::StreamProxy,
-        ));
-    }
-    if config.udp.enabled {
-        services.push(ServiceSpec::new(
-            "Fluxheim UDP Proxy",
-            ServiceKind::UdpProxy,
-        ));
-    }
-
-    services
-}
-
-fn background_task_specs_from_config(config: &Config) -> Vec<BackgroundTaskSpec> {
-    let mut tasks = Vec::new();
-
-    if config.cache_purger.enabled {
-        tasks.push(BackgroundTaskSpec::new(
-            "Cache stale disk purger",
-            fluxheim_runtime::BackgroundTaskKind::CacheStalePurge,
-        ));
-    }
-    if config.metrics.enabled {
-        if any_cache_policy_enabled(config) {
-            tasks.push(BackgroundTaskSpec::new(
-                "Cache runtime metrics",
-                fluxheim_runtime::BackgroundTaskKind::CacheMetrics,
-            ));
-        }
-        if config.metrics.otlp.enabled {
-            tasks.push(BackgroundTaskSpec::new(
-                "OTLP metrics export",
-                fluxheim_runtime::BackgroundTaskKind::MetricsExport,
-            ));
-        }
-    }
-    if config.tls.acme.enabled
-        && config.tls.acme.automation == AcmeAutomationMode::Background
-        && config.tls.acme.renewal.enabled
-    {
-        tasks.push(BackgroundTaskSpec::new(
-            "ACME renewal",
-            fluxheim_runtime::BackgroundTaskKind::AcmeRenewal,
-        ));
-    }
-    if config.tls.acme.enabled && config.tls.acme.renewal.reload_after_renewal {
-        tasks.push(BackgroundTaskSpec::new(
-            "Certificate reload control socket",
-            fluxheim_runtime::BackgroundTaskKind::CertificateReload,
-        ));
-    }
-
-    tasks
-}
-
-fn any_cache_policy_enabled(config: &Config) -> bool {
-    config.cache.enabled
-        || config
-            .vhosts
-            .iter()
-            .any(|vhost| vhost.cache.enabled || vhost.routes.iter().any(route_cache_enabled))
-}
-
-fn route_cache_enabled(route: &fluxheim_config::RouteConfig) -> bool {
-    route.cache.as_ref().is_some_and(|cache| cache.enabled)
-}
-
-fn any_load_balancer_pool_configured(config: &Config) -> bool {
-    if config.vhosts.is_empty() {
-        return load_balancer_pool_configured(&config.proxy);
-    }
-
-    config.vhosts.iter().any(|vhost| {
-        load_balancer_pool_configured(&vhost.proxy)
-            || vhost.routes.iter().any(|route| {
-                route
-                    .proxy
-                    .as_ref()
-                    .is_some_and(load_balancer_pool_configured)
-            })
-    })
-}
-
-fn load_balancer_pool_configured(proxy: &ProxyConfig) -> bool {
-    proxy.upstreams.len() >= 2
-        || proxy.upstreams_file.is_some()
-        || proxy.upstreams_http_url.is_some()
-        || proxy.upstream_dns_refresh_secs.is_some()
 }
 
 #[cfg(test)]

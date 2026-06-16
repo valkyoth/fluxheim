@@ -60,6 +60,9 @@ behavior when the change improves security or project direction.
 - Add load-balancer health-check service intent to `ServerPlan` so load-balancer
   foreground registration is planned alongside proxy, admin, metrics, stream,
   and UDP services.
+- Split server service-intent and background-task intent detection into focused
+  `fluxheim-server` modules, reducing the server crate root while preserving the
+  same runtime plan.
 
 ### Tests
 
@@ -86,6 +89,8 @@ behavior when the change improves security or project direction.
   lookup by kind.
 - Add a `fluxheim-server` regression test for load-balancer service intent and
   verify the runtime path with the live load-balancer smoke.
+- Keep the split server intent modules covered by `cargo test -p
+  fluxheim-server` and the release-gated modularity policy check.
 
 ## 1.6.6 - 2026-06-16
 
