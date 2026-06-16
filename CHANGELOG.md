@@ -78,6 +78,8 @@ behavior when the change improves security or project direction.
 - Add a background-service adapter helper that consumes planned
   `BackgroundTaskSpec` values directly, removing duplicated task kind/name
   wiring from plan-driven runtime services.
+- Update admin service construction to consume planned control-plane and
+  ops-socket service names from `ServerPlan`.
 
 ### Tests
 

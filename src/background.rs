@@ -4,8 +4,10 @@ use pingora::server::ListenFds;
 use pingora::server::ShutdownWatch;
 use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 
+#[cfg(any(feature = "cache", feature = "metrics-otlp", feature = "acme-client"))]
+pub(crate) use fluxheim_runtime::BackgroundTaskSpec;
 pub(crate) use fluxheim_runtime::{
-    BackgroundTaskKind, BackgroundTaskSpec, FluxBackgroundReady, FluxBackgroundTask, FluxShutdown,
+    BackgroundTaskKind, FluxBackgroundReady, FluxBackgroundTask, FluxShutdown,
 };
 
 pub(crate) struct FluxBackgroundService<T>
@@ -37,6 +39,7 @@ where
     FluxBackgroundService::with_kind(name, kind, task)
 }
 
+#[cfg(any(feature = "cache", feature = "metrics-otlp", feature = "acme-client"))]
 pub(crate) fn background_service_for_spec<T>(
     spec: BackgroundTaskSpec,
     task: T,

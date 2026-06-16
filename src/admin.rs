@@ -384,6 +384,10 @@ pub(crate) fn admin_services_from_config(
     else {
         return Err("admin.enabled requires an admin listener in the server plan".into());
     };
+    let admin_service_name = server_plan
+        .service(fluxheim_server::ServiceKind::AdminControlPlane)
+        .map(fluxheim_server::ServiceSpec::name)
+        .ok_or("admin.enabled requires an admin service in the server plan")?;
 
     let app = AdminApp::from_config(config, proxy)?;
     let watchdog = if app.self_healing_enabled {
@@ -396,17 +400,21 @@ pub(crate) fn admin_services_from_config(
         None
     };
     let mut service = Service::new(
-        "Fluxheim Admin Control Plane".to_owned(),
+        admin_service_name.to_owned(),
         HttpServer::new_app(app.clone()),
     );
     service.add_tcp(&admin_listener);
     #[cfg(unix)]
     let ops_socket = if config.admin.ops_socket.enabled {
+        let ops_service_name = server_plan
+            .service(fluxheim_server::ServiceKind::AdminOpsSocket)
+            .map(fluxheim_server::ServiceSpec::name)
+            .ok_or("admin.ops_socket.enabled requires an ops socket service in the server plan")?;
         let Some(path) = config.admin.ops_socket.path.to_str() else {
             return Err("admin.ops_socket.path must be valid UTF-8".into());
         };
         let mut ops_service = Service::new(
-            "Fluxheim Local Ops Socket".to_owned(),
+            ops_service_name.to_owned(),
             HttpServer::new_app(AdminOpsApp {
                 app: app.clone(),
                 require_bearer_token: config.admin.ops_socket.require_bearer_token,
