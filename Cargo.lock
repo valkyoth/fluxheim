@@ -1214,6 +1214,7 @@ name = "fluxheim-server"
 version = "1.6.6"
 dependencies = [
  "fluxheim-config",
+ "fluxheim-protocol",
  "fluxheim-runtime",
 ]
 

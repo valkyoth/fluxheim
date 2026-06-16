@@ -21,7 +21,7 @@ use crate::config::AcmeChallenge;
 use crate::config::CachePurgerConfig;
 use crate::config::Config;
 #[cfg(feature = "proxy")]
-use crate::config::{DownstreamProxyProtocol, LoggingFormat, LoggingTarget};
+use crate::config::{LoggingFormat, LoggingTarget};
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
 const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
@@ -141,7 +141,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         proxy_service.add_tcp(&listen);
     }
     let certificate_reloader = add_tls_listeners(&mut proxy_service, &config, &server_plan)?;
-    apply_downstream_proxy_protocol(&mut proxy_service, &config)?;
+    apply_downstream_proxy_protocol(&mut proxy_service, &server_plan)?;
     #[cfg(not(feature = "acme-client"))]
     let _ = &certificate_reloader;
     #[cfg(all(feature = "acme-client", unix))]
@@ -290,33 +290,29 @@ where
 #[cfg(feature = "proxy")]
 fn apply_downstream_proxy_protocol<S>(
     service: &mut pingora::services::listening::Service<S>,
-    config: &Config,
+    server_plan: &fluxheim_server::ServerPlan,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     S: Send + Sync + 'static,
 {
-    if config.server.proxy_protocol == DownstreamProxyProtocol::Off {
-        return Ok(());
-    }
-    let trusted_sources = config
-        .server
-        .trusted_proxies
-        .iter()
-        .map(|source| pingora_proxy_protocol_trusted_source(source))
-        .collect::<Result<Vec<_>, _>>()?;
-    log::info!(
-        "downstream PROXY protocol {:?} receive enabled for {} trusted source(s)",
-        config.server.proxy_protocol,
-        trusted_sources.len()
-    );
-    match config.server.proxy_protocol {
-        DownstreamProxyProtocol::Off => {}
-        DownstreamProxyProtocol::V1 => {
+    match server_plan.proxy_protocol() {
+        fluxheim_server::ProxyProtocolPolicy::Off => {}
+        fluxheim_server::ProxyProtocolPolicy::V1 { trusted_sources } => {
+            let trusted_sources = pingora_proxy_protocol_trusted_sources(trusted_sources);
+            log::info!(
+                "downstream PROXY protocol v1 receive enabled for {} trusted source(s)",
+                trusted_sources.len()
+            );
             service.set_proxy_protocol_v1(pingora::listeners::ProxyProtocolConfig::v1(
                 trusted_sources,
             ));
         }
-        DownstreamProxyProtocol::V2 => {
+        fluxheim_server::ProxyProtocolPolicy::V2 { trusted_sources } => {
+            let trusted_sources = pingora_proxy_protocol_trusted_sources(trusted_sources);
+            log::info!(
+                "downstream PROXY protocol v2 receive enabled for {} trusted source(s)",
+                trusted_sources.len()
+            );
             service.set_proxy_protocol_v2(pingora::listeners::ProxyProtocolConfig::v2(
                 trusted_sources,
             ));
@@ -326,17 +322,23 @@ where
 }
 
 #[cfg(feature = "proxy")]
-fn pingora_proxy_protocol_trusted_source(
-    value: &str,
-) -> Result<pingora::listeners::ProxyProtocolTrustedSource, Box<dyn Error + Send + Sync>> {
-    match fluxheim_protocol::parse_proxy_protocol_trusted_source(value)? {
-        fluxheim_protocol::ProxyProtocolTrustedSource::Ip(address) => {
-            Ok(pingora::listeners::ProxyProtocolTrustedSource::Ip(address))
-        }
-        fluxheim_protocol::ProxyProtocolTrustedSource::Cidr { network, prefix } => {
-            Ok(pingora::listeners::ProxyProtocolTrustedSource::Cidr { network, prefix })
-        }
-    }
+fn pingora_proxy_protocol_trusted_sources(
+    sources: &[fluxheim_server::ProxyProtocolTrustedSource],
+) -> Vec<pingora::listeners::ProxyProtocolTrustedSource> {
+    sources
+        .iter()
+        .map(|source| match source {
+            fluxheim_server::ProxyProtocolTrustedSource::Ip(address) => {
+                pingora::listeners::ProxyProtocolTrustedSource::Ip(*address)
+            }
+            fluxheim_server::ProxyProtocolTrustedSource::Cidr { network, prefix } => {
+                pingora::listeners::ProxyProtocolTrustedSource::Cidr {
+                    network: *network,
+                    prefix: *prefix,
+                }
+            }
+        })
+        .collect()
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]

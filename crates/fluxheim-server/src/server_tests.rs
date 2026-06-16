@@ -144,6 +144,12 @@ fn server_plan_from_config_collects_listener_inventory() {
         plan.listener_addrs(ListenerProtocol::Https),
         vec!["127.0.0.1:8443".to_owned()]
     );
+    assert_eq!(
+        plan.proxy_protocol(),
+        &ProxyProtocolPolicy::V2 {
+            trusted_sources: Vec::new()
+        }
+    );
     let services = plan
         .services()
         .iter()
@@ -161,6 +167,40 @@ fn server_plan_from_config_collects_listener_inventory() {
     );
     assert!(plan.has_service(ServiceKind::ProxyHttp));
     assert!(!plan.has_service(ServiceKind::AdminOpsSocket));
+}
+
+#[test]
+fn server_plan_parses_proxy_protocol_trusted_sources() {
+    let mut config = Config::default();
+    config.server.proxy_protocol = DownstreamProxyProtocol::V1;
+    config.server.trusted_proxies = vec!["127.0.0.1/32".to_owned(), "::1".to_owned()];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(
+        plan.proxy_protocol(),
+        &ProxyProtocolPolicy::V1 {
+            trusted_sources: vec![
+                ProxyProtocolTrustedSource::Cidr {
+                    network: "127.0.0.1".parse().unwrap(),
+                    prefix: 32,
+                },
+                ProxyProtocolTrustedSource::Ip("::1".parse().unwrap()),
+            ],
+        }
+    );
+}
+
+#[test]
+fn server_plan_rejects_invalid_proxy_protocol_trusted_sources() {
+    let mut config = Config::default();
+    config.server.proxy_protocol = DownstreamProxyProtocol::V1;
+    config.server.trusted_proxies = vec!["not-a-source".to_owned()];
+
+    assert!(matches!(
+        ServerPlan::from_config(&config),
+        Err(ServerPlanError::InvalidProxyProtocolTrustedSource { .. })
+    ));
 }
 
 #[test]

@@ -13,6 +13,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added an explicit server-plan runtime adapter marker so the current Pingora compatibility runtime is a named adapter boundary before the native server cutover.
 - Added server-plan listener lookup helpers so runtime/admin adapters consume HTTP, HTTPS, admin, and metrics listener addresses through `fluxheim-server`.
 - Removed duplicated downstream TLS listener-address storage from `fluxheim-tls`; HTTPS listener addresses now come from the server plan while TLS planning owns certificate selection and policy.
+- Moved downstream PROXY protocol listener policy and trusted-source parsing into `fluxheim-server`, leaving the root runtime as a Pingora listener-policy adapter.
 
 ## Tests
 

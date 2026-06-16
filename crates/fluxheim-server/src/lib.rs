@@ -15,6 +15,32 @@ pub enum RuntimeAdapterKind {
     PingoraCompatibility,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProxyProtocolTrustedSource {
+    Cidr {
+        network: std::net::IpAddr,
+        prefix: u8,
+    },
+    Ip(std::net::IpAddr),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProxyProtocolPolicy {
+    Off,
+    V1 {
+        trusted_sources: Vec<ProxyProtocolTrustedSource>,
+    },
+    V2 {
+        trusted_sources: Vec<ProxyProtocolTrustedSource>,
+    },
+}
+
+impl ProxyProtocolPolicy {
+    pub const fn enabled(&self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ListenerProtocol {
     AdminHttp,
@@ -97,6 +123,7 @@ impl ListenerSpec {
 pub struct ServerPlan {
     runtime_adapter: RuntimeAdapterKind,
     process: ProcessSpec,
+    proxy_protocol: ProxyProtocolPolicy,
     listeners: Vec<ListenerSpec>,
     services: Vec<ServiceSpec>,
     background_tasks: Vec<BackgroundTaskSpec>,
@@ -107,6 +134,7 @@ impl ServerPlan {
         Self {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process: ProcessSpec::default(),
+            proxy_protocol: ProxyProtocolPolicy::Off,
             listeners,
             services: Vec::new(),
             background_tasks,
@@ -122,6 +150,7 @@ impl ServerPlan {
         Self {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process,
+            proxy_protocol: ProxyProtocolPolicy::Off,
             listeners,
             services,
             background_tasks,
@@ -134,6 +163,10 @@ impl ServerPlan {
 
     pub const fn runtime_adapter(&self) -> RuntimeAdapterKind {
         self.runtime_adapter
+    }
+
+    pub fn proxy_protocol(&self) -> &ProxyProtocolPolicy {
+        &self.proxy_protocol
     }
 
     pub fn listeners(&self) -> &[ListenerSpec] {
@@ -229,6 +262,7 @@ impl ServerPlan {
         Ok(Self {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process: ProcessSpec::from_config(config),
+            proxy_protocol: proxy_protocol_policy_from_config(config)?,
             listeners,
             services: service_specs_from_config(config),
             background_tasks: background_task_specs_from_config(config),
@@ -348,6 +382,7 @@ pub trait ServerRunner {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ServerPlanError {
     InvalidListenerAddress { address: String },
+    InvalidProxyProtocolTrustedSource { source: String, reason: String },
 }
 
 impl std::fmt::Display for ServerPlanError {
@@ -355,6 +390,12 @@ impl std::fmt::Display for ServerPlanError {
         match self {
             Self::InvalidListenerAddress { address } => {
                 write!(formatter, "invalid listener address {address:?}")
+            }
+            Self::InvalidProxyProtocolTrustedSource { source, reason } => {
+                write!(
+                    formatter,
+                    "invalid PROXY protocol trusted source {source:?}: {reason}"
+                )
             }
         }
     }
@@ -411,6 +452,41 @@ fn service_specs_from_config(config: &Config) -> Vec<ServiceSpec> {
     }
 
     services
+}
+
+fn proxy_protocol_policy_from_config(
+    config: &Config,
+) -> Result<ProxyProtocolPolicy, ServerPlanError> {
+    let trusted_sources = config
+        .server
+        .trusted_proxies
+        .iter()
+        .map(|source| parse_proxy_protocol_trusted_source(source))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    match config.server.proxy_protocol {
+        DownstreamProxyProtocol::Off => Ok(ProxyProtocolPolicy::Off),
+        DownstreamProxyProtocol::V1 => Ok(ProxyProtocolPolicy::V1 { trusted_sources }),
+        DownstreamProxyProtocol::V2 => Ok(ProxyProtocolPolicy::V2 { trusted_sources }),
+    }
+}
+
+fn parse_proxy_protocol_trusted_source(
+    value: &str,
+) -> Result<ProxyProtocolTrustedSource, ServerPlanError> {
+    match fluxheim_protocol::parse_proxy_protocol_trusted_source(value).map_err(|error| {
+        ServerPlanError::InvalidProxyProtocolTrustedSource {
+            source: value.to_owned(),
+            reason: error.to_string(),
+        }
+    })? {
+        fluxheim_protocol::ProxyProtocolTrustedSource::Ip(address) => {
+            Ok(ProxyProtocolTrustedSource::Ip(address))
+        }
+        fluxheim_protocol::ProxyProtocolTrustedSource::Cidr { network, prefix } => {
+            Ok(ProxyProtocolTrustedSource::Cidr { network, prefix })
+        }
+    }
 }
 
 fn background_task_specs_from_config(config: &Config) -> Vec<BackgroundTaskSpec> {

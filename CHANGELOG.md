@@ -36,6 +36,9 @@ behavior when the change improves security or project direction.
 - Remove duplicated downstream TLS listener-address storage from
   `fluxheim-tls`; HTTPS listener addresses now come from `fluxheim-server`
   while TLS planning owns certificate selection and policy.
+- Move downstream PROXY protocol listener policy and trusted-source parsing
+  into `fluxheim-server`, leaving root runtime as a Pingora listener-policy
+  adapter.
 
 ### Tests
 
