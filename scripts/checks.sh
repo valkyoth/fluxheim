@@ -186,6 +186,7 @@ scripts/validate-fips-openssl.sh check
 scripts/validate-fips-rustls.sh check
 python3 -m py_compile scripts/prepare-server.py scripts/build_fluxheim_rpm.py
 scripts/validate-tls-backends.sh check
+scripts/validate-pingora-boundary-policy.sh check
 config_tester examples/fluxheim.toml
 config_tester examples/admin.toml
 config_tester examples/vhosts.toml

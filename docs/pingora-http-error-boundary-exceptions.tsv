@@ -1,0 +1,10 @@
+# path	reason
+crates/fluxheim-load-balancer/src/health.rs	Temporary HTTP health-check adapter; removed with native HTTP/client cutover.
+src/cache.rs	Temporary Pingora cache storage adapter; removed with native cache/runtime cutover.
+src/compression.rs	Temporary Pingora response adapter for compression errors.
+src/flux_error.rs	Narrow Fluxheim-to-Pingora error conversion boundary.
+src/http_types.rs	Narrow Pingora request/response header type aliases during HTTP runtime migration.
+src/load_balancer.rs	Narrow request-header adapter for load-balancer request view.
+src/proxy.rs	Current Pingora ProxyHttp runtime adapter until native HTTP cutover.
+src/proxy_cache.rs	Current Pingora cache request/response adapter until native cache/runtime cutover.
+src/proxy_protocol.rs	Current Pingora L4 connector adapter for HTTP upstream PROXY protocol.

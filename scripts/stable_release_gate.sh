@@ -30,6 +30,9 @@ fi
 echo "stable release gate: Pingora dependency policy"
 scripts/validate-pingora-dependency-policy.sh check
 
+echo "stable release gate: Pingora HTTP/error boundary policy"
+scripts/validate-pingora-boundary-policy.sh check
+
 echo "stable release gate: runtime parity fixture inventory"
 scripts/validate-runtime-fixtures.sh check
 

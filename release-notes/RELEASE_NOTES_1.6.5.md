@@ -20,6 +20,9 @@ pure header rewrite and forwarded-client-IP helpers now live in
 - Moved stream downstream PROXY protocol v1/v2 byte parsers and size constants
   into `fluxheim-protocol`. The stream crate now keeps only trusted-peer
   checks, timed reads, and runtime error conversion around those pure parsers.
+- Added a release-gated Pingora HTTP/error boundary policy that blocks new
+  direct `pingora::http`, `pingora::Error`, and `pingora::ErrorType` usage
+  outside documented adapter files.
 
 ## Validation
 
@@ -31,3 +34,6 @@ pure header rewrite and forwarded-client-IP helpers now live in
   the new boundary.
 - Preserved the existing root proxy header-policy tests across the new crate
   boundary.
+- Added `scripts/validate-pingora-boundary-policy.sh` and
+  `docs/pingora-http-error-boundary-exceptions.tsv` to keep the remaining
+  Pingora HTTP/error bridge surface explicit during the `1.6.x` removal line.
