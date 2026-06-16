@@ -39,6 +39,9 @@ behavior when the change improves security or project direction.
 - Move downstream PROXY protocol listener policy and trusted-source parsing
   into `fluxheim-server`, leaving root runtime as a Pingora listener-policy
   adapter.
+- Split `fluxheim-server` process planning and PROXY protocol planning into
+  focused modules so the new server crate stays below the 500-line target while
+  the bootstrap cutover continues.
 
 ### Tests
 
@@ -52,6 +55,8 @@ behavior when the change improves security or project direction.
   observability, stream proxy, and UDP proxy smokes.
 - Split `fluxheim-server` tests into a separate module so new server code stays
   under the 500-line modularity target.
+- Verify the split server crate modules remain below the modularity target with
+  the release-gated modularity policy check.
 
 ## 1.6.6 - 2026-06-16
 

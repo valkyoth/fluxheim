@@ -5,40 +5,21 @@
 )]
 
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
 
 use fluxheim_config::{AcmeAutomationMode, Config, DownstreamProxyProtocol};
 use fluxheim_runtime::{BackgroundTaskSpec, ShutdownView};
 
+mod process;
+mod proxy_protocol;
+
+pub use process::ProcessSpec;
+pub use proxy_protocol::{ProxyProtocolPolicy, ProxyProtocolTrustedSource};
+
+use proxy_protocol::proxy_protocol_policy_from_config;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeAdapterKind {
     PingoraCompatibility,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ProxyProtocolTrustedSource {
-    Cidr {
-        network: std::net::IpAddr,
-        prefix: u8,
-    },
-    Ip(std::net::IpAddr),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ProxyProtocolPolicy {
-    Off,
-    V1 {
-        trusted_sources: Vec<ProxyProtocolTrustedSource>,
-    },
-    V2 {
-        trusted_sources: Vec<ProxyProtocolTrustedSource>,
-    },
-}
-
-impl ProxyProtocolPolicy {
-    pub const fn enabled(&self) -> bool {
-        !matches!(self, Self::Off)
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -270,109 +251,6 @@ impl ServerPlan {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProcessSpec {
-    daemon: bool,
-    error_log: Option<PathBuf>,
-    pid_file: PathBuf,
-    upgrade_sock: PathBuf,
-    certificate_reload_sock: PathBuf,
-    threads: usize,
-    listener_tasks_per_fd: usize,
-    work_stealing: bool,
-    upstream_keepalive_pool_size: usize,
-    max_retries: usize,
-    grace_period_seconds: Option<u64>,
-    graceful_shutdown_timeout_seconds: Option<u64>,
-}
-
-impl Default for ProcessSpec {
-    fn default() -> Self {
-        Self {
-            daemon: false,
-            error_log: None,
-            pid_file: PathBuf::from("/run/fluxheim/fluxheim.pid"),
-            upgrade_sock: PathBuf::from("/run/fluxheim/fluxheim-upgrade.sock"),
-            certificate_reload_sock: PathBuf::from("/run/fluxheim/fluxheim-cert-reload.sock"),
-            threads: 1,
-            listener_tasks_per_fd: 1,
-            work_stealing: true,
-            upstream_keepalive_pool_size: 128,
-            max_retries: 16,
-            grace_period_seconds: None,
-            graceful_shutdown_timeout_seconds: None,
-        }
-    }
-}
-
-impl ProcessSpec {
-    fn from_config(config: &Config) -> Self {
-        let process = &config.server.process;
-        Self {
-            daemon: process.daemon,
-            error_log: process.error_log.clone(),
-            pid_file: process.pid_file.clone(),
-            upgrade_sock: process.upgrade_sock.clone(),
-            certificate_reload_sock: process.certificate_reload_sock.clone(),
-            threads: process.threads,
-            listener_tasks_per_fd: process.listener_tasks_per_fd,
-            work_stealing: process.work_stealing,
-            upstream_keepalive_pool_size: process.upstream_keepalive_pool_size,
-            max_retries: process.max_retries,
-            grace_period_seconds: process.grace_period_seconds,
-            graceful_shutdown_timeout_seconds: process.graceful_shutdown_timeout_seconds,
-        }
-    }
-
-    pub const fn daemon(&self) -> bool {
-        self.daemon
-    }
-
-    pub fn error_log(&self) -> Option<&Path> {
-        self.error_log.as_deref()
-    }
-
-    pub fn pid_file(&self) -> &Path {
-        &self.pid_file
-    }
-
-    pub fn upgrade_sock(&self) -> &Path {
-        &self.upgrade_sock
-    }
-
-    pub fn certificate_reload_sock(&self) -> &Path {
-        &self.certificate_reload_sock
-    }
-
-    pub const fn threads(&self) -> usize {
-        self.threads
-    }
-
-    pub const fn listener_tasks_per_fd(&self) -> usize {
-        self.listener_tasks_per_fd
-    }
-
-    pub const fn work_stealing(&self) -> bool {
-        self.work_stealing
-    }
-
-    pub const fn upstream_keepalive_pool_size(&self) -> usize {
-        self.upstream_keepalive_pool_size
-    }
-
-    pub const fn max_retries(&self) -> usize {
-        self.max_retries
-    }
-
-    pub const fn grace_period_seconds(&self) -> Option<u64> {
-        self.grace_period_seconds
-    }
-
-    pub const fn graceful_shutdown_timeout_seconds(&self) -> Option<u64> {
-        self.graceful_shutdown_timeout_seconds
-    }
-}
-
 pub trait ServerRunner {
     type Error;
 
@@ -452,41 +330,6 @@ fn service_specs_from_config(config: &Config) -> Vec<ServiceSpec> {
     }
 
     services
-}
-
-fn proxy_protocol_policy_from_config(
-    config: &Config,
-) -> Result<ProxyProtocolPolicy, ServerPlanError> {
-    let trusted_sources = config
-        .server
-        .trusted_proxies
-        .iter()
-        .map(|source| parse_proxy_protocol_trusted_source(source))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    match config.server.proxy_protocol {
-        DownstreamProxyProtocol::Off => Ok(ProxyProtocolPolicy::Off),
-        DownstreamProxyProtocol::V1 => Ok(ProxyProtocolPolicy::V1 { trusted_sources }),
-        DownstreamProxyProtocol::V2 => Ok(ProxyProtocolPolicy::V2 { trusted_sources }),
-    }
-}
-
-fn parse_proxy_protocol_trusted_source(
-    value: &str,
-) -> Result<ProxyProtocolTrustedSource, ServerPlanError> {
-    match fluxheim_protocol::parse_proxy_protocol_trusted_source(value).map_err(|error| {
-        ServerPlanError::InvalidProxyProtocolTrustedSource {
-            source: value.to_owned(),
-            reason: error.to_string(),
-        }
-    })? {
-        fluxheim_protocol::ProxyProtocolTrustedSource::Ip(address) => {
-            Ok(ProxyProtocolTrustedSource::Ip(address))
-        }
-        fluxheim_protocol::ProxyProtocolTrustedSource::Cidr { network, prefix } => {
-            Ok(ProxyProtocolTrustedSource::Cidr { network, prefix })
-        }
-    }
 }
 
 fn background_task_specs_from_config(config: &Config) -> Vec<BackgroundTaskSpec> {
