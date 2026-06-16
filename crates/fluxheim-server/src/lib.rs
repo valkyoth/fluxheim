@@ -4,9 +4,7 @@
     deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 
-use std::net::SocketAddr;
-
-use fluxheim_config::{Config, DownstreamProxyProtocol};
+use fluxheim_config::Config;
 use fluxheim_runtime::{BackgroundTaskSpec, ShutdownView};
 
 mod background;
@@ -158,54 +156,6 @@ impl ServerPlan {
     }
 
     pub fn from_config(config: &Config) -> Result<Self, ServerPlanError> {
-        let mut listeners = Vec::new();
-        let proxy_protocol = config.server.proxy_protocol != DownstreamProxyProtocol::Off;
-
-        for listen in &config.server.listen {
-            listeners.push(
-                ListenerSpec::new(parse_listener(listen)?, ListenerProtocol::Http)
-                    .with_proxy_protocol(proxy_protocol),
-            );
-        }
-        for listen in &config.server.tls_listen {
-            listeners.push(
-                ListenerSpec::new(parse_listener(listen)?, ListenerProtocol::Https)
-                    .with_proxy_protocol(proxy_protocol),
-            );
-        }
-        if config.admin.enabled {
-            listeners.push(ListenerSpec::new(
-                parse_listener(&config.admin.listen)?,
-                ListenerProtocol::AdminHttp,
-            ));
-        }
-        if config.metrics.enabled {
-            listeners.push(ListenerSpec::new(
-                parse_listener(&config.metrics.listen)?,
-                ListenerProtocol::MetricsHttp,
-            ));
-        }
-        if config.stream.enabled {
-            for route in &config.stream.routes {
-                for listen in &route.listen {
-                    listeners.push(ListenerSpec::new(
-                        parse_listener(listen)?,
-                        ListenerProtocol::StreamTcp,
-                    ));
-                }
-            }
-        }
-        if config.udp.enabled {
-            for route in &config.udp.routes {
-                for listen in &route.listen {
-                    listeners.push(ListenerSpec::new(
-                        parse_listener(listen)?,
-                        ListenerProtocol::Udp,
-                    ));
-                }
-            }
-        }
-
         let process = ProcessSpec::from_config(config);
         let certificate_reload_control =
             certificate_reload_control_plan_from_config(config, &process);
@@ -216,7 +166,7 @@ impl ServerPlan {
             proxy_protocol: proxy_protocol_policy_from_config(config)?,
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control,
-            listeners,
+            listeners: listener::listener_specs_from_config(config)?,
             services: service::service_specs_from_config(config),
             background_tasks: background::background_task_specs_from_config(config),
         })
@@ -264,14 +214,6 @@ impl std::fmt::Display for ServerPlanError {
 }
 
 impl std::error::Error for ServerPlanError {}
-
-fn parse_listener(value: &str) -> Result<SocketAddr, ServerPlanError> {
-    value
-        .parse::<SocketAddr>()
-        .map_err(|_| ServerPlanError::InvalidListenerAddress {
-            address: value.to_owned(),
-        })
-}
 
 #[cfg(test)]
 #[path = "server_tests.rs"]

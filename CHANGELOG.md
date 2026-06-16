@@ -63,6 +63,9 @@ behavior when the change improves security or project direction.
 - Split server service-intent and background-task intent detection into focused
   `fluxheim-server` modules, reducing the server crate root while preserving the
   same runtime plan.
+- Split listener inventory construction into the `fluxheim-server` listener
+  module, keeping HTTP, HTTPS, admin, metrics, stream, and UDP listener parsing
+  out of the server crate root.
 
 ### Tests
 
@@ -91,6 +94,8 @@ behavior when the change improves security or project direction.
   verify the runtime path with the live load-balancer smoke.
 - Keep the split server intent modules covered by `cargo test -p
   fluxheim-server` and the release-gated modularity policy check.
+- Verify the listener-planning split with `cargo test -p fluxheim-server` and
+  the live admin listener smoke.
 
 ## 1.6.6 - 2026-06-16
 

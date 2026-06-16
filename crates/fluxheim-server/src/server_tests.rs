@@ -1,5 +1,8 @@
 use super::*;
-use fluxheim_config::{CacheConfig, RouteConfig, StreamRouteConfig, UdpRouteConfig, VhostConfig};
+use fluxheim_config::{
+    CacheConfig, DownstreamProxyProtocol, RouteConfig, StreamRouteConfig, UdpRouteConfig,
+    VhostConfig,
+};
 use fluxheim_runtime::{BackgroundTaskKind, ShutdownReason, ShutdownState};
 
 struct StaticShutdown(ShutdownState);

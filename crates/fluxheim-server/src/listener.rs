@@ -1,5 +1,9 @@
 use std::net::SocketAddr;
 
+use fluxheim_config::{Config, DownstreamProxyProtocol};
+
+use crate::ServerPlanError;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ListenerProtocol {
     AdminHttp,
@@ -46,4 +50,66 @@ impl ListenerSpec {
     pub fn is_loopback(self) -> bool {
         self.addr.ip().is_loopback()
     }
+}
+
+pub(crate) fn listener_specs_from_config(
+    config: &Config,
+) -> Result<Vec<ListenerSpec>, ServerPlanError> {
+    let mut listeners = Vec::new();
+    let proxy_protocol = config.server.proxy_protocol != DownstreamProxyProtocol::Off;
+
+    for listen in &config.server.listen {
+        listeners.push(
+            ListenerSpec::new(parse_listener(listen)?, ListenerProtocol::Http)
+                .with_proxy_protocol(proxy_protocol),
+        );
+    }
+    for listen in &config.server.tls_listen {
+        listeners.push(
+            ListenerSpec::new(parse_listener(listen)?, ListenerProtocol::Https)
+                .with_proxy_protocol(proxy_protocol),
+        );
+    }
+    if config.admin.enabled {
+        listeners.push(ListenerSpec::new(
+            parse_listener(&config.admin.listen)?,
+            ListenerProtocol::AdminHttp,
+        ));
+    }
+    if config.metrics.enabled {
+        listeners.push(ListenerSpec::new(
+            parse_listener(&config.metrics.listen)?,
+            ListenerProtocol::MetricsHttp,
+        ));
+    }
+    if config.stream.enabled {
+        for route in &config.stream.routes {
+            for listen in &route.listen {
+                listeners.push(ListenerSpec::new(
+                    parse_listener(listen)?,
+                    ListenerProtocol::StreamTcp,
+                ));
+            }
+        }
+    }
+    if config.udp.enabled {
+        for route in &config.udp.routes {
+            for listen in &route.listen {
+                listeners.push(ListenerSpec::new(
+                    parse_listener(listen)?,
+                    ListenerProtocol::Udp,
+                ));
+            }
+        }
+    }
+
+    Ok(listeners)
+}
+
+fn parse_listener(value: &str) -> Result<SocketAddr, ServerPlanError> {
+    value
+        .parse::<SocketAddr>()
+        .map_err(|_| ServerPlanError::InvalidListenerAddress {
+            address: value.to_owned(),
+        })
 }
