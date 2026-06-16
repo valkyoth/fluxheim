@@ -84,6 +84,8 @@ behavior when the change improves security or project direction.
   task spec path and remove the old name/kind free helper.
 - Add admin self-healing watchdog intent to `ServerPlan` so the admin adapter
   consumes the planned `RuntimeWatchdog` task instead of creating it locally.
+- Split the `ServerPlan` implementation into a focused `fluxheim-server` plan
+  module, leaving the crate root as the public export and error surface.
 
 ### Tests
 

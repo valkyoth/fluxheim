@@ -1,9 +1,9 @@
 use super::*;
 use fluxheim_config::{
-    CacheConfig, DownstreamProxyProtocol, RouteConfig, StreamRouteConfig, UdpRouteConfig,
+    CacheConfig, Config, DownstreamProxyProtocol, RouteConfig, StreamRouteConfig, UdpRouteConfig,
     VhostConfig,
 };
-use fluxheim_runtime::{BackgroundTaskKind, ShutdownReason, ShutdownState};
+use fluxheim_runtime::{BackgroundTaskKind, BackgroundTaskSpec, ShutdownReason, ShutdownState};
 
 struct StaticShutdown(ShutdownState);
 

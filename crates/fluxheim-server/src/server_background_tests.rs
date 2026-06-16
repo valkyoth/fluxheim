@@ -1,6 +1,6 @@
 use super::*;
 use fluxheim_config::{AdminSelfHealingConfig, CacheConfig, Config, RouteConfig, VhostConfig};
-use fluxheim_runtime::BackgroundTaskKind;
+use fluxheim_runtime::{BackgroundTaskKind, BackgroundTaskSpec};
 
 #[test]
 fn server_plan_from_config_collects_background_task_inventory() {
