@@ -147,14 +147,14 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(not(feature = "acme-client"))]
     let _ = &certificate_reloader;
     #[cfg(all(feature = "acme-client", unix))]
-    if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::CertificateReload) {
-        if let Some(service) = certificate_reload_control_service(
+    if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::CertificateReload)
+        && let Some(service) = certificate_reload_control_service(
             &config,
             server_plan.process(),
             certificate_reloader.clone(),
-        )? {
-            server.add_service(service);
-        }
+        )?
+    {
+        server.add_service(service);
     }
 
     #[cfg(feature = "load-balancer")]
