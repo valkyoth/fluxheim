@@ -68,6 +68,8 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - `RUSTFLAGS='-D warnings' cargo test --lib admin::tests::admin_services_enable_watchdog_only_when_self_healing_is_enabled`
 - `RUSTFLAGS='-D warnings' cargo check --workspace`
 - `scripts/validate-modularity-policy.sh check`
+- `scripts/validate-pingora-dependency-policy.sh check`
+- `scripts/validate-pingora-boundary-policy.sh check`
 - `scripts/smoke_admin_listener.sh`
 - `FLUXHEIM_SMOKE_SKIP_CORE_MATRIX=1 scripts/smoke_1_0_core.sh`
 - `scripts/smoke_observability_local.sh`
