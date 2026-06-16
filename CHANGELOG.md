@@ -30,8 +30,9 @@ behavior when the change improves security or project direction.
 - Add focused `fluxheim-server` tests for listener inventory, background-task
   intent, process-plan adaptation, invalid listener handling, and shutdown
   runner boundaries.
-- Add a live admin-listener smoke test that starts Fluxheim and verifies both
-  the normal HTTP listener and the admin health/status endpoints.
+- Add a live admin-listener smoke test that starts Fluxheim and verifies the
+  normal HTTP listener, admin health/status endpoints, and local read-only ops
+  socket.
 - Verify plan-gated foreground service registration with live admin,
   observability, stream proxy, and UDP proxy smokes.
 - Split `fluxheim-server` tests into a separate module so new server code stays

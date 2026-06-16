@@ -15,7 +15,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 
 - Added focused `fluxheim-server` tests for listener inventory, background-task intent, invalid listener handling, public-listener detection, and server-runner shutdown behavior.
 - Updated root runtime tests so Pingora `ServerConf` mapping is exercised through `fluxheim-server`.
-- Added a live admin-listener smoke test that starts Fluxheim, reaches the normal HTTP listener, checks unauthenticated admin health, and checks authenticated admin status.
+- Added a live admin-listener smoke test that starts Fluxheim, reaches the normal HTTP listener, checks unauthenticated admin health, checks authenticated admin status, and checks the local read-only ops socket.
 - Verified plan-gated foreground service registration with live admin, observability, stream proxy, and UDP proxy smokes.
 - Kept the new server crate files below the 500-line modularity target by splitting tests into `server_tests.rs`.
 

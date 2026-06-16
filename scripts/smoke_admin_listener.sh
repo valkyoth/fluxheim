@@ -80,6 +80,12 @@ require_loopback = true
 token_file = "$TMP_DIR/admin-token"
 snapshot_store = "$TMP_DIR/admin-snapshots"
 
+[admin.ops_socket]
+enabled = true
+path = "$TMP_DIR/run/fluxheim-ops.sock"
+mode = "0600"
+require_bearer_token = false
+
 [admin.health]
 unauthenticated = true
 
@@ -150,6 +156,30 @@ fi
 if ! grep -q '"status":"ok"' "$TMP_DIR/admin-status.json"; then
     echo "admin listener smoke failed: status endpoint did not report ok" >&2
     cat "$TMP_DIR/admin-status.json" >&2
+    exit 1
+fi
+
+ops_status_code=$(curl -fsS --unix-socket "$TMP_DIR/run/fluxheim-ops.sock" \
+    -o "$TMP_DIR/admin-ops-status.json" -w '%{http_code}' \
+    "http://fluxheim/_fluxheim/status")
+if [ "$ops_status_code" != "200" ]; then
+    echo "admin listener smoke failed: expected ops-socket status HTTP 200, got $ops_status_code" >&2
+    cat "$TMP_DIR/admin-ops-status.json" >&2
+    exit 1
+fi
+
+if ! grep -q '"status":"ok"' "$TMP_DIR/admin-ops-status.json"; then
+    echo "admin listener smoke failed: ops-socket status endpoint did not report ok" >&2
+    cat "$TMP_DIR/admin-ops-status.json" >&2
+    exit 1
+fi
+
+ops_post_code=$(curl -sS --unix-socket "$TMP_DIR/run/fluxheim-ops.sock" \
+    -o "$TMP_DIR/admin-ops-post.txt" -w '%{http_code}' \
+    -X POST "http://fluxheim/_fluxheim/status")
+if [ "$ops_post_code" != "405" ]; then
+    echo "admin listener smoke failed: expected ops-socket POST status HTTP 405, got $ops_post_code" >&2
+    cat "$TMP_DIR/admin-ops-post.txt" >&2
     exit 1
 fi
 
