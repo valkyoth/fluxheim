@@ -38,6 +38,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added a `fluxheim-server` regression test for load-balancer service intent and verified the runtime path with the live load-balancer smoke.
 - Kept the split server intent modules covered by `cargo test -p fluxheim-server` and the release-gated modularity policy check.
 - Verified the listener-planning split with `cargo test -p fluxheim-server` and the live admin listener smoke.
+- Split private Unix listener regression coverage into a focused Unix-only test module so the main server test module remains well below the 500-line target.
 
 ## Verification
 

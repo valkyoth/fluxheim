@@ -96,6 +96,8 @@ behavior when the change improves security or project direction.
   fluxheim-server` and the release-gated modularity policy check.
 - Verify the listener-planning split with `cargo test -p fluxheim-server` and
   the live admin listener smoke.
+- Split private Unix listener regression coverage into a focused Unix-only test
+  module so the main server test module remains well below the 500-line target.
 
 ## 1.6.6 - 2026-06-16
 
