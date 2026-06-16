@@ -144,6 +144,20 @@ impl ServerPlan {
             .collect()
     }
 
+    pub fn service_listener_addrs_for_protocol(
+        &self,
+        kind: ServiceKind,
+        protocol: ListenerProtocol,
+    ) -> Vec<String> {
+        let Some(service) = self.service(kind) else {
+            return Vec::new();
+        };
+        if !service.listener_protocols().contains(&protocol) {
+            return Vec::new();
+        }
+        self.listener_addrs(protocol)
+    }
+
     pub fn background_tasks(&self) -> &[BackgroundTaskSpec] {
         &self.background_tasks
     }

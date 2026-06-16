@@ -73,6 +73,8 @@ behavior when the change improves security or project direction.
   planned listeners.
 - Update the admin and metrics runtime adapters to consume service-owned
   listener lookups from the server plan.
+- Add protocol-filtered service listener lookup and move proxy HTTP/HTTPS
+  listener registration onto the service-owned lookup path.
 
 ### Tests
 
@@ -107,6 +109,8 @@ behavior when the change improves security or project direction.
   module so the main server test module remains well below the 500-line target.
 - Add `fluxheim-server` regression coverage for service-owned listener address
   lookup.
+- Add `fluxheim-server` regression coverage for protocol-filtered service
+  listener lookup.
 
 ## 1.6.6 - 2026-06-16
 

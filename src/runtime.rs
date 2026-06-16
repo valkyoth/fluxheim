@@ -122,7 +122,10 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         ));
     }
 
-    for listen in server_plan.listener_addrs(fluxheim_server::ListenerProtocol::Http) {
+    for listen in server_plan.service_listener_addrs_for_protocol(
+        fluxheim_server::ServiceKind::ProxyHttp,
+        fluxheim_server::ListenerProtocol::Http,
+    ) {
         log::info!("proxy listener enabled on {listen}");
         proxy_service.add_tcp(&listen);
     }
@@ -1304,7 +1307,10 @@ where
     let Some(plan) = crate::tls::downstream_tls_listener_plan(config)? else {
         return Ok(None);
     };
-    let tls_listens = server_plan.listener_addrs(fluxheim_server::ListenerProtocol::Https);
+    let tls_listens = server_plan.service_listener_addrs_for_protocol(
+        fluxheim_server::ServiceKind::ProxyHttp,
+        fluxheim_server::ListenerProtocol::Https,
+    );
 
     let reloader = add_downstream_tls_listeners(
         service,

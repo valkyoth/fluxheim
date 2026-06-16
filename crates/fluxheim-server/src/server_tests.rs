@@ -220,6 +220,18 @@ fn server_plan_from_config_collects_listener_inventory() {
         vec!["127.0.0.1:8080".to_owned(), "127.0.0.1:8443".to_owned()]
     );
     assert_eq!(
+        plan.service_listener_addrs_for_protocol(ServiceKind::ProxyHttp, ListenerProtocol::Http),
+        vec!["127.0.0.1:8080".to_owned()]
+    );
+    assert_eq!(
+        plan.service_listener_addrs_for_protocol(ServiceKind::ProxyHttp, ListenerProtocol::Https),
+        vec!["127.0.0.1:8443".to_owned()]
+    );
+    assert_eq!(
+        plan.service_listener_addrs_for_protocol(ServiceKind::MetricsHttp, ListenerProtocol::Http),
+        Vec::<String>::new()
+    );
+    assert_eq!(
         plan.service_listener_addrs(ServiceKind::AdminControlPlane),
         vec!["127.0.0.1:8081".to_owned()]
     );
