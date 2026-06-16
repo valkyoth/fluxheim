@@ -28,7 +28,7 @@ allowed="$tmp_dir/allowed.paths"
 unexpected="$tmp_dir/unexpected.tsv"
 stale="$tmp_dir/stale.paths"
 
-if git grep -n -E 'pingora::http|pingora::Error|pingora::ErrorType|use pingora::\{Error|use pingora::http' -- '*.rs' >"$matches"; then
+if git grep -n -E '(^|[^A-Za-z0-9_])pingora::' -- '*.rs' >"$matches"; then
     :
 else
     status="$?"

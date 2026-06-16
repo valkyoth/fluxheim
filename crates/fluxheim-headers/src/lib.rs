@@ -245,6 +245,7 @@ fn rewrite_cookie_path(
     rewrite_header_prefix(value.normalized, rules)
 }
 
+#[cfg(not(feature = "privacy-mode"))]
 pub fn effective_client_ip(
     direct_ip: IpAddr,
     trusted_direct_peer: bool,
@@ -291,6 +292,7 @@ pub fn parse_x_forwarded_for_ip(value: &str) -> Option<IpAddr> {
     value.parse().ok()
 }
 
+#[cfg(not(feature = "privacy-mode"))]
 pub fn build_forwarded_header(client_ip: IpAddr, host: Option<&str>, proto: &str) -> String {
     let mut value = format!("for={}", forwarded_ip(client_ip));
     if let Some(host) = host {
@@ -302,6 +304,7 @@ pub fn build_forwarded_header(client_ip: IpAddr, host: Option<&str>, proto: &str
     value
 }
 
+#[cfg(not(feature = "privacy-mode"))]
 fn forwarded_ip(client_ip: IpAddr) -> String {
     match client_ip {
         IpAddr::V4(ip) => ip.to_string(),
@@ -309,6 +312,7 @@ fn forwarded_ip(client_ip: IpAddr) -> String {
     }
 }
 
+#[cfg(not(feature = "privacy-mode"))]
 fn quote_forwarded_value(value: &str) -> String {
     let mut quoted = String::with_capacity(value.len() + 2);
     quoted.push('"');
@@ -324,14 +328,17 @@ fn quote_forwarded_value(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    #[cfg(not(feature = "privacy-mode"))]
+    use std::net::Ipv6Addr;
+    use std::net::{IpAddr, Ipv4Addr};
 
     use fluxheim_config::{ResponseHeaderRewriteConfig, ResponseHeaderRewriteRuleConfig};
 
+    #[cfg(not(feature = "privacy-mode"))]
+    use super::{build_forwarded_header, effective_client_ip};
     use super::{
-        build_forwarded_header, effective_client_ip, join_header_values,
-        join_header_values_with_separator, parse_x_forwarded_for_ip, rewrite_header_prefix,
-        rewrite_refresh_url, rewrite_set_cookie_value,
+        join_header_values, join_header_values_with_separator, parse_x_forwarded_for_ip,
+        rewrite_header_prefix, rewrite_refresh_url, rewrite_set_cookie_value,
     };
 
     #[test]
@@ -411,6 +418,7 @@ mod tests {
         assert_eq!(parse_x_forwarded_for_ip("not-an-ip"), None);
     }
 
+    #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn restores_client_ip_from_trusted_forwarded_chain() {
         let direct = IpAddr::V4(Ipv4Addr::new(10, 89, 0, 254));
@@ -437,6 +445,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn builds_forwarded_header_values() {
         assert_eq!(

@@ -147,6 +147,7 @@ privacy-mode = [
     "proxy",
     "web",
     "fluxheim-config/privacy-mode",
+    "fluxheim-headers/privacy-mode",
     "fluxheim-load-balancer?/privacy-mode",
 ]
 security = []

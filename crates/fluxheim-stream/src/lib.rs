@@ -582,7 +582,7 @@ where
 }
 
 fn proxy_protocol_parse_error(error: DownstreamProxyProtocolParseError) -> FluxError {
-    FluxError::invalid_input(error.to_string())
+    FluxError::InvalidInput(error.as_static_str())
 }
 
 fn ip_in_prefix(address: IpAddr, network: IpAddr, prefix: u8) -> bool {

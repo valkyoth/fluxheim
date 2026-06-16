@@ -35,6 +35,13 @@ pub fn parse_proxy_protocol_trusted_source(
         let prefix = prefix
             .parse::<u8>()
             .map_err(|_| ProxyProtocolTrustedSourceParseError::InvalidPrefix)?;
+        let max_prefix = match network {
+            IpAddr::V4(_) => 32,
+            IpAddr::V6(_) => 128,
+        };
+        if prefix > max_prefix {
+            return Err(ProxyProtocolTrustedSourceParseError::InvalidPrefix);
+        }
         return Ok(ProxyProtocolTrustedSource::Cidr { network, prefix });
     }
     Ok(ProxyProtocolTrustedSource::Ip(
@@ -136,7 +143,15 @@ pub enum DownstreamProxyProtocolParseError {
 
 impl std::fmt::Display for DownstreamProxyProtocolParseError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let message = match self {
+        formatter.write_str(self.as_static_str())
+    }
+}
+
+impl std::error::Error for DownstreamProxyProtocolParseError {}
+
+impl DownstreamProxyProtocolParseError {
+    pub const fn as_static_str(self) -> &'static str {
+        match self {
             Self::V1NotUtf8 => "stream downstream PROXY v1 header is not UTF-8",
             Self::V1MissingCrlf => "stream downstream PROXY v1 header is missing CRLF",
             Self::V1MissingPrefix => "stream downstream PROXY v1 header is missing prefix",
@@ -168,12 +183,9 @@ impl std::fmt::Display for DownstreamProxyProtocolParseError {
             Self::V2UnsupportedAddressFamily => {
                 "stream downstream PROXY v2 address family is unsupported"
             }
-        };
-        formatter.write_str(message)
+        }
     }
 }
-
-impl std::error::Error for DownstreamProxyProtocolParseError {}
 
 pub fn parse_downstream_proxy_protocol_v1(
     line: &[u8],
@@ -227,6 +239,11 @@ pub fn parse_downstream_proxy_protocol_v2(
     header: &[u8; PROXY_PROTOCOL_V2_HEADER_LEN],
     payload: &[u8],
 ) -> Result<Option<SocketAddr>, DownstreamProxyProtocolParseError> {
+    debug_assert_eq!(
+        &header[..PROXY_PROTOCOL_V2_SIGNATURE.len()],
+        &PROXY_PROTOCOL_V2_SIGNATURE[..],
+        "caller must verify PROXY v2 signature before parsing"
+    );
     if header[12] >> 4 != 0x2 {
         return Err(DownstreamProxyProtocolParseError::V2InvalidVersion);
     }
@@ -316,6 +333,14 @@ mod tests {
         );
         assert_eq!(
             parse_proxy_protocol_trusted_source("192.0.2.0/not-a-prefix"),
+            Err(ProxyProtocolTrustedSourceParseError::InvalidPrefix)
+        );
+        assert_eq!(
+            parse_proxy_protocol_trusted_source("192.0.2.0/33"),
+            Err(ProxyProtocolTrustedSourceParseError::InvalidPrefix)
+        );
+        assert_eq!(
+            parse_proxy_protocol_trusted_source("2001:db8::/129"),
             Err(ProxyProtocolTrustedSourceParseError::InvalidPrefix)
         );
     }

@@ -31,6 +31,14 @@ pure header rewrite and forwarded-client-IP helpers now live in
   background I/O.
 - Moved repeated-header value joining for auth subrequest forwarding into the
   same `fluxheim-headers` helper, including the cookie-specific separator rule.
+- Made the new `fluxheim-headers` privacy-sensitive client-IP helpers obey the
+  workspace `privacy-mode` feature at the crate boundary.
+- Hardened PROXY-protocol trusted-source parsing by rejecting CIDR prefixes
+  wider than the address family allows.
+- Aligned access-policy and header-forwarding X-Forwarded-For parsing so both
+  skip malformed hops and continue walking the trusted chain.
+- Broadened the Pingora boundary policy gate to track all direct `pingora::`
+  namespace use through documented adapter exceptions.
 
 ## Validation
 
@@ -49,3 +57,5 @@ pure header rewrite and forwarded-client-IP helpers now live in
   policy extraction and chunked body framing preservation.
 - Added direct `fluxheim-headers` unit coverage for repeated-header forwarding
   value joining.
+- Added PROXY-protocol parser coverage for invalid IPv4/IPv6 CIDR prefix
+  lengths.

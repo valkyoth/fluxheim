@@ -7,6 +7,9 @@ license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim header policy helpers."
 
+[features]
+privacy-mode = []
+
 [dependencies]
 fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
