@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use fluxheim_config::{Config, ProxyConfig};
 
 use crate::ListenerProtocol;
@@ -50,6 +52,26 @@ impl ServiceSpec {
 
     pub const fn listener_protocols(self) -> &'static [ListenerProtocol] {
         self.listener_protocols
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminOpsSocketPlan {
+    path: PathBuf,
+    mode_bits: u32,
+}
+
+impl AdminOpsSocketPlan {
+    pub(crate) fn new(path: PathBuf, mode_bits: u32) -> Self {
+        Self { path, mode_bits }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub const fn mode_bits(&self) -> u32 {
+        self.mode_bits
     }
 }
 
@@ -107,6 +129,21 @@ pub(crate) fn service_specs_from_config(config: &Config) -> Vec<ServiceSpec> {
     }
 
     services
+}
+
+pub(crate) fn admin_ops_socket_plan_from_config(config: &Config) -> Option<AdminOpsSocketPlan> {
+    if !config.admin.enabled || !config.admin.ops_socket.enabled {
+        return None;
+    }
+    Some(AdminOpsSocketPlan::new(
+        config.admin.ops_socket.path.clone(),
+        admin_ops_socket_mode_bits(&config.admin.ops_socket.mode),
+    ))
+}
+
+fn admin_ops_socket_mode_bits(mode: &str) -> u32 {
+    let raw = mode.trim_start_matches("0o");
+    u32::from_str_radix(raw, 8).unwrap_or(0o600)
 }
 
 fn any_load_balancer_pool_configured(config: &Config) -> bool {

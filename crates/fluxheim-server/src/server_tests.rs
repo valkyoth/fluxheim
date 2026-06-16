@@ -246,6 +246,25 @@ fn server_plan_from_config_collects_listener_inventory() {
 }
 
 #[test]
+fn server_plan_collects_admin_ops_socket_plan() {
+    let mut config = Config::default();
+    config.admin.enabled = true;
+    config.admin.ops_socket.enabled = true;
+    config.admin.ops_socket.path = std::path::PathBuf::from("/run/fluxheim/admin.sock");
+    config.admin.ops_socket.mode = "0660".to_owned();
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let ops_socket = plan.admin_ops_socket().expect("ops socket plan");
+
+    assert!(plan.has_service(ServiceKind::AdminOpsSocket));
+    assert_eq!(
+        ops_socket.path(),
+        std::path::Path::new("/run/fluxheim/admin.sock")
+    );
+    assert_eq!(ops_socket.mode_bits(), 0o660);
+}
+
+#[test]
 fn server_plan_collects_load_balancer_service_intent() {
     let mut config = Config::default();
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];

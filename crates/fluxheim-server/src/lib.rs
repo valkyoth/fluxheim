@@ -23,7 +23,7 @@ pub use listener::{ListenerProtocol, ListenerSpec};
 pub use plan::{RuntimeAdapterKind, ServerPlan};
 pub use process::ProcessSpec;
 pub use proxy_protocol::{ProxyProtocolPolicy, ProxyProtocolTrustedSource};
-pub use service::{ServiceKind, ServiceSpec};
+pub use service::{AdminOpsSocketPlan, ServiceKind, ServiceSpec};
 #[cfg(unix)]
 pub use unix_listener::replace_private_unix_listener;
 

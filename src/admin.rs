@@ -412,11 +412,16 @@ pub(crate) fn admin_services_from_config(
     service.add_tcp(&admin_listener);
     #[cfg(unix)]
     let ops_socket = if config.admin.ops_socket.enabled {
+        let Some(ops_socket_plan) = server_plan.admin_ops_socket() else {
+            return Err(
+                "admin.ops_socket.enabled requires an ops socket plan in the server plan".into(),
+            );
+        };
         let ops_service_name = server_plan
             .service(fluxheim_server::ServiceKind::AdminOpsSocket)
             .map(fluxheim_server::ServiceSpec::name)
             .ok_or("admin.ops_socket.enabled requires an ops socket service in the server plan")?;
-        let Some(path) = config.admin.ops_socket.path.to_str() else {
+        let Some(path) = ops_socket_plan.path().to_str() else {
             return Err("admin.ops_socket.path must be valid UTF-8".into());
         };
         let mut ops_service = Service::new(
@@ -428,7 +433,7 @@ pub(crate) fn admin_services_from_config(
         );
         ops_service.add_uds(
             path,
-            Some(Permissions::from_mode(config.admin.ops_socket.mode_bits())),
+            Some(Permissions::from_mode(ops_socket_plan.mode_bits())),
         );
         Some(ops_service)
     } else {

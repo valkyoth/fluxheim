@@ -86,6 +86,8 @@ behavior when the change improves security or project direction.
   consumes the planned `RuntimeWatchdog` task instead of creating it locally.
 - Split the `ServerPlan` implementation into a focused `fluxheim-server` plan
   module, leaving the crate root as the public export and error surface.
+- Add an admin ops-socket endpoint plan to `ServerPlan` and update the admin
+  adapter to consume planned socket path and mode values.
 
 ### Tests
 
@@ -126,6 +128,8 @@ behavior when the change improves security or project direction.
   planned admin self-healing watchdog.
 - Split server background-task inventory tests into a focused module so the
   main server test file stays comfortably below the 500-line target.
+- Add `fluxheim-server` regression coverage for admin ops-socket path and mode
+  planning.
 
 ## 1.6.6 - 2026-06-16
 

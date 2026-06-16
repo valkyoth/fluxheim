@@ -19,6 +19,7 @@ pub struct ServerPlan {
     proxy_protocol: ProxyProtocolPolicy,
     downstream_http2: DownstreamHttp2Policy,
     certificate_reload_control: Option<CertificateReloadControlPlan>,
+    admin_ops_socket: Option<service::AdminOpsSocketPlan>,
     listeners: Vec<ListenerSpec>,
     services: Vec<ServiceSpec>,
     background_tasks: Vec<BackgroundTaskSpec>,
@@ -32,6 +33,7 @@ impl ServerPlan {
             proxy_protocol: ProxyProtocolPolicy::Off,
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control: None,
+            admin_ops_socket: None,
             listeners,
             services: Vec::new(),
             background_tasks,
@@ -50,6 +52,7 @@ impl ServerPlan {
             proxy_protocol: ProxyProtocolPolicy::Off,
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control: None,
+            admin_ops_socket: None,
             listeners,
             services,
             background_tasks,
@@ -74,6 +77,10 @@ impl ServerPlan {
 
     pub fn certificate_reload_control(&self) -> Option<&CertificateReloadControlPlan> {
         self.certificate_reload_control.as_ref()
+    }
+
+    pub fn admin_ops_socket(&self) -> Option<&service::AdminOpsSocketPlan> {
+        self.admin_ops_socket.as_ref()
     }
 
     pub fn listeners(&self) -> &[ListenerSpec] {
@@ -171,6 +178,7 @@ impl ServerPlan {
             proxy_protocol: proxy_protocol::proxy_protocol_policy_from_config(config)?,
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control,
+            admin_ops_socket: service::admin_ops_socket_plan_from_config(config),
             listeners: listener::listener_specs_from_config(config)?,
             services: service::service_specs_from_config(config),
             background_tasks: background::background_task_specs_from_config(config),
