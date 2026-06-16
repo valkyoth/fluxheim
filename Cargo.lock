@@ -1033,6 +1033,7 @@ dependencies = [
  "fluxheim-compression",
  "fluxheim-config",
  "fluxheim-geoip",
+ "fluxheim-headers",
  "fluxheim-load-balancer",
  "fluxheim-observability",
  "fluxheim-openssl-fips-support",
@@ -1126,6 +1127,14 @@ dependencies = [
  "fluxheim-config",
  "log",
  "maxminddb",
+]
+
+[[package]]
+name = "fluxheim-headers"
+version = "1.6.4"
+dependencies = [
+ "fluxheim-config",
+ "fluxheim-protocol",
 ]
 
 [[package]]

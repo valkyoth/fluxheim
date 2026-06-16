@@ -1,0 +1,12 @@
+[package]
+name = "fluxheim-headers"
+version = "1.6.4"
+edition = "2024"
+rust-version = "1.96"
+license = "EUPL-1.2"
+publish = false
+description = "Internal Fluxheim header policy helpers."
+
+[dependencies]
+fluxheim-config = { path = "../fluxheim-config" }
+fluxheim-protocol = { path = "../fluxheim-protocol" }
