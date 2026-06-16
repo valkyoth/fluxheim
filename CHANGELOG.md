@@ -90,6 +90,8 @@ behavior when the change improves security or project direction.
   adapter to consume planned socket path and mode values.
 - Add a first-service-listener lookup to `ServerPlan` and update admin service
   construction/logging to use the planned admin listener.
+- Add borrow-based service listener iterators to `ServerPlan`, keeping the
+  allocation-based address helpers as adapter conveniences.
 
 ### Tests
 
@@ -133,6 +135,8 @@ behavior when the change improves security or project direction.
 - Add `fluxheim-server` regression coverage for admin ops-socket path and mode
   planning.
 - Add `fluxheim-server` regression coverage for first service-listener lookup.
+- Add `fluxheim-server` regression coverage for service listener iterator
+  views.
 
 ## 1.6.6 - 2026-06-16
 

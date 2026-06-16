@@ -117,24 +117,36 @@ impl ServerPlan {
         self.service(kind).is_some()
     }
 
-    pub fn service_listener_addrs(&self, kind: ServiceKind) -> Vec<String> {
-        let Some(service) = self.service(kind) else {
-            return Vec::new();
-        };
-        service
-            .listener_protocols()
+    pub fn service_listeners(&self, kind: ServiceKind) -> impl Iterator<Item = &ListenerSpec> + '_ {
+        let listener_protocols = self
+            .service(kind)
+            .map(ServiceSpec::listener_protocols)
+            .unwrap_or(&[]);
+        listener_protocols
             .iter()
             .flat_map(|protocol| self.listeners_for(*protocol))
+    }
+
+    pub fn service_listeners_for_protocol(
+        &self,
+        kind: ServiceKind,
+        protocol: ListenerProtocol,
+    ) -> impl Iterator<Item = &ListenerSpec> + '_ {
+        let service_owns_protocol = self
+            .service(kind)
+            .is_some_and(|service| service.listener_protocols().contains(&protocol));
+        self.listeners_for(protocol)
+            .filter(move |_| service_owns_protocol)
+    }
+
+    pub fn service_listener_addrs(&self, kind: ServiceKind) -> Vec<String> {
+        self.service_listeners(kind)
             .map(|listener| listener.addr().to_string())
             .collect()
     }
 
     pub fn first_service_listener_addr(&self, kind: ServiceKind) -> Option<String> {
-        let service = self.service(kind)?;
-        service
-            .listener_protocols()
-            .iter()
-            .flat_map(|protocol| self.listeners_for(*protocol))
+        self.service_listeners(kind)
             .map(|listener| listener.addr().to_string())
             .next()
     }
@@ -144,13 +156,9 @@ impl ServerPlan {
         kind: ServiceKind,
         protocol: ListenerProtocol,
     ) -> Vec<String> {
-        let Some(service) = self.service(kind) else {
-            return Vec::new();
-        };
-        if !service.listener_protocols().contains(&protocol) {
-            return Vec::new();
-        }
-        self.listener_addrs(protocol)
+        self.service_listeners_for_protocol(kind, protocol)
+            .map(|listener| listener.addr().to_string())
+            .collect()
     }
 
     pub fn background_tasks(&self) -> &[BackgroundTaskSpec] {
