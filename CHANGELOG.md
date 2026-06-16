@@ -75,6 +75,9 @@ behavior when the change improves security or project direction.
   listener lookups from the server plan.
 - Add protocol-filtered service listener lookup and move proxy HTTP/HTTPS
   listener registration onto the service-owned lookup path.
+- Add a background-service adapter helper that consumes planned
+  `BackgroundTaskSpec` values directly, removing duplicated task kind/name
+  wiring from plan-driven runtime services.
 
 ### Tests
 

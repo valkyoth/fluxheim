@@ -112,9 +112,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             config.cache_purger.limit,
             config.cache_purger.batches
         );
-        server.add_service(crate::background::background_service_with_kind(
-            task.name(),
-            crate::background::BackgroundTaskKind::CacheStalePurge,
+        server.add_service(crate::background::background_service_for_spec(
+            task,
             CacheStalePurgerBackgroundService {
                 config: config.cache_purger.clone(),
                 proxy: admin_proxy.clone(),
@@ -214,9 +213,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::CacheMetrics)
         {
             record_cache_runtime_metrics(&metrics_proxy);
-            server.add_service(crate::background::background_service_with_kind(
-                task.name(),
-                crate::background::BackgroundTaskKind::CacheMetrics,
+            server.add_service(crate::background::background_service_for_spec(
+                task,
                 CacheRuntimeMetricsBackgroundService {
                     proxy: metrics_proxy.clone(),
                 },
@@ -240,9 +238,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             if let Some(exporter) =
                 crate::metrics_otlp::MetricsOtlpExporter::from_config(&config.metrics.otlp)?
             {
-                server.add_service(crate::background::background_service_with_kind(
-                    task.name(),
-                    crate::background::BackgroundTaskKind::MetricsExport,
+                server.add_service(crate::background::background_service_for_spec(
+                    task,
                     MetricsOtlpBackgroundService { exporter },
                 ));
             }
@@ -261,9 +258,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             "ACME renewal service enabled; interval={}s",
             config.tls.acme.renewal.check_interval_secs
         );
-        server.add_service(crate::background::background_service_with_kind(
-            task.name(),
-            crate::background::BackgroundTaskKind::AcmeRenewal,
+        server.add_service(crate::background::background_service_for_spec(
+            task,
             AcmeRenewalBackgroundService {
                 config: config.clone(),
                 certificate_reloader: certificate_reloader.clone(),
@@ -377,9 +373,8 @@ fn certificate_reload_control_service(
         control_plan.socket_path().display()
     );
 
-    Ok(Some(crate::background::background_service_with_kind(
-        task.name(),
-        crate::background::BackgroundTaskKind::CertificateReload,
+    Ok(Some(crate::background::background_service_for_spec(
+        task,
         CertificateReloadControlBackgroundService {
             listener,
             reloader,

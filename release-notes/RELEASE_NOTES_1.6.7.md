@@ -27,6 +27,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added listener-protocol ownership to foreground service specs so the server plan can map proxy, admin, metrics, stream, and UDP services back to their planned listeners.
 - Updated the admin and metrics runtime adapters to consume service-owned listener lookups from the server plan.
 - Added protocol-filtered service listener lookup and moved proxy HTTP/HTTPS listener registration onto the service-owned lookup path.
+- Added a background-service adapter helper that consumes planned `BackgroundTaskSpec` values directly, removing duplicated task kind/name wiring from plan-driven runtime services.
 
 ## Tests
 
