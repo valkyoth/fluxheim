@@ -129,6 +129,16 @@ impl ServerPlan {
             .collect()
     }
 
+    pub fn first_service_listener_addr(&self, kind: ServiceKind) -> Option<String> {
+        let service = self.service(kind)?;
+        service
+            .listener_protocols()
+            .iter()
+            .flat_map(|protocol| self.listeners_for(*protocol))
+            .map(|listener| listener.addr().to_string())
+            .next()
+    }
+
     pub fn service_listener_addrs_for_protocol(
         &self,
         kind: ServiceKind,

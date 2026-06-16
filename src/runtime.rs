@@ -179,11 +179,10 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         && let Some(admin_services) =
             crate::admin::admin_services_from_config(&config, admin_proxy, &server_plan)?
     {
-        log::info!(
-            "{} enabled on {}",
-            admin_service.name(),
-            config.admin.listen
-        );
+        let admin_listener = server_plan
+            .first_service_listener_addr(fluxheim_server::ServiceKind::AdminControlPlane)
+            .unwrap_or_else(|| "unknown".to_owned());
+        log::info!("{} enabled on {}", admin_service.name(), admin_listener);
         if let Some(watchdog) = admin_services.watchdog {
             log::info!("admin self-healing watchdog enabled");
             server.add_service(watchdog);

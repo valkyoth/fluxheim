@@ -377,10 +377,8 @@ pub(crate) fn admin_services_from_config(
     if !config.admin.enabled {
         return Ok(None);
     }
-    let Some(admin_listener) = server_plan
-        .service_listener_addrs(fluxheim_server::ServiceKind::AdminControlPlane)
-        .into_iter()
-        .next()
+    let Some(admin_listener) =
+        server_plan.first_service_listener_addr(fluxheim_server::ServiceKind::AdminControlPlane)
     else {
         return Err("admin.enabled requires an admin listener in the server plan".into());
     };

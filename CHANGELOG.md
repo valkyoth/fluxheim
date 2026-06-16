@@ -88,6 +88,8 @@ behavior when the change improves security or project direction.
   module, leaving the crate root as the public export and error surface.
 - Add an admin ops-socket endpoint plan to `ServerPlan` and update the admin
   adapter to consume planned socket path and mode values.
+- Add a first-service-listener lookup to `ServerPlan` and update admin service
+  construction/logging to use the planned admin listener.
 
 ### Tests
 
@@ -130,6 +132,7 @@ behavior when the change improves security or project direction.
   main server test file stays comfortably below the 500-line target.
 - Add `fluxheim-server` regression coverage for admin ops-socket path and mode
   planning.
+- Add `fluxheim-server` regression coverage for first service-listener lookup.
 
 ## 1.6.6 - 2026-06-16
 

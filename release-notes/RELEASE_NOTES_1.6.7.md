@@ -33,6 +33,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added admin self-healing watchdog intent to `ServerPlan` so the admin adapter consumes the planned `RuntimeWatchdog` task instead of creating it locally.
 - Split the `ServerPlan` implementation into a focused `fluxheim-server` plan module, leaving the crate root as the public export and error surface.
 - Added an admin ops-socket endpoint plan to `ServerPlan` and updated the admin adapter to consume planned socket path and mode values.
+- Added a first-service-listener lookup to `ServerPlan` and updated admin service construction/logging to use the planned admin listener.
 
 ## Tests
 
@@ -54,6 +55,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Extended `fluxheim-server` background-task inventory coverage to include the planned admin self-healing watchdog.
 - Split server background-task inventory tests into a focused module so the main server test file stays comfortably below the 500-line target.
 - Added `fluxheim-server` regression coverage for admin ops-socket path and mode planning.
+- Added `fluxheim-server` regression coverage for first service-listener lookup.
 
 ## Verification
 

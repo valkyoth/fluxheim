@@ -236,6 +236,14 @@ fn server_plan_from_config_collects_listener_inventory() {
         vec!["127.0.0.1:8081".to_owned()]
     );
     assert_eq!(
+        plan.first_service_listener_addr(ServiceKind::AdminControlPlane),
+        Some("127.0.0.1:8081".to_owned())
+    );
+    assert_eq!(
+        plan.first_service_listener_addr(ServiceKind::LoadBalancerHealthChecks),
+        None
+    );
+    assert_eq!(
         plan.service_listener_addrs(ServiceKind::MetricsHttp),
         vec!["127.0.0.1:9090".to_owned()]
     );
