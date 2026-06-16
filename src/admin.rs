@@ -372,10 +372,19 @@ pub(crate) struct AdminServices {
 pub(crate) fn admin_services_from_config(
     config: &Config,
     proxy: FluxProxy,
+    server_plan: &fluxheim_server::ServerPlan,
 ) -> Result<Option<AdminServices>, Box<dyn Error + Send + Sync>> {
     if !config.admin.enabled {
         return Ok(None);
     }
+    let Some(admin_listener) = server_plan
+        .listeners()
+        .iter()
+        .find(|listener| listener.protocol() == fluxheim_server::ListenerProtocol::AdminHttp)
+        .map(|listener| listener.addr().to_string())
+    else {
+        return Err("admin.enabled requires an admin listener in the server plan".into());
+    };
 
     let app = AdminApp::from_config(config, proxy)?;
     let watchdog = if app.self_healing_enabled {
@@ -391,7 +400,7 @@ pub(crate) fn admin_services_from_config(
         "Fluxheim Admin Control Plane".to_owned(),
         HttpServer::new_app(app.clone()),
     );
-    service.add_tcp(&config.admin.listen);
+    service.add_tcp(&admin_listener);
     #[cfg(unix)]
     let ops_socket = if config.admin.ops_socket.enabled {
         let Some(path) = config.admin.ops_socket.path.to_str() else {
@@ -6886,7 +6895,10 @@ mod tests {
         };
         let proxy = FluxProxy::from_config(&config).unwrap();
 
-        let services = admin_services_from_config(&config, proxy).unwrap().unwrap();
+        let server_plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
+        let services = admin_services_from_config(&config, proxy, &server_plan)
+            .unwrap()
+            .unwrap();
 
         assert!(services.watchdog.is_some());
     }

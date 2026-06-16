@@ -144,7 +144,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         log::info!("proxy listener enabled on {listen}");
         proxy_service.add_tcp(&listen);
     }
-    let certificate_reloader = add_tls_listeners(&mut proxy_service, &config)?;
+    let certificate_reloader = add_tls_listeners(&mut proxy_service, &config, &server_plan)?;
     apply_downstream_proxy_protocol(&mut proxy_service, &config)?;
     #[cfg(not(feature = "acme-client"))]
     let _ = &certificate_reloader;
@@ -175,7 +175,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         server.add_service(udp_service);
     }
 
-    if let Some(admin_services) = crate::admin::admin_services_from_config(&config, admin_proxy)? {
+    if let Some(admin_services) =
+        crate::admin::admin_services_from_config(&config, admin_proxy, &server_plan)?
+    {
         log::info!("admin control plane enabled on {}", config.admin.listen);
         if let Some(watchdog) = admin_services.watchdog {
             log::info!("admin self-healing watchdog enabled");
@@ -1298,6 +1300,7 @@ mod tests {
 fn add_tls_listeners<S>(
     service: &mut pingora::services::listening::Service<S>,
     config: &Config,
+    server_plan: &fluxheim_server::ServerPlan,
 ) -> Result<Option<DownstreamCertificateReloader>, Box<dyn Error + Send + Sync>>
 where
     S: Send + Sync + 'static,
@@ -1305,10 +1308,16 @@ where
     let Some(plan) = crate::tls::downstream_tls_listener_plan(config)? else {
         return Ok(None);
     };
+    let tls_listens = server_plan
+        .listeners()
+        .iter()
+        .filter(|listener| listener.protocol() == fluxheim_server::ListenerProtocol::Https)
+        .map(|listener| listener.addr().to_string())
+        .collect::<Vec<_>>();
 
     let reloader = add_downstream_tls_listeners(
         service,
-        plan.listens(),
+        &tls_listens,
         plan.selector(),
         plan.requires_certificate_resolver(),
         &config.tls,
@@ -2000,12 +2009,17 @@ fn certificate_paths_are_absent(
 ))]
 fn add_tls_listeners<S>(
     _service: &mut pingora::services::listening::Service<S>,
-    config: &Config,
+    _config: &Config,
+    server_plan: &fluxheim_server::ServerPlan,
 ) -> Result<Option<DownstreamCertificateReloader>, Box<dyn Error + Send + Sync>>
 where
     S: Send + Sync + 'static,
 {
-    if config.server.tls_listen.is_empty() {
+    if server_plan
+        .listeners()
+        .iter()
+        .all(|listener| listener.protocol() != fluxheim_server::ListenerProtocol::Https)
+    {
         Ok(None)
     } else {
         Err("server.tls_listen requires a TLS feature".into())
