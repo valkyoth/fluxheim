@@ -11,9 +11,13 @@ use fluxheim_runtime::{BackgroundTaskSpec, ShutdownView};
 
 mod process;
 mod proxy_protocol;
+#[cfg(unix)]
+mod unix_listener;
 
 pub use process::ProcessSpec;
 pub use proxy_protocol::{ProxyProtocolPolicy, ProxyProtocolTrustedSource};
+#[cfg(unix)]
+pub use unix_listener::replace_private_unix_listener;
 
 use proxy_protocol::proxy_protocol_policy_from_config;
 

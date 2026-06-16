@@ -42,6 +42,9 @@ behavior when the change improves security or project direction.
 - Split `fluxheim-server` process planning and PROXY protocol planning into
   focused modules so the new server crate stays below the 500-line target while
   the bootstrap cutover continues.
+- Move private Unix listener creation for the certificate reload control socket
+  into `fluxheim-server`, including stale socket replacement, mode `0600`, and
+  nonblocking setup.
 
 ### Tests
 
@@ -57,6 +60,9 @@ behavior when the change improves security or project direction.
   under the 500-line modularity target.
 - Verify the split server crate modules remain below the modularity target with
   the release-gated modularity policy check.
+- Add a `fluxheim-server` regression test proving private Unix listener paths
+  replace stale sockets, reject non-socket files, and enforce private
+  permissions.
 
 ## 1.6.6 - 2026-06-16
 

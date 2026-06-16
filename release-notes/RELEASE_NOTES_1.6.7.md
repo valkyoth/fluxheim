@@ -15,6 +15,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Removed duplicated downstream TLS listener-address storage from `fluxheim-tls`; HTTPS listener addresses now come from the server plan while TLS planning owns certificate selection and policy.
 - Moved downstream PROXY protocol listener policy and trusted-source parsing into `fluxheim-server`, leaving the root runtime as a Pingora listener-policy adapter.
 - Split `fluxheim-server` process planning and PROXY protocol planning into focused modules so the new server crate stays under the 500-line modularity target.
+- Moved private Unix listener creation for the certificate reload control socket into `fluxheim-server`, including stale socket replacement, mode `0600`, and nonblocking setup.
 
 ## Tests
 
@@ -23,6 +24,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added a live admin-listener smoke test that starts Fluxheim, reaches the normal HTTP listener, checks unauthenticated admin health, checks authenticated admin status, and checks the local read-only ops socket.
 - Verified plan-gated foreground service registration with live admin, observability, stream proxy, and UDP proxy smokes.
 - Kept the new server crate files below the 500-line modularity target by splitting tests into `server_tests.rs`, `process.rs`, and `proxy_protocol.rs`.
+- Added a `fluxheim-server` regression test proving private Unix listener paths replace stale sockets, reject non-socket files, and enforce private permissions.
 
 ## Verification
 

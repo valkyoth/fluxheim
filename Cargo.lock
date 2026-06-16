@@ -1216,6 +1216,7 @@ dependencies = [
  "fluxheim-config",
  "fluxheim-protocol",
  "fluxheim-runtime",
+ "rustix",
 ]
 
 [[package]]

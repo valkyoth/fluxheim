@@ -5,8 +5,6 @@ use std::fs::File;
 use std::io::Read;
 #[cfg(feature = "proxy")]
 use std::io::Write;
-#[cfg(all(feature = "proxy", feature = "acme-client", unix))]
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 #[cfg(feature = "proxy")]
 use std::path::Path;
 
@@ -355,23 +353,7 @@ fn certificate_reload_control_service(
     }
 
     let path = process.certificate_reload_sock().to_path_buf();
-    match std::fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.file_type().is_socket() => {
-            std::fs::remove_file(&path)?;
-        }
-        Ok(_) => {
-            return Err(format!(
-                "certificate reload control socket path {} already exists and is not a socket",
-                path.display()
-            )
-            .into());
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-
-    let listener = bind_private_unix_listener(&path)?;
-    listener.set_nonblocking(true)?;
+    let listener = fluxheim_server::replace_private_unix_listener(&path)?;
     log::info!(
         "certificate reload control socket enabled at {}",
         path.display()
@@ -388,28 +370,6 @@ fn certificate_reload_control_service(
             )),
         },
     )))
-}
-
-#[cfg(all(feature = "proxy", feature = "acme-client", unix))]
-fn bind_private_unix_listener(
-    path: &Path,
-) -> Result<std::os::unix::net::UnixListener, Box<dyn Error + Send + Sync>> {
-    let address = rustix::net::SocketAddrUnix::new(path)?;
-    let socket = rustix::net::socket(
-        rustix::net::AddressFamily::UNIX,
-        rustix::net::SocketType::STREAM,
-        None,
-    )?;
-    rustix::net::bind(&socket, &address)?;
-    if let Err(error) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
-        let _ = std::fs::remove_file(path);
-        return Err(error.into());
-    }
-    if let Err(error) = rustix::net::listen(&socket, 128) {
-        let _ = std::fs::remove_file(path);
-        return Err(error.into());
-    }
-    Ok(std::os::unix::net::UnixListener::from(socket))
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
