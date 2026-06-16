@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use fluxheim_config::{AcmeAutomationMode, Config, DownstreamProxyProtocol};
 use fluxheim_runtime::{BackgroundTaskSpec, ShutdownView};
 
+mod control;
 mod http2;
 mod listener;
 mod process;
@@ -17,6 +18,7 @@ mod service;
 #[cfg(unix)]
 mod unix_listener;
 
+pub use control::CertificateReloadControlPlan;
 pub use http2::DownstreamHttp2Policy;
 pub use listener::{ListenerProtocol, ListenerSpec};
 pub use process::ProcessSpec;
@@ -38,6 +40,7 @@ pub struct ServerPlan {
     process: ProcessSpec,
     proxy_protocol: ProxyProtocolPolicy,
     downstream_http2: DownstreamHttp2Policy,
+    certificate_reload_control: Option<CertificateReloadControlPlan>,
     listeners: Vec<ListenerSpec>,
     services: Vec<ServiceSpec>,
     background_tasks: Vec<BackgroundTaskSpec>,
@@ -50,6 +53,7 @@ impl ServerPlan {
             process: ProcessSpec::default(),
             proxy_protocol: ProxyProtocolPolicy::Off,
             downstream_http2: DownstreamHttp2Policy::default(),
+            certificate_reload_control: None,
             listeners,
             services: Vec::new(),
             background_tasks,
@@ -67,6 +71,7 @@ impl ServerPlan {
             process,
             proxy_protocol: ProxyProtocolPolicy::Off,
             downstream_http2: DownstreamHttp2Policy::default(),
+            certificate_reload_control: None,
             listeners,
             services,
             background_tasks,
@@ -87,6 +92,10 @@ impl ServerPlan {
 
     pub const fn downstream_http2(&self) -> &DownstreamHttp2Policy {
         &self.downstream_http2
+    }
+
+    pub fn certificate_reload_control(&self) -> Option<&CertificateReloadControlPlan> {
+        self.certificate_reload_control.as_ref()
     }
 
     pub fn listeners(&self) -> &[ListenerSpec] {
@@ -179,16 +188,33 @@ impl ServerPlan {
             }
         }
 
+        let process = ProcessSpec::from_config(config);
+        let certificate_reload_control =
+            certificate_reload_control_plan_from_config(config, &process);
+
         Ok(Self {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
-            process: ProcessSpec::from_config(config),
+            process,
             proxy_protocol: proxy_protocol_policy_from_config(config)?,
             downstream_http2: DownstreamHttp2Policy::default(),
+            certificate_reload_control,
             listeners,
             services: service_specs_from_config(config),
             background_tasks: background_task_specs_from_config(config),
         })
     }
+}
+
+fn certificate_reload_control_plan_from_config(
+    config: &Config,
+    process: &ProcessSpec,
+) -> Option<CertificateReloadControlPlan> {
+    if config.tls.acme.enabled && config.tls.acme.renewal.reload_after_renewal {
+        return Some(CertificateReloadControlPlan::new(
+            process.certificate_reload_sock().to_path_buf(),
+        ));
+    }
+    None
 }
 
 pub trait ServerRunner {

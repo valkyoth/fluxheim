@@ -51,6 +51,9 @@ behavior when the change improves security or project direction.
 - Move downstream HTTP/2 hardening limits into a Pingora-neutral
   `fluxheim-server` policy plan, with the root runtime only adapting those
   values into Pingora `H2Options`.
+- Move certificate reload control socket policy into `fluxheim-server` so the
+  socket path, concurrency cap, and request read timeout are planned outside
+  the Pingora runtime adapter.
 
 ### Tests
 
@@ -71,6 +74,8 @@ behavior when the change improves security or project direction.
   permissions.
 - Add a `fluxheim-server` regression test for the downstream HTTP/2 hardening
   defaults consumed by the runtime adapter.
+- Add a `fluxheim-server` regression test for the certificate reload control
+  socket plan and keep the live admin listener smoke in the verification set.
 
 ## 1.6.6 - 2026-06-16
 

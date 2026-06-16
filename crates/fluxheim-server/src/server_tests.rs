@@ -57,6 +57,30 @@ fn downstream_http2_policy_uses_hardened_defaults() {
 }
 
 #[test]
+fn server_plan_builds_certificate_reload_control_plan_when_enabled() {
+    let mut config = Config::default();
+    config.tls.acme.enabled = true;
+    config.server.process.certificate_reload_sock =
+        std::path::PathBuf::from("/run/fluxheim/test-cert-reload.sock");
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let control = plan
+        .certificate_reload_control()
+        .expect("certificate reload control plan");
+
+    assert_eq!(
+        control.socket_path(),
+        std::path::Path::new("/run/fluxheim/test-cert-reload.sock")
+    );
+    assert_eq!(control.max_concurrent_requests(), 4);
+    assert_eq!(control.read_timeout(), std::time::Duration::from_secs(5));
+
+    config.tls.acme.renewal.reload_after_renewal = false;
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert!(plan.certificate_reload_control().is_none());
+}
+
+#[test]
 fn server_runner_boundary_accepts_shutdown_view() {
     let plan = ServerPlan::new(
         Vec::new(),

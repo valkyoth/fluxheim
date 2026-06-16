@@ -23,8 +23,6 @@ use crate::config::{LoggingFormat, LoggingTarget};
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
 const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
-#[cfg(all(feature = "proxy", feature = "acme-client", unix))]
-const MAX_CONCURRENT_CERTIFICATE_RELOAD_REQUESTS: usize = 4;
 #[cfg(all(
     feature = "proxy",
     any(
@@ -133,8 +131,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(all(feature = "acme-client", unix))]
     if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::CertificateReload)
         && let Some(service) = certificate_reload_control_service(
-            &config,
-            server_plan.process(),
+            server_plan.certificate_reload_control(),
             certificate_reloader.clone(),
         )?
     {
@@ -332,22 +329,20 @@ fn pingora_proxy_protocol_trusted_sources(
 
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
 fn certificate_reload_control_service(
-    config: &Config,
-    process: &fluxheim_server::ProcessSpec,
+    control_plan: Option<&fluxheim_server::CertificateReloadControlPlan>,
     reloader: Option<DownstreamCertificateReloader>,
 ) -> Result<
     Option<crate::background::FluxBackgroundService<CertificateReloadControlBackgroundService>>,
     Box<dyn Error + Send + Sync>,
 > {
-    if !config.tls.acme.enabled || !config.tls.acme.renewal.reload_after_renewal {
+    let Some(control_plan) = control_plan else {
         return Ok(None);
-    }
+    };
 
-    let path = process.certificate_reload_sock().to_path_buf();
-    let listener = fluxheim_server::replace_private_unix_listener(&path)?;
+    let listener = fluxheim_server::replace_private_unix_listener(control_plan.socket_path())?;
     log::info!(
         "certificate reload control socket enabled at {}",
-        path.display()
+        control_plan.socket_path().display()
     );
 
     Ok(Some(crate::background::background_service_with_kind(
@@ -357,8 +352,9 @@ fn certificate_reload_control_service(
             listener,
             reloader,
             semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
-                MAX_CONCURRENT_CERTIFICATE_RELOAD_REQUESTS,
+                control_plan.max_concurrent_requests(),
             )),
+            read_timeout: control_plan.read_timeout(),
         },
     )))
 }
@@ -367,8 +363,9 @@ fn certificate_reload_control_service(
 fn handle_certificate_reload_control_request(
     stream: &mut std::os::unix::net::UnixStream,
     reloader: Option<&DownstreamCertificateReloader>,
+    read_timeout: std::time::Duration,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+    stream.set_read_timeout(Some(read_timeout))?;
     let mut buffer = [0_u8; 1024];
     let bytes = stream.read(&mut buffer)?;
     let command = std::str::from_utf8(&buffer[..bytes])?.trim();
@@ -400,6 +397,7 @@ struct CertificateReloadControlBackgroundService {
     listener: std::os::unix::net::UnixListener,
     reloader: Option<DownstreamCertificateReloader>,
     semaphore: std::sync::Arc<tokio::sync::Semaphore>,
+    read_timeout: std::time::Duration,
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
@@ -425,6 +423,7 @@ impl crate::background::FluxBackgroundTask for CertificateReloadControlBackgroun
                         continue;
                     };
                     let reloader = self.reloader.clone();
+                    let read_timeout = self.read_timeout;
                     tokio::task::spawn_blocking(move || {
                         let _permit = permit;
                         if let Err(error) = stream.set_nonblocking(false) {
@@ -434,6 +433,7 @@ impl crate::background::FluxBackgroundTask for CertificateReloadControlBackgroun
                         if let Err(error) = handle_certificate_reload_control_request(
                             &mut stream,
                             reloader.as_ref(),
+                            read_timeout,
                         ) {
                             log::warn!("certificate reload control request failed: {error}");
                         }
@@ -1076,9 +1076,12 @@ mod tests {
         let server_plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
 
         assert!(
-            super::certificate_reload_control_service(&config, server_plan.process(), None)
-                .unwrap()
-                .is_none()
+            super::certificate_reload_control_service(
+                server_plan.certificate_reload_control(),
+                None
+            )
+            .unwrap()
+            .is_none()
         );
     }
 
