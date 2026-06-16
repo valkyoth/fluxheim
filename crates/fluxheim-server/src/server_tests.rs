@@ -164,6 +164,8 @@ fn server_plan_from_config_collects_background_task_inventory() {
             BackgroundTaskKind::CertificateReload,
         ]
     );
+    assert!(plan.has_background_task(BackgroundTaskKind::CacheMetrics));
+    assert!(!plan.has_background_task(BackgroundTaskKind::LoadBalancerRefresh));
 }
 
 #[test]

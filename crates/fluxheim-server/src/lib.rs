@@ -98,6 +98,10 @@ impl ServerPlan {
         &self.background_tasks
     }
 
+    pub fn has_background_task(&self, kind: fluxheim_runtime::BackgroundTaskKind) -> bool {
+        self.background_tasks.iter().any(|task| task.kind() == kind)
+    }
+
     pub fn has_public_listener(&self) -> bool {
         self.listeners
             .iter()

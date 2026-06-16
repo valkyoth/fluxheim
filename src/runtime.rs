@@ -10,8 +10,6 @@ use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 #[cfg(feature = "proxy")]
 use std::path::Path;
 
-#[cfg(all(feature = "proxy", feature = "acme-client"))]
-use crate::config::AcmeAutomationMode;
 #[cfg(all(
     feature = "acme",
     feature = "proxy",
@@ -118,7 +116,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     harden_proxy_service_http2_options(&mut proxy_service)?;
 
     #[cfg(feature = "cache")]
-    if config.cache_purger.enabled {
+    if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::CacheStalePurge) {
         log::info!(
             "cache stale disk purger enabled; interval={}s limit={} batches={}",
             config.cache_purger.interval_secs,
@@ -149,10 +147,12 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(not(feature = "acme-client"))]
     let _ = &certificate_reloader;
     #[cfg(all(feature = "acme-client", unix))]
-    if let Some(service) =
-        certificate_reload_control_service(&config, certificate_reloader.clone())?
-    {
-        server.add_service(service);
+    if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::CertificateReload) {
+        if let Some(service) =
+            certificate_reload_control_service(&config, certificate_reloader.clone())?
+        {
+            server.add_service(service);
+        }
     }
 
     #[cfg(feature = "load-balancer")]
@@ -199,7 +199,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         crate::metrics::init()?;
         crate::metrics::record_config(&config);
         #[cfg(feature = "cache")]
-        {
+        if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::CacheMetrics) {
             record_cache_runtime_metrics(&metrics_proxy);
             server.add_service(crate::background::background_service_with_kind(
                 "Cache runtime metrics",
@@ -220,7 +220,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         server.add_service(metrics_service);
 
         #[cfg(feature = "metrics-otlp")]
-        if config.metrics.otlp.enabled {
+        if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::MetricsExport) {
             if let Some(exporter) =
                 crate::metrics_otlp::MetricsOtlpExporter::from_config(&config.metrics.otlp)?
             {
@@ -238,7 +238,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     #[cfg(feature = "acme-client")]
-    if acme_background_service_enabled(&config) {
+    if server_plan.has_background_task(fluxheim_runtime::BackgroundTaskKind::AcmeRenewal) {
         log::info!(
             "ACME renewal service enabled; interval={}s",
             config.tls.acme.renewal.check_interval_secs
@@ -534,9 +534,9 @@ fn record_cache_runtime_metrics(proxy: &crate::proxy::FluxProxy) {
     }
 }
 
-#[cfg(all(feature = "proxy", feature = "acme-client"))]
+#[cfg(all(test, feature = "proxy", feature = "acme-client"))]
 fn acme_background_service_enabled(config: &Config) -> bool {
-    config.tls.acme.automation == AcmeAutomationMode::Background
+    config.tls.acme.automation == crate::config::AcmeAutomationMode::Background
         && !crate::acme::renewal_targets(config).is_empty()
 }
 

@@ -18,6 +18,9 @@ behavior when the change improves security or project direction.
   the current Pingora server as the compatibility adapter.
 - Update root runtime to consume the server plan for process configuration and
   HTTP, HTTPS, admin, and metrics listener registration.
+- Update root background-service registration gates to consume Fluxheim
+  server-plan task metadata for cache purging, cache metrics, OTLP metrics
+  export, ACME renewal, and certificate reload control.
 
 ### Tests
 

@@ -8,6 +8,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Moved HTTP, HTTPS, admin, metrics, stream, and UDP listener inventory into the Fluxheim server plan boundary.
 - Moved daemon mode, PID/upgrade socket paths, worker/thread settings, keepalive pool sizing, retry count, and graceful shutdown timing into the Fluxheim process plan boundary.
 - Updated the root runtime Pingora adapter to consume the Fluxheim server plan for process configuration and HTTP, HTTPS, admin, and metrics listener registration.
+- Updated root background-service registration gates to consume Fluxheim server-plan task metadata for cache purging, cache metrics, OTLP metrics export, ACME renewal, and certificate reload control.
 
 ## Tests
 
