@@ -71,6 +71,8 @@ behavior when the change improves security or project direction.
 - Add listener-protocol ownership to foreground service specs so the server
   plan can map proxy, admin, metrics, stream, and UDP services back to their
   planned listeners.
+- Update the admin and metrics runtime adapters to consume service-owned
+  listener lookups from the server plan.
 
 ### Tests
 

@@ -378,7 +378,7 @@ pub(crate) fn admin_services_from_config(
         return Ok(None);
     }
     let Some(admin_listener) = server_plan
-        .listener_addrs(fluxheim_server::ListenerProtocol::AdminHttp)
+        .service_listener_addrs(fluxheim_server::ServiceKind::AdminControlPlane)
         .into_iter()
         .next()
     else {

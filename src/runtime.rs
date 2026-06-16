@@ -220,7 +220,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             ));
         }
         let mut metrics_service = pingora::services::listening::Service::prometheus_http_service();
-        for listen in server_plan.listener_addrs(fluxheim_server::ListenerProtocol::MetricsHttp) {
+        for listen in server_plan.service_listener_addrs(fluxheim_server::ServiceKind::MetricsHttp)
+        {
             log::info!(
                 "{} listener enabled on {listen}",
                 metrics_service_spec.name()
