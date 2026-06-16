@@ -11,7 +11,8 @@ use crate::http_types::{
     PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader,
 };
 use fluxheim_headers::{
-    DEFAULT_SERVER_HEADER, SPOOFABLE_CLIENT_IP_HEADERS, rewrite_header_prefix, rewrite_refresh_url,
+    DEFAULT_SERVER_HEADER, HOP_BY_HOP_REQUEST_HEADERS, SPOOFABLE_CLIENT_IP_HEADERS,
+    hop_by_hop_request_header_policy, rewrite_header_prefix, rewrite_refresh_url,
     rewrite_set_cookie_value,
 };
 #[cfg(not(feature = "privacy-mode"))]
@@ -37,43 +38,27 @@ pub fn apply_upstream_request_policy(
 pub fn strip_upstream_hop_by_hop_request_headers(
     request: &mut RequestHeader,
 ) -> pingora::Result<()> {
-    let connection_listed_headers = request
+    let connection_values = request
         .headers
         .get_all("connection")
         .iter()
-        .flat_map(|value| value.to_str().unwrap_or_default().split(','))
-        .map(str::trim)
-        .filter(|value| fluxheim_protocol::http_token_valid(value))
-        .map(str::to_ascii_lowercase)
-        .collect::<Vec<_>>();
-    let preserve_chunked_framing = request
+        .filter_map(|value| value.to_str().ok());
+    let transfer_encoding_values = request
         .headers
         .get_all("transfer-encoding")
         .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .map(str::trim)
-        .rfind(|value| !value.is_empty())
-        .is_some_and(|coding| coding.eq_ignore_ascii_case("chunked"));
+        .filter_map(|value| value.to_str().ok());
+    let policy = hop_by_hop_request_header_policy(connection_values, transfer_encoding_values);
 
-    for header in connection_listed_headers {
+    for header in policy.connection_listed_headers() {
         request.remove_header(header.as_str());
     }
 
-    for header in [
-        "connection",
-        "keep-alive",
-        "proxy-authenticate",
-        "proxy-authorization",
-        "te",
-        "trailer",
-        "transfer-encoding",
-        "upgrade",
-    ] {
-        request.remove_header(header);
+    for header in HOP_BY_HOP_REQUEST_HEADERS {
+        request.remove_header(*header);
     }
 
-    if preserve_chunked_framing {
+    if policy.preserve_chunked_framing() {
         request.insert_header("transfer-encoding", "chunked")?;
     }
 

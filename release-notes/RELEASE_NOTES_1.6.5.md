@@ -23,6 +23,9 @@ pure header rewrite and forwarded-client-IP helpers now live in
 - Added a release-gated Pingora HTTP/error boundary policy that blocks new
   direct `pingora::http`, `pingora::Error`, and `pingora::ErrorType` usage
   outside documented adapter files.
+- Moved upstream hop-by-hop request header policy calculation into
+  `fluxheim-headers`; the root `headers` module now only applies the resulting
+  plan to Pingora request headers.
 
 ## Validation
 
@@ -37,3 +40,5 @@ pure header rewrite and forwarded-client-IP helpers now live in
 - Added `scripts/validate-pingora-boundary-policy.sh` and
   `docs/pingora-http-error-boundary-exceptions.tsv` to keep the remaining
   Pingora HTTP/error bridge surface explicit during the `1.6.x` removal line.
+- Added direct `fluxheim-headers` unit coverage for hop-by-hop request header
+  policy extraction and chunked body framing preservation.

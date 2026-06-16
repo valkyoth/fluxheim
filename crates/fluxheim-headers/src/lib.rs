@@ -8,6 +8,12 @@ use std::net::IpAddr;
 
 use fluxheim_config::{ResponseHeaderRewriteConfig, ResponseHeaderRewriteRuleConfig};
 
+mod hop_by_hop;
+
+pub use hop_by_hop::{
+    HOP_BY_HOP_REQUEST_HEADERS, HopByHopRequestHeaderPolicy, hop_by_hop_request_header_policy,
+};
+
 pub const SPOOFABLE_CLIENT_IP_HEADERS: &[&str] = &[
     "x-forwarded-for",
     "x-real-ip",
