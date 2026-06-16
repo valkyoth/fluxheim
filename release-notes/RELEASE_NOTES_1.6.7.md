@@ -12,6 +12,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added Fluxheim-owned foreground service intent metadata for proxy, admin, ops socket, metrics, stream proxy, and UDP proxy service registration.
 - Added an explicit server-plan runtime adapter marker so the current Pingora compatibility runtime is a named adapter boundary before the native server cutover.
 - Added server-plan listener lookup helpers so runtime/admin adapters consume HTTP, HTTPS, admin, and metrics listener addresses through `fluxheim-server`.
+- Removed duplicated downstream TLS listener-address storage from `fluxheim-tls`; HTTPS listener addresses now come from the server plan while TLS planning owns certificate selection and policy.
 
 ## Tests
 
@@ -24,6 +25,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 ## Verification
 
 - `cargo test -p fluxheim-server`
+- `cargo test -p fluxheim-tls`
 - `RUSTFLAGS='-D warnings' cargo test --lib runtime::tests`
 - `RUSTFLAGS='-D warnings' cargo test --lib admin::tests::admin_services_enable_watchdog_only_when_self_healing_is_enabled`
 - `RUSTFLAGS='-D warnings' cargo check --workspace`

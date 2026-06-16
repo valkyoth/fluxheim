@@ -5,7 +5,6 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DownstreamTlsListenerPlan {
-    listens: Vec<String>,
     selector: DownstreamCertificateSelector,
     requires_certificate_resolver: bool,
     acme_tls_alpn_enabled: bool,
@@ -31,7 +30,6 @@ impl DownstreamTlsListenerPlan {
             selector.has_sni_certificates() || acme_tls_alpn_enabled;
 
         Ok(Some(Self {
-            listens: config.server.tls_listen.clone(),
             selector,
             requires_certificate_resolver,
             acme_tls_alpn_enabled,
@@ -40,10 +38,6 @@ impl DownstreamTlsListenerPlan {
 
     pub fn from_config(config: &Config) -> Result<Option<Self>, DownstreamTlsPlanError> {
         Self::from_config_with_acme_resolver(config, |_config, _vhost| None)
-    }
-
-    pub fn listens(&self) -> &[String] {
-        &self.listens
     }
 
     pub fn selector(&self) -> &DownstreamCertificateSelector {
@@ -414,7 +408,6 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(plan.listens(), ["127.0.0.1:8443"]);
         assert!(plan.requires_certificate_resolver());
         assert!(!plan.acme_tls_alpn_enabled());
     }
