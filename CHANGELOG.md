@@ -7,6 +7,34 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.6 - 2026-06-16
+
+### Changed
+
+- Continue the 1.6 Pingora-exit line by adding `fluxheim-tls` as the
+  Fluxheim-owned downstream TLS listener planning and provider-policy
+  boundary.
+- Move downstream TLS listener plans, SNI certificate selection, wildcard
+  matching, ALPN/cipher/curve policy helpers, and rustls/OpenSSL provider/FIPS
+  checks into `fluxheim-tls`.
+- Update the runtime TLS listener adapter to consume `fluxheim-tls` plans while
+  the current Pingora listener path remains the compatibility adapter for this
+  release.
+- Keep `pingora-rustls` documented as a temporary dependency until the native
+  server/listener cutover, since 1.6.6 extracts planning but does not yet
+  replace the active listener adapter.
+
+### Security
+
+- Fix `fluxheim-tls` feature gates so default, OpenSSL-only, and OpenSSL-FIPS
+  builds do not re-export rustls-only policy/provider helpers.
+- Harden downstream SNI certificate lookup to fall back to the default
+  certificate instead of direct-indexing if a future selector refactor violates
+  the internal index invariant.
+- Move PROXY protocol v2 signature validation into the public parser instead of
+  relying on every caller to satisfy the precondition.
+- Reject non-canonical trusted PROXY protocol CIDR entries with host bits set.
+
 ## 1.6.5 - 2026-06-16
 
 ### Changed

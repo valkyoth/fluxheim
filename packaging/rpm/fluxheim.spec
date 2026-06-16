@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.5
+Version:        1.6.6
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue Jun 16 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.6-1
+- Continue the Pingora-exit line with the dedicated fluxheim-tls crate.
+- Move downstream TLS listener planning, SNI certificate selection, ALPN and
+  cipher policy helpers, and rustls/OpenSSL provider checks into fluxheim-tls.
+- Harden PROXY protocol v2 parsing and trusted-source CIDR validation.
+- Fix TLS feature gates for default, OpenSSL-only, and OpenSSL-FIPS builds.
+
 * Tue Jun 16 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.5-1
 - Continue the Pingora-exit line with the first dedicated header-policy crate
   boundary.

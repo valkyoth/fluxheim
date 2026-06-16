@@ -22,3 +22,4 @@ Fluxheim 1.6.6 continues the 1.6 Pingora-exit line by extracting downstream TLS 
 - `cargo test -p fluxheim-tls --features acme,tls-rustls`
 - `RUSTFLAGS='-D warnings' cargo check --workspace`
 - Focused runtime TLS tests for ACME ALPN and SNI certificate reload behavior.
+- `scripts/stable_release_gate.sh release`
