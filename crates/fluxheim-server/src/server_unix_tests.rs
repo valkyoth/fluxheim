@@ -4,7 +4,7 @@ use super::*;
 fn private_unix_listener_replaces_socket_and_rejects_files() {
     use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 
-    let test_dir = unique_temp_dir("fluxheim-server-private-listener");
+    let test_dir = unique_short_temp_dir();
     std::fs::create_dir_all(&test_dir).unwrap();
     let socket_path = test_dir.join("reload.sock");
 
@@ -31,14 +31,14 @@ fn private_unix_listener_replaces_socket_and_rejects_files() {
     std::fs::remove_dir_all(&test_dir).unwrap();
 }
 
-fn unique_temp_dir(name: &str) -> std::path::PathBuf {
+fn unique_short_temp_dir() -> std::path::PathBuf {
     let unique = format!(
-        "{name}-{}-{}",
+        "fh-srv-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
     );
-    std::env::temp_dir().join(unique)
+    std::path::Path::new("/tmp").join(unique)
 }

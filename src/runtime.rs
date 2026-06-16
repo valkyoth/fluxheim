@@ -1101,9 +1101,14 @@ mod tests {
     fn certificate_reload_control_service_skips_when_acme_disabled() {
         let config = crate::config::Config::default();
         let server_plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
+        let task = fluxheim_runtime::BackgroundTaskSpec::new(
+            "cert-reload",
+            fluxheim_runtime::BackgroundTaskKind::CertificateReload,
+        );
 
         assert!(
             super::certificate_reload_control_service(
+                task,
                 server_plan.certificate_reload_control(),
                 None
             )

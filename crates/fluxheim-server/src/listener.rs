@@ -43,6 +43,9 @@ impl ListenerSpec {
         self.protocol
     }
 
+    /// Reports only the server-level HTTP/HTTPS downstream PROXY protocol
+    /// policy. Stream and UDP routes manage their own per-route PROXY protocol
+    /// settings independently.
     pub const fn proxy_protocol_enabled(self) -> bool {
         self.proxy_protocol
     }

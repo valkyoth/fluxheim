@@ -94,6 +94,13 @@ behavior when the change improves security or project direction.
   allocation-based address helpers as adapter conveniences.
 - Update proxy HTTP and metrics listener registration to consume the
   borrow-based service listener views directly before adapting into Pingora.
+- Harden private Unix listener setup by binding under a temporary private
+  umask, using fd-based `fchmod` after bind, and using `rustix` path operations
+  for stale socket cleanup.
+- Remove the duplicate admin ops-socket mode parser from `fluxheim-server`;
+  server planning now delegates to the validated config accessor.
+- Document that `ListenerSpec::proxy_protocol_enabled()` reports only the
+  server-level HTTP/HTTPS downstream PROXY protocol policy.
 
 ### Tests
 
@@ -139,6 +146,8 @@ behavior when the change improves security or project direction.
 - Add `fluxheim-server` regression coverage for first service-listener lookup.
 - Add `fluxheim-server` regression coverage for service listener iterator
   views.
+- Add `proxy,acme-client` runtime test coverage for disabled certificate reload
+  control service planning.
 
 ## 1.6.6 - 2026-06-16
 

@@ -137,13 +137,8 @@ pub(crate) fn admin_ops_socket_plan_from_config(config: &Config) -> Option<Admin
     }
     Some(AdminOpsSocketPlan::new(
         config.admin.ops_socket.path.clone(),
-        admin_ops_socket_mode_bits(&config.admin.ops_socket.mode),
+        config.admin.ops_socket.mode_bits(),
     ))
-}
-
-fn admin_ops_socket_mode_bits(mode: &str) -> u32 {
-    let raw = mode.trim_start_matches("0o");
-    u32::from_str_radix(raw, 8).unwrap_or(0o600)
 }
 
 fn any_load_balancer_pool_configured(config: &Config) -> bool {

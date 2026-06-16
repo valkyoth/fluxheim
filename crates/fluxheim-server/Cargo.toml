@@ -13,4 +13,4 @@ fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-runtime = { path = "../fluxheim-runtime" }
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1.4", features = ["net"] }
+rustix = { version = "1.1.4", features = ["fs", "net", "process"] }

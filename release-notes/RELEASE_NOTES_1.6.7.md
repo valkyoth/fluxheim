@@ -36,6 +36,9 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added a first-service-listener lookup to `ServerPlan` and updated admin service construction/logging to use the planned admin listener.
 - Added borrow-based service listener iterators to `ServerPlan`, keeping the allocation-based address helpers as adapter conveniences.
 - Updated proxy HTTP and metrics listener registration to consume the borrow-based service listener views directly before adapting into Pingora.
+- Hardened private Unix listener setup by binding under a temporary private umask, using fd-based `fchmod` after bind, and using `rustix` path operations for stale socket cleanup.
+- Removed the duplicate admin ops-socket mode parser from `fluxheim-server`; server planning now delegates to the validated config accessor.
+- Documented that `ListenerSpec::proxy_protocol_enabled()` reports only the server-level HTTP/HTTPS downstream PROXY protocol policy.
 
 ## Tests
 
@@ -59,12 +62,14 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added `fluxheim-server` regression coverage for admin ops-socket path and mode planning.
 - Added `fluxheim-server` regression coverage for first service-listener lookup.
 - Added `fluxheim-server` regression coverage for service listener iterator views.
+- Added `proxy,acme-client` runtime test coverage for disabled certificate reload control service planning.
 
 ## Verification
 
 - `cargo test -p fluxheim-server`
 - `cargo test -p fluxheim-tls`
 - `RUSTFLAGS='-D warnings' cargo test --lib runtime::tests`
+- `cargo test --no-default-features --features proxy,acme-client --lib runtime::tests`
 - `RUSTFLAGS='-D warnings' cargo test --lib admin::tests::admin_services_enable_watchdog_only_when_self_healing_is_enabled`
 - `RUSTFLAGS='-D warnings' cargo check --workspace`
 - `scripts/validate-modularity-policy.sh check`

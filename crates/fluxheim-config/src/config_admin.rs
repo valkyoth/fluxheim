@@ -312,7 +312,6 @@ impl AdminOpsSocketConfig {
         }
     }
 
-    #[cfg(all(unix, any(test, feature = "proxy")))]
     pub fn mode_bits(&self) -> u32 {
         parse_admin_ops_socket_mode(&self.mode).unwrap_or(0o600)
     }
