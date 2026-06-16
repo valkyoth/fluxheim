@@ -29,6 +29,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added protocol-filtered service listener lookup and moved proxy HTTP/HTTPS listener registration onto the service-owned lookup path.
 - Added a background-service adapter helper that consumes planned `BackgroundTaskSpec` values directly, removing duplicated task kind/name wiring from plan-driven runtime services.
 - Updated admin service construction to consume planned control-plane and ops-socket service names from `ServerPlan`.
+- Converted the admin self-healing watchdog registration to the typed background task spec path and removed the old name/kind free helper.
 
 ## Tests
 

@@ -80,6 +80,8 @@ behavior when the change improves security or project direction.
   wiring from plan-driven runtime services.
 - Update admin service construction to consume planned control-plane and
   ops-socket service names from `ServerPlan`.
+- Convert the admin self-healing watchdog registration to the typed background
+  task spec path and remove the old name/kind free helper.
 
 ### Tests
 
