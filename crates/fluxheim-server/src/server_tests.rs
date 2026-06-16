@@ -1,7 +1,7 @@
 use super::*;
 use fluxheim_config::{
-    CacheConfig, DownstreamProxyProtocol, RouteConfig, StreamRouteConfig, UdpRouteConfig,
-    VhostConfig,
+    AdminSelfHealingConfig, CacheConfig, DownstreamProxyProtocol, RouteConfig, StreamRouteConfig,
+    UdpRouteConfig, VhostConfig,
 };
 use fluxheim_runtime::{BackgroundTaskKind, ShutdownReason, ShutdownState};
 
@@ -349,6 +349,11 @@ fn server_plan_from_config_collects_background_task_inventory() {
     config.metrics.enabled = true;
     config.metrics.otlp.enabled = true;
     config.tls.acme.enabled = true;
+    config.admin.enabled = true;
+    config.admin.self_healing = AdminSelfHealingConfig {
+        enabled: true,
+        ..AdminSelfHealingConfig::default()
+    };
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
     let tasks = plan
@@ -365,6 +370,7 @@ fn server_plan_from_config_collects_background_task_inventory() {
             BackgroundTaskKind::MetricsExport,
             BackgroundTaskKind::AcmeRenewal,
             BackgroundTaskKind::CertificateReload,
+            BackgroundTaskKind::RuntimeWatchdog,
         ]
     );
     assert!(plan.has_background_task(BackgroundTaskKind::CacheMetrics));
@@ -373,6 +379,11 @@ fn server_plan_from_config_collects_background_task_inventory() {
         plan.background_task(BackgroundTaskKind::AcmeRenewal)
             .map(BackgroundTaskSpec::name),
         Some("ACME renewal")
+    );
+    assert_eq!(
+        plan.background_task(BackgroundTaskKind::RuntimeWatchdog)
+            .map(BackgroundTaskSpec::name),
+        Some("Fluxheim Self-Healing Watchdog")
     );
 }
 

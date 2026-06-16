@@ -39,6 +39,12 @@ pub(crate) fn background_task_specs_from_config(config: &Config) -> Vec<Backgrou
             BackgroundTaskKind::CertificateReload,
         ));
     }
+    if config.admin.enabled && config.admin.self_healing.enabled {
+        tasks.push(BackgroundTaskSpec::new(
+            "Fluxheim Self-Healing Watchdog",
+            BackgroundTaskKind::RuntimeWatchdog,
+        ));
+    }
 
     tasks
 }

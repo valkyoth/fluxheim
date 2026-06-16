@@ -82,6 +82,8 @@ behavior when the change improves security or project direction.
   ops-socket service names from `ServerPlan`.
 - Convert the admin self-healing watchdog registration to the typed background
   task spec path and remove the old name/kind free helper.
+- Add admin self-healing watchdog intent to `ServerPlan` so the admin adapter
+  consumes the planned `RuntimeWatchdog` task instead of creating it locally.
 
 ### Tests
 
@@ -118,6 +120,8 @@ behavior when the change improves security or project direction.
   lookup.
 - Add `fluxheim-server` regression coverage for protocol-filtered service
   listener lookup.
+- Extend `fluxheim-server` background-task inventory coverage to include the
+  planned admin self-healing watchdog.
 
 ## 1.6.6 - 2026-06-16
 

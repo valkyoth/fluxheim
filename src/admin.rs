@@ -391,11 +391,15 @@ pub(crate) fn admin_services_from_config(
 
     let app = AdminApp::from_config(config, proxy)?;
     let watchdog = if app.self_healing_enabled {
+        let Some(task) =
+            server_plan.background_task(crate::background::BackgroundTaskKind::RuntimeWatchdog)
+        else {
+            return Err(
+                "admin.self_healing.enabled requires a watchdog task in the server plan".into(),
+            );
+        };
         Some(crate::background::background_service_for_spec(
-            crate::background::BackgroundTaskSpec::new(
-                "Fluxheim Self-Healing Watchdog",
-                crate::background::BackgroundTaskKind::RuntimeWatchdog,
-            ),
+            task,
             app.clone(),
         ))
     } else {

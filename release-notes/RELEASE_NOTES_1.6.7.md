@@ -30,6 +30,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Added a background-service adapter helper that consumes planned `BackgroundTaskSpec` values directly, removing duplicated task kind/name wiring from plan-driven runtime services.
 - Updated admin service construction to consume planned control-plane and ops-socket service names from `ServerPlan`.
 - Converted the admin self-healing watchdog registration to the typed background task spec path and removed the old name/kind free helper.
+- Added admin self-healing watchdog intent to `ServerPlan` so the admin adapter consumes the planned `RuntimeWatchdog` task instead of creating it locally.
 
 ## Tests
 
@@ -48,6 +49,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Split private Unix listener regression coverage into a focused Unix-only test module so the main server test module remains well below the 500-line target.
 - Added `fluxheim-server` regression coverage for service-owned listener address lookup.
 - Added `fluxheim-server` regression coverage for protocol-filtered service listener lookup.
+- Extended `fluxheim-server` background-task inventory coverage to include the planned admin self-healing watchdog.
 
 ## Verification
 
