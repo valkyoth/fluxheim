@@ -140,6 +140,10 @@ fn server_plan_from_config_collects_listener_inventory() {
             .skip(2)
             .all(|listener| !listener.proxy_protocol_enabled())
     );
+    assert_eq!(
+        plan.listener_addrs(ListenerProtocol::Https),
+        vec!["127.0.0.1:8443".to_owned()]
+    );
     let services = plan
         .services()
         .iter()

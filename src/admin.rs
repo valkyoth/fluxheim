@@ -378,10 +378,9 @@ pub(crate) fn admin_services_from_config(
         return Ok(None);
     }
     let Some(admin_listener) = server_plan
-        .listeners()
-        .iter()
-        .find(|listener| listener.protocol() == fluxheim_server::ListenerProtocol::AdminHttp)
-        .map(|listener| listener.addr().to_string())
+        .listener_addrs(fluxheim_server::ListenerProtocol::AdminHttp)
+        .into_iter()
+        .next()
     else {
         return Err("admin.enabled requires an admin listener in the server plan".into());
     };

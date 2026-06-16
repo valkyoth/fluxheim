@@ -11,6 +11,7 @@ Fluxheim 1.6.7 starts the server-bootstrap cutover in the 1.6 Pingora-exit line.
 - Updated root background-service registration gates to consume Fluxheim server-plan task metadata for cache purging, cache metrics, OTLP metrics export, ACME renewal, and certificate reload control.
 - Added Fluxheim-owned foreground service intent metadata for proxy, admin, ops socket, metrics, stream proxy, and UDP proxy service registration.
 - Added an explicit server-plan runtime adapter marker so the current Pingora compatibility runtime is a named adapter boundary before the native server cutover.
+- Added server-plan listener lookup helpers so runtime/admin adapters consume HTTP, HTTPS, admin, and metrics listener addresses through `fluxheim-server`.
 
 ## Tests
 

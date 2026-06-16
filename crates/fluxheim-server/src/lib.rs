@@ -140,6 +140,21 @@ impl ServerPlan {
         &self.listeners
     }
 
+    pub fn listeners_for(
+        &self,
+        protocol: ListenerProtocol,
+    ) -> impl Iterator<Item = &ListenerSpec> + '_ {
+        self.listeners
+            .iter()
+            .filter(move |listener| listener.protocol() == protocol)
+    }
+
+    pub fn listener_addrs(&self, protocol: ListenerProtocol) -> Vec<String> {
+        self.listeners_for(protocol)
+            .map(|listener| listener.addr().to_string())
+            .collect()
+    }
+
     pub fn services(&self) -> &[ServiceSpec] {
         &self.services
     }

@@ -136,12 +136,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         ));
     }
 
-    for listener in server_plan
-        .listeners()
-        .iter()
-        .filter(|listener| listener.protocol() == fluxheim_server::ListenerProtocol::Http)
-    {
-        let listen = listener.addr().to_string();
+    for listen in server_plan.listener_addrs(fluxheim_server::ListenerProtocol::Http) {
         log::info!("proxy listener enabled on {listen}");
         proxy_service.add_tcp(&listen);
     }
@@ -222,10 +217,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             ));
         }
         let mut metrics_service = pingora::services::listening::Service::prometheus_http_service();
-        for listener in server_plan.listeners().iter().filter(|listener| {
-            listener.protocol() == fluxheim_server::ListenerProtocol::MetricsHttp
-        }) {
-            let listen = listener.addr().to_string();
+        for listen in server_plan.listener_addrs(fluxheim_server::ListenerProtocol::MetricsHttp) {
             log::info!("metrics listener enabled on {listen}");
             metrics_service.add_tcp(&listen);
         }
@@ -1326,12 +1318,7 @@ where
     let Some(plan) = crate::tls::downstream_tls_listener_plan(config)? else {
         return Ok(None);
     };
-    let tls_listens = server_plan
-        .listeners()
-        .iter()
-        .filter(|listener| listener.protocol() == fluxheim_server::ListenerProtocol::Https)
-        .map(|listener| listener.addr().to_string())
-        .collect::<Vec<_>>();
+    let tls_listens = server_plan.listener_addrs(fluxheim_server::ListenerProtocol::Https);
 
     let reloader = add_downstream_tls_listeners(
         service,
@@ -2034,9 +2021,8 @@ where
     S: Send + Sync + 'static,
 {
     if server_plan
-        .listeners()
-        .iter()
-        .all(|listener| listener.protocol() != fluxheim_server::ListenerProtocol::Https)
+        .listener_addrs(fluxheim_server::ListenerProtocol::Https)
+        .is_empty()
     {
         Ok(None)
     } else {

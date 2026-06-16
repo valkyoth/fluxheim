@@ -30,6 +30,9 @@ behavior when the change improves security or project direction.
 - Add an explicit `RuntimeAdapterKind::PingoraCompatibility` marker to the
   server plan so the current Pingora runtime remains a named adapter boundary
   before the native server cutover.
+- Add `ServerPlan` listener lookup helpers and route HTTP, HTTPS, admin, and
+  metrics listener address lookups through `fluxheim-server` instead of
+  hand-rolled adapter-side filtering.
 
 ### Tests
 
