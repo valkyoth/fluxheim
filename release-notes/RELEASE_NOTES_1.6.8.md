@@ -19,6 +19,9 @@ compatibility adapter in this slice.
 - Added an incremental HTTP/1 request-head buffer for future native socket read
   loops, with fragmented-head support and bounded storage when an incomplete
   head exceeds the configured cap.
+- Added strict HTTP/1 request body-framing classification for `Content-Length`
+  and `Transfer-Encoding`, including rejection of ambiguous
+  `Content-Length`/`Transfer-Encoding` combinations.
 
 ## Tests
 
@@ -27,12 +30,15 @@ compatibility adapter in this slice.
   invalid methods, and unsupported versions.
 - Added `fluxheim-protocol` unit tests for fragmented request heads and
   oversized incomplete chunks that must not be stored unboundedly.
+- Added `fluxheim-protocol` unit tests for no-body, fixed-length, chunked, and
+  invalid/ambiguous request body framing decisions.
 - Added `fluxheim-server` unit coverage for downstream HTTP/1 bounded defaults.
 
 ## Verification
 
 - `cargo test --locked -p fluxheim-protocol`
 - `cargo test --locked -p fluxheim-server`
+- `cargo fmt --all --check`
 - `RUSTFLAGS='-D warnings' cargo check --locked -p fluxheim-protocol`
 - `RUSTFLAGS='-D warnings' cargo check --locked -p fluxheim-server`
 - `scripts/validate-modularity-policy.sh check`

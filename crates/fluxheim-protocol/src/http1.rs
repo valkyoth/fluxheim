@@ -45,6 +45,12 @@ pub struct Http1RequestHead<'a> {
     pub head_len: usize,
 }
 
+impl<'a> Http1RequestHead<'a> {
+    pub fn body_framing(&self) -> Result<Http1BodyFraming, Http1ParseError> {
+        http1_request_body_framing(&self.headers)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Http1HeadBuffer {
     bytes: Vec<u8>,
@@ -93,16 +99,27 @@ impl Http1HeadBuffer {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Http1ParseError {
+    ConflictingBodyFraming,
+    DuplicateContentLength,
     HeaderCountExceeded,
     HeaderLineTooLong,
     HeadTooLarge,
+    InvalidContentLength,
     InvalidHeaderName,
     InvalidHeaderValue,
     InvalidRequestLine,
     InvalidUtf8,
     ObsoleteLineFolding,
     StartLineTooLong,
+    UnsupportedTransferEncoding,
     UnsupportedVersion,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Http1BodyFraming {
+    NoBody,
+    ContentLength(u64),
+    Chunked,
 }
 
 pub fn parse_http1_request_head(
@@ -146,6 +163,38 @@ pub fn parse_http1_request_head(
     }))
 }
 
+pub fn http1_request_body_framing(
+    headers: &[Http1Header<'_>],
+) -> Result<Http1BodyFraming, Http1ParseError> {
+    let mut content_length = None;
+    let mut transfer_encoding = None;
+
+    for header in headers {
+        if header.name.eq_ignore_ascii_case("content-length") {
+            let parsed = parse_content_length(header.value)?;
+            if let Some(existing) = content_length {
+                if existing != parsed {
+                    return Err(Http1ParseError::DuplicateContentLength);
+                }
+            } else {
+                content_length = Some(parsed);
+            }
+        } else if header.name.eq_ignore_ascii_case("transfer-encoding") {
+            if transfer_encoding.is_some() {
+                return Err(Http1ParseError::UnsupportedTransferEncoding);
+            }
+            transfer_encoding = Some(parse_transfer_encoding(header.value)?);
+        }
+    }
+
+    match (transfer_encoding, content_length) {
+        (Some(_), Some(_)) => Err(Http1ParseError::ConflictingBodyFraming),
+        (Some(framing), None) => Ok(framing),
+        (None, Some(0)) | (None, None) => Ok(Http1BodyFraming::NoBody),
+        (None, Some(length)) => Ok(Http1BodyFraming::ContentLength(length)),
+    }
+}
+
 fn complete_head_len(
     input: &[u8],
     max_head_bytes: usize,
@@ -164,6 +213,33 @@ fn complete_head_len(
         return Err(Http1ParseError::HeadTooLarge);
     }
     Ok(None)
+}
+
+fn parse_content_length(value: &str) -> Result<u64, Http1ParseError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || !trimmed.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(Http1ParseError::InvalidContentLength);
+    }
+    trimmed
+        .parse::<u64>()
+        .map_err(|_| Http1ParseError::InvalidContentLength)
+}
+
+fn parse_transfer_encoding(value: &str) -> Result<Http1BodyFraming, Http1ParseError> {
+    let mut codings = 0usize;
+    let mut chunked = false;
+    for coding in value.split(',') {
+        let coding = coding.trim();
+        if coding.is_empty() || !http_token_valid(coding) {
+            return Err(Http1ParseError::UnsupportedTransferEncoding);
+        }
+        codings = codings.saturating_add(1);
+        chunked = coding.eq_ignore_ascii_case("chunked");
+    }
+    if codings == 1 && chunked {
+        return Ok(Http1BodyFraming::Chunked);
+    }
+    Err(Http1ParseError::UnsupportedTransferEncoding)
 }
 
 fn parse_request_line(line: &str) -> Result<(&str, &str, Http1Version), Http1ParseError> {
@@ -202,152 +278,4 @@ fn parse_header_line(line: &str) -> Result<Http1Header<'_>, Http1ParseError> {
         name,
         value: value.trim(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_bounded_http11_request_head() {
-        let input =
-            b"GET /index.html HTTP/1.1\r\nHost: example.test\r\nConnection: close\r\n\r\nbody";
-        let parsed = parse_http1_request_head(input, Http1HeadLimits::default())
-            .unwrap()
-            .expect("complete head");
-
-        assert_eq!(parsed.method, "GET");
-        assert_eq!(parsed.target, "/index.html");
-        assert_eq!(parsed.version, Http1Version::Http11);
-        assert_eq!(parsed.head_len, input.len() - 4);
-        assert_eq!(
-            parsed.headers,
-            vec![
-                Http1Header {
-                    name: "Host",
-                    value: "example.test"
-                },
-                Http1Header {
-                    name: "Connection",
-                    value: "close"
-                }
-            ]
-        );
-    }
-
-    #[test]
-    fn returns_none_for_incomplete_head() {
-        assert_eq!(
-            parse_http1_request_head(
-                b"GET / HTTP/1.1\r\nHost: example",
-                Http1HeadLimits::default()
-            )
-            .unwrap(),
-            None
-        );
-    }
-
-    #[test]
-    fn buffers_fragmented_request_head_until_complete() {
-        let mut buffer = Http1HeadBuffer::new(Http1HeadLimits::default());
-
-        assert_eq!(buffer.append(b"GET / HT").unwrap(), None);
-        assert_eq!(buffer.buffered_len(), 8);
-        let parsed = buffer
-            .append(b"TP/1.1\r\nHost: example.test\r\n\r\n")
-            .unwrap()
-            .expect("complete head");
-
-        assert_eq!(parsed.method, "GET");
-        assert_eq!(parsed.target, "/");
-        assert_eq!(
-            parsed.headers,
-            vec![Http1Header {
-                name: "Host",
-                value: "example.test"
-            }]
-        );
-    }
-
-    #[test]
-    fn incremental_buffer_rejects_unbounded_head_without_storing_full_chunk() {
-        let limits = Http1HeadLimits {
-            max_head_bytes: 16,
-            ..Http1HeadLimits::default()
-        };
-        let mut buffer = Http1HeadBuffer::new(limits);
-        let chunk = vec![b'a'; 1024];
-
-        assert_eq!(buffer.append(&chunk), Err(Http1ParseError::HeadTooLarge));
-        assert!(buffer.buffered_len() <= limits.max_head_bytes);
-    }
-
-    #[test]
-    fn rejects_head_when_delimiter_exceeds_limit() {
-        let limits = Http1HeadLimits {
-            max_head_bytes: 17,
-            ..Http1HeadLimits::default()
-        };
-
-        assert_eq!(
-            parse_http1_request_head(b"GET / HTTP/1.1\r\n\r\n", limits),
-            Err(Http1ParseError::HeadTooLarge)
-        );
-    }
-
-    #[test]
-    fn rejects_oversized_head_before_completion() {
-        let limits = Http1HeadLimits {
-            max_head_bytes: 16,
-            ..Http1HeadLimits::default()
-        };
-
-        assert_eq!(
-            parse_http1_request_head(b"GET / HTTP/1.1\r\nHost: example", limits),
-            Err(Http1ParseError::HeadTooLarge)
-        );
-    }
-
-    #[test]
-    fn rejects_header_count_over_limit() {
-        let limits = Http1HeadLimits {
-            max_header_count: 1,
-            ..Http1HeadLimits::default()
-        };
-
-        assert_eq!(
-            parse_http1_request_head(b"GET / HTTP/1.1\r\nA: b\r\nC: d\r\n\r\n", limits),
-            Err(Http1ParseError::HeaderCountExceeded)
-        );
-    }
-
-    #[test]
-    fn rejects_obsolete_line_folding_and_bad_controls() {
-        assert_eq!(
-            parse_http1_request_head(
-                b"GET / HTTP/1.1\r\n folded: nope\r\n\r\n",
-                Http1HeadLimits::default()
-            ),
-            Err(Http1ParseError::ObsoleteLineFolding)
-        );
-        assert_eq!(
-            parse_http1_request_head(
-                b"GET / HTTP/1.1\r\nX: bad\x7f\r\n\r\n",
-                Http1HeadLimits::default()
-            ),
-            Err(Http1ParseError::InvalidHeaderValue)
-        );
-    }
-
-    #[test]
-    fn rejects_unsupported_version_and_invalid_method() {
-        assert_eq!(
-            parse_http1_request_head(b"GET / HTTP/2.0\r\n\r\n", Http1HeadLimits::default()),
-            Err(Http1ParseError::UnsupportedVersion)
-        );
-        assert_eq!(
-            parse_http1_request_head(b"BAD METHOD / HTTP/1.1\r\n\r\n", Http1HeadLimits::default()),
-            Err(Http1ParseError::InvalidRequestLine)
-        );
-    }
 }

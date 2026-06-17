@@ -21,6 +21,9 @@ behavior when the change improves security or project direction.
 - Add an incremental HTTP/1 request-head buffer for future native socket reads,
   including fragmented-head handling and bounded storage for oversized
   incomplete heads.
+- Add strict HTTP/1 request body-framing classification for `Content-Length`
+  and `Transfer-Encoding`, rejecting ambiguous `Content-Length` /
+  `Transfer-Encoding` combinations before the native runtime cutover.
 
 ## 1.6.7 - 2026-06-16
 
