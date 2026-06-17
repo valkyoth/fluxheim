@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.10
+Version:        1.6.11
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,14 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Wed Jun 17 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.11-1
+- Continue the Pingora-exit line with a native HTTP/2 preview gate and focused
+  h2 stack probe in fluxheim-server.
+- Add HTTP/2 safety-hook inventory, request-boundary tests, URI-limit parity,
+  request-body flow-control release, and slow-body timeout coverage.
+- Add real downstream HTTP/1.0 socket tests for hostless requests, default
+  close behavior, and explicit keep-alive.
+
 * Wed Jun 17 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.10-1
 - Continue the Pingora-exit line with a staged native HTTP/1 upstream client
   and plain static-upstream proxy foundation.

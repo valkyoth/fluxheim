@@ -2593,7 +2593,10 @@ Planned `1.6.x` sequence:
   the selected Rust stack only after validating request-boundary limits,
   response-flow-control lifetime limits, slow-body protection, stream resets,
   trailer behavior, gRPC pass-through, HPACK/header-count controls where
-  available, and mixed HTTP/1.1+HTTP/2 fixtures.
+  available, and mixed HTTP/1.1+HTTP/2 fixtures. Start with an explicit
+  `fluxheim-server` preview gate that records every required safety hook and
+  keeps native HTTP/2 cutover blocked until the missing hooks are implemented
+  and covered by parity fixtures.
 - `v1.6.12`: native HTTP/2 runtime cutover. Make the Fluxheim-owned HTTP/2 path
   the default for supported profiles and keep strict fallback rules for any
   protocol safety hook that is not exposed by the underlying crate.

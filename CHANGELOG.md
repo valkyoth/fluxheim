@@ -7,6 +7,40 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.11 - 2026-06-17
+
+### Added
+
+- Add a native HTTP/2 runtime preview gate in `fluxheim-server` that records
+  every required safety hook before any production cutover is allowed.
+- Add a native HTTP/2 stack probe using the Rust `h2` stack with bounded
+  header-list, decoded header-count, URI, request-body, stream, frame,
+  send-buffer, and rapid-reset policy values.
+- Add real HTTP/2 probe tests for successful responses, bounded request
+  bodies, oversized request bodies, oversized URIs, decoded header-count
+  rejection, body flow-control release, and slow-body timeouts.
+- Add downstream HTTP/1.0 socket tests for missing-Host acceptance, default
+  close semantics, and explicit keep-alive handling.
+
+### Hardened
+
+- Keep native HTTP/2 cutover blocked until pre-routing HPACK/header-count
+  allocation bounds, absolute response-write lifetime, and trailer/gRPC
+  pass-through parity are implemented and fixture-covered.
+- Release HTTP/2 request-body flow-control capacity after consumed DATA frames
+  and keep the h2 connection driven while request bodies drain so WINDOW_UPDATE
+  frames can flush.
+- Enforce `[server.limits].max_uri_bytes` on native HTTP/2 request URIs, matching
+  the HTTP/1 request-target budget.
+- Log post-shutdown HTTP/2 probe streams at debug level instead of silently
+  dropping them.
+
+### Tests
+
+- Add `scripts/smoke_native_http2_preview.sh` and register it in the runtime
+  parity fixture inventory.
+- Extend native HTTP/1 coverage with real downstream HTTP/1.0 socket behavior.
+
 ## 1.6.10 - 2026-06-17
 
 ### Added

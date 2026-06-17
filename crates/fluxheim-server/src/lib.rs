@@ -16,6 +16,8 @@ mod native_http1_client;
 mod native_http1_forwarded;
 mod native_http1_plan;
 mod native_http1_proxy;
+mod native_http2;
+mod native_http2_stack;
 mod plan;
 mod process;
 mod proxy_protocol;
@@ -34,6 +36,10 @@ pub use native_http1::{
 pub use native_http1_client::NativeHttp1Upstream;
 pub use native_http1_plan::NativeHttp1ProxyCandidate;
 pub use native_http1_proxy::{NativeHttp1Proxy, NativeHttp1ProxyConfigError};
+pub use native_http2::{
+    NativeHttp2Preview, NativeHttp2SafetyHook, NativeHttp2SafetyReport, NativeHttp2SafetyStatus,
+};
+pub use native_http2_stack::{NativeHttp2StackError, native_http2_stack_probe};
 pub use plan::{RuntimeAdapterKind, ServerPlan};
 pub use process::ProcessSpec;
 pub use proxy_protocol::{ProxyProtocolPolicy, ProxyProtocolTrustedSource};
@@ -90,6 +96,10 @@ mod native_http1_proxy_tests;
 #[cfg(test)]
 #[path = "native_http1_plan_tests.rs"]
 mod native_http1_plan_tests;
+
+#[cfg(test)]
+#[path = "native_http2_tests.rs"]
+mod native_http2_tests;
 
 #[cfg(test)]
 #[path = "server_background_tests.rs"]

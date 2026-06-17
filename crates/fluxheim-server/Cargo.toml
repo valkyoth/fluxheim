@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-server"
-version = "1.6.10"
+version = "1.6.11"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -12,9 +12,12 @@ default = []
 privacy-mode = []
 
 [dependencies]
+bytes = "1.11.1"
 fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-runtime = { path = "../fluxheim-runtime" }
+h2 = "0.4.14"
+http = "1.4.2"
 httpdate = "1.0.3"
 log = "0.4.32"
 tokio = { version = "1.52.3", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }

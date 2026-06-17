@@ -53,11 +53,41 @@ fn downstream_http2_policy_uses_hardened_defaults() {
     let policy = DownstreamHttp2Policy::default();
 
     assert_eq!(policy.max_header_list_size(), 64 * 1024);
+    assert_eq!(policy.max_header_count(), 100);
+    assert_eq!(policy.max_uri_bytes(), 8 * 1024);
     assert_eq!(policy.max_concurrent_streams(), 32);
     assert_eq!(policy.initial_window_size(), 64 * 1024);
     assert_eq!(policy.max_frame_size(), 16 * 1024);
     assert_eq!(policy.max_send_buffer_size(), 256 * 1024);
     assert_eq!(policy.max_pending_accept_reset_streams(), 8);
+}
+
+#[test]
+fn downstream_http2_policy_maps_server_header_limits() {
+    let policy = DownstreamHttp2Policy::from_server_limits(ServerLimitsConfig {
+        max_request_header_bytes: fluxheim_config::ByteSize::from_bytes(4096),
+        max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
+        max_request_headers: 7,
+        max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
+    });
+
+    assert_eq!(policy.max_header_list_size(), 4096);
+    assert_eq!(policy.max_header_count(), 7);
+    assert_eq!(policy.max_uri_bytes(), 1024);
+    assert_eq!(policy.max_concurrent_streams(), 32);
+}
+
+#[test]
+fn server_plan_exposes_native_http2_preview_gate() {
+    let plan = ServerPlan::from_config(&Config::default()).expect("valid server plan");
+    let preview = plan.native_http2_preview();
+
+    assert_eq!(preview.downstream_policy(), plan.downstream_http2());
+    assert!(!preview.is_cutover_ready());
+    assert!(preview.blocking_reports().any(|report| {
+        report.hook() == NativeHttp2SafetyHook::ResponseWriteLifetime
+            && report.detail().contains("absolute response-write lifetime")
+    }));
 }
 
 #[test]

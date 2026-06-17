@@ -3,9 +3,10 @@ use fluxheim_runtime::BackgroundTaskSpec;
 
 use crate::{
     CertificateReloadControlPlan, DownstreamHttp1Policy, DownstreamHttp2Policy, ListenerProtocol,
-    ListenerSpec, NativeHttp1ProxyCandidate, ProcessSpec, ProxyProtocolPolicy, ServerPlanError,
-    ServiceKind, ServiceSpec, background, control::certificate_reload_control_plan_from_config,
-    listener, native_http1_plan, proxy_protocol, service,
+    ListenerSpec, NativeHttp1ProxyCandidate, NativeHttp2Preview, ProcessSpec, ProxyProtocolPolicy,
+    ServerPlanError, ServiceKind, ServiceSpec, background,
+    control::certificate_reload_control_plan_from_config, listener, native_http1_plan,
+    proxy_protocol, service,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -20,6 +21,7 @@ pub struct ServerPlan {
     proxy_protocol: ProxyProtocolPolicy,
     downstream_http1: DownstreamHttp1Policy,
     downstream_http2: DownstreamHttp2Policy,
+    native_http2_preview: NativeHttp2Preview,
     certificate_reload_control: Option<CertificateReloadControlPlan>,
     admin_ops_socket: Option<service::AdminOpsSocketPlan>,
     native_http1_proxy_candidates: Vec<NativeHttp1ProxyCandidate>,
@@ -36,6 +38,9 @@ impl ServerPlan {
             proxy_protocol: ProxyProtocolPolicy::Off,
             downstream_http1: DownstreamHttp1Policy::default(),
             downstream_http2: DownstreamHttp2Policy::default(),
+            native_http2_preview: NativeHttp2Preview::from_downstream_policy(
+                DownstreamHttp2Policy::default(),
+            ),
             certificate_reload_control: None,
             admin_ops_socket: None,
             native_http1_proxy_candidates: Vec::new(),
@@ -57,6 +62,9 @@ impl ServerPlan {
             proxy_protocol: ProxyProtocolPolicy::Off,
             downstream_http1: DownstreamHttp1Policy::default(),
             downstream_http2: DownstreamHttp2Policy::default(),
+            native_http2_preview: NativeHttp2Preview::from_downstream_policy(
+                DownstreamHttp2Policy::default(),
+            ),
             certificate_reload_control: None,
             admin_ops_socket: None,
             native_http1_proxy_candidates: Vec::new(),
@@ -84,6 +92,10 @@ impl ServerPlan {
 
     pub const fn downstream_http2(&self) -> &DownstreamHttp2Policy {
         &self.downstream_http2
+    }
+
+    pub const fn native_http2_preview(&self) -> &NativeHttp2Preview {
+        &self.native_http2_preview
     }
 
     pub fn certificate_reload_control(&self) -> Option<&CertificateReloadControlPlan> {
@@ -206,12 +218,15 @@ impl ServerPlan {
             certificate_reload_control_plan_from_config(config, &process);
         let downstream_http1 = DownstreamHttp1Policy::from_server_limits(config.server.limits);
 
+        let downstream_http2 = DownstreamHttp2Policy::from_server_limits(config.server.limits);
+
         Ok(Self {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process,
             proxy_protocol: proxy_protocol::proxy_protocol_policy_from_config(config)?,
             downstream_http1,
-            downstream_http2: DownstreamHttp2Policy::default(),
+            downstream_http2,
+            native_http2_preview: NativeHttp2Preview::from_downstream_policy(downstream_http2),
             certificate_reload_control,
             admin_ops_socket: service::admin_ops_socket_plan_from_config(config),
             native_http1_proxy_candidates:

@@ -7,7 +7,7 @@ default	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
 default	pingora-http	1.6.13	Internal HTTP adapters still bridge Pingora HTTP types.
 default	pingora-lru	1.6.13	Transitive through Pingora runtime/cache.
 default	pingora-pool	1.6.12	Upstream pooling still uses Pingora runtime path.
-default	pingora-proxy	1.6.11	HTTP proxy lifecycle still uses Pingora ProxyHttp.
+default	pingora-proxy	1.6.13	HTTP proxy lifecycle still uses Pingora ProxyHttp.
 default	pingora-runtime	1.6.14	Server bootstrap still uses Pingora runtime.
 default	pingora-rustls	1.6.14	TLS planning and certificate selection are Fluxheim-owned; old Pingora rustls listener adapter remains until server bootstrap cutover.
 default	pingora-timeout	1.6.13	Transitive through Pingora runtime.
@@ -19,7 +19,7 @@ full	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
 full	pingora-http	1.6.13	Internal HTTP adapters still bridge Pingora HTTP types.
 full	pingora-lru	1.6.13	Transitive through Pingora runtime/cache.
 full	pingora-pool	1.6.12	Upstream pooling still uses Pingora runtime path.
-full	pingora-proxy	1.6.11	HTTP proxy lifecycle still uses Pingora ProxyHttp.
+full	pingora-proxy	1.6.13	HTTP proxy lifecycle still uses Pingora ProxyHttp.
 full	pingora-runtime	1.6.14	Server bootstrap still uses Pingora runtime.
 full	pingora-rustls	1.6.14	TLS planning and certificate selection are Fluxheim-owned; old Pingora rustls listener adapter remains until server bootstrap cutover.
 full	pingora-timeout	1.6.13	Transitive through Pingora runtime.
@@ -31,7 +31,7 @@ cache-edge	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
 cache-edge	pingora-http	1.6.13	Internal HTTP adapters still bridge Pingora HTTP types.
 cache-edge	pingora-lru	1.6.13	Transitive through Pingora runtime/cache.
 cache-edge	pingora-pool	1.6.12	Upstream pooling still uses Pingora runtime path.
-cache-edge	pingora-proxy	1.6.11	HTTP proxy lifecycle still uses Pingora ProxyHttp.
+cache-edge	pingora-proxy	1.6.13	HTTP proxy lifecycle still uses Pingora ProxyHttp.
 cache-edge	pingora-runtime	1.6.14	Server bootstrap still uses Pingora runtime.
 cache-edge	pingora-rustls	1.6.14	TLS planning and certificate selection are Fluxheim-owned; old Pingora rustls listener adapter remains until server bootstrap cutover.
 cache-edge	pingora-timeout	1.6.13	Transitive through Pingora runtime.
@@ -43,7 +43,7 @@ proxy-edge	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
 proxy-edge	pingora-http	1.6.13	Internal HTTP adapters still bridge Pingora HTTP types.
 proxy-edge	pingora-lru	1.6.13	Transitive through Pingora runtime/cache.
 proxy-edge	pingora-pool	1.6.12	Upstream pooling still uses Pingora runtime path.
-proxy-edge	pingora-proxy	1.6.11	HTTP proxy lifecycle still uses Pingora ProxyHttp.
+proxy-edge	pingora-proxy	1.6.13	HTTP proxy lifecycle still uses Pingora ProxyHttp.
 proxy-edge	pingora-runtime	1.6.14	Server bootstrap still uses Pingora runtime.
 proxy-edge	pingora-rustls	1.6.14	TLS planning and certificate selection are Fluxheim-owned; old Pingora rustls listener adapter remains until server bootstrap cutover.
 proxy-edge	pingora-timeout	1.6.13	Transitive through Pingora runtime.
@@ -55,7 +55,7 @@ load-balancer-edge	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/r
 load-balancer-edge	pingora-http	1.6.13	Internal HTTP adapters still bridge Pingora HTTP types.
 load-balancer-edge	pingora-lru	1.6.13	Transitive through Pingora runtime/cache.
 load-balancer-edge	pingora-pool	1.6.12	Upstream pooling still uses Pingora runtime path.
-load-balancer-edge	pingora-proxy	1.6.11	HTTP proxy lifecycle still uses Pingora ProxyHttp.
+load-balancer-edge	pingora-proxy	1.6.13	HTTP proxy lifecycle still uses Pingora ProxyHttp.
 load-balancer-edge	pingora-runtime	1.6.14	Server bootstrap still uses Pingora runtime.
 load-balancer-edge	pingora-rustls	1.6.14	TLS planning and certificate selection are Fluxheim-owned; old Pingora rustls listener adapter remains until server bootstrap cutover.
 load-balancer-edge	pingora-timeout	1.6.13	Transitive through Pingora runtime.
@@ -67,7 +67,7 @@ php	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
 php	pingora-http	1.6.13	Internal HTTP adapters still bridge Pingora HTTP types.
 php	pingora-lru	1.6.13	Transitive through Pingora runtime/cache.
 php	pingora-pool	1.6.12	Upstream pooling still uses Pingora runtime path.
-php	pingora-proxy	1.6.11	HTTP proxy lifecycle still uses Pingora ProxyHttp.
+php	pingora-proxy	1.6.13	HTTP proxy lifecycle still uses Pingora ProxyHttp.
 php	pingora-runtime	1.6.14	Server bootstrap still uses Pingora runtime.
 php	pingora-rustls	1.6.14	TLS planning and certificate selection are Fluxheim-owned; old Pingora rustls listener adapter remains until server bootstrap cutover.
 php	pingora-timeout	1.6.13	Transitive through Pingora runtime.
@@ -79,7 +79,7 @@ privacy	pingora-header-serde	1.6.13	Transitive through Pingora HTTP/runtime.
 privacy	pingora-http	1.6.13	Internal HTTP adapters still bridge Pingora HTTP types.
 privacy	pingora-lru	1.6.13	Transitive through Pingora runtime/cache.
 privacy	pingora-pool	1.6.12	Upstream pooling still uses Pingora runtime path.
-privacy	pingora-proxy	1.6.11	HTTP proxy lifecycle still uses Pingora ProxyHttp.
+privacy	pingora-proxy	1.6.13	HTTP proxy lifecycle still uses Pingora ProxyHttp.
 privacy	pingora-runtime	1.6.14	Server bootstrap still uses Pingora runtime.
 privacy	pingora-rustls	1.6.14	TLS planning and certificate selection are Fluxheim-owned; old Pingora rustls listener adapter remains until server bootstrap cutover.
 privacy	pingora-timeout	1.6.13	Transitive through Pingora runtime.

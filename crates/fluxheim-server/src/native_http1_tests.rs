@@ -5,6 +5,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
+use fluxheim_protocol::Http1Version;
+
 use crate::{
     DownstreamHttp1Policy, NativeHttp1Request, NativeHttp1Response, serve_native_http1_connection,
     serve_native_http1_listener,
@@ -102,6 +104,64 @@ async fn native_http1_serves_keep_alive_requests() {
     let second = read_response(&mut stream).await;
     assert!(second.contains("Connection: close\r\n"));
     assert!(second.ends_with("GET /two"));
+}
+
+#[tokio::test]
+async fn native_http10_accepts_missing_host_and_closes_by_default() {
+    let addr = spawn_server(|request| {
+        assert_eq!(request.version, Http1Version::Http10);
+        assert!(
+            !request
+                .headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+        );
+        NativeHttp1Response::new(200, "OK", request.target)
+    })
+    .await;
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+
+    stream
+        .write_all(b"GET /http10 HTTP/1.0\r\n\r\n")
+        .await
+        .unwrap();
+    let response = read_response(&mut stream).await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains("Connection: close\r\n"));
+    assert!(response.ends_with("/http10"));
+    let mut buffer = [0u8; 1];
+    let read = tokio::time::timeout(Duration::from_secs(1), stream.read(&mut buffer))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(read, 0);
+}
+
+#[tokio::test]
+async fn native_http10_honors_explicit_keep_alive() {
+    let addr = spawn_server(|request| {
+        assert_eq!(request.version, Http1Version::Http10);
+        NativeHttp1Response::new(200, "OK", request.target)
+    })
+    .await;
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+
+    stream
+        .write_all(b"GET /one HTTP/1.0\r\nConnection: keep-alive\r\n\r\n")
+        .await
+        .unwrap();
+    let first = read_response(&mut stream).await;
+    assert!(first.contains("Connection: keep-alive\r\n"));
+    assert!(first.ends_with("/one"));
+
+    stream
+        .write_all(b"GET /two HTTP/1.0\r\n\r\n")
+        .await
+        .unwrap();
+    let second = read_response(&mut stream).await;
+    assert!(second.contains("Connection: close\r\n"));
+    assert!(second.ends_with("/two"));
 }
 
 #[tokio::test]
