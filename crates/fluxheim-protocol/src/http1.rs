@@ -129,6 +129,8 @@ pub enum Http1ParseError {
     InvalidHeaderValue,
     InvalidRequestLine,
     InvalidRequestTarget,
+    InvalidResponseLine,
+    InvalidStatusCode,
     InvalidUtf8,
     MissingHost,
     ObsoleteLineFolding,
@@ -275,7 +277,7 @@ pub fn http1_connection_directive(
     }
 }
 
-fn complete_head_len(
+pub(super) fn complete_head_len(
     input: &[u8],
     max_head_bytes: usize,
 ) -> Result<Option<usize>, Http1ParseError> {
@@ -342,7 +344,7 @@ fn parse_request_line(line: &str) -> Result<(&str, &str, Http1Version), Http1Par
     Ok((method, target, version))
 }
 
-fn parse_header_line(line: &str) -> Result<Http1Header<'_>, Http1ParseError> {
+pub(super) fn parse_header_line(line: &str) -> Result<Http1Header<'_>, Http1ParseError> {
     let Some((name, value)) = line.split_once(':') else {
         return Err(Http1ParseError::InvalidHeaderName);
     };

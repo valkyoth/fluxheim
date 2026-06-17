@@ -37,6 +37,9 @@ behavior when the change improves security or project direction.
 - Add native HTTP/1 request-target classification for origin-form,
   absolute-form, CONNECT authority-form, and OPTIONS asterisk-form requests,
   including percent-encoding and forbidden-fragment/backslash checks.
+- Add a bounded native HTTP/1 response-head parser for future upstream response
+  handling, reusing the same strict header-count, line-length, UTF-8, and
+  obsolete-folding checks as request-head parsing.
 
 ## 1.6.7 - 2026-06-16
 

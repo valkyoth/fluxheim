@@ -36,6 +36,9 @@ compatibility adapter in this slice.
 - Added native HTTP/1 request-target classification for origin-form,
   absolute-form, CONNECT authority-form, and OPTIONS asterisk-form requests,
   including percent-encoding and forbidden-fragment/backslash checks.
+- Added a bounded native HTTP/1 response-head parser for future upstream
+  response handling, reusing the same strict header-count, line-length, UTF-8,
+  and obsolete-folding checks as request-head parsing.
 
 ## Tests
 
@@ -54,6 +57,8 @@ compatibility adapter in this slice.
   chunks, output/body limits, chunk-size limits, and invalid chunk framing.
 - Added `fluxheim-protocol` unit tests for HTTP/1 request-target classification
   and malformed target rejection.
+- Added `fluxheim-protocol` unit tests for HTTP/1 response-head parsing,
+  incomplete response heads, malformed status lines, and shared header bounds.
 - Added `fluxheim-server` unit coverage for downstream HTTP/1 bounded defaults.
 
 ## Verification
