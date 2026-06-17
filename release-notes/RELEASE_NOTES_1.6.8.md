@@ -27,6 +27,9 @@ compatibility adapter in this slice.
 - Added HTTP/1 connection persistence classification for the native parser,
   covering HTTP/1.0 close-by-default, HTTP/1.1 persistent-by-default, explicit
   `Connection: close`, and HTTP/1.0 `Connection: keep-alive`.
+- Added a bounded complete-buffer HTTP/1 chunked body decoder that writes into
+  caller-owned output and enforces chunk-size, total-body, output-buffer, and
+  CRLF framing limits.
 
 ## Tests
 
@@ -41,6 +44,8 @@ compatibility adapter in this slice.
   and malformed `Host` fields.
 - Added `fluxheim-protocol` unit tests for HTTP/1.0/HTTP/1.1 connection
   persistence decisions and invalid `Connection` tokens.
+- Added `fluxheim-protocol` unit tests for chunked body decoding, incomplete
+  chunks, output/body limits, chunk-size limits, and invalid chunk framing.
 - Added `fluxheim-server` unit coverage for downstream HTTP/1 bounded defaults.
 
 ## Verification

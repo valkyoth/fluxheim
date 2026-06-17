@@ -1,6 +1,7 @@
 use super::{
-    Http1BodyFraming, Http1ConnectionDirective, Http1HeadBuffer, Http1HeadLimits, Http1Header,
-    Http1ParseError, Http1Version, http1_connection_directive, http1_request_body_framing,
+    Http1BodyFraming, Http1ChunkLimits, Http1ChunkedDecode, Http1ConnectionDirective,
+    Http1HeadBuffer, Http1HeadLimits, Http1Header, Http1ParseError, Http1Version,
+    decode_http1_chunked_body, http1_connection_directive, http1_request_body_framing,
     http1_required_host, parse_http1_request_head,
 };
 
@@ -284,5 +285,91 @@ fn parsed_head_exposes_connection_directive() {
     assert_eq!(
         parsed.connection_directive(),
         Ok(Http1ConnectionDirective::Close)
+    );
+}
+
+#[test]
+fn decodes_complete_chunked_body_into_caller_buffer() {
+    let mut output = [0u8; 16];
+    let decoded = decode_http1_chunked_body(
+        b"4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\nextra",
+        &mut output,
+        Http1ChunkLimits::default(),
+    )
+    .unwrap()
+    .expect("complete body");
+
+    assert_eq!(
+        decoded,
+        Http1ChunkedDecode {
+            decoded_len: 9,
+            consumed_len: 24
+        }
+    );
+    assert_eq!(&output[..decoded.decoded_len], b"Wikipedia");
+}
+
+#[test]
+fn chunked_decoder_reports_incomplete_without_error() {
+    let mut output = [0u8; 16];
+
+    assert_eq!(
+        decode_http1_chunked_body(b"4\r\nWi", &mut output, Http1ChunkLimits::default()).unwrap(),
+        None
+    );
+    assert_eq!(
+        decode_http1_chunked_body(b"0\r\n", &mut output, Http1ChunkLimits::default()).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn chunked_decoder_enforces_output_and_body_limits() {
+    let mut short_output = [0u8; 4];
+    assert_eq!(
+        decode_http1_chunked_body(
+            b"5\r\nhello\r\n0\r\n\r\n",
+            &mut short_output,
+            Http1ChunkLimits::default()
+        ),
+        Err(Http1ParseError::OutputTooSmall)
+    );
+
+    let mut output = [0u8; 16];
+    assert_eq!(
+        decode_http1_chunked_body(
+            b"5\r\nhello\r\n0\r\n\r\n",
+            &mut output,
+            Http1ChunkLimits {
+                max_body_bytes: 4,
+                ..Http1ChunkLimits::default()
+            }
+        ),
+        Err(Http1ParseError::BodyTooLarge)
+    );
+}
+
+#[test]
+fn chunked_decoder_rejects_invalid_chunk_shapes() {
+    let mut output = [0u8; 16];
+
+    assert_eq!(
+        decode_http1_chunked_body(b"g\r\nbad\r\n", &mut output, Http1ChunkLimits::default()),
+        Err(Http1ParseError::InvalidChunkSize)
+    );
+    assert_eq!(
+        decode_http1_chunked_body(b"4\r\nWikiXX", &mut output, Http1ChunkLimits::default()),
+        Err(Http1ParseError::InvalidChunk)
+    );
+    assert_eq!(
+        decode_http1_chunked_body(
+            b"5\r\nhello\r\n0\r\n\r\n",
+            &mut output,
+            Http1ChunkLimits {
+                max_chunk_size: 4,
+                ..Http1ChunkLimits::default()
+            }
+        ),
+        Err(Http1ParseError::ChunkTooLarge)
     );
 }

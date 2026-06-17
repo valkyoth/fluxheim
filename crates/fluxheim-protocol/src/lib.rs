@@ -11,10 +11,11 @@ mod proxy_protocol;
 mod http1_tests;
 
 pub use http1::{
-    DEFAULT_HTTP1_MAX_HEAD_BYTES, DEFAULT_HTTP1_MAX_HEADER_COUNT,
+    DEFAULT_HTTP1_MAX_CHUNK_SIZE, DEFAULT_HTTP1_MAX_HEAD_BYTES, DEFAULT_HTTP1_MAX_HEADER_COUNT,
     DEFAULT_HTTP1_MAX_HEADER_LINE_BYTES, DEFAULT_HTTP1_MAX_START_LINE_BYTES, Http1BodyFraming,
-    Http1ConnectionDirective, Http1HeadBuffer, Http1HeadLimits, Http1Header, Http1ParseError,
-    Http1RequestHead, Http1Version, http1_connection_directive, http1_request_body_framing,
+    Http1ChunkLimits, Http1ChunkedDecode, Http1ConnectionDirective, Http1HeadBuffer,
+    Http1HeadLimits, Http1Header, Http1ParseError, Http1RequestHead, Http1Version,
+    decode_http1_chunked_body, http1_connection_directive, http1_request_body_framing,
     http1_required_host, parse_http1_request_head,
 };
 pub use proxy_protocol::{
