@@ -31,6 +31,9 @@ behavior when the change improves security or project direction.
   `Connection: close`, and HTTP/1.0 `Connection: keep-alive`.
 - Add a bounded complete-buffer HTTP/1 chunked body decoder that writes into a
   caller-owned output buffer and enforces chunk, body, output, and CRLF limits.
+- Split the HTTP/1 chunked decoder into a focused `fluxheim-protocol` module so
+  the native HTTP parser remains under the reviewability target as the 1.6
+  Pingora-exit line grows.
 
 ## 1.6.7 - 2026-06-16
 

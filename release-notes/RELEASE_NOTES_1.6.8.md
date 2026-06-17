@@ -30,6 +30,9 @@ compatibility adapter in this slice.
 - Added a bounded complete-buffer HTTP/1 chunked body decoder that writes into
   caller-owned output and enforces chunk-size, total-body, output-buffer, and
   CRLF framing limits.
+- Split the HTTP/1 chunked decoder into a focused `fluxheim-protocol` module so
+  the native HTTP parser stays below the reviewability target while more HTTP
+  runtime pieces are added.
 
 ## Tests
 
