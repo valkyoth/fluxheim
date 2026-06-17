@@ -32,18 +32,17 @@ operator-facing product is Fluxheim: focused release profiles are available for
 full, cache, proxy, load-balancer, and PHP deployments, with matching container
 images and Linux runtime archives.
 
-The `1.5.x` load-balancer line targets F5 LTM, HAProxy, nginx, and Envoy-style
-HTTP/TCP pool operations: weighted and adaptive selection, health and circuit
-state, slow start, retry budgets, bounded queueing, local persistence, runtime
-member-state controls, status/metrics/audit visibility, and a validated
-enterprise migration fixture. It is not a complete BIG-IP platform clone:
-managed affinity cookies are local to one process, while a Fluxheim-native
-load-balancer core, restart-persistent load-balancer state, runtime
-add/remove-member, cross-instance state sync, UDP, GSLB, WAF, VPN/firewall
+The load-balancer line targets F5 LTM, HAProxy, nginx, and Envoy-style HTTP/TCP
+pool operations: weighted and adaptive selection, health and circuit state,
+slow start, retry budgets, bounded queueing, local persistence, runtime
+member-state controls, runtime backend-set mutation, status/metrics/audit
+visibility, and a validated enterprise migration fixture. It is not a complete
+BIG-IP platform clone: managed affinity cookies remain local to one process,
+while cross-instance state sync, production UDP/GSLB, WAF, VPN/firewall
 appliance behavior, and iRules/Lua/Wasm scripting are documented future tracks
 rather than hidden or implied behavior. Runtime weight overrides are local,
-in-memory controls for round-robin and least-* selectors in the current `1.5.x`
-line.
+in-memory controls for round-robin and least-* selectors in the current
+load-balancer implementation.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -93,7 +92,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection with circuit-open status visibility. |
 | Active health checks | ✅ | TCP/TLS, HTTP, standard gRPC, Redis `PING`, MySQL/MariaDB handshake, PostgreSQL SSLRequest, exact JSON scalar body validation, `X-Health-Weight` degraded weight signals, and opt-in bounded local exec checks. Agent checks and additional database protocol probes remain future load-balancer health-check work. |
 | Load-balancer status | ✅ | Admin status includes configured pools, discovery mode/refresh health, selection/health/retry policy metadata, ready/available summary counts, runtime override counts/timestamps, backend readiness, disabled/drained state, in-flight counts, persistence-entry skew, passive failure/ejection and circuit state, slow-start, and least-time latency state; discovery refreshes also emit bounded success/failure events. |
-| Load-balancer 1.5.x boundaries | Limited | Local persistence and runtime overrides can be restart-persisted with `proxy.load_balance.runtime_state_file`; managed affinity cookie signing keys remain process-local; Fluxheim does not yet add/remove members at runtime, apply runtime weights to hash/ring selectors, share managed-cookie keys, or sync state across active-active nodes. |
+| Load-balancer boundaries | Limited | Local persistence and runtime overrides can be restart-persisted with `proxy.load_balance.runtime_state_file`; managed affinity cookie signing keys remain process-local; Fluxheim does not yet apply runtime weights to hash/ring selectors, share managed-cookie keys, or sync state across active-active nodes. |
 | Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
 | Concurrency limits | ✅ | Vhost/route in-flight limits with bounded wait queues. |
 | IP ACLs | ✅ | Trusted-proxy-aware allow/deny rules. |
@@ -288,7 +287,7 @@ Recommended profile features:
 | `profile-load-balancer` | `proxy`, `web`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `load-balancer`, `tls-rustls`, `security` | Edge server with Fluxheim load balancing and all compression codecs compiled in. |
 | `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
-| `profile-full` | `profile-load-balancer`, `geoip`, `stream-proxy`, `traffic-mirror` | All stable production modules, including GeoIP, traffic mirroring, and the 1.5 stream/load-balancer runtime lines. |
+| `profile-full` | `profile-load-balancer`, `geoip`, `stream-proxy`, `traffic-mirror` | All stable production modules, including GeoIP, traffic mirroring, and the current stream/load-balancer runtime lines. |
 | `profile-development` | `profile-full`, `php-fpm`, `acme-client`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Broad development build with all compatible production modules. |
 | `profile-web-server` | `proxy`, `web`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Static webserver profile while serving still uses the shared proxy runtime. |
 | `profile-cache-edge` | `proxy`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Cache edge without local static web serving. |
@@ -339,8 +338,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.6.7-wolfi`, `v1.6.7-cache-wolfi`, `v1.6.7-proxy-wolfi`,
-`v1.6.7-load-balancer-wolfi`, and `v1.6.7-php-wolfi`.
+`v1.6.8-wolfi`, `v1.6.8-cache-wolfi`, `v1.6.8-proxy-wolfi`,
+`v1.6.8-load-balancer-wolfi`, and `v1.6.8-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the

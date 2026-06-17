@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.7
+Version:        1.6.8
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Wed Jun 17 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.8-1
+- Continue the Pingora-exit line with Fluxheim-owned HTTP/1 parser foundations.
+- Add bounded native HTTP/1 request-head, response-head, request-target,
+  connection, body-framing, and chunked-body parser helpers in fluxheim-protocol.
+- Harden the native HTTP/1 parser against authority userinfo, obs-text,
+  duplicate Content-Length fields, and unbounded chunked body defaults.
+
 * Tue Jun 16 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.7-1
 - Continue the Pingora-exit line with Fluxheim-owned server plan boundaries.
 - Move listener inventory, service intent, background-task intent, process

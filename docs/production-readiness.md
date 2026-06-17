@@ -166,9 +166,10 @@ The `1.3.0` support promise includes:
 - full native and RPM packages that keep the broad production feature set for
   operators who prefer one complete binary.
 
-The load-balancer edge profile is compile- and config-validated in `1.3.0` so
-the feature graph is ready for `1.5`, but it is not a production
-load-balancing support promise yet.
+The load-balancer edge profile was compile- and config-validated in `1.3.0`;
+the production load-balancer control-plane and runtime feature line shipped
+through `1.5.x` and continues to be carried through the current `1.6.x`
+Pingora-exit work.
 
 The `1.3.1` support promise adds an opt-in `php-fpm` module for PHP
 applications. PHP remains outside default and focused cache/proxy builds. A

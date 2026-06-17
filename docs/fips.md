@@ -12,8 +12,8 @@ published Security Policy.
 
 ## Status
 
-Current release line: `1.5.x`. The FIPS/ISO internal-crypto closure was
-completed in `1.3.6`; the `1.5.x` load-balancer line does not broaden the
+Current release line: `1.6.x`. The FIPS/ISO internal-crypto closure was
+completed in `1.3.6`; the `1.6.x` Pingora-exit line does not broaden the
 compliance claim.
 
 The `1.3.4` release line adds OpenSSL FIPS-capable TLS validation and

@@ -83,8 +83,8 @@ consecutive_failure = 3
 ```
 
 HAProxy stick-table patterns map only to Fluxheim's bounded local persistence
-tables in the current `1.5.x` line. Multi-counter stick-table expressions
-remain future advanced ACL/stick-table work.
+tables in the current load-balancer implementation. Multi-counter stick-table
+expressions remain future advanced ACL/stick-table work.
 
 ## F5 LTM Pool
 
@@ -141,8 +141,10 @@ curl -X POST \
 ```
 
 Supported states are `normal`, `drain`, `disable`, `forced_down`, and
-`manual_resume`. Runtime mutations are intentionally in-memory in the current
-`1.5.x` line; they survive neither process restart nor runtime rebuild.
+`manual_resume`. Runtime mutations are intentionally local to one Fluxheim
+process; they survive process restart only when
+`proxy.load_balance.runtime_state_file` is configured, and they do not sync
+across active-active nodes.
 
 Configured member weights can be shifted at runtime for canary or traffic-ramp
 workflows when the pool uses `round-robin`, `least-connections`,
@@ -199,16 +201,17 @@ curl -X POST \
 
 ## Known Migration Boundaries
 
-The following are intentional current `1.5.x` boundaries. They are not defects
-in the shipped load-balancer behavior; they are architectural gaps tracked for
-later `1.5.x` or future module lines.
+The following are intentional current load-balancer boundaries. They are not
+defects in the shipped load-balancer behavior; they are architectural gaps
+tracked for future module lines.
 
 - Runtime add/remove/update-member operations are available for static upstream
   pools only. DNS/file/HTTP-discovery pools reject them because discovery
   refresh owns the live member set.
 - The load-balancer core is Fluxheim-owned, including backend-set snapshots,
   runtime mutation, health/discovery loops, and selection policy. Pingora still
-  remains the HTTP proxy transport boundary in the current `1.5.x` line.
+  remains the HTTP proxy transport boundary until the `1.6.x` native HTTP
+  runtime cutover completes.
 - Runtime weight changes are available for round-robin and least-* selectors.
   Hash/ring selectors need future table-rebuild semantics before runtime
   weights are accepted there.
@@ -221,16 +224,16 @@ later `1.5.x` or future module lines.
   tables and runtime member/weight overrides can be restart-persisted locally
   with `proxy.load_balance.runtime_state_file`, but passive health, retry
   budgets, queue counters, and managed-cookie signing keys remain local to one
-  Fluxheim process in the current `1.5.x` line. Active-active deployments must
-  either accept independent local state or place another HA layer in front until
-  cross-node synchronization lands.
+  Fluxheim process in the current load-balancer implementation. Active-active
+  deployments must either accept independent local state or place another HA
+  layer in front until cross-node synchronization lands.
 - In dynamic DNS/file/HTTP-discovery pools, stale runtime `drain` overrides may
   be reclaimed when a member leaves the live discovery set. Runtime `disable`
   and `forced_down` overrides are preserved across discovery churn until
   explicit admin resume/normal action.
 - Maglev hashing is available for static `proxy.upstreams` pools. File-refreshed
-  DNS-refreshed, and HTTP-discovered pools reject Maglev in the current `1.5.x`
-  line until dynamic table rebuild behavior is specified and observable.
+  DNS-refreshed, and HTTP-discovered pools reject Maglev until dynamic table
+  rebuild behavior is specified and observable.
 - Bounded-load consistent hashing is local to one Fluxheim process. It avoids
   selecting an over-bound hash target when another eligible ring candidate is
   available, but it does not coordinate load across multiple Fluxheim nodes.
@@ -238,8 +241,7 @@ later `1.5.x` or future module lines.
   overrides, runtime weight overrides, and persistence tables can be
   restart-persisted with `proxy.load_balance.runtime_state_file`, but mutated
   backend sets, passive health, retry budgets, queue counters, and
-  managed-cookie signing keys are not cluster-synced in the current `1.5.x`
-  line.
+  managed-cookie signing keys are not cluster-synced.
 - UDP, GSLB/DNS steering, WAF, VPN/firewall appliance behavior, and scripted
   iRules/Lua/Wasm behavior are intentionally separate roadmap lines.
 - `proxy.load_balance.queue` is opt-in. Defaults keep fail-fast behavior when

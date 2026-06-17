@@ -42,6 +42,9 @@ compatibility adapter in this slice.
 - Hardened the native HTTP/1 parser by rejecting deprecated authority userinfo,
   non-ASCII obs-text in strict header values and response reason phrases, all
   duplicate `Content-Length` fields, and unbounded chunked body defaults.
+- Extended the temporary `pingora-runtime` and `pingora-rustls` dependency
+  policy exceptions to `1.6.9` because `1.6.8` adds parser foundations but does
+  not yet replace the active server/listener adapter.
 
 ## Tests
 

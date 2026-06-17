@@ -462,9 +462,9 @@ and current waiting count, priority group, locality, tags, max in-flight cap,
 current in-flight count, passive failure count, passive ejection, passive
 ejection remaining seconds, circuit state, slow-start allowance, persistence
 entries currently pinned to each backend, and least-time latency state where
-available. In the current `1.5.x` line, `circuit_state = "open"` is the runtime
-status view for a backend currently ejected by passive health; `"closed"` means
-the backend is not passively ejected. Per-backend rows include
+available. In the current load-balancer implementation, `circuit_state = "open"`
+is the runtime status view for a backend currently ejected by passive health;
+`"closed"` means the backend is not passively ejected. Per-backend rows include
 `runtime_state_override` when an
 authenticated runtime member operation is active and
 `runtime_state_changed_at_unix_secs` when that override currently has a recorded
@@ -1632,11 +1632,11 @@ header value, and `cookie` mode writes the configured cookie value.
 an encrypted, access-restricted volume when raw header or cookie identifiers are
 used.
 
-The current `1.5.x` load-balancer line does not add/remove pool members at
-runtime, apply runtime weights to hash/ring selectors, share managed-cookie
-signing keys across nodes, or synchronize load-balancer state across
-active-active Fluxheim nodes. Managed-cookie HA mirroring is tracked separately
-from the local managed-cookie table shipped in `1.5.3`; see
+The current load-balancer implementation does not apply runtime weights to
+hash/ring selectors, share managed-cookie signing keys across nodes, or
+synchronize load-balancer state across active-active Fluxheim nodes.
+Managed-cookie HA mirroring is tracked separately from the local managed-cookie
+table shipped in `1.5.3`; see
 [Load Balancer HA Design Notes](load-balancer-ha.md).
 
 `upstreams` is the preferred static proxy target form for both one and many origins.
