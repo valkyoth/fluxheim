@@ -1,6 +1,6 @@
 use super::{
     Http1BodyFraming, Http1HeadBuffer, Http1HeadLimits, Http1Header, Http1ParseError, Http1Version,
-    http1_request_body_framing, parse_http1_request_head,
+    http1_request_body_framing, http1_required_host, parse_http1_request_head,
 };
 
 fn header<'a>(name: &'a str, value: &'a str) -> Http1Header<'a> {
@@ -197,4 +197,37 @@ fn parsed_head_exposes_body_framing_decision() {
         parsed.body_framing(),
         Ok(Http1BodyFraming::ContentLength(5))
     );
+}
+
+#[test]
+fn validates_required_http11_host_boundary() {
+    assert_eq!(
+        http1_required_host(&[header("Host", "example.test")]),
+        Ok("example.test")
+    );
+    assert_eq!(http1_required_host(&[]), Err(Http1ParseError::MissingHost));
+    assert_eq!(
+        http1_required_host(&[header("Host", "example.test"), header("Host", "other.test")]),
+        Err(Http1ParseError::DuplicateHost)
+    );
+    assert_eq!(
+        http1_required_host(&[header("Host", "")]),
+        Err(Http1ParseError::InvalidHost)
+    );
+    assert_eq!(
+        http1_required_host(&[header("Host", "bad host")]),
+        Err(Http1ParseError::InvalidHost)
+    );
+}
+
+#[test]
+fn parsed_head_exposes_required_host_decision() {
+    let parsed = parse_http1_request_head(
+        b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n",
+        Http1HeadLimits::default(),
+    )
+    .unwrap()
+    .expect("complete head");
+
+    assert_eq!(parsed.host(), Ok("example.test"));
 }

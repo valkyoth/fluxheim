@@ -22,6 +22,8 @@ compatibility adapter in this slice.
 - Added strict HTTP/1 request body-framing classification for `Content-Length`
   and `Transfer-Encoding`, including rejection of ambiguous
   `Content-Length`/`Transfer-Encoding` combinations.
+- Added HTTP/1.1 required `Host` boundary validation for the native parser,
+  rejecting missing, duplicate, empty, or whitespace-containing host fields.
 
 ## Tests
 
@@ -32,6 +34,8 @@ compatibility adapter in this slice.
   oversized incomplete chunks that must not be stored unboundedly.
 - Added `fluxheim-protocol` unit tests for no-body, fixed-length, chunked, and
   invalid/ambiguous request body framing decisions.
+- Added `fluxheim-protocol` unit tests for valid, missing, duplicate, empty,
+  and malformed `Host` fields.
 - Added `fluxheim-server` unit coverage for downstream HTTP/1 bounded defaults.
 
 ## Verification

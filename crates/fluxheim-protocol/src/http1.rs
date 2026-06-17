@@ -49,6 +49,10 @@ impl<'a> Http1RequestHead<'a> {
     pub fn body_framing(&self) -> Result<Http1BodyFraming, Http1ParseError> {
         http1_request_body_framing(&self.headers)
     }
+
+    pub fn host(&self) -> Result<&'a str, Http1ParseError> {
+        http1_required_host(&self.headers)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -101,14 +105,17 @@ impl Http1HeadBuffer {
 pub enum Http1ParseError {
     ConflictingBodyFraming,
     DuplicateContentLength,
+    DuplicateHost,
     HeaderCountExceeded,
     HeaderLineTooLong,
     HeadTooLarge,
     InvalidContentLength,
+    InvalidHost,
     InvalidHeaderName,
     InvalidHeaderValue,
     InvalidRequestLine,
     InvalidUtf8,
+    MissingHost,
     ObsoleteLineFolding,
     StartLineTooLong,
     UnsupportedTransferEncoding,
@@ -193,6 +200,23 @@ pub fn http1_request_body_framing(
         (None, Some(0)) | (None, None) => Ok(Http1BodyFraming::NoBody),
         (None, Some(length)) => Ok(Http1BodyFraming::ContentLength(length)),
     }
+}
+
+pub fn http1_required_host<'a>(headers: &[Http1Header<'a>]) -> Result<&'a str, Http1ParseError> {
+    let mut host = None;
+    for header in headers {
+        if header.name.eq_ignore_ascii_case("host") {
+            if host.is_some() {
+                return Err(Http1ParseError::DuplicateHost);
+            }
+            let value = header.value.trim();
+            if value.is_empty() || value.bytes().any(|byte| matches!(byte, b' ' | b'\t')) {
+                return Err(Http1ParseError::InvalidHost);
+            }
+            host = Some(value);
+        }
+    }
+    host.ok_or(Http1ParseError::MissingHost)
 }
 
 fn complete_head_len(

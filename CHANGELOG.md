@@ -24,6 +24,8 @@ behavior when the change improves security or project direction.
 - Add strict HTTP/1 request body-framing classification for `Content-Length`
   and `Transfer-Encoding`, rejecting ambiguous `Content-Length` /
   `Transfer-Encoding` combinations before the native runtime cutover.
+- Add HTTP/1.1 required `Host` boundary validation for the native parser,
+  rejecting missing, duplicate, empty, or whitespace-containing host fields.
 
 ## 1.6.7 - 2026-06-16
 
