@@ -1217,6 +1217,7 @@ dependencies = [
  "fluxheim-protocol",
  "fluxheim-runtime",
  "httpdate",
+ "log",
  "rustix",
  "tokio",
 ]

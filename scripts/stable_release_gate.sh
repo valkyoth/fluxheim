@@ -69,6 +69,9 @@ scripts/validate-1-0-fixtures.sh
 echo "stable release gate: 1.0 core smoke"
 FLUXHEIM_SMOKE_SKIP_CORE_MATRIX=1 scripts/smoke_1_0_core.sh
 
+echo "stable release gate: native HTTP/1 listener/proxy smoke"
+scripts/smoke_native_http1_proxy.sh
+
 echo "stable release gate: admin listener smoke"
 scripts/smoke_admin_listener.sh
 

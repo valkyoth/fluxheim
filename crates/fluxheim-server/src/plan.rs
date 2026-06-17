@@ -3,9 +3,9 @@ use fluxheim_runtime::BackgroundTaskSpec;
 
 use crate::{
     CertificateReloadControlPlan, DownstreamHttp1Policy, DownstreamHttp2Policy, ListenerProtocol,
-    ListenerSpec, ProcessSpec, ProxyProtocolPolicy, ServerPlanError, ServiceKind, ServiceSpec,
-    background, control::certificate_reload_control_plan_from_config, listener, proxy_protocol,
-    service,
+    ListenerSpec, NativeHttp1ProxyCandidate, ProcessSpec, ProxyProtocolPolicy, ServerPlanError,
+    ServiceKind, ServiceSpec, background, control::certificate_reload_control_plan_from_config,
+    listener, native_http1_plan, proxy_protocol, service,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,6 +22,7 @@ pub struct ServerPlan {
     downstream_http2: DownstreamHttp2Policy,
     certificate_reload_control: Option<CertificateReloadControlPlan>,
     admin_ops_socket: Option<service::AdminOpsSocketPlan>,
+    native_http1_proxy_candidates: Vec<NativeHttp1ProxyCandidate>,
     listeners: Vec<ListenerSpec>,
     services: Vec<ServiceSpec>,
     background_tasks: Vec<BackgroundTaskSpec>,
@@ -37,6 +38,7 @@ impl ServerPlan {
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control: None,
             admin_ops_socket: None,
+            native_http1_proxy_candidates: Vec::new(),
             listeners,
             services: Vec::new(),
             background_tasks,
@@ -57,6 +59,7 @@ impl ServerPlan {
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control: None,
             admin_ops_socket: None,
+            native_http1_proxy_candidates: Vec::new(),
             listeners,
             services,
             background_tasks,
@@ -89,6 +92,10 @@ impl ServerPlan {
 
     pub fn admin_ops_socket(&self) -> Option<&service::AdminOpsSocketPlan> {
         self.admin_ops_socket.as_ref()
+    }
+
+    pub fn native_http1_proxy_candidates(&self) -> &[NativeHttp1ProxyCandidate] {
+        &self.native_http1_proxy_candidates
     }
 
     pub fn listeners(&self) -> &[ListenerSpec] {
@@ -197,15 +204,21 @@ impl ServerPlan {
         let process = ProcessSpec::from_config(config);
         let certificate_reload_control =
             certificate_reload_control_plan_from_config(config, &process);
+        let downstream_http1 = DownstreamHttp1Policy::from_server_limits(config.server.limits);
 
         Ok(Self {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process,
             proxy_protocol: proxy_protocol::proxy_protocol_policy_from_config(config)?,
-            downstream_http1: DownstreamHttp1Policy::from_server_limits(config.server.limits),
+            downstream_http1,
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control,
             admin_ops_socket: service::admin_ops_socket_plan_from_config(config),
+            native_http1_proxy_candidates:
+                native_http1_plan::native_http1_proxy_candidates_from_config(
+                    config,
+                    downstream_http1,
+                ),
             listeners: listener::listener_specs_from_config(config)?,
             services: service::service_specs_from_config(config),
             background_tasks: background::background_task_specs_from_config(config),

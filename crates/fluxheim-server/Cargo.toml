@@ -12,6 +12,7 @@ fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-runtime = { path = "../fluxheim-runtime" }
 httpdate = "1.0.3"
+log = "0.4.32"
 tokio = { version = "1.52.3", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 
 [target.'cfg(unix)'.dependencies]

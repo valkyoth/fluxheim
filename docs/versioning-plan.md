@@ -2576,12 +2576,17 @@ Planned `1.6.x` sequence:
   bodies, keep-alive, explicit close, and shutdown behavior with real socket
   tests. Keep the active production proxy/cache/PHP listener on the Pingora
   compatibility adapter until full route and upstream parity is green.
-- `v1.6.10`: native HTTP/1.1 proxy/cache/PHP cutover. Make the Fluxheim-owned
-  HTTP/1.1 path the default for selected profiles, preserving routing,
-  upstream selection, request/response header policy, access policy,
-  rate/concurrency limits, retries, compression, auth-request, traffic
-  mirroring, PHP-FPM, ACME challenge routing, GeoIP, cache interaction,
-  observability, and admin-visible failure semantics.
+- `v1.6.10`: native HTTP/1.1 upstream/proxy foundation. Add the
+  Fluxheim-owned bounded upstream HTTP/1 client, plain static-upstream proxy
+  handler, and `ServerPlan` eligibility inventory for native proxy candidates.
+  Keep the production default on the Pingora compatibility adapter until route
+  matching, request/response header policy, access policy, rate/concurrency
+  limits, retries, compression, auth-request, traffic mirroring, PHP-FPM, ACME
+  challenge routing, GeoIP, cache interaction, observability, and
+  admin-visible failure semantics are all implemented and smoke-tested on the
+  native path. The eligibility gate must fail closed for unsupported policy
+  layers, dynamic discovery, load balancing, upstream TLS, upstream PROXY
+  protocol, HTTP/2 upstreams, and websocket upgrade.
 - `v1.6.11`: native HTTP/2 runtime preview. Add HTTP/2 serving/proxying through
   the selected Rust stack only after validating request-boundary limits,
   response-flow-control lifetime limits, slow-body protection, stream resets,

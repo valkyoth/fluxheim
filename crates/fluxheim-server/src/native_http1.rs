@@ -29,7 +29,7 @@ pub struct NativeHttp1Request {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1Response {
     status: u16,
-    reason: &'static str,
+    reason: String,
     headers: Vec<(String, String)>,
     content_length: Option<u64>,
     body: Vec<u8>,
@@ -37,10 +37,10 @@ pub struct NativeHttp1Response {
 }
 
 impl NativeHttp1Response {
-    pub fn new(status: u16, reason: &'static str, body: impl Into<Vec<u8>>) -> Self {
+    pub fn new(status: u16, reason: impl Into<String>, body: impl Into<Vec<u8>>) -> Self {
         Self {
             status,
-            reason,
+            reason: reason.into(),
             headers: Vec::new(),
             content_length: None,
             body: body.into(),
@@ -61,6 +61,26 @@ impl NativeHttp1Response {
     pub const fn close_connection(mut self) -> Self {
         self.close = true;
         self
+    }
+
+    pub const fn status(&self) -> u16 {
+        self.status
+    }
+
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+
+    pub fn headers(&self) -> &[(String, String)] {
+        &self.headers
+    }
+
+    pub const fn content_length(&self) -> Option<u64> {
+        self.content_length
+    }
+
+    pub fn body(&self) -> &[u8] {
+        &self.body
     }
 }
 
@@ -226,6 +246,10 @@ where
             accepted = listener.accept() => {
                 let (stream, peer_addr) = accepted?;
                 let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                    log::warn!(
+                        target: "fluxheim::native_http1",
+                        "HTTP/1 connection rejected: listener at capacity; peer={peer_addr}; limit={}",
+                        policy.max_connections());
                     continue;
                 };
                 let handler = handler.clone();
@@ -409,8 +433,9 @@ async fn write_response<S>(
 where
     S: AsyncWrite + Unpin,
 {
+    let reason = sanitize_reason_phrase(&response.reason).collect::<String>();
     stream
-        .write_all(format!("HTTP/1.1 {} {}\r\n", response.status, response.reason).as_bytes())
+        .write_all(format!("HTTP/1.1 {} {reason}\r\n", response.status).as_bytes())
         .await?;
     stream
         .write_all(
@@ -464,4 +489,11 @@ fn valid_response_header(name: &str, value: &str) -> bool {
         && !value
             .bytes()
             .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f..=0xff))
+}
+
+fn sanitize_reason_phrase(reason: &str) -> impl Iterator<Item = char> + '_ {
+    reason
+        .bytes()
+        .filter(|byte| matches!(byte, 0x09 | 0x20..=0x7e))
+        .map(char::from)
 }

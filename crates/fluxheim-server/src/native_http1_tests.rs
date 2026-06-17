@@ -196,6 +196,23 @@ async fn native_http1_owns_response_framing_headers() {
 }
 
 #[tokio::test]
+async fn native_http1_sanitizes_response_reason_phrase() {
+    let addr =
+        spawn_server(|_| NativeHttp1Response::new(200, "OK\rX-Injected: yes\u{7f}\u{80}", b"ok"))
+            .await;
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: local.test\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let response = read_response(&mut stream).await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OKX-Injected: yes\r\n"));
+    assert!(!response.contains("\rX-Injected: yes\r\n"));
+}
+
+#[tokio::test]
 async fn native_http1_can_advertise_explicit_response_length() {
     let addr = spawn_server(|_| {
         NativeHttp1Response::new(304, "Not Modified", Vec::new()).with_content_length(123)
