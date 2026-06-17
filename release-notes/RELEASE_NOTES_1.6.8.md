@@ -24,6 +24,9 @@ compatibility adapter in this slice.
   `Content-Length`/`Transfer-Encoding` combinations.
 - Added HTTP/1.1 required `Host` boundary validation for the native parser,
   rejecting missing, duplicate, empty, or whitespace-containing host fields.
+- Added HTTP/1 connection persistence classification for the native parser,
+  covering HTTP/1.0 close-by-default, HTTP/1.1 persistent-by-default, explicit
+  `Connection: close`, and HTTP/1.0 `Connection: keep-alive`.
 
 ## Tests
 
@@ -36,6 +39,8 @@ compatibility adapter in this slice.
   invalid/ambiguous request body framing decisions.
 - Added `fluxheim-protocol` unit tests for valid, missing, duplicate, empty,
   and malformed `Host` fields.
+- Added `fluxheim-protocol` unit tests for HTTP/1.0/HTTP/1.1 connection
+  persistence decisions and invalid `Connection` tokens.
 - Added `fluxheim-server` unit coverage for downstream HTTP/1 bounded defaults.
 
 ## Verification

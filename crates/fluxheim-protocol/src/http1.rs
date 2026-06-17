@@ -53,6 +53,10 @@ impl<'a> Http1RequestHead<'a> {
     pub fn host(&self) -> Result<&'a str, Http1ParseError> {
         http1_required_host(&self.headers)
     }
+
+    pub fn connection_directive(&self) -> Result<Http1ConnectionDirective, Http1ParseError> {
+        http1_connection_directive(self.version, &self.headers)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -109,6 +113,7 @@ pub enum Http1ParseError {
     HeaderCountExceeded,
     HeaderLineTooLong,
     HeadTooLarge,
+    InvalidConnection,
     InvalidContentLength,
     InvalidHost,
     InvalidHeaderName,
@@ -127,6 +132,12 @@ pub enum Http1BodyFraming {
     NoBody,
     ContentLength(u64),
     Chunked,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Http1ConnectionDirective {
+    Close,
+    Persistent,
 }
 
 pub fn parse_http1_request_head(
@@ -217,6 +228,40 @@ pub fn http1_required_host<'a>(headers: &[Http1Header<'a>]) -> Result<&'a str, H
         }
     }
     host.ok_or(Http1ParseError::MissingHost)
+}
+
+pub fn http1_connection_directive(
+    version: Http1Version,
+    headers: &[Http1Header<'_>],
+) -> Result<Http1ConnectionDirective, Http1ParseError> {
+    let mut close = false;
+    let mut keep_alive = false;
+
+    for header in headers {
+        if !header.name.eq_ignore_ascii_case("connection") {
+            continue;
+        }
+        for token in header.value.split(',') {
+            let token = token.trim();
+            if !http_token_valid(token) {
+                return Err(Http1ParseError::InvalidConnection);
+            }
+            if token.eq_ignore_ascii_case("close") {
+                close = true;
+            } else if token.eq_ignore_ascii_case("keep-alive") {
+                keep_alive = true;
+            }
+        }
+    }
+
+    if close {
+        return Ok(Http1ConnectionDirective::Close);
+    }
+    if version == Http1Version::Http11 || keep_alive {
+        Ok(Http1ConnectionDirective::Persistent)
+    } else {
+        Ok(Http1ConnectionDirective::Close)
+    }
 }
 
 fn complete_head_len(

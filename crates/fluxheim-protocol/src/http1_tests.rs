@@ -1,6 +1,7 @@
 use super::{
-    Http1BodyFraming, Http1HeadBuffer, Http1HeadLimits, Http1Header, Http1ParseError, Http1Version,
-    http1_request_body_framing, http1_required_host, parse_http1_request_head,
+    Http1BodyFraming, Http1ConnectionDirective, Http1HeadBuffer, Http1HeadLimits, Http1Header,
+    Http1ParseError, Http1Version, http1_connection_directive, http1_request_body_framing,
+    http1_required_host, parse_http1_request_head,
 };
 
 fn header<'a>(name: &'a str, value: &'a str) -> Http1Header<'a> {
@@ -230,4 +231,58 @@ fn parsed_head_exposes_required_host_decision() {
     .expect("complete head");
 
     assert_eq!(parsed.host(), Ok("example.test"));
+}
+
+#[test]
+fn classifies_connection_persistence_by_version_and_header() {
+    assert_eq!(
+        http1_connection_directive(Http1Version::Http11, &[]),
+        Ok(Http1ConnectionDirective::Persistent)
+    );
+    assert_eq!(
+        http1_connection_directive(Http1Version::Http10, &[]),
+        Ok(Http1ConnectionDirective::Close)
+    );
+    assert_eq!(
+        http1_connection_directive(Http1Version::Http10, &[header("Connection", "keep-alive")]),
+        Ok(Http1ConnectionDirective::Persistent)
+    );
+    assert_eq!(
+        http1_connection_directive(Http1Version::Http11, &[header("Connection", "close")]),
+        Ok(Http1ConnectionDirective::Close)
+    );
+    assert_eq!(
+        http1_connection_directive(
+            Http1Version::Http11,
+            &[header("Connection", "keep-alive, close")]
+        ),
+        Ok(Http1ConnectionDirective::Close)
+    );
+}
+
+#[test]
+fn rejects_invalid_connection_tokens() {
+    assert_eq!(
+        http1_connection_directive(Http1Version::Http11, &[header("Connection", "keep alive")]),
+        Err(Http1ParseError::InvalidConnection)
+    );
+    assert_eq!(
+        http1_connection_directive(Http1Version::Http11, &[header("Connection", "")]),
+        Err(Http1ParseError::InvalidConnection)
+    );
+}
+
+#[test]
+fn parsed_head_exposes_connection_directive() {
+    let parsed = parse_http1_request_head(
+        b"GET / HTTP/1.1\r\nHost: example.test\r\nConnection: close\r\n\r\n",
+        Http1HeadLimits::default(),
+    )
+    .unwrap()
+    .expect("complete head");
+
+    assert_eq!(
+        parsed.connection_directive(),
+        Ok(Http1ConnectionDirective::Close)
+    );
 }

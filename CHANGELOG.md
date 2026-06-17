@@ -26,6 +26,9 @@ behavior when the change improves security or project direction.
   `Transfer-Encoding` combinations before the native runtime cutover.
 - Add HTTP/1.1 required `Host` boundary validation for the native parser,
   rejecting missing, duplicate, empty, or whitespace-containing host fields.
+- Add HTTP/1 connection persistence classification for the native parser,
+  covering HTTP/1.0 close-by-default, HTTP/1.1 persistent-by-default, explicit
+  `Connection: close`, and HTTP/1.0 `Connection: keep-alive`.
 
 ## 1.6.7 - 2026-06-16
 
