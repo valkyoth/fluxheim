@@ -1,11 +1,15 @@
 [package]
 name = "fluxheim-server"
-version = "1.6.9"
+version = "1.6.10"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim listener and server boundary types."
+
+[features]
+default = []
+privacy-mode = []
 
 [dependencies]
 fluxheim-config = { path = "../fluxheim-config" }

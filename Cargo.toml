@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.6.9"
+version = "1.6.10"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -153,6 +153,7 @@ privacy-mode = [
     "fluxheim-config/privacy-mode",
     "fluxheim-headers/privacy-mode",
     "fluxheim-load-balancer?/privacy-mode",
+    "fluxheim-server/privacy-mode",
 ]
 security = []
 

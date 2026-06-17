@@ -7,6 +7,43 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.10 - 2026-06-17
+
+### Added
+
+- Add a Fluxheim-owned bounded native HTTP/1 upstream client for plain static
+  upstream proxying, including request serialization, response-head parsing,
+  fixed-length, chunked, and close-delimited response body reads.
+- Add native proxy candidate inventory in `fluxheim-server` so eligible
+  vhost/route proxy configurations can be identified before production cutover.
+- Add a staged native proxy handler for plain static upstreams, while keeping
+  the production default on the Pingora compatibility adapter until full route,
+  policy, cache, PHP-FPM, ACME, observability, and failure-semantics parity is
+  green.
+- Add native proxy-owned `Via` and `X-Forwarded-For` forwarding parity, with
+  privacy-mode builds suppressing `X-Forwarded-For`.
+
+### Hardened
+
+- Native upstream forwarding now strips inbound hop-by-hop framing headers,
+  prior `Via`, and prior `X-Forwarded-For` before writing Fluxheim-owned proxy
+  headers.
+- Native close-delimited upstream responses now accept exact-size bodies and
+  reject oversized bodies immediately instead of waiting for EOF.
+- Native proxy eligibility fails closed for unsupported policy layers,
+  dynamic discovery, load balancing, upstream TLS, upstream PROXY protocol,
+  HTTP/2 upstreams, and websocket upgrade.
+
+### Tests
+
+- Add native upstream tests for chunked responses, close-delimited responses,
+  exact body limits, oversized bodies, timeout handling, invalid headers, and
+  Fluxheim-owned proxy headers.
+- Extend the native HTTP/1 smoke script with a real TCP downstream listener to
+  native proxy to upstream socket test.
+- Add a privacy-mode regression test proving native upstream forwarding does
+  not emit `X-Forwarded-For`.
+
 ## 1.6.9 - 2026-06-17
 
 ### Added

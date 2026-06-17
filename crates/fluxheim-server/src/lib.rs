@@ -13,6 +13,7 @@ mod http2;
 mod listener;
 mod native_http1;
 mod native_http1_client;
+mod native_http1_forwarded;
 mod native_http1_plan;
 mod native_http1_proxy;
 mod plan;

@@ -2586,7 +2586,9 @@ Planned `1.6.x` sequence:
   admin-visible failure semantics are all implemented and smoke-tested on the
   native path. The eligibility gate must fail closed for unsupported policy
   layers, dynamic discovery, load balancing, upstream TLS, upstream PROXY
-  protocol, HTTP/2 upstreams, and websocket upgrade.
+  protocol, HTTP/2 upstreams, and websocket upgrade. Connection pooling remains
+  deferred performance parity until the upstream connector/pooling work in
+  `v1.6.13`.
 - `v1.6.11`: native HTTP/2 runtime preview. Add HTTP/2 serving/proxying through
   the selected Rust stack only after validating request-boundary limits,
   response-flow-control lifetime limits, slow-body protection, stream resets,

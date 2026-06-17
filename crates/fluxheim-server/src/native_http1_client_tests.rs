@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use std::net::SocketAddr;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -147,6 +149,25 @@ async fn native_upstream_rejects_oversized_close_delimited_response() {
 }
 
 #[tokio::test]
+async fn native_upstream_accepts_exact_limit_close_delimited_response() {
+    let addr = upstream(|_, mut stream| async move {
+        stream
+            .write_all(b"HTTP/1.0 200 OK\r\nserver: test\r\n\r\n1234")
+            .await
+            .unwrap();
+    })
+    .await;
+
+    let response = NativeHttp1Upstream::new(addr.to_string())
+        .with_max_body_bytes(4)
+        .send(&request())
+        .await
+        .unwrap();
+
+    assert_eq!(response.body(), b"1234");
+}
+
+#[tokio::test]
 async fn native_upstream_strips_request_hop_by_hop_headers() {
     let addr = upstream(|request, mut stream| async move {
         let request = String::from_utf8(request).unwrap();
@@ -177,6 +198,61 @@ async fn native_upstream_strips_request_hop_by_hop_headers() {
 
     assert_eq!(response.status(), 204);
     assert_eq!(response.body(), b"");
+}
+
+#[tokio::test]
+async fn native_upstream_adds_owned_proxy_headers() {
+    let addr = upstream(|request, mut stream| async move {
+        let request = String::from_utf8(request).unwrap();
+        assert!(request.contains("via: 1.0 prior, 1.1 fluxheim\r\n"));
+        assert!(request.contains("x-forwarded-for: 198.51.100.17\r\n"));
+        assert!(!request.contains("x-forwarded-for: 192.0.2.9\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    })
+    .await;
+
+    let mut request = request();
+    request.peer_addr = Some(SocketAddr::from(([198, 51, 100, 17], 49000)));
+    request
+        .headers
+        .push(("Via".to_owned(), "1.0 prior".to_owned()));
+    request
+        .headers
+        .push(("X-Forwarded-For".to_owned(), "192.0.2.9".to_owned()));
+
+    let response = NativeHttp1Upstream::new(addr.to_string())
+        .send(&request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 204);
+}
+
+#[cfg(feature = "privacy-mode")]
+#[tokio::test]
+async fn privacy_mode_native_upstream_does_not_add_forwarded_for() {
+    let addr = upstream(|request, mut stream| async move {
+        let request = String::from_utf8(request).unwrap();
+        assert!(!request.to_ascii_lowercase().contains("x-forwarded-for:"));
+        stream
+            .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    })
+    .await;
+
+    let mut request = request();
+    request.peer_addr = Some(SocketAddr::from(([198, 51, 100, 17], 49000)));
+
+    let response = NativeHttp1Upstream::new(addr.to_string())
+        .send(&request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 204);
 }
 
 #[tokio::test]

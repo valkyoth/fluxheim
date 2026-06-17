@@ -2,12 +2,15 @@ use std::time::Duration;
 
 use fluxheim_protocol::{
     Http1ChunkLimits, Http1HeadLimits, Http1ParseError, decode_http1_chunked_body,
-    http_token_valid, http1_request_target, parse_http1_response_head,
+    http1_request_target, parse_http1_response_head,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
+use crate::native_http1_forwarded::{
+    valid_upstream_header_value, valid_upstream_request_header, write_owned_proxy_headers,
+};
 use crate::{DownstreamHttp1Policy, NativeHttp1Error, NativeHttp1Request, NativeHttp1Response};
 
 const UPSTREAM_READ_CHUNK_BYTES: usize = 8192;
@@ -151,6 +154,8 @@ where
             || name.eq_ignore_ascii_case("host")
             || name.eq_ignore_ascii_case("content-length")
             || name.eq_ignore_ascii_case("transfer-encoding")
+            || name.eq_ignore_ascii_case("via")
+            || name.eq_ignore_ascii_case("x-forwarded-for")
         {
             continue;
         }
@@ -161,6 +166,7 @@ where
             .write_all(format!("{name}: {value}\r\n").as_bytes())
             .await?;
     }
+    write_owned_proxy_headers(stream, request).await?;
     stream.write_all(b"\r\n").await?;
     stream.write_all(&request.body).await?;
     stream.flush().await?;
@@ -203,16 +209,6 @@ fn valid_request_host<'a>(
     } else {
         Err(Http1ParseError::InvalidHeaderValue.into())
     }
-}
-
-fn valid_upstream_request_header(name: &str, value: &str) -> bool {
-    http_token_valid(name) && valid_upstream_header_value(value)
-}
-
-fn valid_upstream_header_value(value: &str) -> bool {
-    !value
-        .bytes()
-        .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f..=0xff))
 }
 
 fn connection_tokens(request: &NativeHttp1Request) -> Vec<String> {
@@ -386,7 +382,10 @@ where
         ResponseBodyFraming::NoBody => Ok(Vec::new()),
         ResponseBodyFraming::CloseDelimited => {
             let mut body = buffer[head_len..].to_vec();
-            while body.len() < max_body_bytes {
+            if body.len() > max_body_bytes {
+                return Err(Http1ParseError::BodyTooLarge.into());
+            }
+            loop {
                 let mut chunk = [0u8; UPSTREAM_READ_CHUNK_BYTES];
                 let read = stream.read(&mut chunk).await?;
                 if read == 0 {
@@ -394,10 +393,9 @@ where
                 }
                 body.extend_from_slice(&chunk[..read]);
                 if body.len() > max_body_bytes {
-                    break;
+                    return Err(Http1ParseError::BodyTooLarge.into());
                 }
             }
-            Err(Http1ParseError::BodyTooLarge.into())
         }
         ResponseBodyFraming::ContentLength(length) => {
             if length > max_body_bytes {
@@ -468,8 +466,8 @@ fn downstream_hop_by_hop_header(name: &str) -> bool {
 }
 
 fn response_header_allowed(name: &str, body_framing: ResponseBodyFraming) -> bool {
-    !downstream_hop_by_hop_header(name)
-        && !(matches!(body_framing, ResponseBodyFraming::Chunked)
+    !(downstream_hop_by_hop_header(name)
+        || matches!(body_framing, ResponseBodyFraming::Chunked)
             && name.eq_ignore_ascii_case("content-length"))
 }
 

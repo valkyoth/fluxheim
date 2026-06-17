@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.9
+Version:        1.6.10
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Wed Jun 17 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.10-1
+- Continue the Pingora-exit line with a staged native HTTP/1 upstream client
+  and plain static-upstream proxy foundation.
+- Add native proxy candidate inventory and real socket proxy smoke coverage.
+- Harden native upstream response body limits and add Fluxheim-owned Via /
+  X-Forwarded-For header parity with privacy-mode suppression.
+
 * Wed Jun 17 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.9-1
 - Continue the Pingora-exit line with a staged native HTTP/1 connection,
   listener, and static-file serving boundary.

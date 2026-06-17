@@ -25,54 +25,56 @@ fn server_plan_collects_native_http1_proxy_candidates() {
 
 #[test]
 fn server_plan_collects_vhost_and_route_native_http1_proxy_candidates() {
-    let mut config = Config::default();
-    config.vhosts = vec![VhostConfig {
-        name: "native.test".to_owned(),
-        hosts: vec!["native.test".to_owned()],
-        max_request_body_bytes: None,
-        access: Default::default(),
-        rate_limit: Default::default(),
-        concurrency: Default::default(),
-        tls: Default::default(),
-        acme_challenge: Default::default(),
-        redirect: Default::default(),
-        proxy: fluxheim_config::ProxyConfig {
-            upstreams: vec!["127.0.0.1:3001".to_owned()],
-            ..Default::default()
-        },
-        cache: CacheConfig::default(),
-        compression: None,
-        headers: Default::default(),
-        php: Default::default(),
-        web: Default::default(),
-        routes: vec![RouteConfig {
-            name: "api".to_owned(),
-            path_exact: None,
-            path_prefix: Some("/api/".to_owned()),
-            path_regex: None,
-            methods: Vec::new(),
-            fallback: false,
-            https_redirect_exempt: false,
-            strip_prefix: None,
-            rewrite_prefix: None,
-            rewrite_template: None,
+    let config = Config {
+        vhosts: vec![VhostConfig {
+            name: "native.test".to_owned(),
+            hosts: vec!["native.test".to_owned()],
             max_request_body_bytes: None,
             access: Default::default(),
             rate_limit: Default::default(),
             concurrency: Default::default(),
-            grpc: Default::default(),
-            redirect: None,
-            proxy: Some(fluxheim_config::ProxyConfig {
-                upstreams: vec!["127.0.0.1:3002".to_owned(), "127.0.0.1:3003".to_owned()],
+            tls: Default::default(),
+            acme_challenge: Default::default(),
+            redirect: Default::default(),
+            proxy: fluxheim_config::ProxyConfig {
+                upstreams: vec!["127.0.0.1:3001".to_owned()],
                 ..Default::default()
-            }),
-            web: None,
-            php: None,
-            cache: None,
+            },
+            cache: CacheConfig::default(),
             compression: None,
             headers: Default::default(),
+            php: Default::default(),
+            web: Default::default(),
+            routes: vec![RouteConfig {
+                name: "api".to_owned(),
+                path_exact: None,
+                path_prefix: Some("/api/".to_owned()),
+                path_regex: None,
+                methods: Vec::new(),
+                fallback: false,
+                https_redirect_exempt: false,
+                strip_prefix: None,
+                rewrite_prefix: None,
+                rewrite_template: None,
+                max_request_body_bytes: None,
+                access: Default::default(),
+                rate_limit: Default::default(),
+                concurrency: Default::default(),
+                grpc: Default::default(),
+                redirect: None,
+                proxy: Some(fluxheim_config::ProxyConfig {
+                    upstreams: vec!["127.0.0.1:3002".to_owned(), "127.0.0.1:3003".to_owned()],
+                    ..Default::default()
+                }),
+                web: None,
+                php: None,
+                cache: None,
+                compression: None,
+                headers: Default::default(),
+            }],
         }],
-    }];
+        ..Default::default()
+    };
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
     let candidates = plan.native_http1_proxy_candidates();
@@ -107,8 +109,10 @@ fn server_plan_rejects_native_http1_proxy_candidate_with_root_policy() {
 #[test]
 fn server_plan_rejects_native_http1_route_proxy_candidate_with_route_policy() {
     let mut config = Config::default();
-    let mut cache = CacheConfig::default();
-    cache.enabled = true;
+    let cache = CacheConfig {
+        enabled: true,
+        ..Default::default()
+    };
     config.vhosts = vec![VhostConfig {
         name: "native.test".to_owned(),
         hosts: vec!["native.test".to_owned()],
@@ -164,31 +168,33 @@ fn server_plan_rejects_native_http1_route_proxy_candidate_with_route_policy() {
 
 #[test]
 fn disabled_empty_access_policy_does_not_block_native_http1_proxy_candidate() {
-    let mut config = Config::default();
-    config.vhosts = vec![VhostConfig {
-        name: "native.test".to_owned(),
-        hosts: vec!["native.test".to_owned()],
-        max_request_body_bytes: None,
-        access: fluxheim_config::AccessPolicyConfig {
-            enabled: false,
-            ..Default::default()
-        },
-        rate_limit: Default::default(),
-        concurrency: Default::default(),
-        tls: Default::default(),
-        acme_challenge: Default::default(),
-        redirect: Default::default(),
-        proxy: fluxheim_config::ProxyConfig {
-            upstreams: vec!["127.0.0.1:3001".to_owned()],
-            ..Default::default()
-        },
-        cache: CacheConfig::default(),
-        compression: None,
-        headers: Default::default(),
-        php: Default::default(),
-        web: Default::default(),
-        routes: Vec::new(),
-    }];
+    let config = Config {
+        vhosts: vec![VhostConfig {
+            name: "native.test".to_owned(),
+            hosts: vec!["native.test".to_owned()],
+            max_request_body_bytes: None,
+            access: fluxheim_config::AccessPolicyConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            tls: Default::default(),
+            acme_challenge: Default::default(),
+            redirect: Default::default(),
+            proxy: fluxheim_config::ProxyConfig {
+                upstreams: vec!["127.0.0.1:3001".to_owned()],
+                ..Default::default()
+            },
+            cache: CacheConfig::default(),
+            compression: None,
+            headers: Default::default(),
+            php: Default::default(),
+            web: Default::default(),
+            routes: Vec::new(),
+        }],
+        ..Default::default()
+    };
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 

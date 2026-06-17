@@ -125,11 +125,13 @@ async fn native_proxy_maps_upstream_timeout_to_gateway_timeout() {
 
 #[test]
 fn native_proxy_config_accepts_plain_static_upstream() {
-    let mut proxy = fluxheim_config::ProxyConfig::default();
-    proxy.upstream = Some("127.0.0.1:3000".to_owned());
-    proxy.connect_timeout_secs = Some(2);
-    proxy.read_timeout_secs = Some(3);
-    proxy.send_timeout_secs = Some(4);
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        connect_timeout_secs: Some(2),
+        read_timeout_secs: Some(3),
+        send_timeout_secs: Some(4),
+        ..Default::default()
+    };
 
     let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
         .unwrap()
@@ -156,23 +158,29 @@ fn native_proxy_config_returns_none_without_upstream() {
 
 #[test]
 fn native_proxy_config_rejects_unsupported_upstream_features() {
-    let mut proxy = fluxheim_config::ProxyConfig::default();
-    proxy.upstream = Some("127.0.0.1:3000".to_owned());
-    proxy.upstream_tls = true;
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_tls: true,
+        ..Default::default()
+    };
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
         Err(NativeHttp1ProxyConfigError::UpstreamTls)
     );
 
-    let mut proxy = fluxheim_config::ProxyConfig::default();
-    proxy.upstreams = vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()];
+    let proxy = fluxheim_config::ProxyConfig {
+        upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+        ..Default::default()
+    };
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
         Err(NativeHttp1ProxyConfigError::LoadBalancing)
     );
 
-    let mut proxy = fluxheim_config::ProxyConfig::default();
-    proxy.upstreams_file = Some(std::path::PathBuf::from("/tmp/upstreams.txt"));
+    let proxy = fluxheim_config::ProxyConfig {
+        upstreams_file: Some(std::path::PathBuf::from("/tmp/upstreams.txt")),
+        ..Default::default()
+    };
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
         Err(NativeHttp1ProxyConfigError::DynamicUpstreamDiscovery)
