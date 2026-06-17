@@ -155,7 +155,7 @@ fn validate_authority(value: &str) -> Result<(), Http1ParseError> {
     if value.is_empty()
         || value
             .bytes()
-            .any(|byte| matches!(byte, 0x00..=0x20 | 0x7f | b'/' | b'?' | b'#' | b'\\'))
+            .any(|byte| matches!(byte, 0x00..=0x20 | 0x7f | b'/' | b'?' | b'#' | b'\\' | b'@'))
     {
         return Err(Http1ParseError::InvalidRequestTarget);
     }

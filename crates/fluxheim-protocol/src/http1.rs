@@ -203,13 +203,10 @@ pub fn http1_request_body_framing(
     for header in headers {
         if header.name.eq_ignore_ascii_case("content-length") {
             let parsed = parse_content_length(header.value)?;
-            if let Some(existing) = content_length {
-                if existing != parsed {
-                    return Err(Http1ParseError::DuplicateContentLength);
-                }
-            } else {
-                content_length = Some(parsed);
+            if content_length.is_some() {
+                return Err(Http1ParseError::DuplicateContentLength);
             }
+            content_length = Some(parsed);
         } else if header.name.eq_ignore_ascii_case("transfer-encoding") {
             if transfer_encoding.is_some() {
                 return Err(Http1ParseError::UnsupportedTransferEncoding);
@@ -353,7 +350,7 @@ pub(super) fn parse_header_line(line: &str) -> Result<Http1Header<'_>, Http1Pars
     }
     if value
         .bytes()
-        .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f))
+        .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f..=0xff))
     {
         return Err(Http1ParseError::InvalidHeaderValue);
     }

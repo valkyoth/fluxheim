@@ -1,5 +1,6 @@
 use crate::http1::Http1ParseError;
 
+pub const DEFAULT_HTTP1_MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_HTTP1_MAX_CHUNK_SIZE: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -12,7 +13,7 @@ impl Default for Http1ChunkLimits {
     fn default() -> Self {
         Self {
             max_chunk_size: DEFAULT_HTTP1_MAX_CHUNK_SIZE,
-            max_body_bytes: usize::MAX,
+            max_body_bytes: DEFAULT_HTTP1_MAX_BODY_BYTES,
         }
     }
 }

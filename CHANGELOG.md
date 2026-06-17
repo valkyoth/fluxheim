@@ -40,6 +40,9 @@ behavior when the change improves security or project direction.
 - Add a bounded native HTTP/1 response-head parser for future upstream response
   handling, reusing the same strict header-count, line-length, UTF-8, and
   obsolete-folding checks as request-head parsing.
+- Harden the native HTTP/1 parser by rejecting deprecated authority userinfo,
+  non-ASCII obs-text in strict header values and response reason phrases, all
+  duplicate `Content-Length` fields, and unbounded chunked body defaults.
 
 ## 1.6.7 - 2026-06-16
 

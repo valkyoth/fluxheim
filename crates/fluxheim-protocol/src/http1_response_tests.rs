@@ -46,6 +46,13 @@ fn rejects_invalid_response_status_line() {
         parse_http1_response_head(b"HTTP/1.1 200 bad\x7f\r\n\r\n", Http1HeadLimits::default()),
         Err(Http1ParseError::InvalidResponseLine)
     );
+    assert_eq!(
+        parse_http1_response_head(
+            "HTTP/1.1 200 bad\u{80}\r\n\r\n".as_bytes(),
+            Http1HeadLimits::default()
+        ),
+        Err(Http1ParseError::InvalidResponseLine)
+    );
 }
 
 #[test]

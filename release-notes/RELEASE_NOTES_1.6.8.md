@@ -39,6 +39,9 @@ compatibility adapter in this slice.
 - Added a bounded native HTTP/1 response-head parser for future upstream
   response handling, reusing the same strict header-count, line-length, UTF-8,
   and obsolete-folding checks as request-head parsing.
+- Hardened the native HTTP/1 parser by rejecting deprecated authority userinfo,
+  non-ASCII obs-text in strict header values and response reason phrases, all
+  duplicate `Content-Length` fields, and unbounded chunked body defaults.
 
 ## Tests
 
@@ -59,6 +62,9 @@ compatibility adapter in this slice.
   and malformed target rejection.
 - Added `fluxheim-protocol` unit tests for HTTP/1 response-head parsing,
   incomplete response heads, malformed status lines, and shared header bounds.
+- Added `fluxheim-protocol` regression tests for authority userinfo rejection,
+  obs-text rejection, duplicate `Content-Length` rejection, and bounded chunked
+  body defaults.
 - Added `fluxheim-server` unit coverage for downstream HTTP/1 bounded defaults.
 
 ## Verification

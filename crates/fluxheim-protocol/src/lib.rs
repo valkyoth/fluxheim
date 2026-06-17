@@ -23,7 +23,8 @@ pub use http1::{
     http1_required_host, parse_http1_request_head,
 };
 pub use http1_chunked::{
-    DEFAULT_HTTP1_MAX_CHUNK_SIZE, Http1ChunkLimits, Http1ChunkedDecode, decode_http1_chunked_body,
+    DEFAULT_HTTP1_MAX_BODY_BYTES, DEFAULT_HTTP1_MAX_CHUNK_SIZE, Http1ChunkLimits,
+    Http1ChunkedDecode, decode_http1_chunked_body,
 };
 pub use http1_response::{Http1ResponseHead, parse_http1_response_head};
 pub use http1_target::{Http1RequestTarget, http1_request_target};

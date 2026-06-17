@@ -1,7 +1,7 @@
 use super::{
-    Http1BodyFraming, Http1ChunkLimits, Http1ChunkedDecode, Http1ConnectionDirective,
-    Http1HeadBuffer, Http1HeadLimits, Http1Header, Http1ParseError, Http1RequestTarget,
-    Http1Version, decode_http1_chunked_body, http1_connection_directive,
+    DEFAULT_HTTP1_MAX_BODY_BYTES, Http1BodyFraming, Http1ChunkLimits, Http1ChunkedDecode,
+    Http1ConnectionDirective, Http1HeadBuffer, Http1HeadLimits, Http1Header, Http1ParseError,
+    Http1RequestTarget, Http1Version, decode_http1_chunked_body, http1_connection_directive,
     http1_request_body_framing, http1_request_target, http1_required_host,
     parse_http1_request_head,
 };
@@ -126,6 +126,13 @@ fn rejects_obsolete_line_folding_and_bad_controls() {
         ),
         Err(Http1ParseError::InvalidHeaderValue)
     );
+    assert_eq!(
+        parse_http1_request_head(
+            "GET / HTTP/1.1\r\nX: bad\u{80}\r\n\r\n".as_bytes(),
+            Http1HeadLimits::default()
+        ),
+        Err(Http1ParseError::InvalidHeaderValue)
+    );
 }
 
 #[test]
@@ -199,6 +206,14 @@ fn rejects_invalid_http1_request_target_forms() {
         http1_request_target("CONNECT", "example.test"),
         Err(Http1ParseError::InvalidRequestTarget)
     );
+    assert_eq!(
+        http1_request_target("CONNECT", "user@example.test:443"),
+        Err(Http1ParseError::InvalidRequestTarget)
+    );
+    assert_eq!(
+        http1_request_target("GET", "http://user@example.test/path"),
+        Err(Http1ParseError::InvalidRequestTarget)
+    );
 }
 
 #[test]
@@ -251,6 +266,10 @@ fn rejects_ambiguous_or_invalid_body_framing() {
     );
     assert_eq!(
         http1_request_body_framing(&[header("Content-Length", "1"), header("Content-Length", "2")]),
+        Err(Http1ParseError::DuplicateContentLength)
+    );
+    assert_eq!(
+        http1_request_body_framing(&[header("Content-Length", "1"), header("Content-Length", "1")]),
         Err(Http1ParseError::DuplicateContentLength)
     );
     assert_eq!(
@@ -428,6 +447,15 @@ fn chunked_decoder_enforces_output_and_body_limits() {
         ),
         Err(Http1ParseError::BodyTooLarge)
     );
+}
+
+#[test]
+fn chunked_decoder_default_body_limit_is_bounded() {
+    assert_eq!(
+        Http1ChunkLimits::default().max_body_bytes,
+        DEFAULT_HTTP1_MAX_BODY_BYTES
+    );
+    assert!(Http1ChunkLimits::default().max_body_bytes < usize::MAX);
 }
 
 #[test]

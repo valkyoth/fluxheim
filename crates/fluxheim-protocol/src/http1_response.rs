@@ -74,7 +74,7 @@ fn parse_status_line(line: &str) -> Result<(Http1Version, u16, &str), Http1Parse
     }
     if reason
         .bytes()
-        .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f))
+        .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f..=0xff))
     {
         return Err(Http1ParseError::InvalidResponseLine);
     }
