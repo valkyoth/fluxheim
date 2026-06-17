@@ -1,4 +1,5 @@
 use crate::http_token_valid;
+use crate::http1_target::{Http1RequestTarget, http1_request_target};
 
 pub const DEFAULT_HTTP1_MAX_HEAD_BYTES: usize = 64 * 1024;
 pub const DEFAULT_HTTP1_MAX_HEADER_COUNT: usize = 100;
@@ -56,6 +57,10 @@ impl<'a> Http1RequestHead<'a> {
 
     pub fn connection_directive(&self) -> Result<Http1ConnectionDirective, Http1ParseError> {
         http1_connection_directive(self.version, &self.headers)
+    }
+
+    pub fn request_target(&self) -> Result<Http1RequestTarget<'a>, Http1ParseError> {
+        http1_request_target(self.method, self.target)
     }
 }
 
@@ -123,6 +128,7 @@ pub enum Http1ParseError {
     InvalidHeaderName,
     InvalidHeaderValue,
     InvalidRequestLine,
+    InvalidRequestTarget,
     InvalidUtf8,
     MissingHost,
     ObsoleteLineFolding,
@@ -332,6 +338,7 @@ fn parse_request_line(line: &str) -> Result<(&str, &str, Http1Version), Http1Par
         "HTTP/1.1" => Http1Version::Http11,
         _ => return Err(Http1ParseError::UnsupportedVersion),
     };
+    http1_request_target(method, target)?;
     Ok((method, target, version))
 }
 

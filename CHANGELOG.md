@@ -34,6 +34,9 @@ behavior when the change improves security or project direction.
 - Split the HTTP/1 chunked decoder into a focused `fluxheim-protocol` module so
   the native HTTP parser remains under the reviewability target as the 1.6
   Pingora-exit line grows.
+- Add native HTTP/1 request-target classification for origin-form,
+  absolute-form, CONNECT authority-form, and OPTIONS asterisk-form requests,
+  including percent-encoding and forbidden-fragment/backslash checks.
 
 ## 1.6.7 - 2026-06-16
 

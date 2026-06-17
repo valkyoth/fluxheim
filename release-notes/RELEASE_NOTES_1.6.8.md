@@ -33,6 +33,9 @@ compatibility adapter in this slice.
 - Split the HTTP/1 chunked decoder into a focused `fluxheim-protocol` module so
   the native HTTP parser stays below the reviewability target while more HTTP
   runtime pieces are added.
+- Added native HTTP/1 request-target classification for origin-form,
+  absolute-form, CONNECT authority-form, and OPTIONS asterisk-form requests,
+  including percent-encoding and forbidden-fragment/backslash checks.
 
 ## Tests
 
@@ -49,6 +52,8 @@ compatibility adapter in this slice.
   persistence decisions and invalid `Connection` tokens.
 - Added `fluxheim-protocol` unit tests for chunked body decoding, incomplete
   chunks, output/body limits, chunk-size limits, and invalid chunk framing.
+- Added `fluxheim-protocol` unit tests for HTTP/1 request-target classification
+  and malformed target rejection.
 - Added `fluxheim-server` unit coverage for downstream HTTP/1 bounded defaults.
 
 ## Verification

@@ -6,6 +6,7 @@
 
 mod http1;
 mod http1_chunked;
+mod http1_target;
 mod proxy_protocol;
 
 #[cfg(test)]
@@ -21,6 +22,7 @@ pub use http1::{
 pub use http1_chunked::{
     DEFAULT_HTTP1_MAX_CHUNK_SIZE, Http1ChunkLimits, Http1ChunkedDecode, decode_http1_chunked_body,
 };
+pub use http1_target::{Http1RequestTarget, http1_request_target};
 pub use proxy_protocol::{
     DownstreamProxyProtocolParseError, PROXY_PROTOCOL_V1_MAX_LINE, PROXY_PROTOCOL_V2_HEADER_LEN,
     PROXY_PROTOCOL_V2_MAX_PAYLOAD, PROXY_PROTOCOL_V2_SIGNATURE, ProxyProtocolTrustedSource,

@@ -1,8 +1,9 @@
 use super::{
     Http1BodyFraming, Http1ChunkLimits, Http1ChunkedDecode, Http1ConnectionDirective,
-    Http1HeadBuffer, Http1HeadLimits, Http1Header, Http1ParseError, Http1Version,
-    decode_http1_chunked_body, http1_connection_directive, http1_request_body_framing,
-    http1_required_host, parse_http1_request_head,
+    Http1HeadBuffer, Http1HeadLimits, Http1Header, Http1ParseError, Http1RequestTarget,
+    Http1Version, decode_http1_chunked_body, http1_connection_directive,
+    http1_request_body_framing, http1_request_target, http1_required_host,
+    parse_http1_request_head,
 };
 
 fn header<'a>(name: &'a str, value: &'a str) -> Http1Header<'a> {
@@ -136,6 +137,86 @@ fn rejects_unsupported_version_and_invalid_method() {
     assert_eq!(
         parse_http1_request_head(b"BAD METHOD / HTTP/1.1\r\n\r\n", Http1HeadLimits::default()),
         Err(Http1ParseError::InvalidRequestLine)
+    );
+}
+
+#[test]
+fn classifies_http1_request_target_forms() {
+    assert_eq!(
+        http1_request_target("GET", "/items?kind=book"),
+        Ok(Http1RequestTarget::Origin {
+            raw: "/items?kind=book",
+            path: "/items",
+            query: Some("kind=book")
+        })
+    );
+    assert_eq!(
+        http1_request_target("GET", "https://example.test/items?q=1"),
+        Ok(Http1RequestTarget::AbsoluteUri {
+            raw: "https://example.test/items?q=1",
+            scheme: "https",
+            authority: Some("example.test"),
+            path: Some("/items"),
+            query: Some("q=1")
+        })
+    );
+    assert_eq!(
+        http1_request_target("CONNECT", "example.test:443"),
+        Ok(Http1RequestTarget::Authority {
+            raw: "example.test:443",
+            port: 443
+        })
+    );
+    assert_eq!(
+        http1_request_target("OPTIONS", "*"),
+        Ok(Http1RequestTarget::Asterisk)
+    );
+}
+
+#[test]
+fn rejects_invalid_http1_request_target_forms() {
+    assert_eq!(
+        http1_request_target("GET", "//authority-like/path"),
+        Err(Http1ParseError::InvalidRequestTarget)
+    );
+    assert_eq!(
+        http1_request_target("GET", "/bad#fragment"),
+        Err(Http1ParseError::InvalidRequestTarget)
+    );
+    assert_eq!(
+        http1_request_target("GET", "/bad%xx"),
+        Err(Http1ParseError::InvalidRequestTarget)
+    );
+    assert_eq!(
+        http1_request_target("POST", "*"),
+        Err(Http1ParseError::InvalidRequestTarget)
+    );
+    assert_eq!(
+        http1_request_target("CONNECT", "https://example.test"),
+        Err(Http1ParseError::InvalidRequestTarget)
+    );
+    assert_eq!(
+        http1_request_target("CONNECT", "example.test"),
+        Err(Http1ParseError::InvalidRequestTarget)
+    );
+}
+
+#[test]
+fn parsed_head_exposes_request_target_decision() {
+    let parsed = parse_http1_request_head(
+        b"GET /items?kind=book HTTP/1.1\r\nHost: example.test\r\n\r\n",
+        Http1HeadLimits::default(),
+    )
+    .unwrap()
+    .expect("complete head");
+
+    assert_eq!(
+        parsed.request_target(),
+        Ok(Http1RequestTarget::Origin {
+            raw: "/items?kind=book",
+            path: "/items",
+            query: Some("kind=book")
+        })
     );
 }
 
