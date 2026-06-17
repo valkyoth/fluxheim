@@ -1,6 +1,6 @@
 use fluxheim_protocol::{
     DEFAULT_HTTP1_MAX_HEAD_BYTES, DEFAULT_HTTP1_MAX_HEADER_COUNT,
-    DEFAULT_HTTP1_MAX_HEADER_LINE_BYTES, DEFAULT_HTTP1_MAX_START_LINE_BYTES,
+    DEFAULT_HTTP1_MAX_HEADER_LINE_BYTES, DEFAULT_HTTP1_MAX_START_LINE_BYTES, Http1HeadLimits,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,5 +37,16 @@ impl DownstreamHttp1Policy {
 
     pub const fn max_start_line_bytes(self) -> usize {
         self.max_start_line_bytes
+    }
+}
+
+impl From<DownstreamHttp1Policy> for Http1HeadLimits {
+    fn from(policy: DownstreamHttp1Policy) -> Self {
+        Self {
+            max_head_bytes: policy.max_head_bytes,
+            max_header_count: policy.max_header_count,
+            max_header_line_bytes: policy.max_header_line_bytes,
+            max_start_line_bytes: policy.max_start_line_bytes,
+        }
     }
 }

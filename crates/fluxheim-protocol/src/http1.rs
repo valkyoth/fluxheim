@@ -46,6 +46,52 @@ pub struct Http1RequestHead<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Http1HeadBuffer {
+    bytes: Vec<u8>,
+    limits: Http1HeadLimits,
+}
+
+impl Http1HeadBuffer {
+    pub fn new(limits: Http1HeadLimits) -> Self {
+        Self {
+            bytes: Vec::new(),
+            limits,
+        }
+    }
+
+    pub fn buffered_len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub fn append(
+        &mut self,
+        chunk: &[u8],
+    ) -> Result<Option<Http1RequestHead<'_>>, Http1ParseError> {
+        if self.bytes.len() > self.limits.max_head_bytes {
+            return Err(Http1ParseError::HeadTooLarge);
+        }
+        let search_cap = self.limits.max_head_bytes;
+        let remaining = search_cap.saturating_sub(self.bytes.len());
+        self.bytes
+            .extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        match parse_http1_request_head(&self.bytes, self.limits) {
+            Ok(Some(head)) => Ok(Some(head)),
+            Ok(None)
+                if chunk.len() > remaining || self.bytes.len() > self.limits.max_head_bytes =>
+            {
+                Err(Http1ParseError::HeadTooLarge)
+            }
+            Ok(None) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.bytes.clear();
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Http1ParseError {
     HeaderCountExceeded,
     HeaderLineTooLong,
@@ -107,7 +153,11 @@ fn complete_head_len(
     let search_len = input.len().min(max_head_bytes.saturating_add(4));
     for index in 0..search_len.saturating_sub(3) {
         if &input[index..index + 4] == b"\r\n\r\n" {
-            return Ok(Some(index + 4));
+            let head_len = index + 4;
+            if head_len > max_head_bytes {
+                return Err(Http1ParseError::HeadTooLarge);
+            }
+            return Ok(Some(head_len));
         }
     }
     if input.len() > max_head_bytes {
@@ -194,6 +244,54 @@ mod tests {
             )
             .unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn buffers_fragmented_request_head_until_complete() {
+        let mut buffer = Http1HeadBuffer::new(Http1HeadLimits::default());
+
+        assert_eq!(buffer.append(b"GET / HT").unwrap(), None);
+        assert_eq!(buffer.buffered_len(), 8);
+        let parsed = buffer
+            .append(b"TP/1.1\r\nHost: example.test\r\n\r\n")
+            .unwrap()
+            .expect("complete head");
+
+        assert_eq!(parsed.method, "GET");
+        assert_eq!(parsed.target, "/");
+        assert_eq!(
+            parsed.headers,
+            vec![Http1Header {
+                name: "Host",
+                value: "example.test"
+            }]
+        );
+    }
+
+    #[test]
+    fn incremental_buffer_rejects_unbounded_head_without_storing_full_chunk() {
+        let limits = Http1HeadLimits {
+            max_head_bytes: 16,
+            ..Http1HeadLimits::default()
+        };
+        let mut buffer = Http1HeadBuffer::new(limits);
+        let chunk = vec![b'a'; 1024];
+
+        assert_eq!(buffer.append(&chunk), Err(Http1ParseError::HeadTooLarge));
+        assert!(buffer.buffered_len() <= limits.max_head_bytes);
+    }
+
+    #[test]
+    fn rejects_head_when_delimiter_exceeds_limit() {
+        let limits = Http1HeadLimits {
+            max_head_bytes: 17,
+            ..Http1HeadLimits::default()
+        };
+
+        assert_eq!(
+            parse_http1_request_head(b"GET / HTTP/1.1\r\n\r\n", limits),
+            Err(Http1ParseError::HeadTooLarge)
         );
     }
 

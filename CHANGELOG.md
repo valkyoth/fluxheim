@@ -18,6 +18,9 @@ behavior when the change improves security or project direction.
 - Add downstream HTTP/1 policy defaults to `fluxheim-server` so the native
   server cutover can carry HTTP/1 limits through the Fluxheim server plan before
   production traffic leaves the Pingora compatibility adapter.
+- Add an incremental HTTP/1 request-head buffer for future native socket reads,
+  including fragmented-head handling and bounded storage for oversized
+  incomplete heads.
 
 ## 1.6.7 - 2026-06-16
 

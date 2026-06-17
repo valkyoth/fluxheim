@@ -70,6 +70,12 @@ fn downstream_http1_policy_uses_bounded_native_defaults() {
 
     let plan = ServerPlan::new(Vec::new(), Vec::new());
     assert_eq!(plan.downstream_http1(), &policy);
+
+    let limits = fluxheim_protocol::Http1HeadLimits::from(policy);
+    assert_eq!(limits.max_head_bytes, policy.max_head_bytes());
+    assert_eq!(limits.max_header_count, policy.max_header_count());
+    assert_eq!(limits.max_header_line_bytes, policy.max_header_line_bytes());
+    assert_eq!(limits.max_start_line_bytes, policy.max_start_line_bytes());
 }
 
 #[test]
