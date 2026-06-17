@@ -7,6 +7,18 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.8 - 2026-06-17
+
+### Added
+
+- Add a Fluxheim-owned HTTP/1.0/HTTP/1.1 request-head parser in
+  `fluxheim-protocol` with bounded head size, header count, start-line length,
+  header-line length, CRLF termination, UTF-8 validation, and obs-fold
+  rejection.
+- Add downstream HTTP/1 policy defaults to `fluxheim-server` so the native
+  server cutover can carry HTTP/1 limits through the Fluxheim server plan before
+  production traffic leaves the Pingora compatibility adapter.
+
 ## 1.6.7 - 2026-06-16
 
 ### Changed

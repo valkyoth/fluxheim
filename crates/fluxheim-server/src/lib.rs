@@ -8,6 +8,7 @@ use fluxheim_runtime::ShutdownView;
 
 mod background;
 mod control;
+mod http1;
 mod http2;
 mod listener;
 mod plan;
@@ -18,6 +19,7 @@ mod service;
 mod unix_listener;
 
 pub use control::CertificateReloadControlPlan;
+pub use http1::DownstreamHttp1Policy;
 pub use http2::DownstreamHttp2Policy;
 pub use listener::{ListenerProtocol, ListenerSpec};
 pub use plan::{RuntimeAdapterKind, ServerPlan};

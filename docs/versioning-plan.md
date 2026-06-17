@@ -2563,11 +2563,12 @@ Planned `1.6.x` sequence:
   listener policy, and admin/private Unix socket planning while keeping the
   active Pingora runtime as an explicit compatibility adapter.
 - `v1.6.8`: native server/listener continuation and HTTP/1.1 runtime preview
-  foundations. Continue removing Pingora server/listener glue, then add the
-  Fluxheim-owned HTTP/1.1 proxy pipeline beside the old path using standard
-  `http` types, bounded body streams, explicit downstream/upstream timeouts,
-  and existing route/policy modules. Keep it behind an internal migration
-  feature until fixture parity is green.
+  foundations. Start with a Fluxheim-owned bounded HTTP/1.0/HTTP/1.1
+  request-head parser and server-plan HTTP/1 limits, continue removing Pingora
+  server/listener glue, then add the Fluxheim-owned HTTP/1.1 proxy pipeline
+  beside the old path using standard `http` types, bounded body streams,
+  explicit downstream/upstream timeouts, and existing route/policy modules.
+  Keep it behind an internal migration feature until fixture parity is green.
 - `v1.6.9`: native HTTP/1.1 runtime cutover. Make the Fluxheim-owned HTTP/1.1
   path the default for selected profiles, preserving routing, upstream
   selection, request/response header policy, access policy,

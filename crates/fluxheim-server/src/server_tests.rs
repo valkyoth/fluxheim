@@ -60,6 +60,19 @@ fn downstream_http2_policy_uses_hardened_defaults() {
 }
 
 #[test]
+fn downstream_http1_policy_uses_bounded_native_defaults() {
+    let policy = DownstreamHttp1Policy::default();
+
+    assert_eq!(policy.max_head_bytes(), 64 * 1024);
+    assert_eq!(policy.max_header_count(), 100);
+    assert_eq!(policy.max_header_line_bytes(), 8 * 1024);
+    assert_eq!(policy.max_start_line_bytes(), 8 * 1024);
+
+    let plan = ServerPlan::new(Vec::new(), Vec::new());
+    assert_eq!(plan.downstream_http1(), &policy);
+}
+
+#[test]
 fn server_plan_builds_certificate_reload_control_plan_when_enabled() {
     let mut config = Config::default();
     config.tls.acme.enabled = true;

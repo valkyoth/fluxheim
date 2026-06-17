@@ -2,9 +2,10 @@ use fluxheim_config::Config;
 use fluxheim_runtime::BackgroundTaskSpec;
 
 use crate::{
-    CertificateReloadControlPlan, DownstreamHttp2Policy, ListenerProtocol, ListenerSpec,
-    ProcessSpec, ProxyProtocolPolicy, ServerPlanError, ServiceKind, ServiceSpec, background,
-    control::certificate_reload_control_plan_from_config, listener, proxy_protocol, service,
+    CertificateReloadControlPlan, DownstreamHttp1Policy, DownstreamHttp2Policy, ListenerProtocol,
+    ListenerSpec, ProcessSpec, ProxyProtocolPolicy, ServerPlanError, ServiceKind, ServiceSpec,
+    background, control::certificate_reload_control_plan_from_config, listener, proxy_protocol,
+    service,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -17,6 +18,7 @@ pub struct ServerPlan {
     runtime_adapter: RuntimeAdapterKind,
     process: ProcessSpec,
     proxy_protocol: ProxyProtocolPolicy,
+    downstream_http1: DownstreamHttp1Policy,
     downstream_http2: DownstreamHttp2Policy,
     certificate_reload_control: Option<CertificateReloadControlPlan>,
     admin_ops_socket: Option<service::AdminOpsSocketPlan>,
@@ -31,6 +33,7 @@ impl ServerPlan {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process: ProcessSpec::default(),
             proxy_protocol: ProxyProtocolPolicy::Off,
+            downstream_http1: DownstreamHttp1Policy::default(),
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control: None,
             admin_ops_socket: None,
@@ -50,6 +53,7 @@ impl ServerPlan {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process,
             proxy_protocol: ProxyProtocolPolicy::Off,
+            downstream_http1: DownstreamHttp1Policy::default(),
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control: None,
             admin_ops_socket: None,
@@ -69,6 +73,10 @@ impl ServerPlan {
 
     pub fn proxy_protocol(&self) -> &ProxyProtocolPolicy {
         &self.proxy_protocol
+    }
+
+    pub const fn downstream_http1(&self) -> &DownstreamHttp1Policy {
+        &self.downstream_http1
     }
 
     pub const fn downstream_http2(&self) -> &DownstreamHttp2Policy {
@@ -194,6 +202,7 @@ impl ServerPlan {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process,
             proxy_protocol: proxy_protocol::proxy_protocol_policy_from_config(config)?,
+            downstream_http1: DownstreamHttp1Policy::default(),
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control,
             admin_ops_socket: service::admin_ops_socket_plan_from_config(config),
