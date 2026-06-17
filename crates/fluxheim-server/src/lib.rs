@@ -11,6 +11,7 @@ mod control;
 mod http1;
 mod http2;
 mod listener;
+mod native_http1;
 mod plan;
 mod process;
 mod proxy_protocol;
@@ -22,6 +23,10 @@ pub use control::CertificateReloadControlPlan;
 pub use http1::DownstreamHttp1Policy;
 pub use http2::DownstreamHttp2Policy;
 pub use listener::{ListenerProtocol, ListenerSpec};
+pub use native_http1::{
+    NativeHttp1Error, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
+    serve_native_http1_connection, serve_native_http1_listener,
+};
 pub use plan::{RuntimeAdapterKind, ServerPlan};
 pub use process::ProcessSpec;
 pub use proxy_protocol::{ProxyProtocolPolicy, ProxyProtocolTrustedSource};
@@ -62,6 +67,10 @@ impl std::error::Error for ServerPlanError {}
 #[cfg(test)]
 #[path = "server_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "native_http1_tests.rs"]
+mod native_http1_tests;
 
 #[cfg(test)]
 #[path = "server_background_tests.rs"]

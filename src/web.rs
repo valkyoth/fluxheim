@@ -146,6 +146,16 @@ impl StaticFileServer {
         self.resolve_relative_candidate(&relative_path)
     }
 
+    #[cfg_attr(not(all(feature = "web", feature = "proxy")), allow(dead_code))]
+    pub(crate) fn cache_control(&self) -> &str {
+        &self.cache_control
+    }
+
+    #[cfg_attr(not(all(feature = "web", feature = "proxy")), allow(dead_code))]
+    pub(crate) fn expires(&self) -> Option<&str> {
+        self.expires.as_deref()
+    }
+
     #[cfg(feature = "proxy")]
     pub fn resolve_rooted_file(&self, path: &Path) -> io::Result<ResolveResult> {
         if !path.is_absolute() {

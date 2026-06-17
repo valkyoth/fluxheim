@@ -2569,21 +2569,28 @@ Planned `1.6.x` sequence:
   beside the old path using standard `http` types, bounded body streams,
   explicit downstream/upstream timeouts, and existing route/policy modules.
   Keep it behind an internal migration feature until fixture parity is green.
-- `v1.6.9`: native HTTP/1.1 runtime cutover. Make the Fluxheim-owned HTTP/1.1
-  path the default for selected profiles, preserving routing, upstream
-  selection, request/response header policy, access policy,
+- `v1.6.9`: native HTTP/1.1 runtime continuation and static-serving parity.
+  Add the Fluxheim-owned HTTP/1.1 connection/listener runtime over Tokio IO,
+  map `[server.limits]` into the native HTTP/1 policy, and prove static file
+  serving, HEAD framing, directory listings, fixed-length bodies, chunked
+  bodies, keep-alive, explicit close, and shutdown behavior with real socket
+  tests. Keep the active production proxy/cache/PHP listener on the Pingora
+  compatibility adapter until full route and upstream parity is green.
+- `v1.6.10`: native HTTP/1.1 proxy/cache/PHP cutover. Make the Fluxheim-owned
+  HTTP/1.1 path the default for selected profiles, preserving routing,
+  upstream selection, request/response header policy, access policy,
   rate/concurrency limits, retries, compression, auth-request, traffic
   mirroring, PHP-FPM, ACME challenge routing, GeoIP, cache interaction,
   observability, and admin-visible failure semantics.
-- `v1.6.10`: native HTTP/2 runtime preview. Add HTTP/2 serving/proxying through
+- `v1.6.11`: native HTTP/2 runtime preview. Add HTTP/2 serving/proxying through
   the selected Rust stack only after validating request-boundary limits,
   response-flow-control lifetime limits, slow-body protection, stream resets,
   trailer behavior, gRPC pass-through, HPACK/header-count controls where
   available, and mixed HTTP/1.1+HTTP/2 fixtures.
-- `v1.6.11`: native HTTP/2 runtime cutover. Make the Fluxheim-owned HTTP/2 path
+- `v1.6.12`: native HTTP/2 runtime cutover. Make the Fluxheim-owned HTTP/2 path
   the default for supported profiles and keep strict fallback rules for any
   protocol safety hook that is not exposed by the underlying crate.
-- `v1.6.12`: upstream connector and pooling parity. Replace remaining Pingora
+- `v1.6.13`: upstream connector and pooling parity. Replace remaining Pingora
   upstream peer/session/pool behavior with Fluxheim-owned connectors and pools
   for HTTP/1.1, HTTP/2, TLS/mTLS, DNS/file/runtime-discovered backends,
   retry/failover decisions, and privacy-mode-safe observability. After proxy,
@@ -2591,16 +2598,16 @@ Planned `1.6.x` sequence:
   stable APIs, reduce `admin.rs` to endpoint routing and auth glue or move it
   into `fluxheim-admin` if the dependency graph stays one-way. Do not let admin
   own domain state; it should call domain APIs and serialize responses.
-- `v1.6.13`: remove remaining Pingora crates, vendored Pingora patches,
+- `v1.6.14`: remove remaining Pingora crates, vendored Pingora patches,
   Pingora compatibility shims, and Pingora-specific docs from normal builds.
   Release gates must prove `cargo tree` and container builds do not compile
   Pingora for default, full, cache, proxy, PHP, load-balancer, FIPS, macOS
   developer, and release-image profiles.
-- `v1.6.14`: stabilization/security-only release for the Pingora-free runtime
+- `v1.6.15`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
   checks, long-running soak tests, and documentation clarity.
-- `v1.6.15`: native load-balancer compatibility polish after Pingora is gone
+- `v1.6.16`: native load-balancer compatibility polish after Pingora is gone
   from normal builds. Add a Fluxheim-owned nginx/Ketama-compatible consistent
   hash selection mode for operators migrating from nginx or Pingora Ketama
   behavior. Keep the existing rendezvous consistent-hash and bounded-load

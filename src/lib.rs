@@ -144,6 +144,8 @@ pub mod load_balancer;
 pub mod metrics;
 #[cfg(feature = "metrics-otlp")]
 pub mod metrics_otlp;
+#[cfg(all(feature = "web", feature = "proxy"))]
+mod native_http1_static;
 #[cfg(feature = "otel-otlp")]
 pub mod otel_otlp;
 #[cfg(feature = "metrics-otlp")]

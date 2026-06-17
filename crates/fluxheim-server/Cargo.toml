@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-server"
-version = "1.6.8"
+version = "1.6.9"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -11,6 +11,8 @@ description = "Internal Fluxheim listener and server boundary types."
 fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-runtime = { path = "../fluxheim-runtime" }
+httpdate = "1.0.3"
+tokio = { version = "1.52.3", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1.4", features = ["fs", "net", "process"] }

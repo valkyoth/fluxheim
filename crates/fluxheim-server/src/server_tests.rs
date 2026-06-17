@@ -1,7 +1,8 @@
 use super::*;
+use crate::http1::DEFAULT_HTTP1_MAX_CONNECTIONS;
 use fluxheim_config::{
-    CacheConfig, Config, DownstreamProxyProtocol, RouteConfig, StreamRouteConfig, UdpRouteConfig,
-    VhostConfig,
+    CacheConfig, Config, DownstreamProxyProtocol, RouteConfig, ServerLimitsConfig,
+    StreamRouteConfig, UdpRouteConfig, VhostConfig,
 };
 use fluxheim_runtime::{BackgroundTaskKind, BackgroundTaskSpec, ShutdownReason, ShutdownState};
 
@@ -63,10 +64,20 @@ fn downstream_http2_policy_uses_hardened_defaults() {
 fn downstream_http1_policy_uses_bounded_native_defaults() {
     let policy = DownstreamHttp1Policy::default();
 
+    assert_eq!(policy.max_body_bytes(), 64 * 1024 * 1024);
     assert_eq!(policy.max_head_bytes(), 64 * 1024);
     assert_eq!(policy.max_header_count(), 100);
     assert_eq!(policy.max_header_line_bytes(), 8 * 1024);
     assert_eq!(policy.max_start_line_bytes(), 8 * 1024);
+    assert_eq!(policy.max_connections(), 1024);
+    assert_eq!(
+        policy.request_head_timeout(),
+        std::time::Duration::from_secs(10)
+    );
+    assert_eq!(
+        policy.request_body_timeout(),
+        std::time::Duration::from_secs(30)
+    );
 
     let plan = ServerPlan::new(Vec::new(), Vec::new());
     assert_eq!(plan.downstream_http1(), &policy);
@@ -76,6 +87,46 @@ fn downstream_http1_policy_uses_bounded_native_defaults() {
     assert_eq!(limits.max_header_count, policy.max_header_count());
     assert_eq!(limits.max_header_line_bytes, policy.max_header_line_bytes());
     assert_eq!(limits.max_start_line_bytes, policy.max_start_line_bytes());
+}
+
+#[test]
+fn downstream_http1_policy_preserves_tight_head_limit_invariant() {
+    let policy = DownstreamHttp1Policy::from_server_limits(ServerLimitsConfig {
+        max_request_header_bytes: fluxheim_config::ByteSize::from_bytes(16),
+        max_uri_bytes: fluxheim_config::ByteSize::from_bytes(8),
+        max_request_headers: 4,
+        max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(16),
+    });
+
+    assert_eq!(policy.max_head_bytes(), 16);
+    assert_eq!(policy.max_start_line_bytes(), 16);
+    assert!(policy.max_start_line_bytes() <= policy.max_head_bytes());
+}
+
+#[test]
+fn downstream_http1_policy_treats_zero_connection_cap_as_default() {
+    let policy = DownstreamHttp1Policy::default().with_max_connections(0);
+
+    assert_eq!(policy.max_connections(), DEFAULT_HTTP1_MAX_CONNECTIONS);
+}
+
+#[test]
+fn server_plan_maps_configured_limits_to_downstream_http1_policy() {
+    let mut config = Config::default();
+    config.server.limits = ServerLimitsConfig {
+        max_request_header_bytes: fluxheim_config::ByteSize::from_bytes(4096),
+        max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
+        max_request_headers: 32,
+        max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let policy = plan.downstream_http1();
+
+    assert_eq!(policy.max_body_bytes(), 2048);
+    assert_eq!(policy.max_head_bytes(), 4096);
+    assert_eq!(policy.max_header_count(), 32);
+    assert_eq!(policy.max_start_line_bytes(), 1056);
 }
 
 #[test]

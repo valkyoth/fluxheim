@@ -202,7 +202,7 @@ impl ServerPlan {
             runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
             process,
             proxy_protocol: proxy_protocol::proxy_protocol_policy_from_config(config)?,
-            downstream_http1: DownstreamHttp1Policy::default(),
+            downstream_http1: DownstreamHttp1Policy::from_server_limits(config.server.limits),
             downstream_http2: DownstreamHttp2Policy::default(),
             certificate_reload_control,
             admin_ops_socket: service::admin_ops_socket_plan_from_config(config),

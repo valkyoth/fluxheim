@@ -7,6 +7,38 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.9 - 2026-06-17
+
+### Added
+
+- Add a Fluxheim-owned native HTTP/1 connection and listener runtime over Tokio
+  IO, using the bounded HTTP/1 parser from `fluxheim-protocol` and keeping the
+  production proxy path on the Pingora compatibility adapter until parity is
+  green.
+- Add a staged native static-file adapter that reuses Fluxheim's safe web-root
+  resolver, conditional-response planner, and body reader while writing through
+  native HTTP/1 response types.
+- Map `[server.limits]` request-head, URI, header-count, and request-body
+  limits into the native downstream HTTP/1 policy.
+- Add real TCP socket tests for native HTTP/1 keep-alive, fixed-length and
+  chunked bodies, listener shutdown, static files, HEAD framing, directory
+  listings, slow-client timeouts, peer-address propagation, and connection-cap
+  shedding.
+
+### Hardened
+
+- Bound native HTTP/1 request-head and request-body reads with explicit
+  deadlines to prevent slowloris and slow-body tasks from living indefinitely.
+- Bound native HTTP/1 listener concurrency with a policy connection cap and
+  safe zero-cap fallback to the default.
+- Make native HTTP/1 response framing runtime-owned for `Content-Length`,
+  `Connection`, and `Date`, and validate handler-supplied headers before
+  writing.
+- Sanitize native static 500 responses so filesystem and OS error details stay
+  in logs instead of HTTP response bodies.
+- Tighten native HTTP/1 head and chunked-body secondary buffer guards, and keep
+  derived start-line limits within the total request-head limit.
+
 ## 1.6.8 - 2026-06-17
 
 ### Added

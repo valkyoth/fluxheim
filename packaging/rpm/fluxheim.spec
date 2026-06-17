@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.8
+Version:        1.6.9
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,14 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Wed Jun 17 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.9-1
+- Continue the Pingora-exit line with a staged native HTTP/1 connection,
+  listener, and static-file serving boundary.
+- Map server request limits into native HTTP/1 policy and add real socket tests
+  for keep-alive, bodies, static files, HEAD framing, and directory listings.
+- Harden native HTTP/1 slow-client handling, connection caps, runtime-owned
+  Date/Content-Length/Connection framing, static 500 bodies, and buffer guards.
+
 * Wed Jun 17 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.8-1
 - Continue the Pingora-exit line with Fluxheim-owned HTTP/1 parser foundations.
 - Add bounded native HTTP/1 request-head, response-head, request-target,
