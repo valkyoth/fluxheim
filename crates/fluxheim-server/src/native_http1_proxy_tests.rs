@@ -253,7 +253,9 @@ async fn mtls_upstream(
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
-        let mut stream = acceptor.accept(stream).await.unwrap();
+        let Ok(mut stream) = acceptor.accept(stream).await else {
+            return;
+        };
         let request = String::from_utf8(read_request_head(&mut stream).await).unwrap();
         assert!(request.starts_with("GET /mtls HTTP/1.1\r\n"));
         assert!(request.contains("host: proxy.test\r\n"));
@@ -337,7 +339,9 @@ async fn mtls_upstream(
         let (stream, _) = listener.accept().await.unwrap();
         let ssl = openssl::ssl::Ssl::new(acceptor.context()).unwrap();
         let mut stream = SslStream::new(ssl, stream).unwrap();
-        std::pin::Pin::new(&mut stream).accept().await.unwrap();
+        if std::pin::Pin::new(&mut stream).accept().await.is_err() {
+            return;
+        }
         let request = String::from_utf8(read_request_head(&mut stream).await).unwrap();
         assert!(request.starts_with("GET /mtls HTTP/1.1\r\n"));
         assert!(request.contains("host: proxy.test\r\n"));
@@ -616,6 +620,50 @@ async fn native_proxy_forwards_to_mtls_upstream_with_client_certificate() {
     );
     assert!(response.contains("x-origin: mtls\r\n"));
     assert!(response.ends_with("hello mtls native"));
+    std::fs::remove_dir_all(fixture.directory).unwrap();
+}
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+#[tokio::test]
+async fn native_proxy_rejects_mtls_upstream_without_client_certificate() {
+    let fixture = native_tls_fixture();
+    let upstream = mtls_upstream(
+        fixture.chain_pem.clone(),
+        fixture.key_pem.clone(),
+        fixture.ca_pem.clone(),
+    )
+    .await;
+    let proxy_config = fluxheim_config::ProxyConfig {
+        upstream: Some(upstream.to_string()),
+        upstream_tls: true,
+        upstream_sni: Some("localhost".to_owned()),
+        upstream_ca_path: Some(fixture.ca_path.clone()),
+        ..Default::default()
+    };
+    let native =
+        NativeHttp1Proxy::from_proxy_config(&proxy_config, DownstreamHttp1Policy::default())
+            .unwrap()
+            .expect("native TLS proxy without client cert");
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        serve_native_http1_listener(
+            listener,
+            DownstreamHttp1Policy::default(),
+            Arc::new(native),
+            std::future::pending::<()>(),
+        )
+        .await
+        .unwrap();
+    });
+
+    let response = downstream_get(proxy, "/mtls").await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert!(response.ends_with("bad gateway\n"));
     std::fs::remove_dir_all(fixture.directory).unwrap();
 }
 

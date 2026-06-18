@@ -21,7 +21,9 @@ represented and tested through Fluxheim-owned connector code.
   configured CA bundle, and forwards a request through the native proxy.
 - Added a real native upstream mTLS test that starts an origin requiring a
   client certificate and verifies the configured upstream client cert/key path
-  works through rustls and OpenSSL builds.
+  works through rustls and OpenSSL builds. The same fixture now also verifies
+  that an mTLS-only origin fails closed when the native proxy is not configured
+  with upstream client certificate material.
 - Added ordered static upstream failover for the staged native HTTP/1 proxy
   path. Safe methods (`GET`, `HEAD`, `OPTIONS`, `TRACE`) can try the next
   configured static upstream after an upstream error; unsafe methods are not
