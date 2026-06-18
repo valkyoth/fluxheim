@@ -133,7 +133,13 @@ runtime backend mutation has proven safe locally.
 `1.6` is the Pingora-exit release line. It starts with baseline evidence,
 crate-boundary policy, runtime parity fixtures, dependency exception gates, and
 small Fluxheim-owned runtime proof primitives, then removes Pingora dependency
-surface profile by profile. The line should keep behavior stable while moving
+surface profile by profile. The remaining `1.6.x` work is intentionally split
+into smaller checkpoints instead of one risky proxy cutover: native HTTP/1.1
+upstream connector/pooling parity, upstream TLS/mTLS and discovery parity,
+native HTTP/2 upstream safety, simple native proxy/cache/static/PHP cutover,
+full official-profile cutover, final Pingora dependency removal, a
+security-only stabilization release, and then nginx/Ketama-compatible
+load-balancer hash polish. The line should keep behavior stable while moving
 code into focused crates where that reduces review surface. Shared Wasm
 extensibility moves to `1.7`; it should cover the operational jobs normally
 solved with F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-style

@@ -2604,24 +2604,56 @@ Planned `1.6.x` sequence:
   HTTP/2 cutover blocked until the remaining pre-routing HPACK/header-count
   allocation proof is implemented or the protocol mode has an equally strong
   Fluxheim-owned boundary.
-- `v1.6.13`: upstream connector and pooling parity. Replace remaining Pingora
-  upstream peer/session/pool behavior with Fluxheim-owned connectors and pools
-  for HTTP/1.1, HTTP/2, TLS/mTLS, DNS/file/runtime-discovered backends,
-  retry/failover decisions, and privacy-mode-safe observability. After proxy,
-  cache, load-balancer, snapshot, ACME, header-policy, and protocol crates have
-  stable APIs, reduce `admin.rs` to endpoint routing and auth glue or move it
-  into `fluxheim-admin` if the dependency graph stays one-way. Do not let admin
-  own domain state; it should call domain APIs and serialize responses.
-- `v1.6.14`: remove remaining Pingora crates, vendored Pingora patches,
-  Pingora compatibility shims, and Pingora-specific docs from normal builds.
-  Release gates must prove `cargo tree` and container builds do not compile
-  Pingora for default, full, cache, proxy, PHP, load-balancer, FIPS, macOS
-  developer, and release-image profiles.
-- `v1.6.15`: stabilization/security-only release for the Pingora-free runtime
+- `v1.6.13`: native HTTP/1.1 upstream connector and pooling parity. Replace the
+  simple static-upstream HTTP/1.1 connector/pool path with Fluxheim-owned
+  connectors, bounded connection reuse, request/response timeout handling,
+  connection accounting, privacy-mode-safe observability, and focused smoke
+  tests. Keep Pingora as the production proxy fallback for unsupported policy
+  layers, HTTP/2 upstreams, upstream TLS/mTLS, dynamic discovery, and complex
+  retry/failover behavior.
+- `v1.6.14`: native upstream TLS/mTLS, SNI, CA verification, discovery, and
+  retry/failover parity. Extend the Fluxheim-owned upstream connector to cover
+  rustls/OpenSSL TLS, client certificates, explicit SNI, per-route CA bundles,
+  DNS/file/runtime-discovered backend views, conservative retry decisions, and
+  admin-visible failure reasons. Keep the cutover behind eligibility gates
+  until the native path can prove it never silently downgrades verification,
+  routing, or health semantics.
+- `v1.6.15`: native HTTP/2 upstream/client parity and remaining HTTP/2 safety
+  hooks. Add Fluxheim-owned HTTP/2 upstream request handling, stream reset and
+  trailer behavior, gRPC pass-through fixtures, response-flow-control lifetime
+  checks, and any remaining HPACK/header-count allocation boundary needed
+  before production HTTP/2 cutover. If a crate does not expose a required
+  safety hook, keep that protocol mode gated off rather than forcing cutover.
+- `v1.6.16`: native proxy cutover for simple proxy, cache, static, and PHP
+  paths. Move the first production-eligible profiles to the Fluxheim-owned
+  request pipeline only where route matching, request/response header policy,
+  access policy, rate/concurrency limits, compression, auth-request, traffic
+  mirroring, PHP-FPM, ACME challenge routing, GeoIP, cache interaction,
+  observability, and admin-visible failure semantics are all explicitly
+  supported or fail closed. Preserve the Pingora compatibility adapter for any
+  profile or feature combination still outside the native eligibility matrix.
+- `v1.6.17`: expand the native cutover to every official profile and remove
+  `pingora-proxy`, `pingora-cache`, `pingora-pool`, `pingora-lru`,
+  `pingora-timeout`, Pingora HTTP/error wrapper dependencies, and other
+  proxy/cache/pool transitive Pingora crates from normal builds. Release gates
+  must prove default, full, cache, proxy, PHP, load-balancer, FIPS, macOS
+  developer, and release-image profiles no longer compile those crates.
+  After proxy, cache, load-balancer, snapshot, ACME, header-policy, and
+  protocol crates have stable APIs, reduce `admin.rs` to endpoint routing and
+  auth glue or move it into `fluxheim-admin` if the dependency graph stays
+  one-way. Do not let admin own domain state; it should call domain APIs and
+  serialize responses.
+- `v1.6.18`: remove remaining Pingora runtime/listener/TLS adapter crates,
+  vendored Pingora patches, compatibility shims, and Pingora-specific docs from
+  normal builds. This is the final Pingora-free proof release: `cargo tree`,
+  release containers, RPM builds, source builds, and focused artifacts must all
+  prove no normal Fluxheim build compiles vendored Pingora code.
+- `v1.6.19`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
-  checks, long-running soak tests, and documentation clarity.
-- `v1.6.16`: native load-balancer compatibility polish after Pingora is gone
+  checks, long-running soak tests, runtime-baseline comparisons, and
+  documentation clarity.
+- `v1.6.20`: native load-balancer compatibility polish after Pingora is gone
   from normal builds. Add a Fluxheim-owned nginx/Ketama-compatible consistent
   hash selection mode for operators migrating from nginx or Pingora Ketama
   behavior. Keep the existing rendezvous consistent-hash and bounded-load
