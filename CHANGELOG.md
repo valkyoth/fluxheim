@@ -31,6 +31,8 @@ behavior when the change improves security or project direction.
   material combinations even when called outside the full config loader.
 - Restrict native HTTP/1 stale pooled-connection retries to safe methods so
   unsafe requests are not replayed after a pooled socket failure.
+- Harden the native OpenSSL upstream TLS connector with a TLS 1.2 minimum and
+  explicit AEAD-only TLS 1.2 / TLS 1.3 cipher suite allowlists.
 - Add native HTTP/1 ordered static upstream failover for safe request methods,
   with socket tests proving `GET` can fall through to the next configured
   upstream while unsafe methods are not replayed.

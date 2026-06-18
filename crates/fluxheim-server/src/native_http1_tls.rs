@@ -21,7 +21,7 @@ use zeroize::Zeroizing;
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
 use openssl::pkey::PKey;
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
-use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
+use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode, SslVersion};
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
 use openssl::x509::{X509, store::X509StoreBuilder};
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
@@ -29,6 +29,20 @@ use tokio_openssl::SslStream;
 
 use crate::native_http1_client::NativeHttp1Stream;
 use crate::{NativeHttp1Error, NativeHttp1ProxyConfigError};
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+const OPENSSL_UPSTREAM_TLS12_CIPHERS: &str = concat!(
+    "ECDHE-ECDSA-AES256-GCM-SHA384:",
+    "ECDHE-RSA-AES256-GCM-SHA384:",
+    "ECDHE-ECDSA-CHACHA20-POLY1305:",
+    "ECDHE-RSA-CHACHA20-POLY1305:",
+    "ECDHE-ECDSA-AES128-GCM-SHA256:",
+    "ECDHE-RSA-AES128-GCM-SHA256",
+);
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+const OPENSSL_UPSTREAM_TLS13_CIPHERS: &str =
+    "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256";
 
 #[derive(Clone)]
 pub struct NativeHttp1UpstreamTls {
@@ -287,6 +301,7 @@ fn build_openssl_connector(
             format!("native HTTP/1 upstream TLS connector setup failed: {error}"),
         ))
     })?;
+    configure_openssl_tls_baseline(&mut builder)?;
     if let Some(ca_path) = proxy.upstream_ca_path.as_deref() {
         let certs = X509::stack_from_pem(&read_upstream_tls_file(ca_path)?).map_err(|error| {
             NativeHttp1Error::Io(io::Error::new(
@@ -341,6 +356,37 @@ fn build_openssl_connector(
     }
 
     Ok(builder.build())
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+fn configure_openssl_tls_baseline(
+    builder: &mut openssl::ssl::SslConnectorBuilder,
+) -> Result<(), NativeHttp1Error> {
+    builder
+        .set_min_proto_version(Some(SslVersion::TLS1_2))
+        .map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("failed to set minimum upstream TLS version: {error}"),
+            ))
+        })?;
+    builder
+        .set_cipher_list(OPENSSL_UPSTREAM_TLS12_CIPHERS)
+        .map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("failed to configure upstream TLS cipher list: {error}"),
+            ))
+        })?;
+    builder
+        .set_ciphersuites(OPENSSL_UPSTREAM_TLS13_CIPHERS)
+        .map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("failed to configure upstream TLS 1.3 ciphersuites: {error}"),
+            ))
+        })?;
+    Ok(())
 }
 
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
@@ -784,5 +830,25 @@ mod tests {
             "unexpected error: {error:?}"
         );
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+    #[test]
+    fn openssl_upstream_tls_baseline_uses_modern_cipher_suites() {
+        assert_eq!(
+            OPENSSL_UPSTREAM_TLS12_CIPHERS,
+            concat!(
+                "ECDHE-ECDSA-AES256-GCM-SHA384:",
+                "ECDHE-RSA-AES256-GCM-SHA384:",
+                "ECDHE-ECDSA-CHACHA20-POLY1305:",
+                "ECDHE-RSA-CHACHA20-POLY1305:",
+                "ECDHE-ECDSA-AES128-GCM-SHA256:",
+                "ECDHE-RSA-AES128-GCM-SHA256",
+            )
+        );
+        assert_eq!(
+            OPENSSL_UPSTREAM_TLS13_CIPHERS,
+            "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256"
+        );
     }
 }

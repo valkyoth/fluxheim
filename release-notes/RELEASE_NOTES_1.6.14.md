@@ -61,6 +61,9 @@ represented and tested through Fluxheim-owned connector code.
 - OpenSSL-only native HTTP/1 server-plan tests now assert the same TLS policy
   failure reason as rustls builds instead of treating OpenSSL as an unsupported
   TLS backend.
+- The native OpenSSL upstream TLS connector now enforces TLS 1.2 or newer and
+  uses explicit AEAD-only TLS 1.2 / TLS 1.3 cipher suite allowlists instead of
+  relying on system OpenSSL defaults.
 - TLS key, certificate, and CA files loaded by the native path are bounded to
   1 MiB, must be regular files, and are opened with `O_NOFOLLOW` on audited Unix
   platforms. The native file reader now has direct tests for oversized-file
