@@ -16,6 +16,9 @@ behavior when the change improves security or project direction.
   upstream client certificates, and certificate verification controls.
 - Add real native HTTPS upstream proxy coverage with an in-test CA and
   localhost SAN leaf certificate.
+- Add native HTTP/1 ordered static upstream failover for safe request methods,
+  with socket tests proving `GET` can fall through to the next configured
+  upstream while unsafe methods are not replayed.
 
 ### Changed
 
@@ -25,12 +28,15 @@ behavior when the change improves security or project direction.
   TLS is compiled in the same rustls profiles operators use today.
 - Keep OpenSSL-native upstream TLS on the Pingora compatibility path until it
   has equivalent implementation and tests.
+- Keep dynamic upstream discovery and advanced load-balancer policy on the
+  Pingora compatibility path; the native HTTP/1 path now accepts only plain
+  static upstream lists as ordered failover candidates.
 
 ### Security
 
-- Fail closed when native HTTPS upstream conversion sees an IP-addressed
-  upstream with certificate verification enabled and no explicit
-  `upstream_sni`.
+- Fail closed when native HTTPS upstream conversion sees any IP-addressed
+  configured static upstream with certificate verification enabled and no
+  explicit `upstream_sni`.
 - Read native upstream TLS CA, certificate, and key files through bounded
   no-follow regular-file handling.
 

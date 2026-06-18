@@ -2611,13 +2611,14 @@ Planned `1.6.x` sequence:
   tests. Keep Pingora as the production proxy fallback for unsupported policy
   layers, HTTP/2 upstreams, upstream TLS/mTLS, dynamic discovery, and complex
   retry/failover behavior.
-- `v1.6.14`: native upstream TLS/mTLS, SNI, CA verification, discovery, and
-  retry/failover parity. Extend the Fluxheim-owned upstream connector to cover
+- `v1.6.14`: native upstream TLS/mTLS, SNI, CA verification, and conservative
+  static failover parity. Extend the Fluxheim-owned upstream connector to cover
   rustls/OpenSSL TLS, client certificates, explicit SNI, per-route CA bundles,
-  DNS/file/runtime-discovered backend views, conservative retry decisions, and
-  admin-visible failure reasons. Keep the cutover behind eligibility gates
-  until the native path can prove it never silently downgrades verification,
-  routing, or health semantics.
+  plain static upstream lists with safe-method ordered failover, conservative
+  retry decisions, and admin-visible failure reasons. Keep DNS/file/runtime
+  discovery and advanced load-balancer policy behind eligibility gates until
+  the native path can prove it never silently downgrades verification, routing,
+  or health semantics.
 - `v1.6.15`: native HTTP/2 upstream/client parity and remaining HTTP/2 safety
   hooks. Add Fluxheim-owned HTTP/2 upstream request handling, stream reset and
   trailer behavior, gRPC pass-through fixtures, response-flow-control lifetime

@@ -92,10 +92,8 @@ fn server_plan_collects_vhost_and_route_native_http1_proxy_candidates() {
         candidates[1].scope(),
         "vhost \"native.test\" route \"api\" proxy"
     );
-    assert_eq!(
-        candidates[1].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::LoadBalancing)
-    );
+    assert!(candidates[1].is_eligible());
+    assert_eq!(candidates[1].unsupported_reason(), None);
 }
 
 #[test]
@@ -205,4 +203,18 @@ fn disabled_empty_access_policy_does_not_block_native_http1_proxy_candidate() {
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
     assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
+}
+
+#[test]
+fn server_plan_rejects_native_http1_proxy_candidate_with_advanced_load_balance_policy() {
+    let mut config = Config::default();
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];
+    config.proxy.upstream_weights = vec![2, 1];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::LoadBalancing)
+    );
 }

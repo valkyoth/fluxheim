@@ -116,6 +116,36 @@ async fn proxy_listener(upstream: std::net::SocketAddr) -> std::net::SocketAddr 
     addr
 }
 
+async fn failover_proxy_listener(
+    first: std::net::SocketAddr,
+    second: std::net::SocketAddr,
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let proxy = Arc::new(
+        NativeHttp1Proxy::from_upstreams(vec![
+            NativeHttp1Upstream::new(first.to_string())
+                .with_connect_timeout(Duration::from_millis(25)),
+            NativeHttp1Upstream::new(second.to_string())
+                .with_connect_timeout(Duration::from_millis(25)),
+        ])
+        .unwrap(),
+    );
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        serve_native_http1_listener(listener, DownstreamHttp1Policy::default(), proxy, async {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .unwrap();
+    });
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let _ = shutdown_tx.send(());
+    });
+    addr
+}
+
 async fn pooled_proxy_listener(upstream: std::net::SocketAddr) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -184,6 +214,13 @@ async fn downstream_get(proxy: std::net::SocketAddr, path: &str) -> String {
     String::from_utf8(response).unwrap()
 }
 
+async fn unused_local_address() -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    address
+}
+
 #[tokio::test]
 async fn native_proxy_forwards_downstream_request_to_upstream() {
     let upstream = upstream(|request, mut stream| async move {
@@ -215,6 +252,60 @@ async fn native_proxy_forwards_downstream_request_to_upstream() {
     );
     assert!(response.contains("x-origin: native\r\n"));
     assert!(response.ends_with("hello native"));
+}
+
+#[tokio::test]
+async fn native_proxy_fails_over_get_to_second_static_upstream() {
+    let first = unused_local_address().await;
+    let second = upstream(|request, mut stream| async move {
+        let request = String::from_utf8(request).unwrap();
+        assert!(request.starts_with("GET /failover HTTP/1.1\r\n"));
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-length: 15\r\nx-origin: second\r\n\r\nsecond upstream",
+            )
+            .await
+            .unwrap();
+    })
+    .await;
+    let proxy = failover_proxy_listener(first, second).await;
+
+    let response = downstream_get(proxy, "/failover").await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert!(response.contains("x-origin: second\r\n"));
+    assert!(response.ends_with("second upstream"));
+}
+
+#[tokio::test]
+async fn native_proxy_does_not_fail_over_unsafe_method() {
+    let first = unused_local_address().await;
+    let second = upstream(|_, mut stream| async move {
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 6\r\n\r\nsecond")
+            .await
+            .unwrap();
+    })
+    .await;
+    let proxy = failover_proxy_listener(first, second).await;
+
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+    client
+        .write_all(b"POST /submit HTTP/1.1\r\nHost: proxy.test\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata")
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+
+    assert!(
+        response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert!(response.ends_with("bad gateway\n"));
 }
 
 #[tokio::test]
@@ -354,6 +445,29 @@ fn native_proxy_config_accepts_plain_static_upstream() {
 }
 
 #[test]
+fn native_proxy_config_accepts_ordered_static_upstreams() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+        connect_timeout_secs: Some(2),
+        ..Default::default()
+    };
+
+    let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
+        .unwrap()
+        .expect("native proxy");
+
+    assert_eq!(native.upstreams().len(), 2);
+    assert_eq!(
+        native.upstreams()[0],
+        NativeHttp1Upstream::new("127.0.0.1:3000").with_connect_timeout(Duration::from_secs(2))
+    );
+    assert_eq!(
+        native.upstreams()[1],
+        NativeHttp1Upstream::new("127.0.0.1:3001").with_connect_timeout(Duration::from_secs(2))
+    );
+}
+
+#[test]
 fn native_proxy_config_applies_pool_capacity() {
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -401,6 +515,7 @@ fn native_proxy_config_rejects_unsupported_upstream_features() {
 
     let proxy = fluxheim_config::ProxyConfig {
         upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+        upstream_weights: vec![2, 1],
         ..Default::default()
     };
     assert_eq!(
@@ -415,5 +530,21 @@ fn native_proxy_config_rejects_unsupported_upstream_features() {
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
         Err(NativeHttp1ProxyConfigError::DynamicUpstreamDiscovery)
+    );
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+#[test]
+fn native_proxy_config_rejects_mixed_static_ip_tls_without_sni() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstreams: vec!["localhost:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+        upstream_tls: true,
+        upstream_verify_cert: true,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy)
     );
 }

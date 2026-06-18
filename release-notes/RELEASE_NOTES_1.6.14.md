@@ -19,6 +19,10 @@ tested through Fluxheim-owned connector code.
 - Added a real native HTTP/1 proxy test that generates a test CA and
   localhost SAN leaf certificate, starts a TLS upstream, verifies through the
   configured CA bundle, and forwards a request through the native proxy.
+- Added ordered static upstream failover for the staged native HTTP/1 proxy
+  path. Safe methods (`GET`, `HEAD`, `OPTIONS`, `TRACE`) can try the next
+  configured static upstream after an upstream error; unsafe methods are not
+  replayed.
 
 ## Changed
 
@@ -29,13 +33,17 @@ tested through Fluxheim-owned connector code.
   upstream TLS path is built in the same rustls profiles operators already use.
 - Kept OpenSSL-native upstream TLS behind the existing compatibility fallback
   until it has equivalent implementation and tests.
+- Allowed plain static `proxy.upstreams` lists to become native HTTP/1
+  candidates when no advanced load-balancer policy is configured. Weighted,
+  priority, locality, alias, tag, backup, drain, disabled, dynamic-discovery,
+  and DNS-discovery policy still fail closed to the compatibility path.
 
 ## Security
 
-- Native HTTPS upstream conversion now fails closed for IP-addressed upstreams
-  with certificate verification enabled and no explicit `upstream_sni`, matching
-  the validated config contract and avoiding silent hostname-verification
-  downgrades.
+- Native HTTPS upstream conversion now fails closed when any configured static
+  upstream is IP-addressed with certificate verification enabled and no explicit
+  `upstream_sni`, matching the validated config contract and avoiding silent
+  hostname-verification downgrades.
 - TLS key, certificate, and CA files loaded by the native path are bounded to
   1 MiB, must be regular files, and are opened with `O_NOFOLLOW` on audited Unix
   platforms.
@@ -44,4 +52,5 @@ tested through Fluxheim-owned connector code.
 
 - Existing Pingora compatibility behavior remains available for unsupported
   policy combinations, OpenSSL-native upstream TLS, HTTP/2 upstreams, dynamic
-  discovery, load balancing, upstream PROXY protocol, and websocket upgrades.
+  discovery, advanced load-balancer policy, upstream PROXY protocol, and
+  websocket upgrades.

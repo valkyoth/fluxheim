@@ -34,10 +34,7 @@ impl NativeHttp1UpstreamTls {
         }
         if proxy.upstream_verify_cert
             && proxy.upstream_sni.is_none()
-            && proxy
-                .configured_primary_upstream()
-                .and_then(fluxheim_config::config_net::upstream_host)
-                .is_some_and(|host| host.parse::<std::net::IpAddr>().is_ok())
+            && configured_upstreams_contain_ip_literal(proxy)
         {
             return Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy);
         }
@@ -71,6 +68,20 @@ impl NativeHttp1UpstreamTls {
             })?;
         Ok(Box::new(stream) as NativeHttp1Stream)
     }
+}
+
+fn configured_upstreams_contain_ip_literal(proxy: &fluxheim_config::ProxyConfig) -> bool {
+    if !proxy.upstreams.is_empty() {
+        return proxy
+            .upstreams
+            .iter()
+            .filter_map(|upstream| fluxheim_config::config_net::upstream_host(upstream))
+            .any(|host| host.parse::<std::net::IpAddr>().is_ok());
+    }
+    proxy
+        .configured_primary_upstream()
+        .and_then(fluxheim_config::config_net::upstream_host)
+        .is_some_and(|host| host.parse::<std::net::IpAddr>().is_ok())
 }
 
 impl std::fmt::Debug for NativeHttp1UpstreamTls {

@@ -8,7 +8,7 @@ use crate::{NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeH
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1Proxy {
-    upstream: NativeHttp1Upstream,
+    upstreams: Vec<NativeHttp1Upstream>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -32,7 +32,7 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
             Self::HttpPolicy => formatter
                 .write_str("native HTTP/1 proxy does not yet support Fluxheim HTTP policy layers"),
             Self::LoadBalancing => formatter.write_str(
-                "native HTTP/1 proxy does not yet support multi-upstream load balancing",
+                "native HTTP/1 proxy does not yet support advanced load-balancer policy",
             ),
             Self::MissingUpstream => {
                 formatter.write_str("native HTTP/1 proxy requires an upstream")
@@ -58,12 +58,27 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
 impl std::error::Error for NativeHttp1ProxyConfigError {}
 
 impl NativeHttp1Proxy {
-    pub const fn new(upstream: NativeHttp1Upstream) -> Self {
-        Self { upstream }
+    pub fn new(upstream: NativeHttp1Upstream) -> Self {
+        Self {
+            upstreams: vec![upstream],
+        }
     }
 
-    pub const fn upstream(&self) -> &NativeHttp1Upstream {
-        &self.upstream
+    pub fn from_upstreams(
+        upstreams: Vec<NativeHttp1Upstream>,
+    ) -> Result<Self, NativeHttp1ProxyConfigError> {
+        if upstreams.is_empty() {
+            return Err(NativeHttp1ProxyConfigError::MissingUpstream);
+        }
+        Ok(Self { upstreams })
+    }
+
+    pub fn upstream(&self) -> &NativeHttp1Upstream {
+        &self.upstreams[0]
+    }
+
+    pub fn upstreams(&self) -> &[NativeHttp1Upstream] {
+        &self.upstreams
     }
 
     pub fn from_proxy_config(
@@ -100,30 +115,36 @@ impl NativeHttp1Proxy {
         {
             return Err(NativeHttp1ProxyConfigError::DynamicUpstreamDiscovery);
         }
-        if proxy_requires_load_balancer(proxy) {
+        if proxy_requires_advanced_load_balancer(proxy) {
             return Err(NativeHttp1ProxyConfigError::LoadBalancing);
         }
-        let upstream = proxy
-            .configured_primary_upstream()
+        let upstreams = configured_native_upstreams(proxy)
             .ok_or(NativeHttp1ProxyConfigError::MissingUpstream)?;
-        let mut upstream = NativeHttp1Upstream::from_policy(upstream, policy);
+        let mut native_upstreams = Vec::with_capacity(upstreams.len());
         #[cfg(feature = "tls-rustls-backend")]
-        if let Some(tls) = NativeHttp1UpstreamTls::from_proxy_config(proxy)? {
-            upstream = upstream.with_tls(tls);
+        let tls = NativeHttp1UpstreamTls::from_proxy_config(proxy)?;
+        for upstream in upstreams {
+            let mut native_upstream = NativeHttp1Upstream::from_policy(upstream, policy);
+            #[cfg(feature = "tls-rustls-backend")]
+            if let Some(tls) = tls.clone() {
+                native_upstream = native_upstream.with_tls(tls);
+            }
+            if let Some(timeout) = proxy.connect_timeout_secs {
+                native_upstream =
+                    native_upstream.with_connect_timeout(Duration::from_secs(timeout));
+            }
+            if let Some(timeout) = proxy.read_timeout_secs {
+                native_upstream = native_upstream.with_read_timeout(Duration::from_secs(timeout));
+            }
+            if let Some(timeout) = proxy.send_timeout_secs {
+                native_upstream = native_upstream.with_write_timeout(Duration::from_secs(timeout));
+            }
+            native_upstream = native_upstream
+                .with_pool_idle_timeout(proxy.upstream_idle_timeout_secs.map(Duration::from_secs));
+            native_upstream = native_upstream.with_pool_max_idle(pool_max_idle);
+            native_upstreams.push(native_upstream);
         }
-        if let Some(timeout) = proxy.connect_timeout_secs {
-            upstream = upstream.with_connect_timeout(Duration::from_secs(timeout));
-        }
-        if let Some(timeout) = proxy.read_timeout_secs {
-            upstream = upstream.with_read_timeout(Duration::from_secs(timeout));
-        }
-        if let Some(timeout) = proxy.send_timeout_secs {
-            upstream = upstream.with_write_timeout(Duration::from_secs(timeout));
-        }
-        upstream = upstream
-            .with_pool_idle_timeout(proxy.upstream_idle_timeout_secs.map(Duration::from_secs));
-        upstream = upstream.with_pool_max_idle(pool_max_idle);
-        Ok(Some(Self::new(upstream)))
+        Self::from_upstreams(native_upstreams).map(Some)
     }
 }
 
@@ -133,17 +154,28 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
         request: NativeHttp1Request,
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>> {
         Box::pin(async move {
-            match self.upstream.send(&request).await {
-                Ok(response) => response,
-                Err(error) if native_proxy_error_is_timeout(&error) => {
-                    NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
-                        .close_connection()
+            let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
+            let mut last_error = None;
+            for (index, upstream) in self.upstreams.iter().enumerate() {
+                match upstream.send(&request).await {
+                    Ok(response) => return response,
+                    Err(error) if retry_allowed && index + 1 < self.upstreams.len() => {
+                        last_error = Some(error);
+                    }
+                    Err(error) => {
+                        last_error = Some(error);
+                        break;
+                    }
                 }
-                Err(error) => {
-                    let _ = error;
-                    NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
-                        .close_connection()
-                }
+            }
+            if last_error
+                .as_ref()
+                .is_some_and(native_proxy_error_is_timeout)
+            {
+                NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
+                    .close_connection()
+            } else {
+                NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n").close_connection()
             }
         })
     }
@@ -156,9 +188,17 @@ fn native_proxy_error_is_timeout(error: &crate::NativeHttp1Error) -> bool {
     )
 }
 
-fn proxy_requires_load_balancer(proxy: &fluxheim_config::ProxyConfig) -> bool {
-    proxy.upstreams.len() > 1
-        || !proxy.upstream_weights.is_empty()
+fn configured_native_upstreams(proxy: &fluxheim_config::ProxyConfig) -> Option<Vec<String>> {
+    if !proxy.upstreams.is_empty() {
+        return Some(proxy.upstreams.clone());
+    }
+    proxy
+        .configured_primary_upstream()
+        .map(|upstream| vec![upstream.to_owned()])
+}
+
+fn proxy_requires_advanced_load_balancer(proxy: &fluxheim_config::ProxyConfig) -> bool {
+    !proxy.upstream_weights.is_empty()
         || !proxy.upstream_priority_groups.is_empty()
         || !proxy.upstream_localities.is_empty()
         || !proxy.preferred_upstream_localities.is_empty()
@@ -168,4 +208,8 @@ fn proxy_requires_load_balancer(proxy: &fluxheim_config::ProxyConfig) -> bool {
         || !proxy.backup_upstreams.is_empty()
         || !proxy.drain_upstreams.is_empty()
         || !proxy.disabled_upstreams.is_empty()
+}
+
+fn native_http1_static_failover_method_allowed(method: &str) -> bool {
+    matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE")
 }
