@@ -721,7 +721,8 @@ compile_error!(
 );
 
 fn read_upstream_tls_file(path: &Path) -> Result<Vec<u8>, NativeHttp1Error> {
-    let metadata = std::fs::symlink_metadata(path).map_err(NativeHttp1Error::Io)?;
+    let safe_path = canonical_upstream_tls_file_path(path)?;
+    let metadata = std::fs::symlink_metadata(&safe_path).map_err(NativeHttp1Error::Io)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(NativeHttp1Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -740,7 +741,7 @@ fn read_upstream_tls_file(path: &Path) -> Result<Vec<u8>, NativeHttp1Error> {
         options.custom_flags(UPSTREAM_TLS_O_NOFOLLOW);
     }
 
-    let file = options.open(path).map_err(NativeHttp1Error::Io)?;
+    let file = options.open(&safe_path).map_err(NativeHttp1Error::Io)?;
     let metadata = file.metadata().map_err(NativeHttp1Error::Io)?;
     if !metadata.is_file() {
         return Err(NativeHttp1Error::Io(io::Error::new(
@@ -778,18 +779,35 @@ fn read_upstream_tls_file(path: &Path) -> Result<Vec<u8>, NativeHttp1Error> {
     Ok(contents)
 }
 
+fn canonical_upstream_tls_file_path(path: &Path) -> Result<std::path::PathBuf, NativeHttp1Error> {
+    let file_name = path.file_name().ok_or_else(|| {
+        NativeHttp1Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("upstream TLS path has no file name: {}", path.display()),
+        ))
+    })?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let canonical_parent = std::fs::canonicalize(parent).map_err(NativeHttp1Error::Io)?;
+    Ok(canonical_parent.join(file_name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NATIVE_HTTP1_TLS_TEST_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     fn unique_temp_dir(label: &str) -> std::path::PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("fluxheim-{label}-{}-{nanos}", std::process::id()));
-        std::fs::create_dir(&path).unwrap();
+        let sequence = NATIVE_HTTP1_TLS_TEST_DIR_COUNTER.fetch_add(1, Ordering::AcqRel);
+        let base = std::path::PathBuf::from("target/fluxheim-native-http1-tls-tests");
+        std::fs::create_dir_all(&base).unwrap();
+        let path = base.join(format!(
+            "fluxheim-{label}-{}-{sequence}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
         path
     }
 

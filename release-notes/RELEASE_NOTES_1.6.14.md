@@ -64,6 +64,10 @@ represented and tested through Fluxheim-owned connector code.
 - The native OpenSSL upstream TLS connector now enforces TLS 1.2 or newer and
   uses explicit AEAD-only TLS 1.2 / TLS 1.3 cipher suite allowlists instead of
   relying on system OpenSSL defaults.
+- Native upstream TLS certificate/key loading now canonicalizes the existing
+  parent directory before inspecting and opening the final file, keeping the
+  final `O_NOFOLLOW` symlink protection while making the filesystem trust
+  boundary explicit for CodeQL.
 - TLS key, certificate, and CA files loaded by the native path are bounded to
   1 MiB, must be regular files, and are opened with `O_NOFOLLOW` on audited Unix
   platforms. The native file reader now has direct tests for oversized-file
