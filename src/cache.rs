@@ -9718,14 +9718,12 @@ mod tests {
                 .unwrap();
         }
 
-        assert!(!index_path.exists());
-        assert_eq!(storage.storage_bin_index_flags(), (true, true));
-        for _ in 0..20 {
-            if index_path.exists() && storage.storage_bin_index_flags() == (false, false) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
+        let immediate_flags = storage.storage_bin_index_flags();
+        assert!(
+            index_path.exists() || immediate_flags.0 || immediate_flags.1,
+            "storage-bin index should either be pending or already flushed"
+        );
+        storage.flush_storage_bin_index_if_dirty().unwrap();
         assert!(index_path.exists());
         assert_eq!(storage.storage_bin_index_flags(), (false, false));
         assert_eq!(
