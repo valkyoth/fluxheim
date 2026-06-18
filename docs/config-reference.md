@@ -113,6 +113,10 @@ Notes:
 
 - `listen` and `tls_listen` cannot both be empty unless `[stream].enabled =
   true` supplies dedicated TCP stream listeners.
+- `server.process.upstream_keepalive_pool_size` is a per-native-upstream idle
+  socket cap. Size it against the process file-descriptor budget; total idle
+  upstream sockets can be the sum of this cap across native proxy entries.
+  Values above 16384 are rejected.
 - TLS listeners are explicit through `tls_listen`; Fluxheim does not infer TLS
   from port numbers.
 - `listen` and `tls_listen` are each capped at 64 entries.

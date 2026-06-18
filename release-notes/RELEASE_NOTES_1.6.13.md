@@ -22,6 +22,14 @@ connections under bounded pool controls.
 - Native HTTP/1.1 pooling only returns sockets for response shapes that are safe
   to reuse today: no-body responses and content-length responses with no extra
   buffered bytes.
+- Native HTTP/1.1 pooling now applies HTTP/1.0 close-by-default semantics before
+  returning origin sockets to the idle pool.
+- Native HTTP/1.1 pooling no longer reuses `1xx` origin responses, including
+  `101 Switching Protocols`, because the connection state is ambiguous.
+- Native HTTP/1.1 pooling retries once on a fresh origin connection when a
+  checked-out idle socket fails with a dead-connection I/O error.
+- Reduced `server.process.upstream_keepalive_pool_size` maximum to 16384 to
+  bound per-native-upstream idle file-descriptor exposure.
 - Native HTTP/1.1 pooling does not reuse close-delimited responses, chunked
   responses, or responses with `Connection: close`.
 - Unsupported upstream TLS/mTLS, HTTP/2 upstreams, dynamic discovery,

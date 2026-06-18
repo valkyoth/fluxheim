@@ -7,7 +7,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
     DownstreamHttp1Policy, NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1Upstream,
-    serve_native_http1_listener,
+    native_http1_test_utils::read_request_head, serve_native_http1_listener,
 };
 
 async fn upstream<F, Fut>(handler: F) -> std::net::SocketAddr
@@ -35,22 +35,6 @@ where
         handler(request, stream).await;
     });
     addr
-}
-
-async fn read_request_head(stream: &mut TcpStream) -> Vec<u8> {
-    let mut request = Vec::new();
-    let mut chunk = [0u8; 1024];
-    loop {
-        let read = stream.read(&mut chunk).await.unwrap();
-        if read == 0 {
-            break;
-        }
-        request.extend_from_slice(&chunk[..read]);
-        if request.windows(4).any(|window| window == b"\r\n\r\n") {
-            break;
-        }
-    }
-    request
 }
 
 async fn proxy_listener(upstream: std::net::SocketAddr) -> std::net::SocketAddr {

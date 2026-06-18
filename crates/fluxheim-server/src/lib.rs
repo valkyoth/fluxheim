@@ -87,6 +87,9 @@ impl std::error::Error for ServerPlanError {}
 mod tests;
 
 #[cfg(test)]
+mod native_http1_test_utils;
+
+#[cfg(test)]
 #[path = "native_http1_tests.rs"]
 mod native_http1_tests;
 

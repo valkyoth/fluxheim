@@ -494,6 +494,24 @@ fn parses_server_process_settings() {
 }
 
 #[test]
+fn rejects_unbounded_upstream_keepalive_pool_size() {
+    let config: Config = toml::from_str(
+        r#"
+            [server.process]
+            upstream_keepalive_pool_size = 16385
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidProcessSetting {
+            field: "server.process.upstream_keepalive_pool_size"
+        })
+    );
+}
+
+#[test]
 fn parses_static_cache_headers() {
     let config: Config = toml::from_str(
         r#"

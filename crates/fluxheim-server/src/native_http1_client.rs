@@ -153,21 +153,18 @@ impl NativeHttp1Upstream {
             return self.send_on_stream(stream, request).await;
         }
 
-        let mut stream = self.connection().await?;
-        timeout(
-            self.write_timeout,
-            write_upstream_request(&mut stream, &self.authority, request, true),
-        )
-        .await
-        .map_err(|_| timeout_error("native HTTP/1 upstream write timeout"))??;
-        let (response, reusable) = read_upstream_response_for_pool(
-            &mut stream,
-            self.read_timeout,
-            self.max_head_bytes,
-            self.max_body_bytes,
-            &request.method,
-        )
-        .await?;
+        let (mut stream, reused) = self.connection().await?;
+        let result = self.send_on_pooled_stream(&mut stream, request).await;
+        let (response, reusable) = match result {
+            Ok(result) => result,
+            Err(error) if reused && pooled_connection_error_can_retry(&error) => {
+                let fresh = timeout(self.connect_timeout, connect_upstream(&self.authority))
+                    .await
+                    .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
+                return self.send_on_stream(fresh, request).await;
+            }
+            Err(error) => return Err(error),
+        };
         if reusable {
             self.return_connection(stream).await;
         }
@@ -198,7 +195,28 @@ impl NativeHttp1Upstream {
         .await
     }
 
-    async fn connection(&self) -> Result<TcpStream, NativeHttp1Error> {
+    async fn send_on_pooled_stream(
+        &self,
+        stream: &mut TcpStream,
+        request: &NativeHttp1Request,
+    ) -> Result<(NativeHttp1Response, bool), NativeHttp1Error> {
+        timeout(
+            self.write_timeout,
+            write_upstream_request(stream, &self.authority, request, true),
+        )
+        .await
+        .map_err(|_| timeout_error("native HTTP/1 upstream write timeout"))??;
+        read_upstream_response_for_pool(
+            stream,
+            self.read_timeout,
+            self.max_head_bytes,
+            self.max_body_bytes,
+            &request.method,
+        )
+        .await
+    }
+
+    async fn connection(&self) -> Result<(TcpStream, bool), NativeHttp1Error> {
         let now = Instant::now();
         let mut idle = self.pool.idle.lock().await;
         while let Some(connection) = idle.pop() {
@@ -207,12 +225,13 @@ impl NativeHttp1Upstream {
             }) {
                 continue;
             }
-            return Ok(connection.stream);
+            return Ok((connection.stream, true));
         }
         drop(idle);
-        timeout(self.connect_timeout, connect_upstream(&self.authority))
+        let stream = timeout(self.connect_timeout, connect_upstream(&self.authority))
             .await
-            .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))?
+            .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
+        Ok((stream, false))
     }
 
     async fn return_connection(&self, stream: TcpStream) {
@@ -224,6 +243,20 @@ impl NativeHttp1Upstream {
             });
         }
     }
+}
+
+fn pooled_connection_error_can_retry(error: &NativeHttp1Error) -> bool {
+    matches!(
+        error,
+        NativeHttp1Error::Io(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::UnexpectedEof
+            )
+    )
 }
 
 async fn connect_upstream(authority: &str) -> Result<TcpStream, NativeHttp1Error> {

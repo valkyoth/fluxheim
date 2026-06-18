@@ -9,6 +9,7 @@ use crate::config_path::{validate_optional_process_path, validate_required_proce
 
 pub const MAX_SERVER_LISTENERS: usize = 64;
 pub const MAX_TRUSTED_PROXIES: usize = 512;
+pub const MAX_PROCESS_UPSTREAM_KEEPALIVE_POOL_SIZE: usize = 16_384;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -339,7 +340,7 @@ impl ServerProcessConfig {
             "server.process.upstream_keepalive_pool_size",
             self.upstream_keepalive_pool_size,
             1,
-            1_000_000,
+            MAX_PROCESS_UPSTREAM_KEEPALIVE_POOL_SIZE,
         )?;
         validate_process_usize("server.process.max_retries", self.max_retries, 0, 1024)?;
         validate_process_optional_duration(

@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::native_http1_test_utils::read_request_head;
 use crate::{NativeHttp1Error, NativeHttp1Request, NativeHttp1Upstream};
 
 async fn upstream<F, Fut>(handler: F) -> std::net::SocketAddr
@@ -34,22 +35,6 @@ where
         handler(request, stream).await;
     });
     addr
-}
-
-async fn read_request_head(stream: &mut TcpStream) -> Vec<u8> {
-    let mut request = Vec::new();
-    let mut chunk = [0u8; 1024];
-    loop {
-        let read = stream.read(&mut chunk).await.unwrap();
-        if read == 0 {
-            break;
-        }
-        request.extend_from_slice(&chunk[..read]);
-        if request.windows(4).any(|window| window == b"\r\n\r\n") {
-            break;
-        }
-    }
-    request
 }
 
 fn request() -> NativeHttp1Request {
@@ -127,6 +112,77 @@ async fn native_upstream_reuses_safe_content_length_connection() {
     let response = upstream.send(&request()).await.unwrap();
     assert_eq!(response.body(), b"second");
     assert_eq!(upstream.idle_connection_count().await, 1);
+}
+
+#[tokio::test]
+async fn native_upstream_does_not_pool_http10_without_keep_alive() {
+    let addr = upstream(|_, mut stream| async move {
+        stream
+            .write_all(b"HTTP/1.0 200 OK\r\ncontent-length: 6\r\n\r\nlegacy")
+            .await
+            .unwrap();
+    })
+    .await;
+
+    let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
+    let response = upstream.send(&request()).await.unwrap();
+
+    assert_eq!(response.body(), b"legacy");
+    assert_eq!(upstream.idle_connection_count().await, 0);
+}
+
+#[tokio::test]
+async fn native_upstream_does_not_pool_switching_protocols_response() {
+    let addr = upstream(|_, mut stream| async move {
+        stream
+            .write_all(
+                b"HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\ncontent-length: 0\r\n\r\n",
+            )
+            .await
+            .unwrap();
+    })
+    .await;
+
+    let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
+    let response = upstream.send(&request()).await.unwrap();
+
+    assert_eq!(response.status(), 101);
+    assert_eq!(upstream.idle_connection_count().await, 0);
+}
+
+#[tokio::test]
+async fn native_upstream_retries_once_when_pooled_connection_is_stale() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let accepted_for_task = Arc::clone(&accepted);
+    tokio::spawn(async move {
+        let (mut stale, _) = listener.accept().await.unwrap();
+        accepted_for_task.fetch_add(1, Ordering::AcqRel);
+        let _request = read_request_head(&mut stale).await;
+        stale
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nstale")
+            .await
+            .unwrap();
+        drop(stale);
+
+        let (mut fresh, _) = listener.accept().await.unwrap();
+        accepted_for_task.fetch_add(1, Ordering::AcqRel);
+        let _request = read_request_head(&mut fresh).await;
+        fresh
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nfresh")
+            .await
+            .unwrap();
+    });
+
+    let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
+    let response = upstream.send(&request()).await.unwrap();
+    assert_eq!(response.body(), b"stale");
+    assert_eq!(upstream.idle_connection_count().await, 1);
+
+    let response = upstream.send(&request()).await.unwrap();
+    assert_eq!(response.body(), b"fresh");
+    assert_eq!(accepted.load(Ordering::Acquire), 2);
 }
 
 #[tokio::test]

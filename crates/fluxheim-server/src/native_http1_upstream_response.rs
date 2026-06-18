@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use fluxheim_protocol::{
-    Http1ChunkLimits, Http1HeadLimits, Http1ParseError, decode_http1_chunked_body,
-    parse_http1_response_head,
+    Http1ChunkLimits, Http1ConnectionDirective, Http1HeadLimits, Http1ParseError,
+    decode_http1_chunked_body, http1_connection_directive, parse_http1_response_head,
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::time::timeout;
@@ -83,7 +83,9 @@ where
     let status = head.status;
     let reason = head.reason.to_owned();
     let body_framing = response_body_framing(status, request_method, &head.headers)?;
-    let origin_closes = headers_close_connection(&head.headers);
+    let origin_closes = http1_connection_directive(head.version, &head.headers)
+        .map(|directive| directive == Http1ConnectionDirective::Close)
+        .unwrap_or(true);
     let headers = head
         .headers
         .iter()
@@ -94,7 +96,7 @@ where
         read_response_body(stream, &mut buffer, head_len, body_framing, max_body_bytes).await?;
     let reusable = want_reusable
         && !origin_closes
-        && response_body_reusable(&buffer, head_len, body_framing, body.len());
+        && response_body_reusable(&buffer, head_len, body_framing, body.len(), status);
     let content_length = response_content_length(&headers);
     let mut response = NativeHttp1Response::new(status, reason, body);
     if let Some(content_length) = content_length {
@@ -126,6 +128,12 @@ where
         let mut chunk = [0u8; UPSTREAM_READ_CHUNK_BYTES];
         let read = stream.read(&mut chunk).await?;
         if read == 0 {
+            if buffer.is_empty() {
+                return Err(NativeHttp1Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "upstream closed before response",
+                )));
+            }
             return Err(Http1ParseError::InvalidResponseLine.into());
         }
         buffer.extend_from_slice(&chunk[..read]);
@@ -298,22 +306,16 @@ fn response_content_length(headers: &[(String, String)]) -> Option<u64> {
         .and_then(|(_, value)| value.trim().parse().ok())
 }
 
-fn headers_close_connection(headers: &[fluxheim_protocol::Http1Header<'_>]) -> bool {
-    headers.iter().any(|header| {
-        header.name.eq_ignore_ascii_case("connection")
-            && header
-                .value
-                .split(',')
-                .any(|token| token.trim().eq_ignore_ascii_case("close"))
-    })
-}
-
 fn response_body_reusable(
     buffer: &[u8],
     head_len: usize,
     framing: ResponseBodyFraming,
     body_len: usize,
+    status: u16,
 ) -> bool {
+    if (100..200).contains(&status) {
+        return false;
+    }
     match framing {
         ResponseBodyFraming::NoBody => buffer.len() == head_len,
         ResponseBodyFraming::ContentLength(length) => {
