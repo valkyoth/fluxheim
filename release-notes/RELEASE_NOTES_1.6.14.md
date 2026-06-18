@@ -19,6 +19,9 @@ represented and tested through Fluxheim-owned connector code.
 - Added a real native HTTP/1 proxy test that generates a test CA and
   localhost SAN leaf certificate, starts a TLS upstream, verifies through the
   configured CA bundle, and forwards a request through the native proxy.
+- Added a real native upstream mTLS test that starts an origin requiring a
+  client certificate and verifies the configured upstream client cert/key path
+  works through rustls and OpenSSL builds.
 - Added ordered static upstream failover for the staged native HTTP/1 proxy
   path. Safe methods (`GET`, `HEAD`, `OPTIONS`, `TRACE`) can try the next
   configured static upstream after an upstream error; unsafe methods are not

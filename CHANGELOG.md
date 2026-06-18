@@ -17,6 +17,8 @@ behavior when the change improves security or project direction.
   controls.
 - Add real native HTTPS upstream proxy coverage with an in-test CA and
   localhost SAN leaf certificate.
+- Add real native upstream mTLS coverage for rustls and OpenSSL by requiring a
+  client certificate on the test origin.
 - Add native HTTP/1 ordered static upstream failover for safe request methods,
   with socket tests proving `GET` can fall through to the next configured
   upstream while unsafe methods are not replayed.
