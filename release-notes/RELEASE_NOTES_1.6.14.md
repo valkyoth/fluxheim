@@ -45,6 +45,8 @@ represented and tested through Fluxheim-owned connector code.
   candidates when no advanced load-balancer policy is configured. Weighted,
   priority, locality, alias, tag, backup, drain, disabled, dynamic-discovery,
   and DNS-discovery policy still fail closed to the compatibility path.
+- Restricted stale pooled-connection retries in the native HTTP/1 upstream
+  client to safe methods only, matching the static failover replay policy.
 
 ## Security
 

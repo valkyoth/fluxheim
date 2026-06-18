@@ -186,6 +186,56 @@ async fn native_upstream_retries_once_when_pooled_connection_is_stale() {
 }
 
 #[tokio::test]
+async fn native_upstream_does_not_retry_unsafe_method_on_stale_pool_connection() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let accepted_for_task = Arc::clone(&accepted);
+    tokio::spawn(async move {
+        let (mut stale, _) = listener.accept().await.unwrap();
+        accepted_for_task.fetch_add(1, Ordering::AcqRel);
+        let _request = read_request_head(&mut stale).await;
+        stale
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nstale")
+            .await
+            .unwrap();
+        drop(stale);
+
+        if let Ok(Ok((mut fresh, _))) =
+            tokio::time::timeout(Duration::from_millis(100), listener.accept()).await
+        {
+            accepted_for_task.fetch_add(1, Ordering::AcqRel);
+            let _ = read_request_head(&mut fresh).await;
+        }
+    });
+
+    let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
+    let response = upstream.send(&request()).await.unwrap();
+    assert_eq!(response.body(), b"stale");
+    assert_eq!(upstream.idle_connection_count().await, 1);
+
+    let mut post = request();
+    post.method = "POST".to_owned();
+    post.body = b"do not replay".to_vec();
+
+    let error = upstream.send(&post).await.unwrap_err();
+
+    assert!(matches!(
+        error,
+        NativeHttp1Error::Io(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::UnexpectedEof
+            )
+    ));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(accepted.load(Ordering::Acquire), 1);
+}
+
+#[tokio::test]
 async fn native_upstream_does_not_pool_connection_close_response() {
     let addr = upstream(|_, mut stream| async move {
         stream

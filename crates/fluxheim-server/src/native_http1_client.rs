@@ -203,7 +203,11 @@ impl NativeHttp1Upstream {
         let result = self.send_on_pooled_stream(&mut stream, request).await;
         let (response, reusable) = match result {
             Ok(result) => result,
-            Err(error) if reused && pooled_connection_error_can_retry(&error) => {
+            Err(error)
+                if reused
+                    && pooled_connection_error_can_retry(&error)
+                    && native_http1_retry_method_allowed(&request.method) =>
+            {
                 let fresh = self.connect_stream().await?;
                 return self.send_on_stream(fresh, request).await;
             }
@@ -312,6 +316,10 @@ fn pooled_connection_error_can_retry(error: &NativeHttp1Error) -> bool {
                     | std::io::ErrorKind::UnexpectedEof
             )
     )
+}
+
+fn native_http1_retry_method_allowed(method: &str) -> bool {
+    matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE")
 }
 
 async fn connect_upstream(authority: &str) -> Result<TcpStream, NativeHttp1Error> {
