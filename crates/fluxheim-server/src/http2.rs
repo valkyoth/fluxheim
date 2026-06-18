@@ -7,6 +7,7 @@ pub struct DownstreamHttp2Policy {
     max_uri_bytes: usize,
     max_body_bytes: usize,
     request_body_timeout: Duration,
+    response_body_timeout: Duration,
     handler_timeout: Duration,
     response_write_lifetime: Duration,
     max_concurrent_streams: u32,
@@ -24,6 +25,7 @@ impl Default for DownstreamHttp2Policy {
             max_uri_bytes: 8 * 1024,
             max_body_bytes: 16 * 1024 * 1024,
             request_body_timeout: Duration::from_secs(30),
+            response_body_timeout: Duration::from_secs(30),
             handler_timeout: Duration::from_secs(30),
             response_write_lifetime: Duration::from_secs(30),
             max_concurrent_streams: 32,
@@ -61,6 +63,11 @@ impl DownstreamHttp2Policy {
         self
     }
 
+    pub const fn with_response_body_timeout(mut self, timeout: Duration) -> Self {
+        self.response_body_timeout = timeout;
+        self
+    }
+
     #[cfg(test)]
     pub const fn with_initial_window_size(mut self, initial_window_size: u32) -> Self {
         self.initial_window_size = initial_window_size;
@@ -83,11 +90,14 @@ impl DownstreamHttp2Policy {
         self.request_body_timeout
     }
 
+    pub const fn response_body_timeout(&self) -> Duration {
+        self.response_body_timeout
+    }
+
     pub const fn handler_timeout(&self) -> Duration {
         self.handler_timeout
     }
 
-    #[cfg(test)]
     pub const fn with_handler_timeout(mut self, timeout: Duration) -> Self {
         self.handler_timeout = timeout;
         self
@@ -97,7 +107,6 @@ impl DownstreamHttp2Policy {
         self.response_write_lifetime
     }
 
-    #[cfg(test)]
     pub const fn with_response_write_lifetime(mut self, lifetime: Duration) -> Self {
         self.response_write_lifetime = lifetime;
         self

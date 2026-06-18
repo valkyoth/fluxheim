@@ -20,6 +20,7 @@ mod native_http1_proxy;
 mod native_http1_tls;
 mod native_http1_upstream_response;
 mod native_http2;
+mod native_http2_client;
 mod native_http2_stack;
 mod plan;
 mod process;
@@ -43,6 +44,9 @@ pub use native_http1_proxy::{NativeHttp1Proxy, NativeHttp1ProxyConfigError};
 pub use native_http1_tls::NativeHttp1UpstreamTls;
 pub use native_http2::{
     NativeHttp2Preview, NativeHttp2SafetyHook, NativeHttp2SafetyReport, NativeHttp2SafetyStatus,
+};
+pub use native_http2_client::{
+    NativeHttp2UpstreamRequest, NativeHttp2UpstreamResponse, send_native_http2_upstream_on_io,
 };
 pub use native_http2_stack::{
     NativeHttp2Handler, NativeHttp2Request, NativeHttp2Response, NativeHttp2StackError,
@@ -112,6 +116,10 @@ mod native_http1_plan_tests;
 #[cfg(test)]
 #[path = "native_http2_tests.rs"]
 mod native_http2_tests;
+
+#[cfg(test)]
+#[path = "native_http2_upstream_tests.rs"]
+mod native_http2_upstream_tests;
 
 #[cfg(test)]
 #[path = "server_background_tests.rs"]

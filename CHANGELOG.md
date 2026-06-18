@@ -7,6 +7,39 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.15 - 2026-06-18
+
+### Added
+
+- Add a Fluxheim-owned native HTTP/2 upstream client primitive in
+  `fluxheim-server`, including request body/trailer sending, response
+  body/trailer collection, bounded response header counts, bounded response
+  bodies, and absolute request-write / response-read deadlines.
+- Add in-memory h2 client/server tests proving native HTTP/2 upstream trailer
+  preservation for gRPC-style responses, oversized response rejection, response
+  header-count rejection, upstream stream reset surfacing, and request
+  flow-control write timeout behavior.
+
+### Changed
+
+- Share native HTTP/2 prohibited response-header validation between the
+  downstream stack probe and the new upstream client path.
+- Share the native HTTP/2 bounded DATA sender between downstream responses and
+  upstream request bodies.
+- Keep production HTTP/2 cutover gated until the native path has full
+  pre-routing HPACK/header-count allocation proof and integration through the
+  production proxy pipeline.
+
+### Security
+
+- Stage native HTTP/2 upstream request bodies in zeroizing memory before
+  copying them into h2 DATA frames.
+- Add a dedicated native HTTP/2 upstream response-body timeout so upstream
+  response reads no longer reuse the downstream request-body timeout setting.
+- Document the current native HTTP/2 upstream client as a one-request preview
+  client whose hard connection-driver abort must not be copied into future
+  pooled upstream connections.
+
 ## 1.6.14 - 2026-06-18
 
 ### Added

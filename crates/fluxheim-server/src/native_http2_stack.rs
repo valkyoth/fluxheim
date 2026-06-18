@@ -384,7 +384,7 @@ async fn send_native_http2_response(
     Ok(())
 }
 
-fn validate_response_headers(headers: &HeaderMap) -> Result<(), NativeHttp2StackError> {
+pub(crate) fn validate_response_headers(headers: &HeaderMap) -> Result<(), NativeHttp2StackError> {
     for name in headers.keys() {
         if prohibited_http2_response_header(name) {
             return Err(NativeHttp2StackError::ProhibitedResponseHeader {
@@ -395,14 +395,14 @@ fn validate_response_headers(headers: &HeaderMap) -> Result<(), NativeHttp2Stack
     Ok(())
 }
 
-fn prohibited_http2_response_header(name: &HeaderName) -> bool {
+pub(crate) fn prohibited_http2_response_header(name: &HeaderName) -> bool {
     matches!(
         name.as_str(),
         "connection" | "keep-alive" | "proxy-connection" | "transfer-encoding" | "upgrade"
     )
 }
 
-async fn send_data_bounded(
+pub(crate) async fn send_data_bounded(
     send_stream: &mut h2::SendStream<Bytes>,
     body: Bytes,
     end_of_stream: bool,

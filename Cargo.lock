@@ -1010,7 +1010,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1076,7 +1076,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-cache"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1087,14 +1087,14 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-common"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "fluxheim-compression"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "brotli 8.0.4",
  "bytes",
@@ -1105,7 +1105,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-config"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "fluxheim-common",
  "fluxheim-protocol",
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-geoip"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "fluxheim-config",
  "log",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-headers"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "fluxheim-config",
  "fluxheim-protocol",
@@ -1135,7 +1135,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-load-balancer"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1165,7 +1165,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-observability"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "fluxheim-common",
  "fluxheim-config",
@@ -1185,7 +1185,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-php-fpm"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "fluxheim-config",
  "getrandom 0.4.3",
@@ -1193,11 +1193,11 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-protocol"
-version = "1.6.14"
+version = "1.6.15"
 
 [[package]]
 name = "fluxheim-runtime"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "async-trait",
  "tokio",
@@ -1205,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-server"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "bytes",
  "fluxheim-config",
@@ -1228,7 +1228,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-snapshot"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "fluxheim-common",
  "fluxheim-config",
@@ -1239,7 +1239,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-stream"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "fluxheim-common",
  "fluxheim-config",
@@ -1249,7 +1249,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-tls"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "fluxheim-config",
  "fluxheim-openssl-fips-support",
@@ -1261,7 +1261,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-web"
-version = "1.6.14"
+version = "1.6.15"
 dependencies = [
  "chrono",
  "fluxheim-common",

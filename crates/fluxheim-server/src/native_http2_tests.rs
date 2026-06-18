@@ -44,6 +44,7 @@ fn native_http2_preview_preserves_downstream_policy_values() {
     assert_eq!(policy.max_body_bytes(), 16 * 1024 * 1024);
     assert_eq!(policy.handler_timeout(), Duration::from_secs(30));
     assert_eq!(policy.response_write_lifetime(), Duration::from_secs(30));
+    assert_eq!(policy.response_body_timeout(), Duration::from_secs(30));
     assert_eq!(policy.max_concurrent_streams(), 32);
     assert_eq!(policy.initial_window_size(), 64 * 1024);
     assert_eq!(policy.max_send_buffer_size(), 256 * 1024);
