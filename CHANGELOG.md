@@ -22,6 +22,9 @@ behavior when the change improves security or project direction.
   proxy has no upstream client certificate configured.
 - Fix native HTTP/1 server-plan TLS failure-reason coverage for OpenSSL-only
   builds.
+- Add real native upstream TLS hostname-policy coverage for default mismatch
+  rejection, `upstream_alternative_cn`, and `upstream_verify_hostname = false`
+  across rustls and OpenSSL builds.
 - Add native HTTP/1 ordered static upstream failover for safe request methods,
   with socket tests proving `GET` can fall through to the next configured
   upstream while unsafe methods are not replayed.

@@ -19,6 +19,10 @@ represented and tested through Fluxheim-owned connector code.
 - Added a real native HTTP/1 proxy test that generates a test CA and
   localhost SAN leaf certificate, starts a TLS upstream, verifies through the
   configured CA bundle, and forwards a request through the native proxy.
+- Added real native upstream TLS hostname-policy tests proving the default
+  path rejects SAN mismatches, `upstream_alternative_cn` verifies against the
+  configured alternate name, and `upstream_verify_hostname = false` disables
+  only hostname verification while keeping CA verification active.
 - Added a real native upstream mTLS test that starts an origin requiring a
   client certificate and verifies the configured upstream client cert/key path
   works through rustls and OpenSSL builds. The same fixture now also verifies
