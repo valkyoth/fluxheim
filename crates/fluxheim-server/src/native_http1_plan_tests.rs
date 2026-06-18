@@ -17,12 +17,12 @@ fn server_plan_collects_native_http1_proxy_candidates() {
 
     config.proxy.upstream_tls = true;
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
-    #[cfg(not(feature = "tls-rustls-backend"))]
+    #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
         Some(NativeHttp1ProxyConfigError::UpstreamTls)
     );
-    #[cfg(feature = "tls-rustls-backend")]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
         Some(NativeHttp1ProxyConfigError::UpstreamTlsPolicy)

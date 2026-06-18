@@ -48,6 +48,9 @@ represented and tested through Fluxheim-owned connector code.
   upstream is IP-addressed with certificate verification enabled and no explicit
   `upstream_sni`, matching the validated config contract and avoiding silent
   hostname-verification downgrades.
+- OpenSSL-only native HTTP/1 server-plan tests now assert the same TLS policy
+  failure reason as rustls builds instead of treating OpenSSL as an unsupported
+  TLS backend.
 - TLS key, certificate, and CA files loaded by the native path are bounded to
   1 MiB, must be regular files, and are opened with `O_NOFOLLOW` on audited Unix
   platforms.

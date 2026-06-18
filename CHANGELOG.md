@@ -20,6 +20,8 @@ behavior when the change improves security or project direction.
 - Add real native upstream mTLS coverage for rustls and OpenSSL by requiring a
   client certificate on the test origin, including the failure path when the
   proxy has no upstream client certificate configured.
+- Fix native HTTP/1 server-plan TLS failure-reason coverage for OpenSSL-only
+  builds.
 - Add native HTTP/1 ordered static upstream failover for safe request methods,
   with socket tests proving `GET` can fall through to the next configured
   upstream while unsafe methods are not replayed.
