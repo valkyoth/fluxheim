@@ -2,6 +2,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
+#[cfg(feature = "tls-rustls-backend")]
+use crate::NativeHttp1UpstreamTls;
 use crate::{NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1Upstream};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -18,6 +20,7 @@ pub enum NativeHttp1ProxyConfigError {
     UpstreamHttp2,
     UpstreamProxyProtocol,
     UpstreamTls,
+    UpstreamTlsPolicy,
     WebSocket,
 }
 
@@ -41,6 +44,9 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
                 .write_str("native HTTP/1 proxy does not yet support upstream PROXY protocol"),
             Self::UpstreamTls => {
                 formatter.write_str("native HTTP/1 proxy does not yet support upstream TLS")
+            }
+            Self::UpstreamTlsPolicy => {
+                formatter.write_str("native HTTP/1 proxy rejected upstream TLS policy")
             }
             Self::WebSocket => {
                 formatter.write_str("native HTTP/1 proxy does not yet support websocket upgrade")
@@ -75,6 +81,7 @@ impl NativeHttp1Proxy {
         if !proxy.has_configured_upstream() {
             return Ok(None);
         }
+        #[cfg(not(feature = "tls-rustls-backend"))]
         if proxy.upstream_tls {
             return Err(NativeHttp1ProxyConfigError::UpstreamTls);
         }
@@ -100,6 +107,10 @@ impl NativeHttp1Proxy {
             .configured_primary_upstream()
             .ok_or(NativeHttp1ProxyConfigError::MissingUpstream)?;
         let mut upstream = NativeHttp1Upstream::from_policy(upstream, policy);
+        #[cfg(feature = "tls-rustls-backend")]
+        if let Some(tls) = NativeHttp1UpstreamTls::from_proxy_config(proxy)? {
+            upstream = upstream.with_tls(tls);
+        }
         if let Some(timeout) = proxy.connect_timeout_secs {
             upstream = upstream.with_connect_timeout(Duration::from_secs(timeout));
         }

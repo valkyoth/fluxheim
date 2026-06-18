@@ -1,7 +1,9 @@
-use tokio::io::AsyncReadExt;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
-pub(crate) async fn read_request_head(stream: &mut TcpStream) -> Vec<u8> {
+pub(crate) async fn read_request_head<S>(stream: &mut S) -> Vec<u8>
+where
+    S: AsyncRead + Unpin,
+{
     let mut request = Vec::new();
     let mut chunk = [0u8; 1024];
     loop {

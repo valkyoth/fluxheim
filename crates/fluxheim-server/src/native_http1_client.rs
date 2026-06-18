@@ -7,6 +7,8 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
+#[cfg(feature = "tls-rustls-backend")]
+use crate::NativeHttp1UpstreamTls;
 use crate::native_http1_forwarded::{
     valid_upstream_header_value, valid_upstream_request_header, write_owned_proxy_headers,
 };
@@ -14,6 +16,12 @@ use crate::native_http1_upstream_response::{
     read_upstream_response, read_upstream_response_for_pool,
 };
 use crate::{DownstreamHttp1Policy, NativeHttp1Error, NativeHttp1Request, NativeHttp1Response};
+
+pub(crate) trait NativeHttp1Io: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T> NativeHttp1Io for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+pub(crate) type NativeHttp1Stream = Box<dyn NativeHttp1Io>;
 
 #[derive(Clone)]
 pub struct NativeHttp1Upstream {
@@ -23,6 +31,8 @@ pub struct NativeHttp1Upstream {
     write_timeout: Duration,
     max_head_bytes: usize,
     max_body_bytes: usize,
+    #[cfg(feature = "tls-rustls-backend")]
+    tls: Option<NativeHttp1UpstreamTls>,
     pool: Arc<NativeHttp1Pool>,
 }
 
@@ -33,10 +43,18 @@ struct NativeHttp1Pool {
     idle: Mutex<Vec<IdleNativeHttp1Connection>>,
 }
 
-#[derive(Debug)]
 struct IdleNativeHttp1Connection {
-    stream: TcpStream,
+    stream: NativeHttp1Stream,
     inserted_at: Instant,
+}
+
+impl std::fmt::Debug for IdleNativeHttp1Connection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("IdleNativeHttp1Connection")
+            .field("inserted_at", &self.inserted_at)
+            .finish_non_exhaustive()
+    }
 }
 
 impl std::fmt::Debug for NativeHttp1Upstream {
@@ -49,6 +67,16 @@ impl std::fmt::Debug for NativeHttp1Upstream {
             .field("write_timeout", &self.write_timeout)
             .field("max_head_bytes", &self.max_head_bytes)
             .field("max_body_bytes", &self.max_body_bytes)
+            .field("tls", {
+                #[cfg(feature = "tls-rustls-backend")]
+                {
+                    &self.tls
+                }
+                #[cfg(not(feature = "tls-rustls-backend"))]
+                {
+                    &Option::<()>::None
+                }
+            })
             .field("pool_max_idle", &self.pool.max_idle)
             .field("pool_idle_timeout", &self.pool.idle_timeout)
             .finish_non_exhaustive()
@@ -63,6 +91,16 @@ impl PartialEq for NativeHttp1Upstream {
             && self.write_timeout == other.write_timeout
             && self.max_head_bytes == other.max_head_bytes
             && self.max_body_bytes == other.max_body_bytes
+            && {
+                #[cfg(feature = "tls-rustls-backend")]
+                {
+                    self.tls == other.tls
+                }
+                #[cfg(not(feature = "tls-rustls-backend"))]
+                {
+                    true
+                }
+            }
             && self.pool.max_idle == other.pool.max_idle
             && self.pool.idle_timeout == other.pool.idle_timeout
     }
@@ -80,6 +118,8 @@ impl NativeHttp1Upstream {
             write_timeout: Duration::from_secs(30),
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
+            #[cfg(feature = "tls-rustls-backend")]
+            tls: None,
             pool: Arc::new(NativeHttp1Pool::default()),
         }
     }
@@ -92,6 +132,8 @@ impl NativeHttp1Upstream {
             write_timeout: Duration::from_secs(30),
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
+            #[cfg(feature = "tls-rustls-backend")]
+            tls: None,
             pool: Arc::new(NativeHttp1Pool::default()),
         }
     }
@@ -113,6 +155,12 @@ impl NativeHttp1Upstream {
 
     pub const fn with_max_body_bytes(mut self, max_body_bytes: usize) -> Self {
         self.max_body_bytes = max_body_bytes;
+        self
+    }
+
+    #[cfg(feature = "tls-rustls-backend")]
+    pub fn with_tls(mut self, tls: NativeHttp1UpstreamTls) -> Self {
+        self.tls = Some(tls);
         self
     }
 
@@ -147,9 +195,7 @@ impl NativeHttp1Upstream {
         request: &NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
         if self.pool.max_idle == 0 {
-            let stream = timeout(self.connect_timeout, connect_upstream(&self.authority))
-                .await
-                .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
+            let stream = self.connect_stream().await?;
             return self.send_on_stream(stream, request).await;
         }
 
@@ -158,9 +204,7 @@ impl NativeHttp1Upstream {
         let (response, reusable) = match result {
             Ok(result) => result,
             Err(error) if reused && pooled_connection_error_can_retry(&error) => {
-                let fresh = timeout(self.connect_timeout, connect_upstream(&self.authority))
-                    .await
-                    .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
+                let fresh = self.connect_stream().await?;
                 return self.send_on_stream(fresh, request).await;
             }
             Err(error) => return Err(error),
@@ -197,7 +241,7 @@ impl NativeHttp1Upstream {
 
     async fn send_on_pooled_stream(
         &self,
-        stream: &mut TcpStream,
+        stream: &mut NativeHttp1Stream,
         request: &NativeHttp1Request,
     ) -> Result<(NativeHttp1Response, bool), NativeHttp1Error> {
         timeout(
@@ -216,7 +260,7 @@ impl NativeHttp1Upstream {
         .await
     }
 
-    async fn connection(&self) -> Result<(TcpStream, bool), NativeHttp1Error> {
+    async fn connection(&self) -> Result<(NativeHttp1Stream, bool), NativeHttp1Error> {
         let now = Instant::now();
         let mut idle = self.pool.idle.lock().await;
         while let Some(connection) = idle.pop() {
@@ -228,13 +272,11 @@ impl NativeHttp1Upstream {
             return Ok((connection.stream, true));
         }
         drop(idle);
-        let stream = timeout(self.connect_timeout, connect_upstream(&self.authority))
-            .await
-            .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
+        let stream = self.connect_stream().await?;
         Ok((stream, false))
     }
 
-    async fn return_connection(&self, stream: TcpStream) {
+    async fn return_connection(&self, stream: NativeHttp1Stream) {
         let mut idle = self.pool.idle.lock().await;
         if idle.len() < self.pool.max_idle {
             idle.push(IdleNativeHttp1Connection {
@@ -242,6 +284,19 @@ impl NativeHttp1Upstream {
                 inserted_at: Instant::now(),
             });
         }
+    }
+
+    async fn connect_stream(&self) -> Result<NativeHttp1Stream, NativeHttp1Error> {
+        let stream = timeout(self.connect_timeout, connect_upstream(&self.authority))
+            .await
+            .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
+        #[cfg(feature = "tls-rustls-backend")]
+        if let Some(tls) = &self.tls {
+            return timeout(self.connect_timeout, tls.connect(stream, &self.authority))
+                .await
+                .map_err(|_| timeout_error("native HTTP/1 upstream TLS handshake timeout"))?;
+        }
+        Ok(Box::new(stream) as NativeHttp1Stream)
     }
 }
 

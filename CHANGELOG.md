@@ -7,6 +7,33 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.14 - 2026-06-18
+
+### Added
+
+- Add native rustls upstream TLS support to the staged HTTP/1.1 proxy path in
+  `fluxheim-server`, including explicit SNI, configured CA bundles, optional
+  upstream client certificates, and certificate verification controls.
+- Add real native HTTPS upstream proxy coverage with an in-test CA and
+  localhost SAN leaf certificate.
+
+### Changed
+
+- Store native HTTP/1 upstream pooled connections as Fluxheim-owned boxed IO
+  streams so the same retry/reuse path works for plain TCP and TLS upstreams.
+- Wire root rustls feature aliases into `fluxheim-server` so native upstream
+  TLS is compiled in the same rustls profiles operators use today.
+- Keep OpenSSL-native upstream TLS on the Pingora compatibility path until it
+  has equivalent implementation and tests.
+
+### Security
+
+- Fail closed when native HTTPS upstream conversion sees an IP-addressed
+  upstream with certificate verification enabled and no explicit
+  `upstream_sni`.
+- Read native upstream TLS CA, certificate, and key files through bounded
+  no-follow regular-file handling.
+
 ## 1.6.13 - 2026-06-18
 
 ### Added

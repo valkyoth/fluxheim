@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.13
+Version:        1.6.14
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu Jun 18 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.14-1
+- Continue the Pingora-exit line with native rustls upstream TLS support for
+  the staged HTTP/1.1 proxy path.
+- Add native HTTPS upstream proxy tests with generated CA/SAN certificates and
+  keep unsupported OpenSSL-native upstream TLS on the compatibility path.
+
 * Thu Jun 18 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.13-1
 - Continue the Pingora-exit line with native HTTP/1.1 upstream connection
   pooling for safe content-length/no-body responses.

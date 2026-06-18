@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.6.13"
+version = "1.6.14"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -82,6 +82,7 @@ tls = ["ingress", "dep:rustix"]
 tls-rustls-backend = [
     "tls",
     "fluxheim-config/tls-rustls-backend",
+    "fluxheim-server/tls-rustls-backend",
     "fluxheim-tls/tls-rustls-backend",
     "pingora/rustls",
     "dep:rustls",
@@ -89,8 +90,8 @@ tls-rustls-backend = [
     "dep:tokio-rustls",
     "fluxheim-load-balancer?/tls-rustls-backend",
 ]
-tls-rustls = ["tls-rustls-backend", "rustls/ring", "fluxheim-tls/tls-rustls"]
-tls-rustls-fips = ["tls-rustls-backend", "dep:aws-lc-rs", "fluxheim-config/tls-rustls-fips", "fluxheim-tls/tls-rustls-fips", "rustls/fips"]
+tls-rustls = ["tls-rustls-backend", "rustls/ring", "fluxheim-server/tls-rustls", "fluxheim-tls/tls-rustls"]
+tls-rustls-fips = ["tls-rustls-backend", "dep:aws-lc-rs", "fluxheim-config/tls-rustls-fips", "fluxheim-server/tls-rustls-fips", "fluxheim-tls/tls-rustls-fips", "rustls/fips"]
 tls-rustls-iso19790 = ["tls-rustls-fips"]
 tls-openssl = [
     "tls",

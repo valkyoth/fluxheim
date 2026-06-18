@@ -10,6 +10,64 @@ use crate::{
     native_http1_test_utils::read_request_head, serve_native_http1_listener,
 };
 
+#[cfg(feature = "tls-rustls-backend")]
+struct NativeTlsFixture {
+    ca_path: std::path::PathBuf,
+    directory: std::path::PathBuf,
+    chain_pem: String,
+    key_pem: String,
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+fn native_tls_fixture() -> NativeTlsFixture {
+    use rcgen::{
+        BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
+        IsCa, Issuer, KeyPair, KeyUsagePurpose,
+    };
+
+    let ca_key = KeyPair::generate().unwrap();
+    let mut ca_name = DistinguishedName::new();
+    ca_name.push(DnType::CommonName, "Fluxheim Native HTTP Test CA");
+    let mut ca_params = CertificateParams::default();
+    ca_params.distinguished_name = ca_name;
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    ca_params.key_usages = vec![
+        KeyUsagePurpose::KeyCertSign,
+        KeyUsagePurpose::DigitalSignature,
+    ];
+    let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+    let ca_issuer = Issuer::new(ca_params, ca_key);
+
+    let leaf_key = KeyPair::generate().unwrap();
+    let mut leaf_params = CertificateParams::new(vec!["localhost".to_owned()]).unwrap();
+    leaf_params.is_ca = IsCa::ExplicitNoCa;
+    leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    let leaf_cert = leaf_params.signed_by(&leaf_key, &ca_issuer).unwrap();
+
+    let directory = unique_temp_dir("native-http1-tls");
+    let ca_path = directory.join("ca.pem");
+    std::fs::write(&ca_path, ca_cert.pem()).unwrap();
+
+    NativeTlsFixture {
+        ca_path,
+        directory,
+        chain_pem: format!("{}{}", leaf_cert.pem(), ca_cert.pem()),
+        key_pem: leaf_key.serialize_pem(),
+    }
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+fn unique_temp_dir(label: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path =
+        std::env::temp_dir().join(format!("fluxheim-{label}-{}-{nanos}", std::process::id()));
+    std::fs::create_dir(&path).unwrap();
+    path
+}
+
 async fn upstream<F, Fut>(handler: F) -> std::net::SocketAddr
 where
     F: Fn(Vec<u8>, TcpStream) -> Fut + Send + Sync + 'static,
@@ -79,6 +137,39 @@ async fn pooled_proxy_listener(upstream: std::net::SocketAddr) -> std::net::Sock
     addr
 }
 
+#[cfg(feature = "tls-rustls-backend")]
+async fn tls_upstream(chain_pem: String, key_pem: String) -> std::net::SocketAddr {
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
+    use tokio_rustls::TlsAcceptor;
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let certs = CertificateDer::pem_slice_iter(chain_pem.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).unwrap();
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .unwrap();
+    let acceptor = TlsAcceptor::from(Arc::new(config));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut stream = acceptor.accept(stream).await.unwrap();
+        let request = String::from_utf8(read_request_head(&mut stream).await).unwrap();
+        assert!(request.starts_with("GET /secure HTTP/1.1\r\n"));
+        assert!(request.contains("host: proxy.test\r\n"));
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-length: 16\r\nx-origin: tls\r\n\r\nhello tls native",
+            )
+            .await
+            .unwrap();
+    });
+    addr
+}
+
 async fn downstream_get(proxy: std::net::SocketAddr, path: &str) -> String {
     let mut client = TcpStream::connect(proxy).await.unwrap();
     client
@@ -118,7 +209,10 @@ async fn native_proxy_forwards_downstream_request_to_upstream() {
     client.read_to_end(&mut response).await.unwrap();
     let response = String::from_utf8(response).unwrap();
 
-    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected response: {response:?}"
+    );
     assert!(response.contains("x-origin: native\r\n"));
     assert!(response.ends_with("hello native"));
 }
@@ -196,6 +290,46 @@ async fn native_proxy_maps_upstream_timeout_to_gateway_timeout() {
     assert!(response.ends_with("gateway timeout\n"));
 }
 
+#[cfg(feature = "tls-rustls-backend")]
+#[tokio::test]
+async fn native_proxy_forwards_to_tls_upstream_with_ca_and_sni() {
+    let fixture = native_tls_fixture();
+    let upstream = tls_upstream(fixture.chain_pem.clone(), fixture.key_pem.clone()).await;
+    let proxy_config = fluxheim_config::ProxyConfig {
+        upstream: Some(upstream.to_string()),
+        upstream_tls: true,
+        upstream_sni: Some("localhost".to_owned()),
+        upstream_ca_path: Some(fixture.ca_path.clone()),
+        ..Default::default()
+    };
+    let native =
+        NativeHttp1Proxy::from_proxy_config(&proxy_config, DownstreamHttp1Policy::default())
+            .unwrap()
+            .expect("native TLS proxy");
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        serve_native_http1_listener(
+            listener,
+            DownstreamHttp1Policy::default(),
+            Arc::new(native),
+            std::future::pending::<()>(),
+        )
+        .await
+        .unwrap();
+    });
+
+    let response = downstream_get(proxy, "/secure").await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert!(response.contains("x-origin: tls\r\n"));
+    assert!(response.ends_with("hello tls native"));
+    std::fs::remove_dir_all(fixture.directory).unwrap();
+}
+
 #[test]
 fn native_proxy_config_accepts_plain_static_upstream() {
     let proxy = fluxheim_config::ProxyConfig {
@@ -254,9 +388,15 @@ fn native_proxy_config_rejects_unsupported_upstream_features() {
         upstream_tls: true,
         ..Default::default()
     };
+    #[cfg(not(feature = "tls-rustls-backend"))]
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
         Err(NativeHttp1ProxyConfigError::UpstreamTls)
+    );
+    #[cfg(feature = "tls-rustls-backend")]
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy)
     );
 
     let proxy = fluxheim_config::ProxyConfig {
