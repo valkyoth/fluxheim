@@ -42,6 +42,7 @@ impl NativeHttp1ProxyCandidate {
 pub(crate) fn native_http1_proxy_candidates_from_config(
     config: &Config,
     policy: DownstreamHttp1Policy,
+    pool_max_idle: usize,
 ) -> Vec<NativeHttp1ProxyCandidate> {
     let mut candidates = Vec::new();
 
@@ -51,6 +52,7 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
             &config.proxy,
             root_policy_supported(config),
             policy,
+            pool_max_idle,
             &mut candidates,
         );
         return candidates;
@@ -62,6 +64,7 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
             &vhost.proxy,
             vhost_policy_supported(vhost),
             policy,
+            pool_max_idle,
             &mut candidates,
         );
         for route in &vhost.routes {
@@ -71,6 +74,7 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
                     proxy,
                     vhost_policy_supported(vhost) && route_policy_supported(route),
                     policy,
+                    pool_max_idle,
                     &mut candidates,
                 );
             }
@@ -85,6 +89,7 @@ fn push_proxy_candidate(
     proxy: &ProxyConfig,
     policy_supported: bool,
     policy: DownstreamHttp1Policy,
+    pool_max_idle: usize,
     candidates: &mut Vec<NativeHttp1ProxyCandidate>,
 ) {
     if !proxy.has_configured_upstream() {
@@ -99,7 +104,7 @@ fn push_proxy_candidate(
         return;
     }
 
-    match NativeHttp1Proxy::from_proxy_config(proxy, policy) {
+    match NativeHttp1Proxy::from_proxy_config_with_pool_size(proxy, policy, pool_max_idle) {
         Ok(Some(_)) => candidates.push(NativeHttp1ProxyCandidate::eligible(scope)),
         Ok(None) => {}
         Err(error) => candidates.push(NativeHttp1ProxyCandidate::unsupported(scope, error)),

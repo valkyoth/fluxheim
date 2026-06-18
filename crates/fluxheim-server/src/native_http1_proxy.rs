@@ -64,6 +64,14 @@ impl NativeHttp1Proxy {
         proxy: &fluxheim_config::ProxyConfig,
         policy: crate::DownstreamHttp1Policy,
     ) -> Result<Option<Self>, NativeHttp1ProxyConfigError> {
+        Self::from_proxy_config_with_pool_size(proxy, policy, 0)
+    }
+
+    pub fn from_proxy_config_with_pool_size(
+        proxy: &fluxheim_config::ProxyConfig,
+        policy: crate::DownstreamHttp1Policy,
+        pool_max_idle: usize,
+    ) -> Result<Option<Self>, NativeHttp1ProxyConfigError> {
         if !proxy.has_configured_upstream() {
             return Ok(None);
         }
@@ -101,6 +109,9 @@ impl NativeHttp1Proxy {
         if let Some(timeout) = proxy.send_timeout_secs {
             upstream = upstream.with_write_timeout(Duration::from_secs(timeout));
         }
+        upstream = upstream
+            .with_pool_idle_timeout(proxy.upstream_idle_timeout_secs.map(Duration::from_secs));
+        upstream = upstream.with_pool_max_idle(pool_max_idle);
         Ok(Some(Self::new(upstream)))
     }
 }

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use std::net::SocketAddr;
@@ -33,6 +34,22 @@ where
         handler(request, stream).await;
     });
     addr
+}
+
+async fn read_request_head(stream: &mut TcpStream) -> Vec<u8> {
+    let mut request = Vec::new();
+    let mut chunk = [0u8; 1024];
+    loop {
+        let read = stream.read(&mut chunk).await.unwrap();
+        if read == 0 {
+            break;
+        }
+        request.extend_from_slice(&chunk[..read]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    request
 }
 
 fn request() -> NativeHttp1Request {
@@ -78,6 +95,91 @@ async fn native_upstream_forwards_request_and_reads_content_length_response() {
             .iter()
             .any(|(name, value)| name == "x-test" && value == "yes")
     );
+}
+
+#[tokio::test]
+async fn native_upstream_reuses_safe_content_length_connection() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let first = String::from_utf8(read_request_head(&mut stream).await).unwrap();
+        assert!(first.contains("connection: keep-alive\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nfirst")
+            .await
+            .unwrap();
+
+        let second = String::from_utf8(read_request_head(&mut stream).await).unwrap();
+        assert!(second.contains("connection: keep-alive\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 6\r\n\r\nsecond")
+            .await
+            .unwrap();
+    });
+
+    let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
+
+    let response = upstream.send(&request()).await.unwrap();
+    assert_eq!(response.body(), b"first");
+    assert_eq!(upstream.idle_connection_count().await, 1);
+
+    let response = upstream.send(&request()).await.unwrap();
+    assert_eq!(response.body(), b"second");
+    assert_eq!(upstream.idle_connection_count().await, 1);
+}
+
+#[tokio::test]
+async fn native_upstream_does_not_pool_connection_close_response() {
+    let addr = upstream(|_, mut stream| async move {
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: 4\r\n\r\nstop")
+            .await
+            .unwrap();
+    })
+    .await;
+
+    let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
+    let response = upstream.send(&request()).await.unwrap();
+
+    assert_eq!(response.body(), b"stop");
+    assert_eq!(upstream.idle_connection_count().await, 0);
+}
+
+#[tokio::test]
+async fn native_upstream_expires_idle_pool_connections() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let accepted_for_task = Arc::clone(&accepted);
+    tokio::spawn(async move {
+        for body in [b"first".as_slice(), b"fresh".as_slice()] {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            accepted_for_task.fetch_add(1, Ordering::AcqRel);
+            let _request = read_request_head(&mut stream).await;
+            stream
+                .write_all(
+                    format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n", body.len()).as_bytes(),
+                )
+                .await
+                .unwrap();
+            stream.write_all(body).await.unwrap();
+        }
+    });
+
+    let upstream = NativeHttp1Upstream::new(addr.to_string())
+        .with_pool_idle_timeout(Some(Duration::from_millis(1)))
+        .with_pool_max_idle(1);
+
+    let response = upstream.send(&request()).await.unwrap();
+    assert_eq!(response.body(), b"first");
+    assert_eq!(upstream.idle_connection_count().await, 1);
+
+    tokio::time::sleep(Duration::from_millis(5)).await;
+
+    let response = upstream.send(&request()).await.unwrap();
+    assert_eq!(response.body(), b"fresh");
+    assert_eq!(accepted.load(Ordering::Acquire), 2);
 }
 
 #[tokio::test]

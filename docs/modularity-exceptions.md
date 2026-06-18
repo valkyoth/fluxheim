@@ -14,10 +14,10 @@ documents why the exception is temporary and how it will be removed.
 
 | File | Baseline lines | Reason | Split target |
 | --- | ---: | --- | --- |
-| `src/proxy.rs` | 19208 | Legacy Pingora `ProxyHttp` orchestration and cross-domain adapter hub. | Split during `1.6.8`-`1.6.12` native HTTP proxy work. |
+| `src/proxy.rs` | 19208 | Legacy Pingora `ProxyHttp` orchestration and cross-domain adapter hub. | Split during `1.6.8`-`1.6.20` native HTTP proxy work. |
 | `crates/fluxheim-config/src/config_tests.rs` | 13952 | Legacy central config regression suite. | Split by config domain as crates stabilize. |
 | `src/cache.rs` | 13486 | Legacy Pingora cache storage/runtime adapter plus remaining cache orchestration. The 1.6.2 native cache adapter temporarily increases this file until the Pingora HTTP runtime edge is removed. | Continue moving pure cache runtime into `fluxheim-cache`; shrink the compatibility adapter during the native HTTP/cache cutover. |
-| `src/admin.rs` | 7943 | Legacy admin HTTP endpoint router over every domain. | Reduce after domain APIs stabilize; possible `fluxheim-admin` after `1.6.12`. |
+| `src/admin.rs` | 7943 | Legacy admin HTTP endpoint router over every domain. | Reduce after domain APIs stabilize; possible `fluxheim-admin` after `1.6.17`. |
 | `src/cli.rs` | 5544 | Legacy command dispatch and release/admin/cache tooling. | Split command handlers by domain after runtime crates settle. |
 | `crates/fluxheim-load-balancer/src/lib.rs` | 4013 | Load-balancer orchestration root still hosts many domain pieces; API/runtime DTOs moved to `api.rs` in `1.6.1`. | Continue splitting orchestration and runtime mutation code during the remaining `1.6` load-balancer/background cutovers. |
 | `src/acme.rs` | 3909 | ACME account/order/install/renewal and filesystem safety in one root adapter. | Move to `fluxheim-acme` after the native listener/TLS cutover stabilizes. |

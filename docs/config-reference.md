@@ -1261,7 +1261,8 @@ content types, and leaves gRPC-Web/JSON transcoding out of scope.
 `upstream_total_connection_timeout_secs` wraps full upstream establishment,
 including protocol/TLS setup where the selected connector exposes it.
 `upstream_idle_timeout_secs` controls how long reusable idle upstream
-connections remain in Pingora's keepalive pool before they are closed.
+connections remain in the native HTTP/1.1 upstream pool or the remaining
+Pingora compatibility keepalive pool before they are closed.
 `upstream_tcp_keepalive_idle_secs`, `upstream_tcp_keepalive_interval_secs`, and
 `upstream_tcp_keepalive_count` configure TCP keepalive probes on upstream
 connections and must be set together. `upstream_tcp_user_timeout_ms` maps to

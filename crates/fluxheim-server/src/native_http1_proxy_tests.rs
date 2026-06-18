@@ -147,6 +147,24 @@ fn native_proxy_config_accepts_plain_static_upstream() {
 }
 
 #[test]
+fn native_proxy_config_applies_pool_capacity() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        ..Default::default()
+    };
+
+    let native = NativeHttp1Proxy::from_proxy_config_with_pool_size(
+        &proxy,
+        DownstreamHttp1Policy::default(),
+        16,
+    )
+    .unwrap()
+    .expect("native proxy");
+
+    assert_eq!(native.upstream().pool_max_idle(), 16);
+}
+
+#[test]
 fn native_proxy_config_returns_none_without_upstream() {
     let proxy = fluxheim_config::ProxyConfig::disabled();
 

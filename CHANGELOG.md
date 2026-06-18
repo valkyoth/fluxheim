@@ -7,6 +7,31 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.13 - 2026-06-18
+
+### Added
+
+- Add bounded native HTTP/1.1 upstream connection pooling in
+  `fluxheim-server` for safe content-length and no-body origin responses.
+- Wire `server.process.upstream_keepalive_pool_size` into native HTTP/1 proxy
+  candidates and honor `proxy.upstream_idle_timeout_secs` for native pooled
+  upstream connections.
+
+### Hardened
+
+- Keep the native HTTP/1.1 pool conservative: do not reuse close-delimited
+  responses, chunked responses, responses with `Connection: close`, or
+  responses where extra bytes were buffered beyond the declared body.
+- Keep unsupported upstream TLS/mTLS, HTTP/2 upstreams, dynamic discovery,
+  load balancing, upstream PROXY protocol, websocket upgrade, and broader
+  policy layers on the Pingora compatibility path until later 1.6 cutover
+  releases prove parity.
+
+### Tests
+
+- Add real socket tests for native upstream connection reuse, idle-pool expiry,
+  and `Connection: close` non-reuse behavior.
+
 ## 1.6.12 - 2026-06-18
 
 ### Added

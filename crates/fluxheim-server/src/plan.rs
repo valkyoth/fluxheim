@@ -214,6 +214,7 @@ impl ServerPlan {
 
     pub fn from_config(config: &Config) -> Result<Self, ServerPlanError> {
         let process = ProcessSpec::from_config(config);
+        let upstream_keepalive_pool_size = process.upstream_keepalive_pool_size();
         let certificate_reload_control =
             certificate_reload_control_plan_from_config(config, &process);
         let downstream_http1 = DownstreamHttp1Policy::from_server_limits(config.server.limits);
@@ -233,6 +234,7 @@ impl ServerPlan {
                 native_http1_plan::native_http1_proxy_candidates_from_config(
                     config,
                     downstream_http1,
+                    upstream_keepalive_pool_size,
                 ),
             listeners: listener::listener_specs_from_config(config)?,
             services: service::service_specs_from_config(config),
