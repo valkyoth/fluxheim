@@ -27,6 +27,8 @@ behavior when the change improves security or project direction.
   across rustls and OpenSSL builds.
 - Add direct native upstream TLS file-reader tests for oversized-file and final
   symlink rejection.
+- Make the native HTTP/1 proxy builder fail closed on invalid upstream TLS
+  material combinations even when called outside the full config loader.
 - Add native HTTP/1 ordered static upstream failover for safe request methods,
   with socket tests proving `GET` can fall through to the next configured
   upstream while unsafe methods are not replayed.

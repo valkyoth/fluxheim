@@ -91,13 +91,19 @@ fn native_tls_fixture() -> NativeTlsFixture {
 }
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+static NATIVE_TLS_TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 fn unique_temp_dir(label: &str) -> std::path::PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path =
-        std::env::temp_dir().join(format!("fluxheim-{label}-{}-{nanos}", std::process::id()));
+    let counter = NATIVE_TLS_TEMP_DIR_COUNTER.fetch_add(1, Ordering::AcqRel);
+    let path = std::env::temp_dir().join(format!(
+        "fluxheim-{label}-{}-{nanos}-{counter}",
+        std::process::id()
+    ));
     std::fs::create_dir(&path).unwrap();
     path
 }
@@ -939,6 +945,45 @@ fn native_proxy_config_rejects_mixed_static_ip_tls_without_sni() {
         ..Default::default()
     };
 
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy)
+    );
+}
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+#[test]
+fn native_proxy_config_rejects_invalid_upstream_tls_material_policy() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("localhost:3000".to_owned()),
+        upstream_ca_path: Some(std::path::PathBuf::from("/tmp/upstream-ca.pem")),
+        ..Default::default()
+    };
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy)
+    );
+
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("localhost:3000".to_owned()),
+        upstream_tls: true,
+        upstream_sni: Some("localhost".to_owned()),
+        upstream_verify_cert: false,
+        upstream_verify_hostname: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy)
+    );
+
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("localhost:3000".to_owned()),
+        upstream_tls: true,
+        upstream_sni: Some("localhost".to_owned()),
+        upstream_client_cert_path: Some(std::path::PathBuf::from("/tmp/client.pem")),
+        ..Default::default()
+    };
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
         Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy)

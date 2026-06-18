@@ -52,6 +52,10 @@ represented and tested through Fluxheim-owned connector code.
   upstream is IP-addressed with certificate verification enabled and no explicit
   `upstream_sni`, matching the validated config contract and avoiding silent
   hostname-verification downgrades.
+- The native HTTP/1 proxy builder now mirrors the config loader's upstream TLS
+  material checks so crate-level callers cannot silently ignore a CA bundle,
+  one-sided client certificate/key material, or inconsistent
+  `upstream_verify_cert` / `upstream_verify_hostname` settings.
 - OpenSSL-only native HTTP/1 server-plan tests now assert the same TLS policy
   failure reason as rustls builds instead of treating OpenSSL as an unsupported
   TLS backend.

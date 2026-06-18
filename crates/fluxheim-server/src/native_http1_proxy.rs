@@ -96,6 +96,13 @@ impl NativeHttp1Proxy {
         if !proxy.has_configured_upstream() {
             return Ok(None);
         }
+        if !proxy.upstream_tls
+            && (proxy.upstream_ca_path.is_some()
+                || proxy.upstream_client_cert_path.is_some()
+                || proxy.upstream_client_key_path.is_some())
+        {
+            return Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy);
+        }
         #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
         if proxy.upstream_tls {
             return Err(NativeHttp1ProxyConfigError::UpstreamTls);

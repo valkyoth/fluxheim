@@ -49,6 +49,19 @@ impl NativeHttp1UpstreamTls {
         if !proxy.upstream_tls {
             return Ok(None);
         }
+        if !proxy.upstream_verify_cert && proxy.upstream_verify_hostname {
+            return Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy);
+        }
+        if !proxy.upstream_verify_cert && proxy.upstream_ca_path.is_some() {
+            return Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy);
+        }
+        match (
+            &proxy.upstream_client_cert_path,
+            &proxy.upstream_client_key_path,
+        ) {
+            (Some(_), Some(_)) | (None, None) => {}
+            _ => return Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy),
+        }
         if proxy.upstream_verify_cert
             && proxy.upstream_sni.is_none()
             && configured_upstreams_contain_ip_literal(proxy)
