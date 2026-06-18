@@ -2,16 +2,30 @@ use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
+#[cfg(feature = "tls-rustls-backend")]
 use rustls::client::WebPkiServerVerifier;
+#[cfg(feature = "tls-rustls-backend")]
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+#[cfg(feature = "tls-rustls-backend")]
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime, pem::PemObject};
+#[cfg(feature = "tls-rustls-backend")]
 use rustls::{
     CertificateError, ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore,
     SignatureScheme,
 };
 use tokio::net::TcpStream;
+#[cfg(feature = "tls-rustls-backend")]
 use tokio_rustls::TlsConnector;
 use zeroize::Zeroizing;
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+use openssl::pkey::PKey;
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+use openssl::x509::{X509, store::X509StoreBuilder};
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+use tokio_openssl::SslStream;
 
 use crate::native_http1_client::NativeHttp1Stream;
 use crate::{NativeHttp1Error, NativeHttp1ProxyConfigError};
@@ -22,7 +36,10 @@ pub struct NativeHttp1UpstreamTls {
     verify_cert: bool,
     verify_hostname: bool,
     alternative_cn: Option<Arc<str>>,
-    connector: TlsConnector,
+    #[cfg(feature = "tls-rustls-backend")]
+    rustls: TlsConnector,
+    #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+    openssl: Arc<SslConnector>,
 }
 
 impl NativeHttp1UpstreamTls {
@@ -39,14 +56,19 @@ impl NativeHttp1UpstreamTls {
             return Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy);
         }
 
-        let connector =
-            build_connector(proxy).map_err(|_| NativeHttp1ProxyConfigError::UpstreamTlsPolicy)?;
         Ok(Some(Self {
             sni: proxy.upstream_sni.as_deref().map(Arc::from),
             verify_cert: proxy.upstream_verify_cert,
             verify_hostname: proxy.upstream_verify_hostname,
             alternative_cn: proxy.upstream_alternative_cn.as_deref().map(Arc::from),
-            connector,
+            #[cfg(feature = "tls-rustls-backend")]
+            rustls: build_rustls_connector(proxy)
+                .map_err(|_| NativeHttp1ProxyConfigError::UpstreamTlsPolicy)?,
+            #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+            openssl: Arc::new(
+                build_openssl_connector(proxy)
+                    .map_err(|_| NativeHttp1ProxyConfigError::UpstreamTlsPolicy)?,
+            ),
         }))
     }
 
@@ -55,10 +77,83 @@ impl NativeHttp1UpstreamTls {
         stream: TcpStream,
         upstream_authority: &str,
     ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
+        #[cfg(feature = "tls-rustls-backend")]
+        {
+            return self.connect_rustls(stream, upstream_authority).await;
+        }
+        #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+        {
+            self.connect_openssl(stream, upstream_authority).await
+        }
+    }
+
+    #[cfg(feature = "tls-rustls-backend")]
+    async fn connect_rustls(
+        &self,
+        stream: TcpStream,
+        upstream_authority: &str,
+    ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
         let server_name = upstream_tls_server_name(self.sni.as_deref(), upstream_authority)?;
         let stream = self
-            .connector
+            .rustls
             .connect(server_name, stream)
+            .await
+            .map_err(|error| {
+                NativeHttp1Error::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("native HTTP/1 upstream TLS handshake failed: {error}"),
+                ))
+            })?;
+        Ok(Box::new(stream) as NativeHttp1Stream)
+    }
+
+    #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+    async fn connect_openssl(
+        &self,
+        stream: TcpStream,
+        upstream_authority: &str,
+    ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
+        let sni = upstream_tls_openssl_sni(self.sni.as_deref(), upstream_authority);
+        let mut config = self.openssl.configure().map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("native HTTP/1 upstream TLS configure failed: {error}"),
+            ))
+        })?;
+
+        if sni.is_empty() {
+            config.set_use_server_name_indication(false);
+            config.set_verify(SslVerifyMode::NONE);
+        } else if self.verify_cert {
+            if self.verify_hostname {
+                let check_host = self.alternative_cn.as_deref().unwrap_or(&sni);
+                config.param_mut().set_host(check_host).map_err(|error| {
+                    NativeHttp1Error::Io(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("native HTTP/1 upstream TLS hostname policy failed: {error}"),
+                    ))
+                })?;
+            }
+            config.set_verify(SslVerifyMode::PEER);
+        } else {
+            config.set_verify(SslVerifyMode::NONE);
+        }
+        config.set_verify_hostname(false);
+
+        let ssl = config.into_ssl(&sni).map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("native HTTP/1 upstream TLS configure failed: {error}"),
+            ))
+        })?;
+        let mut stream = SslStream::new(ssl, stream).map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("native HTTP/1 upstream TLS stream setup failed: {error}"),
+            ))
+        })?;
+        std::pin::Pin::new(&mut stream)
+            .connect()
             .await
             .map_err(|error| {
                 NativeHttp1Error::Io(io::Error::new(
@@ -107,7 +202,10 @@ impl PartialEq for NativeHttp1UpstreamTls {
 
 impl Eq for NativeHttp1UpstreamTls {}
 
-fn build_connector(proxy: &fluxheim_config::ProxyConfig) -> Result<TlsConnector, NativeHttp1Error> {
+#[cfg(feature = "tls-rustls-backend")]
+fn build_rustls_connector(
+    proxy: &fluxheim_config::ProxyConfig,
+) -> Result<TlsConnector, NativeHttp1Error> {
     ensure_rustls_provider_installed()?;
     let roots = Arc::new(root_store(proxy.upstream_ca_path.as_deref())?);
     let builder = ClientConfig::builder_with_protocol_versions(&[
@@ -166,11 +264,157 @@ fn build_connector(proxy: &fluxheim_config::ProxyConfig) -> Result<TlsConnector,
     Ok(TlsConnector::from(Arc::new(config)))
 }
 
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+fn build_openssl_connector(
+    proxy: &fluxheim_config::ProxyConfig,
+) -> Result<SslConnector, NativeHttp1Error> {
+    let mut builder = SslConnector::builder(SslMethod::tls_client()).map_err(|error| {
+        NativeHttp1Error::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("native HTTP/1 upstream TLS connector setup failed: {error}"),
+        ))
+    })?;
+    if let Some(ca_path) = proxy.upstream_ca_path.as_deref() {
+        let certs = X509::stack_from_pem(&read_upstream_tls_file(ca_path)?).map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "failed to parse upstream CA bundle {}: {error}",
+                    ca_path.display()
+                ),
+            ))
+        })?;
+        if certs.is_empty() {
+            return Err(NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "upstream CA bundle {} contains no certificates",
+                    ca_path.display()
+                ),
+            )));
+        }
+        let mut store = X509StoreBuilder::new().map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("native HTTP/1 upstream TLS trust store setup failed: {error}"),
+            ))
+        })?;
+        for cert in certs {
+            store.add_cert(cert).map_err(|error| {
+                NativeHttp1Error::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "failed to add upstream CA bundle {}: {error}",
+                        ca_path.display()
+                    ),
+                ))
+            })?;
+        }
+        builder.set_cert_store(store.build());
+    } else {
+        builder.set_default_verify_paths().map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("failed to load native upstream TLS trust roots: {error}"),
+            ))
+        })?;
+    }
+
+    if let (Some(cert_path), Some(key_path)) = (
+        proxy.upstream_client_cert_path.as_deref(),
+        proxy.upstream_client_key_path.as_deref(),
+    ) {
+        configure_openssl_client_cert(&mut builder, cert_path, key_path)?;
+    }
+
+    Ok(builder.build())
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+fn configure_openssl_client_cert(
+    builder: &mut openssl::ssl::SslConnectorBuilder,
+    cert_path: &Path,
+    key_path: &Path,
+) -> Result<(), NativeHttp1Error> {
+    let certs = X509::stack_from_pem(&read_upstream_tls_file(cert_path)?).map_err(|error| {
+        NativeHttp1Error::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "failed to parse upstream client certificate {}: {error}",
+                cert_path.display()
+            ),
+        ))
+    })?;
+    let Some((leaf, intermediates)) = certs.split_first() else {
+        return Err(NativeHttp1Error::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "upstream client certificate {} contains no certificates",
+                cert_path.display()
+            ),
+        )));
+    };
+    let key_contents = Zeroizing::new(read_upstream_tls_file(key_path)?);
+    let key = PKey::private_key_from_pem(&key_contents).map_err(|error| {
+        NativeHttp1Error::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "failed to parse upstream client private key {}: {error}",
+                key_path.display()
+            ),
+        ))
+    })?;
+    builder.set_certificate(leaf).map_err(|error| {
+        NativeHttp1Error::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "failed to configure upstream client certificate {}: {error}",
+                cert_path.display()
+            ),
+        ))
+    })?;
+    for cert in intermediates {
+        builder
+            .add_extra_chain_cert(cert.clone())
+            .map_err(|error| {
+                NativeHttp1Error::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "failed to configure upstream client certificate chain {}: {error}",
+                        cert_path.display()
+                    ),
+                ))
+            })?;
+    }
+    builder.set_private_key(&key).map_err(|error| {
+        NativeHttp1Error::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "failed to configure upstream client private key {}: {error}",
+                key_path.display()
+            ),
+        ))
+    })?;
+    Ok(())
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+fn upstream_tls_openssl_sni(configured: Option<&str>, upstream_authority: &str) -> String {
+    configured
+        .map(str::to_owned)
+        .or_else(|| {
+            let host = fluxheim_config::config_net::upstream_host(upstream_authority)?;
+            host.parse::<std::net::IpAddr>().is_err().then_some(host)
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(feature = "tls-rustls-backend")]
 fn ensure_rustls_provider_installed() -> Result<(), NativeHttp1Error> {
     let provider = {
         #[cfg(feature = "tls-rustls-fips")]
         {
-            rustls::crypto::aws_lc_rs::default_fips_provider()
+            rustls::crypto::default_fips_provider()
         }
         #[cfg(not(feature = "tls-rustls-fips"))]
         {
@@ -186,6 +430,7 @@ fn ensure_rustls_provider_installed() -> Result<(), NativeHttp1Error> {
     }
 }
 
+#[cfg(feature = "tls-rustls-backend")]
 fn root_store(ca_path: Option<&Path>) -> Result<RootCertStore, NativeHttp1Error> {
     let mut roots = RootCertStore::empty();
     if let Some(path) = ca_path {
@@ -227,6 +472,7 @@ fn root_store(ca_path: Option<&Path>) -> Result<RootCertStore, NativeHttp1Error>
     Ok(roots)
 }
 
+#[cfg(feature = "tls-rustls-backend")]
 fn certificates_from_file(
     path: &Path,
     label: &str,
@@ -249,6 +495,7 @@ fn certificates_from_file(
     Ok(certs)
 }
 
+#[cfg(feature = "tls-rustls-backend")]
 fn client_cert_key(
     cert_path: &Path,
     key_path: &Path,
@@ -267,6 +514,7 @@ fn client_cert_key(
     Ok((certs, key))
 }
 
+#[cfg(feature = "tls-rustls-backend")]
 fn verification_mode(proxy: &fluxheim_config::ProxyConfig) -> RustlsVerificationMode {
     if !proxy.upstream_verify_cert {
         RustlsVerificationMode::SkipAll
@@ -277,6 +525,7 @@ fn verification_mode(proxy: &fluxheim_config::ProxyConfig) -> RustlsVerification
     }
 }
 
+#[cfg(feature = "tls-rustls-backend")]
 fn upstream_tls_server_name(
     configured: Option<&str>,
     upstream_authority: &str,
@@ -303,6 +552,7 @@ fn upstream_tls_server_name(
     )))
 }
 
+#[cfg(feature = "tls-rustls-backend")]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum RustlsVerificationMode {
     Full,
@@ -310,6 +560,7 @@ enum RustlsVerificationMode {
     SkipAll,
 }
 
+#[cfg(feature = "tls-rustls-backend")]
 #[derive(Debug)]
 struct NativeRustlsVerifier {
     delegate: Arc<WebPkiServerVerifier>,
@@ -317,6 +568,7 @@ struct NativeRustlsVerifier {
     alternative_name: Option<ServerName<'static>>,
 }
 
+#[cfg(feature = "tls-rustls-backend")]
 impl ServerCertVerifier for NativeRustlsVerifier {
     fn verify_server_cert(
         &self,

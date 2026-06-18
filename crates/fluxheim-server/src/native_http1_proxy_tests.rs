@@ -10,7 +10,7 @@ use crate::{
     native_http1_test_utils::read_request_head, serve_native_http1_listener,
 };
 
-#[cfg(feature = "tls-rustls-backend")]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 struct NativeTlsFixture {
     ca_path: std::path::PathBuf,
     directory: std::path::PathBuf,
@@ -18,7 +18,7 @@ struct NativeTlsFixture {
     key_pem: String,
 }
 
-#[cfg(feature = "tls-rustls-backend")]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 fn native_tls_fixture() -> NativeTlsFixture {
     use rcgen::{
         BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
@@ -56,7 +56,7 @@ fn native_tls_fixture() -> NativeTlsFixture {
     }
 }
 
-#[cfg(feature = "tls-rustls-backend")]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 fn unique_temp_dir(label: &str) -> std::path::PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -187,6 +187,43 @@ async fn tls_upstream(chain_pem: String, key_pem: String) -> std::net::SocketAdd
     tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut stream = acceptor.accept(stream).await.unwrap();
+        let request = String::from_utf8(read_request_head(&mut stream).await).unwrap();
+        assert!(request.starts_with("GET /secure HTTP/1.1\r\n"));
+        assert!(request.contains("host: proxy.test\r\n"));
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-length: 16\r\nx-origin: tls\r\n\r\nhello tls native",
+            )
+            .await
+            .unwrap();
+    });
+    addr
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+async fn tls_upstream(chain_pem: String, key_pem: String) -> std::net::SocketAddr {
+    use openssl::pkey::PKey;
+    use openssl::ssl::{SslAcceptor, SslMethod};
+    use openssl::x509::X509;
+    use tokio_openssl::SslStream;
+
+    let certs = X509::stack_from_pem(chain_pem.as_bytes()).unwrap();
+    let (leaf, intermediates) = certs.split_first().unwrap();
+    let key = PKey::private_key_from_pem(key_pem.as_bytes()).unwrap();
+    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls_server()).unwrap();
+    builder.set_certificate(leaf).unwrap();
+    for cert in intermediates {
+        builder.add_extra_chain_cert(cert.clone()).unwrap();
+    }
+    builder.set_private_key(&key).unwrap();
+    let acceptor = Arc::new(builder.build());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let ssl = openssl::ssl::Ssl::new(acceptor.context()).unwrap();
+        let mut stream = SslStream::new(ssl, stream).unwrap();
+        std::pin::Pin::new(&mut stream).accept().await.unwrap();
         let request = String::from_utf8(read_request_head(&mut stream).await).unwrap();
         assert!(request.starts_with("GET /secure HTTP/1.1\r\n"));
         assert!(request.contains("host: proxy.test\r\n"));
@@ -381,7 +418,7 @@ async fn native_proxy_maps_upstream_timeout_to_gateway_timeout() {
     assert!(response.ends_with("gateway timeout\n"));
 }
 
-#[cfg(feature = "tls-rustls-backend")]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 #[tokio::test]
 async fn native_proxy_forwards_to_tls_upstream_with_ca_and_sni() {
     let fixture = native_tls_fixture();
@@ -502,12 +539,12 @@ fn native_proxy_config_rejects_unsupported_upstream_features() {
         upstream_tls: true,
         ..Default::default()
     };
-    #[cfg(not(feature = "tls-rustls-backend"))]
+    #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
         Err(NativeHttp1ProxyConfigError::UpstreamTls)
     );
-    #[cfg(feature = "tls-rustls-backend")]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
         Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy)
@@ -533,7 +570,7 @@ fn native_proxy_config_rejects_unsupported_upstream_features() {
     );
 }
 
-#[cfg(feature = "tls-rustls-backend")]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 #[test]
 fn native_proxy_config_rejects_mixed_static_ip_tls_without_sni() {
     let proxy = fluxheim_config::ProxyConfig {

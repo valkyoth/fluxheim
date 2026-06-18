@@ -13,6 +13,9 @@ privacy-mode = []
 tls-rustls-backend = ["dep:rustls", "dep:rustls-native-certs", "dep:tokio-rustls", "rustls/ring"]
 tls-rustls = ["tls-rustls-backend", "rustls/ring"]
 tls-rustls-fips = ["tls-rustls-backend", "rustls/fips"]
+tls-openssl-backend = ["dep:openssl", "dep:tokio-openssl"]
+tls-openssl = ["tls-openssl-backend"]
+tls-openssl-fips = ["tls-openssl"]
 
 [dependencies]
 bytes = "1.11.1"
@@ -23,9 +26,11 @@ h2 = "0.4.15"
 http = "1.4.2"
 httpdate = "1.0.3"
 log = "0.4.32"
+openssl = { version = "0.10.81", optional = true }
 rustls = { version = "0.23.40", optional = true }
 rustls-native-certs = { version = "0.8.3", optional = true }
 tokio = { version = "1.52.3", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tokio-openssl = { version = "0.6.5", optional = true }
 tokio-rustls = { version = "0.26.4", optional = true }
 zeroize = "1.8.2"
 

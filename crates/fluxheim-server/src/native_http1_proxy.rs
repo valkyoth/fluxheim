@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-#[cfg(feature = "tls-rustls-backend")]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::NativeHttp1UpstreamTls;
 use crate::{NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1Upstream};
 
@@ -96,7 +96,7 @@ impl NativeHttp1Proxy {
         if !proxy.has_configured_upstream() {
             return Ok(None);
         }
-        #[cfg(not(feature = "tls-rustls-backend"))]
+        #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
         if proxy.upstream_tls {
             return Err(NativeHttp1ProxyConfigError::UpstreamTls);
         }
@@ -121,11 +121,11 @@ impl NativeHttp1Proxy {
         let upstreams = configured_native_upstreams(proxy)
             .ok_or(NativeHttp1ProxyConfigError::MissingUpstream)?;
         let mut native_upstreams = Vec::with_capacity(upstreams.len());
-        #[cfg(feature = "tls-rustls-backend")]
+        #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
         let tls = NativeHttp1UpstreamTls::from_proxy_config(proxy)?;
         for upstream in upstreams {
             let mut native_upstream = NativeHttp1Upstream::from_policy(upstream, policy);
-            #[cfg(feature = "tls-rustls-backend")]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
             if let Some(tls) = tls.clone() {
                 native_upstream = native_upstream.with_tls(tls);
             }

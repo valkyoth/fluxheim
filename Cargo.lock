@@ -1215,11 +1215,13 @@ dependencies = [
  "http",
  "httpdate",
  "log",
+ "openssl",
  "rcgen",
  "rustix",
  "rustls",
  "rustls-native-certs 0.8.4",
  "tokio",
+ "tokio-openssl",
  "tokio-rustls",
  "zeroize",
 ]

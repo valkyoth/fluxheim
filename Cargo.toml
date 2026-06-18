@@ -96,13 +96,14 @@ tls-rustls-iso19790 = ["tls-rustls-fips"]
 tls-openssl = [
     "tls",
     "fluxheim-config/tls-openssl",
+    "fluxheim-server/tls-openssl",
     "fluxheim-tls/tls-openssl",
     "fluxheim-load-balancer?/tls-openssl-backend",
     "pingora/openssl",
     "dep:openssl",
     "dep:tokio-openssl",
 ]
-tls-openssl-fips = ["tls-openssl", "dep:fluxheim-openssl-fips-support", "dep:openssl", "fluxheim-config/tls-openssl-fips", "fluxheim-tls/tls-openssl-fips"]
+tls-openssl-fips = ["tls-openssl", "dep:fluxheim-openssl-fips-support", "dep:openssl", "fluxheim-config/tls-openssl-fips", "fluxheim-server/tls-openssl-fips", "fluxheim-tls/tls-openssl-fips"]
 tls-openssl-iso19790 = ["tls-openssl-fips"]
 acme = [
     "tls",

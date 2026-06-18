@@ -7,7 +7,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
-#[cfg(feature = "tls-rustls-backend")]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::NativeHttp1UpstreamTls;
 use crate::native_http1_forwarded::{
     valid_upstream_header_value, valid_upstream_request_header, write_owned_proxy_headers,
@@ -31,7 +31,7 @@ pub struct NativeHttp1Upstream {
     write_timeout: Duration,
     max_head_bytes: usize,
     max_body_bytes: usize,
-    #[cfg(feature = "tls-rustls-backend")]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
     tls: Option<NativeHttp1UpstreamTls>,
     pool: Arc<NativeHttp1Pool>,
 }
@@ -68,11 +68,11 @@ impl std::fmt::Debug for NativeHttp1Upstream {
             .field("max_head_bytes", &self.max_head_bytes)
             .field("max_body_bytes", &self.max_body_bytes)
             .field("tls", {
-                #[cfg(feature = "tls-rustls-backend")]
+                #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
                 {
                     &self.tls
                 }
-                #[cfg(not(feature = "tls-rustls-backend"))]
+                #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
                 {
                     &Option::<()>::None
                 }
@@ -92,11 +92,11 @@ impl PartialEq for NativeHttp1Upstream {
             && self.max_head_bytes == other.max_head_bytes
             && self.max_body_bytes == other.max_body_bytes
             && {
-                #[cfg(feature = "tls-rustls-backend")]
+                #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
                 {
                     self.tls == other.tls
                 }
-                #[cfg(not(feature = "tls-rustls-backend"))]
+                #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
                 {
                     true
                 }
@@ -118,7 +118,7 @@ impl NativeHttp1Upstream {
             write_timeout: Duration::from_secs(30),
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
-            #[cfg(feature = "tls-rustls-backend")]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
             tls: None,
             pool: Arc::new(NativeHttp1Pool::default()),
         }
@@ -132,7 +132,7 @@ impl NativeHttp1Upstream {
             write_timeout: Duration::from_secs(30),
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
-            #[cfg(feature = "tls-rustls-backend")]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
             tls: None,
             pool: Arc::new(NativeHttp1Pool::default()),
         }
@@ -158,7 +158,7 @@ impl NativeHttp1Upstream {
         self
     }
 
-    #[cfg(feature = "tls-rustls-backend")]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
     pub fn with_tls(mut self, tls: NativeHttp1UpstreamTls) -> Self {
         self.tls = Some(tls);
         self
@@ -290,7 +290,7 @@ impl NativeHttp1Upstream {
         let stream = timeout(self.connect_timeout, connect_upstream(&self.authority))
             .await
             .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
-        #[cfg(feature = "tls-rustls-backend")]
+        #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
         if let Some(tls) = &self.tls {
             return timeout(self.connect_timeout, tls.connect(stream, &self.authority))
                 .await

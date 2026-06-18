@@ -11,9 +11,10 @@ behavior when the change improves security or project direction.
 
 ### Added
 
-- Add native rustls upstream TLS support to the staged HTTP/1.1 proxy path in
-  `fluxheim-server`, including explicit SNI, configured CA bundles, optional
-  upstream client certificates, and certificate verification controls.
+- Add native rustls and OpenSSL upstream TLS support to the staged HTTP/1.1
+  proxy path in `fluxheim-server`, including explicit SNI, configured CA
+  bundles, optional upstream client certificates, and certificate verification
+  controls.
 - Add real native HTTPS upstream proxy coverage with an in-test CA and
   localhost SAN leaf certificate.
 - Add native HTTP/1 ordered static upstream failover for safe request methods,
@@ -24,10 +25,8 @@ behavior when the change improves security or project direction.
 
 - Store native HTTP/1 upstream pooled connections as Fluxheim-owned boxed IO
   streams so the same retry/reuse path works for plain TCP and TLS upstreams.
-- Wire root rustls feature aliases into `fluxheim-server` so native upstream
-  TLS is compiled in the same rustls profiles operators use today.
-- Keep OpenSSL-native upstream TLS on the Pingora compatibility path until it
-  has equivalent implementation and tests.
+- Wire root rustls and OpenSSL feature aliases into `fluxheim-server` so native
+  upstream TLS is compiled in the same TLS profiles operators use today.
 - Keep dynamic upstream discovery and advanced load-balancer policy on the
   Pingora compatibility path; the native HTTP/1 path now accepts only plain
   static upstream lists as ordered failover candidates.

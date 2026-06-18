@@ -16,7 +16,7 @@ mod native_http1_client;
 mod native_http1_forwarded;
 mod native_http1_plan;
 mod native_http1_proxy;
-#[cfg(feature = "tls-rustls-backend")]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 mod native_http1_tls;
 mod native_http1_upstream_response;
 mod native_http2;
@@ -39,7 +39,7 @@ pub use native_http1::{
 pub use native_http1_client::NativeHttp1Upstream;
 pub use native_http1_plan::NativeHttp1ProxyCandidate;
 pub use native_http1_proxy::{NativeHttp1Proxy, NativeHttp1ProxyConfigError};
-#[cfg(feature = "tls-rustls-backend")]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 pub use native_http1_tls::NativeHttp1UpstreamTls;
 pub use native_http2::{
     NativeHttp2Preview, NativeHttp2SafetyHook, NativeHttp2SafetyReport, NativeHttp2SafetyStatus,
