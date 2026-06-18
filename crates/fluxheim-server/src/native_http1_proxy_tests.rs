@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -36,6 +37,22 @@ where
     addr
 }
 
+async fn read_request_head(stream: &mut TcpStream) -> Vec<u8> {
+    let mut request = Vec::new();
+    let mut chunk = [0u8; 1024];
+    loop {
+        let read = stream.read(&mut chunk).await.unwrap();
+        if read == 0 {
+            break;
+        }
+        request.extend_from_slice(&chunk[..read]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    request
+}
+
 async fn proxy_listener(upstream: std::net::SocketAddr) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -55,6 +72,41 @@ async fn proxy_listener(upstream: std::net::SocketAddr) -> std::net::SocketAddr 
         let _ = shutdown_tx.send(());
     });
     addr
+}
+
+async fn pooled_proxy_listener(upstream: std::net::SocketAddr) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let proxy = Arc::new(NativeHttp1Proxy::new(
+        NativeHttp1Upstream::new(upstream.to_string()).with_pool_max_idle(1),
+    ));
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        serve_native_http1_listener(listener, DownstreamHttp1Policy::default(), proxy, async {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .unwrap();
+    });
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let _ = shutdown_tx.send(());
+    });
+    addr
+}
+
+async fn downstream_get(proxy: std::net::SocketAddr, path: &str) -> String {
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+    client
+        .write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: proxy.test\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.unwrap();
+    String::from_utf8(response).unwrap()
 }
 
 #[tokio::test]
@@ -85,6 +137,43 @@ async fn native_proxy_forwards_downstream_request_to_upstream() {
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.contains("x-origin: native\r\n"));
     assert!(response.ends_with("hello native"));
+}
+
+#[tokio::test]
+async fn native_proxy_reuses_origin_connection_for_separate_downstream_clients() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream = listener.local_addr().unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let accepted_for_task = Arc::clone(&accepted);
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        accepted_for_task.fetch_add(1, Ordering::AcqRel);
+
+        let first = String::from_utf8(read_request_head(&mut stream).await).unwrap();
+        assert!(first.starts_with("GET /one HTTP/1.1\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 3\r\n\r\none")
+            .await
+            .unwrap();
+
+        let second = String::from_utf8(read_request_head(&mut stream).await).unwrap();
+        assert!(second.starts_with("GET /two HTTP/1.1\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 3\r\n\r\ntwo")
+            .await
+            .unwrap();
+    });
+    let proxy = pooled_proxy_listener(upstream).await;
+
+    let first = downstream_get(proxy, "/one").await;
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("one"));
+
+    let second = downstream_get(proxy, "/two").await;
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.ends_with("two"));
+
+    assert_eq!(accepted.load(Ordering::Acquire), 1);
 }
 
 #[tokio::test]

@@ -14,6 +14,8 @@ connections under bounded pool controls.
   into native HTTP/1 proxy candidates.
 - Added native pool idle-age enforcement from `proxy.upstream_idle_timeout_secs`.
 - Added real socket tests proving safe connection reuse and idle expiry.
+- Added a proxy-listener regression proving two separate downstream clients can
+  reuse one safe pooled origin connection.
 
 ## Hardened
 
