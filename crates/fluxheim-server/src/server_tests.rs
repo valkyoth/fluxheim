@@ -59,6 +59,7 @@ fn downstream_http2_policy_uses_hardened_defaults() {
         policy.response_write_lifetime(),
         std::time::Duration::from_secs(30)
     );
+    assert_eq!(policy.handler_timeout(), std::time::Duration::from_secs(30));
     assert_eq!(policy.max_concurrent_streams(), 32);
     assert_eq!(policy.initial_window_size(), 64 * 1024);
     assert_eq!(policy.max_frame_size(), 16 * 1024);

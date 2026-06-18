@@ -25,8 +25,17 @@ behavior when the change improves security or project direction.
 - Add an explicit downstream HTTP/2 response-write lifetime budget and wrap the
   whole response send path in one absolute timeout, so flow-control window holds
   cannot keep a response write alive indefinitely.
+- Add an explicit native HTTP/2 handler execution timeout so slow handler work
+  cannot hold a stream indefinitely between request-body drain and response
+  write.
 - Send response DATA through h2 capacity reservation/polling instead of
   unbounded implicit buffering.
+- Reject HTTP/2-prohibited response headers and trailers before sending
+  responses from the native HTTP/2 primitive.
+- Zeroize collected native HTTP/2 request bodies on drop and preallocate the
+  request-body buffer with a bounded hint.
+- Treat a zero-capacity h2 send-side wakeup as a closed response-capacity path
+  to avoid a defensive spin loop.
 - Advance the native HTTP/2 preview gate: response-write lifetime and
   trailer/gRPC preservation are now satisfied; pre-routing HPACK/header-count
   allocation proof remains the explicit blocker before production cutover.
@@ -35,6 +44,8 @@ behavior when the change improves security or project direction.
 
 - Add a regression test that holds the client response flow-control window and
   confirms the native HTTP/2 response lifetime expires.
+- Add regression tests for handler timeout, prohibited response headers, and
+  empty-body response trailers.
 
 ## 1.6.11 - 2026-06-17
 

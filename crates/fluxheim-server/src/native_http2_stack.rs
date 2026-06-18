@@ -4,11 +4,14 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use bytes::Bytes;
-use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
+use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::oneshot;
+use zeroize::Zeroizing;
 
 use crate::DownstreamHttp2Policy;
+
+const BODY_PREALLOC_HINT_BYTES: usize = 64 * 1024;
 
 #[derive(Debug)]
 pub enum NativeHttp2StackError {
@@ -20,6 +23,8 @@ pub enum NativeHttp2StackError {
     BodyTooLarge { limit: usize },
     BodyData(h2::Error),
     BodyTrailers(h2::Error),
+    HandlerTimeout,
+    ProhibitedResponseHeader { name: String },
     ResponseBuild(http::Error),
     SendResponse(h2::Error),
     ResponseWriteTimeout,
@@ -46,6 +51,13 @@ impl std::fmt::Display for NativeHttp2StackError {
             Self::BodyTrailers(error) => {
                 write!(formatter, "native HTTP/2 body trailer read failed: {error}")
             }
+            Self::HandlerTimeout => write!(formatter, "native HTTP/2 handler timed out"),
+            Self::ProhibitedResponseHeader { name } => {
+                write!(
+                    formatter,
+                    "native HTTP/2 response includes prohibited header {name:?}"
+                )
+            }
             Self::ResponseBuild(error) => {
                 write!(formatter, "native HTTP/2 response build failed: {error}")
             }
@@ -69,7 +81,7 @@ pub struct NativeHttp2Request {
     pub method: Method,
     pub uri: Uri,
     pub headers: HeaderMap,
-    pub body: Vec<u8>,
+    pub body: Zeroizing<Vec<u8>>,
     pub trailers: Option<HeaderMap>,
 }
 
@@ -212,21 +224,29 @@ where
     let method = request.method().clone();
     let uri = request.uri().clone();
     let headers = request.headers().clone();
+    let body_capacity_hint = request_body_capacity_hint(request.headers(), policy.max_body_bytes());
     let (body, trailers) = tokio::time::timeout(
         policy.request_body_timeout(),
-        drain_request_body(request.body_mut(), policy.max_body_bytes()),
+        drain_request_body(
+            request.body_mut(),
+            policy.max_body_bytes(),
+            body_capacity_hint,
+        ),
     )
     .await
     .map_err(|_| NativeHttp2StackError::BodyReadTimeout)??;
-    let response = handler
-        .handle(NativeHttp2Request {
+    let response = tokio::time::timeout(
+        policy.handler_timeout(),
+        handler.handle(NativeHttp2Request {
             method,
             uri,
             headers,
             body,
             trailers,
-        })
-        .await;
+        }),
+    )
+    .await
+    .map_err(|_| NativeHttp2StackError::HandlerTimeout)?;
     tokio::time::timeout(
         policy.response_write_lifetime(),
         send_native_http2_response(respond, response),
@@ -297,9 +317,10 @@ async fn drive_connection<T>(
 async fn drain_request_body(
     body: &mut h2::RecvStream,
     max_body_bytes: usize,
-) -> Result<(Vec<u8>, Option<HeaderMap>), NativeHttp2StackError> {
+    capacity_hint: usize,
+) -> Result<(Zeroizing<Vec<u8>>, Option<HeaderMap>), NativeHttp2StackError> {
     let mut total = 0usize;
-    let mut buffered = Vec::new();
+    let mut buffered = Zeroizing::new(Vec::with_capacity(capacity_hint));
     while let Some(chunk) = body.data().await {
         let chunk = chunk.map_err(NativeHttp2StackError::BodyData)?;
         let chunk_len = chunk.len();
@@ -322,10 +343,25 @@ async fn drain_request_body(
     Ok((buffered, trailers))
 }
 
+fn request_body_capacity_hint(headers: &HeaderMap, max_body_bytes: usize) -> usize {
+    headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|length| *length <= max_body_bytes)
+        .map_or(max_body_bytes.min(BODY_PREALLOC_HINT_BYTES), |length| {
+            length.min(BODY_PREALLOC_HINT_BYTES)
+        })
+}
+
 async fn send_native_http2_response(
     respond: &mut h2::server::SendResponse<Bytes>,
     response: NativeHttp2Response,
 ) -> Result<(), NativeHttp2StackError> {
+    validate_response_headers(&response.headers)?;
+    if let Some(trailers) = &response.trailers {
+        validate_response_headers(trailers)?;
+    }
     let end_on_headers = response.body.is_empty() && response.trailers.is_none();
     let mut builder = http::Response::builder().status(response.status);
     for (name, value) in &response.headers {
@@ -348,6 +384,24 @@ async fn send_native_http2_response(
     Ok(())
 }
 
+fn validate_response_headers(headers: &HeaderMap) -> Result<(), NativeHttp2StackError> {
+    for name in headers.keys() {
+        if prohibited_http2_response_header(name) {
+            return Err(NativeHttp2StackError::ProhibitedResponseHeader {
+                name: name.as_str().to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn prohibited_http2_response_header(name: &HeaderName) -> bool {
+    matches!(
+        name.as_str(),
+        "connection" | "keep-alive" | "proxy-connection" | "transfer-encoding" | "upgrade"
+    )
+}
+
 async fn send_data_bounded(
     send_stream: &mut h2::SendStream<Bytes>,
     body: Bytes,
@@ -365,6 +419,9 @@ async fn send_data_bounded(
             Poll::Pending => Poll::Pending,
         })
         .await?;
+        if capacity == 0 {
+            return Err(NativeHttp2StackError::ResponseCapacityClosed);
+        }
         let available = capacity.min(body.len() - offset);
         let next_offset = offset + available;
         let chunk = body.slice(offset..next_offset);

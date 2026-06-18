@@ -42,6 +42,7 @@ fn native_http2_preview_preserves_downstream_policy_values() {
     assert_eq!(policy.max_header_count(), 100);
     assert_eq!(policy.max_uri_bytes(), 8 * 1024);
     assert_eq!(policy.max_body_bytes(), 16 * 1024 * 1024);
+    assert_eq!(policy.handler_timeout(), Duration::from_secs(30));
     assert_eq!(policy.response_write_lifetime(), Duration::from_secs(30));
     assert_eq!(policy.max_concurrent_streams(), 32);
     assert_eq!(policy.initial_window_size(), 64 * 1024);
@@ -88,6 +89,28 @@ async fn native_http2_connection_passes_request_trailers_to_handler() {
         observed.lock().unwrap().as_ref(),
         Some(&http::HeaderValue::from_static("0"))
     );
+}
+
+#[tokio::test]
+async fn native_http2_connection_times_out_slow_handler() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let policy = DownstreamHttp2Policy::default().with_handler_timeout(Duration::from_millis(10));
+    let handler = Arc::new(|_request: NativeHttp2Request| async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        NativeHttp2Response::no_content()
+    });
+    let server = tokio::spawn(serve_native_http2_connection(server_io, policy, handler));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    let request = http::Request::builder().uri("/slow").body(()).unwrap();
+
+    let (_response, _send_stream) = client.send_request(request, true).unwrap();
+    let error = server.await.unwrap().unwrap_err();
+
+    assert!(matches!(error, NativeHttp2StackError::HandlerTimeout));
+    client_connection.await.unwrap();
 }
 
 #[tokio::test]
@@ -311,6 +334,63 @@ async fn native_http2_stack_probe_sends_response_trailers() {
     assert_eq!(&data[..], b"ok");
     assert_eq!(trailers.get("grpc-status").unwrap(), "0");
     server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_stack_probe_sends_empty_body_response_trailers() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let response = NativeHttp2Response::new(http::StatusCode::OK, bytes::Bytes::new())
+        .with_trailer(
+            http::HeaderName::from_static("grpc-status"),
+            http::HeaderValue::from_static("0"),
+        );
+    let server = tokio::spawn(native_http2_stack_probe_with_response(
+        server_io,
+        DownstreamHttp2Policy::default(),
+        response,
+    ));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        connection.await.unwrap();
+    });
+    let request = http::Request::builder().uri("/").body(()).unwrap();
+
+    let (response, _send_stream) = client.send_request(request, true).unwrap();
+    let response = response.await.unwrap();
+    let mut body = response.into_body();
+    let trailers = body.trailers().await.unwrap().unwrap();
+
+    assert_eq!(trailers.get("grpc-status").unwrap(), "0");
+    server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_stack_probe_rejects_prohibited_response_headers() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let response = NativeHttp2Response::new(http::StatusCode::OK, bytes::Bytes::new()).with_header(
+        http::header::CONNECTION,
+        http::HeaderValue::from_static("close"),
+    );
+    let server = tokio::spawn(native_http2_stack_probe_with_response(
+        server_io,
+        DownstreamHttp2Policy::default(),
+        response,
+    ));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    let request = http::Request::builder().uri("/").body(()).unwrap();
+
+    let (_response, _send_stream) = client.send_request(request, true).unwrap();
+    let error = server.await.unwrap().unwrap_err();
+
+    assert!(matches!(
+        error,
+        NativeHttp2StackError::ProhibitedResponseHeader { .. }
+    ));
     client_connection.await.unwrap();
 }
 

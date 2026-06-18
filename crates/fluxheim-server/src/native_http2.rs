@@ -1,10 +1,11 @@
 use crate::DownstreamHttp2Policy;
 
-const REQUIRED_HOOKS: [NativeHttp2SafetyHook; 8] = [
+const REQUIRED_HOOKS: [NativeHttp2SafetyHook; 9] = [
     NativeHttp2SafetyHook::HeaderListSize,
     NativeHttp2SafetyHook::HeaderFieldCount,
     NativeHttp2SafetyHook::ConcurrentStreamLimit,
     NativeHttp2SafetyHook::RequestBodyReadTimeout,
+    NativeHttp2SafetyHook::HandlerExecutionTimeout,
     NativeHttp2SafetyHook::ResponseWriteLifetime,
     NativeHttp2SafetyHook::FlowControlWindowBounds,
     NativeHttp2SafetyHook::ResetFloodBound,
@@ -17,6 +18,7 @@ pub enum NativeHttp2SafetyHook {
     HeaderFieldCount,
     ConcurrentStreamLimit,
     RequestBodyReadTimeout,
+    HandlerExecutionTimeout,
     ResponseWriteLifetime,
     FlowControlWindowBounds,
     ResetFloodBound,
@@ -30,6 +32,7 @@ impl NativeHttp2SafetyHook {
             Self::HeaderFieldCount => "header-field-count",
             Self::ConcurrentStreamLimit => "concurrent-stream-limit",
             Self::RequestBodyReadTimeout => "request-body-read-timeout",
+            Self::HandlerExecutionTimeout => "handler-execution-timeout",
             Self::ResponseWriteLifetime => "response-write-lifetime",
             Self::FlowControlWindowBounds => "flow-control-window-bounds",
             Self::ResetFloodBound => "reset-flood-bound",
@@ -107,6 +110,10 @@ impl NativeHttp2Preview {
                 NativeHttp2SafetyReport::satisfied(
                     NativeHttp2SafetyHook::RequestBodyReadTimeout,
                     "native HTTP/2 stack probe wraps the full request-body drain in one absolute deadline.",
+                ),
+                NativeHttp2SafetyReport::satisfied(
+                    NativeHttp2SafetyHook::HandlerExecutionTimeout,
+                    "native HTTP/2 handler execution is wrapped in one absolute deadline.",
                 ),
                 NativeHttp2SafetyReport::satisfied(
                     NativeHttp2SafetyHook::ResponseWriteLifetime,
