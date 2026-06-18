@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-observability"
-version = "1.6.11"
+version = "1.6.12"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -15,7 +15,7 @@ otlp-trace = ["dep:fluxheim-config", "dep:serde_json", "otlp-http"]
 
 [dependencies]
 fluxheim-config = { path = "../fluxheim-config", optional = true }
-getrandom = "0.4.2"
+getrandom = "0.4.3"
 log = "0.4.32"
 prometheus = { version = "0.14.0", optional = true }
 serde_json = { version = "1.0.150", optional = true }

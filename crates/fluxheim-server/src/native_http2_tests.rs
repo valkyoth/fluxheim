@@ -1,5 +1,6 @@
 use super::*;
 use std::future::poll_fn;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[test]
@@ -12,11 +13,7 @@ fn native_http2_preview_starts_blocked_until_all_safety_hooks_exist() {
             .blocking_reports()
             .map(|report| report.hook())
             .collect::<Vec<_>>(),
-        vec![
-            NativeHttp2SafetyHook::HeaderFieldCount,
-            NativeHttp2SafetyHook::ResponseWriteLifetime,
-            NativeHttp2SafetyHook::TrailerAndGrpcPassThrough,
-        ]
+        vec![NativeHttp2SafetyHook::HeaderFieldCount]
     );
 }
 
@@ -45,10 +42,52 @@ fn native_http2_preview_preserves_downstream_policy_values() {
     assert_eq!(policy.max_header_count(), 100);
     assert_eq!(policy.max_uri_bytes(), 8 * 1024);
     assert_eq!(policy.max_body_bytes(), 16 * 1024 * 1024);
+    assert_eq!(policy.response_write_lifetime(), Duration::from_secs(30));
     assert_eq!(policy.max_concurrent_streams(), 32);
     assert_eq!(policy.initial_window_size(), 64 * 1024);
     assert_eq!(policy.max_send_buffer_size(), 256 * 1024);
     assert_eq!(policy.max_pending_accept_reset_streams(), 8);
+}
+
+#[tokio::test]
+async fn native_http2_connection_passes_request_trailers_to_handler() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let observed = Arc::new(Mutex::new(None));
+    let observed_for_handler = observed.clone();
+    let handler = Arc::new(move |request: NativeHttp2Request| {
+        let observed_for_handler = observed_for_handler.clone();
+        async move {
+            let trailers = request.trailers.expect("request trailers");
+            let status = trailers.get("grpc-status").cloned();
+            *observed_for_handler.lock().unwrap() = status;
+            NativeHttp2Response::no_content()
+        }
+    });
+    let server = tokio::spawn(serve_native_http2_connection(
+        server_io,
+        DownstreamHttp2Policy::default(),
+        handler,
+    ));
+    let (client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        connection.await.unwrap();
+    });
+    let mut client = client.ready().await.unwrap();
+    let request = http::Request::builder().uri("/grpc").body(()).unwrap();
+    let (response, mut send_stream) = client.send_request(request, false).unwrap();
+    let mut trailers = http::HeaderMap::new();
+    trailers.insert("grpc-status", http::HeaderValue::from_static("0"));
+
+    send_stream.send_trailers(trailers).unwrap();
+    let response = response.await.unwrap();
+
+    assert_eq!(response.status(), http::StatusCode::NO_CONTENT);
+    server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+    assert_eq!(
+        observed.lock().unwrap().as_ref(),
+        Some(&http::HeaderValue::from_static("0"))
+    );
 }
 
 #[tokio::test]
@@ -241,5 +280,66 @@ async fn native_http2_stack_probe_serves_single_response() {
 
     assert_eq!(response.status(), http::StatusCode::NO_CONTENT);
     server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_stack_probe_sends_response_trailers() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let response = NativeHttp2Response::new(http::StatusCode::OK, bytes::Bytes::from_static(b"ok"))
+        .with_trailer(
+            http::HeaderName::from_static("grpc-status"),
+            http::HeaderValue::from_static("0"),
+        );
+    let server = tokio::spawn(native_http2_stack_probe_with_response(
+        server_io,
+        DownstreamHttp2Policy::default(),
+        response,
+    ));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        connection.await.unwrap();
+    });
+    let request = http::Request::builder().uri("/").body(()).unwrap();
+
+    let (response, _send_stream) = client.send_request(request, true).unwrap();
+    let response = response.await.unwrap();
+    let mut body = response.into_body();
+    let data = body.data().await.unwrap().unwrap();
+    let trailers = body.trailers().await.unwrap().unwrap();
+
+    assert_eq!(&data[..], b"ok");
+    assert_eq!(trailers.get("grpc-status").unwrap(), "0");
+    server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_stack_probe_times_out_response_flow_control_hold() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let policy =
+        DownstreamHttp2Policy::default().with_response_write_lifetime(Duration::from_millis(25));
+    let response = NativeHttp2Response::new(
+        http::StatusCode::OK,
+        bytes::Bytes::from(vec![b'x'; policy.initial_window_size() as usize + 1]),
+    );
+    let server = tokio::spawn(native_http2_stack_probe_with_response(
+        server_io, policy, response,
+    ));
+    let mut builder = h2::client::Builder::new();
+    builder.initial_window_size(1);
+    let (mut client, connection) = builder
+        .handshake::<_, bytes::Bytes>(client_io)
+        .await
+        .unwrap();
+    let client_connection = tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    let request = http::Request::builder().uri("/").body(()).unwrap();
+
+    let (_response, _send_stream) = client.send_request(request, true).unwrap();
+    let error = server.await.unwrap().unwrap_err();
+
+    assert!(matches!(error, NativeHttp2StackError::ResponseWriteTimeout));
     client_connection.await.unwrap();
 }

@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-tls"
-version = "1.6.11"
+version = "1.6.12"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -24,6 +24,6 @@ tls-openssl-fips = [
 fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-openssl-fips-support = { path = "../../vendor/fluxheim-openssl-fips-support", optional = true }
 log = "0.4.32"
-openssl = { version = "0.10.80", optional = true }
+openssl = { version = "0.10.81", optional = true }
 rustls = { version = "0.23.40", optional = true }
 thiserror = "2.0.18"

@@ -7,6 +7,35 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.12 - 2026-06-18
+
+### Added
+
+- Add a reusable native HTTP/2 connection primitive in `fluxheim-server` with
+  handler-owned request/response types, bounded request-body collection, and
+  response trailer support for gRPC-style status propagation.
+- Add native HTTP/2 tests that pass request trailers into the handler and send
+  response trailers back to the client over a real h2 client/server exchange.
+
+### Hardened
+
+- Refresh non-Pingora dependency patches: `getrandom` 0.4.3, `openssl`
+  0.10.81, `brotli` 8.0.4, and `h2` 0.4.15. Keep Pingora pinned at 0.8.0
+  while the 1.6 exit line removes it.
+- Add an explicit downstream HTTP/2 response-write lifetime budget and wrap the
+  whole response send path in one absolute timeout, so flow-control window holds
+  cannot keep a response write alive indefinitely.
+- Send response DATA through h2 capacity reservation/polling instead of
+  unbounded implicit buffering.
+- Advance the native HTTP/2 preview gate: response-write lifetime and
+  trailer/gRPC preservation are now satisfied; pre-routing HPACK/header-count
+  allocation proof remains the explicit blocker before production cutover.
+
+### Tests
+
+- Add a regression test that holds the client response flow-control window and
+  confirms the native HTTP/2 response lifetime expires.
+
 ## 1.6.11 - 2026-06-17
 
 ### Added

@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-compression"
-version = "1.6.11"
+version = "1.6.12"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -14,7 +14,7 @@ gzip = ["dep:flate2"]
 zstd = ["dep:zstd"]
 
 [dependencies]
-brotli = { version = "8.0.3", default-features = false, features = ["std"], optional = true }
+brotli = { version = "8.0.4", default-features = false, features = ["std"], optional = true }
 bytes = "1.11.1"
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"], optional = true }
 fluxheim-common = { path = "../fluxheim-common" }

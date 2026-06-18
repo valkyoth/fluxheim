@@ -108,9 +108,9 @@ impl NativeHttp2Preview {
                     NativeHttp2SafetyHook::RequestBodyReadTimeout,
                     "native HTTP/2 stack probe wraps the full request-body drain in one absolute deadline.",
                 ),
-                NativeHttp2SafetyReport::blocking(
+                NativeHttp2SafetyReport::satisfied(
                     NativeHttp2SafetyHook::ResponseWriteLifetime,
-                    "native HTTP/2 needs an absolute response-write lifetime to prevent flow-control window holds",
+                    "native HTTP/2 response writes are wrapped in one absolute lifetime to prevent flow-control window holds.",
                 ),
                 NativeHttp2SafetyReport::satisfied(
                     NativeHttp2SafetyHook::FlowControlWindowBounds,
@@ -120,9 +120,9 @@ impl NativeHttp2Preview {
                     NativeHttp2SafetyHook::ResetFloodBound,
                     "DownstreamHttp2Policy sets max_pending_accept_reset_streams.",
                 ),
-                NativeHttp2SafetyReport::blocking(
+                NativeHttp2SafetyReport::satisfied(
                     NativeHttp2SafetyHook::TrailerAndGrpcPassThrough,
-                    "native HTTP/2 proxying needs end-to-end trailer and gRPC status parity fixtures",
+                    "native HTTP/2 request/response types preserve trailers, including gRPC status trailers.",
                 ),
             ],
         }

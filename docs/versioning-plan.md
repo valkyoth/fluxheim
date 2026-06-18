@@ -2597,9 +2597,13 @@ Planned `1.6.x` sequence:
   `fluxheim-server` preview gate that records every required safety hook and
   keeps native HTTP/2 cutover blocked until the missing hooks are implemented
   and covered by parity fixtures.
-- `v1.6.12`: native HTTP/2 runtime cutover. Make the Fluxheim-owned HTTP/2 path
-  the default for supported profiles and keep strict fallback rules for any
-  protocol safety hook that is not exposed by the underlying crate.
+- `v1.6.12`: native HTTP/2 runtime hardening. Promote the preview into a
+  reusable `fluxheim-server` HTTP/2 connection primitive with Fluxheim-owned
+  request/response types, explicit response-write lifetime, bounded response
+  DATA capacity handling, and request/response trailer parity. Keep production
+  HTTP/2 cutover blocked until the remaining pre-routing HPACK/header-count
+  allocation proof is implemented or the protocol mode has an equally strong
+  Fluxheim-owned boundary.
 - `v1.6.13`: upstream connector and pooling parity. Replace remaining Pingora
   upstream peer/session/pool behavior with Fluxheim-owned connectors and pools
   for HTTP/1.1, HTTP/2, TLS/mTLS, DNS/file/runtime-discovered backends,

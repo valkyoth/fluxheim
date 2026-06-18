@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-server"
-version = "1.6.11"
+version = "1.6.12"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -16,7 +16,7 @@ bytes = "1.11.1"
 fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-runtime = { path = "../fluxheim-runtime" }
-h2 = "0.4.14"
+h2 = "0.4.15"
 http = "1.4.2"
 httpdate = "1.0.3"
 log = "0.4.32"

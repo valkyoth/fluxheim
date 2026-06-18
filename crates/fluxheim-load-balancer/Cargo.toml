@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-load-balancer"
-version = "1.6.11"
+version = "1.6.12"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -23,9 +23,9 @@ fluxheim-common = { path = "../fluxheim-common" }
 fluxheim-config = { path = "../fluxheim-config", features = ["load-balancer", "proxy"] }
 fluxheim-runtime = { path = "../fluxheim-runtime" }
 futures = "0.3.32"
-getrandom = "0.4.2"
+getrandom = "0.4.3"
 log = "0.4.32"
-openssl = { version = "0.10.76", optional = true }
+openssl = { version = "0.10.81", optional = true }
 pingora = { version = "=0.8.0", default-features = false, features = ["proxy"] }
 ring = "0.17.14"
 rustls = { version = "0.23.40", optional = true }

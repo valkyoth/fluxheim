@@ -55,6 +55,10 @@ fn downstream_http2_policy_uses_hardened_defaults() {
     assert_eq!(policy.max_header_list_size(), 64 * 1024);
     assert_eq!(policy.max_header_count(), 100);
     assert_eq!(policy.max_uri_bytes(), 8 * 1024);
+    assert_eq!(
+        policy.response_write_lifetime(),
+        std::time::Duration::from_secs(30)
+    );
     assert_eq!(policy.max_concurrent_streams(), 32);
     assert_eq!(policy.initial_window_size(), 64 * 1024);
     assert_eq!(policy.max_frame_size(), 16 * 1024);
@@ -85,8 +89,8 @@ fn server_plan_exposes_native_http2_preview_gate() {
     assert_eq!(preview.downstream_policy(), plan.downstream_http2());
     assert!(!preview.is_cutover_ready());
     assert!(preview.blocking_reports().any(|report| {
-        report.hook() == NativeHttp2SafetyHook::ResponseWriteLifetime
-            && report.detail().contains("absolute response-write lifetime")
+        report.hook() == NativeHttp2SafetyHook::HeaderFieldCount
+            && report.detail().contains("pre-routing")
     }));
 }
 

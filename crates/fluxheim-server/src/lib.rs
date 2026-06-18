@@ -39,7 +39,11 @@ pub use native_http1_proxy::{NativeHttp1Proxy, NativeHttp1ProxyConfigError};
 pub use native_http2::{
     NativeHttp2Preview, NativeHttp2SafetyHook, NativeHttp2SafetyReport, NativeHttp2SafetyStatus,
 };
-pub use native_http2_stack::{NativeHttp2StackError, native_http2_stack_probe};
+pub use native_http2_stack::{
+    NativeHttp2Handler, NativeHttp2Request, NativeHttp2Response, NativeHttp2StackError,
+    native_http2_stack_probe, native_http2_stack_probe_with_response,
+    serve_native_http2_connection,
+};
 pub use plan::{RuntimeAdapterKind, ServerPlan};
 pub use process::ProcessSpec;
 pub use proxy_protocol::{ProxyProtocolPolicy, ProxyProtocolTrustedSource};

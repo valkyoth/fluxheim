@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-php-fpm"
-version = "1.6.11"
+version = "1.6.12"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -9,4 +9,4 @@ description = "Internal Fluxheim PHP-FPM protocol and runtime boundary."
 
 [dependencies]
 fluxheim-config = { path = "../fluxheim-config", features = ["php-fpm"] }
-getrandom = "0.4.2"
+getrandom = "0.4.3"
