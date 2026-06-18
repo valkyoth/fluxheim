@@ -718,3 +718,58 @@ fn read_upstream_tls_file(path: &Path) -> Result<Vec<u8>, NativeHttp1Error> {
     }
     Ok(contents)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_temp_dir(label: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("fluxheim-{label}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn upstream_tls_file_reader_rejects_oversized_files() {
+        let directory = unique_temp_dir("native-upstream-tls-large");
+        let path = directory.join("ca.pem");
+        std::fs::write(
+            &path,
+            vec![b'a'; MAX_UPSTREAM_TLS_FILE_BYTES.saturating_add(1) as usize],
+        )
+        .unwrap();
+
+        let error = read_upstream_tls_file(&path).unwrap_err();
+
+        assert!(
+            matches!(&error, NativeHttp1Error::Io(error) if error.kind() == io::ErrorKind::InvalidData),
+            "unexpected error: {error:?}"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn upstream_tls_file_reader_rejects_final_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let directory = unique_temp_dir("native-upstream-tls-symlink");
+        let target = directory.join("target.pem");
+        let link = directory.join("linked.pem");
+        std::fs::write(&target, b"not a real certificate").unwrap();
+        symlink(&target, &link).unwrap();
+
+        let error = read_upstream_tls_file(&link).unwrap_err();
+
+        assert!(
+            matches!(&error, NativeHttp1Error::Io(error) if error.kind() == io::ErrorKind::InvalidInput),
+            "unexpected error: {error:?}"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}

@@ -57,7 +57,8 @@ represented and tested through Fluxheim-owned connector code.
   TLS backend.
 - TLS key, certificate, and CA files loaded by the native path are bounded to
   1 MiB, must be regular files, and are opened with `O_NOFOLLOW` on audited Unix
-  platforms.
+  platforms. The native file reader now has direct tests for oversized-file
+  rejection and final-symlink rejection.
 
 ## Compatibility
 

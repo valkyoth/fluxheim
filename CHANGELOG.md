@@ -25,6 +25,8 @@ behavior when the change improves security or project direction.
 - Add real native upstream TLS hostname-policy coverage for default mismatch
   rejection, `upstream_alternative_cn`, and `upstream_verify_hostname = false`
   across rustls and OpenSSL builds.
+- Add direct native upstream TLS file-reader tests for oversized-file and final
+  symlink rejection.
 - Add native HTTP/1 ordered static upstream failover for safe request methods,
   with socket tests proving `GET` can fall through to the next configured
   upstream while unsafe methods are not replayed.
