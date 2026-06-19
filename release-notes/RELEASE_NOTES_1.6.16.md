@@ -20,6 +20,10 @@ native handler can be marked ready.
   advanced upstream transport settings, per-proxy downstream throttling, or
   advanced load-balancer policy now receive explicit compatibility-only
   reasons from the native proxy builder.
+- Parsed TOML configs now receive the same proxy downstream write and
+  total-response timeout defaults as `ProxyConfig::default()`. This keeps the
+  native cutover readiness gate from treating omitted timeout fields as
+  per-proxy overrides.
 - `ServerPlan` now exposes a native HTTP/1.1 proxy cutover summary with
   `NoProxy`, `NativeReady`, `Mixed`, and `CompatibilityRequired` states. This
   gives the next runtime wiring release a single audited readiness signal
@@ -34,7 +38,11 @@ native handler can be marked ready.
   error-page, upstream-transport, and downstream-policy blockers.
 - Added server-plan tests proving route strip/rewrite and vhost ACME challenge
   routing keep affected proxy paths on the compatibility adapter.
+- Added server-plan coverage for vhost redirects and TOML parsing coverage for
+  proxy downstream timeout defaults.
 - Added server-plan tests for aggregate native HTTP/1.1 cutover readiness.
+- Native HTTP/1.1 TLS proxy tests now clean up temporary PEM fixture
+  directories through a drop guard even if a test assertion panics.
 
 ## Compatibility
 

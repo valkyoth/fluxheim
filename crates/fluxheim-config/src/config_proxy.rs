@@ -134,9 +134,9 @@ pub struct ProxyConfig {
     pub send_timeout_secs: Option<u64>,
     #[serde(default = "default_proxy_downstream_read_timeout_secs")]
     pub downstream_read_timeout_secs: Option<u64>,
-    #[serde(default)]
+    #[serde(default = "default_proxy_downstream_write_timeout_secs")]
     pub downstream_write_timeout_secs: Option<u64>,
-    #[serde(default)]
+    #[serde(default = "default_proxy_downstream_total_response_timeout_secs")]
     pub downstream_total_response_timeout_secs: Option<u64>,
     #[serde(default)]
     pub downstream_min_send_rate_bytes_per_sec: Option<usize>,
@@ -1782,6 +1782,14 @@ fn default_proxy_upstreams_http_refresh_secs() -> u64 {
 
 fn default_proxy_downstream_read_timeout_secs() -> Option<u64> {
     Some(DEFAULT_PROXY_DOWNSTREAM_READ_TIMEOUT_SECS)
+}
+
+fn default_proxy_downstream_write_timeout_secs() -> Option<u64> {
+    Some(DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS)
+}
+
+fn default_proxy_downstream_total_response_timeout_secs() -> Option<u64> {
+    Some(DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS)
 }
 
 fn default_upstream_priority_group_min_active() -> usize {

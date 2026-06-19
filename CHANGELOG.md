@@ -24,6 +24,9 @@ behavior when the change improves security or project direction.
   candidate rows.
 - Log native HTTP/1.1 proxy cutover readiness at startup, including the
   compatibility-only reason for each unsupported proxy path.
+- Align TOML serde defaults for proxy downstream write and total-response
+  timeouts with `ProxyConfig::default()` so native cutover readiness uses the
+  same baseline for parsed production configs and test-built configs.
 
 ### Security
 
@@ -35,6 +38,8 @@ behavior when the change improves security or project direction.
   compatibility blockers so future cutover work cannot silently accept
   unsupported policy layers.
 - Add server-plan tests for aggregate native HTTP/1.1 cutover readiness states.
+- Add TOML parsing coverage for proxy downstream timeout defaults and make
+  native HTTP/1.1 TLS proxy test fixture cleanup panic-safe.
 
 ## 1.6.15 - 2026-06-18
 

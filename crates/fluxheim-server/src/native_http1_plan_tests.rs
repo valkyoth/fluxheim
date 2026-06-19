@@ -308,6 +308,45 @@ fn server_plan_rejects_native_http1_proxy_candidate_with_vhost_routing_policy() 
 }
 
 #[test]
+fn server_plan_rejects_native_http1_proxy_candidate_with_vhost_redirect() {
+    let config = Config {
+        vhosts: vec![VhostConfig {
+            name: "redir.test".to_owned(),
+            hosts: vec!["redir.test".to_owned()],
+            max_request_body_bytes: None,
+            access: Default::default(),
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            tls: Default::default(),
+            acme_challenge: Default::default(),
+            redirect: fluxheim_config::VhostRedirectConfig {
+                enabled: true,
+                to: Some("https://target.example{uri}".to_owned()),
+                ..Default::default()
+            },
+            proxy: fluxheim_config::ProxyConfig {
+                upstreams: vec!["127.0.0.1:3001".to_owned()],
+                ..Default::default()
+            },
+            cache: CacheConfig::default(),
+            compression: None,
+            headers: Default::default(),
+            php: Default::default(),
+            web: Default::default(),
+            routes: Vec::new(),
+        }],
+        ..Default::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::HttpPolicy)
+    );
+}
+
+#[test]
 fn server_plan_rejects_native_http1_proxy_candidate_with_advanced_load_balance_policy() {
     let mut config = Config::default();
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];

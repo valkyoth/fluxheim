@@ -2500,6 +2500,29 @@ fn rejects_too_many_header_append_values() {
 }
 
 #[test]
+fn parses_proxy_downstream_timeout_defaults_from_toml() {
+    let config: Config = toml::from_str(
+        r#"
+            [server]
+            listen = ["127.0.0.1:18080"]
+
+            [proxy]
+            upstream = "origin.example.test:8080"
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.proxy.downstream_write_timeout_secs,
+        Some(DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS)
+    );
+    assert_eq!(
+        config.proxy.downstream_total_response_timeout_secs,
+        Some(DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS)
+    );
+}
+
+#[test]
 fn parses_response_header_policy() {
     let config: Config = toml::from_str(
         r#"

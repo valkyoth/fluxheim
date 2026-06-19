@@ -34,7 +34,7 @@ impl NativeHttp1ProxyCutoverSummary {
         let unsupported = total.saturating_sub(eligible);
         let status = match (total, eligible) {
             (0, _) => NativeHttp1ProxyCutoverStatus::NoProxy,
-            (_, eligible) if eligible == total => NativeHttp1ProxyCutoverStatus::NativeReady,
+            _ if eligible == total => NativeHttp1ProxyCutoverStatus::NativeReady,
             (_, 0) => NativeHttp1ProxyCutoverStatus::CompatibilityRequired,
             _ => NativeHttp1ProxyCutoverStatus::Mixed,
         };

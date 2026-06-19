@@ -21,6 +21,12 @@ struct NativeTlsFixture {
     alternate_key_pem: String,
 }
 
+impl Drop for NativeTlsFixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
+
 fn native_tls_fixture() -> NativeTlsFixture {
     use rcgen::{
         BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
@@ -329,7 +335,6 @@ async fn native_proxy_forwards_to_tls_upstream_with_ca_and_sni() {
     );
     assert!(response.contains("x-origin: tls\r\n"));
     assert!(response.ends_with("hello tls native"));
-    std::fs::remove_dir_all(fixture.directory).unwrap();
 }
 
 #[tokio::test]
@@ -360,7 +365,6 @@ async fn native_proxy_rejects_tls_upstream_hostname_mismatch_by_default() {
         "unexpected response: {response:?}"
     );
     assert!(response.ends_with("bad gateway\n"));
-    std::fs::remove_dir_all(fixture.directory).unwrap();
 }
 
 #[tokio::test]
@@ -393,7 +397,6 @@ async fn native_proxy_accepts_tls_upstream_alternative_name() {
     );
     assert!(response.contains("x-origin: tls\r\n"));
     assert!(response.ends_with("hello tls native"));
-    std::fs::remove_dir_all(fixture.directory).unwrap();
 }
 
 #[tokio::test]
@@ -426,7 +429,6 @@ async fn native_proxy_accepts_tls_upstream_without_hostname_verification() {
     );
     assert!(response.contains("x-origin: tls\r\n"));
     assert!(response.ends_with("hello tls native"));
-    std::fs::remove_dir_all(fixture.directory).unwrap();
 }
 
 #[tokio::test]
@@ -461,7 +463,6 @@ async fn native_proxy_forwards_to_mtls_upstream_with_client_certificate() {
     );
     assert!(response.contains("x-origin: mtls\r\n"));
     assert!(response.ends_with("hello mtls native"));
-    std::fs::remove_dir_all(fixture.directory).unwrap();
 }
 
 #[tokio::test]
@@ -493,5 +494,4 @@ async fn native_proxy_rejects_mtls_upstream_without_client_certificate() {
         "unexpected response: {response:?}"
     );
     assert!(response.ends_with("bad gateway\n"));
-    std::fs::remove_dir_all(fixture.directory).unwrap();
 }
