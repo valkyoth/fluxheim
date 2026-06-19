@@ -26,6 +26,8 @@ behavior when the change improves security or project direction.
   modularity policy target.
 - Split exec active health checks into a small helper module covering command
   launch, environment scrubbing, timeout handling, and exit-status mapping.
+- Split TCP health checks, TCP/TLS handshake setup, ALPN selection, and shared
+  HTTP health-stream connection handling into a transport helper module.
 
 ### Security
 
