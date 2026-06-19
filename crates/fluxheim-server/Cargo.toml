@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-server"
-version = "1.6.16"
+version = "1.6.17"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"

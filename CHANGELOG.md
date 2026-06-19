@@ -7,6 +7,30 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.17 - 2026-06-19
+
+### Changed
+
+- Remove the direct Pingora dependency from the `fluxheim-load-balancer` crate.
+  HTTP health checks now use a Fluxheim-owned bounded HTTP/1.1 probe, and gRPC
+  health checks now use a Fluxheim-owned h2 client probe.
+- Keep TCP, Redis, MySQL, PostgreSQL, exec, passive-health, persistence, and
+  selection logic on the existing native load-balancer code paths.
+- Add `fluxheim-load-balancer` to the Pingora dependency policy so future
+  changes cannot reintroduce Pingora into the load-balancer core unnoticed.
+
+### Security
+
+- Bound native HTTP health-check response headers and bodies independently of
+  Pingora's HTTP session machinery.
+- Preserve TLS handshake timeouts for HTTP/gRPC health checks through the
+  Fluxheim-owned TCP/TLS connector path.
+- Add real listener-backed tests proving native HTTP/1.1 health checks send
+  configured headers, validate JSON responses, and apply degraded health
+  weights.
+- Add a real h2 server test proving native gRPC health checks send the
+  standard health-check request body and accept a `SERVING` response.
+
 ## 1.6.16 - 2026-06-19
 
 ### Changed

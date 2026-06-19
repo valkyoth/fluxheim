@@ -5,19 +5,15 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use pingora::connectors::http::Connector as HttpConnector;
-use pingora::protocols::http::client::HttpSession;
-use pingora::upstreams::peer::{HttpPeer, Peer};
-use pingora::{Error, ErrorType};
+use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use serde_json::Value;
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use fluxheim_common::{FluxError, FluxResult};
 use fluxheim_config::{
     LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedJson,
     LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol, ProxyConfig,
 };
-use pingora::http::{RequestHeader, ResponseHeader};
 
 use super::backend::{FluxHealthCheck, RuntimeBackend as Backend};
 use super::key::backend_key;
@@ -31,6 +27,19 @@ const REDIS_HEALTH_CHECK_REQUEST: &[u8] = b"*1\r\n$4\r\nPING\r\n";
 const REDIS_HEALTH_CHECK_MAX_RESPONSE_BYTES: usize = 64;
 const MYSQL_HEALTH_CHECK_MAX_HANDSHAKE_BYTES: usize = 1024;
 const POSTGRES_HEALTH_CHECK_SSL_REQUEST: &[u8; 8] = b"\x00\x00\x00\x08\x04\xd2\x16/";
+
+trait HealthIo: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T> HealthIo for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+type BoxedHealthIo = Box<dyn HealthIo>;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HealthTlsAlpn {
+    None,
+    Http1,
+    Http2,
+}
 
 pub(super) fn configured_health_check(
     config: &ProxyConfig,
@@ -51,7 +60,8 @@ pub(super) fn configured_health_check(
                     .or(config.connect_timeout_secs)
                     .unwrap_or(1),
             );
-            let tls = configured_tcp_health_check_tls(config).map_err(FluxError::into_io)?;
+            let tls = configured_tcp_health_check_tls(config, HealthTlsAlpn::None)
+                .map_err(FluxError::into_io)?;
             Ok(Box::new(FluxTcpHealthCheck {
                 consecutive_success,
                 consecutive_failure,
@@ -118,14 +128,15 @@ impl FluxHealthCheck for FluxTcpHealthCheck {
         })?
         .map_err(|error| FluxError::io("connect TCP health check upstream", error))?;
         if let Some(tls) = &self.tls {
-            return tokio::time::timeout(self.connect_timeout, tls.handshake(stream))
+            let _stream = tokio::time::timeout(self.connect_timeout, tls.handshake(stream))
                 .await
                 .map_err(|_| {
                     FluxError::timeout(
                         "TLS TCP health check handshake",
                         format!("timeout after {}s", self.connect_timeout.as_secs()),
                     )
-                })?;
+                })??;
+            return Ok(());
         }
         Ok(())
     }
@@ -147,17 +158,17 @@ impl FluxHealthCheck for FluxTcpHealthCheck {
 
 impl FluxTcpHealthCheckTls {
     #[cfg(feature = "tls-rustls-backend")]
-    async fn handshake(&self, stream: tokio::net::TcpStream) -> FluxResult<()> {
+    async fn handshake(&self, stream: tokio::net::TcpStream) -> FluxResult<BoxedHealthIo> {
         let connector = tokio_rustls::TlsConnector::from(self.config.clone());
-        connector
+        let stream = connector
             .connect(self.server_name.clone(), stream)
             .await
             .map_err(|error| FluxError::io("TLS TCP health check handshake failed", error))?;
-        Ok(())
+        Ok(Box::new(stream))
     }
 
     #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
-    async fn handshake(&self, stream: tokio::net::TcpStream) -> FluxResult<()> {
+    async fn handshake(&self, stream: tokio::net::TcpStream) -> FluxResult<BoxedHealthIo> {
         let ssl = self
             .connector
             .configure()
@@ -183,11 +194,11 @@ impl FluxTcpHealthCheckTls {
                     io::Error::other(error.to_string()),
                 )
             })?;
-        Ok(())
+        Ok(Box::new(stream))
     }
 
     #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
-    async fn handshake(&self, _stream: tokio::net::TcpStream) -> FluxResult<()> {
+    async fn handshake(&self, _stream: tokio::net::TcpStream) -> FluxResult<BoxedHealthIo> {
         Err(FluxError::InvalidInput(
             "TLS TCP health checks require a TLS backend feature",
         ))
@@ -196,16 +207,18 @@ impl FluxTcpHealthCheckTls {
 
 fn configured_tcp_health_check_tls(
     config: &ProxyConfig,
+    alpn: HealthTlsAlpn,
 ) -> FluxResult<Option<FluxTcpHealthCheckTls>> {
     if !config.upstream_tls {
         return Ok(None);
     }
-    configured_tcp_health_check_tls_inner(config).map(Some)
+    configured_tcp_health_check_tls_inner(config, alpn).map(Some)
 }
 
 #[cfg(feature = "tls-rustls-backend")]
 fn configured_tcp_health_check_tls_inner(
     config: &ProxyConfig,
+    alpn: HealthTlsAlpn,
 ) -> FluxResult<FluxTcpHealthCheckTls> {
     let server_name =
         rustls::pki_types::ServerName::try_from(config.upstream_sni()).map_err(|error| {
@@ -231,9 +244,14 @@ fn configured_tcp_health_check_tls_inner(
             )
         })?;
     }
-    let config = rustls::ClientConfig::builder()
+    let mut config = rustls::ClientConfig::builder()
         .with_root_certificates(roots)
         .with_no_client_auth();
+    match alpn {
+        HealthTlsAlpn::None => {}
+        HealthTlsAlpn::Http1 => config.alpn_protocols = vec![b"http/1.1".to_vec()],
+        HealthTlsAlpn::Http2 => config.alpn_protocols = vec![b"h2".to_vec()],
+    }
     Ok(FluxTcpHealthCheckTls {
         server_name,
         config: Arc::new(config),
@@ -243,6 +261,7 @@ fn configured_tcp_health_check_tls_inner(
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
 fn configured_tcp_health_check_tls_inner(
     config: &ProxyConfig,
+    alpn: HealthTlsAlpn,
 ) -> FluxResult<FluxTcpHealthCheckTls> {
     let domain = config.upstream_sni();
     if domain.is_empty() {
@@ -263,6 +282,21 @@ fn configured_tcp_health_check_tls_inner(
             io::Error::other(error.to_string()),
         )
     })?;
+    match alpn {
+        HealthTlsAlpn::None => {}
+        HealthTlsAlpn::Http1 => builder.set_alpn_protos(b"\x08http/1.1").map_err(|error| {
+            FluxError::io(
+                "configure OpenSSL TCP health check ALPN",
+                io::Error::other(error.to_string()),
+            )
+        })?,
+        HealthTlsAlpn::Http2 => builder.set_alpn_protos(b"\x02h2").map_err(|error| {
+            FluxError::io(
+                "configure OpenSSL TCP health check ALPN",
+                io::Error::other(error.to_string()),
+            )
+        })?,
+    }
     Ok(FluxTcpHealthCheckTls {
         domain,
         connector: builder.build(),
@@ -272,6 +306,7 @@ fn configured_tcp_health_check_tls_inner(
 #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
 fn configured_tcp_health_check_tls_inner(
     _config: &ProxyConfig,
+    _alpn: HealthTlsAlpn,
 ) -> FluxResult<FluxTcpHealthCheckTls> {
     Err(FluxError::InvalidInput(
         "TLS TCP health checks require a TLS backend feature",
@@ -651,21 +686,37 @@ fn configured_postgres_health_check(
     }))
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HealthHttpRequest {
+    method: Method,
+    path: String,
+    host: String,
+    headers: HeaderMap,
+    body: Option<Bytes>,
+    grpc: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HealthHttpResponse {
+    status: StatusCode,
+    headers: HeaderMap,
+}
+
 struct FluxHttpHealthCheck {
     consecutive_success: usize,
     consecutive_failure: usize,
-    peer_template: HttpPeer,
+    upstream_tls: bool,
+    tls: Option<FluxTcpHealthCheckTls>,
+    connection_timeout: Duration,
+    read_timeout: Duration,
     reuse_connection: bool,
-    req: RequestHeader,
-    connector: HttpConnector,
+    req: HealthHttpRequest,
     port_override: Option<u16>,
     expected_statuses: Arc<[u16]>,
     expected_status_ranges: Arc<[LoadBalanceHealthCheckExpectedStatusRange]>,
     expected_headers: Arc<[LoadBalanceHealthCheckExpectedHeader]>,
     expected_body_contains: Arc<[String]>,
     expected_body_json: Arc<[LoadBalanceHealthCheckExpectedJson]>,
-    request_body: Option<Bytes>,
-    grpc_response: bool,
     health_weight_min_percent: u8,
     health_weights: Arc<HealthDerivedWeights>,
 }
@@ -681,90 +732,51 @@ impl FluxHealthCheck for FluxHttpHealthCheck {
     }
 
     async fn check(&self, target: &Backend) -> FluxResult<()> {
-        let mut peer = self.peer_template.clone();
-        peer._address = pingora::protocols::l4::socket::SocketAddr::Inet(target.addr);
+        let mut address = target.addr;
         if let Some(port) = self.port_override {
-            peer._address.set_port(port);
+            address.set_port(port);
         }
+        let stream = connect_health_stream(
+            address,
+            self.upstream_tls,
+            self.tls.as_ref(),
+            self.connection_timeout,
+        )
+        .await?;
 
-        let (mut session, _) = self
-            .connector
-            .get_http_session(&peer)
-            .await
-            .map_err(pingora_health_error("connect HTTP health check upstream"))?;
-        session
-            .write_request_header(Box::new(self.req.clone()))
-            .await
-            .map_err(pingora_health_error(
-                "write HTTP health check request header",
-            ))?;
-        if let Some(body) = &self.request_body {
-            session
-                .write_request_body(body.clone(), true)
-                .await
-                .map_err(pingora_health_error("write HTTP health check request body"))?;
+        let (response, body) = if self.req.grpc {
+            execute_grpc_health_check(stream, &self.req, self.read_timeout).await?
         } else {
-            session
-                .finish_request_body()
-                .await
-                .map_err(pingora_health_error(
-                    "finish HTTP health check request body",
-                ))?;
-        }
-
-        if let Some(read_timeout) = peer.options.read_timeout {
-            session.set_read_timeout(Some(read_timeout));
-        }
-
-        session
-            .read_response_header()
-            .await
-            .map_err(pingora_health_error(
-                "read HTTP health check response header",
-            ))?;
-        let Some(response) = session.response_header() else {
-            return Err(HttpHealthCheckError::new(
-                ErrorType::ReadError,
-                "missing HTTP health check response header",
-            )
-            .into_flux());
+            execute_http1_health_check(stream, &self.req, self.read_timeout).await?
         };
         validate_http_health_response(
-            response,
+            &response,
             &self.expected_statuses,
             &self.expected_status_ranges,
             &self.expected_headers,
         )
         .map_err(HttpHealthCheckError::into_flux)?;
         record_health_weight(
-            response,
+            &response,
             backend_key(target),
             self.health_weight_min_percent,
             &self.health_weights,
         )
         .map_err(HttpHealthCheckError::into_flux)?;
 
-        if self.grpc_response {
-            validate_grpc_health_response_header(response)
+        if self.req.grpc {
+            validate_grpc_health_response_header(&response)
                 .map_err(HttpHealthCheckError::into_flux)?;
-            let body = read_http_health_response_body(&mut session).await?;
             validate_grpc_health_response_body(&body).map_err(HttpHealthCheckError::into_flux)?;
         } else if self.expected_body_contains.is_empty() && self.expected_body_json.is_empty() {
-            drain_http_health_response_body(&mut session).await?;
+            let _ = body;
         } else {
-            let body = read_http_health_response_body(&mut session).await?;
             validate_http_health_response_body(&body, &self.expected_body_contains)
                 .map_err(HttpHealthCheckError::into_flux)?;
             validate_http_health_response_body_json(&body, &self.expected_body_json)
                 .map_err(HttpHealthCheckError::into_flux)?;
         }
-
-        if self.reuse_connection {
-            let idle_timeout = peer.idle_timeout();
-            self.connector
-                .release_http_session(session, &peer, idle_timeout)
-                .await;
-        }
+        let _ = self.reuse_connection;
 
         Ok(())
     }
@@ -790,77 +802,74 @@ fn configured_http_health_check(
         config.load_balance.health_check.method.as_str()
     };
     let path = if grpc {
-        GRPC_HEALTH_CHECK_PATH
+        std::str::from_utf8(GRPC_HEALTH_CHECK_PATH).unwrap_or("/grpc.health.v1.Health/Check")
     } else {
-        config.load_balance.health_check.path.as_bytes()
+        config.load_balance.health_check.path.as_str()
     };
-    let mut request = RequestHeader::build(method, path, None).map_err(|error| {
+    let method = Method::from_bytes(method.as_bytes()).map_err(|error| {
         FluxError::io(
-            "build HTTP health check request header",
+            "build HTTP health check request method",
             io::Error::other(error.to_string()),
         )
     })?;
-    request.append_header("Host", &host).map_err(|error| {
-        FluxError::io(
-            "append HTTP health check Host header",
-            io::Error::other(error.to_string()),
-        )
-    })?;
+    let mut headers = HeaderMap::new();
     for header in &config.load_balance.health_check.request_headers {
-        request
-            .append_header(header.name.clone(), header.value.clone())
-            .map_err(|error| {
-                FluxError::io(
-                    "append HTTP health check request header",
-                    io::Error::other(error.to_string()),
-                )
-            })?;
-    }
-    if grpc {
-        request
-            .append_header("Content-Type", "application/grpc")
-            .map_err(|error| {
-                FluxError::io(
-                    "append gRPC health check content type",
-                    io::Error::other(error.to_string()),
-                )
-            })?;
-        request.append_header("TE", "trailers").map_err(|error| {
+        let name = HeaderName::from_bytes(header.name.as_bytes()).map_err(|error| {
             FluxError::io(
-                "append gRPC health check trailers header",
+                "append HTTP health check request header",
                 io::Error::other(error.to_string()),
             )
         })?;
+        let value = HeaderValue::from_str(&header.value).map_err(|error| {
+            FluxError::io(
+                "append HTTP health check request header",
+                io::Error::other(error.to_string()),
+            )
+        })?;
+        headers.append(name, value);
+    }
+    if grpc {
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/grpc"),
+        );
+        headers.insert("te", HeaderValue::from_static("trailers"));
     }
 
-    let sni = if config.upstream_tls {
-        host.clone()
-    } else {
-        String::new()
-    };
-    let mut peer_template = HttpPeer::new("0.0.0.0:1", config.upstream_tls, sni);
-    if grpc {
-        peer_template.options.set_http_version(2, 2);
-        peer_template.options.max_h2_streams = config.upstream_h2_max_streams.unwrap_or(64);
-        peer_template.options.h2_ping_interval = config
-            .upstream_h2_ping_interval_secs
-            .map(Duration::from_secs);
-    }
-    peer_template.options.connection_timeout = Some(Duration::from_secs(1));
-    peer_template.options.read_timeout = Some(Duration::from_secs(1));
-    apply_health_check_peer_timeouts(
-        &mut peer_template.options.connection_timeout,
-        Some(&mut peer_template.options.read_timeout),
+    let mut connection_timeout = Some(Duration::from_secs(1));
+    let mut read_timeout = Some(Duration::from_secs(1));
+    apply_health_check_peer_timeouts(&mut connection_timeout, Some(&mut read_timeout), config);
+    let connection_timeout = connection_timeout.unwrap_or_else(|| Duration::from_secs(1));
+    let read_timeout = read_timeout.unwrap_or_else(|| Duration::from_secs(1));
+    let tls = configured_tcp_health_check_tls(
         config,
-    );
+        if grpc {
+            HealthTlsAlpn::Http2
+        } else {
+            HealthTlsAlpn::Http1
+        },
+    )?;
 
     Ok(Box::new(FluxHttpHealthCheck {
         consecutive_success: config.load_balance.health_check.consecutive_success,
         consecutive_failure: config.load_balance.health_check.consecutive_failure,
-        peer_template,
+        upstream_tls: config.upstream_tls,
+        tls,
+        connection_timeout,
+        read_timeout,
         reuse_connection: config.load_balance.health_check.reuse_connection,
-        req: request,
-        connector: HttpConnector::new(None),
+        req: HealthHttpRequest {
+            method,
+            path: path.to_owned(),
+            host,
+            headers,
+            body: grpc.then(|| {
+                Bytes::from(grpc_health_request_body(
+                    config.load_balance.health_check.grpc_service.as_deref(),
+                ))
+            }),
+            grpc,
+        },
         port_override: config.load_balance.health_check.port_override,
         expected_statuses: config
             .load_balance
@@ -892,12 +901,6 @@ fn configured_http_health_check(
             .expected_body_json
             .clone()
             .into(),
-        request_body: grpc.then(|| {
-            Bytes::from(grpc_health_request_body(
-                config.load_balance.health_check.grpc_service.as_deref(),
-            ))
-        }),
-        grpc_response: grpc,
         health_weight_min_percent: config.load_balance.health_check.health_weight_min_percent,
         health_weights,
     }))
@@ -924,6 +927,463 @@ fn apply_health_check_peer_timeouts(
             .or(config.read_timeout_secs)
     {
         *read_timeout = Some(Duration::from_secs(timeout));
+    }
+}
+
+async fn connect_health_stream(
+    address: std::net::SocketAddr,
+    upstream_tls: bool,
+    tls: Option<&FluxTcpHealthCheckTls>,
+    connection_timeout: Duration,
+) -> FluxResult<BoxedHealthIo> {
+    let stream = tokio::time::timeout(connection_timeout, tokio::net::TcpStream::connect(address))
+        .await
+        .map_err(|_| {
+            FluxError::timeout(
+                "connect HTTP health check upstream",
+                format!("timeout after {}s", connection_timeout.as_secs()),
+            )
+        })?
+        .map_err(|error| FluxError::io("connect HTTP health check upstream", error))?;
+    if !upstream_tls {
+        return Ok(Box::new(stream));
+    }
+    let Some(tls) = tls else {
+        return Err(FluxError::InvalidInput(
+            "HTTP health check TLS requires a TLS backend feature",
+        ));
+    };
+    tokio::time::timeout(connection_timeout, tls.handshake(stream))
+        .await
+        .map_err(|_| {
+            FluxError::timeout(
+                "TLS HTTP health check handshake",
+                format!("timeout after {}s", connection_timeout.as_secs()),
+            )
+        })?
+}
+
+async fn execute_http1_health_check(
+    mut stream: BoxedHealthIo,
+    request: &HealthHttpRequest,
+    read_timeout: Duration,
+) -> FluxResult<(HealthHttpResponse, Vec<u8>)> {
+    let request_bytes = build_http1_health_request(request)?;
+    stream
+        .write_all(&request_bytes)
+        .await
+        .map_err(|error| FluxError::io("write HTTP health check request", error))?;
+    stream
+        .flush()
+        .await
+        .map_err(|error| FluxError::io("flush HTTP health check request", error))?;
+    let (response, remainder) = read_http1_response_header(&mut stream, read_timeout).await?;
+    let body =
+        read_http1_response_body(&mut stream, &response.headers, remainder, read_timeout).await?;
+    Ok((response, body))
+}
+
+fn build_http1_health_request(request: &HealthHttpRequest) -> FluxResult<Vec<u8>> {
+    let mut output = Vec::new();
+    output.extend_from_slice(request.method.as_str().as_bytes());
+    output.extend_from_slice(b" ");
+    output.extend_from_slice(request.path.as_bytes());
+    output.extend_from_slice(b" HTTP/1.1\r\nHost: ");
+    output.extend_from_slice(request.host.as_bytes());
+    output.extend_from_slice(b"\r\nUser-Agent: fluxheim-health\r\nConnection: close\r\n");
+    if let Some(body) = &request.body {
+        output.extend_from_slice(b"Content-Length: ");
+        output.extend_from_slice(body.len().to_string().as_bytes());
+        output.extend_from_slice(b"\r\n");
+    }
+    for (name, value) in &request.headers {
+        output.extend_from_slice(name.as_str().as_bytes());
+        output.extend_from_slice(b": ");
+        output.extend_from_slice(value.as_bytes());
+        output.extend_from_slice(b"\r\n");
+    }
+    output.extend_from_slice(b"\r\n");
+    if let Some(body) = &request.body {
+        output.extend_from_slice(body);
+    }
+    Ok(output)
+}
+
+async fn execute_grpc_health_check(
+    stream: BoxedHealthIo,
+    request: &HealthHttpRequest,
+    read_timeout: Duration,
+) -> FluxResult<(HealthHttpResponse, Vec<u8>)> {
+    let builder = h2::client::Builder::new();
+    let (mut client, connection) = tokio::time::timeout(read_timeout, builder.handshake(stream))
+        .await
+        .map_err(|_| {
+            FluxError::timeout(
+                "connect gRPC health check upstream",
+                format!("timeout after {}s", read_timeout.as_secs()),
+            )
+        })?
+        .map_err(|error| {
+            FluxError::io(
+                "connect gRPC health check upstream",
+                io::Error::other(error.to_string()),
+            )
+        })?;
+    let driver = tokio::spawn(async move {
+        if let Err(error) = connection.await {
+            log::debug!(
+                target: "fluxheim::load_balancer",
+                "gRPC health check connection closed with error: {error}"
+            );
+        }
+    });
+    let uri: Uri = format!("{}://{}{}", "http", request.host, request.path)
+        .parse()
+        .map_err(|error| FluxError::io("build gRPC health check URI", io::Error::other(error)))?;
+    let mut http_request = http::Request::builder()
+        .method(request.method.clone())
+        .uri(uri);
+    for (name, value) in &request.headers {
+        http_request = http_request.header(name, value);
+    }
+    let http_request = http_request.body(()).map_err(|error| {
+        FluxError::io("build gRPC health check request", io::Error::other(error))
+    })?;
+    let body = request.body.clone().unwrap_or_default();
+    client = tokio::time::timeout(read_timeout, client.ready())
+        .await
+        .map_err(|_| {
+            FluxError::timeout(
+                "prepare gRPC health check request",
+                format!("timeout after {}s", read_timeout.as_secs()),
+            )
+        })?
+        .map_err(|error| {
+            FluxError::io(
+                "prepare gRPC health check request",
+                io::Error::other(error.to_string()),
+            )
+        })?;
+    let (response_future, mut send_stream) = client
+        .send_request(http_request, body.is_empty())
+        .map_err(|error| {
+            FluxError::io(
+                "write gRPC health check request",
+                io::Error::other(error.to_string()),
+            )
+        })?;
+    if !body.is_empty() {
+        send_stream.send_data(body, true).map_err(|error| {
+            FluxError::io(
+                "write gRPC health check request body",
+                io::Error::other(error.to_string()),
+            )
+        })?;
+    }
+    drop(send_stream);
+    let response = tokio::time::timeout(read_timeout, response_future)
+        .await
+        .map_err(|_| {
+            FluxError::timeout(
+                "read gRPC health check response header",
+                format!("timeout after {}s", read_timeout.as_secs()),
+            )
+        })?
+        .map_err(|error| {
+            FluxError::io(
+                "read gRPC health check response header",
+                io::Error::other(error.to_string()),
+            )
+        })?;
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = read_h2_health_body(response.into_body(), read_timeout).await?;
+    driver.abort();
+    Ok((HealthHttpResponse { status, headers }, body))
+}
+
+async fn read_h2_health_body(
+    mut body: h2::RecvStream,
+    read_timeout: Duration,
+) -> FluxResult<Vec<u8>> {
+    let mut output = Vec::new();
+    while let Some(chunk) = tokio::time::timeout(read_timeout, body.data())
+        .await
+        .map_err(|_| {
+            FluxError::timeout(
+                "read gRPC health check response body",
+                format!("timeout after {}s", read_timeout.as_secs()),
+            )
+        })?
+    {
+        let chunk = chunk.map_err(|error| {
+            FluxError::io(
+                "read gRPC health check response body",
+                io::Error::other(error.to_string()),
+            )
+        })?;
+        if output.len().saturating_add(chunk.len()) > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
+            return Err(HttpHealthCheckError::new(
+                HealthErrorKind::ReadError,
+                "HTTP health check response body exceeded maximum size",
+            )
+            .into_flux());
+        }
+        output.extend_from_slice(&chunk);
+    }
+    Ok(output)
+}
+
+async fn read_http1_response_header(
+    stream: &mut BoxedHealthIo,
+    read_timeout: Duration,
+) -> FluxResult<(HealthHttpResponse, Vec<u8>)> {
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 1024];
+    loop {
+        if let Some(index) = find_header_end(&buffer) {
+            let remainder = buffer[index + 4..].to_vec();
+            let response = parse_http1_response_header(&buffer[..index])?;
+            return Ok((response, remainder));
+        }
+        if buffer.len() >= HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
+            return Err(HttpHealthCheckError::new(
+                HealthErrorKind::ReadError,
+                "HTTP health check response header exceeded maximum size",
+            )
+            .into_flux());
+        }
+        let read = tokio::time::timeout(read_timeout, stream.read(&mut chunk))
+            .await
+            .map_err(|_| {
+                FluxError::timeout(
+                    "read HTTP health check response header",
+                    format!("timeout after {}s", read_timeout.as_secs()),
+                )
+            })?
+            .map_err(|error| FluxError::io("read HTTP health check response header", error))?;
+        if read == 0 {
+            return Err(HttpHealthCheckError::new(
+                HealthErrorKind::ReadError,
+                "missing HTTP health check response header",
+            )
+            .into_flux());
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+    }
+}
+
+fn find_header_end(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn parse_http1_response_header(header_block: &[u8]) -> FluxResult<HealthHttpResponse> {
+    let text = std::str::from_utf8(header_block).map_err(|error| {
+        FluxError::io(
+            "parse HTTP health check response header",
+            io::Error::new(io::ErrorKind::InvalidData, error),
+        )
+    })?;
+    let mut lines = text.split("\r\n");
+    let status_line = lines.next().ok_or_else(|| {
+        HttpHealthCheckError::new(
+            HealthErrorKind::ReadError,
+            "missing HTTP health check response status",
+        )
+        .into_flux()
+    })?;
+    let mut parts = status_line.splitn(3, ' ');
+    let version = parts.next().unwrap_or_default();
+    if !version.starts_with("HTTP/") {
+        return Err(HttpHealthCheckError::new(
+            HealthErrorKind::ReadError,
+            "invalid HTTP health check response status",
+        )
+        .into_flux());
+    }
+    let status = parts
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+        .and_then(|value| StatusCode::from_u16(value).ok())
+        .ok_or_else(|| {
+            HttpHealthCheckError::new(
+                HealthErrorKind::ReadError,
+                "invalid HTTP health check response status",
+            )
+            .into_flux()
+        })?;
+    let mut headers = HeaderMap::new();
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            return Err(HttpHealthCheckError::new(
+                HealthErrorKind::InvalidHttpHeader,
+                "invalid HTTP health check response header",
+            )
+            .into_flux());
+        };
+        let name = HeaderName::from_bytes(name.trim().as_bytes()).map_err(|error| {
+            FluxError::io(
+                "parse HTTP health check response header",
+                io::Error::new(io::ErrorKind::InvalidData, error),
+            )
+        })?;
+        let value = HeaderValue::from_str(value.trim()).map_err(|error| {
+            FluxError::io(
+                "parse HTTP health check response header",
+                io::Error::new(io::ErrorKind::InvalidData, error),
+            )
+        })?;
+        headers.append(name, value);
+    }
+    Ok(HealthHttpResponse { status, headers })
+}
+
+async fn read_http1_response_body(
+    stream: &mut BoxedHealthIo,
+    headers: &HeaderMap,
+    remainder: Vec<u8>,
+    read_timeout: Duration,
+) -> FluxResult<Vec<u8>> {
+    if headers
+        .get(header::TRANSFER_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_ascii_lowercase().contains("chunked"))
+        .unwrap_or(false)
+    {
+        return read_http1_chunked_body(stream, remainder, read_timeout).await;
+    }
+    if let Some(length) = headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<usize>().ok())
+    {
+        if length > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
+            return Err(HttpHealthCheckError::new(
+                HealthErrorKind::ReadError,
+                "HTTP health check response body exceeded maximum size",
+            )
+            .into_flux());
+        }
+        let mut body = remainder;
+        while body.len() < length {
+            read_more_body(stream, &mut body, read_timeout).await?;
+        }
+        body.truncate(length);
+        return Ok(body);
+    }
+    let mut body = remainder;
+    loop {
+        match tokio::time::timeout(
+            read_timeout,
+            read_more_body(stream, &mut body, read_timeout),
+        )
+        .await
+        {
+            Ok(Ok(true)) => {}
+            Ok(Ok(false)) => return Ok(body),
+            Ok(Err(error)) => return Err(error),
+            Err(_) => return Ok(body),
+        }
+    }
+}
+
+async fn read_more_body(
+    stream: &mut BoxedHealthIo,
+    body: &mut Vec<u8>,
+    read_timeout: Duration,
+) -> FluxResult<bool> {
+    let mut chunk = [0u8; 1024];
+    let read = tokio::time::timeout(read_timeout, stream.read(&mut chunk))
+        .await
+        .map_err(|_| {
+            FluxError::timeout(
+                "read HTTP health check response body",
+                format!("timeout after {}s", read_timeout.as_secs()),
+            )
+        })?
+        .map_err(|error| FluxError::io("read HTTP health check response body", error))?;
+    if read == 0 {
+        return Ok(false);
+    }
+    if body.len().saturating_add(read) > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
+        return Err(HttpHealthCheckError::new(
+            HealthErrorKind::ReadError,
+            "HTTP health check response body exceeded maximum size",
+        )
+        .into_flux());
+    }
+    body.extend_from_slice(&chunk[..read]);
+    Ok(true)
+}
+
+async fn read_http1_chunked_body(
+    stream: &mut BoxedHealthIo,
+    mut buffer: Vec<u8>,
+    read_timeout: Duration,
+) -> FluxResult<Vec<u8>> {
+    let mut body = Vec::new();
+    let mut cursor = 0usize;
+    loop {
+        let line_end = loop {
+            if let Some(relative) = buffer[cursor..]
+                .windows(2)
+                .position(|window| window == b"\r\n")
+            {
+                break cursor + relative;
+            }
+            if !read_more_body(stream, &mut buffer, read_timeout).await? {
+                return Err(HttpHealthCheckError::new(
+                    HealthErrorKind::ReadError,
+                    "truncated HTTP health check chunked response",
+                )
+                .into_flux());
+            }
+        };
+        let size_line = std::str::from_utf8(&buffer[cursor..line_end]).map_err(|error| {
+            FluxError::io(
+                "parse HTTP health check chunk size",
+                io::Error::new(io::ErrorKind::InvalidData, error),
+            )
+        })?;
+        let size_text = size_line.split(';').next().unwrap_or_default().trim();
+        let size = usize::from_str_radix(size_text, 16).map_err(|error| {
+            FluxError::io(
+                "parse HTTP health check chunk size",
+                io::Error::new(io::ErrorKind::InvalidData, error),
+            )
+        })?;
+        cursor = line_end + 2;
+        if size == 0 {
+            return Ok(body);
+        }
+        while buffer.len() < cursor.saturating_add(size).saturating_add(2) {
+            if !read_more_body(stream, &mut buffer, read_timeout).await? {
+                return Err(HttpHealthCheckError::new(
+                    HealthErrorKind::ReadError,
+                    "truncated HTTP health check chunked response",
+                )
+                .into_flux());
+            }
+        }
+        if &buffer[cursor + size..cursor + size + 2] != b"\r\n" {
+            return Err(HttpHealthCheckError::new(
+                HealthErrorKind::ReadError,
+                "invalid HTTP health check chunk terminator",
+            )
+            .into_flux());
+        }
+        if body.len().saturating_add(size) > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
+            return Err(HttpHealthCheckError::new(
+                HealthErrorKind::ReadError,
+                "HTTP health check response body exceeded maximum size",
+            )
+            .into_flux());
+        }
+        body.extend_from_slice(&buffer[cursor..cursor + size]);
+        cursor += size + 2;
     }
 }
 
@@ -965,7 +1425,7 @@ fn validate_postgres_health_response(response: u8) -> FluxResult<()> {
 }
 
 fn validate_http_health_response(
-    response: &ResponseHeader,
+    response: &HealthHttpResponse,
     expected_statuses: &[u16],
     expected_status_ranges: &[LoadBalanceHealthCheckExpectedStatusRange],
     expected_headers: &[LoadBalanceHealthCheckExpectedHeader],
@@ -974,7 +1434,7 @@ fn validate_http_health_response(
     if expected_statuses.is_empty() && expected_status_ranges.is_empty() {
         if status != 200 {
             return Err(HttpHealthCheckError::new(
-                ErrorType::HTTPStatus(status),
+                HealthErrorKind::HttpStatus(status),
                 "unexpected HTTP health check status",
             ));
         }
@@ -984,7 +1444,7 @@ fn validate_http_health_response(
             .any(|range| (range.start..=range.end).contains(&status))
     {
         return Err(HttpHealthCheckError::new(
-            ErrorType::HTTPStatus(status),
+            HealthErrorKind::HttpStatus(status),
             "unexpected HTTP health check status",
         ));
     }
@@ -999,50 +1459,12 @@ fn validate_http_health_response(
         }
         if !matched {
             return Err(HttpHealthCheckError::new(
-                ErrorType::InvalidHTTPHeader,
+                HealthErrorKind::InvalidHttpHeader,
                 "missing expected HTTP health check header",
             ));
         }
     }
     Ok(())
-}
-
-async fn drain_http_health_response_body(session: &mut HttpSession) -> FluxResult<()> {
-    let mut drained = 0usize;
-    while let Some(chunk) = session
-        .read_response_body()
-        .await
-        .map_err(pingora_health_error("read HTTP health check response body"))?
-    {
-        drained = drained.saturating_add(chunk.len());
-        if drained > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
-            return Err(HttpHealthCheckError::new(
-                ErrorType::ReadError,
-                "HTTP health check response body exceeded maximum size",
-            )
-            .into_flux());
-        }
-    }
-    Ok(())
-}
-
-async fn read_http_health_response_body(session: &mut HttpSession) -> FluxResult<Vec<u8>> {
-    let mut body = Vec::new();
-    while let Some(chunk) = session
-        .read_response_body()
-        .await
-        .map_err(pingora_health_error("read HTTP health check response body"))?
-    {
-        if body.len().saturating_add(chunk.len()) > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
-            return Err(HttpHealthCheckError::new(
-                ErrorType::ReadError,
-                "HTTP health check response body exceeded maximum size",
-            )
-            .into_flux());
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
 }
 
 fn validate_http_health_response_body(
@@ -1055,7 +1477,7 @@ fn validate_http_health_response_body(
             .any(|window| window == expected.as_bytes())
         {
             return Err(HttpHealthCheckError::new(
-                ErrorType::ReadError,
+                HealthErrorKind::ReadError,
                 "missing expected HTTP health check response body substring",
             ));
         }
@@ -1072,20 +1494,20 @@ fn validate_http_health_response_body_json(
     }
     let json: Value = serde_json::from_slice(body).map_err(|_| {
         HttpHealthCheckError::new(
-            ErrorType::ReadError,
+            HealthErrorKind::ReadError,
             "invalid HTTP health check JSON response body",
         )
     })?;
     for expected in expected_body_json {
         let Some(value) = json_path_value(&json, &expected.path) else {
             return Err(HttpHealthCheckError::new(
-                ErrorType::ReadError,
+                HealthErrorKind::ReadError,
                 "missing expected HTTP health check JSON field",
             ));
         };
         if json_scalar_string(value).as_deref() != Some(expected.equals.as_str()) {
             return Err(HttpHealthCheckError::new(
-                ErrorType::ReadError,
+                HealthErrorKind::ReadError,
                 "unexpected HTTP health check JSON field value",
             ));
         }
@@ -1102,7 +1524,7 @@ fn json_path_value<'a>(json: &'a Value, path: &str) -> Option<&'a Value> {
 }
 
 fn record_health_weight(
-    response: &ResponseHeader,
+    response: &HealthHttpResponse,
     key: u64,
     min_percent: u8,
     health_weights: &HealthDerivedWeights,
@@ -1113,19 +1535,19 @@ fn record_health_weight(
     };
     let value = value.to_str().map_err(|_| {
         HttpHealthCheckError::new(
-            ErrorType::InvalidHTTPHeader,
+            HealthErrorKind::InvalidHttpHeader,
             "invalid HTTP health check degraded weight header",
         )
     })?;
     let percent = value.trim().parse::<u8>().map_err(|_| {
         HttpHealthCheckError::new(
-            ErrorType::InvalidHTTPHeader,
+            HealthErrorKind::InvalidHttpHeader,
             "invalid HTTP health check degraded weight header",
         )
     })?;
     if percent == 0 || percent > 100 {
         return Err(HttpHealthCheckError::new(
-            ErrorType::InvalidHTTPHeader,
+            HealthErrorKind::InvalidHttpHeader,
             "invalid HTTP health check degraded weight header",
         ));
     }
@@ -1174,11 +1596,11 @@ fn encode_grpc_varint(mut value: u64, output: &mut Vec<u8>) {
 }
 
 fn validate_grpc_health_response_header(
-    response: &ResponseHeader,
+    response: &HealthHttpResponse,
 ) -> Result<(), HttpHealthCheckError> {
     if response.status.as_u16() != 200 {
         return Err(HttpHealthCheckError::new(
-            ErrorType::HTTPStatus(response.status.as_u16()),
+            HealthErrorKind::HttpStatus(response.status.as_u16()),
             "unexpected gRPC health check HTTP status",
         ));
     }
@@ -1192,7 +1614,7 @@ fn validate_grpc_health_response_header(
         .starts_with("application/grpc")
     {
         return Err(HttpHealthCheckError::new(
-            ErrorType::InvalidHTTPHeader,
+            HealthErrorKind::InvalidHttpHeader,
             "unexpected gRPC health check content type",
         ));
     }
@@ -1202,21 +1624,21 @@ fn validate_grpc_health_response_header(
 fn validate_grpc_health_response_body(body: &[u8]) -> Result<(), HttpHealthCheckError> {
     if body.len() < 5 || body[0] != 0 {
         return Err(HttpHealthCheckError::new(
-            ErrorType::ReadError,
+            HealthErrorKind::ReadError,
             "invalid gRPC health check response frame",
         ));
     }
     let len = u32::from_be_bytes([body[1], body[2], body[3], body[4]]) as usize;
     if body.len() != 5 + len {
         return Err(HttpHealthCheckError::new(
-            ErrorType::ReadError,
+            HealthErrorKind::ReadError,
             "invalid gRPC health check response length",
         ));
     }
     let status = decode_grpc_health_status(&body[5..])?;
     if status != GRPC_SERVING_STATUS {
         return Err(HttpHealthCheckError::new(
-            ErrorType::ReadError,
+            HealthErrorKind::ReadError,
             "gRPC health check response is not SERVING",
         ));
     }
@@ -1276,18 +1698,25 @@ fn decode_grpc_varint(message: &[u8], offset: &mut usize) -> Result<u64, HttpHea
 
 fn invalid_grpc_response() -> HttpHealthCheckError {
     HttpHealthCheckError::new(
-        ErrorType::ReadError,
+        HealthErrorKind::ReadError,
         "invalid gRPC health check response message",
     )
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HealthErrorKind {
+    ReadError,
+    InvalidHttpHeader,
+    HttpStatus(u16),
+}
+
 struct HttpHealthCheckError {
-    kind: ErrorType,
+    kind: HealthErrorKind,
     error: FluxError,
 }
 
 impl HttpHealthCheckError {
-    fn new(kind: ErrorType, detail: &'static str) -> Self {
+    fn new(kind: HealthErrorKind, detail: &'static str) -> Self {
         Self {
             kind,
             error: FluxError::InvalidInput(detail),
@@ -1302,12 +1731,9 @@ impl HttpHealthCheckError {
     }
 }
 
-fn pingora_health_error(context: &'static str) -> impl FnOnce(Box<Error>) -> FluxError {
-    move |error| FluxError::io(context, io::Error::other(error.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
+    use std::future::poll_fn;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -1317,7 +1743,7 @@ mod tests {
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
     use super::{FluxTcpHealthCheck, configured_tcp_health_check_tls_inner};
     use super::{
-        POSTGRES_HEALTH_CHECK_SSL_REQUEST, REDIS_HEALTH_CHECK_REQUEST,
+        HealthHttpResponse, POSTGRES_HEALTH_CHECK_SSL_REQUEST, REDIS_HEALTH_CHECK_REQUEST,
         configured_exec_health_check, configured_health_check, configured_http_health_check,
         configured_mysql_health_check, configured_postgres_health_check,
         configured_redis_health_check, grpc_frame, grpc_health_request_body, record_health_weight,
@@ -1326,17 +1752,32 @@ mod tests {
         validate_http_health_response_body_json, validate_mysql_health_handshake,
         validate_postgres_health_response, validate_redis_health_response,
     };
+    use bytes::Bytes;
     use fluxheim_config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
         LoadBalanceHealthCheckExpectedJson, LoadBalanceHealthCheckExpectedStatusRange,
         LoadBalanceHealthCheckProtocol, LoadBalanceHealthCheckRequestHeader, ProxyConfig,
     };
-    use pingora::http::ResponseHeader;
+    use http::{HeaderMap, HeaderValue, StatusCode};
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     fn install_test_crypto_provider() {
         #[cfg(feature = "tls-rustls-backend")]
         let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
+    fn health_response(status: u16, headers: &[(&str, &str)]) -> HealthHttpResponse {
+        let mut map = HeaderMap::new();
+        for (name, value) in headers {
+            map.append(
+                http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                HeaderValue::from_str(value).unwrap(),
+            );
+        }
+        HealthHttpResponse {
+            status: StatusCode::from_u16(status).unwrap(),
+            headers: map,
+        }
     }
 
     #[tokio::test]
@@ -1385,11 +1826,14 @@ mod tests {
             };
             tokio::time::sleep(Duration::from_secs(5)).await;
         });
-        let tls = configured_tcp_health_check_tls_inner(&ProxyConfig {
-            upstream_tls: true,
-            upstream_sni: Some("localhost".to_owned()),
-            ..ProxyConfig::default()
-        })
+        let tls = configured_tcp_health_check_tls_inner(
+            &ProxyConfig {
+                upstream_tls: true,
+                upstream_sni: Some("localhost".to_owned()),
+                ..ProxyConfig::default()
+            },
+            super::HealthTlsAlpn::None,
+        )
         .unwrap();
         let health_check = FluxTcpHealthCheck {
             consecutive_success: 1,
@@ -1406,7 +1850,7 @@ mod tests {
     }
 
     #[test]
-    fn configures_pingora_http_health_check() {
+    fn configures_native_http_health_check() {
         install_test_crypto_provider();
         let health_check = configured_http_health_check(
             &ProxyConfig {
@@ -1467,14 +1911,8 @@ mod tests {
         );
         assert!(health_check.reuse_connection);
         assert_eq!(health_check.port_override, Some(8081));
-        assert_eq!(
-            health_check.peer_template.options.connection_timeout,
-            Some(Duration::from_secs(5))
-        );
-        assert_eq!(
-            health_check.peer_template.options.read_timeout,
-            Some(Duration::from_secs(6))
-        );
+        assert_eq!(health_check.connection_timeout, Duration::from_secs(5));
+        assert_eq!(health_check.read_timeout, Duration::from_secs(6));
         assert!(!health_check.expected_statuses.is_empty());
         assert!(!health_check.expected_headers.is_empty());
         assert_eq!(
@@ -1495,10 +1933,7 @@ mod tests {
             name: "x-fluxheim-health".to_owned(),
             value: "ready".to_owned(),
         }];
-        let mut response = ResponseHeader::build(204, None).unwrap();
-        response
-            .append_header("x-fluxheim-health", "ready")
-            .unwrap();
+        let response = health_response(204, &[("x-fluxheim-health", "ready")]);
         assert!(
             validate_http_health_response(
                 &response,
@@ -1509,7 +1944,7 @@ mod tests {
             .is_ok()
         );
 
-        let missing = ResponseHeader::build(204, None).unwrap();
+        let missing = health_response(204, &[]);
         assert!(
             validate_http_health_response(
                 &missing,
@@ -1520,7 +1955,7 @@ mod tests {
             .is_err()
         );
 
-        let ranged = ResponseHeader::build(302, None).unwrap();
+        let ranged = health_response(302, &[]);
         assert!(validate_http_health_response(&ranged, &[], &expected_status_ranges, &[]).is_ok());
     }
 
@@ -1565,8 +2000,6 @@ mod tests {
         let health_check = configured_http_health_check(
             &ProxyConfig {
                 upstreams: vec!["127.0.0.1:50051".to_owned()],
-                upstream_tls: true,
-                upstream_sni: Some("grpc.example.test".to_owned()),
                 upstream_h2_max_streams: Some(32),
                 load_balance: LoadBalanceConfig {
                     health_check: LoadBalanceHealthCheckConfig {
@@ -1584,9 +2017,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(health_check.req.method.as_str(), "POST");
-        assert_eq!(health_check.req.uri.path(), "/grpc.health.v1.Health/Check");
-        assert!(health_check.grpc_response);
-        assert_eq!(health_check.peer_template.options.max_h2_streams, 32);
+        assert_eq!(health_check.req.path, "/grpc.health.v1.Health/Check");
+        assert!(health_check.req.grpc);
         assert_eq!(
             health_check
                 .req
@@ -1596,9 +2028,158 @@ mod tests {
             Some("application/grpc".as_bytes())
         );
         assert_eq!(
-            health_check.request_body.as_deref(),
+            health_check.req.body.as_deref(),
             Some(grpc_health_request_body(Some("example.Health")).as_slice())
         );
+    }
+
+    #[tokio::test]
+    async fn http_health_check_uses_native_http1_client() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 256];
+            loop {
+                let read = stream.read(&mut chunk).await.unwrap();
+                assert!(read > 0);
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(request.starts_with("GET /healthz HTTP/1.1\r\n"));
+            assert!(request.contains("\r\nHost: origin.example.test\r\n"));
+            assert!(
+                request
+                    .to_ascii_lowercase()
+                    .contains("\r\nauthorization: bearer health-token\r\n")
+            );
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nx-fluxheim-health: ready\r\nx-health-weight: 40\r\ncontent-length: 18\r\n\r\n{\"status\":\"ready\"}",
+                )
+                .await
+                .unwrap();
+        });
+        let weights = Arc::new(HealthDerivedWeights::default());
+        let health_check = configured_http_health_check(
+            &ProxyConfig {
+                upstreams: vec![address.to_string()],
+                load_balance: LoadBalanceConfig {
+                    health_check: LoadBalanceHealthCheckConfig {
+                        enabled: true,
+                        protocol: LoadBalanceHealthCheckProtocol::Http,
+                        path: "/healthz".to_owned(),
+                        host: Some("origin.example.test".to_owned()),
+                        request_headers: vec![LoadBalanceHealthCheckRequestHeader {
+                            name: "Authorization".to_owned(),
+                            value: "Bearer health-token".to_owned(),
+                        }],
+                        expected_headers: vec![LoadBalanceHealthCheckExpectedHeader {
+                            name: "x-fluxheim-health".to_owned(),
+                            value: "ready".to_owned(),
+                        }],
+                        expected_body_json: vec![LoadBalanceHealthCheckExpectedJson {
+                            path: "status".to_owned(),
+                            equals: "ready".to_owned(),
+                        }],
+                        connect_timeout_secs: Some(1),
+                        read_timeout_secs: Some(1),
+                        ..LoadBalanceHealthCheckConfig::default()
+                    },
+                    ..LoadBalanceConfig::default()
+                },
+                ..ProxyConfig::default()
+            },
+            weights.clone(),
+        )
+        .unwrap();
+        let backend = Backend::new(&address.to_string()).unwrap();
+
+        health_check.check(&backend).await.unwrap();
+        server.await.unwrap();
+        assert_eq!(
+            weights.weight_percent(super::backend_key(&backend)),
+            Some(40)
+        );
+    }
+
+    #[tokio::test]
+    async fn grpc_health_check_uses_native_h2_client() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut connection = h2::server::handshake(stream).await.unwrap();
+            let Some(result) = connection.accept().await else {
+                panic!("missing gRPC health request");
+            };
+            let (request, mut respond) = result.unwrap();
+            assert_eq!(request.uri().path(), "/grpc.health.v1.Health/Check");
+            assert_eq!(
+                request.headers().get("content-type").unwrap(),
+                "application/grpc"
+            );
+            let mut body = request.into_body();
+            let mut request_body = Vec::new();
+            while let Some(chunk) = body.data().await {
+                let chunk = chunk.unwrap();
+                body.flow_control().release_capacity(chunk.len()).unwrap();
+                request_body.extend_from_slice(&chunk);
+            }
+            assert_eq!(
+                request_body,
+                grpc_health_request_body(Some("example.Health"))
+            );
+            let response = http::Response::builder()
+                .status(200)
+                .header("content-type", "application/grpc")
+                .body(())
+                .unwrap();
+            let mut send = respond.send_response(response, false).unwrap();
+            send.send_data(Bytes::from(grpc_frame(&[0x08, 0x01])), true)
+                .unwrap();
+            drive_h2_test_server_to_close(connection).await;
+        });
+        let health_check = configured_http_health_check(
+            &ProxyConfig {
+                upstreams: vec![address.to_string()],
+                load_balance: LoadBalanceConfig {
+                    health_check: LoadBalanceHealthCheckConfig {
+                        enabled: true,
+                        protocol: LoadBalanceHealthCheckProtocol::Grpc,
+                        host: Some("grpc.example.test".to_owned()),
+                        grpc_service: Some("example.Health".to_owned()),
+                        connect_timeout_secs: Some(1),
+                        read_timeout_secs: Some(1),
+                        ..LoadBalanceHealthCheckConfig::default()
+                    },
+                    ..LoadBalanceConfig::default()
+                },
+                ..ProxyConfig::default()
+            },
+            Arc::new(HealthDerivedWeights::default()),
+        )
+        .unwrap();
+        let backend = Backend::new(&address.to_string()).unwrap();
+
+        health_check.check(&backend).await.unwrap();
+        server.await.unwrap();
+    }
+
+    async fn drive_h2_test_server_to_close<T>(mut connection: h2::server::Connection<T, Bytes>)
+    where
+        T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        connection.graceful_shutdown();
+        let _ = tokio::time::timeout(
+            Duration::from_secs(1),
+            poll_fn(|context| connection.poll_closed(context)),
+        )
+        .await;
     }
 
     #[test]
@@ -1865,10 +2446,7 @@ mod tests {
 
     #[test]
     fn validates_grpc_health_check_response() {
-        let mut response = ResponseHeader::build(200, None).unwrap();
-        response
-            .append_header("content-type", "application/grpc")
-            .unwrap();
+        let response = health_response(200, &[("content-type", "application/grpc")]);
         let serving = grpc_frame(&[0x08, 0x01]);
         assert!(validate_grpc_health_response_header(&response).is_ok());
         assert!(validate_grpc_health_response_body(&serving).is_ok());
@@ -1876,10 +2454,7 @@ mod tests {
         let not_serving = grpc_frame(&[0x08, 0x02]);
         assert!(validate_grpc_health_response_body(&not_serving).is_err());
 
-        let mut wrong_type = ResponseHeader::build(200, None).unwrap();
-        wrong_type
-            .append_header("content-type", "text/plain")
-            .unwrap();
+        let wrong_type = health_response(200, &[("content-type", "text/plain")]);
         assert!(validate_grpc_health_response_header(&wrong_type).is_err());
     }
 
@@ -1897,14 +2472,12 @@ mod tests {
     #[test]
     fn health_weight_signal_is_clamped_to_configured_floor() {
         let weights = HealthDerivedWeights::default();
-        let mut response = ResponseHeader::build(200, None).unwrap();
-        response.append_header("x-health-weight", "1").unwrap();
+        let response = health_response(200, &[("x-health-weight", "1")]);
 
         assert!(record_health_weight(&response, 42, 25, &weights).is_ok());
         assert_eq!(weights.weight_percent(42), Some(25));
 
-        let mut recovered = ResponseHeader::build(200, None).unwrap();
-        recovered.append_header("x-health-weight", "100").unwrap();
+        let recovered = health_response(200, &[("x-health-weight", "100")]);
         assert!(record_health_weight(&recovered, 42, 25, &weights).is_ok());
         assert_eq!(weights.weight_percent(42), None);
     }

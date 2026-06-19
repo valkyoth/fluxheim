@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.16
+Version:        1.6.17
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Fri Jun 19 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.17-1
+- Remove the direct Pingora dependency from the `fluxheim-load-balancer` crate.
+- Replace Pingora HTTP health sessions with Fluxheim-owned HTTP/1.1 and h2/gRPC
+  health probes.
+
 * Fri Jun 19 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.16-1
 - Tighten native HTTP/1.1 proxy cutover eligibility for unsupported route
   transforms, vhost routing policy, and proxy policy layers.

@@ -2633,7 +2633,14 @@ Planned `1.6.x` sequence:
   observability, and admin-visible failure semantics are all explicitly
   supported or fail closed. Preserve the Pingora compatibility adapter for any
   profile or feature combination still outside the native eligibility matrix.
-- `v1.6.17`: expand the native cutover to every official profile and remove
+- `v1.6.17`: remove the last direct Pingora dependency from the
+  `fluxheim-load-balancer` crate. Replace the Pingora HTTP health-check client
+  with Fluxheim-owned HTTP/1 and h2/gRPC probes, keep TCP/Redis/MySQL/Postgres
+  checks native, and add real listener-backed tests proving HTTP/1 and gRPC
+  health checks still work. Release gates must prove `cargo tree -p
+  fluxheim-load-balancer` has no Pingora crates. The root compatibility runtime
+  may still pull Pingora transitively until the next native HTTP cutover step.
+- `v1.6.18`: expand the native cutover to every official profile and remove
   `pingora-proxy`, `pingora-cache`, `pingora-pool`, `pingora-lru`,
   `pingora-timeout`, Pingora HTTP/error wrapper dependencies, and other
   proxy/cache/pool transitive Pingora crates from normal builds. Release gates
@@ -2644,17 +2651,17 @@ Planned `1.6.x` sequence:
   auth glue or move it into `fluxheim-admin` if the dependency graph stays
   one-way. Do not let admin own domain state; it should call domain APIs and
   serialize responses.
-- `v1.6.18`: remove remaining Pingora runtime/listener/TLS adapter crates,
+- `v1.6.19`: remove remaining Pingora runtime/listener/TLS adapter crates,
   vendored Pingora patches, compatibility shims, and Pingora-specific docs from
   normal builds. This is the final Pingora-free proof release: `cargo tree`,
   release containers, RPM builds, source builds, and focused artifacts must all
   prove no normal Fluxheim build compiles vendored Pingora code.
-- `v1.6.19`: stabilization/security-only release for the Pingora-free runtime
+- `v1.6.20`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
   checks, long-running soak tests, runtime-baseline comparisons, and
   documentation clarity.
-- `v1.6.20`: native load-balancer compatibility polish after Pingora is gone
+- `v1.6.21`: native load-balancer compatibility polish after Pingora is gone
   from normal builds. Add a Fluxheim-owned nginx/Ketama-compatible consistent
   hash selection mode for operators migrating from nginx or Pingora Ketama
   behavior. Keep the existing rendezvous consistent-hash and bounded-load

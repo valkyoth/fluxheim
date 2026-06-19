@@ -1,6 +1,5 @@
 # path	reason
 # crates/fluxheim-tls intentionally has no entry: TLS policy/planning must stay Pingora-free.
-crates/fluxheim-load-balancer/src/health.rs	Temporary HTTP health-check adapter; removed with native HTTP/client cutover.
 src/admin.rs	Current Pingora admin HTTP app/listener adapter until native admin runtime cutover.
 src/background.rs	Current Pingora background service/shutdown adapter until native task supervisor cutover.
 src/cache.rs	Temporary Pingora cache storage adapter; removed with native cache/runtime cutover.
