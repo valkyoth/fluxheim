@@ -83,6 +83,21 @@ pub(super) fn configured_exec_health_check(
             "exec health check command is required",
         ));
     };
+    if config
+        .load_balance
+        .health_check
+        .exec_allowed_commands
+        .is_empty()
+        || !config
+            .load_balance
+            .health_check
+            .exec_allowed_commands
+            .contains(&command)
+    {
+        return Err(FluxError::InvalidInput(
+            "exec health check command is not in exec_allowed_commands",
+        ));
+    }
     Ok(Box::new(FluxExecHealthCheck {
         consecutive_success: config.load_balance.health_check.consecutive_success,
         consecutive_failure: config.load_balance.health_check.consecutive_failure,

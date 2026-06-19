@@ -150,10 +150,25 @@ async fn read_h2_health_body(
         }
         output.extend_from_slice(&chunk);
     }
+    let trailers = tokio::time::timeout(read_timeout, body.trailers())
+        .await
+        .map_err(|_| {
+            FluxError::timeout(
+                "read gRPC health check trailers",
+                format!("timeout after {}s", read_timeout.as_secs()),
+            )
+        })?
+        .map_err(|error| {
+            FluxError::io(
+                "read gRPC health check trailers",
+                io::Error::other(error.to_string()),
+            )
+        })?;
+    validate_grpc_health_trailers(trailers.as_ref()).map_err(HttpHealthCheckError::into_flux)?;
     Ok(output)
 }
 
-pub(super) fn grpc_health_request_body(service: Option<&str>) -> Vec<u8> {
+pub(super) fn grpc_health_request_body(service: Option<&str>) -> FluxResult<Vec<u8>> {
     let mut message = Vec::new();
     if let Some(service) = service
         && !service.is_empty()
@@ -165,13 +180,14 @@ pub(super) fn grpc_health_request_body(service: Option<&str>) -> Vec<u8> {
     grpc_frame(&message)
 }
 
-pub(super) fn grpc_frame(message: &[u8]) -> Vec<u8> {
-    let len = message.len() as u32;
+pub(super) fn grpc_frame(message: &[u8]) -> FluxResult<Vec<u8>> {
+    let len = u32::try_from(message.len())
+        .map_err(|_| FluxError::InvalidInput("gRPC health check message exceeds frame limit"))?;
     let mut frame = Vec::with_capacity(5 + message.len());
     frame.push(0);
     frame.extend_from_slice(&len.to_be_bytes());
     frame.extend_from_slice(message);
-    frame
+    Ok(frame)
 }
 
 fn encode_grpc_varint(mut value: u64, output: &mut Vec<u8>) {
@@ -232,6 +248,27 @@ pub(super) fn validate_grpc_health_response_body(body: &[u8]) -> Result<(), Http
     Ok(())
 }
 
+fn validate_grpc_health_trailers(
+    trailers: Option<&http::HeaderMap>,
+) -> Result<(), HttpHealthCheckError> {
+    let grpc_status = trailers
+        .and_then(|trailers| trailers.get("grpc-status"))
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            HttpHealthCheckError::new(
+                HealthErrorKind::ReadError,
+                "missing gRPC health check grpc-status trailer",
+            )
+        })?;
+    if grpc_status != "0" {
+        return Err(HttpHealthCheckError::new(
+            HealthErrorKind::ReadError,
+            "gRPC health check returned non-OK grpc-status",
+        ));
+    }
+    Ok(())
+}
+
 fn decode_grpc_health_status(message: &[u8]) -> Result<u64, HttpHealthCheckError> {
     let mut offset = 0usize;
     while offset < message.len() {
@@ -271,10 +308,19 @@ fn decode_grpc_health_status(message: &[u8]) -> Result<u64, HttpHealthCheckError
 fn decode_grpc_varint(message: &[u8], offset: &mut usize) -> Result<u64, HttpHealthCheckError> {
     let mut value = 0u64;
     let mut shift = 0u32;
-    while *offset < message.len() && shift < 64 {
+    while *offset < message.len() {
         let byte = message[*offset];
         *offset += 1;
-        value |= u64::from(byte & 0x7f) << shift;
+        if shift < 63 {
+            value |= u64::from(byte & 0x7f) << shift;
+        } else if shift == 63 {
+            if byte & !0x01 != 0 {
+                return Err(invalid_grpc_response());
+            }
+            value |= u64::from(byte & 0x01) << 63;
+        } else {
+            return Err(invalid_grpc_response());
+        }
         if byte & 0x80 == 0 {
             return Ok(value);
         }

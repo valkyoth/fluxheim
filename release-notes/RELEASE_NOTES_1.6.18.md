@@ -11,6 +11,11 @@ Pingora-free.
   HTTP/1.1 health probes reject CR/LF in request path and Host values, gRPC
   health probes release h2 flow-control capacity, and h2 driver tasks are
   aborted on all exit paths.
+- Harden native health probes after the 1.6.18 split: gRPC health requests now
+  guard frame-length conversion, reject `@` userinfo in configured health hosts,
+  require `grpc-status: 0` trailers, and reject overlarge protobuf varints;
+  HTTP/1.1 health responses now use an 8 KiB response-header cap; exec health
+  checks re-enforce `exec_allowed_commands` at runtime.
 - Split native HTTP/1.1 and gRPC/h2 health-check helper code into focused
   private modules under `fluxheim-load-balancer`. This keeps the protocol
   serialization/parsing paths reviewable without changing the public

@@ -45,6 +45,7 @@ use self::transport::{
 };
 
 const HTTP_HEALTH_CHECK_MAX_BODY_BYTES: usize = 64 * 1024;
+const HTTP_HEALTH_CHECK_MAX_HEADER_BYTES: usize = 8 * 1024;
 const GRPC_HEALTH_CHECK_PATH: &[u8] = b"/grpc.health.v1.Health/Check";
 const HEALTH_WEIGHT_HEADER: &str = "x-health-weight";
 
@@ -218,6 +219,7 @@ fn configured_http_health_check(
     };
     reject_http1_health_request_crlf(path, "health check path must not contain CR or LF")?;
     reject_http1_health_request_crlf(&host, "health check host must not contain CR or LF")?;
+    reject_http_health_host_userinfo(&host)?;
     let method = Method::from_bytes(method.as_bytes()).map_err(|error| {
         FluxError::io(
             "build HTTP health check request method",
@@ -247,6 +249,13 @@ fn configured_http_health_check(
         );
         headers.insert("te", HeaderValue::from_static("trailers"));
     }
+    if config.load_balance.health_check.reuse_connection {
+        log::warn!(
+            target: "fluxheim::load_balancer",
+            "load-balancer health_check.reuse_connection is accepted for compatibility but not \
+             implemented by the native health-check client yet; checks will open a fresh connection"
+        );
+    }
 
     let mut connection_timeout = Some(Duration::from_secs(1));
     let mut read_timeout = Some(Duration::from_secs(1));
@@ -275,11 +284,13 @@ fn configured_http_health_check(
             path: path.to_owned(),
             host,
             headers,
-            body: grpc.then(|| {
-                Bytes::from(grpc_health_request_body(
+            body: if grpc {
+                Some(Bytes::from(grpc_health_request_body(
                     config.load_balance.health_check.grpc_service.as_deref(),
-                ))
-            }),
+                )?))
+            } else {
+                None
+            },
             grpc,
         },
         port_override: config.load_balance.health_check.port_override,
@@ -321,6 +332,15 @@ fn configured_http_health_check(
 fn reject_http1_health_request_crlf(value: &str, message: &'static str) -> FluxResult<()> {
     if value.bytes().any(|byte| matches!(byte, b'\r' | b'\n')) {
         return Err(FluxError::InvalidInput(message));
+    }
+    Ok(())
+}
+
+fn reject_http_health_host_userinfo(value: &str) -> FluxResult<()> {
+    if value.as_bytes().contains(&b'@') {
+        return Err(FluxError::InvalidInput(
+            "health check host must not contain userinfo",
+        ));
     }
     Ok(())
 }
@@ -531,14 +551,15 @@ mod tests {
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
     use super::transport::{FluxTcpHealthCheck, configured_tcp_health_check_tls_inner};
     use super::{
-        HealthHttpResponse, POSTGRES_HEALTH_CHECK_SSL_REQUEST, REDIS_HEALTH_CHECK_REQUEST,
-        configured_exec_health_check, configured_health_check, configured_http_health_check,
-        configured_mysql_health_check, configured_postgres_health_check,
-        configured_redis_health_check, grpc_frame, grpc_health_request_body, record_health_weight,
-        validate_grpc_health_response_body, validate_grpc_health_response_header,
-        validate_http_health_response, validate_http_health_response_body,
-        validate_http_health_response_body_json, validate_mysql_health_handshake,
-        validate_postgres_health_response, validate_redis_health_response,
+        HealthHttpRequest, HealthHttpResponse, POSTGRES_HEALTH_CHECK_SSL_REQUEST,
+        REDIS_HEALTH_CHECK_REQUEST, configured_exec_health_check, configured_health_check,
+        configured_http_health_check, configured_mysql_health_check,
+        configured_postgres_health_check, configured_redis_health_check, grpc_frame,
+        grpc_health_request_body, record_health_weight, validate_grpc_health_response_body,
+        validate_grpc_health_response_header, validate_http_health_response,
+        validate_http_health_response_body, validate_http_health_response_body_json,
+        validate_mysql_health_handshake, validate_postgres_health_response,
+        validate_redis_health_response,
     };
     use bytes::Bytes;
     use fluxheim_config::{
@@ -858,7 +879,32 @@ mod tests {
         );
         assert_eq!(
             health_check.req.body.as_deref(),
-            Some(grpc_health_request_body(Some("example.Health")).as_slice())
+            Some(
+                grpc_health_request_body(Some("example.Health"))
+                    .unwrap()
+                    .as_slice()
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_grpc_health_check_host_with_userinfo() {
+        assert!(
+            configured_http_health_check(
+                &ProxyConfig {
+                    load_balance: LoadBalanceConfig {
+                        health_check: LoadBalanceHealthCheckConfig {
+                            protocol: LoadBalanceHealthCheckProtocol::Grpc,
+                            host: Some("metadata@backend.example.test".to_owned()),
+                            ..LoadBalanceHealthCheckConfig::default()
+                        },
+                        ..LoadBalanceConfig::default()
+                    },
+                    ..ProxyConfig::default()
+                },
+                Arc::new(HealthDerivedWeights::default()),
+            )
+            .is_err()
         );
     }
 
@@ -961,7 +1007,7 @@ mod tests {
             }
             assert_eq!(
                 request_body,
-                grpc_health_request_body(Some("example.Health"))
+                grpc_health_request_body(Some("example.Health")).unwrap()
             );
             let response = http::Response::builder()
                 .status(200)
@@ -969,8 +1015,11 @@ mod tests {
                 .body(())
                 .unwrap();
             let mut send = respond.send_response(response, false).unwrap();
-            send.send_data(Bytes::from(grpc_frame(&[0x08, 0x01])), true)
+            send.send_data(Bytes::from(grpc_frame(&[0x08, 0x01]).unwrap()), false)
                 .unwrap();
+            let mut trailers = HeaderMap::new();
+            trailers.insert("grpc-status", HeaderValue::from_static("0"));
+            send.send_trailers(trailers).unwrap();
             drive_h2_test_server_to_close(connection).await;
         });
         let health_check = configured_http_health_check(
@@ -996,6 +1045,45 @@ mod tests {
         let backend = Backend::new(&address.to_string()).unwrap();
 
         health_check.check(&backend).await.unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn grpc_health_check_rejects_non_ok_trailer_status() {
+        let (client, server) = tokio::io::duplex(8192);
+        let server = tokio::spawn(async move {
+            let mut connection = h2::server::handshake(server).await.unwrap();
+            let Some(result) = connection.accept().await else {
+                panic!("missing gRPC health request");
+            };
+            let (_request, mut respond) = result.unwrap();
+            let response = http::Response::builder()
+                .status(200)
+                .header("content-type", "application/grpc")
+                .body(())
+                .unwrap();
+            let mut send = respond.send_response(response, false).unwrap();
+            send.send_data(Bytes::from(grpc_frame(&[0x08, 0x01]).unwrap()), false)
+                .unwrap();
+            let mut trailers = HeaderMap::new();
+            trailers.insert("grpc-status", HeaderValue::from_static("14"));
+            send.send_trailers(trailers).unwrap();
+            drive_h2_test_server_to_close(connection).await;
+        });
+        let request = HealthHttpRequest {
+            method: http::Method::POST,
+            path: "/grpc.health.v1.Health/Check".to_owned(),
+            host: "grpc.example.test".to_owned(),
+            headers: HeaderMap::new(),
+            body: Some(Bytes::from(grpc_health_request_body(None).unwrap())),
+            grpc: true,
+        };
+
+        let result =
+            super::execute_grpc_health_check(Box::new(client), &request, Duration::from_secs(1))
+                .await;
+
+        assert!(result.is_err());
         server.await.unwrap();
     }
 
@@ -1040,6 +1128,25 @@ mod tests {
         assert_eq!(
             health_check.backend_summary(&backend),
             "127.0.0.1:8080 via exec"
+        );
+    }
+
+    #[test]
+    fn rejects_exec_health_check_without_runtime_allowlist_match() {
+        assert!(
+            configured_exec_health_check(&ProxyConfig {
+                load_balance: LoadBalanceConfig {
+                    health_check: LoadBalanceHealthCheckConfig {
+                        protocol: LoadBalanceHealthCheckProtocol::Exec,
+                        exec_command: Some("/usr/local/libexec/fluxheim-health".to_owned()),
+                        exec_allowed_commands: vec!["/usr/local/libexec/other-health".to_owned()],
+                        ..LoadBalanceHealthCheckConfig::default()
+                    },
+                    ..LoadBalanceConfig::default()
+                },
+                ..ProxyConfig::default()
+            })
+            .is_err()
         );
     }
 
@@ -1276,11 +1383,11 @@ mod tests {
     #[test]
     fn validates_grpc_health_check_response() {
         let response = health_response(200, &[("content-type", "application/grpc")]);
-        let serving = grpc_frame(&[0x08, 0x01]);
+        let serving = grpc_frame(&[0x08, 0x01]).unwrap();
         assert!(validate_grpc_health_response_header(&response).is_ok());
         assert!(validate_grpc_health_response_body(&serving).is_ok());
 
-        let not_serving = grpc_frame(&[0x08, 0x02]);
+        let not_serving = grpc_frame(&[0x08, 0x02]).unwrap();
         assert!(validate_grpc_health_response_body(&not_serving).is_err());
 
         let wrong_type = health_response(200, &[("content-type", "text/plain")]);
@@ -1295,7 +1402,12 @@ mod tests {
         response.extend_from_slice(&[0u8; 4]);
         response.extend_from_slice(&[0x08, 0x01]);
 
-        assert!(validate_grpc_health_response_body(&grpc_frame(&response)).is_ok());
+        assert!(validate_grpc_health_response_body(&grpc_frame(&response).unwrap()).is_ok());
+        let overlarge_varint = grpc_frame(&[
+            0x08, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02,
+        ])
+        .unwrap();
+        assert!(validate_grpc_health_response_body(&overlarge_varint).is_err());
     }
 
     #[test]

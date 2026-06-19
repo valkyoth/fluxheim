@@ -35,6 +35,14 @@ behavior when the change improves security or project direction.
   baseline for 1.6.18 release gates.
 - Preserve the 1.6.17 HTTP/1.1 CR/LF rejection, gRPC h2 flow-control release,
   and h2 driver abort-on-drop behavior across the protocol split.
+- Guard native gRPC health-check frame length conversion, validate
+  `grpc-status: 0` trailers, reject overlarge protobuf varints, and reject
+  userinfo in configured health-check hosts.
+- Limit native HTTP/1.1 health response headers to 8 KiB instead of sharing the
+  64 KiB body cap.
+- Re-enforce `exec_allowed_commands` inside the native exec health-check
+  builder so programmatic `ProxyConfig` construction cannot bypass the config
+  validator's allowlist check.
 
 ## 1.6.17 - 2026-06-19
 

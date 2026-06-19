@@ -7,8 +7,8 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use fluxheim_common::{FluxError, FluxResult};
 
 use super::{
-    BoxedHealthIo, HTTP_HEALTH_CHECK_MAX_BODY_BYTES, HealthErrorKind, HealthHttpRequest,
-    HealthHttpResponse, HttpHealthCheckError,
+    BoxedHealthIo, HTTP_HEALTH_CHECK_MAX_BODY_BYTES, HTTP_HEALTH_CHECK_MAX_HEADER_BYTES,
+    HealthErrorKind, HealthHttpRequest, HealthHttpResponse, HttpHealthCheckError,
 };
 
 pub(super) async fn execute_http1_health_check(
@@ -69,7 +69,7 @@ async fn read_http1_response_header(
             let response = parse_http1_response_header(&buffer[..index])?;
             return Ok((response, remainder));
         }
-        if buffer.len() >= HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
+        if buffer.len() >= HTTP_HEALTH_CHECK_MAX_HEADER_BYTES {
             return Err(HttpHealthCheckError::new(
                 HealthErrorKind::ReadError,
                 "HTTP health check response header exceeded maximum size",
