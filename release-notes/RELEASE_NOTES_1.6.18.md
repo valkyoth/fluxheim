@@ -37,3 +37,7 @@ Pingora-free.
   is in progress. The release target is to remove Pingora proxy/cache/pool
   crates from normal official profiles only when the native replacement paths
   pass the same release gates and smoke tests.
+- Keep root-profile Pingora dependency exceptions targeted at 1.6.19 while
+  1.6.18 finishes the load-balancer health split. The dedicated
+  `fluxheim-load-balancer` crate remains covered by the stricter Pingora-free
+  gate.

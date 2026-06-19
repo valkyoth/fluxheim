@@ -28,6 +28,9 @@ behavior when the change improves security or project direction.
   launch, environment scrubbing, timeout handling, and exit-status mapping.
 - Split TCP health checks, TCP/TLS handshake setup, ALPN selection, and shared
   HTTP health-stream connection handling into a transport helper module.
+- Move root-profile Pingora dependency exception targets to 1.6.19 while
+  keeping the dedicated `fluxheim-load-balancer` crate covered by the
+  Pingora-free policy gate.
 
 ### Security
 
