@@ -18,6 +18,9 @@ web build can stay Pingora-free.
   `cargo tree --locked --no-default-features --features web,tls-rustls` and
   `cargo tree --locked --no-default-features --features web,tls-openssl` have
   no Pingora crates.
+- Add `scripts/validate-native-web-tls.sh` and wire it into the stable release
+  gate so the same native web TLS proof profiles are compiled during release
+  checks, not only inspected with `cargo tree`.
 - Move rustls downstream SNI certificate resolution into `fluxheim-tls`.
   Fluxheim now owns the reloadable certificate table, PEM certificate/private
   key loading, wildcard/exact SNI lookup, and TLS-ALPN challenge certificate

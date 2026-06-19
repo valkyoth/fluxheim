@@ -298,9 +298,9 @@ Recommended profile features:
 
 The remaining Pingora compatibility runtime is selected explicitly through the
 internal `pingora-compat` feature, which is currently pulled in by `proxy`.
-Starting in `1.6.19`, `web,tls-rustls` is release-gate checked as a native
-TLS-only dependency proof and does not compile Pingora crates, but it is not yet
-the production static-site runtime profile.
+Starting in `1.6.19`, `web,tls-rustls` and `web,tls-openssl` are release-gate
+checked as native TLS-only dependency proofs and do not compile Pingora crates,
+but they are not yet the production static-site runtime profile.
 
 Fluxheim 1.3 started the focused image split. The `profile-cache-edge` and
 `profile-proxy-edge` aliases are TLS-capable without compiling local static web
