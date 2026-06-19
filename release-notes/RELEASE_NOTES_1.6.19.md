@@ -13,10 +13,11 @@ web build can stay Pingora-free.
   features. `tls-rustls-backend` now forwards `pingora?/rustls`, and
   `tls-openssl` now forwards `pingora?/openssl`, so native TLS-only builds do
   not pull Pingora just to use rustls or OpenSSL.
-- Extend `scripts/validate-pingora-dependency-policy.sh` with a
-  `native-web-tls` profile. The gate now records and verifies that
-  `cargo tree --locked --no-default-features --features web,tls-rustls` has no
-  Pingora crates.
+- Extend `scripts/validate-pingora-dependency-policy.sh` with native web TLS
+  profiles for rustls and OpenSSL. The gate now records and verifies that
+  `cargo tree --locked --no-default-features --features web,tls-rustls` and
+  `cargo tree --locked --no-default-features --features web,tls-openssl` have
+  no Pingora crates.
 - Move rustls downstream SNI certificate resolution into `fluxheim-tls`.
   Fluxheim now owns the reloadable certificate table, PEM certificate/private
   key loading, wildcard/exact SNI lookup, and TLS-ALPN challenge certificate

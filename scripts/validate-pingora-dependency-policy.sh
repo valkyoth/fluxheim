@@ -49,6 +49,9 @@ capture_tree() {
         native-web-tls)
             cargo tree --locked --no-default-features --features web,tls-rustls >"$tree_file"
             ;;
+        native-web-openssl)
+            cargo tree --locked --no-default-features --features web,tls-openssl >"$tree_file"
+            ;;
         php)
             cargo tree --locked --no-default-features --features profile-web-server,php-fpm >"$tree_file"
             ;;
@@ -82,7 +85,7 @@ extract_pingora_crates() {
     fi
 }
 
-profiles="default full cache-edge proxy-edge load-balancer-edge load-balancer-crate native-web-tls php privacy"
+profiles="default full cache-edge proxy-edge load-balancer-edge load-balancer-crate native-web-tls native-web-openssl php privacy"
 current_tsv="$out_dir/current.tsv"
 current_keys="$out_dir/current.keys"
 exception_keys="$out_dir/exceptions.keys"
