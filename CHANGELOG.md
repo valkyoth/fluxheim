@@ -7,6 +7,26 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.19 - 2026-06-19
+
+### Changed
+
+- Add an explicit `pingora-compat` feature for the remaining root compatibility
+  runtime, making the Pingora boundary visible in Cargo features instead of
+  hiding it behind the generic `ingress` feature.
+- Stop native TLS-only web builds from enabling `pingora/rustls` or
+  `pingora/openssl` when the Pingora compatibility runtime is not selected.
+- Extend the Pingora dependency policy with a `native-web-tls` cargo-tree
+  profile that proves `--no-default-features --features web,tls-rustls` does
+  not compile Pingora crates.
+
+### Notes
+
+- Root proxy profiles still use the compatibility runtime in this cut. The
+  remaining server/admin/metrics/proxy compatibility removal is moved to the
+  next Pingora-exit slice so it can be tested as a runtime change rather than
+  hidden inside a feature cleanup.
+
 ## 1.6.18 - 2026-06-19
 
 ### Changed

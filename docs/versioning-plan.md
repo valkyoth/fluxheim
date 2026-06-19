@@ -2654,17 +2654,22 @@ Planned `1.6.x` sequence:
   auth glue or move it into `fluxheim-admin` if the dependency graph stays
   one-way. Do not let admin own domain state; it should call domain APIs and
   serialize responses.
-- `v1.6.19`: remove remaining Pingora runtime/listener/TLS adapter crates,
+- `v1.6.19`: isolate the remaining Pingora compatibility runtime behind an
+  explicit Cargo feature boundary and prove native TLS-only web builds do not
+  pull Pingora through TLS feature forwarding. Do not claim this as the final
+  runtime cutover; root proxy/admin/metrics/listener compatibility removal is
+  a behavior change and belongs in the next slice.
+- `v1.6.20`: remove remaining Pingora runtime/listener/TLS adapter crates,
   vendored Pingora patches, compatibility shims, and Pingora-specific docs from
   normal builds. This is the final Pingora-free proof release: `cargo tree`,
   release containers, RPM builds, source builds, and focused artifacts must all
   prove no normal Fluxheim build compiles vendored Pingora code.
-- `v1.6.20`: stabilization/security-only release for the Pingora-free runtime
+- `v1.6.21`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
   checks, long-running soak tests, runtime-baseline comparisons, and
   documentation clarity.
-- `v1.6.21`: native load-balancer compatibility polish after Pingora is gone
+- `v1.6.22`: native load-balancer compatibility polish after Pingora is gone
   from normal builds. Add a Fluxheim-owned nginx/Ketama-compatible consistent
   hash selection mode for operators migrating from nginx or Pingora Ketama
   behavior. Keep the existing rendezvous consistent-hash and bounded-load

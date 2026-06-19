@@ -126,6 +126,12 @@ feature aliases for common deployment shapes.
 | `profile-fips-rustls` | `proxy`, `security`, `tls-rustls-fips` | FIPS-capable rustls/AWS-LC candidate build. |
 | `profile-iso19790-rustls` | `profile-fips-rustls`, `tls-rustls-iso19790` | ISO/IEC 19790 terminology alias for the same rustls/AWS-LC candidate path. |
 
+The remaining Pingora compatibility runtime is selected through
+`pingora-compat`, which `proxy` still enables in the current release line.
+`1.6.19` adds a release-gate dependency proof for
+`--no-default-features --features web,tls-rustls`; that build does not compile
+Pingora crates, but it is not yet the production static-site runtime profile.
+
 Examples that match the official release artifacts:
 
 ```bash

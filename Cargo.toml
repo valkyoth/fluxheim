@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.6.18"
+version = "1.6.19"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -40,11 +40,12 @@ default = [
 ingress = [
     "dep:bytes",
     "dep:http",
-    "dep:pingora",
     "dep:tokio",
 ]
+pingora-compat = ["dep:pingora"]
 proxy = [
     "ingress",
+    "pingora-compat",
     "dep:async-trait",
     "dep:base64-ng",
     "fluxheim-config/proxy",
@@ -84,7 +85,7 @@ tls-rustls-backend = [
     "fluxheim-config/tls-rustls-backend",
     "fluxheim-server/tls-rustls-backend",
     "fluxheim-tls/tls-rustls-backend",
-    "pingora/rustls",
+    "pingora?/rustls",
     "dep:rustls",
     "dep:rustls-native-certs",
     "dep:tokio-rustls",
@@ -99,7 +100,7 @@ tls-openssl = [
     "fluxheim-server/tls-openssl",
     "fluxheim-tls/tls-openssl",
     "fluxheim-load-balancer?/tls-openssl-backend",
-    "pingora/openssl",
+    "pingora?/openssl",
     "dep:openssl",
     "dep:tokio-openssl",
 ]

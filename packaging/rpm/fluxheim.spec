@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.18
+Version:        1.6.19
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Fri Jun 19 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.19-1
+- Isolate the remaining Pingora compatibility runtime behind an explicit
+  `pingora-compat` feature boundary.
+- Stop native TLS-only web builds from enabling Pingora TLS backend features
+  when the compatibility runtime is not selected.
+- Extend the Pingora dependency policy with a native web+TLS cargo-tree proof.
+
 * Fri Jun 19 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.18-1
 - Continue the Pingora-exit release line toward normal-profile proxy/cache/pool
   dependency removal.

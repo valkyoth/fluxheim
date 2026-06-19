@@ -46,6 +46,9 @@ capture_tree() {
         load-balancer-crate)
             cargo tree --locked -p fluxheim-load-balancer >"$tree_file"
             ;;
+        native-web-tls)
+            cargo tree --locked --no-default-features --features web,tls-rustls >"$tree_file"
+            ;;
         php)
             cargo tree --locked --no-default-features --features profile-web-server,php-fpm >"$tree_file"
             ;;
@@ -79,7 +82,7 @@ extract_pingora_crates() {
     fi
 }
 
-profiles="default full cache-edge proxy-edge load-balancer-edge load-balancer-crate php privacy"
+profiles="default full cache-edge proxy-edge load-balancer-edge load-balancer-crate native-web-tls php privacy"
 current_tsv="$out_dir/current.tsv"
 current_keys="$out_dir/current.keys"
 exception_keys="$out_dir/exceptions.keys"

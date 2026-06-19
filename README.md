@@ -296,6 +296,12 @@ Recommended profile features:
 | `profile-fips-rustls` | `proxy`, `security`, `tls-rustls-fips` | rustls/AWS-LC FIPS-capable candidate build. |
 | `profile-iso19790-rustls` | `profile-fips-rustls` | ISO/IEC 19790 terminology alias for the same rustls/AWS-LC candidate path. |
 
+The remaining Pingora compatibility runtime is selected explicitly through the
+internal `pingora-compat` feature, which is currently pulled in by `proxy`.
+Starting in `1.6.19`, `web,tls-rustls` is release-gate checked as a native
+TLS-only dependency proof and does not compile Pingora crates, but it is not yet
+the production static-site runtime profile.
+
 Fluxheim 1.3 started the focused image split. The `profile-cache-edge` and
 `profile-proxy-edge` aliases are TLS-capable without compiling local static web
 serving. Official RPMs, container images, and release tarballs add
@@ -338,8 +344,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.6.18-wolfi`, `v1.6.18-cache-wolfi`, `v1.6.18-proxy-wolfi`,
-`v1.6.18-load-balancer-wolfi`, and `v1.6.18-php-wolfi`.
+`v1.6.19-wolfi`, `v1.6.19-cache-wolfi`, `v1.6.19-proxy-wolfi`,
+`v1.6.19-load-balancer-wolfi`, and `v1.6.19-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
