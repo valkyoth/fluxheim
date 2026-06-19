@@ -11,6 +11,10 @@ Pingora-free.
   HTTP/1.1 health probes reject CR/LF in request path and Host values, gRPC
   health probes release h2 flow-control capacity, and h2 driver tasks are
   aborted on all exit paths.
+- Split native HTTP/1.1 and gRPC/h2 health-check helper code into focused
+  private modules under `fluxheim-load-balancer`. This keeps the protocol
+  serialization/parsing paths reviewable without changing the public
+  load-balancer API.
 
 ## Compatibility
 

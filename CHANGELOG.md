@@ -18,11 +18,16 @@ behavior when the change improves security or project direction.
 - Keep the load-balancer crate Pingora-free after 1.6.17 and plan the native
   health-check implementation split by protocol so each probe can be reviewed
   independently.
+- Split native HTTP/1.1 and gRPC/h2 health-check helpers out of the
+  load-balancer health orchestration module. The new protocol helper files stay
+  below the modularity policy's 500-line target.
 
 ### Security
 
 - Carry forward the 1.6.17 native load-balancer health-probe hardening as the
   baseline for 1.6.18 release gates.
+- Preserve the 1.6.17 HTTP/1.1 CR/LF rejection, gRPC h2 flow-control release,
+  and h2 driver abort-on-drop behavior across the protocol split.
 
 ## 1.6.17 - 2026-06-19
 
