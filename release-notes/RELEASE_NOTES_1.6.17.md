@@ -17,6 +17,11 @@ active health-check client path are now Fluxheim-owned.
 - TLS health-check connections use the Fluxheim-owned TCP/TLS connector path,
   including handshake timeout enforcement and protocol-specific ALPN for
   HTTP/1.1 or h2.
+- HTTP/1.1 health-check request paths and Host values now reject CR/LF before
+  request serialization, closing a native health-probe header-injection gap.
+- gRPC health-check response reads now release h2 flow-control capacity and use
+  an abort-on-drop driver task guard so error paths cannot leave orphaned h2
+  driver tasks behind. h2 driver errors are logged at warning level.
 - `scripts/validate-pingora-dependency-policy.sh` now checks
   `cargo tree -p fluxheim-load-balancer` directly, so release gates fail if
   Pingora is reintroduced into the load-balancer crate.

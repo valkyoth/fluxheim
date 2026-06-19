@@ -41,6 +41,14 @@ enum HealthTlsAlpn {
     Http2,
 }
 
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 pub(super) fn configured_health_check(
     config: &ProxyConfig,
     health_weights: Arc<HealthDerivedWeights>,
@@ -806,6 +814,8 @@ fn configured_http_health_check(
     } else {
         config.load_balance.health_check.path.as_str()
     };
+    reject_http1_health_request_crlf(path, "health check path must not contain CR or LF")?;
+    reject_http1_health_request_crlf(&host, "health check host must not contain CR or LF")?;
     let method = Method::from_bytes(method.as_bytes()).map_err(|error| {
         FluxError::io(
             "build HTTP health check request method",
@@ -904,6 +914,13 @@ fn configured_http_health_check(
         health_weight_min_percent: config.load_balance.health_check.health_weight_min_percent,
         health_weights,
     }))
+}
+
+fn reject_http1_health_request_crlf(value: &str, message: &'static str) -> FluxResult<()> {
+    if value.bytes().any(|byte| matches!(byte, b'\r' | b'\n')) {
+        return Err(FluxError::InvalidInput(message));
+    }
+    Ok(())
 }
 
 fn apply_health_check_peer_timeouts(
@@ -1029,14 +1046,14 @@ async fn execute_grpc_health_check(
                 io::Error::other(error.to_string()),
             )
         })?;
-    let driver = tokio::spawn(async move {
+    let _driver = AbortOnDrop(tokio::spawn(async move {
         if let Err(error) = connection.await {
-            log::debug!(
+            log::warn!(
                 target: "fluxheim::load_balancer",
                 "gRPC health check connection closed with error: {error}"
             );
         }
-    });
+    }));
     let uri: Uri = format!("{}://{}{}", "http", request.host, request.path)
         .parse()
         .map_err(|error| FluxError::io("build gRPC health check URI", io::Error::other(error)))?;
@@ -1098,7 +1115,6 @@ async fn execute_grpc_health_check(
     let status = response.status();
     let headers = response.headers().clone();
     let body = read_h2_health_body(response.into_body(), read_timeout).await?;
-    driver.abort();
     Ok((HealthHttpResponse { status, headers }, body))
 }
 
@@ -1122,6 +1138,15 @@ async fn read_h2_health_body(
                 io::Error::other(error.to_string()),
             )
         })?;
+        let chunk_len = chunk.len();
+        body.flow_control()
+            .release_capacity(chunk_len)
+            .map_err(|error| {
+                FluxError::io(
+                    "release gRPC health check flow control",
+                    io::Error::other(error.to_string()),
+                )
+            })?;
         if output.len().saturating_add(chunk.len()) > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
             return Err(HttpHealthCheckError::new(
                 HealthErrorKind::ReadError,
@@ -1920,6 +1945,47 @@ mod tests {
             ["ready".to_owned()]
         );
         assert_eq!(health_check.expected_body_json[0].path, "status");
+    }
+
+    #[test]
+    fn rejects_http_health_check_path_and_host_crlf() {
+        let base = ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned()],
+            load_balance: LoadBalanceConfig {
+                health_check: LoadBalanceHealthCheckConfig {
+                    enabled: true,
+                    protocol: LoadBalanceHealthCheckProtocol::Http,
+                    path: "/healthz".to_owned(),
+                    host: Some("origin.example.test".to_owned()),
+                    ..LoadBalanceHealthCheckConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        };
+
+        let mut bad_path = base.clone();
+        bad_path.load_balance.health_check.path = "/healthz\r\nX-Injected: yes".to_owned();
+        let error = match configured_http_health_check(
+            &bad_path,
+            Arc::new(HealthDerivedWeights::default()),
+        ) {
+            Ok(_) => panic!("CRLF path was accepted"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("path must not contain"));
+
+        let mut bad_host = base;
+        bad_host.load_balance.health_check.host =
+            Some("origin.example.test\r\nX-Injected: yes".to_owned());
+        let error = match configured_http_health_check(
+            &bad_host,
+            Arc::new(HealthDerivedWeights::default()),
+        ) {
+            Ok(_) => panic!("CRLF host was accepted"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("host must not contain"));
     }
 
     #[test]
