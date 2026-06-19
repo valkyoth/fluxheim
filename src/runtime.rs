@@ -80,6 +80,12 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     fluxheim_load_balancer::set_load_balancer_event_recorder(
         crate::metrics::record_load_balancer_event,
     );
+    #[cfg(all(
+        feature = "tls-rustls-backend",
+        feature = "metrics",
+        not(feature = "tls-openssl")
+    ))]
+    fluxheim_tls::set_pending_managed_certificate_recorder(record_pending_managed_certificate);
 
     let server_plan = fluxheim_server::ServerPlan::from_config(&config)?;
     match server_plan.runtime_adapter() {
@@ -270,6 +276,16 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     server.add_service(proxy_service);
     server.run_forever();
+}
+
+#[cfg(all(
+    feature = "proxy",
+    feature = "tls-rustls-backend",
+    feature = "metrics",
+    not(feature = "tls-openssl")
+))]
+fn record_pending_managed_certificate() {
+    crate::metrics::record_acme_event("pending");
 }
 
 #[cfg(feature = "proxy")]
@@ -1250,12 +1266,12 @@ mod tests {
                     "expected downstream certificate selector",
                 )
             })?;
-        let resolver = super::RustlsSniCertificateResolver::new(&selector, &config.tls)?;
+        let resolver = super::rustls_sni_certificate_resolver(&selector, &config.tls)?;
 
         resolver.reload()?;
 
-        assert_eq!(resolver.certificates.load().len(), 1);
-        assert!(resolver.certificates.load()[0].is_some());
+        assert_eq!(resolver.certificate_slot_count(), 1);
+        assert_eq!(resolver.loaded_certificate_count(), 1);
         Ok(())
     }
 
@@ -1320,11 +1336,10 @@ mod tests {
             .unwrap()
             .unwrap();
         let resolver =
-            super::RustlsSniCertificateResolver::new(plan.selector(), &config.tls).unwrap();
+            super::rustls_sni_certificate_resolver(plan.selector(), &config.tls).unwrap();
 
-        assert_eq!(resolver.certificates.load().len(), 2);
-        assert!(resolver.certificates.load()[0].is_some());
-        assert!(resolver.certificates.load()[1].is_none());
+        assert_eq!(resolver.certificate_slot_count(), 2);
+        assert_eq!(resolver.loaded_certificate_count(), 1);
 
         std::fs::remove_dir_all(acme_storage).unwrap();
     }
@@ -1592,7 +1607,7 @@ impl DownstreamCertificateReloader {
     fn reload(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         match self {
             #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
-            Self::Rustls(resolver) => resolver.reload(),
+            Self::Rustls(resolver) => Ok(resolver.reload()?),
             #[cfg(feature = "tls-openssl")]
             Self::Openssl(callback) => callback.reload(),
             #[cfg(not(any(
@@ -1657,7 +1672,7 @@ where
     S: Send + Sync + 'static,
 {
     if requires_certificate_resolver {
-        let resolver = std::sync::Arc::new(RustlsSniCertificateResolver::new(selector, tls)?);
+        let resolver = std::sync::Arc::new(rustls_sni_certificate_resolver(selector, tls)?);
         for listen in listens {
             log::info!("proxy TLS listener enabled on {listen}");
             let mut settings =
@@ -1684,91 +1699,32 @@ where
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
-struct RustlsSniCertificateResolver {
-    selector: fluxheim_tls::DownstreamCertificateSelector,
-    certificates: arc_swap::ArcSwap<Vec<Option<std::sync::Arc<rustls::sign::CertifiedKey>>>>,
+type RustlsSniCertificateResolver = fluxheim_tls::RustlsDownstreamCertificateResolver;
+
+#[cfg(all(
+    feature = "proxy",
+    feature = "tls-rustls-backend",
+    not(feature = "tls-openssl")
+))]
+fn rustls_sni_certificate_resolver(
+    selector: &fluxheim_tls::DownstreamCertificateSelector,
+    tls: &TlsConfig,
+) -> Result<RustlsSniCertificateResolver, Box<dyn Error + Send + Sync>> {
     #[cfg(feature = "acme")]
-    tls_alpn_01_store: Option<crate::acme::AcmeTlsAlpn01ChallengeStore>,
-}
-
-#[cfg(all(
-    feature = "proxy",
-    feature = "tls-rustls-backend",
-    not(feature = "tls-openssl")
-))]
-impl std::fmt::Debug for RustlsSniCertificateResolver {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("RustlsSniCertificateResolver")
-            .field("certificate_count", &self.certificates.load().len())
-            .finish_non_exhaustive()
-    }
-}
-
-#[cfg(all(
-    feature = "proxy",
-    feature = "tls-rustls-backend",
-    not(feature = "tls-openssl")
-))]
-impl RustlsSniCertificateResolver {
-    fn new(
-        selector: &fluxheim_tls::DownstreamCertificateSelector,
-        tls: &TlsConfig,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        #[cfg(not(feature = "acme"))]
-        let _ = tls;
-        let certificates = load_rustls_certified_keys(selector)?;
-        #[cfg(feature = "acme")]
-        let tls_alpn_01_store = if rustls_acme_tls_alpn_enabled(tls) {
-            tls.acme
-                .storage
-                .as_deref()
-                .map(crate::acme::AcmeTlsAlpn01ChallengeStore::new)
-        } else {
-            None
-        };
-
-        Ok(Self {
-            selector: selector.clone(),
-            certificates: arc_swap::ArcSwap::from_pointee(certificates),
-            #[cfg(feature = "acme")]
-            tls_alpn_01_store,
-        })
+    if rustls_acme_tls_alpn_enabled(tls)
+        && let Some(storage) = tls.acme.storage.as_deref()
+    {
+        return fluxheim_tls::RustlsDownstreamCertificateResolver::with_tls_alpn_challenge(
+            selector,
+            crate::acme::acme_tls_alpn_protocol().to_vec(),
+            std::sync::Arc::new(AcmeTlsAlpnCertificateLoader {
+                store: crate::acme::AcmeTlsAlpn01ChallengeStore::new(storage),
+            }),
+        )
+        .map_err(Into::into);
     }
 
-    #[cfg_attr(not(feature = "acme-client"), allow(dead_code))]
-    fn reload(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let certificates = load_rustls_certified_keys(&self.selector)?;
-        self.certificates.store(std::sync::Arc::new(certificates));
-        Ok(())
-    }
-}
-
-#[cfg(all(
-    feature = "proxy",
-    feature = "tls-rustls-backend",
-    not(feature = "tls-openssl")
-))]
-impl rustls::server::ResolvesServerCert for RustlsSniCertificateResolver {
-    fn resolve(
-        &self,
-        client_hello: rustls::server::ClientHello<'_>,
-    ) -> Option<std::sync::Arc<rustls::sign::CertifiedKey>> {
-        #[cfg(feature = "acme")]
-        if rustls_client_hello_requests_acme_tls_alpn(&client_hello) {
-            return self.load_acme_tls_alpn_challenge(client_hello.server_name());
-        }
-
-        let index = self
-            .selector
-            .certificate_index_for_sni(client_hello.server_name());
-        let certificates = self.certificates.load();
-        certificates.get(index).and_then(Clone::clone).or_else(|| {
-            certificates
-                .get(self.selector.default_certificate_index())
-                .and_then(Clone::clone)
-        })
-    }
+    fluxheim_tls::RustlsDownstreamCertificateResolver::new(selector).map_err(Into::into)
 }
 
 #[cfg(all(
@@ -1787,12 +1743,9 @@ fn rustls_acme_tls_alpn_enabled(tls: &TlsConfig) -> bool {
     feature = "acme",
     not(feature = "tls-openssl")
 ))]
-fn rustls_client_hello_requests_acme_tls_alpn(
-    client_hello: &rustls::server::ClientHello<'_>,
-) -> bool {
-    client_hello.alpn().is_some_and(|mut protocols| {
-        protocols.any(|protocol| protocol == crate::acme::acme_tls_alpn_protocol())
-    })
+#[derive(Debug)]
+struct AcmeTlsAlpnCertificateLoader {
+    store: crate::acme::AcmeTlsAlpn01ChallengeStore,
 }
 
 #[cfg(all(
@@ -1801,86 +1754,21 @@ fn rustls_client_hello_requests_acme_tls_alpn(
     feature = "acme",
     not(feature = "tls-openssl")
 ))]
-impl RustlsSniCertificateResolver {
-    fn load_acme_tls_alpn_challenge(
+impl fluxheim_tls::RustlsTlsAlpnCertificateLoader for AcmeTlsAlpnCertificateLoader {
+    fn load_tls_alpn_certificate(
         &self,
         sni: Option<&str>,
-    ) -> Option<std::sync::Arc<rustls::sign::CertifiedKey>> {
-        let store = self.tls_alpn_01_store.as_ref()?;
-        let paths = store.certificate_paths_for_sni(sni?)?;
-        match load_rustls_certified_key_from_paths(&paths.cert_path, &paths.key_path) {
-            Ok(certificate) => Some(std::sync::Arc::new(certificate)),
-            Err(error) => {
-                log::warn!("failed to load ACME TLS-ALPN-01 challenge certificate: {error}");
-                None
-            }
-        }
+    ) -> Result<Option<rustls::sign::CertifiedKey>, fluxheim_tls::RustlsDownstreamCertificateError>
+    {
+        let Some(sni) = sni else {
+            return Ok(None);
+        };
+        let Some(paths) = self.store.certificate_paths_for_sni(sni) else {
+            return Ok(None);
+        };
+        fluxheim_tls::load_rustls_certified_key_from_paths(&paths.cert_path, &paths.key_path)
+            .map(Some)
     }
-}
-
-#[cfg(all(
-    feature = "proxy",
-    feature = "tls-rustls-backend",
-    not(feature = "tls-openssl")
-))]
-fn load_rustls_certified_key(
-    certificate: &crate::config::StaticCertificateConfig,
-) -> Result<rustls::sign::CertifiedKey, Box<dyn Error + Send + Sync>> {
-    let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
-    load_rustls_certified_key_from_paths(Path::new(cert_path), Path::new(key_path))
-}
-
-#[cfg(all(
-    feature = "proxy",
-    feature = "tls-rustls-backend",
-    not(feature = "tls-openssl")
-))]
-fn load_rustls_certified_keys(
-    selector: &fluxheim_tls::DownstreamCertificateSelector,
-) -> Result<Vec<Option<std::sync::Arc<rustls::sign::CertifiedKey>>>, Box<dyn Error + Send + Sync>> {
-    let mut certificates = Vec::with_capacity(selector.certificates().len());
-    for (index, certificate) in selector.certificates().iter().enumerate() {
-        if selector.certificate_is_managed_acme(index) && certificate_paths_are_absent(certificate)?
-        {
-            log::warn!(
-                "managed ACME certificate is pending issuance; cert={} key={}",
-                certificate.cert_path.display(),
-                certificate.key_path.display()
-            );
-            #[cfg(feature = "metrics")]
-            crate::metrics::record_acme_event("pending");
-            certificates.push(None);
-            continue;
-        }
-        certificates.push(Some(std::sync::Arc::new(load_rustls_certified_key(
-            certificate,
-        )?)));
-    }
-    Ok(certificates)
-}
-
-#[cfg(all(
-    feature = "proxy",
-    feature = "tls-rustls-backend",
-    not(feature = "tls-openssl")
-))]
-fn load_rustls_certified_key_from_paths(
-    cert_path: &Path,
-    key_path: &Path,
-) -> Result<rustls::sign::CertifiedKey, Box<dyn Error + Send + Sync>> {
-    let cert_path = cert_path
-        .to_str()
-        .ok_or("TLS certificate path must be valid UTF-8")?;
-    let key_path = key_path
-        .to_str()
-        .ok_or("TLS private-key path must be valid UTF-8")?;
-    let Some((certs, key)) = pingora::tls::load_certs_and_key_files(cert_path, key_path)? else {
-        return Err("TLS certificate chain and private key must be readable PEM files".into());
-    };
-
-    let provider = crate::tls::rustls_crypto_provider();
-    let certified_key = rustls::sign::CertifiedKey::from_der(certs, key, &provider)?;
-    Ok(certified_key)
 }
 
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
@@ -2028,10 +1916,7 @@ fn downstream_certificate_paths(
     Ok((cert_path, key_path))
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-rustls-backend", feature = "tls-openssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 fn certificate_paths_are_absent(
     certificate: &crate::config::StaticCertificateConfig,
 ) -> std::io::Result<bool> {

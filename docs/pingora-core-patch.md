@@ -14,6 +14,14 @@ The patch keeps Pingora's existing single-certificate path unchanged. It only
 allows Fluxheim to pass a rustls `ResolvesServerCert` implementation so
 per-vhost certificates can be selected by SNI in the default build.
 
+As of Fluxheim `1.6.19`, the resolver implementation itself lives in
+`fluxheim-tls`: Fluxheim owns wildcard/exact SNI lookup, the reloadable
+certificate table, PEM certificate/private-key parsing, and TLS-ALPN challenge
+certificate loading. The vendored Pingora patch is now only the temporary
+listener acceptor hook that lets the compatibility runtime pass that resolver
+into rustls. This keeps Pingora's `build()` panic behavior isolated until the
+native downstream listener replaces the compatibility acceptor.
+
 ## Rustls Upstream Verification Policy
 
 Fluxheim also patches the rustls upstream connector so per-peer
@@ -116,7 +124,8 @@ default.
    example `rustls-listener-cert-resolver`.
 2. Apply only the rustls listener API change:
    - add a resolver field to the rustls listener `TlsSettings`;
-   - add `TlsSettings::with_cert_resolver(...)`;
+   - add `TlsSettings::with_cert_resolver(...)` or use Fluxheim's native
+     listener resolver directly once Pingora is removed;
    - make `build()` use the resolver when present and keep the existing
      `intermediate(cert, key)` single-certificate path unchanged.
 3. Prefer the smallest public API surface the upstream maintainers will accept.

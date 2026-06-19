@@ -17,11 +17,19 @@ web build can stay Pingora-free.
   `native-web-tls` profile. The gate now records and verifies that
   `cargo tree --locked --no-default-features --features web,tls-rustls` has no
   Pingora crates.
+- Move rustls downstream SNI certificate resolution into `fluxheim-tls`.
+  Fluxheim now owns the reloadable certificate table, PEM certificate/private
+  key loading, wildcard/exact SNI lookup, and TLS-ALPN challenge certificate
+  adapter used by the compatibility listener.
 
 ## Security
 
 - Tighten the release-gate proof around dependency ownership: native TLS-only
   builds cannot silently reintroduce Pingora through TLS feature forwarding.
+- Isolate the old vendored Pingora rustls listener panic surface to the
+  temporary acceptor shim. Certificate selection and key parsing now return
+  typed Fluxheim errors and can be reused directly by the native listener
+  cutover.
 
 ## Compatibility Boundary
 

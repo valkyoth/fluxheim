@@ -16,6 +16,10 @@ behavior when the change improves security or project direction.
   hiding it behind the generic `ingress` feature.
 - Stop native TLS-only web builds from enabling `pingora/rustls` or
   `pingora/openssl` when the Pingora compatibility runtime is not selected.
+- Move rustls downstream SNI certificate resolution, reloadable certificate
+  storage, and PEM certificate/private-key parsing into `fluxheim-tls` so the
+  native listener cutover no longer depends on Pingora's listener key-loading
+  helper.
 - Extend the Pingora dependency policy with a `native-web-tls` cargo-tree
   profile that proves `--no-default-features --features web,tls-rustls` does
   not compile Pingora crates.
@@ -26,6 +30,8 @@ behavior when the change improves security or project direction.
   remaining server/admin/metrics/proxy compatibility removal is moved to the
   next Pingora-exit slice so it can be tested as a runtime change rather than
   hidden inside a feature cleanup.
+- The vendored Pingora rustls listener still wraps downstream TLS accepts until
+  listener cutover, but Fluxheim now owns SNI selection and cert/key parsing.
 
 ## 1.6.18 - 2026-06-19
 

@@ -1253,11 +1253,13 @@ dependencies = [
 name = "fluxheim-tls"
 version = "1.6.19"
 dependencies = [
+ "arc-swap",
  "fluxheim-config",
  "fluxheim-openssl-fips-support",
  "log",
  "openssl",
  "rustls",
+ "rustls-pemfile",
  "thiserror 2.0.18",
 ]
 
