@@ -7,6 +7,23 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.18 - 2026-06-19
+
+### Changed
+
+- Start the next Pingora-exit slice for normal builds. This release focuses on
+  shrinking the remaining root compatibility surface and preparing the
+  proxy/cache/runtime paths for release-gate proof that official profiles no
+  longer compile Pingora proxy/cache/pool crates.
+- Keep the load-balancer crate Pingora-free after 1.6.17 and plan the native
+  health-check implementation split by protocol so each probe can be reviewed
+  independently.
+
+### Security
+
+- Carry forward the 1.6.17 native load-balancer health-probe hardening as the
+  baseline for 1.6.18 release gates.
+
 ## 1.6.17 - 2026-06-19
 
 ### Changed
