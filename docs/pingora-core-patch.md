@@ -31,8 +31,11 @@ mirrors the same policy into Pingora's `TlsSettings` shim.
 `fluxheim-server` has a native rustls HTTP/1 listener preview that accepts a
 ready `rustls::ServerConfig`, bounds the TLS handshake, and then hands the
 stream to the same native HTTP/1 parser/handler path used by plain listeners.
-This is the intended replacement path for the rustls listener patch once the
-runtime cutover wires it into official profiles.
+OpenSSL-only builds also have a matching native HTTP/1 listener preview that
+accepts an `openssl::ssl::SslAcceptor`, bounds the handshake, and uses the same
+native parser/handler. These are the intended replacement paths for the
+compatibility listener patch once the runtime cutover wires them into official
+profiles.
 
 ## Rustls Upstream Verification Policy
 

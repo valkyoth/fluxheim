@@ -27,6 +27,9 @@ behavior when the change improves security or project direction.
 - Add a native rustls HTTP/1 downstream listener preview in `fluxheim-server`
   that reuses the existing native HTTP/1 parser/handler path, listener
   connection budget, and request-head timeout as the TLS handshake bound.
+- Add the matching native OpenSSL HTTP/1 downstream listener preview for
+  OpenSSL-only builds, with the same connection budget, bounded TLS handshake,
+  and real client/server TLS socket coverage.
 - Extend the Pingora dependency policy with a `native-web-tls` cargo-tree
   profile that proves `--no-default-features --features web,tls-rustls` does
   not compile Pingora crates.
@@ -42,9 +45,9 @@ behavior when the change improves security or project direction.
 - The native rustls server-config builder is available for the listener cutover;
   the compatibility runtime still applies the same TLS policy to Pingora's
   temporary listener shim in this release.
-- The native rustls listener is test-backed but not wired into official proxy
-  profiles yet; production traffic remains on the compatibility runtime until
-  the full listener/runtime cutover.
+- The native rustls and OpenSSL listeners are test-backed but not wired into
+  official proxy profiles yet; production traffic remains on the compatibility
+  runtime until the full listener/runtime cutover.
 
 ## 1.6.18 - 2026-06-19
 

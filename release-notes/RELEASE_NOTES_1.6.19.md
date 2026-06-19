@@ -29,6 +29,10 @@ web build can stay Pingora-free.
   It wraps the existing native HTTP/1 parser/handler with `tokio-rustls`,
   shares the listener connection budget, and bounds the TLS handshake before
   request parsing starts.
+- Add the matching native OpenSSL HTTP/1 downstream listener preview for
+  OpenSSL-only builds. It uses the same connection budget and handshake
+  timeout as the rustls path, then hands the accepted stream to the same native
+  HTTP/1 parser/handler.
 
 ## Security
 
@@ -44,6 +48,8 @@ web build can stay Pingora-free.
 - Add socket-level test coverage proving a real rustls client can complete a
   downstream TLS handshake and receive an HTTP/1 response through the native
   listener path.
+- Add socket-level OpenSSL client/server coverage for the OpenSSL downstream
+  listener preview so the native cutover is not rustls-only.
 
 ## Compatibility Boundary
 

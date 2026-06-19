@@ -33,6 +33,8 @@ pub use control::CertificateReloadControlPlan;
 pub use http1::DownstreamHttp1Policy;
 pub use http2::DownstreamHttp2Policy;
 pub use listener::{ListenerProtocol, ListenerSpec};
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+pub use native_http1::serve_native_http1_openssl_listener;
 #[cfg(feature = "tls-rustls-backend")]
 pub use native_http1::serve_native_http1_rustls_listener;
 pub use native_http1::{

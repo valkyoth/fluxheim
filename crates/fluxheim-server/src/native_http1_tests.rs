@@ -7,6 +7,8 @@ use tokio::sync::oneshot;
 
 use fluxheim_protocol::Http1Version;
 
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+use crate::serve_native_http1_openssl_listener;
 #[cfg(feature = "tls-rustls-backend")]
 use crate::serve_native_http1_rustls_listener;
 use crate::{
@@ -509,6 +511,80 @@ async fn native_http1_rustls_listener_serves_request() {
 
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.ends_with("native tls listener"));
+    shutdown_tx.send(()).unwrap();
+    join.await.unwrap();
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+#[tokio::test]
+async fn native_http1_openssl_listener_serves_request() {
+    use openssl::pkey::PKey;
+    use openssl::ssl::{SslAcceptor, SslConnector, SslMethod, SslVerifyMode};
+    use openssl::x509::{X509, store::X509StoreBuilder};
+    use rcgen::{CertificateParams, KeyPair};
+    use tokio_openssl::SslStream;
+
+    let key = KeyPair::generate().unwrap();
+    let certificate = CertificateParams::new(vec!["localhost".to_owned()])
+        .unwrap()
+        .self_signed(&key)
+        .unwrap();
+    let cert_pem = certificate.pem();
+    let key_pem = key.serialize_pem();
+    let certs = X509::stack_from_pem(cert_pem.as_bytes()).unwrap();
+    let (leaf, intermediates) = certs.split_first().unwrap();
+    let private_key = PKey::private_key_from_pem(key_pem.as_bytes()).unwrap();
+    let mut acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls_server()).unwrap();
+    acceptor.set_certificate(leaf).unwrap();
+    for certificate in intermediates {
+        acceptor.add_extra_chain_cert(certificate.clone()).unwrap();
+    }
+    acceptor.set_private_key(&private_key).unwrap();
+
+    let mut store = X509StoreBuilder::new().unwrap();
+    store.add_cert(leaf.clone()).unwrap();
+    let mut connector = SslConnector::builder(SslMethod::tls_client()).unwrap();
+    connector.set_cert_store(store.build());
+    connector.set_verify(SslVerifyMode::PEER);
+    let connector = connector.build();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let handler = Arc::new(|request: NativeHttp1Request| async move {
+        assert_eq!(request.target, "/secure");
+        NativeHttp1Response::new(200, "OK", b"native openssl listener".as_slice())
+    });
+    let join = tokio::spawn(async move {
+        serve_native_http1_openssl_listener(
+            listener,
+            DownstreamHttp1Policy::default(),
+            Arc::new(acceptor.build()),
+            handler,
+            async move {
+                let _ = shutdown_rx.await;
+            },
+        )
+        .await
+        .unwrap();
+    });
+
+    let tcp = TcpStream::connect(addr).await.unwrap();
+    let ssl = connector
+        .configure()
+        .unwrap()
+        .into_ssl("localhost")
+        .unwrap();
+    let mut stream = SslStream::new(ssl, tcp).unwrap();
+    std::pin::Pin::new(&mut stream).connect().await.unwrap();
+    stream
+        .write_all(b"GET /secure HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let response = read_response(&mut stream).await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("native openssl listener"));
     shutdown_tx.send(()).unwrap();
     join.await.unwrap();
 }
