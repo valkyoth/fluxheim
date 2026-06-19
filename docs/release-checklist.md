@@ -37,7 +37,7 @@ cargo install --locked cargo-sbom --version 0.10.0
 - Run `cargo update` only as a deliberate dependency maintenance step.
 - Before tagging, verify compatible dependency updates are exhausted. This gate
   intentionally ignores `pingora*` packages while Fluxheim is still exiting the
-  Pingora load-balancer/cache dependency surface:
+  Pingora compatibility runtime dependency surface:
 
 ```bash
 scripts/check_latest_crates.sh
@@ -45,8 +45,9 @@ scripts/check_latest_crates.sh
 
 - During the `1.6.x` Pingora-exit line, capture the runtime baseline evidence
   before tagging. `check` mode records locked dependency trees and the
-  per-profile Pingora dependency surface; `release` mode also records the
-  default release-binary size and local performance baseline:
+  per-profile Pingora dependency surface, including native web TLS proof
+  profiles; `release` mode also records the default release-binary size and
+  local performance baseline:
 
 ```bash
 scripts/capture-runtime-baseline.sh check

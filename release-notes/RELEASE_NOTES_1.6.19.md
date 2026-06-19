@@ -21,6 +21,9 @@ web builds can stay Pingora-free.
 - Add `scripts/validate-native-web-tls.sh` and wire it into the stable release
   gate and CI so the same native web TLS proof profiles are compiled during
   release checks, not only inspected with `cargo tree`.
+- Extend runtime-baseline evidence with the native web TLS proof profiles so
+  release artifacts record their Pingora dependency surface alongside the
+  official compatibility profiles.
 - Move rustls downstream SNI certificate resolution into `fluxheim-tls`.
   Fluxheim now owns the reloadable certificate table, PEM certificate/private
   key loading, wildcard/exact SNI lookup, and TLS-ALPN challenge certificate

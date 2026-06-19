@@ -61,6 +61,12 @@ capture_tree() {
         load-balancer-edge)
             cargo tree --locked --no-default-features --features profile-load-balancer-edge >"$tree_file"
             ;;
+        native-web-tls)
+            cargo tree --locked --no-default-features --features web,tls-rustls >"$tree_file"
+            ;;
+        native-web-openssl)
+            cargo tree --locked --no-default-features --features web,tls-openssl >"$tree_file"
+            ;;
         php)
             cargo tree --locked --no-default-features --features profile-web-server,php-fpm >"$tree_file"
             ;;
@@ -74,7 +80,7 @@ capture_tree() {
     esac
 }
 
-profiles="default full cache-edge proxy-edge load-balancer-edge php privacy"
+profiles="default full cache-edge proxy-edge load-balancer-edge native-web-tls native-web-openssl php privacy"
 for profile in $profiles; do
     echo "runtime baseline: cargo tree $profile"
     capture_tree "$profile"
