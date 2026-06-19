@@ -21,6 +21,10 @@ web build can stay Pingora-free.
   Fluxheim now owns the reloadable certificate table, PEM certificate/private
   key loading, wildcard/exact SNI lookup, and TLS-ALPN challenge certificate
   adapter used by the compatibility listener.
+- Add a Fluxheim-owned native rustls downstream `ServerConfig` builder. It
+  applies the configured cipher suites, curve groups, minimum protocol, ALPN,
+  client-auth verifier, and FIPS reporting check with typed errors instead of
+  Pingora listener `build()` panics.
 
 ## Security
 
@@ -30,6 +34,9 @@ web build can stay Pingora-free.
   temporary acceptor shim. Certificate selection and key parsing now return
   typed Fluxheim errors and can be reused directly by the native listener
   cutover.
+- Prepare the native downstream listener cutover with a no-panic rustls server
+  config path that can replace the vendored Pingora rustls `TlsSettings`
+  builder.
 
 ## Compatibility Boundary
 

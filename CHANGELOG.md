@@ -20,6 +20,10 @@ behavior when the change improves security or project direction.
   storage, and PEM certificate/private-key parsing into `fluxheim-tls` so the
   native listener cutover no longer depends on Pingora's listener key-loading
   helper.
+- Add a Fluxheim-owned native rustls downstream `ServerConfig` builder covering
+  cipher suites, key-exchange groups, minimum protocol, ALPN, client-auth
+  verifier construction, and FIPS reporting checks without Pingora listener
+  panic paths.
 - Extend the Pingora dependency policy with a `native-web-tls` cargo-tree
   profile that proves `--no-default-features --features web,tls-rustls` does
   not compile Pingora crates.
@@ -32,6 +36,9 @@ behavior when the change improves security or project direction.
   hidden inside a feature cleanup.
 - The vendored Pingora rustls listener still wraps downstream TLS accepts until
   listener cutover, but Fluxheim now owns SNI selection and cert/key parsing.
+- The native rustls server-config builder is available for the listener cutover;
+  the compatibility runtime still applies the same TLS policy to Pingora's
+  temporary listener shim in this release.
 
 ## 1.6.18 - 2026-06-19
 

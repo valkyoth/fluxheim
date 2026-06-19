@@ -22,6 +22,12 @@ listener acceptor hook that lets the compatibility runtime pass that resolver
 into rustls. This keeps Pingora's `build()` panic behavior isolated until the
 native downstream listener replaces the compatibility acceptor.
 
+`fluxheim-tls` also owns the native rustls downstream `ServerConfig` builder.
+That builder applies Fluxheim TLS policy and returns typed errors for protocol,
+cipher, group, client-auth, and FIPS reporting failures. Until the native
+listener is wired into production profiles, the compatibility runtime still
+mirrors the same policy into Pingora's `TlsSettings` shim.
+
 ## Rustls Upstream Verification Policy
 
 Fluxheim also patches the rustls upstream connector so per-peer

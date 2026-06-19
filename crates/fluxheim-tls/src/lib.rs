@@ -9,6 +9,8 @@ mod policy;
 mod provider;
 #[cfg(feature = "tls-rustls-backend")]
 mod rustls_resolver;
+#[cfg(feature = "tls-rustls-backend")]
+mod rustls_server_config;
 
 pub use listener::{
     DownstreamCertificateSelector, DownstreamCertificateSource, DownstreamTlsListenerPlan,
@@ -31,4 +33,8 @@ pub use rustls_resolver::{
     RustlsDownstreamCertificateError, RustlsDownstreamCertificateResolver,
     RustlsTlsAlpnCertificateLoader, load_rustls_certified_key_from_paths,
     set_pending_managed_certificate_recorder,
+};
+#[cfg(feature = "tls-rustls-backend")]
+pub use rustls_server_config::{
+    RustlsDownstreamServerConfigError, build_rustls_downstream_server_config,
 };
