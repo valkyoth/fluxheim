@@ -2646,6 +2646,9 @@ Planned `1.6.x` sequence:
   proxy/cache/pool transitive Pingora crates from normal builds. Release gates
   must prove default, full, cache, proxy, PHP, load-balancer, FIPS, macOS
   developer, and release-image profiles no longer compile those crates.
+  Split the now-native load-balancer health-check implementation by protocol
+  once the 1.6.17 behavior has settled, so TCP/TLS, HTTP/1, gRPC/h2, Redis,
+  MySQL, PostgreSQL, exec, and shared validators are reviewable independently.
   After proxy, cache, load-balancer, snapshot, ACME, header-policy, and
   protocol crates have stable APIs, reduce `admin.rs` to endpoint routing and
   auth glue or move it into `fluxheim-admin` if the dependency graph stays
