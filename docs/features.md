@@ -128,9 +128,11 @@ feature aliases for common deployment shapes.
 
 The remaining Pingora compatibility runtime is selected through
 `pingora-compat`, which `proxy` still enables in the current release line.
-`1.6.19` adds a release-gate dependency proof for
-`--no-default-features --features web,tls-rustls`; that build does not compile
-Pingora crates, but it is not yet the production static-site runtime profile.
+`1.6.19` adds release-gate dependency and compile proofs for
+`--no-default-features --features web,tls-rustls` and
+`--no-default-features --features web,tls-openssl`; those builds do not compile
+Pingora crates, but they are not yet the production static-site runtime
+profile.
 
 Examples that match the official release artifacts:
 
