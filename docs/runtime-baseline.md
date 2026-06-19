@@ -31,7 +31,7 @@ The generated files are:
 | File | Purpose |
 | --- | --- |
 | `metadata.env` | Package version, git commit, dirty flag, timestamp, host, rustc, and Cargo versions. |
-| `cargo-tree/*.txt` | Locked dependency trees for default, full, cache-edge, proxy-edge, load-balancer-edge, PHP, and privacy profiles. |
+| `cargo-tree/*.txt` | Locked dependency trees for default, full, cache-edge, proxy-edge, load-balancer-edge, native-web-tls, native-web-openssl, PHP, and privacy profiles. |
 | `pingora-dependency-surface.tsv` | Report-only list of Pingora crates still present per profile. |
 | `binary-size.tsv` | Default release binary size when release/build mode is used. |
 | `startup-time.tsv` | Milliseconds from process spawn to first successful local HTTP response. |
@@ -94,6 +94,11 @@ Later `1.6.x` releases should compare against this baseline as follows:
 The final `1.6.x` release must make this a hard gate for every official profile:
 default, full, cache, proxy, load-balancer, PHP, privacy, FIPS/ISO candidates,
 and macOS developer builds.
+
+Starting in `1.6.19`, the baseline also records the `native-web-tls` and
+`native-web-openssl` proof profiles. Those are not production static-site
+profiles yet, but their `web,tls-rustls` and `web,tls-openssl` dependency
+trees should already emit no rows in `pingora-dependency-surface.tsv`.
 
 Temporary compatibility shims are acceptable only while an old and new runtime
 path are being compared. New internal APIs should not introduce fresh Pingora
