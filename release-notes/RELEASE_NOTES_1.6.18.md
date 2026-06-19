@@ -15,6 +15,10 @@ Pingora-free.
   private modules under `fluxheim-load-balancer`. This keeps the protocol
   serialization/parsing paths reviewable without changing the public
   load-balancer API.
+- Split Redis, MySQL, and PostgreSQL active health probes into a private
+  database health module. The wire-format parsers, request constants, and
+  timeout handling remain unchanged, but database probe review no longer shares
+  a large file with HTTP/gRPC orchestration.
 
 ## Compatibility
 

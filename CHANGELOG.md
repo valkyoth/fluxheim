@@ -21,6 +21,9 @@ behavior when the change improves security or project direction.
 - Split native HTTP/1.1 and gRPC/h2 health-check helpers out of the
   load-balancer health orchestration module. The new protocol helper files stay
   below the modularity policy's 500-line target.
+- Split Redis, MySQL, and PostgreSQL active health probes into a database
+  health helper module, keeping each new protocol/probe module below the
+  modularity policy target.
 
 ### Security
 
