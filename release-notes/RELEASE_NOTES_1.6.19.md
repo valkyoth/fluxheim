@@ -36,6 +36,10 @@ web build can stay Pingora-free.
 - Add a native runtime cutover summary to `ServerPlan`. Fluxheim now logs the
   remaining native-runtime blockers at startup while still retaining the
   compatibility adapter for this release.
+- Add a root integration test proving the `fluxheim-tls` rustls downstream
+  server-config builder can drive the native `fluxheim-server` HTTP/1 listener
+  with a real TLS client handshake and request.
+- Update the test-only `rcgen` dependency to `0.14.8`.
 
 ## Security
 
@@ -55,6 +59,8 @@ web build can stay Pingora-free.
   listener preview so the native cutover is not rustls-only.
 - Add server-plan coverage for native-runtime blocker reporting so the final
   Pingora removal slice has a tested checklist.
+- Add end-to-end native rustls listener cutover coverage across the
+  `fluxheim-tls` and `fluxheim-server` crates.
 
 ## Compatibility Boundary
 

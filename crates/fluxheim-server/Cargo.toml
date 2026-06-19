@@ -38,5 +38,5 @@ zeroize = "1.8.2"
 rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
 
 [dev-dependencies]
-rcgen = { version = "0.14.7", default-features = false, features = ["pem", "ring"] }
+rcgen = { version = "0.14.8", default-features = false, features = ["pem", "ring"] }
 tempfile = "3.27.0"

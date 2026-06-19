@@ -33,6 +33,10 @@ behavior when the change improves security or project direction.
 - Add a native runtime cutover summary to `ServerPlan` so startup diagnostics
   and release tests can report the remaining compatibility blockers before the
   1.6.20 runtime removal slice.
+- Add a root integration test proving the `fluxheim-tls` rustls downstream
+  server-config builder can drive the native `fluxheim-server` HTTP/1 listener
+  with a real client handshake and request.
+- Update the test-only `rcgen` dependency to `0.14.8`.
 - Extend the Pingora dependency policy with a `native-web-tls` cargo-tree
   profile that proves `--no-default-features --features web,tls-rustls` does
   not compile Pingora crates.
