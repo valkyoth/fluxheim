@@ -25,6 +25,10 @@ web build can stay Pingora-free.
   applies the configured cipher suites, curve groups, minimum protocol, ALPN,
   client-auth verifier, and FIPS reporting check with typed errors instead of
   Pingora listener `build()` panics.
+- Add a Fluxheim-owned native OpenSSL downstream `SslAcceptor` builder for the
+  fallback-certificate listener path. It applies certificate/key loading,
+  cipher, curve, minimum-protocol, ALPN, and client-auth CA policy with typed
+  errors.
 - Add a native rustls HTTP/1 downstream listener preview in `fluxheim-server`.
   It wraps the existing native HTTP/1 parser/handler with `tokio-rustls`,
   shares the listener connection budget, and bounds the TLS handshake before
@@ -39,6 +43,8 @@ web build can stay Pingora-free.
 - Add a root integration test proving the `fluxheim-tls` rustls downstream
   server-config builder can drive the native `fluxheim-server` HTTP/1 listener
   with a real TLS client handshake and request.
+- Add the matching OpenSSL integration test proving the `fluxheim-tls`
+  acceptor builder can drive the native OpenSSL HTTP/1 listener.
 - Update the test-only `rcgen` dependency to `0.14.8`.
 
 ## Security
@@ -61,6 +67,8 @@ web build can stay Pingora-free.
   Pingora removal slice has a tested checklist.
 - Add end-to-end native rustls listener cutover coverage across the
   `fluxheim-tls` and `fluxheim-server` crates.
+- Add end-to-end native OpenSSL listener cutover coverage across the same crate
+  boundary.
 
 ## Compatibility Boundary
 

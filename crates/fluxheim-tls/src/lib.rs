@@ -5,6 +5,8 @@
 )]
 
 mod listener;
+#[cfg(feature = "tls-openssl")]
+mod openssl_server_config;
 mod policy;
 mod provider;
 #[cfg(feature = "tls-rustls-backend")]
@@ -15,6 +17,10 @@ mod rustls_server_config;
 pub use listener::{
     DownstreamCertificateSelector, DownstreamCertificateSource, DownstreamTlsListenerPlan,
     DownstreamTlsPlanError, shared_managed_acme_certificate_owner,
+};
+#[cfg(feature = "tls-openssl")]
+pub use openssl_server_config::{
+    OpenSslDownstreamAcceptorError, build_openssl_downstream_acceptor,
 };
 pub use policy::{openssl_cipher_lists, openssl_curve_list, rustls_alpn_protocols};
 #[cfg(feature = "tls-rustls-backend")]

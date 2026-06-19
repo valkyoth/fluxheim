@@ -28,6 +28,12 @@ cipher, group, client-auth, and FIPS reporting failures. Until the native
 listener is wired into production profiles, the compatibility runtime still
 mirrors the same policy into Pingora's `TlsSettings` shim.
 
+For OpenSSL-only builds, `fluxheim-tls` owns the native downstream
+`SslAcceptor` builder for the fallback-certificate listener path. It applies
+certificate/key loading, ALPN, cipher, curve, minimum protocol, and client-auth
+CA policy with typed errors. Full OpenSSL SNI callback/reload parity remains a
+separate runtime-cutover step.
+
 `fluxheim-server` has a native rustls HTTP/1 listener preview that accepts a
 ready `rustls::ServerConfig`, bounds the TLS handshake, and then hands the
 stream to the same native HTTP/1 parser/handler path used by plain listeners.

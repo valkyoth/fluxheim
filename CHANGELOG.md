@@ -24,6 +24,10 @@ behavior when the change improves security or project direction.
   cipher suites, key-exchange groups, minimum protocol, ALPN, client-auth
   verifier construction, and FIPS reporting checks without Pingora listener
   panic paths.
+- Add a Fluxheim-owned native OpenSSL downstream `SslAcceptor` builder for the
+  fallback-certificate listener path, covering certificate/key loading,
+  ciphers, curves, minimum protocol, ALPN, and client-auth CA policy with typed
+  errors.
 - Add a native rustls HTTP/1 downstream listener preview in `fluxheim-server`
   that reuses the existing native HTTP/1 parser/handler path, listener
   connection budget, and request-head timeout as the TLS handshake bound.
@@ -36,6 +40,8 @@ behavior when the change improves security or project direction.
 - Add a root integration test proving the `fluxheim-tls` rustls downstream
   server-config builder can drive the native `fluxheim-server` HTTP/1 listener
   with a real client handshake and request.
+- Add the matching OpenSSL integration test proving the `fluxheim-tls`
+  acceptor builder can drive the native OpenSSL HTTP/1 listener.
 - Update the test-only `rcgen` dependency to `0.14.8`.
 - Extend the Pingora dependency policy with a `native-web-tls` cargo-tree
   profile that proves `--no-default-features --features web,tls-rustls` does
