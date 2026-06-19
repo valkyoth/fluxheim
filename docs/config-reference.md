@@ -1427,9 +1427,9 @@ HTTP/2. Fluxheim sends `POST /grpc.health.v1.Health/Check` with a bounded
 hand-encoded request body and expects HTTP `200`, `content-type:
 application/grpc`, and a `SERVING` response message. `grpc_service =
 "package.Service"` optionally checks a specific gRPC service name. gRPC health
-checks may use `host`, `request_headers`, timeout fields, connection reuse, and
-`port_override`; HTTP status/header/body matchers are rejected because the
-standard gRPC health response has its own fixed semantics.
+checks may use `host`, `request_headers`, timeout fields, and `port_override`;
+HTTP status/header/body matchers are rejected because the standard gRPC health
+response has its own fixed semantics.
 Set `protocol = "redis"` to run a bounded Redis health check. Fluxheim opens a
 TCP connection to the selected backend, sends one fixed RESP `PING` frame, and
 requires a simple-string `+PONG` response. Redis checks use
@@ -1540,13 +1540,15 @@ weight and admin runtime weight overrides.
 `expected_body_contains = ["ready"]` requires each configured byte substring
 to appear in the HTTP health response body. Fluxheim reads at most 64 KiB of a
 health-check body for this validation.
-`host` overrides the health-check `Host` header and TLS SNI fallback,
-`reuse_connection = true` allows Pingora to reuse check connections, and
+`host` overrides the health-check `Host` header and TLS SNI fallback, and
 `port_override` sends checks to a different port on the same backend address.
-Omit `port_override` to check the backend's normal port. `connect_timeout_secs`
-and `read_timeout_secs` are optional active-check overrides; when omitted,
-checks inherit the proxy upstream timeout where applicable and otherwise use
-Pingora's health-check defaults.
+Omit `port_override` to check the backend's normal port. `reuse_connection` is
+accepted for configuration compatibility with older releases, but the native
+HTTP/gRPC health-check client introduced in 1.6.17 opens a fresh bounded
+connection per probe. `connect_timeout_secs` and `read_timeout_secs` are
+optional active-check overrides; when omitted, checks inherit the proxy
+upstream timeout where applicable and otherwise use Fluxheim's native
+health-check defaults.
 `proxy.load_balance.passive_health.enabled = true` adds opt-in passive outlier
 detection. Fluxheim records selected upstream outcomes, treats 5xx responses as
 failures by default, and temporarily ejects a backend after

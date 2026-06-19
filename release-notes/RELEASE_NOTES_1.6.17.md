@@ -38,3 +38,6 @@ active health-check client path are now Fluxheim-owned.
 - The root runtime adapter remains `PingoraCompatibility` in this release.
   Normal Fluxheim builds may still compile Pingora through the root proxy
   runtime until the next native HTTP/runtime cutover releases.
+- `reuse_connection` remains accepted in load-balancer health-check
+  configuration for compatibility, but the native HTTP/gRPC health-check client
+  currently opens a fresh bounded connection per probe.
