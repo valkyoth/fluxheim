@@ -1744,11 +1744,11 @@ type RustlsSniCertificateResolver = fluxheim_tls::RustlsDownstreamCertificateRes
 ))]
 fn rustls_sni_certificate_resolver(
     selector: &fluxheim_tls::DownstreamCertificateSelector,
-    tls: &TlsConfig,
+    _tls: &TlsConfig,
 ) -> Result<RustlsSniCertificateResolver, Box<dyn Error + Send + Sync>> {
     #[cfg(feature = "acme")]
-    if rustls_acme_tls_alpn_enabled(tls)
-        && let Some(storage) = tls.acme.storage.as_deref()
+    if rustls_acme_tls_alpn_enabled(_tls)
+        && let Some(storage) = _tls.acme.storage.as_deref()
     {
         return fluxheim_tls::RustlsDownstreamCertificateResolver::with_tls_alpn_challenge(
             selector,
