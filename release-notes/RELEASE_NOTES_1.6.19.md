@@ -29,6 +29,9 @@ web build can stay Pingora-free.
   fallback-certificate listener path. It applies certificate/key loading,
   cipher, curve, minimum-protocol, ALPN, and client-auth CA policy with typed
   errors.
+- Move OpenSSL downstream SNI certificate storage, reload, pending-managed-cert
+  handling, and certificate application into `fluxheim-tls`. The root runtime
+  keeps only the temporary Pingora `TlsAccept` adapter.
 - Add a native rustls HTTP/1 downstream listener preview in `fluxheim-server`.
   It wraps the existing native HTTP/1 parser/handler with `tokio-rustls`,
   shares the listener connection budget, and bounds the TLS handshake before
@@ -55,6 +58,9 @@ web build can stay Pingora-free.
   temporary acceptor shim. Certificate selection and key parsing now return
   typed Fluxheim errors and can be reused directly by the native listener
   cutover.
+- Shrink the OpenSSL compatibility listener surface: SNI certificate material
+  is now loaded, selected, reloaded, and applied by `fluxheim-tls`, leaving the
+  Pingora layer as an adapter only.
 - Prepare the native downstream listener cutover with a no-panic rustls server
   config path that can replace the vendored Pingora rustls `TlsSettings`
   builder.

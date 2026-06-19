@@ -28,6 +28,9 @@ behavior when the change improves security or project direction.
   fallback-certificate listener path, covering certificate/key loading,
   ciphers, curves, minimum protocol, ALPN, and client-auth CA policy with typed
   errors.
+- Move OpenSSL downstream SNI certificate storage, reload, pending-managed-cert
+  handling, and certificate application into `fluxheim-tls`; the root runtime
+  now keeps only the Pingora `TlsAccept` adapter.
 - Add a native rustls HTTP/1 downstream listener preview in `fluxheim-server`
   that reuses the existing native HTTP/1 parser/handler path, listener
   connection budget, and request-head timeout as the TLS handshake bound.

@@ -50,9 +50,8 @@ use crate::config::{TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference};
 use crate::config::{TlsConfig, TlsProtocolVersion};
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 use pingora::tls::{
-    pkey::{PKey, Private},
     ssl::{SslVerifyMode, SslVersion},
-    x509::{X509, X509Name},
+    x509::X509Name,
 };
 
 #[cfg(feature = "proxy")]
@@ -281,9 +280,11 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls-backend",
     feature = "metrics",
-    not(feature = "tls-openssl")
+    any(
+        all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
+        feature = "tls-openssl"
+    )
 ))]
 fn record_pending_managed_certificate() {
     crate::metrics::record_acme_event("pending");
@@ -1617,7 +1618,7 @@ enum DownstreamCertificateReloader {
     #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
     Rustls(std::sync::Arc<RustlsSniCertificateResolver>),
     #[cfg(feature = "tls-openssl")]
-    Openssl(std::sync::Arc<SniCertificateCallback>),
+    Openssl(std::sync::Arc<fluxheim_tls::OpenSslDownstreamCertificateStore>),
 }
 
 #[cfg(feature = "proxy")]
@@ -1629,7 +1630,7 @@ impl DownstreamCertificateReloader {
             #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
             Self::Rustls(resolver) => Ok(resolver.reload()?),
             #[cfg(feature = "tls-openssl")]
-            Self::Openssl(callback) => callback.reload(),
+            Self::Openssl(store) => Ok(store.reload()?),
             #[cfg(not(any(
                 all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
                 feature = "tls-openssl"
@@ -1651,18 +1652,21 @@ where
     S: Send + Sync + 'static,
 {
     if requires_certificate_resolver {
-        let callback = std::sync::Arc::new(SniCertificateCallback::new(selector)?);
+        let store = std::sync::Arc::new(fluxheim_tls::OpenSslDownstreamCertificateStore::new(
+            selector,
+            openssl_pending_managed_certificate_recorder(),
+        )?);
         for listen in listens {
             log::info!("proxy TLS listener enabled on {listen}");
             let mut settings = pingora::listeners::tls::TlsSettings::with_callbacks(Box::new(
                 SharedSniCertificateCallback {
-                    inner: callback.clone(),
+                    inner: store.clone(),
                 },
             ))?;
             apply_tls_policy(&mut settings, tls)?;
             service.add_tls_with_settings(listen, None, settings);
         }
-        return Ok(Some(DownstreamCertificateReloader::Openssl(callback)));
+        return Ok(Some(DownstreamCertificateReloader::Openssl(store)));
     }
 
     let certificate = selector.certificate_for_sni(None);
@@ -1674,6 +1678,18 @@ where
         service.add_tls_with_settings(listen, None, settings);
     }
     Ok(None)
+}
+
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+fn openssl_pending_managed_certificate_recorder() -> Option<fn()> {
+    #[cfg(feature = "metrics")]
+    {
+        Some(record_pending_managed_certificate)
+    }
+    #[cfg(not(feature = "metrics"))]
+    {
+        None
+    }
 }
 
 #[cfg(all(
@@ -1792,128 +1808,20 @@ impl fluxheim_tls::RustlsTlsAlpnCertificateLoader for AcmeTlsAlpnCertificateLoad
 }
 
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
-struct SniCertificateCallback {
-    selector: fluxheim_tls::DownstreamCertificateSelector,
-    certificates: arc_swap::ArcSwap<Vec<Option<CallbackCertificate>>>,
-}
-
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
-impl SniCertificateCallback {
-    fn new(
-        selector: &fluxheim_tls::DownstreamCertificateSelector,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let certificates = load_callback_certificates(selector)?;
-
-        Ok(Self {
-            selector: selector.clone(),
-            certificates: arc_swap::ArcSwap::from_pointee(certificates),
-        })
-    }
-
-    fn reload(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let certificates = load_callback_certificates(&self.selector)?;
-        self.certificates.store(std::sync::Arc::new(certificates));
-        Ok(())
-    }
-}
-
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
-fn load_callback_certificates(
-    selector: &fluxheim_tls::DownstreamCertificateSelector,
-) -> Result<Vec<Option<CallbackCertificate>>, Box<dyn Error + Send + Sync>> {
-    let mut certificates = Vec::with_capacity(selector.certificates().len());
-    for (index, certificate) in selector.certificates().iter().enumerate() {
-        if selector.certificate_is_managed_acme(index) && certificate_paths_are_absent(certificate)?
-        {
-            log::warn!(
-                "managed ACME certificate is pending issuance; cert={} key={}",
-                certificate.cert_path.display(),
-                certificate.key_path.display()
-            );
-            #[cfg(feature = "metrics")]
-            crate::metrics::record_acme_event("pending");
-            certificates.push(None);
-            continue;
-        }
-        let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
-        certificates.push(Some(CallbackCertificate::load(cert_path, key_path)?));
-    }
-    Ok(certificates)
-}
-
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 struct SharedSniCertificateCallback {
-    inner: std::sync::Arc<SniCertificateCallback>,
-}
-
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
-#[async_trait::async_trait]
-impl pingora::listeners::TlsAccept for SniCertificateCallback {
-    async fn certificate_callback(&self, ssl: &mut pingora::tls::ssl::SslRef) {
-        let sni = ssl.servername(pingora::tls::ssl::NameType::HOST_NAME);
-        let index = self.selector.certificate_index_for_sni(sni);
-        let certificates = self.certificates.load();
-        let Some(certificate) = certificates
-            .get(index)
-            .and_then(Option::as_ref)
-            .or_else(|| {
-                certificates
-                    .get(self.selector.default_certificate_index())
-                    .and_then(Option::as_ref)
-            })
-        else {
-            log::error!("downstream SNI certificate index {index} was not loaded");
-            return;
-        };
-        if let Err(error) = certificate.apply_to_ssl(ssl) {
-            log::error!("failed to set downstream SNI certificate: {error}");
-        }
-    }
+    inner: std::sync::Arc<fluxheim_tls::OpenSslDownstreamCertificateStore>,
 }
 
 #[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 #[async_trait::async_trait]
 impl pingora::listeners::TlsAccept for SharedSniCertificateCallback {
     async fn certificate_callback(&self, ssl: &mut pingora::tls::ssl::SslRef) {
-        self.inner.certificate_callback(ssl).await;
-    }
-}
-
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
-struct CallbackCertificate {
-    chain: Vec<X509>,
-    private_key: PKey<Private>,
-}
-
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
-impl CallbackCertificate {
-    fn load(cert_path: &str, key_path: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let cert_bytes = std::fs::read(cert_path)?;
-        let chain = X509::stack_from_pem(&cert_bytes)?;
-        if chain.is_empty() {
-            return Err("TLS certificate chain must contain at least one certificate".into());
+        let sni = ssl
+            .servername(pingora::tls::ssl::NameType::HOST_NAME)
+            .map(str::to_owned);
+        if let Err(error) = self.inner.apply_certificate_for_sni(sni.as_deref(), ssl) {
+            log::error!("failed to set downstream SNI certificate: {error}");
         }
-
-        let key_bytes = std::fs::read(key_path)?;
-        let private_key = PKey::private_key_from_pem(&key_bytes)?;
-
-        Ok(Self { chain, private_key })
-    }
-
-    fn apply_to_ssl(
-        &self,
-        ssl: &mut pingora::tls::ssl::SslRef,
-    ) -> Result<(), pingora::tls::error::ErrorStack> {
-        let Some((leaf, chain)) = self.chain.split_first() else {
-            log::error!("TLS callback certificate chain unexpectedly empty");
-            return Ok(());
-        };
-        ssl.set_certificate(leaf)?;
-        ssl.set_private_key(&self.private_key)?;
-        for certificate in chain {
-            ssl.add_chain_cert(certificate.clone())?;
-        }
-        Ok(())
     }
 }
 
@@ -1934,13 +1842,6 @@ fn downstream_certificate_paths(
         .ok_or("TLS private key path must be valid UTF-8 for Pingora")?;
 
     Ok((cert_path, key_path))
-}
-
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
-fn certificate_paths_are_absent(
-    certificate: &crate::config::StaticCertificateConfig,
-) -> std::io::Result<bool> {
-    Ok(!certificate.cert_path.try_exists()? && !certificate.key_path.try_exists()?)
 }
 
 #[cfg(all(

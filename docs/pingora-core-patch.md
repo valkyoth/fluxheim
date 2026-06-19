@@ -31,8 +31,10 @@ mirrors the same policy into Pingora's `TlsSettings` shim.
 For OpenSSL-only builds, `fluxheim-tls` owns the native downstream
 `SslAcceptor` builder for the fallback-certificate listener path. It applies
 certificate/key loading, ALPN, cipher, curve, minimum protocol, and client-auth
-CA policy with typed errors. Full OpenSSL SNI callback/reload parity remains a
-separate runtime-cutover step.
+CA policy with typed errors. It also owns OpenSSL SNI certificate storage,
+reload, pending managed-certificate handling, and certificate application. The
+remaining Pingora layer is a thin `TlsAccept` adapter until production listener
+cutover.
 
 `fluxheim-server` has a native rustls HTTP/1 listener preview that accepts a
 ready `rustls::ServerConfig`, bounds the TLS handshake, and then hands the
