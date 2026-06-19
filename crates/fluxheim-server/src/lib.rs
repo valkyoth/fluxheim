@@ -59,7 +59,9 @@ pub use native_http2_stack::{
     native_http2_stack_probe, native_http2_stack_probe_with_response,
     serve_native_http2_connection,
 };
-pub use plan::{RuntimeAdapterKind, ServerPlan};
+pub use plan::{
+    NativeRuntimeCutoverBlocker, NativeRuntimeCutoverSummary, RuntimeAdapterKind, ServerPlan,
+};
 pub use process::ProcessSpec;
 pub use proxy_protocol::{ProxyProtocolPolicy, ProxyProtocolTrustedSource};
 pub use service::{AdminOpsSocketPlan, ServiceKind, ServiceSpec};

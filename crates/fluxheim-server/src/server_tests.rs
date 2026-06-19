@@ -96,6 +96,70 @@ fn server_plan_exposes_native_http2_preview_gate() {
 }
 
 #[test]
+fn native_runtime_cutover_summary_reports_ready_when_no_services_block() {
+    let plan = ServerPlan::new(Vec::new(), Vec::new());
+    let summary = plan.native_runtime_cutover_summary();
+
+    assert!(summary.is_ready());
+    assert!(summary.blockers().is_empty());
+}
+
+#[test]
+fn native_runtime_cutover_summary_reports_proxy_blockers() {
+    let mut config = Config::default();
+    config.server.listen = vec!["127.0.0.1:8080".to_owned()];
+    config.proxy.upstreams = vec!["127.0.0.1:3000".to_owned()];
+    config.cache.enabled = true;
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let blockers = plan.native_runtime_cutover_summary().blockers().to_vec();
+
+    assert!(blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp1Proxy));
+    assert!(blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp2));
+}
+
+#[test]
+fn native_runtime_cutover_summary_reports_service_blockers() {
+    let plan = ServerPlan::with_process(
+        ProcessSpec::default(),
+        Vec::new(),
+        vec![
+            ServiceSpec::new(
+                "admin",
+                ServiceKind::AdminControlPlane,
+                &[ListenerProtocol::AdminHttp],
+            ),
+            ServiceSpec::new("ops", ServiceKind::AdminOpsSocket, &[]),
+            ServiceSpec::new(
+                "metrics",
+                ServiceKind::MetricsHttp,
+                &[ListenerProtocol::MetricsHttp],
+            ),
+            ServiceSpec::new(
+                "stream",
+                ServiceKind::StreamProxy,
+                &[ListenerProtocol::StreamTcp],
+            ),
+            ServiceSpec::new("udp", ServiceKind::UdpProxy, &[ListenerProtocol::Udp]),
+        ],
+        Vec::new(),
+    );
+    let summary = plan.native_runtime_cutover_summary();
+
+    assert!(!summary.is_ready());
+    assert_eq!(
+        summary.blockers(),
+        &[
+            NativeRuntimeCutoverBlocker::AdminControlPlane,
+            NativeRuntimeCutoverBlocker::AdminOpsSocket,
+            NativeRuntimeCutoverBlocker::MetricsHttp,
+            NativeRuntimeCutoverBlocker::StreamProxy,
+            NativeRuntimeCutoverBlocker::UdpProxy,
+        ]
+    );
+}
+
+#[test]
 fn downstream_http1_policy_uses_bounded_native_defaults() {
     let policy = DownstreamHttp1Policy::default();
 

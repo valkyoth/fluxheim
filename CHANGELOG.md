@@ -30,6 +30,9 @@ behavior when the change improves security or project direction.
 - Add the matching native OpenSSL HTTP/1 downstream listener preview for
   OpenSSL-only builds, with the same connection budget, bounded TLS handshake,
   and real client/server TLS socket coverage.
+- Add a native runtime cutover summary to `ServerPlan` so startup diagnostics
+  and release tests can report the remaining compatibility blockers before the
+  1.6.20 runtime removal slice.
 - Extend the Pingora dependency policy with a `native-web-tls` cargo-tree
   profile that proves `--no-default-features --features web,tls-rustls` does
   not compile Pingora crates.
@@ -48,6 +51,8 @@ behavior when the change improves security or project direction.
 - The native rustls and OpenSSL listeners are test-backed but not wired into
   official proxy profiles yet; production traffic remains on the compatibility
   runtime until the full listener/runtime cutover.
+- The native runtime cutover summary is diagnostic-only in this release. It
+  does not select the native runtime yet.
 
 ## 1.6.18 - 2026-06-19
 

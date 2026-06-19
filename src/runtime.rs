@@ -91,6 +91,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     match server_plan.runtime_adapter() {
         fluxheim_server::RuntimeAdapterKind::PingoraCompatibility => {}
     }
+    log_native_runtime_cutover_summary(&server_plan);
     log_native_http1_proxy_cutover_summary(&server_plan);
     let pingora_conf = pingora_server_conf(&server_plan);
     let mut server = pingora::server::Server::new_with_opt_and_conf(None, pingora_conf);
@@ -286,6 +287,25 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 ))]
 fn record_pending_managed_certificate() {
     crate::metrics::record_acme_event("pending");
+}
+
+#[cfg(feature = "proxy")]
+fn log_native_runtime_cutover_summary(server_plan: &fluxheim_server::ServerPlan) {
+    let summary = server_plan.native_runtime_cutover_summary();
+    if summary.is_ready() {
+        log::info!("native runtime cutover preview: no blockers detected");
+        return;
+    }
+
+    let blockers = summary
+        .blockers()
+        .iter()
+        .map(|blocker| blocker.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    log::info!(
+        "native runtime cutover preview: compatibility adapter retained; blockers={blockers}"
+    );
 }
 
 #[cfg(feature = "proxy")]

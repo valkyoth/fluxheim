@@ -14,6 +14,89 @@ pub enum RuntimeAdapterKind {
     PingoraCompatibility,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeRuntimeCutoverBlocker {
+    NativeHttp1Proxy,
+    NativeHttp2,
+    AdminControlPlane,
+    AdminOpsSocket,
+    MetricsHttp,
+    StreamProxy,
+    UdpProxy,
+}
+
+impl NativeRuntimeCutoverBlocker {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NativeHttp1Proxy => "native HTTP/1 proxy parity",
+            Self::NativeHttp2 => "native HTTP/2 downstream parity",
+            Self::AdminControlPlane => "native admin control plane",
+            Self::AdminOpsSocket => "native admin ops socket service",
+            Self::MetricsHttp => "native metrics HTTP service",
+            Self::StreamProxy => "native stream proxy service",
+            Self::UdpProxy => "native UDP proxy service",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeRuntimeCutoverSummary {
+    blockers: Vec<NativeRuntimeCutoverBlocker>,
+}
+
+impl NativeRuntimeCutoverSummary {
+    fn from_plan(plan: &ServerPlan) -> Self {
+        let mut blockers = Vec::new();
+        let http1_summary = plan.native_http1_proxy_cutover_summary();
+        if plan.has_service(ServiceKind::ProxyHttp)
+            && !matches!(
+                http1_summary.status(),
+                crate::NativeHttp1ProxyCutoverStatus::NoProxy
+                    | crate::NativeHttp1ProxyCutoverStatus::NativeReady
+            )
+        {
+            blockers.push(NativeRuntimeCutoverBlocker::NativeHttp1Proxy);
+        }
+        if plan.has_service(ServiceKind::ProxyHttp)
+            && !plan.native_http2_preview().is_cutover_ready()
+        {
+            blockers.push(NativeRuntimeCutoverBlocker::NativeHttp2);
+        }
+        for (kind, blocker) in [
+            (
+                ServiceKind::AdminControlPlane,
+                NativeRuntimeCutoverBlocker::AdminControlPlane,
+            ),
+            (
+                ServiceKind::AdminOpsSocket,
+                NativeRuntimeCutoverBlocker::AdminOpsSocket,
+            ),
+            (
+                ServiceKind::MetricsHttp,
+                NativeRuntimeCutoverBlocker::MetricsHttp,
+            ),
+            (
+                ServiceKind::StreamProxy,
+                NativeRuntimeCutoverBlocker::StreamProxy,
+            ),
+            (ServiceKind::UdpProxy, NativeRuntimeCutoverBlocker::UdpProxy),
+        ] {
+            if plan.has_service(kind) {
+                blockers.push(blocker);
+            }
+        }
+        Self { blockers }
+    }
+
+    pub fn blockers(&self) -> &[NativeRuntimeCutoverBlocker] {
+        &self.blockers
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.blockers.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ServerPlan {
     runtime_adapter: RuntimeAdapterKind,
@@ -112,6 +195,10 @@ impl ServerPlan {
 
     pub fn native_http1_proxy_cutover_summary(&self) -> NativeHttp1ProxyCutoverSummary {
         NativeHttp1ProxyCutoverSummary::from_candidates(&self.native_http1_proxy_candidates)
+    }
+
+    pub fn native_runtime_cutover_summary(&self) -> NativeRuntimeCutoverSummary {
+        NativeRuntimeCutoverSummary::from_plan(self)
     }
 
     pub fn listeners(&self) -> &[ListenerSpec] {

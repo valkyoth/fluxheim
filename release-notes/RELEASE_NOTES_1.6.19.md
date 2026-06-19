@@ -33,6 +33,9 @@ web build can stay Pingora-free.
   OpenSSL-only builds. It uses the same connection budget and handshake
   timeout as the rustls path, then hands the accepted stream to the same native
   HTTP/1 parser/handler.
+- Add a native runtime cutover summary to `ServerPlan`. Fluxheim now logs the
+  remaining native-runtime blockers at startup while still retaining the
+  compatibility adapter for this release.
 
 ## Security
 
@@ -50,6 +53,8 @@ web build can stay Pingora-free.
   listener path.
 - Add socket-level OpenSSL client/server coverage for the OpenSSL downstream
   listener preview so the native cutover is not rustls-only.
+- Add server-plan coverage for native-runtime blocker reporting so the final
+  Pingora removal slice has a tested checklist.
 
 ## Compatibility Boundary
 
@@ -57,3 +62,5 @@ web build can stay Pingora-free.
   use the Pingora compatibility runtime in this release. The next
   Pingora-exit slice removes the runtime/listener/admin compatibility layer as
   a tested behavior change.
+- The native runtime cutover summary is diagnostic-only. It does not change
+  which runtime adapter handles production traffic in 1.6.19.
