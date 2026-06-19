@@ -100,6 +100,9 @@ jobs:
           cargo clippy --no-default-features --features profile-iso19790-rustls --all-targets -- -D warnings
           cargo clippy --no-default-features --features web --all-targets -- -D warnings
 
+      - name: Validate native web TLS proof profiles
+        run: scripts/validate-native-web-tls.sh check
+
       - name: Run default tests
         run: cargo test
 

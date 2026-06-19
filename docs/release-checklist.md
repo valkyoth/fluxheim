@@ -53,6 +53,7 @@ scripts/capture-runtime-baseline.sh check
 scripts/capture-runtime-baseline.sh release
 scripts/capture-runtime-performance-baseline.sh release
 scripts/validate-pingora-dependency-policy.sh check
+scripts/validate-native-web-tls.sh check
 scripts/validate-runtime-fixtures.sh check
 ```
 
