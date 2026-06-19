@@ -8,6 +8,61 @@ pub struct NativeHttp1ProxyCandidate {
     result: Result<(), NativeHttp1ProxyConfigError>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeHttp1ProxyCutoverStatus {
+    NoProxy,
+    NativeReady,
+    Mixed,
+    CompatibilityRequired,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeHttp1ProxyCutoverSummary {
+    status: NativeHttp1ProxyCutoverStatus,
+    total: usize,
+    eligible: usize,
+    unsupported: usize,
+}
+
+impl NativeHttp1ProxyCutoverSummary {
+    pub(crate) fn from_candidates(candidates: &[NativeHttp1ProxyCandidate]) -> Self {
+        let total = candidates.len();
+        let eligible = candidates
+            .iter()
+            .filter(|candidate| candidate.is_eligible())
+            .count();
+        let unsupported = total.saturating_sub(eligible);
+        let status = match (total, eligible) {
+            (0, _) => NativeHttp1ProxyCutoverStatus::NoProxy,
+            (_, eligible) if eligible == total => NativeHttp1ProxyCutoverStatus::NativeReady,
+            (_, 0) => NativeHttp1ProxyCutoverStatus::CompatibilityRequired,
+            _ => NativeHttp1ProxyCutoverStatus::Mixed,
+        };
+        Self {
+            status,
+            total,
+            eligible,
+            unsupported,
+        }
+    }
+
+    pub const fn status(&self) -> NativeHttp1ProxyCutoverStatus {
+        self.status
+    }
+
+    pub const fn total(&self) -> usize {
+        self.total
+    }
+
+    pub const fn eligible(&self) -> usize {
+        self.eligible
+    }
+
+    pub const fn unsupported(&self) -> usize {
+        self.unsupported
+    }
+}
+
 impl NativeHttp1ProxyCandidate {
     fn eligible(scope: String) -> Self {
         Self {
@@ -122,6 +177,8 @@ fn vhost_policy_supported(vhost: &VhostConfig) -> bool {
     !access_policy_active(&vhost.access)
         && !vhost.rate_limit.enabled
         && !vhost.concurrency.enabled
+        && !vhost.redirect.enabled
+        && !vhost.acme_challenge.enabled
         && vhost.headers == fluxheim_config::VhostHeaderPolicyConfig::default()
         && !cache_enabled(&vhost.cache)
         && vhost
@@ -138,6 +195,9 @@ fn route_policy_supported(route: &RouteConfig) -> bool {
         && !route.concurrency.enabled
         && !route.grpc.enabled
         && route.redirect.is_none()
+        && route.strip_prefix.is_none()
+        && route.rewrite_prefix.is_none()
+        && route.rewrite_template.is_none()
         && route.headers == fluxheim_config::VhostHeaderPolicyConfig::default()
         && route
             .cache

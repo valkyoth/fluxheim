@@ -14,13 +14,18 @@ pub struct NativeHttp1Proxy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeHttp1ProxyConfigError {
     DynamicUpstreamDiscovery,
+    DownstreamPolicy,
+    ErrorPages,
     HttpPolicy,
     LoadBalancing,
     MissingUpstream,
+    TrafficMirror,
+    AuthRequest,
     UpstreamHttp2,
     UpstreamProxyProtocol,
     UpstreamTls,
     UpstreamTlsPolicy,
+    UpstreamTransportPolicy,
     WebSocket,
 }
 
@@ -29,6 +34,11 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
         match self {
             Self::DynamicUpstreamDiscovery => formatter
                 .write_str("native HTTP/1 proxy does not yet support dynamic upstream discovery"),
+            Self::DownstreamPolicy => formatter
+                .write_str("native HTTP/1 proxy does not yet support per-proxy downstream policy"),
+            Self::ErrorPages => {
+                formatter.write_str("native HTTP/1 proxy does not yet support proxy error pages")
+            }
             Self::HttpPolicy => formatter
                 .write_str("native HTTP/1 proxy does not yet support Fluxheim HTTP policy layers"),
             Self::LoadBalancing => formatter.write_str(
@@ -36,6 +46,12 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
             ),
             Self::MissingUpstream => {
                 formatter.write_str("native HTTP/1 proxy requires an upstream")
+            }
+            Self::TrafficMirror => {
+                formatter.write_str("native HTTP/1 proxy does not yet support traffic mirroring")
+            }
+            Self::AuthRequest => {
+                formatter.write_str("native HTTP/1 proxy does not yet support auth subrequests")
             }
             Self::UpstreamHttp2 => {
                 formatter.write_str("native HTTP/1 proxy does not yet support HTTP/2 upstreams")
@@ -48,6 +64,9 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
             Self::UpstreamTlsPolicy => {
                 formatter.write_str("native HTTP/1 proxy rejected upstream TLS policy")
             }
+            Self::UpstreamTransportPolicy => formatter.write_str(
+                "native HTTP/1 proxy does not yet support advanced upstream transport policy",
+            ),
             Self::WebSocket => {
                 formatter.write_str("native HTTP/1 proxy does not yet support websocket upgrade")
             }
@@ -121,6 +140,21 @@ impl NativeHttp1Proxy {
             || proxy.upstream_dns_refresh_secs.is_some()
         {
             return Err(NativeHttp1ProxyConfigError::DynamicUpstreamDiscovery);
+        }
+        if proxy_requires_auth_request(proxy) {
+            return Err(NativeHttp1ProxyConfigError::AuthRequest);
+        }
+        if proxy.mirror.enabled {
+            return Err(NativeHttp1ProxyConfigError::TrafficMirror);
+        }
+        if !proxy.error_pages.is_empty() {
+            return Err(NativeHttp1ProxyConfigError::ErrorPages);
+        }
+        if proxy_requires_advanced_upstream_transport(proxy) {
+            return Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy);
+        }
+        if proxy_requires_per_proxy_downstream_policy(proxy) {
+            return Err(NativeHttp1ProxyConfigError::DownstreamPolicy);
         }
         if proxy_requires_advanced_load_balancer(proxy) {
             return Err(NativeHttp1ProxyConfigError::LoadBalancing);
@@ -205,6 +239,9 @@ fn configured_native_upstreams(proxy: &fluxheim_config::ProxyConfig) -> Option<V
 }
 
 fn proxy_requires_advanced_load_balancer(proxy: &fluxheim_config::ProxyConfig) -> bool {
+    if proxy.load_balance != fluxheim_config::LoadBalanceConfig::default() {
+        return true;
+    }
     !proxy.upstream_weights.is_empty()
         || !proxy.upstream_priority_groups.is_empty()
         || !proxy.upstream_localities.is_empty()
@@ -215,6 +252,36 @@ fn proxy_requires_advanced_load_balancer(proxy: &fluxheim_config::ProxyConfig) -
         || !proxy.backup_upstreams.is_empty()
         || !proxy.drain_upstreams.is_empty()
         || !proxy.disabled_upstreams.is_empty()
+}
+
+fn proxy_requires_auth_request(proxy: &fluxheim_config::ProxyConfig) -> bool {
+    proxy.auth_request.enabled
+        || proxy.auth_request.url.is_some()
+        || !proxy.auth_request.forward_headers.is_empty()
+        || !proxy.auth_request.allow_response_headers.is_empty()
+}
+
+fn proxy_requires_advanced_upstream_transport(proxy: &fluxheim_config::ProxyConfig) -> bool {
+    proxy.upstream_total_connection_timeout_secs.is_some()
+        || proxy.upstream_tcp_keepalive_idle_secs.is_some()
+        || proxy.upstream_tcp_keepalive_interval_secs.is_some()
+        || proxy.upstream_tcp_keepalive_count.is_some()
+        || proxy.upstream_tcp_user_timeout_ms.is_some()
+        || proxy.upstream_tcp_recv_buffer_bytes.is_some()
+        || proxy.upstream_dscp.is_some()
+        || proxy.upstream_tcp_fast_open
+        || proxy.upstream_h2_max_streams.is_some()
+        || proxy.upstream_h2_ping_interval_secs.is_some()
+}
+
+fn proxy_requires_per_proxy_downstream_policy(proxy: &fluxheim_config::ProxyConfig) -> bool {
+    let defaults = fluxheim_config::ProxyConfig::default();
+    proxy.downstream_read_timeout_secs != defaults.downstream_read_timeout_secs
+        || proxy.downstream_write_timeout_secs != defaults.downstream_write_timeout_secs
+        || proxy.downstream_total_response_timeout_secs
+            != defaults.downstream_total_response_timeout_secs
+        || proxy.downstream_min_send_rate_bytes_per_sec
+            != defaults.downstream_min_send_rate_bytes_per_sec
 }
 
 fn native_http1_static_failover_method_allowed(method: &str) -> bool {

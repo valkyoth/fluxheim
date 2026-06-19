@@ -7,6 +7,35 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.16 - 2026-06-19
+
+### Changed
+
+- Start the native proxy cutover gate by tightening `fluxheim-server`'s native
+  HTTP/1.1 proxy eligibility checks. Configurations using auth subrequests,
+  traffic mirroring, proxy error pages, advanced upstream transport options,
+  per-proxy downstream throttling, advanced load-balancer policy, vhost ACME
+  challenge routing, vhost redirects, or route strip/rewrite transforms now
+  stay explicitly on the Pingora compatibility adapter until those semantics
+  are implemented in the native pipeline.
+- Add a native HTTP/1.1 proxy cutover summary on `ServerPlan` so future runtime
+  wiring can distinguish no-proxy, fully native-ready, mixed, and
+  compatibility-required configurations without reinterpreting individual
+  candidate rows.
+- Log native HTTP/1.1 proxy cutover readiness at startup, including the
+  compatibility-only reason for each unsupported proxy path.
+
+### Security
+
+- Fail closed in native HTTP/1.1 cutover planning when a route would require
+  request-path transformation before upstream forwarding. This prevents the
+  staged native path from being marked eligible for route configurations whose
+  strip/rewrite behavior it does not yet enforce.
+- Add focused native HTTP/1.1 proxy and server-plan tests covering the new
+  compatibility blockers so future cutover work cannot silently accept
+  unsupported policy layers.
+- Add server-plan tests for aggregate native HTTP/1.1 cutover readiness states.
+
 ## 1.6.15 - 2026-06-18
 
 ### Added

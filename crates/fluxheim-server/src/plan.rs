@@ -3,8 +3,8 @@ use fluxheim_runtime::BackgroundTaskSpec;
 
 use crate::{
     CertificateReloadControlPlan, DownstreamHttp1Policy, DownstreamHttp2Policy, ListenerProtocol,
-    ListenerSpec, NativeHttp1ProxyCandidate, NativeHttp2Preview, ProcessSpec, ProxyProtocolPolicy,
-    ServerPlanError, ServiceKind, ServiceSpec, background,
+    ListenerSpec, NativeHttp1ProxyCandidate, NativeHttp1ProxyCutoverSummary, NativeHttp2Preview,
+    ProcessSpec, ProxyProtocolPolicy, ServerPlanError, ServiceKind, ServiceSpec, background,
     control::certificate_reload_control_plan_from_config, listener, native_http1_plan,
     proxy_protocol, service,
 };
@@ -108,6 +108,10 @@ impl ServerPlan {
 
     pub fn native_http1_proxy_candidates(&self) -> &[NativeHttp1ProxyCandidate] {
         &self.native_http1_proxy_candidates
+    }
+
+    pub fn native_http1_proxy_cutover_summary(&self) -> NativeHttp1ProxyCutoverSummary {
+        NativeHttp1ProxyCutoverSummary::from_candidates(&self.native_http1_proxy_candidates)
     }
 
     pub fn listeners(&self) -> &[ListenerSpec] {

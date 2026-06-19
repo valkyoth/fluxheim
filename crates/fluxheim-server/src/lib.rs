@@ -38,7 +38,9 @@ pub use native_http1::{
     serve_native_http1_connection, serve_native_http1_listener,
 };
 pub use native_http1_client::NativeHttp1Upstream;
-pub use native_http1_plan::NativeHttp1ProxyCandidate;
+pub use native_http1_plan::{
+    NativeHttp1ProxyCandidate, NativeHttp1ProxyCutoverStatus, NativeHttp1ProxyCutoverSummary,
+};
 pub use native_http1_proxy::{NativeHttp1Proxy, NativeHttp1ProxyConfigError};
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 pub use native_http1_tls::NativeHttp1UpstreamTls;
@@ -108,6 +110,20 @@ mod native_http1_client_tests;
 #[cfg(test)]
 #[path = "native_http1_proxy_tests.rs"]
 mod native_http1_proxy_tests;
+
+#[cfg(all(
+    test,
+    any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")
+))]
+#[path = "native_http1_proxy_tls_tests.rs"]
+mod native_http1_proxy_tls_tests;
+
+#[cfg(all(
+    test,
+    any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")
+))]
+#[path = "native_http1_proxy_tls_policy_tests.rs"]
+mod native_http1_proxy_tls_policy_tests;
 
 #[cfg(test)]
 #[path = "native_http1_plan_tests.rs"]

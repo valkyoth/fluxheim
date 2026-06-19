@@ -85,6 +85,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     match server_plan.runtime_adapter() {
         fluxheim_server::RuntimeAdapterKind::PingoraCompatibility => {}
     }
+    log_native_http1_proxy_cutover_summary(&server_plan);
     let pingora_conf = pingora_server_conf(&server_plan);
     let mut server = pingora::server::Server::new_with_opt_and_conf(None, pingora_conf);
     server.bootstrap();
@@ -269,6 +270,43 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     server.add_service(proxy_service);
     server.run_forever();
+}
+
+#[cfg(feature = "proxy")]
+fn log_native_http1_proxy_cutover_summary(server_plan: &fluxheim_server::ServerPlan) {
+    let summary = server_plan.native_http1_proxy_cutover_summary();
+    match summary.status() {
+        fluxheim_server::NativeHttp1ProxyCutoverStatus::NoProxy => {}
+        fluxheim_server::NativeHttp1ProxyCutoverStatus::NativeReady => {
+            log::info!(
+                "native HTTP/1 proxy cutover ready for {} configured proxy path(s)",
+                summary.total()
+            );
+        }
+        fluxheim_server::NativeHttp1ProxyCutoverStatus::Mixed => {
+            log::info!(
+                "native HTTP/1 proxy cutover mixed: {} eligible, {} compatibility-only",
+                summary.eligible(),
+                summary.unsupported()
+            );
+        }
+        fluxheim_server::NativeHttp1ProxyCutoverStatus::CompatibilityRequired => {
+            log::info!(
+                "native HTTP/1 proxy cutover not ready: {} configured proxy path(s) require compatibility adapter",
+                summary.unsupported()
+            );
+        }
+    }
+
+    for candidate in server_plan.native_http1_proxy_candidates() {
+        if let Some(reason) = candidate.unsupported_reason() {
+            log::info!(
+                "native HTTP/1 proxy compatibility path retained for {}: {}",
+                candidate.scope(),
+                reason
+            );
+        }
+    }
 }
 
 #[cfg(feature = "proxy")]

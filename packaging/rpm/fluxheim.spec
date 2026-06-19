@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.15
+Version:        1.6.16
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Fri Jun 19 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.16-1
+- Tighten native HTTP/1.1 proxy cutover eligibility for unsupported route
+  transforms, vhost routing policy, and proxy policy layers.
+- Keep production traffic on the Pingora compatibility adapter until the
+  native path implements those semantics explicitly.
+
 * Thu Jun 18 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.15-1
 - Continue the Pingora-exit line with native HTTP/2 upstream client parity
   primitives in `fluxheim-server`.
