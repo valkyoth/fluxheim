@@ -2,7 +2,7 @@
 
 Fluxheim 1.6.19 continues the Pingora-exit line by making the remaining
 compatibility runtime explicit in Cargo features and proving a native TLS-only
-web build can stay Pingora-free.
+web builds can stay Pingora-free.
 
 ## Changed
 
@@ -19,8 +19,8 @@ web build can stay Pingora-free.
   `cargo tree --locked --no-default-features --features web,tls-openssl` have
   no Pingora crates.
 - Add `scripts/validate-native-web-tls.sh` and wire it into the stable release
-  gate so the same native web TLS proof profiles are compiled during release
-  checks, not only inspected with `cargo tree`.
+  gate and CI so the same native web TLS proof profiles are compiled during
+  release checks, not only inspected with `cargo tree`.
 - Move rustls downstream SNI certificate resolution into `fluxheim-tls`.
   Fluxheim now owns the reloadable certificate table, PEM certificate/private
   key loading, wildcard/exact SNI lookup, and TLS-ALPN challenge certificate
