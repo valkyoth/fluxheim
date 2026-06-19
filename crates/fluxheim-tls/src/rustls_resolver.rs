@@ -5,6 +5,10 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use fluxheim_config::StaticCertificateConfig;
+use rustls::pki_types::{
+    CertificateDer, PrivateKeyDer,
+    pem::{Error as PemError, PemObject},
+};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use thiserror::Error;
@@ -29,7 +33,7 @@ pub enum RustlsDownstreamCertificateError {
     ParseCertificate {
         path: PathBuf,
         #[source]
-        source: io::Error,
+        source: PemError,
     },
     #[error("TLS certificate file {path} does not contain a certificate chain")]
     EmptyCertificateChain { path: PathBuf },
@@ -43,7 +47,7 @@ pub enum RustlsDownstreamCertificateError {
     ParsePrivateKey {
         path: PathBuf,
         #[source]
-        source: io::Error,
+        source: PemError,
     },
     #[error("TLS private-key file {path} does not contain a supported private key")]
     MissingPrivateKey { path: PathBuf },
@@ -241,7 +245,7 @@ fn record_pending_managed_certificate() {
 
 fn read_certificate_chain(
     cert_path: &Path,
-) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>, RustlsDownstreamCertificateError> {
+) -> Result<Vec<CertificateDer<'static>>, RustlsDownstreamCertificateError> {
     let file = File::open(cert_path).map_err(|source| {
         RustlsDownstreamCertificateError::OpenCertificate {
             path: cert_path.to_path_buf(),
@@ -249,7 +253,7 @@ fn read_certificate_chain(
         }
     })?;
     let mut reader = BufReader::new(file);
-    rustls_pemfile::certs(&mut reader)
+    CertificateDer::pem_reader_iter(&mut reader)
         .collect::<Result<Vec<_>, _>>()
         .map_err(
             |source| RustlsDownstreamCertificateError::ParseCertificate {
@@ -261,7 +265,7 @@ fn read_certificate_chain(
 
 fn read_private_key(
     key_path: &Path,
-) -> Result<rustls::pki_types::PrivateKeyDer<'static>, RustlsDownstreamCertificateError> {
+) -> Result<PrivateKeyDer<'static>, RustlsDownstreamCertificateError> {
     let file = File::open(key_path).map_err(|source| {
         RustlsDownstreamCertificateError::OpenPrivateKey {
             path: key_path.to_path_buf(),
@@ -269,14 +273,15 @@ fn read_private_key(
         }
     })?;
     let mut reader = BufReader::new(file);
-    rustls_pemfile::private_key(&mut reader)
-        .map_err(|source| RustlsDownstreamCertificateError::ParsePrivateKey {
+    PrivateKeyDer::from_pem_reader(&mut reader).map_err(|source| match source {
+        PemError::NoItemsFound => RustlsDownstreamCertificateError::MissingPrivateKey {
+            path: key_path.to_path_buf(),
+        },
+        source => RustlsDownstreamCertificateError::ParsePrivateKey {
             path: key_path.to_path_buf(),
             source,
-        })?
-        .ok_or_else(|| RustlsDownstreamCertificateError::MissingPrivateKey {
-            path: key_path.to_path_buf(),
-        })
+        },
+    })
 }
 
 fn certificate_paths_are_absent(

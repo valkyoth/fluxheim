@@ -10,7 +10,7 @@ description = "Internal Fluxheim TLS provider and listener planning boundaries."
 [features]
 default = []
 acme = ["fluxheim-config/acme"]
-tls-rustls-backend = ["dep:rustls", "dep:rustls-pemfile", "fluxheim-config/tls-rustls-backend"]
+tls-rustls-backend = ["dep:rustls", "fluxheim-config/tls-rustls-backend"]
 tls-rustls = ["tls-rustls-backend", "rustls/ring"]
 tls-rustls-fips = ["tls-rustls-backend", "fluxheim-config/tls-rustls-fips", "rustls/fips"]
 tls-openssl = ["dep:openssl", "fluxheim-config/tls-openssl"]
@@ -27,5 +27,4 @@ fluxheim-openssl-fips-support = { path = "../../vendor/fluxheim-openssl-fips-sup
 log = "0.4.32"
 openssl = { version = "0.10.81", optional = true }
 rustls = { version = "0.23.40", optional = true }
-rustls-pemfile = { version = "2.2.0", optional = true }
 thiserror = "2.0.18"

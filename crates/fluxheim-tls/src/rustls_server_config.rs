@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fluxheim_config::{TlsClientAuthMode, TlsConfig, TlsProtocolVersion};
+use rustls::pki_types::{CertificateDer, pem::PemObject};
 use rustls::server::{ResolvesServerCert, VerifierBuilderError};
 use rustls::{RootCertStore, SupportedProtocolVersion};
 use thiserror::Error;
@@ -33,7 +34,7 @@ pub enum RustlsDownstreamServerConfigError {
     ParseClientAuthCa {
         path: PathBuf,
         #[source]
-        source: io::Error,
+        source: rustls::pki_types::pem::Error,
     },
     #[error("failed to add certificate from TLS client-auth CA bundle {path}: {source}")]
     AddClientAuthCa {
@@ -122,7 +123,7 @@ fn rustls_client_cert_verifier(
     let mut reader = BufReader::new(file);
     let mut roots = RootCertStore::empty();
     let mut loaded = 0usize;
-    for certificate in rustls_pemfile::certs(&mut reader) {
+    for certificate in CertificateDer::pem_reader_iter(&mut reader) {
         let certificate =
             certificate.map_err(
                 |source| RustlsDownstreamServerConfigError::ParseClientAuthCa {

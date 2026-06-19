@@ -1260,7 +1260,6 @@ dependencies = [
  "log",
  "openssl",
  "rustls",
- "rustls-pemfile",
  "thiserror 2.0.18",
 ]
 

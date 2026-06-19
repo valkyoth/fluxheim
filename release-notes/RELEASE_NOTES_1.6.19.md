@@ -64,6 +64,8 @@ web builds can stay Pingora-free.
 - Add the matching OpenSSL integration test proving the `fluxheim-tls`
   acceptor builder can drive the native OpenSSL HTTP/1 listener.
 - Update the test-only `rcgen` dependency to `0.14.8`.
+- Remove Fluxheim's direct `rustls-pemfile` dependency from `fluxheim-tls` by
+  using the maintained `rustls-pki-types` PEM parser API.
 
 ## Security
 
@@ -95,6 +97,8 @@ web builds can stay Pingora-free.
   `fluxheim-tls` and `fluxheim-server` crates.
 - Add end-to-end native OpenSSL listener cutover coverage across the same crate
   boundary.
+- Remove direct use of the unmaintained `rustls-pemfile` parser from
+  Fluxheim-owned TLS code.
 
 ## Compatibility Boundary
 
