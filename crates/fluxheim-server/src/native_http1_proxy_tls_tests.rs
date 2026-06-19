@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -13,7 +12,9 @@ struct NativeTlsFixture {
     ca_path: std::path::PathBuf,
     client_cert_path: std::path::PathBuf,
     client_key_path: std::path::PathBuf,
-    directory: std::path::PathBuf,
+    _ca_file: tempfile::NamedTempFile,
+    _client_cert_file: tempfile::NamedTempFile,
+    _client_key_file: tempfile::NamedTempFile,
     ca_pem: String,
     chain_pem: String,
     key_pem: String,
@@ -21,13 +22,9 @@ struct NativeTlsFixture {
     alternate_key_pem: String,
 }
 
-impl Drop for NativeTlsFixture {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.directory);
-    }
-}
-
 fn native_tls_fixture() -> NativeTlsFixture {
+    use std::io::Write as _;
+
     use rcgen::{
         BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
         IsCa, Issuer, KeyPair, KeyUsagePurpose,
@@ -68,45 +65,30 @@ fn native_tls_fixture() -> NativeTlsFixture {
     client_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
     let client_cert = client_params.signed_by(&client_key, &ca_issuer).unwrap();
 
-    let directory = unique_temp_dir("native-http1-tls");
-    let ca_path = directory.join("ca.pem");
-    let client_cert_path = directory.join("client-chain.pem");
-    let client_key_path = directory.join("client-key.pem");
-    std::fs::write(&ca_path, ca_cert.pem()).unwrap();
-    std::fs::write(
-        &client_cert_path,
-        format!("{}{}", client_cert.pem(), ca_cert.pem()),
-    )
-    .unwrap();
-    std::fs::write(&client_key_path, client_key.serialize_pem()).unwrap();
+    let mut ca_file = tempfile::NamedTempFile::new().unwrap();
+    let mut client_cert_file = tempfile::NamedTempFile::new().unwrap();
+    let mut client_key_file = tempfile::NamedTempFile::new().unwrap();
+    ca_file.write_all(ca_cert.pem().as_bytes()).unwrap();
+    client_cert_file
+        .write_all(format!("{}{}", client_cert.pem(), ca_cert.pem()).as_bytes())
+        .unwrap();
+    client_key_file
+        .write_all(client_key.serialize_pem().as_bytes())
+        .unwrap();
 
     NativeTlsFixture {
-        ca_path,
-        client_cert_path,
-        client_key_path,
-        directory,
+        ca_path: ca_file.path().to_path_buf(),
+        client_cert_path: client_cert_file.path().to_path_buf(),
+        client_key_path: client_key_file.path().to_path_buf(),
+        _ca_file: ca_file,
+        _client_cert_file: client_cert_file,
+        _client_key_file: client_key_file,
         ca_pem: ca_cert.pem(),
         chain_pem: format!("{}{}", leaf_cert.pem(), ca_cert.pem()),
         key_pem: leaf_key.serialize_pem(),
         alternate_chain_pem: format!("{}{}", alternate_leaf_cert.pem(), ca_cert.pem()),
         alternate_key_pem: alternate_leaf_key.serialize_pem(),
     }
-}
-
-static NATIVE_TLS_TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-fn unique_temp_dir(label: &str) -> std::path::PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let counter = NATIVE_TLS_TEMP_DIR_COUNTER.fetch_add(1, Ordering::AcqRel);
-    let path = std::env::temp_dir().join(format!(
-        "fluxheim-{label}-{}-{nanos}-{counter}",
-        std::process::id()
-    ));
-    std::fs::create_dir(&path).unwrap();
-    path
 }
 
 #[cfg(feature = "tls-rustls-backend")]
