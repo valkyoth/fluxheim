@@ -28,6 +28,8 @@ active health-check client path are now Fluxheim-owned.
   updates.
 - Added a real h2 server-backed gRPC health-check test proving Fluxheim sends
   the standard gRPC health request body and accepts a `SERVING` response.
+- The load-balancer container smoke now uses HTTP active health checks and
+  fails if `cargo tree -p fluxheim-load-balancer` contains any Pingora crate.
 - Verified `cargo test -p fluxheim-load-balancer --locked` passes with 125
   tests.
 

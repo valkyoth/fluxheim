@@ -399,9 +399,11 @@ scripts/smoke_load_balancer_container.sh
 ```
 
 This smoke builds the `profile-load-balancer-edge,acme-client` image by
-default, starts Fluxheim with host networking, and fails if the
+default, starts Fluxheim with host networking, verifies HTTP active health
+checks plus round-robin/header persistence, and fails if the
 load-balancer-edge dependency tree compiles `pingora-load-balancing` or
-`pingora-ketama`.
+`pingora-ketama` or if the `fluxheim-load-balancer` crate dependency tree
+contains any Pingora crate.
 
 Run every runtime variant smoke:
 

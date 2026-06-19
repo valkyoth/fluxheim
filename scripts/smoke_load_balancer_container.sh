@@ -168,12 +168,16 @@ max_iterations = 128
 
 [vhosts.proxy.load_balance.health_check]
 enabled = true
-protocol = "tcp"
+protocol = "http"
+method = "GET"
+path = "/"
+host = "127.0.0.1"
 interval_secs = 1
 consecutive_success = 1
 consecutive_failure = 1
 parallel = true
 connect_timeout_secs = 1
+read_timeout_secs = 1
 
 [[vhosts.routes]]
 name = "sticky"
@@ -271,10 +275,17 @@ fi
     cd "$ROOT_DIR"
     cargo tree --locked --no-default-features --features profile-load-balancer-edge \
         > "$TMP_DIR/load-balancer-edge-cargo-tree.txt"
+    cargo tree --locked -p fluxheim-load-balancer \
+        > "$TMP_DIR/fluxheim-load-balancer-cargo-tree.txt"
 )
 if grep -E 'pingora-load-balancing|pingora-ketama' "$TMP_DIR/load-balancer-edge-cargo-tree.txt" >/dev/null; then
     echo "load-balancer-edge dependency tree still compiles Pingora load-balancing crates" >&2
     cat "$TMP_DIR/load-balancer-edge-cargo-tree.txt" >&2
+    exit 1
+fi
+if grep -E 'pingora[-_a-z]* v[0-9]' "$TMP_DIR/fluxheim-load-balancer-cargo-tree.txt" >/dev/null; then
+    echo "fluxheim-load-balancer crate dependency tree still compiles Pingora crates" >&2
+    cat "$TMP_DIR/fluxheim-load-balancer-cargo-tree.txt" >&2
     exit 1
 fi
 
