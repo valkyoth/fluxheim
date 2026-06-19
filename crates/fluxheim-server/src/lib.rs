@@ -33,6 +33,8 @@ pub use control::CertificateReloadControlPlan;
 pub use http1::DownstreamHttp1Policy;
 pub use http2::DownstreamHttp2Policy;
 pub use listener::{ListenerProtocol, ListenerSpec};
+#[cfg(feature = "tls-rustls-backend")]
+pub use native_http1::serve_native_http1_rustls_listener;
 pub use native_http1::{
     NativeHttp1Error, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
     serve_native_http1_connection, serve_native_http1_listener,

@@ -28,6 +28,12 @@ cipher, group, client-auth, and FIPS reporting failures. Until the native
 listener is wired into production profiles, the compatibility runtime still
 mirrors the same policy into Pingora's `TlsSettings` shim.
 
+`fluxheim-server` has a native rustls HTTP/1 listener preview that accepts a
+ready `rustls::ServerConfig`, bounds the TLS handshake, and then hands the
+stream to the same native HTTP/1 parser/handler path used by plain listeners.
+This is the intended replacement path for the rustls listener patch once the
+runtime cutover wires it into official profiles.
+
 ## Rustls Upstream Verification Policy
 
 Fluxheim also patches the rustls upstream connector so per-peer

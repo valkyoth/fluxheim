@@ -11,6 +11,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
+#[cfg(feature = "tls-rustls-backend")]
+use tokio_rustls::TlsAcceptor;
 
 use crate::DownstreamHttp1Policy;
 
@@ -255,6 +257,62 @@ where
                 let handler = handler.clone();
                 tokio::spawn(async move {
                     let _ = serve_native_http1_connection(stream, Some(peer_addr), policy, handler).await;
+                    drop(permit);
+                });
+            }
+        }
+    }
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+pub async fn serve_native_http1_rustls_listener<H, F>(
+    listener: TcpListener,
+    policy: DownstreamHttp1Policy,
+    tls_config: Arc<rustls::ServerConfig>,
+    handler: Arc<H>,
+    shutdown: F,
+) -> Result<(), NativeHttp1Error>
+where
+    H: NativeHttp1Handler,
+    F: Future<Output = ()> + Send,
+{
+    let acceptor = TlsAcceptor::from(tls_config);
+    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    tokio::pin!(shutdown);
+    loop {
+        tokio::select! {
+            () = &mut shutdown => return Ok(()),
+            accepted = listener.accept() => {
+                let (stream, peer_addr) = accepted?;
+                let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                    log::warn!(
+                        target: "fluxheim::native_http1",
+                        "HTTPS HTTP/1 connection rejected: listener at capacity; peer={peer_addr}; limit={}",
+                        policy.max_connections());
+                    continue;
+                };
+                let acceptor = acceptor.clone();
+                let handler = handler.clone();
+                tokio::spawn(async move {
+                    let handshake = timeout(policy.request_head_timeout(), acceptor.accept(stream)).await;
+                    match handshake {
+                        Ok(Ok(stream)) => {
+                            let _ = serve_native_http1_connection(stream, Some(peer_addr), policy, handler).await;
+                        }
+                        Ok(Err(error)) => {
+                            log::debug!(
+                                target: "fluxheim::native_http1",
+                                "HTTPS HTTP/1 TLS handshake failed; peer={peer_addr}; error={error}"
+                            );
+                        }
+                        Err(_) => {
+                            log::debug!(
+                                target: "fluxheim::native_http1",
+                                "HTTPS HTTP/1 TLS handshake timed out; peer={peer_addr}; timeout_secs={}",
+                                policy.request_head_timeout().as_secs()
+                            );
+                        }
+                    }
                     drop(permit);
                 });
             }

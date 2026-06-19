@@ -25,6 +25,10 @@ web build can stay Pingora-free.
   applies the configured cipher suites, curve groups, minimum protocol, ALPN,
   client-auth verifier, and FIPS reporting check with typed errors instead of
   Pingora listener `build()` panics.
+- Add a native rustls HTTP/1 downstream listener preview in `fluxheim-server`.
+  It wraps the existing native HTTP/1 parser/handler with `tokio-rustls`,
+  shares the listener connection budget, and bounds the TLS handshake before
+  request parsing starts.
 
 ## Security
 
@@ -37,6 +41,9 @@ web build can stay Pingora-free.
 - Prepare the native downstream listener cutover with a no-panic rustls server
   config path that can replace the vendored Pingora rustls `TlsSettings`
   builder.
+- Add socket-level test coverage proving a real rustls client can complete a
+  downstream TLS handshake and receive an HTTP/1 response through the native
+  listener path.
 
 ## Compatibility Boundary
 
