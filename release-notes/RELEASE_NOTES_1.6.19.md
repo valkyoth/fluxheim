@@ -39,6 +39,10 @@ web builds can stay Pingora-free.
 - Move OpenSSL downstream SNI certificate storage, reload, pending-managed-cert
   handling, and certificate application into `fluxheim-tls`. The root runtime
   keeps only the temporary Pingora `TlsAccept` adapter.
+- Align rustls and OpenSSL managed-certificate pending detection. A
+  half-present ACME-managed cert/key pair is now treated as pending by both TLS
+  backends instead of making rustls listener startup or reload fail during the
+  issuance window.
 - Add a native rustls HTTP/1 downstream listener preview in `fluxheim-server`.
   It wraps the existing native HTTP/1 parser/handler with `tokio-rustls`,
   shares the listener connection budget, and bounds the TLS handshake before
@@ -47,6 +51,10 @@ web builds can stay Pingora-free.
   OpenSSL-only builds. It uses the same connection budget and handshake
   timeout as the rustls path, then hands the accepted stream to the same native
   HTTP/1 parser/handler.
+- Split the native HTTP/1 TLS handshake timeout from the HTTP request-head
+  timeout. Preview TLS listeners now use a dedicated 5-second handshake window,
+  so operator tuning of request-head parsing does not accidentally widen or
+  shrink the TLS negotiation budget.
 - Add a native runtime cutover summary to `ServerPlan`. Fluxheim now logs the
   remaining native-runtime blockers at startup while still retaining the
   compatibility adapter for this release.
@@ -68,9 +76,14 @@ web builds can stay Pingora-free.
 - Shrink the OpenSSL compatibility listener surface: SNI certificate material
   is now loaded, selected, reloaded, and applied by `fluxheim-tls`, leaving the
   Pingora layer as an adapter only.
+- Fix rustls/OpenSSL backend divergence for pending managed certificates so an
+  ACME issuance race with only one file present does not fail rustls startup or
+  reload.
 - Prepare the native downstream listener cutover with a no-panic rustls server
   config path that can replace the vendored Pingora rustls `TlsSettings`
   builder.
+- Bound native TLS handshakes with their own timeout instead of reusing the
+  HTTP request-head timeout.
 - Add socket-level test coverage proving a real rustls client can complete a
   downstream TLS handshake and receive an HTTP/1 response through the native
   listener path.

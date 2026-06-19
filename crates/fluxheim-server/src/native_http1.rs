@@ -296,7 +296,7 @@ where
                 let acceptor = acceptor.clone();
                 let handler = handler.clone();
                 tokio::spawn(async move {
-                    let handshake = timeout(policy.request_head_timeout(), acceptor.accept(stream)).await;
+                    let handshake = timeout(policy.tls_handshake_timeout(), acceptor.accept(stream)).await;
                     match handshake {
                         Ok(Ok(stream)) => {
                             let _ = serve_native_http1_connection(stream, Some(peer_addr), policy, handler).await;
@@ -311,7 +311,7 @@ where
                             log::debug!(
                                 target: "fluxheim::native_http1",
                                 "HTTPS HTTP/1 TLS handshake timed out; peer={peer_addr}; timeout_secs={}",
-                                policy.request_head_timeout().as_secs()
+                                policy.tls_handshake_timeout().as_secs()
                             );
                         }
                     }
@@ -364,7 +364,7 @@ where
                     };
                     let mut stream = stream;
                     let handshake =
-                        timeout(policy.request_head_timeout(), std::pin::Pin::new(&mut stream).accept())
+                        timeout(policy.tls_handshake_timeout(), std::pin::Pin::new(&mut stream).accept())
                             .await;
                     match handshake {
                         Ok(Ok(())) => {
@@ -380,7 +380,7 @@ where
                             log::debug!(
                                 target: "fluxheim::native_http1",
                                 "HTTPS HTTP/1 TLS handshake timed out; peer={peer_addr}; timeout_secs={}",
-                                policy.request_head_timeout().as_secs()
+                                policy.tls_handshake_timeout().as_secs()
                             );
                         }
                     }

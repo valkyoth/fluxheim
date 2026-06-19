@@ -120,7 +120,6 @@ struct FluxHttpHealthCheck {
     tls: Option<FluxTcpHealthCheckTls>,
     connection_timeout: Duration,
     read_timeout: Duration,
-    reuse_connection: bool,
     req: HealthHttpRequest,
     port_override: Option<u16>,
     expected_statuses: Arc<[u16]>,
@@ -187,7 +186,6 @@ impl FluxHealthCheck for FluxHttpHealthCheck {
             validate_http_health_response_body_json(&body, &self.expected_body_json)
                 .map_err(HttpHealthCheckError::into_flux)?;
         }
-        let _ = self.reuse_connection;
 
         Ok(())
     }
@@ -278,7 +276,6 @@ fn configured_http_health_check(
         tls,
         connection_timeout,
         read_timeout,
-        reuse_connection: config.load_balance.health_check.reuse_connection,
         req: HealthHttpRequest {
             method,
             path: path.to_owned(),
@@ -718,7 +715,6 @@ mod tests {
                 .map(|value| value.as_bytes()),
             Some("Bearer health-token".as_bytes())
         );
-        assert!(health_check.reuse_connection);
         assert_eq!(health_check.port_override, Some(8081));
         assert_eq!(health_check.connection_timeout, Duration::from_secs(5));
         assert_eq!(health_check.read_timeout, Duration::from_secs(6));

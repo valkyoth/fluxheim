@@ -6,6 +6,7 @@ use std::time::Duration;
 
 pub const DEFAULT_HTTP1_REQUEST_HEAD_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEFAULT_HTTP1_REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_HTTP1_TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const DEFAULT_HTTP1_MAX_CONNECTIONS: usize = 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -18,6 +19,7 @@ pub struct DownstreamHttp1Policy {
     max_start_line_bytes: usize,
     request_body_timeout: Duration,
     request_head_timeout: Duration,
+    tls_handshake_timeout: Duration,
 }
 
 impl Default for DownstreamHttp1Policy {
@@ -31,6 +33,7 @@ impl Default for DownstreamHttp1Policy {
             max_start_line_bytes: DEFAULT_HTTP1_MAX_START_LINE_BYTES,
             request_body_timeout: DEFAULT_HTTP1_REQUEST_BODY_TIMEOUT,
             request_head_timeout: DEFAULT_HTTP1_REQUEST_HEAD_TIMEOUT,
+            tls_handshake_timeout: DEFAULT_HTTP1_TLS_HANDSHAKE_TIMEOUT,
         }
     }
 }
@@ -55,6 +58,7 @@ impl DownstreamHttp1Policy {
                 .max(32_usize.min(max_head_bytes)),
             request_body_timeout: DEFAULT_HTTP1_REQUEST_BODY_TIMEOUT,
             request_head_timeout: DEFAULT_HTTP1_REQUEST_HEAD_TIMEOUT,
+            tls_handshake_timeout: DEFAULT_HTTP1_TLS_HANDSHAKE_TIMEOUT,
         }
     }
 
@@ -74,6 +78,11 @@ impl DownstreamHttp1Policy {
 
     pub const fn with_request_head_timeout(mut self, timeout: Duration) -> Self {
         self.request_head_timeout = timeout;
+        self
+    }
+
+    pub const fn with_tls_handshake_timeout(mut self, timeout: Duration) -> Self {
+        self.tls_handshake_timeout = timeout;
         self
     }
 
@@ -107,6 +116,10 @@ impl DownstreamHttp1Policy {
 
     pub const fn request_head_timeout(self) -> Duration {
         self.request_head_timeout
+    }
+
+    pub const fn tls_handshake_timeout(self) -> Duration {
+        self.tls_handshake_timeout
     }
 }
 

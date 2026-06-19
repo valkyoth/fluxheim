@@ -296,7 +296,7 @@ fn certificate_paths_are_absent(
             source,
         }
     })?;
-    Ok(!cert_exists && !key_exists)
+    Ok(!cert_exists || !key_exists)
 }
 
 fn client_hello_requests_alpn_protocol(client_hello: &ClientHello<'_>, protocol: &[u8]) -> bool {
@@ -307,6 +307,7 @@ fn client_hello_requests_alpn_protocol(client_hello: &ClientHello<'_>, protocol:
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
 
     use fluxheim_config::{Config, StaticCertificateConfig, TlsConfig};
@@ -336,6 +337,28 @@ mod tests {
 
         assert_eq!(resolver.certificate_slot_count(), 1);
         assert_eq!(resolver.loaded_certificate_count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn managed_certificate_is_pending_when_either_file_is_missing()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let unique = format!("fluxheim-rustls-managed-pending-{}", std::process::id());
+        let directory = std::env::temp_dir().join(unique);
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory)?;
+        let cert_path = directory.join("cert.pem");
+        let key_path = directory.join("key.pem");
+        fs::write(&cert_path, b"pending cert placeholder")?;
+
+        let certificate = StaticCertificateConfig {
+            cert_path,
+            key_path,
+        };
+
+        assert!(certificate_paths_are_absent(&certificate)?);
+
+        fs::remove_dir_all(directory)?;
         Ok(())
     }
 }

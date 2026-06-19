@@ -174,6 +174,10 @@ fn downstream_http1_policy_uses_bounded_native_defaults() {
         std::time::Duration::from_secs(10)
     );
     assert_eq!(
+        policy.tls_handshake_timeout(),
+        std::time::Duration::from_secs(5)
+    );
+    assert_eq!(
         policy.request_body_timeout(),
         std::time::Duration::from_secs(30)
     );

@@ -199,16 +199,10 @@ async fn read_http1_response_body(
     }
     let mut body = remainder;
     loop {
-        match tokio::time::timeout(
-            read_timeout,
-            read_more_body(stream, &mut body, read_timeout),
-        )
-        .await
-        {
-            Ok(Ok(true)) => {}
-            Ok(Ok(false)) => return Ok(body),
-            Ok(Err(error)) => return Err(error),
-            Err(_) => return Ok(body),
+        match read_more_body(stream, &mut body, read_timeout).await {
+            Ok(true) => {}
+            Ok(false) => return Ok(body),
+            Err(error) => return Err(error),
         }
     }
 }
