@@ -24,6 +24,8 @@ behavior when the change improves security or project direction.
 - Split Redis, MySQL, and PostgreSQL active health probes into a database
   health helper module, keeping each new protocol/probe module below the
   modularity policy target.
+- Split exec active health checks into a small helper module covering command
+  launch, environment scrubbing, timeout handling, and exit-status mapping.
 
 ### Security
 

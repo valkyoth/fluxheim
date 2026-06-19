@@ -19,6 +19,9 @@ Pingora-free.
   database health module. The wire-format parsers, request constants, and
   timeout handling remain unchanged, but database probe review no longer shares
   a large file with HTTP/gRPC orchestration.
+- Split exec active health checks into a private exec module so command launch,
+  environment scrubbing, timeout handling, and exit-status interpretation have a
+  smaller dedicated review surface.
 
 ## Compatibility
 
