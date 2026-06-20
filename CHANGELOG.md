@@ -7,6 +7,33 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.22 - 2026-06-20
+
+### Changed
+
+- Start the native admin/metrics serving slice of the Pingora-exit line.
+- Keep production admin and metrics compatibility conservative while native
+  control-plane HTTP handlers and parity tests are introduced behind Fluxheim-owned
+  server primitives.
+- Update release metadata, RPM metadata, and container tag documentation for
+  `v1.6.22`.
+
+### Security
+
+- Preserve auth-first admin behavior as the required compatibility contract for
+  native admin/control-plane serving.
+- Mark config-derived admin, ops-socket, and metrics service plans native-ready
+  only after adding native handler parity tests.
+- Harden native background handles so dropped handles abort instead of silently
+  detaching tasks, document critical-handle abort behavior, and make shutdown
+  initiation results `#[must_use]`.
+- Reject newline-bearing native runtime cutover evidence paths before generating
+  TOML fixtures.
+- Document that native admin target matching intentionally uses raw,
+  percent-encoded paths.
+- Keep the native runtime cutover blocker gate active for stream, UDP, HTTP/2,
+  and final proxy-runtime blockers while this slice advances.
+
 ## 1.6.21 - 2026-06-20
 
 ### Changed

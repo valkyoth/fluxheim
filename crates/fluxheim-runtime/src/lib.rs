@@ -122,7 +122,7 @@ pub struct NativeBackgroundJoinHandle {
     name: String,
     kind: Option<BackgroundTaskKind>,
     critical: bool,
-    handle: JoinHandle<()>,
+    handle: Option<JoinHandle<()>>,
 }
 
 impl NativeBackgroundJoinHandle {
@@ -139,15 +139,37 @@ impl NativeBackgroundJoinHandle {
     }
 
     pub fn is_finished(&self) -> bool {
-        self.handle.is_finished()
+        self.handle.as_ref().is_none_or(JoinHandle::is_finished)
     }
 
+    /// Abort the underlying task.
+    ///
+    /// # Warning
+    ///
+    /// If this handle is critical and has been registered with
+    /// [`NativeBackgroundSupervisor::spawn_critical_watchdog`], aborting the
+    /// task causes the watchdog to request process-wide shutdown. Prefer
+    /// graceful shutdown through [`NativeBackgroundSupervisor::shutdown`] unless
+    /// local cancellation is explicitly intended.
     pub fn abort(&self) {
-        self.handle.abort();
+        if let Some(handle) = &self.handle {
+            handle.abort();
+        }
     }
 
-    pub async fn join(self) -> Result<(), tokio::task::JoinError> {
-        self.handle.await
+    pub async fn join(mut self) -> Result<(), tokio::task::JoinError> {
+        let Some(handle) = self.handle.take() else {
+            return Ok(());
+        };
+        handle.await
+    }
+}
+
+impl Drop for NativeBackgroundJoinHandle {
+    fn drop(&mut self) {
+        if let Some(handle) = &self.handle {
+            handle.abort();
+        }
     }
 }
 
@@ -174,6 +196,7 @@ impl NativeBackgroundSupervisor {
         }
     }
 
+    #[must_use = "returns false if shutdown was already in progress; true if this call initiated it"]
     pub fn shutdown(&self) -> bool {
         !self.inner.shutdown_tx.send_replace(true)
     }
@@ -210,10 +233,15 @@ impl NativeBackgroundSupervisor {
             name,
             kind,
             critical,
-            handle,
+            handle: Some(handle),
         }
     }
 
+    /// Spawn a watchdog task that requests shutdown when any critical task exits.
+    ///
+    /// The returned handle represents the watchdog task itself. Do not register
+    /// that handle with another watchdog: its exit only means all watched tasks
+    /// have exited, not that an independent service failed.
     pub fn spawn_critical_watchdog<I>(&self, handles: I) -> NativeBackgroundJoinHandle
     where
         I: IntoIterator<Item = NativeBackgroundJoinHandle>,
@@ -225,7 +253,7 @@ impl NativeBackgroundSupervisor {
                 let supervisor = self.clone();
                 tokio::spawn(async move {
                     let _ = handle.join().await;
-                    supervisor.shutdown();
+                    let _ = supervisor.shutdown();
                 })
             })
             .collect::<Vec<_>>();
@@ -239,7 +267,7 @@ impl NativeBackgroundSupervisor {
             name: "critical-background-watchdog".to_owned(),
             kind: Some(BackgroundTaskKind::RuntimeWatchdog),
             critical: true,
-            handle,
+            handle: Some(handle),
         }
     }
 }
@@ -261,7 +289,7 @@ impl BackgroundTaskSpawner for NativeBackgroundSupervisor {
             name: spec.name().to_owned(),
             kind: Some(spec.kind()),
             critical: spec.is_critical(),
-            handle: tokio::spawn(task),
+            handle: Some(tokio::spawn(task)),
         }
     }
 }
@@ -393,7 +421,7 @@ pub fn background_service_with_kind<T>(
 mod tests {
     use super::*;
     use std::time::Duration;
-    use tokio::sync::{mpsc, watch};
+    use tokio::sync::{mpsc, oneshot, watch};
 
     #[derive(Clone, Copy)]
     struct StaticShutdown(ShutdownState);
@@ -523,6 +551,41 @@ mod tests {
         assert!(handle.is_critical());
         assert_eq!(receiver.recv().await, Some(7));
         handle.join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_background_join_handle_aborts_task_on_drop() {
+        struct DropNotify(Option<oneshot::Sender<()>>);
+
+        impl Drop for DropNotify {
+            fn drop(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+
+        let supervisor = NativeBackgroundSupervisor::new();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let (drop_tx, drop_rx) = oneshot::channel();
+        let handle = supervisor.spawn_background(
+            BackgroundTaskSpec::new("detached-task", BackgroundTaskKind::CacheMetrics),
+            async move {
+                let _drop_notify = DropNotify(Some(drop_tx));
+                let _ = ready_tx.send(());
+                std::future::pending::<()>().await;
+            },
+        );
+
+        ready_rx
+            .await
+            .expect("task should start before handle drop");
+        drop(handle);
+
+        tokio::time::timeout(Duration::from_secs(10), drop_rx)
+            .await
+            .expect("dropped handle should abort task")
+            .expect("task drop notifier should send");
     }
 
     #[tokio::test]

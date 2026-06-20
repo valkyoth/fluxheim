@@ -23,7 +23,8 @@ fi
 
 snapshot_store="$(pwd)/$out_dir/snapshots"
 case "$snapshot_store" in
-    *\"*|*\\*|*'`'*|*'$'*)
+    *\"*|*\\*|*'`'*|*'$'*|*'
+'*)
         echo "native runtime cutover evidence: unsafe snapshot_store path" >&2
         exit 1
         ;;
@@ -82,8 +83,6 @@ cargo run --quiet --locked --no-default-features --features profile-development 
 expected_blockers="$out_dir/representative-runtime-cutover-expected.tsv"
 awk -F '\t' '
     BEGIN {
-        expected["admin-control-plane"] = 1
-        expected["metrics-http"] = 1
         expected["stream-proxy"] = 1
         expected["native-http2"] = 1
     }

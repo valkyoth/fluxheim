@@ -750,8 +750,8 @@ mod tests {
 
         assert!(report.contains("native-runtime-adapter: PingoraCompatibility\n"));
         assert!(report.contains("native-http2\tnative HTTP/2 downstream parity\t1.6.24\n"));
-        assert!(report.contains("admin-control-plane\tnative admin control plane\t1.6.22\n"));
-        assert!(report.contains("metrics-http\tnative metrics HTTP service\t1.6.22\n"));
+        assert!(!report.contains("admin-control-plane\tnative admin control plane\t1.6.22\n"));
+        assert!(!report.contains("metrics-http\tnative metrics HTTP service\t1.6.22\n"));
     }
 
     #[test]

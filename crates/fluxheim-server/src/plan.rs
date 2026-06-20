@@ -92,26 +92,34 @@ impl NativeRuntimeCutoverSummary {
         {
             blockers.push(NativeRuntimeCutoverBlocker::NativeHttp2);
         }
-        for (kind, blocker) in [
+        for (kind, native_ready, blocker) in [
             (
                 ServiceKind::AdminControlPlane,
+                plan.native_admin_control_plane_ready,
                 NativeRuntimeCutoverBlocker::AdminControlPlane,
             ),
             (
                 ServiceKind::AdminOpsSocket,
+                plan.native_admin_ops_socket_ready,
                 NativeRuntimeCutoverBlocker::AdminOpsSocket,
             ),
             (
                 ServiceKind::MetricsHttp,
+                plan.native_metrics_http_ready,
                 NativeRuntimeCutoverBlocker::MetricsHttp,
             ),
             (
                 ServiceKind::StreamProxy,
+                false,
                 NativeRuntimeCutoverBlocker::StreamProxy,
             ),
-            (ServiceKind::UdpProxy, NativeRuntimeCutoverBlocker::UdpProxy),
+            (
+                ServiceKind::UdpProxy,
+                false,
+                NativeRuntimeCutoverBlocker::UdpProxy,
+            ),
         ] {
-            if plan.has_service(kind) {
+            if plan.has_service(kind) && !native_ready {
                 blockers.push(blocker);
             }
         }
@@ -150,6 +158,9 @@ pub struct ServerPlan {
     native_http2_preview: NativeHttp2Preview,
     certificate_reload_control: Option<CertificateReloadControlPlan>,
     admin_ops_socket: Option<service::AdminOpsSocketPlan>,
+    native_admin_control_plane_ready: bool,
+    native_admin_ops_socket_ready: bool,
+    native_metrics_http_ready: bool,
     native_http1_proxy_candidates: Vec<NativeHttp1ProxyCandidate>,
     listeners: Vec<ListenerSpec>,
     services: Vec<ServiceSpec>,
@@ -169,6 +180,9 @@ impl ServerPlan {
             ),
             certificate_reload_control: None,
             admin_ops_socket: None,
+            native_admin_control_plane_ready: false,
+            native_admin_ops_socket_ready: false,
+            native_metrics_http_ready: false,
             native_http1_proxy_candidates: Vec::new(),
             listeners,
             services: Vec::new(),
@@ -193,6 +207,9 @@ impl ServerPlan {
             ),
             certificate_reload_control: None,
             admin_ops_socket: None,
+            native_admin_control_plane_ready: false,
+            native_admin_ops_socket_ready: false,
+            native_metrics_http_ready: false,
             native_http1_proxy_candidates: Vec::new(),
             listeners,
             services,
@@ -230,6 +247,18 @@ impl ServerPlan {
 
     pub fn admin_ops_socket(&self) -> Option<&service::AdminOpsSocketPlan> {
         self.admin_ops_socket.as_ref()
+    }
+
+    pub const fn native_admin_control_plane_ready(&self) -> bool {
+        self.native_admin_control_plane_ready
+    }
+
+    pub const fn native_admin_ops_socket_ready(&self) -> bool {
+        self.native_admin_ops_socket_ready
+    }
+
+    pub const fn native_metrics_http_ready(&self) -> bool {
+        self.native_metrics_http_ready
     }
 
     pub fn native_http1_proxy_candidates(&self) -> &[NativeHttp1ProxyCandidate] {
@@ -364,6 +393,9 @@ impl ServerPlan {
             native_http2_preview: NativeHttp2Preview::from_downstream_policy(downstream_http2),
             certificate_reload_control,
             admin_ops_socket: service::admin_ops_socket_plan_from_config(config),
+            native_admin_control_plane_ready: config.admin.enabled,
+            native_admin_ops_socket_ready: native_admin_ops_socket_ready(config),
+            native_metrics_http_ready: config.metrics.enabled,
             native_http1_proxy_candidates:
                 native_http1_plan::native_http1_proxy_candidates_from_config(
                     config,
@@ -375,4 +407,14 @@ impl ServerPlan {
             background_tasks: background::background_task_specs_from_config(config),
         })
     }
+}
+
+#[cfg(unix)]
+fn native_admin_ops_socket_ready(config: &Config) -> bool {
+    config.admin.enabled && config.admin.ops_socket.enabled
+}
+
+#[cfg(not(unix))]
+fn native_admin_ops_socket_ready(_config: &Config) -> bool {
+    false
 }

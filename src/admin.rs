@@ -2767,6 +2767,34 @@ impl ServeHttp for AdminApp {
     }
 }
 
+impl fluxheim_server::NativeHttp1Handler for AdminApp {
+    fn handle<'a>(
+        &'a self,
+        request: fluxheim_server::NativeHttp1Request,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = fluxheim_server::NativeHttp1Response> + Send + 'a>,
+    > {
+        Box::pin(async move { self.native_http1_response(request) })
+    }
+}
+
+impl AdminApp {
+    fn native_http1_response(
+        &self,
+        request: fluxheim_server::NativeHttp1Request,
+    ) -> fluxheim_server::NativeHttp1Response {
+        let headers = native_admin_headers(&request.headers);
+        let (path, query) = native_admin_target_parts(&request.target);
+        admin_native_http1_response(self.handle_with_source(
+            &request.method,
+            path,
+            query,
+            &headers,
+            request.peer_addr.map(|peer| peer.ip()),
+        ))
+    }
+}
+
 #[cfg(unix)]
 #[async_trait]
 impl ServeHttp for AdminOpsApp {
@@ -2777,6 +2805,36 @@ impl ServeHttp for AdminOpsApp {
             request.uri.path(),
             request.uri.query(),
             Some(&request.headers),
+            self.require_bearer_token,
+        ))
+    }
+}
+
+#[cfg(unix)]
+impl fluxheim_server::NativeHttp1Handler for AdminOpsApp {
+    fn handle<'a>(
+        &'a self,
+        request: fluxheim_server::NativeHttp1Request,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = fluxheim_server::NativeHttp1Response> + Send + 'a>,
+    > {
+        Box::pin(async move { self.native_http1_response(request) })
+    }
+}
+
+#[cfg(unix)]
+impl AdminOpsApp {
+    fn native_http1_response(
+        &self,
+        request: fluxheim_server::NativeHttp1Request,
+    ) -> fluxheim_server::NativeHttp1Response {
+        let headers = native_admin_headers(&request.headers);
+        let (path, query) = native_admin_target_parts(&request.target);
+        admin_native_http1_response(self.app.handle_ops_socket(
+            &request.method,
+            path,
+            query,
+            Some(&headers),
             self.require_bearer_token,
         ))
     }
@@ -2803,6 +2861,52 @@ fn admin_http_response(response: AdminResponse) -> Response<Vec<u8>> {
             fallback
         }
     }
+}
+
+fn admin_native_http1_response(response: AdminResponse) -> fluxheim_server::NativeHttp1Response {
+    fluxheim_server::NativeHttp1Response::new(
+        response.status.as_u16(),
+        response
+            .status
+            .canonical_reason()
+            .unwrap_or("Admin Response"),
+        response.body,
+    )
+    .with_header(header::CONTENT_TYPE.as_str(), response.content_type)
+    .with_header(header::CACHE_CONTROL.as_str(), "no-store")
+}
+
+fn native_admin_headers(headers: &[(String, String)]) -> HeaderMap {
+    let mut map = HeaderMap::new();
+    for (name, value) in headers {
+        let Ok(name) = http::HeaderName::try_from(name.as_str()) else {
+            continue;
+        };
+        let Ok(value) = http::HeaderValue::try_from(value.as_str()) else {
+            continue;
+        };
+        map.append(name, value);
+    }
+    map
+}
+
+/// Return `(path, query)` from the raw HTTP request target without
+/// percent-decoding. Admin routes must match encoded path strings so a future
+/// normalization change cannot introduce a route-bypass gap.
+fn native_admin_target_parts(target: &str) -> (&str, Option<&str>) {
+    let target = match target.split_once('#') {
+        Some((before_fragment, _)) => before_fragment,
+        None => target,
+    };
+    let target = if let Some(rest) = target.strip_prefix("http://") {
+        rest.find('/').map_or("/", |index| &rest[index..])
+    } else if let Some(rest) = target.strip_prefix("https://") {
+        rest.find('/').map_or("/", |index| &rest[index..])
+    } else {
+        target
+    };
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    (path, (!query.is_empty()).then_some(query))
 }
 
 fn authorization_header(headers: &HeaderMap) -> Option<&str> {
@@ -4201,6 +4305,21 @@ mod tests {
         }
     }
 
+    fn native_request(
+        method: &str,
+        target: &str,
+        headers: Vec<(String, String)>,
+    ) -> fluxheim_server::NativeHttp1Request {
+        fluxheim_server::NativeHttp1Request {
+            method: method.to_owned(),
+            peer_addr: Some("127.0.0.1:59000".parse().unwrap()),
+            target: target.to_owned(),
+            version: fluxheim_protocol::Http1Version::Http11,
+            headers,
+            body: Vec::new(),
+        }
+    }
+
     #[cfg(feature = "load-balancer")]
     fn load_balancer_admin_config() -> Config {
         Config {
@@ -4261,6 +4380,41 @@ mod tests {
 
         assert_eq!(response.status, StatusCode::OK);
         assert_eq!(response.body, br#"{"status":"ok"}"#);
+    }
+
+    #[tokio::test]
+    async fn native_admin_http1_preserves_auth_first_health_contract() {
+        let app = app();
+
+        let unauthorized = fluxheim_server::NativeHttp1Handler::handle(
+            &app,
+            native_request("GET", "/_fluxheim/health", Vec::new()),
+        )
+        .await;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED.as_u16());
+        assert_eq!(unauthorized.body(), br#"{"error":"unauthorized"}"#);
+
+        let authorized = fluxheim_server::NativeHttp1Handler::handle(
+            &app,
+            native_request(
+                "GET",
+                "http://admin.local/_fluxheim/health",
+                vec![(
+                    header::AUTHORIZATION.as_str().to_owned(),
+                    "Bearer secret-token".to_owned(),
+                )],
+            ),
+        )
+        .await;
+        assert_eq!(authorized.status(), StatusCode::OK.as_u16());
+        assert_eq!(authorized.body(), br#"{"status":"ok"}"#);
+        assert!(
+            authorized
+                .headers()
+                .iter()
+                .any(|(name, value)| name.eq_ignore_ascii_case("cache-control")
+                    && value == "no-store")
+        );
     }
 
     #[test]

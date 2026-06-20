@@ -1,7 +1,10 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts};
+use fluxheim_server::NativeHttp1Response;
+use prometheus::{
+    Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
+};
 
 static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -65,6 +68,18 @@ static METRICS_OTLP_EXPORTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 
 pub fn enabled() -> bool {
     true
+}
+
+pub fn prometheus_text() -> Result<Vec<u8>, prometheus::Error> {
+    let metric_families = prometheus::gather();
+    let mut output = Vec::new();
+    prometheus::TextEncoder::new().encode(&metric_families, &mut output)?;
+    Ok(output)
+}
+
+pub fn native_prometheus_response() -> Result<NativeHttp1Response, prometheus::Error> {
+    Ok(NativeHttp1Response::new(200, "OK", prometheus_text()?)
+        .with_header("content-type", prometheus::TextEncoder::new().format_type()))
 }
 
 pub fn init() -> Result<(), prometheus::Error> {
@@ -1703,15 +1718,16 @@ mod tests {
     #[cfg(all(feature = "proxy", feature = "cache"))]
     use super::record_cache_runtime_totals;
     use super::{
-        init, method_bucket, record_acme_event, record_admin_auth_event, record_cache_activity,
-        record_cache_activity_scope, record_cache_operation_duration, record_cache_purge,
-        record_cache_purger_duration, record_cache_purger_entries, record_cache_purger_run,
-        record_config, record_edge_policy_event, record_host_routing_rejection,
-        record_load_balancer_event, record_load_balancer_queue_wait, record_metrics_otlp_export,
-        record_php_fpm_pool_event, record_php_fpm_pool_idle, record_php_fpm_retry,
-        record_php_request, record_php_stderr, record_proxy_outcome, record_response_compression,
-        record_stream_bytes, record_stream_connection, record_udp_datagram, record_udp_drop,
-        set_udp_active_sessions, status_class,
+        init, method_bucket, native_prometheus_response, record_acme_event,
+        record_admin_auth_event, record_cache_activity, record_cache_activity_scope,
+        record_cache_operation_duration, record_cache_purge, record_cache_purger_duration,
+        record_cache_purger_entries, record_cache_purger_run, record_config,
+        record_edge_policy_event, record_host_routing_rejection, record_load_balancer_event,
+        record_load_balancer_queue_wait, record_metrics_otlp_export, record_php_fpm_pool_event,
+        record_php_fpm_pool_idle, record_php_fpm_retry, record_php_request, record_php_stderr,
+        record_proxy_outcome, record_response_compression, record_stream_bytes,
+        record_stream_connection, record_udp_datagram, record_udp_drop, set_udp_active_sessions,
+        status_class,
     };
 
     #[test]
@@ -2179,6 +2195,26 @@ mod tests {
         assert!(output.contains(r#"event="failure",scope="source""#));
         assert!(output.contains(r#"event="throttled",scope="global""#));
         assert!(output.contains(r#"event="other",scope="other""#));
+    }
+
+    #[test]
+    fn native_prometheus_response_exposes_text_metrics() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_admin_auth_event("failure", "source");
+        let response = native_prometheus_response().unwrap();
+        let output = String::from_utf8(response.body().to_vec()).unwrap();
+
+        assert_eq!(response.status(), 200);
+        assert!(
+            response
+                .headers()
+                .iter()
+                .any(|(name, value)| name == "content-type" && value.starts_with("text/plain"))
+        );
+        assert!(output.contains("fluxheim_admin_auth_events_total"));
+        assert!(output.contains(r#"event="failure",scope="source""#));
     }
 
     #[test]

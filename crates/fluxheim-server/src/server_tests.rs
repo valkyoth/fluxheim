@@ -492,6 +492,26 @@ fn server_plan_from_config_collects_listener_inventory() {
         plan.service_listener_addrs(ServiceKind::LoadBalancerHealthChecks),
         Vec::<String>::new()
     );
+    assert!(plan.native_admin_control_plane_ready());
+    assert!(!plan.native_admin_ops_socket_ready());
+    assert!(plan.native_metrics_http_ready());
+}
+
+#[test]
+fn native_runtime_cutover_summary_treats_configured_admin_and_metrics_as_ready() {
+    let mut config = Config::default();
+    config.server.listen = vec!["127.0.0.1:8080".to_owned()];
+    config.admin.enabled = true;
+    config.admin.listen = "127.0.0.1:9090".to_owned();
+    config.metrics.enabled = true;
+    config.metrics.listen = "127.0.0.1:9091".to_owned();
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let blockers = plan.native_runtime_cutover_summary().blockers().to_vec();
+
+    assert!(!blockers.contains(&NativeRuntimeCutoverBlocker::AdminControlPlane));
+    assert!(!blockers.contains(&NativeRuntimeCutoverBlocker::MetricsHttp));
+    assert!(blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp2));
 }
 
 #[test]
@@ -506,6 +526,7 @@ fn server_plan_collects_admin_ops_socket_plan() {
     let ops_socket = plan.admin_ops_socket().expect("ops socket plan");
 
     assert!(plan.has_service(ServiceKind::AdminOpsSocket));
+    assert!(plan.native_admin_ops_socket_ready());
     assert_eq!(
         ops_socket.path(),
         std::path::Path::new("/run/fluxheim/admin.sock")
