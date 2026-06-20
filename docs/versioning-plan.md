@@ -2667,12 +2667,13 @@ Planned `1.6.x` sequence:
   runtime code toward the 500-line modularity target. Dependency policy targets
   move to the final proof release only with matching release notes explaining
   the remaining blockers.
-- `v1.6.21`: replace Pingora background-service orchestration for internal
-  Fluxheim tasks with a Tokio task supervisor and Fluxheim shutdown token.
-  Certificate reload, ACME renewal, cache stale purge, cache metrics, OTLP
-  export, and load-balancer refresh tasks should no longer need Pingora service
-  traits. Keep the old adapter only where a production listener still requires
-  it.
+- `v1.6.21`: add and test the Fluxheim-owned Tokio background supervisor and
+  shutdown token that will replace Pingora background-service orchestration for
+  internal tasks. Certificate reload, ACME renewal, cache stale purge, cache
+  metrics, OTLP export, and load-balancer refresh tasks already implement the
+  Fluxheim task trait; keep the production Pingora adapter while the main
+  server shutdown source still comes from Pingora, and wire those tasks to the
+  native supervisor during the `1.6.22`-`1.6.24` runtime/listener cutover.
 - `v1.6.22`: move metrics/admin/ops HTTP serving onto Fluxheim-native HTTP
   handlers. Admin must stay auth-first and should expose the same response
   shape as the compatibility path. Release gates need localhost smoke coverage

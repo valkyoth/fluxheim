@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 pub mod policy;
 
@@ -114,6 +115,114 @@ pub trait BackgroundTaskSpawner {
     fn spawn_background<F>(&self, spec: BackgroundTaskSpec, task: F) -> Self::JoinHandle
     where
         F: Future<Output = ()> + Send + 'static;
+}
+
+#[derive(Debug)]
+pub struct NativeBackgroundJoinHandle {
+    name: String,
+    kind: Option<BackgroundTaskKind>,
+    critical: bool,
+    handle: JoinHandle<()>,
+}
+
+impl NativeBackgroundJoinHandle {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub const fn kind(&self) -> Option<BackgroundTaskKind> {
+        self.kind
+    }
+
+    pub const fn is_critical(&self) -> bool {
+        self.critical
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.handle.is_finished()
+    }
+
+    pub fn abort(&self) {
+        self.handle.abort();
+    }
+
+    pub async fn join(self) -> Result<(), tokio::task::JoinError> {
+        self.handle.await
+    }
+}
+
+#[derive(Clone)]
+pub struct NativeBackgroundSupervisor {
+    shutdown_tx: watch::Sender<bool>,
+}
+
+impl NativeBackgroundSupervisor {
+    pub fn new() -> Self {
+        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
+        Self { shutdown_tx }
+    }
+
+    pub fn shutdown(&self) -> bool {
+        self.shutdown_tx.send(true).is_ok()
+    }
+
+    pub fn shutdown_view(&self) -> FluxShutdown {
+        FluxShutdown::new(self.shutdown_tx.subscribe())
+    }
+
+    pub fn spawn_service<T>(&self, service: FluxBackgroundService<T>) -> NativeBackgroundJoinHandle
+    where
+        T: FluxBackgroundTask,
+    {
+        self.spawn_service_with_ready(service, || {})
+    }
+
+    pub fn spawn_service_with_ready<T>(
+        &self,
+        service: FluxBackgroundService<T>,
+        ready: impl FnOnce() + Send + 'static,
+    ) -> NativeBackgroundJoinHandle
+    where
+        T: FluxBackgroundTask,
+    {
+        let name = service.name().to_owned();
+        let kind = service.kind();
+        let critical = service.is_critical();
+        let task = service.task();
+        let shutdown = self.shutdown_view();
+        let handle = tokio::spawn(async move {
+            task.start(shutdown, FluxBackgroundReady::new(ready)).await;
+        });
+
+        NativeBackgroundJoinHandle {
+            name,
+            kind,
+            critical,
+            handle,
+        }
+    }
+}
+
+impl Default for NativeBackgroundSupervisor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BackgroundTaskSpawner for NativeBackgroundSupervisor {
+    type JoinHandle = NativeBackgroundJoinHandle;
+
+    fn spawn_background<F>(&self, spec: BackgroundTaskSpec, task: F) -> Self::JoinHandle
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        NativeBackgroundJoinHandle {
+            name: spec.name().to_owned(),
+            kind: Some(spec.kind()),
+            critical: spec.is_critical(),
+            handle: tokio::spawn(task),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -234,7 +343,7 @@ pub fn background_service_with_kind<T>(
 mod tests {
     use super::*;
     use std::time::Duration;
-    use tokio::sync::watch;
+    use tokio::sync::{mpsc, watch};
 
     #[derive(Clone, Copy)]
     struct StaticShutdown(ShutdownState);
@@ -282,6 +391,88 @@ mod tests {
         assert_eq!(service.name(), "cache");
         assert_eq!(service.kind(), Some(BackgroundTaskKind::CacheMetrics));
         assert!(!service.is_critical());
+    }
+
+    #[tokio::test]
+    async fn native_background_supervisor_runs_service_until_shutdown() {
+        struct ShutdownAwareTask {
+            finished: mpsc::Sender<bool>,
+        }
+
+        #[async_trait]
+        impl FluxBackgroundTask for ShutdownAwareTask {
+            async fn start(&self, mut shutdown: FluxShutdown, mut ready: FluxBackgroundReady) {
+                ready.notify_ready();
+                let stopped_by_shutdown = shutdown.sleep_or_shutdown(Duration::from_secs(10)).await;
+                self.finished.send(stopped_by_shutdown).await.unwrap();
+            }
+        }
+
+        let supervisor = NativeBackgroundSupervisor::new();
+        let (ready_tx, mut ready_rx) = watch::channel(false);
+        let (finished_tx, mut finished_rx) = mpsc::channel(1);
+        let service = FluxBackgroundService::from_spec(
+            BackgroundTaskSpec::new("test-task", BackgroundTaskKind::MetricsExport),
+            ShutdownAwareTask {
+                finished: finished_tx,
+            },
+        );
+
+        let handle = supervisor.spawn_service_with_ready(service, move || {
+            let _ = ready_tx.send(true);
+        });
+
+        assert_eq!(handle.name(), "test-task");
+        assert_eq!(handle.kind(), Some(BackgroundTaskKind::MetricsExport));
+        ready_rx.changed().await.unwrap();
+        assert!(*ready_rx.borrow());
+        assert!(supervisor.shutdown());
+        assert!(finished_rx.recv().await.unwrap());
+        handle.join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_background_supervisor_preserves_untyped_service_metadata() {
+        struct ReadyTask;
+
+        #[async_trait]
+        impl FluxBackgroundTask for ReadyTask {
+            async fn start(&self, _shutdown: FluxShutdown, mut ready: FluxBackgroundReady) {
+                ready.notify_ready();
+            }
+        }
+
+        let supervisor = NativeBackgroundSupervisor::new();
+        let (ready_tx, mut ready_rx) = watch::channel(false);
+        let service = FluxBackgroundService::new("untyped-task", ReadyTask);
+
+        let handle = supervisor.spawn_service_with_ready(service, move || {
+            let _ = ready_tx.send(true);
+        });
+
+        assert_eq!(handle.name(), "untyped-task");
+        assert_eq!(handle.kind(), None);
+        ready_rx.changed().await.unwrap();
+        assert!(*ready_rx.borrow());
+        handle.join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_background_supervisor_spawns_raw_background_future() {
+        let supervisor = NativeBackgroundSupervisor::new();
+        let (sender, mut receiver) = mpsc::channel(1);
+        let spec =
+            BackgroundTaskSpec::new("raw-task", BackgroundTaskKind::CacheMetrics).critical(true);
+
+        let handle = supervisor.spawn_background(spec, async move {
+            sender.send(7_u8).await.unwrap();
+        });
+
+        assert_eq!(handle.name(), "raw-task");
+        assert_eq!(handle.kind(), Some(BackgroundTaskKind::CacheMetrics));
+        assert!(handle.is_critical());
+        assert_eq!(receiver.recv().await, Some(7));
+        handle.join().await.unwrap();
     }
 
     #[tokio::test]

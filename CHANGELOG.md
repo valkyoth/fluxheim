@@ -7,6 +7,30 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.21 - 2026-06-20
+
+### Changed
+
+- Start the native background-service orchestration slice of the Pingora-exit
+  line for Fluxheim-owned tasks such as certificate reload, ACME renewal, cache
+  maintenance, observability export, and load-balancer refresh.
+- Add `fluxheim_runtime::NativeBackgroundSupervisor` as the first Pingora-free
+  task-runner primitive for typed background services, raw async tasks,
+  readiness callbacks, shutdown fan-out, and join/abort supervision.
+- Keep the final Pingora-free proof target at 1.6.24 while this release focuses
+  on task-supervision boundaries instead of changing production listener
+  behavior.
+- Update release metadata, RPM metadata, and container tag documentation for
+  `v1.6.21`.
+
+### Notes
+
+- Normal proxy profiles still retain the Pingora compatibility runtime in this
+  release.
+- The first-party `zeroize` to `sanitization` migration remains planned for the
+  post-Pingora stabilization release so it can be tested as a focused
+  hardening pass.
+
 ## 1.6.20 - 2026-06-20
 
 ### Changed
