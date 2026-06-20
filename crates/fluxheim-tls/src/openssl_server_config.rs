@@ -9,6 +9,7 @@ use fluxheim_config::{
 use openssl::pkey::{PKey, Private};
 use openssl::ssl::{AlpnError, SslAcceptor, SslMethod, SslVerifyMode, SslVersion};
 use openssl::x509::{X509, X509Name};
+use sanitization::SecretVec;
 use thiserror::Error;
 
 use crate::{DownstreamCertificateSelector, openssl_cipher_lists, openssl_curve_list};
@@ -160,6 +161,9 @@ impl OpenSslDownstreamCertificateStore {
 
 struct OpenSslDownstreamCertificate {
     chain: Vec<X509>,
+    // OpenSSL owns the parsed key after this point. The PEM input bytes are
+    // zeroed by load_private_key(); EVP_PKEY_free does not expose a portable
+    // zero-on-drop guarantee for all key internals at this abstraction layer.
     private_key: PKey<Private>,
 }
 
@@ -258,18 +262,18 @@ fn load_certificate_chain(
 fn load_private_key(
     certificate: &StaticCertificateConfig,
 ) -> Result<PKey<Private>, OpenSslDownstreamAcceptorError> {
-    let bytes = fs::read(&certificate.key_path).map_err(|source| {
+    let bytes = SecretVec::from_vec(fs::read(&certificate.key_path).map_err(|source| {
         OpenSslDownstreamAcceptorError::ReadPrivateKey {
             path: certificate.key_path.clone(),
             source,
         }
-    })?;
-    PKey::private_key_from_pem(&bytes).map_err(|source| {
-        OpenSslDownstreamAcceptorError::ParsePrivateKey {
+    })?);
+    bytes
+        .with_secret(PKey::private_key_from_pem)
+        .map_err(|source| OpenSslDownstreamAcceptorError::ParsePrivateKey {
             path: certificate.key_path.clone(),
             source,
-        }
-    })
+        })
 }
 
 fn load_openssl_downstream_certificates(

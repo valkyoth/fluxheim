@@ -1260,6 +1260,7 @@ dependencies = [
  "log",
  "openssl",
  "rustls",
+ "sanitization",
  "thiserror 2.0.18",
 ]
 
@@ -3218,6 +3219,12 @@ checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
+
+[[package]]
+name = "sanitization"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fbb455919a30bfc235cd956c90ba1ff774888c7c66c0743eeaf720ebc5ac64d"
 
 [[package]]
 name = "schannel"

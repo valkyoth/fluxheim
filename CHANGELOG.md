@@ -36,6 +36,12 @@ behavior when the change improves security or project direction.
   fail once the documented final proof target is reached if any listed Pingora
   crate remains.
 
+### Security
+
+- Wrap OpenSSL downstream private-key PEM file buffers in `sanitization::SecretVec`
+  before parsing, so Fluxheim's owned PEM copy is wiped after the OpenSSL key
+  import path completes.
+
 ## 1.6.19 - 2026-06-19
 
 ### Changed

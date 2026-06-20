@@ -47,6 +47,9 @@ to a truthful multi-release exit plan.
   follow-up releases can remove blockers with a reviewable artifact trail.
 - Check native-runtime blocker reports against a committed target map so an
   accidental change cannot silently move security-relevant cutover work later.
+- Wrap OpenSSL downstream private-key PEM file buffers in the `sanitization`
+  crate's `SecretVec` while parsing them, so Fluxheim wipes its owned key-file
+  copy after OpenSSL has imported the key material.
 
 ## Compatibility Boundary
 
