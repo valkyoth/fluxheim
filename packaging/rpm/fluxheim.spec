@@ -159,6 +159,8 @@ fi
   slices instead of forcing an unsafe production switch.
 - Keep the remaining Pingora compatibility dependency exceptions active until
   the 1.6.24 final proof target.
+- Wrap OpenSSL downstream private-key PEM buffers in the Fluxheim
+  `sanitization` crate before OpenSSL key import.
 - Update release metadata for the 1.6.20 native runtime cutover contract.
 
 * Fri Jun 19 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.19-1
