@@ -2898,15 +2898,37 @@ fn native_admin_target_parts(target: &str) -> (&str, Option<&str>) {
         Some((before_fragment, _)) => before_fragment,
         None => target,
     };
-    let target = if let Some(rest) = target.strip_prefix("http://") {
-        rest.find('/').map_or("/", |index| &rest[index..])
+    if let Some(rest) = target.strip_prefix("http://") {
+        native_admin_absolute_target_parts(rest)
     } else if let Some(rest) = target.strip_prefix("https://") {
-        rest.find('/').map_or("/", |index| &rest[index..])
+        native_admin_absolute_target_parts(rest)
     } else {
-        target
-    };
+        native_admin_origin_target_parts(target)
+    }
+}
+
+fn native_admin_absolute_target_parts(target_after_scheme: &str) -> (&str, Option<&str>) {
+    let path_index = target_after_scheme.find('/');
+    let query_index = target_after_scheme.find('?');
+    match (path_index, query_index) {
+        (Some(path_index), Some(query_index)) if query_index < path_index => {
+            ("/", nonempty_query(&target_after_scheme[query_index + 1..]))
+        }
+        (Some(path_index), _) => {
+            native_admin_origin_target_parts(&target_after_scheme[path_index..])
+        }
+        (None, Some(query_index)) => ("/", nonempty_query(&target_after_scheme[query_index + 1..])),
+        (None, None) => ("/", None),
+    }
+}
+
+fn native_admin_origin_target_parts(target: &str) -> (&str, Option<&str>) {
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     (path, (!query.is_empty()).then_some(query))
+}
+
+fn nonempty_query(query: &str) -> Option<&str> {
+    (!query.is_empty()).then_some(query)
 }
 
 fn authorization_header(headers: &HeaderMap) -> Option<&str> {
@@ -4219,7 +4241,7 @@ mod tests {
     use super::{
         AdminApp, AdminAuthThrottle, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
         admin_services_from_config, authorized, constant_time_eq, error_response, json_response,
-        read_bounded_secret_file, read_secret_file,
+        native_admin_target_parts, read_bounded_secret_file, read_secret_file,
     };
     #[cfg(feature = "cache")]
     use crate::config::ByteSize;
@@ -4263,6 +4285,19 @@ mod tests {
         assert_eq!(response.status, StatusCode::BAD_REQUEST);
         assert!(body.len() < message.len());
         assert!(body.contains("..."));
+    }
+
+    #[test]
+    fn native_admin_target_parts_preserves_absolute_uri_query_without_path() {
+        assert_eq!(
+            native_admin_target_parts("http://admin.local?reload=true#fragment"),
+            ("/", Some("reload=true"))
+        );
+        assert_eq!(
+            native_admin_target_parts("https://admin.local/_fluxheim/health?full=1"),
+            ("/_fluxheim/health", Some("full=1"))
+        );
+        assert_eq!(native_admin_target_parts("http://admin.local"), ("/", None));
     }
 
     fn app() -> AdminApp {

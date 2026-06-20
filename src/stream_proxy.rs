@@ -13,6 +13,7 @@ use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::background::{FluxBackgroundReady, FluxBackgroundTask, FluxShutdown};
 use crate::config::{Config, DownstreamProxyProtocol, StreamRouteConfig, UpstreamProxyProtocol};
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use crate::stream_tls::StreamUpstreamTlsConnector;
@@ -77,22 +78,31 @@ impl StreamProxyService {
             trusted_sources: trusted_sources.into(),
         })
     }
+}
 
+pub(crate) struct StreamProxyTask {
+    listen: Arc<[String]>,
+    app: Arc<StreamProxyApp>,
+    downstream_proxy_protocol: DownstreamProxyProtocol,
+    trusted_sources: Arc<[StreamTrustedSource]>,
+}
+
+impl StreamProxyTask {
     async fn run_listener(
         app: Arc<StreamProxyApp>,
         listener: TcpListener,
         listen: String,
         downstream_proxy_protocol: DownstreamProxyProtocol,
         trusted_sources: Arc<[StreamTrustedSource]>,
-        mut shutdown: ShutdownWatch,
+        mut shutdown: FluxShutdown,
     ) {
         loop {
-            if *shutdown.borrow() {
+            if shutdown.is_shutdown() {
                 break;
             }
             tokio::select! {
-                changed = shutdown.changed() => {
-                    if changed.is_err() || *shutdown.borrow() {
+                requested = shutdown.wait_for_shutdown() => {
+                    if requested {
                         break;
                     }
                 }
@@ -124,14 +134,8 @@ impl StreamProxyService {
 }
 
 #[async_trait]
-impl ServiceWithDependents for StreamProxyService {
-    async fn start_service(
-        &mut self,
-        #[cfg(unix)] _fds: Option<ListenFds>,
-        mut shutdown: ShutdownWatch,
-        _listeners_per_fd: usize,
-        ready_notifier: ServiceReadyNotifier,
-    ) {
+impl FluxBackgroundTask for StreamProxyTask {
+    async fn start(&self, shutdown: FluxShutdown, mut ready: FluxBackgroundReady) {
         let mut listeners = Vec::with_capacity(self.listen.len());
         for listen in self.listen.iter() {
             match TcpListener::bind(listen).await {
@@ -145,9 +149,10 @@ impl ServiceWithDependents for StreamProxyService {
                 }
             }
         }
-        ready_notifier.notify_ready();
+        ready.notify_ready();
         if listeners.is_empty() {
-            let _ = shutdown.changed().await;
+            let mut shutdown = shutdown;
+            let _ = shutdown.wait_for_shutdown().await;
             return;
         }
         let mut tasks = Vec::with_capacity(listeners.len());
@@ -161,10 +166,34 @@ impl ServiceWithDependents for StreamProxyService {
                 shutdown.clone(),
             )));
         }
-        let _ = shutdown.changed().await;
+        let mut shutdown = shutdown;
+        let _ = shutdown.wait_for_shutdown().await;
         for task in tasks {
             task.abort();
         }
+    }
+}
+
+#[async_trait]
+impl ServiceWithDependents for StreamProxyService {
+    async fn start_service(
+        &mut self,
+        #[cfg(unix)] _fds: Option<ListenFds>,
+        shutdown: ShutdownWatch,
+        _listeners_per_fd: usize,
+        ready_notifier: ServiceReadyNotifier,
+    ) {
+        let task = StreamProxyTask {
+            listen: self.listen.clone(),
+            app: self.app.clone(),
+            downstream_proxy_protocol: self.downstream_proxy_protocol,
+            trusted_sources: self.trusted_sources.clone(),
+        };
+        task.start(
+            fluxheim_runtime::FluxShutdown::new(shutdown),
+            fluxheim_runtime::FluxBackgroundReady::new(move || ready_notifier.notify_ready()),
+        )
+        .await;
     }
 
     fn name(&self) -> &str {

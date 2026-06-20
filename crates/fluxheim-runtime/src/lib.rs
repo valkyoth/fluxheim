@@ -5,7 +5,9 @@
 )]
 
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -161,11 +163,44 @@ impl NativeBackgroundJoinHandle {
         let Some(handle) = self.handle.take() else {
             return Ok(());
         };
-        handle.await
+        AbortOnCancelJoin::new(handle).await
     }
 }
 
 impl Drop for NativeBackgroundJoinHandle {
+    fn drop(&mut self) {
+        if let Some(handle) = &self.handle {
+            handle.abort();
+        }
+    }
+}
+
+struct AbortOnCancelJoin {
+    handle: Option<JoinHandle<()>>,
+}
+
+impl AbortOnCancelJoin {
+    fn new(handle: JoinHandle<()>) -> Self {
+        Self {
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Future for AbortOnCancelJoin {
+    type Output = Result<(), tokio::task::JoinError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let Some(handle) = self.handle.as_mut() else {
+            return Poll::Ready(Ok(()));
+        };
+        let result = std::task::ready!(Pin::new(handle).poll(cx));
+        self.handle.take();
+        Poll::Ready(result)
+    }
+}
+
+impl Drop for AbortOnCancelJoin {
     fn drop(&mut self) {
         if let Some(handle) = &self.handle {
             handle.abort();
@@ -306,6 +341,22 @@ impl FluxShutdown {
 
     pub fn is_shutdown(&self) -> bool {
         *self.inner.borrow()
+    }
+
+    /// Wait until shutdown is requested.
+    ///
+    /// This method is cancellation-safe for use inside `tokio::select!`: if a
+    /// caller drops the wait future after a notification is delivered, the next
+    /// call still observes the latest state before waiting again.
+    pub async fn wait_for_shutdown(&mut self) -> bool {
+        loop {
+            if *self.inner.borrow_and_update() {
+                return true;
+            }
+            if self.inner.changed().await.is_err() {
+                return true;
+            }
+        }
     }
 
     pub async fn sleep_or_shutdown(&mut self, delay: Duration) -> bool {
@@ -589,12 +640,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_background_join_handle_aborts_task_when_join_future_is_cancelled() {
+        struct DropNotify(Option<oneshot::Sender<()>>);
+
+        impl Drop for DropNotify {
+            fn drop(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+
+        let supervisor = NativeBackgroundSupervisor::new();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let (drop_tx, drop_rx) = oneshot::channel();
+        let handle = supervisor.spawn_background(
+            BackgroundTaskSpec::new("joined-task", BackgroundTaskKind::CacheMetrics),
+            async move {
+                let _drop_notify = DropNotify(Some(drop_tx));
+                let _ = ready_tx.send(());
+                std::future::pending::<()>().await;
+            },
+        );
+
+        ready_rx
+            .await
+            .expect("task should start before join future cancellation");
+        let join_task = tokio::spawn(handle.join());
+        join_task.abort();
+
+        tokio::time::timeout(Duration::from_secs(10), drop_rx)
+            .await
+            .expect("cancelled join future should abort task")
+            .expect("task drop notifier should send");
+    }
+
+    #[tokio::test]
     async fn native_background_supervisor_pre_spawn_shutdown_reaches_new_views() {
         let supervisor = NativeBackgroundSupervisor::new();
 
         assert!(supervisor.shutdown());
         let mut shutdown = supervisor.shutdown_view();
 
+        assert!(shutdown.wait_for_shutdown().await);
+        assert!(shutdown.is_shutdown());
+    }
+
+    #[tokio::test]
+    async fn native_background_supervisor_shutdown_waiter_observes_shutdown() {
+        let supervisor = NativeBackgroundSupervisor::new();
+        let mut shutdown = supervisor.shutdown_view();
+        let waiter = tokio::spawn(async move { shutdown.wait_for_shutdown().await });
+
+        assert!(supervisor.shutdown());
+        assert!(waiter.await.unwrap());
+
+        let mut shutdown = supervisor.shutdown_view();
         assert!(shutdown.sleep_or_shutdown(Duration::from_secs(10)).await);
         assert!(shutdown.is_shutdown());
     }

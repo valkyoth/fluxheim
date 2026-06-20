@@ -13,6 +13,7 @@ use pingora::server::ShutdownWatch;
 use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 use tokio::net::UdpSocket;
 
+use crate::background::{FluxBackgroundReady, FluxBackgroundTask, FluxShutdown};
 use crate::config::{Config, UdpRouteConfig, UdpRouteMode};
 use crate::flux_error::{FluxError, FluxResult};
 
@@ -52,12 +53,19 @@ impl UdpProxyService {
             app: Arc::new(app),
         })
     }
+}
 
+pub(crate) struct UdpProxyTask {
+    listen: Arc<[String]>,
+    app: Arc<UdpProxyApp>,
+}
+
+impl UdpProxyTask {
     async fn run_listener(
         app: Arc<UdpProxyApp>,
         socket: Arc<UdpSocket>,
         listen: String,
-        mut shutdown: ShutdownWatch,
+        mut shutdown: FluxShutdown,
     ) {
         let listener_local = match socket.local_addr() {
             Ok(address) => address,
@@ -71,12 +79,12 @@ impl UdpProxyService {
         };
         let mut buffer = vec![0u8; UDP_RECEIVE_BUFFER_BYTES];
         loop {
-            if *shutdown.borrow() {
+            if shutdown.is_shutdown() {
                 break;
             }
             tokio::select! {
-                changed = shutdown.changed() => {
-                    if changed.is_err() || *shutdown.borrow() {
+                requested = shutdown.wait_for_shutdown() => {
+                    if requested {
                         break;
                     }
                 }
@@ -140,14 +148,8 @@ impl UdpProxyService {
 }
 
 #[async_trait]
-impl ServiceWithDependents for UdpProxyService {
-    async fn start_service(
-        &mut self,
-        #[cfg(unix)] _fds: Option<ListenFds>,
-        mut shutdown: ShutdownWatch,
-        _listeners_per_fd: usize,
-        ready_notifier: ServiceReadyNotifier,
-    ) {
+impl FluxBackgroundTask for UdpProxyTask {
+    async fn start(&self, shutdown: FluxShutdown, mut ready: FluxBackgroundReady) {
         let mut listeners = Vec::with_capacity(self.listen.len());
         for listen in self.listen.iter() {
             match UdpSocket::bind(listen).await {
@@ -161,9 +163,10 @@ impl ServiceWithDependents for UdpProxyService {
                 }
             }
         }
-        ready_notifier.notify_ready();
+        ready.notify_ready();
         if listeners.is_empty() {
-            let _ = shutdown.changed().await;
+            let mut shutdown = shutdown;
+            let _ = shutdown.wait_for_shutdown().await;
             return;
         }
         let mut tasks = Vec::with_capacity(listeners.len());
@@ -175,10 +178,32 @@ impl ServiceWithDependents for UdpProxyService {
                 shutdown.clone(),
             )));
         }
-        let _ = shutdown.changed().await;
+        let mut shutdown = shutdown;
+        let _ = shutdown.wait_for_shutdown().await;
         for task in tasks {
             task.abort();
         }
+    }
+}
+
+#[async_trait]
+impl ServiceWithDependents for UdpProxyService {
+    async fn start_service(
+        &mut self,
+        #[cfg(unix)] _fds: Option<ListenFds>,
+        shutdown: ShutdownWatch,
+        _listeners_per_fd: usize,
+        ready_notifier: ServiceReadyNotifier,
+    ) {
+        let task = UdpProxyTask {
+            listen: self.listen.clone(),
+            app: self.app.clone(),
+        };
+        task.start(
+            fluxheim_runtime::FluxShutdown::new(shutdown),
+            fluxheim_runtime::FluxBackgroundReady::new(move || ready_notifier.notify_ready()),
+        )
+        .await;
     }
 
     fn name(&self) -> &str {

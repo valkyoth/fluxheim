@@ -58,6 +58,14 @@ name = "cutover-stream"
 listen = ["127.0.0.1:15432"]
 upstreams = ["127.0.0.1:5432"]
 upstream_tls = false
+
+[udp]
+enabled = true
+
+[[udp.routes]]
+name = "cutover-udp"
+listen = ["127.0.0.1:15353"]
+upstream = "127.0.0.1:5353"
 CONFIG
 
 cargo test --locked -p fluxheim-server native_runtime_cutover_summary \
@@ -72,10 +80,10 @@ cargo test --locked -p fluxheim-server native_proxy \
 scripts/validate-pingora-dependency-policy.sh check \
     >"$out_dir/pingora-dependency-policy.txt" 2>&1
 
-cargo run --quiet --locked --no-default-features --features profile-development \
+cargo run --quiet --locked --no-default-features --features profile-full,udp-proxy \
     --bin fluxheim-config-tester -- \
     --config "$sample_config" \
-    --profile development \
+    --profile full \
     --no-runtime-paths \
     --runtime-cutover \
     >"$out_dir/representative-runtime-cutover.tsv" 2>&1
@@ -83,7 +91,6 @@ cargo run --quiet --locked --no-default-features --features profile-development 
 expected_blockers="$out_dir/representative-runtime-cutover-expected.tsv"
 awk -F '\t' '
     BEGIN {
-        expected["stream-proxy"] = 1
         expected["native-http2"] = 1
     }
     $0 ~ /^[[:space:]]*#/ || NF == 0 { next }

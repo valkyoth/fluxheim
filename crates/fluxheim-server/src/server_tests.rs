@@ -515,6 +515,45 @@ fn native_runtime_cutover_summary_treats_configured_admin_and_metrics_as_ready()
 }
 
 #[test]
+fn native_runtime_cutover_summary_treats_configured_stream_and_udp_as_ready() {
+    let mut config = Config::default();
+    config.stream.enabled = true;
+    config.stream.routes = vec![StreamRouteConfig {
+        name: "tcp".to_owned(),
+        listen: vec!["127.0.0.1:15432".to_owned()],
+        upstream: Some("127.0.0.1:5432".to_owned()),
+        ..StreamRouteConfig::default()
+    }];
+    config.udp.enabled = true;
+    config.udp.routes = vec![UdpRouteConfig {
+        name: "dns".to_owned(),
+        mode: fluxheim_config::UdpRouteMode::DnsLoadBalance,
+        listen: vec!["127.0.0.1:15353".to_owned()],
+        upstream: Some("127.0.0.1:5353".to_owned()),
+        upstreams: Vec::new(),
+        upstream_weights: Vec::new(),
+        upstream_aliases: Vec::new(),
+        idle_timeout_secs: 30,
+        response_timeout_secs: 3,
+        max_datagram_bytes: 1232,
+        max_sessions: 4096,
+        max_sessions_per_source: 64,
+        max_responses_per_source_per_second: 256,
+        passive_health_enabled: true,
+        passive_health_failures: 3,
+        passive_health_ejection_secs: 10,
+    }];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let blockers = plan.native_runtime_cutover_summary().blockers().to_vec();
+
+    assert!(plan.native_stream_proxy_ready());
+    assert!(plan.native_udp_proxy_ready());
+    assert!(!blockers.contains(&NativeRuntimeCutoverBlocker::StreamProxy));
+    assert!(!blockers.contains(&NativeRuntimeCutoverBlocker::UdpProxy));
+}
+
+#[test]
 fn server_plan_collects_admin_ops_socket_plan() {
     let mut config = Config::default();
     config.admin.enabled = true;

@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-runtime"
-version = "1.6.22"
+version = "1.6.23"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"

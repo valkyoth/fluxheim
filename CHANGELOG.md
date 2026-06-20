@@ -7,6 +7,34 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.23 - 2026-06-20
+
+### Changed
+
+- Cut stream and UDP proxy service startup over to Fluxheim-owned native task
+  boundaries while keeping the Pingora runtime adapter as a thin compatibility
+  registration layer.
+- Mark config-derived stream and UDP service plans native-ready in the runtime
+  cutover report.
+- Extend native runtime cutover evidence with a representative UDP route and
+  prove that stream/UDP no longer remain 1.6.23 blockers.
+- Update release metadata, RPM metadata, and container tag documentation for
+  `v1.6.23`.
+
+### Security
+
+- Add a native shutdown wait primitive that handles both already-requested and
+  future shutdown requests, avoiding stalled service tasks during supervisor
+  handoff.
+- Make native background-task joins abort-on-cancel and make the shutdown waiter
+  cancellation-safe for native `tokio::select!` loops.
+- Preserve query strings on pathless absolute-form admin request targets instead
+  of dropping them during native admin request parsing.
+- Preserve live stream and UDP smoke coverage while changing their startup
+  lifecycle, including real listener-backed stream and UDP proxy checks.
+- Keep HTTP/2 and final HTTP proxy runtime parity as the remaining native
+  runtime blockers for the final Pingora-free proof release.
+
 ## 1.6.22 - 2026-06-20
 
 ### Changed
