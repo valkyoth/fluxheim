@@ -33,6 +33,9 @@ scripts/validate-pingora-dependency-policy.sh check
 echo "stable release gate: native web TLS build proof"
 scripts/validate-native-web-tls.sh "$mode"
 
+echo "stable release gate: native runtime cutover evidence"
+scripts/validate-native-runtime-cutover.sh
+
 echo "stable release gate: Pingora HTTP/error boundary policy"
 scripts/validate-pingora-boundary-policy.sh check
 

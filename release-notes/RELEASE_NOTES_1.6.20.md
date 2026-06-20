@@ -20,6 +20,10 @@ to a truthful multi-release exit plan.
   the gate remains active and will fail if Pingora appears outside the listed
   profiles or survives beyond the final proof target.
 - Update release metadata and container tag documentation for `v1.6.20`.
+- Add `scripts/validate-native-runtime-cutover.sh` and wire it into the stable
+  release gate and developer checks. The script captures native runtime blocker
+  tests, native HTTP/2 preview tests, native HTTP/1 proxy tests, and Pingora
+  dependency policy output under `target/release-evidence/native-runtime-cutover/`.
 
 ## Security
 
@@ -29,6 +33,9 @@ to a truthful multi-release exit plan.
 - Keep the dependency-policy gate enforcing every remaining Pingora crate by
   profile and removal target. New Pingora edges outside the documented
   compatibility surface remain release-blocking.
+- Add release evidence for the native runtime cutover blocker inventory so the
+  final Pingora-removal work has a test-backed checklist instead of relying on
+  roadmap prose.
 
 ## Compatibility Boundary
 

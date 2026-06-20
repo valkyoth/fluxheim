@@ -18,6 +18,9 @@ behavior when the change improves security or project direction.
   listener startup, final Pingora-free proof, and stabilization.
 - Move the remaining Pingora dependency exception targets to the documented
   1.6.24 final proof release while keeping the cargo-tree policy gate active.
+- Add a native runtime cutover evidence gate that runs blocker-summary,
+  native HTTP/2 preview, native HTTP/1 proxy, and Pingora dependency policy
+  checks during release gates.
 - Update release metadata, RPM metadata, and container tag documentation for
   `v1.6.20`.
 
