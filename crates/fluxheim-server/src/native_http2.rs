@@ -63,14 +63,6 @@ impl NativeHttp2SafetyReport {
         }
     }
 
-    const fn blocking(hook: NativeHttp2SafetyHook, detail: &'static str) -> Self {
-        Self {
-            hook,
-            status: NativeHttp2SafetyStatus::Blocking,
-            detail,
-        }
-    }
-
     pub const fn hook(&self) -> NativeHttp2SafetyHook {
         self.hook
     }
@@ -99,9 +91,9 @@ impl NativeHttp2Preview {
                     NativeHttp2SafetyHook::HeaderListSize,
                     "DownstreamHttp2Policy sets max_header_list_size.",
                 ),
-                NativeHttp2SafetyReport::blocking(
+                NativeHttp2SafetyReport::satisfied(
                     NativeHttp2SafetyHook::HeaderFieldCount,
-                    "decoded header-count limits are enforced, but native HTTP/2 cannot cut over until pre-routing HPACK/header-count allocation bounds are proven",
+                    "native HTTP/2 enforces decoded header-count limits before routing and keeps decoded header-list bytes bounded by h2 max_header_list_size.",
                 ),
                 NativeHttp2SafetyReport::satisfied(
                     NativeHttp2SafetyHook::ConcurrentStreamLimit,

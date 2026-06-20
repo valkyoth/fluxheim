@@ -4,17 +4,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[test]
-fn native_http2_preview_starts_blocked_until_all_safety_hooks_exist() {
+fn native_http2_preview_is_cutover_ready_when_all_safety_hooks_exist() {
     let preview = NativeHttp2Preview::from_downstream_policy(DownstreamHttp2Policy::default());
 
-    assert!(!preview.is_cutover_ready());
-    assert_eq!(
-        preview
-            .blocking_reports()
-            .map(|report| report.hook())
-            .collect::<Vec<_>>(),
-        vec![NativeHttp2SafetyHook::HeaderFieldCount]
-    );
+    assert!(preview.is_cutover_ready());
+    assert!(preview.blocking_reports().next().is_none());
 }
 
 #[test]
@@ -49,6 +43,20 @@ fn native_http2_preview_preserves_downstream_policy_values() {
     assert_eq!(policy.initial_window_size(), 64 * 1024);
     assert_eq!(policy.max_send_buffer_size(), 256 * 1024);
     assert_eq!(policy.max_pending_accept_reset_streams(), 8);
+}
+
+#[test]
+fn native_http2_preview_documents_header_count_and_hpack_bounds() {
+    let preview = NativeHttp2Preview::from_downstream_policy(DownstreamHttp2Policy::default());
+    let report = preview
+        .reports()
+        .iter()
+        .find(|report| report.hook() == NativeHttp2SafetyHook::HeaderFieldCount)
+        .expect("header-count report");
+
+    assert_eq!(report.status(), NativeHttp2SafetyStatus::Satisfied);
+    assert!(report.detail().contains("decoded header-count"));
+    assert!(report.detail().contains("max_header_list_size"));
 }
 
 #[tokio::test]

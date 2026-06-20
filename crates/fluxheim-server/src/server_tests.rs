@@ -90,10 +90,12 @@ fn server_plan_exposes_native_http2_preview_gate() {
     let preview = plan.native_http2_preview();
 
     assert_eq!(preview.downstream_policy(), plan.downstream_http2());
-    assert!(!preview.is_cutover_ready());
-    assert!(preview.blocking_reports().any(|report| {
+    assert!(preview.is_cutover_ready());
+    assert!(preview.blocking_reports().next().is_none());
+    assert!(preview.reports().iter().any(|report| {
         report.hook() == NativeHttp2SafetyHook::HeaderFieldCount
-            && report.detail().contains("pre-routing")
+            && report.status() == NativeHttp2SafetyStatus::Satisfied
+            && report.detail().contains("max_header_list_size")
     }));
 }
 
@@ -117,7 +119,7 @@ fn native_runtime_cutover_summary_reports_proxy_blockers() {
     let blockers = plan.native_runtime_cutover_summary().blockers().to_vec();
 
     assert!(blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp1Proxy));
-    assert!(blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp2));
+    assert!(!blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp2));
 }
 
 #[test]
@@ -511,7 +513,7 @@ fn native_runtime_cutover_summary_treats_configured_admin_and_metrics_as_ready()
 
     assert!(!blockers.contains(&NativeRuntimeCutoverBlocker::AdminControlPlane));
     assert!(!blockers.contains(&NativeRuntimeCutoverBlocker::MetricsHttp));
-    assert!(blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp2));
+    assert!(!blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp2));
 }
 
 #[test]

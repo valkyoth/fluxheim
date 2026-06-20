@@ -2683,12 +2683,18 @@ Planned `1.6.x` sequence:
   remove Pingora service registration from those services. Soak tests should
   cover stream byte limits, connection caps, downstream PROXY protocol, UDP
   session expiry, passive health, and per-source rate limits.
-- `v1.6.24`: remove remaining Pingora runtime/listener/TLS adapter crates,
+- `v1.6.24`: finish the native HTTP/2 downstream parity proof and make the
+  representative native-runtime cutover report blocker-free for the simple
+  HTTP/1 + HTTP/2 + admin + metrics + stream + UDP config. Keep the remaining
+  Pingora runtime/listener/TLS adapter crates in normal builds until the next
+  checkpoint so the final deletion is reviewed as a focused dependency-removal
+  change.
+- `v1.6.25`: remove remaining Pingora runtime/listener/TLS adapter crates,
   vendored Pingora patches, compatibility shims, and Pingora-specific docs from
   normal builds. This is the final Pingora-free proof release: `cargo tree`,
   release containers, RPM builds, source builds, and focused artifacts must all
   prove no normal Fluxheim build compiles vendored Pingora code.
-- `v1.6.25`: stabilization/security-only release for the Pingora-free runtime
+- `v1.6.26`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
   checks, long-running soak tests, runtime-baseline comparisons, and
@@ -2697,7 +2703,7 @@ Planned `1.6.x` sequence:
   where practical, using crate-scoped patches and tests. Keep third-party
   transitive `zeroize` use inside crates such as rustls/AWS-LC untouched, and
   avoid mixing this secret-container migration into the runtime cutover slices.
-- `v1.6.26`: native load-balancer compatibility polish after Pingora is gone
+- `v1.6.27`: native load-balancer compatibility polish after Pingora is gone
   from normal builds. Add a Fluxheim-owned nginx/Ketama-compatible consistent
   hash selection mode for operators migrating from nginx or Pingora Ketama
   behavior. Keep the existing rendezvous consistent-hash and bounded-load

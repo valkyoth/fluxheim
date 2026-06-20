@@ -344,8 +344,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.6.23-wolfi`, `v1.6.23-cache-wolfi`, `v1.6.23-proxy-wolfi`,
-`v1.6.23-load-balancer-wolfi`, and `v1.6.23-php-wolfi`.
+`v1.6.24-wolfi`, `v1.6.24-cache-wolfi`, `v1.6.24-proxy-wolfi`,
+`v1.6.24-load-balancer-wolfi`, and `v1.6.24-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the

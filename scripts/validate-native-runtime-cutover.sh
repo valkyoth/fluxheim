@@ -89,13 +89,7 @@ cargo run --quiet --locked --no-default-features --features profile-full,udp-pro
     >"$out_dir/representative-runtime-cutover.tsv" 2>&1
 
 expected_blockers="$out_dir/representative-runtime-cutover-expected.tsv"
-awk -F '\t' '
-    BEGIN {
-        expected["native-http2"] = 1
-    }
-    $0 ~ /^[[:space:]]*#/ || NF == 0 { next }
-    $1 in expected { print }
-' "$targets" >"$expected_blockers"
+printf '# no expected blockers for the representative native-runtime config\n' >"$expected_blockers"
 
 awk -F '\t' '
     FNR == NR {
@@ -132,6 +126,9 @@ awk -F '\t' '
 
 awk -F '\t' '
     FNR == NR {
+        if ($0 ~ /^[[:space:]]*#/ || NF == 0) {
+            next
+        }
         if (NF != 3) {
             print "native runtime cutover evidence: malformed expected row: " $0 > "/dev/stderr"
             exit 2

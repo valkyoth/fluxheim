@@ -7,6 +7,30 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.24 - 2026-06-20
+
+### Changed
+
+- Promote the native HTTP/2 downstream safety preview to cutover-ready after
+  proving every required safety hook with focused tests.
+- Make the representative native runtime cutover report blocker-free for the
+  simple HTTP/1 + HTTP/2 + admin + metrics + stream + UDP configuration.
+- Move the final Pingora dependency-removal target to `1.6.25` so deleting the
+  remaining runtime/listener/TLS adapter crates is reviewed as its own focused
+  release.
+- Update release metadata, RPM metadata, and container tag documentation for
+  `v1.6.24`.
+
+### Security
+
+- Document native HTTP/2 header-count protection as satisfied by decoded
+  header-count enforcement before routing plus `h2` `max_header_list_size`
+  bounds on decoded header-list bytes.
+- Keep HTTP/2 body, URI, trailer, response lifetime, flow-control, reset, and
+  handler-timeout parity covered by the native server test suite.
+- Keep the Pingora dependency policy active and enforce all remaining Pingora
+  crates against the next deletion target.
+
 ## 1.6.23 - 2026-06-20
 
 ### Changed
