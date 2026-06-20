@@ -2691,7 +2691,11 @@ Planned `1.6.x` sequence:
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
   checks, long-running soak tests, runtime-baseline comparisons, and
-  documentation clarity.
+  documentation clarity. It should also run the first-party secret-memory
+  migration from direct `zeroize` APIs to the Fluxheim `sanitization` crate
+  where practical, using crate-scoped patches and tests. Keep third-party
+  transitive `zeroize` use inside crates such as rustls/AWS-LC untouched, and
+  avoid mixing this secret-container migration into the runtime cutover slices.
 - `v1.6.26`: native load-balancer compatibility polish after Pingora is gone
   from normal builds. Add a Fluxheim-owned nginx/Ketama-compatible consistent
   hash selection mode for operators migrating from nginx or Pingora Ketama
@@ -4299,7 +4303,10 @@ circular dependencies.
   in staged minor releases. Preserve current operator-facing behavior and make
   each release independently testable before deleting the old adapter. Do not
   carry unfinished structural crate splits into `1.7` unless they are unrelated
-  to the Pingora-free runtime boundary.
+  to the Pingora-free runtime boundary. After the final Pingora-free proof,
+  do a dedicated hardening cleanup that moves first-party secret buffers and
+  drop-clearing structs to `sanitization` containers/derives where practical,
+  rather than mixing that API migration into the runtime replacement work.
 - `v1.7.0`: shared Wasm extensibility runtime line. Stop at one sandboxed,
   typed, resource-limited extension runtime for operator policy normally solved
   with F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-like cache
