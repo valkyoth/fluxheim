@@ -2,7 +2,13 @@
 set -eu
 
 out_dir="${FLUXHEIM_NATIVE_RUNTIME_CUTOVER_DIR:-target/release-evidence/native-runtime-cutover}"
+targets="docs/native-runtime-cutover-targets.tsv"
 mkdir -p "$out_dir"
+
+if [ ! -f "$targets" ]; then
+    echo "native runtime cutover evidence: missing $targets" >&2
+    exit 1
+fi
 
 {
     echo "Fluxheim native runtime cutover evidence"
@@ -66,6 +72,39 @@ cargo run --quiet --locked --no-default-features --features profile-development 
     --no-runtime-paths \
     --runtime-cutover \
     >"$out_dir/representative-runtime-cutover.tsv" 2>&1
+
+awk -F '\t' '
+    FNR == NR {
+        if ($0 ~ /^[[:space:]]*#/ || NF == 0) {
+            next
+        }
+        if (NF != 3) {
+            print "native runtime cutover evidence: malformed target row: " $0 > "/dev/stderr"
+            exit 2
+        }
+        target[$1] = $2 "\t" $3
+        next
+    }
+    /^native-runtime-adapter:/ { next }
+    /^config tester: ok$/ { next }
+    $1 == "blocker" { next }
+    NF == 0 { next }
+    NF != 3 {
+        print "native runtime cutover evidence: malformed report row: " $0 > "/dev/stderr"
+        exit 2
+    }
+    !($1 in target) {
+        print "native runtime cutover evidence: unknown blocker " $1 > "/dev/stderr"
+        exit 1
+    }
+    target[$1] != ($2 "\t" $3) {
+        print "native runtime cutover evidence: target drift for " $1 > "/dev/stderr"
+        print "  expected: " target[$1] > "/dev/stderr"
+        print "  actual:   " $2 "\t" $3 > "/dev/stderr"
+        exit 1
+    }
+' "$targets" "$out_dir/representative-runtime-cutover.tsv" \
+    >"$out_dir/representative-runtime-cutover-target-check.txt"
 
 echo "native runtime cutover evidence: wrote $out_dir"
 echo "native runtime cutover evidence: ok"

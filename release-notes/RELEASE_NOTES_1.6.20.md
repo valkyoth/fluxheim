@@ -28,6 +28,9 @@ to a truthful multi-release exit plan.
   runtime adapter and a stable TSV blocker report for a real config. The native
   runtime cutover gate now records this report for a representative proxy,
   admin, metrics, and stream configuration.
+- Add `docs/native-runtime-cutover-targets.tsv` as the machine-readable target
+  map for remaining native runtime blockers, and make the cutover gate fail if
+  reported blocker keys, descriptions, or target releases drift from that map.
 
 ## Security
 
@@ -42,6 +45,8 @@ to a truthful multi-release exit plan.
   roadmap prose.
 - Give each native-runtime blocker a stable key and planned target release so
   follow-up releases can remove blockers with a reviewable artifact trail.
+- Check native-runtime blocker reports against a committed target map so an
+  accidental change cannot silently move security-relevant cutover work later.
 
 ## Compatibility Boundary
 

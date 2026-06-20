@@ -23,6 +23,8 @@ behavior when the change improves security or project direction.
   checks during release gates.
 - Add `fluxheim-config-tester --runtime-cutover` with stable native-runtime
   blocker keys and target releases.
+- Add a committed native-runtime cutover target map and validate generated
+  blocker reports against it during release gates.
 - Update release metadata, RPM metadata, and container tag documentation for
   `v1.6.20`.
 
