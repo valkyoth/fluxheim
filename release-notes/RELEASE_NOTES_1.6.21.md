@@ -22,6 +22,14 @@ keeping production listener behavior conservative.
 - Preserve the `pingora-compat` runtime boundary and dependency-policy gates
   while adding the Fluxheim-owned supervision primitive that internal
   background tasks will use during the remaining runtime/listener cutover.
+- Add native critical background-task watchdog support so critical task exits can
+  trigger supervisor shutdown before production task wiring moves off Pingora.
+- Fix native supervisor shutdown delivery for pre-spawn shutdown, last-handle
+  drop, and clone-drop edge cases.
+- Harden the native runtime cutover evidence script against unsafe TOML path
+  interpolation and missing expected blocker rows in the representative report.
+- Mark background-service `threads()` as Pingora compatibility-only; the native
+  supervisor does not treat it as a per-service thread-pool contract.
 - Keep the first-party `zeroize` to `sanitization` migration planned for the
   post-Pingora stabilization release so secret-container API changes are tested
   as a focused hardening pass.

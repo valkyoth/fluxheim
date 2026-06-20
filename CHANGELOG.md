@@ -31,6 +31,18 @@ behavior when the change improves security or project direction.
   post-Pingora stabilization release so it can be tested as a focused
   hardening pass.
 
+### Security
+
+- Add native critical background-task watchdog support so critical tasks can
+  request supervisor shutdown when they exit unexpectedly before the production
+  background-task wiring moves off Pingora.
+- Harden native supervisor shutdown delivery for pre-spawn shutdown, last-handle
+  drop, and clone-drop edge cases.
+- Harden the native runtime cutover evidence script against unsafe TOML path
+  interpolation and missing expected blocker rows in the representative report.
+- Mark background-service `threads()` as Pingora compatibility-only so native
+  task supervision cannot be mistaken for a per-service thread-pool contract.
+
 ## 1.6.20 - 2026-06-20
 
 ### Changed

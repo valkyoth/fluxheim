@@ -75,6 +75,7 @@ impl pingora::services::ServiceWithDependents for PingoraLoadBalancerService {
         self.inner.name()
     }
 
+    #[allow(deprecated)]
     fn threads(&self) -> Option<usize> {
         self.inner.threads()
     }

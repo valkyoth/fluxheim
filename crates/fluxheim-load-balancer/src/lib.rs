@@ -108,6 +108,7 @@ impl UpstreamLoadBalancerService {
         self.inner.name()
     }
 
+    #[allow(deprecated)]
     pub fn threads(&self) -> Option<usize> {
         self.inner.threads()
     }

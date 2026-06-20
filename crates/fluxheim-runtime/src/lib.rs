@@ -153,21 +153,33 @@ impl NativeBackgroundJoinHandle {
 
 #[derive(Clone)]
 pub struct NativeBackgroundSupervisor {
+    inner: Arc<NativeBackgroundSupervisorInner>,
+}
+
+struct NativeBackgroundSupervisorInner {
     shutdown_tx: watch::Sender<bool>,
+}
+
+impl Drop for NativeBackgroundSupervisorInner {
+    fn drop(&mut self) {
+        self.shutdown_tx.send_replace(true);
+    }
 }
 
 impl NativeBackgroundSupervisor {
     pub fn new() -> Self {
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-        Self { shutdown_tx }
+        Self {
+            inner: Arc::new(NativeBackgroundSupervisorInner { shutdown_tx }),
+        }
     }
 
     pub fn shutdown(&self) -> bool {
-        self.shutdown_tx.send(true).is_ok()
+        !self.inner.shutdown_tx.send_replace(true)
     }
 
     pub fn shutdown_view(&self) -> FluxShutdown {
-        FluxShutdown::new(self.shutdown_tx.subscribe())
+        FluxShutdown::new(self.inner.shutdown_tx.subscribe())
     }
 
     pub fn spawn_service<T>(&self, service: FluxBackgroundService<T>) -> NativeBackgroundJoinHandle
@@ -198,6 +210,35 @@ impl NativeBackgroundSupervisor {
             name,
             kind,
             critical,
+            handle,
+        }
+    }
+
+    pub fn spawn_critical_watchdog<I>(&self, handles: I) -> NativeBackgroundJoinHandle
+    where
+        I: IntoIterator<Item = NativeBackgroundJoinHandle>,
+    {
+        let watchers = handles
+            .into_iter()
+            .filter(|handle| handle.is_critical())
+            .map(|handle| {
+                let supervisor = self.clone();
+                tokio::spawn(async move {
+                    let _ = handle.join().await;
+                    supervisor.shutdown();
+                })
+            })
+            .collect::<Vec<_>>();
+        let handle = tokio::spawn(async move {
+            for watcher in watchers {
+                let _ = watcher.await;
+            }
+        });
+
+        NativeBackgroundJoinHandle {
+            name: "critical-background-watchdog".to_owned(),
+            kind: Some(BackgroundTaskKind::RuntimeWatchdog),
+            critical: true,
             handle,
         }
     }
@@ -240,6 +281,9 @@ impl FluxShutdown {
     }
 
     pub async fn sleep_or_shutdown(&mut self, delay: Duration) -> bool {
+        if self.is_shutdown() {
+            return true;
+        }
         match tokio::time::timeout(delay, self.inner.changed()).await {
             Ok(Ok(())) => self.is_shutdown(),
             Ok(Err(_closed)) => true,
@@ -322,6 +366,12 @@ impl<T> FluxBackgroundService<T> {
         self.critical
     }
 
+    /// Pingora compatibility only. The native `NativeBackgroundSupervisor`
+    /// ignores this value; remove it after the `1.6.24` Pingora exit.
+    #[deprecated(
+        since = "1.6.21",
+        note = "Pingora compatibility only; native supervisor ignores thread count"
+    )]
     pub fn threads(&self) -> Option<usize> {
         Some(1)
     }
@@ -473,6 +523,55 @@ mod tests {
         assert!(handle.is_critical());
         assert_eq!(receiver.recv().await, Some(7));
         handle.join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_background_supervisor_pre_spawn_shutdown_reaches_new_views() {
+        let supervisor = NativeBackgroundSupervisor::new();
+
+        assert!(supervisor.shutdown());
+        let mut shutdown = supervisor.shutdown_view();
+
+        assert!(shutdown.sleep_or_shutdown(Duration::from_secs(10)).await);
+        assert!(shutdown.is_shutdown());
+    }
+
+    #[tokio::test]
+    async fn native_background_supervisor_last_drop_requests_shutdown() {
+        let supervisor = NativeBackgroundSupervisor::new();
+        let mut shutdown = supervisor.shutdown_view();
+
+        drop(supervisor);
+
+        assert!(shutdown.sleep_or_shutdown(Duration::from_secs(10)).await);
+        assert!(shutdown.is_shutdown());
+    }
+
+    #[tokio::test]
+    async fn native_background_supervisor_clone_drop_does_not_request_shutdown() {
+        let supervisor = NativeBackgroundSupervisor::new();
+        let mut shutdown = supervisor.shutdown_view();
+
+        drop(supervisor.clone());
+
+        assert!(!shutdown.sleep_or_shutdown(Duration::from_millis(1)).await);
+        assert!(!shutdown.is_shutdown());
+    }
+
+    #[tokio::test]
+    async fn native_background_supervisor_watchdog_shutdowns_on_critical_exit() {
+        let supervisor = NativeBackgroundSupervisor::new();
+        let shutdown = supervisor.shutdown_view();
+        let critical = supervisor.spawn_background(
+            BackgroundTaskSpec::new("critical-task", BackgroundTaskKind::MetricsExport)
+                .critical(true),
+            async {},
+        );
+
+        let watchdog = supervisor.spawn_critical_watchdog(vec![critical]);
+
+        watchdog.join().await.unwrap();
+        assert!(shutdown.is_shutdown());
     }
 
     #[tokio::test]

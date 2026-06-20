@@ -22,6 +22,12 @@ fi
 } >"$out_dir/README.txt"
 
 snapshot_store="$(pwd)/$out_dir/snapshots"
+case "$snapshot_store" in
+    *\"*|*\\*|*'`'*|*'$'*)
+        echo "native runtime cutover evidence: unsafe snapshot_store path" >&2
+        exit 1
+        ;;
+esac
 mkdir -p "$snapshot_store"
 
 sample_config="$out_dir/representative-runtime-cutover.toml"
@@ -73,6 +79,18 @@ cargo run --quiet --locked --no-default-features --features profile-development 
     --runtime-cutover \
     >"$out_dir/representative-runtime-cutover.tsv" 2>&1
 
+expected_blockers="$out_dir/representative-runtime-cutover-expected.tsv"
+awk -F '\t' '
+    BEGIN {
+        expected["admin-control-plane"] = 1
+        expected["metrics-http"] = 1
+        expected["stream-proxy"] = 1
+        expected["native-http2"] = 1
+    }
+    $0 ~ /^[[:space:]]*#/ || NF == 0 { next }
+    $1 in expected { print }
+' "$targets" >"$expected_blockers"
+
 awk -F '\t' '
     FNR == NR {
         if ($0 ~ /^[[:space:]]*#/ || NF == 0) {
@@ -105,6 +123,43 @@ awk -F '\t' '
     }
 ' "$targets" "$out_dir/representative-runtime-cutover.tsv" \
     >"$out_dir/representative-runtime-cutover-target-check.txt"
+
+awk -F '\t' '
+    FNR == NR {
+        if (NF != 3) {
+            print "native runtime cutover evidence: malformed expected row: " $0 > "/dev/stderr"
+            exit 2
+        }
+        expected[$1] = $2 "\t" $3
+        next
+    }
+    /^native-runtime-adapter:/ { next }
+    /^config tester: ok$/ { next }
+    $1 == "blocker" { next }
+    NF == 0 { next }
+    NF != 3 {
+        print "native runtime cutover evidence: malformed report row: " $0 > "/dev/stderr"
+        exit 2
+    }
+    {
+        seen[$1] = $2 "\t" $3
+    }
+    END {
+        for (key in expected) {
+            if (!(key in seen)) {
+                print "native runtime cutover evidence: expected blocker missing from report: " key > "/dev/stderr"
+                exit 1
+            }
+            if (seen[key] != expected[key]) {
+                print "native runtime cutover evidence: expected blocker drift for " key > "/dev/stderr"
+                print "  expected: " expected[key] > "/dev/stderr"
+                print "  actual:   " seen[key] > "/dev/stderr"
+                exit 1
+            }
+        }
+    }
+' "$expected_blockers" "$out_dir/representative-runtime-cutover.tsv" \
+    >"$out_dir/representative-runtime-cutover-expected-check.txt"
 
 echo "native runtime cutover evidence: wrote $out_dir"
 echo "native runtime cutover evidence: ok"
