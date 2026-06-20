@@ -537,12 +537,16 @@ fluxheim-config-tester \
   --check-tls-storage \
   --acme-targets \
   --resolve-upstreams \
+  --runtime-cutover \
   --explain
 ```
 
 Use `--profile full`, `--profile cache`, `--profile proxy`, or
 `--profile web-php` to match the release artifact or image profile you plan to
 run. Add `--no-runtime-paths` when you only need syntax, semantic, and profile
+validation without touching runtime paths. During the `1.6.x` Pingora-exit
+line, `--runtime-cutover` prints the active runtime adapter and stable blocker
+keys for configs that still require compatibility glue.
 validation from outside the gateway container and do not have access to the
 service runtime mount such as `/run/fluxheim`. Leave that flag off when you
 want the tester to inspect `server.process.pid_file`, upgrade socket, and

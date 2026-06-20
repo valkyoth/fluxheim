@@ -135,6 +135,11 @@ than as an active runtime adapter claim.
 remaining blockers such as native HTTP/1 proxy parity, native HTTP/2 downstream
 parity, admin, metrics, stream, and UDP service adapters. This is still
 diagnostic evidence only; it does not change the active runtime adapter.
+Release gates record the same inventory through
+`scripts/validate-native-runtime-cutover.sh`, and operators can inspect a
+specific config with `fluxheim-config-tester --runtime-cutover`. The generated
+report uses stable blocker keys from `docs/native-runtime-cutover-targets.tsv`
+so target-release drift is reviewable.
 
 Later 1.6 releases may add a bounded in-memory fact ring for admin diagnostics.
 The ring must be optional, fixed-size, redacted by type, and safe to disable.

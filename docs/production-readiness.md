@@ -312,6 +312,9 @@ Before starting the server:
   service start;
 - use `fluxheim-config-tester --config <path> --profile <profile> --no-runtime-paths`
   when diagnosing a mounted config without access to `/run/fluxheim`;
+- during the `1.6.x` Pingora-exit line, add `--runtime-cutover` to the
+  config-tester command to record which native-runtime blockers still apply to
+  that exact config;
 - prefer split `conf.d` files with one `[[vhosts]]` per file;
 - use `upstreams = ["host:port"]` for proxy targets;
 - do not mix compatibility aliases such as `upstream` with preferred fields
