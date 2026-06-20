@@ -164,5 +164,26 @@ awk -F '\t' '
 ' "$expected_blockers" "$out_dir/representative-runtime-cutover.tsv" \
     >"$out_dir/representative-runtime-cutover-expected-check.txt"
 
+awk -F '\t' '
+    /^native-runtime-adapter:/ { next }
+    /^config tester: ok$/ { next }
+    $1 == "blocker" { next }
+    NF == 0 { next }
+    NF != 3 {
+        print "native runtime cutover evidence: malformed report row: " $0 > "/dev/stderr"
+        exit 2
+    }
+    {
+        unexpected_blocker_count++
+    }
+    END {
+        if (unexpected_blocker_count > 0) {
+            print "native runtime cutover evidence: expected zero representative blockers but found " unexpected_blocker_count > "/dev/stderr"
+            exit 1
+        }
+    }
+' "$out_dir/representative-runtime-cutover.tsv" \
+    >"$out_dir/representative-runtime-cutover-zero-blockers-check.txt"
+
 echo "native runtime cutover evidence: wrote $out_dir"
 echo "native runtime cutover evidence: ok"

@@ -277,6 +277,10 @@ impl NativeBackgroundSupervisor {
     /// The returned handle represents the watchdog task itself. Do not register
     /// that handle with another watchdog: its exit only means all watched tasks
     /// have exited, not that an independent service failed.
+    ///
+    /// Aborting or dropping the returned handle cancels only the collector that
+    /// joins per-critical-task watchers. The individual watcher tasks continue
+    /// running and still request supervisor shutdown if a critical task exits.
     pub fn spawn_critical_watchdog<I>(&self, handles: I) -> NativeBackgroundJoinHandle
     where
         I: IntoIterator<Item = NativeBackgroundJoinHandle>,

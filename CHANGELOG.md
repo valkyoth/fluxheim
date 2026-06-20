@@ -28,6 +28,11 @@ behavior when the change improves security or project direction.
   bounds on decoded header-list bytes.
 - Keep HTTP/2 body, URI, trailer, response lifetime, flow-control, reset, and
   handler-timeout parity covered by the native server test suite.
+- Join aborted native stream and UDP listener tasks during shutdown so listener
+  sockets are released before the background task returns.
+- Make the native runtime cutover evidence script assert that the
+  representative config has zero blockers instead of relying on an empty
+  expected-blocker set.
 - Keep the Pingora dependency policy active and enforce all remaining Pingora
   crates against the next deletion target.
 

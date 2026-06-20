@@ -22,6 +22,10 @@ targeted for a focused `1.6.25` deletion release.
 
 - Keep decoded HTTP/2 header-count enforcement before routing and document the
   paired decoded header-list byte bound from `h2` `max_header_list_size`.
+- Join aborted native stream and UDP listener tasks during shutdown, closing
+  the short file-descriptor release window after an operator-triggered stop.
+- Add an explicit zero-blocker assertion to the native runtime cutover evidence
+  script for the representative config.
 - Preserve native HTTP/2 tests for oversized URI rejection, oversized request
   bodies, decoded header count, request trailers, response trailers, prohibited
   HTTP/2 response headers, request flow-control release, response flow-control

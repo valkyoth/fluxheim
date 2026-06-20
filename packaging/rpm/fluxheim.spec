@@ -157,6 +157,8 @@ fi
 * Sat Jun 20 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.24-1
 - Promote native HTTP/2 downstream parity to cutover-ready after completing
   the safety-hook proof.
+- Join aborted native stream and UDP listener tasks during shutdown.
+- Assert zero representative native-runtime blockers in release evidence.
 - Keep remaining Pingora runtime dependency removal targeted at 1.6.25 for a
   focused final deletion release.
 - Update release metadata for 1.6.24.

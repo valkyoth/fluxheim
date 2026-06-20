@@ -182,6 +182,7 @@ impl FluxBackgroundTask for UdpProxyTask {
         let _ = shutdown.wait_for_shutdown().await;
         for task in tasks {
             task.abort();
+            let _ = task.await;
         }
     }
 }
