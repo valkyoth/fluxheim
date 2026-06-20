@@ -15,6 +15,38 @@ mkdir -p "$out_dir"
     echo "Generated: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 } >"$out_dir/README.txt"
 
+snapshot_store="$(pwd)/$out_dir/snapshots"
+mkdir -p "$snapshot_store"
+
+sample_config="$out_dir/representative-runtime-cutover.toml"
+cat >"$sample_config" <<CONFIG
+[server]
+listen = ["127.0.0.1:18080"]
+
+[admin]
+enabled = true
+listen = "127.0.0.1:19090"
+token_env = "FLUXHEIM_ADMIN_TOKEN"
+snapshot_store = "$snapshot_store"
+
+[metrics]
+enabled = true
+listen = "127.0.0.1:19091"
+
+[proxy]
+upstreams = ["127.0.0.1:13000"]
+upstream_tls = false
+
+[stream]
+enabled = true
+
+[[stream.routes]]
+name = "cutover-stream"
+listen = ["127.0.0.1:15432"]
+upstreams = ["127.0.0.1:5432"]
+upstream_tls = false
+CONFIG
+
 cargo test --locked -p fluxheim-server native_runtime_cutover_summary \
     >"$out_dir/server-native-runtime-cutover-tests.txt" 2>&1
 
@@ -26,6 +58,14 @@ cargo test --locked -p fluxheim-server native_proxy \
 
 scripts/validate-pingora-dependency-policy.sh check \
     >"$out_dir/pingora-dependency-policy.txt" 2>&1
+
+cargo run --quiet --locked --no-default-features --features profile-development \
+    --bin fluxheim-config-tester -- \
+    --config "$sample_config" \
+    --profile development \
+    --no-runtime-paths \
+    --runtime-cutover \
+    >"$out_dir/representative-runtime-cutover.tsv" 2>&1
 
 echo "native runtime cutover evidence: wrote $out_dir"
 echo "native runtime cutover evidence: ok"

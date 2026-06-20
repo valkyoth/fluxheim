@@ -24,6 +24,10 @@ to a truthful multi-release exit plan.
   release gate and developer checks. The script captures native runtime blocker
   tests, native HTTP/2 preview tests, native HTTP/1 proxy tests, and Pingora
   dependency policy output under `target/release-evidence/native-runtime-cutover/`.
+- Add `fluxheim-config-tester --runtime-cutover`, which prints the selected
+  runtime adapter and a stable TSV blocker report for a real config. The native
+  runtime cutover gate now records this report for a representative proxy,
+  admin, metrics, and stream configuration.
 
 ## Security
 
@@ -36,6 +40,8 @@ to a truthful multi-release exit plan.
 - Add release evidence for the native runtime cutover blocker inventory so the
   final Pingora-removal work has a test-backed checklist instead of relying on
   roadmap prose.
+- Give each native-runtime blocker a stable key and planned target release so
+  follow-up releases can remove blockers with a reviewable artifact trail.
 
 ## Compatibility Boundary
 

@@ -21,6 +21,8 @@ behavior when the change improves security or project direction.
 - Add a native runtime cutover evidence gate that runs blocker-summary,
   native HTTP/2 preview, native HTTP/1 proxy, and Pingora dependency policy
   checks during release gates.
+- Add `fluxheim-config-tester --runtime-cutover` with stable native-runtime
+  blocker keys and target releases.
 - Update release metadata, RPM metadata, and container tag documentation for
   `v1.6.20`.
 

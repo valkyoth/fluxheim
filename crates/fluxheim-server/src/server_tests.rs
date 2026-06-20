@@ -160,6 +160,36 @@ fn native_runtime_cutover_summary_reports_service_blockers() {
 }
 
 #[test]
+fn native_runtime_cutover_summary_exports_stable_tsv() {
+    let plan = ServerPlan::with_process(
+        ProcessSpec::default(),
+        Vec::new(),
+        vec![
+            ServiceSpec::new(
+                "admin",
+                ServiceKind::AdminControlPlane,
+                &[ListenerProtocol::AdminHttp],
+            ),
+            ServiceSpec::new(
+                "metrics",
+                ServiceKind::MetricsHttp,
+                &[ListenerProtocol::MetricsHttp],
+            ),
+            ServiceSpec::new("udp", ServiceKind::UdpProxy, &[ListenerProtocol::Udp]),
+        ],
+        Vec::new(),
+    );
+
+    assert_eq!(
+        plan.native_runtime_cutover_summary().to_tsv(),
+        "blocker\tdescription\ttarget_release\n\
+         admin-control-plane\tnative admin control plane\t1.6.22\n\
+         metrics-http\tnative metrics HTTP service\t1.6.22\n\
+         udp-proxy\tnative UDP proxy service\t1.6.23\n"
+    );
+}
+
+#[test]
 fn downstream_http1_policy_uses_bounded_native_defaults() {
     let policy = DownstreamHttp1Policy::default();
 

@@ -43,6 +43,10 @@ pub struct ConfigTesterCli {
     /// Print compiled crypto/TLS diagnostics for this tester build.
     #[arg(long)]
     pub crypto: bool,
+
+    /// Print the native runtime cutover blocker report for this config.
+    #[arg(long)]
+    pub runtime_cutover: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -87,6 +91,10 @@ fn run(cli: ConfigTesterCli) -> Result<(), Box<dyn Error + Send + Sync>> {
         crate::cli::print_crypto_diagnostics(Some(&config), Some(&cli.config));
     }
 
+    if cli.runtime_cutover {
+        print_runtime_cutover_report(&config)?;
+    }
+
     if cli.explain {
         println!(
             "config: {} profile={} vhosts={}",
@@ -120,6 +128,14 @@ fn run(cli: ConfigTesterCli) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     println!("config tester: ok");
+    Ok(())
+}
+
+fn print_runtime_cutover_report(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let plan = fluxheim_server::ServerPlan::from_config(config)?;
+    let summary = plan.native_runtime_cutover_summary();
+    println!("native-runtime-adapter: {:?}", plan.runtime_adapter());
+    print!("{}", summary.to_tsv());
     Ok(())
 }
 

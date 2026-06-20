@@ -26,6 +26,18 @@ pub enum NativeRuntimeCutoverBlocker {
 }
 
 impl NativeRuntimeCutoverBlocker {
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::NativeHttp1Proxy => "native-http1-proxy",
+            Self::NativeHttp2 => "native-http2",
+            Self::AdminControlPlane => "admin-control-plane",
+            Self::AdminOpsSocket => "admin-ops-socket",
+            Self::MetricsHttp => "metrics-http",
+            Self::StreamProxy => "stream-proxy",
+            Self::UdpProxy => "udp-proxy",
+        }
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::NativeHttp1Proxy => "native HTTP/1 proxy parity",
@@ -35,6 +47,14 @@ impl NativeRuntimeCutoverBlocker {
             Self::MetricsHttp => "native metrics HTTP service",
             Self::StreamProxy => "native stream proxy service",
             Self::UdpProxy => "native UDP proxy service",
+        }
+    }
+
+    pub const fn target_release(self) -> &'static str {
+        match self {
+            Self::AdminControlPlane | Self::AdminOpsSocket | Self::MetricsHttp => "1.6.22",
+            Self::StreamProxy | Self::UdpProxy => "1.6.23",
+            Self::NativeHttp1Proxy | Self::NativeHttp2 => "1.6.24",
         }
     }
 }
@@ -94,6 +114,19 @@ impl NativeRuntimeCutoverSummary {
 
     pub fn is_ready(&self) -> bool {
         self.blockers.is_empty()
+    }
+
+    pub fn to_tsv(&self) -> String {
+        let mut report = String::from("blocker\tdescription\ttarget_release\n");
+        for blocker in &self.blockers {
+            report.push_str(blocker.key());
+            report.push('\t');
+            report.push_str(blocker.as_str());
+            report.push('\t');
+            report.push_str(blocker.target_release());
+            report.push('\n');
+        }
+        report
     }
 }
 
