@@ -132,11 +132,16 @@ fn run(cli: ConfigTesterCli) -> Result<(), Box<dyn Error + Send + Sync>> {
 }
 
 fn print_runtime_cutover_report(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    print!("{}", runtime_cutover_report(config)?);
+    Ok(())
+}
+
+fn runtime_cutover_report(config: &Config) -> Result<String, Box<dyn Error + Send + Sync>> {
     let plan = fluxheim_server::ServerPlan::from_config(config)?;
     let summary = plan.native_runtime_cutover_summary();
-    println!("native-runtime-adapter: {:?}", plan.runtime_adapter());
-    print!("{}", summary.to_tsv());
-    Ok(())
+    let mut report = format!("native-runtime-adapter: {:?}\n", plan.runtime_adapter());
+    report.push_str(&summary.to_tsv());
+    Ok(report)
 }
 
 fn validate_profile_config(
@@ -493,9 +498,13 @@ fn push_proxy_upstreams(scope: &str, proxy: &ProxyConfig, targets: &mut Vec<Upst
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigTesterProfile, configured_upstreams, validate_profile_config};
+    use super::{
+        ConfigTesterCli, ConfigTesterProfile, configured_upstreams, runtime_cutover_report,
+        validate_profile_config,
+    };
     use crate::config::Config;
     use crate::test_support::unique_temp_path;
+    use clap::Parser;
     use std::fs;
 
     fn config_from_toml(input: &str) -> Config {
@@ -700,6 +709,49 @@ mod tests {
             error.to_string().contains("server.process.threads"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn runtime_cutover_flag_parses() {
+        let cli = ConfigTesterCli::parse_from([
+            "fluxheim-config-tester",
+            "--config",
+            "fluxheim.toml",
+            "--runtime-cutover",
+        ]);
+
+        assert!(cli.runtime_cutover);
+    }
+
+    #[test]
+    fn runtime_cutover_report_lists_config_blockers() {
+        let config = config_from_toml(
+            r#"
+            [server]
+            listen = ["127.0.0.1:8080"]
+
+            [admin]
+            enabled = true
+            listen = "127.0.0.1:9090"
+            token_env = "FLUXHEIM_ADMIN_TOKEN"
+            snapshot_store = "/tmp/fluxheim-test-snapshots"
+
+            [metrics]
+            enabled = true
+            listen = "127.0.0.1:9091"
+
+            [proxy]
+            upstreams = ["127.0.0.1:3000"]
+            upstream_tls = false
+            "#,
+        );
+
+        let report = runtime_cutover_report(&config).unwrap();
+
+        assert!(report.contains("native-runtime-adapter: PingoraCompatibility\n"));
+        assert!(report.contains("native-http2\tnative HTTP/2 downstream parity\t1.6.24\n"));
+        assert!(report.contains("admin-control-plane\tnative admin control plane\t1.6.22\n"));
+        assert!(report.contains("metrics-http\tnative metrics HTTP service\t1.6.22\n"));
     }
 
     #[test]
