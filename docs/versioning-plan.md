@@ -2659,17 +2659,40 @@ Planned `1.6.x` sequence:
   pull Pingora through TLS feature forwarding. Do not claim this as the final
   runtime cutover; root proxy/admin/metrics/listener compatibility removal is
   a behavior change and belongs in the next slice.
-- `v1.6.20`: remove remaining Pingora runtime/listener/TLS adapter crates,
+- `v1.6.20`: make the production runtime cutover contract explicit and keep the
+  remaining compatibility adapter behind measured blockers instead of forcing an
+  unsafe flip. This slice must keep the native TLS/listener work Pingora-free,
+  preserve the native HTTP/1 and HTTP/2 proof tests, record which production
+  services still require compatibility glue, and split any newly touched
+  runtime code toward the 500-line modularity target. Dependency policy targets
+  move to the final proof release only with matching release notes explaining
+  the remaining blockers.
+- `v1.6.21`: replace Pingora background-service orchestration for internal
+  Fluxheim tasks with a Tokio task supervisor and Fluxheim shutdown token.
+  Certificate reload, ACME renewal, cache stale purge, cache metrics, OTLP
+  export, and load-balancer refresh tasks should no longer need Pingora service
+  traits. Keep the old adapter only where a production listener still requires
+  it.
+- `v1.6.22`: move metrics/admin/ops HTTP serving onto Fluxheim-native HTTP
+  handlers. Admin must stay auth-first and should expose the same response
+  shape as the compatibility path. Release gates need localhost smoke coverage
+  for admin health/status, metrics scrape, and ops socket behavior.
+- `v1.6.23`: cut stream and UDP proxy service startup over to Fluxheim-native
+  listeners and shutdown handling. Keep the existing stream/UDP data paths but
+  remove Pingora service registration from those services. Soak tests should
+  cover stream byte limits, connection caps, downstream PROXY protocol, UDP
+  session expiry, passive health, and per-source rate limits.
+- `v1.6.24`: remove remaining Pingora runtime/listener/TLS adapter crates,
   vendored Pingora patches, compatibility shims, and Pingora-specific docs from
   normal builds. This is the final Pingora-free proof release: `cargo tree`,
   release containers, RPM builds, source builds, and focused artifacts must all
   prove no normal Fluxheim build compiles vendored Pingora code.
-- `v1.6.21`: stabilization/security-only release for the Pingora-free runtime
+- `v1.6.25`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
   checks, long-running soak tests, runtime-baseline comparisons, and
   documentation clarity.
-- `v1.6.22`: native load-balancer compatibility polish after Pingora is gone
+- `v1.6.26`: native load-balancer compatibility polish after Pingora is gone
   from normal builds. Add a Fluxheim-owned nginx/Ketama-compatible consistent
   hash selection mode for operators migrating from nginx or Pingora Ketama
   behavior. Keep the existing rendezvous consistent-hash and bounded-load

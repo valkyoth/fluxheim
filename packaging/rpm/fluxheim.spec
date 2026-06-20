@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.19
+Version:        1.6.20
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat Jun 20 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.20-1
+- Re-scope the final Pingora runtime-removal work into measured native cutover
+  slices instead of forcing an unsafe production switch.
+- Keep the remaining Pingora compatibility dependency exceptions active until
+  the 1.6.24 final proof target.
+- Update release metadata for the 1.6.20 native runtime cutover contract.
+
 * Fri Jun 19 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.19-1
 - Isolate the remaining Pingora compatibility runtime behind an explicit
   `pingora-compat` feature boundary.

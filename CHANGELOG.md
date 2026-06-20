@@ -7,6 +7,28 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.20 - 2026-06-20
+
+### Changed
+
+- Start the next Pingora-exit slice as a native runtime cutover contract rather
+  than a premature production switch.
+- Re-scope the remaining Pingora runtime removal across focused 1.6.x releases:
+  native background task orchestration, admin/metrics serving, stream/UDP
+  listener startup, final Pingora-free proof, and stabilization.
+- Move the remaining Pingora dependency exception targets to the documented
+  1.6.24 final proof release while keeping the cargo-tree policy gate active.
+- Update release metadata, RPM metadata, and container tag documentation for
+  `v1.6.20`.
+
+### Notes
+
+- Normal proxy profiles still use the Pingora compatibility runtime in this
+  release. Native TLS-only web proof profiles remain Pingora-free.
+- The dependency policy still rejects new undocumented Pingora edges and will
+  fail once the documented final proof target is reached if any listed Pingora
+  crate remains.
+
 ## 1.6.19 - 2026-06-19
 
 ### Changed

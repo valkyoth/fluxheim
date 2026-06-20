@@ -95,7 +95,7 @@ The final `1.6.x` release must make this a hard gate for every official profile:
 default, full, cache, proxy, load-balancer, PHP, privacy, FIPS/ISO candidates,
 and macOS developer builds.
 
-Starting in `1.6.19`, the baseline also records the `native-web-tls` and
+Starting in `1.6.20`, the baseline also records the `native-web-tls` and
 `native-web-openssl` proof profiles. Those are not production static-site
 profiles yet, but their `web,tls-rustls` and `web,tls-openssl` dependency
 trees should already emit no rows in `pingora-dependency-surface.tsv`.

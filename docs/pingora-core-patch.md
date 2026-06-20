@@ -14,7 +14,7 @@ The patch keeps Pingora's existing single-certificate path unchanged. It only
 allows Fluxheim to pass a rustls `ResolvesServerCert` implementation so
 per-vhost certificates can be selected by SNI in the default build.
 
-As of Fluxheim `1.6.19`, the resolver implementation itself lives in
+As of Fluxheim `1.6.20`, the resolver implementation itself lives in
 `fluxheim-tls`: Fluxheim owns wildcard/exact SNI lookup, the reloadable
 certificate table, PEM certificate/private-key parsing, and TLS-ALPN challenge
 certificate loading. The vendored Pingora patch is now only the temporary

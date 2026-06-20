@@ -298,7 +298,7 @@ Recommended profile features:
 
 The remaining Pingora compatibility runtime is selected explicitly through the
 internal `pingora-compat` feature, which is currently pulled in by `proxy`.
-Starting in `1.6.19`, `web,tls-rustls` and `web,tls-openssl` are release-gate
+Starting in `1.6.20`, `web,tls-rustls` and `web,tls-openssl` are release-gate
 checked as native TLS-only dependency proofs and do not compile Pingora crates,
 but they are not yet the production static-site runtime profile.
 
@@ -344,8 +344,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.6.19-wolfi`, `v1.6.19-cache-wolfi`, `v1.6.19-proxy-wolfi`,
-`v1.6.19-load-balancer-wolfi`, and `v1.6.19-php-wolfi`.
+`v1.6.20-wolfi`, `v1.6.20-cache-wolfi`, `v1.6.20-proxy-wolfi`,
+`v1.6.20-load-balancer-wolfi`, and `v1.6.20-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the

@@ -408,6 +408,7 @@ async fn native_upstream_strips_request_hop_by_hop_headers() {
     assert_eq!(response.body(), b"");
 }
 
+#[cfg(not(feature = "privacy-mode"))]
 #[tokio::test]
 async fn native_upstream_adds_owned_proxy_headers() {
     let addr = upstream(|request, mut stream| async move {

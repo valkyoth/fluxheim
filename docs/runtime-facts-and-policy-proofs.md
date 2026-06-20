@@ -131,7 +131,7 @@ path with a bounded reason. Operators should treat `NativeReady`, `Mixed`, and
 `CompatibilityRequired` as rollout evidence for the Pingora-exit line rather
 than as an active runtime adapter claim.
 
-`v1.6.19` adds the broader native runtime cutover summary. It reports
+`v1.6.20` adds the broader native runtime cutover summary. It reports
 remaining blockers such as native HTTP/1 proxy parity, native HTTP/2 downstream
 parity, admin, metrics, stream, and UDP service adapters. This is still
 diagnostic evidence only; it does not change the active runtime adapter.
