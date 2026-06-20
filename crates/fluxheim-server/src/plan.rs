@@ -26,6 +26,16 @@ pub enum NativeRuntimeCutoverBlocker {
 }
 
 impl NativeRuntimeCutoverBlocker {
+    pub const ALL: [Self; 7] = [
+        Self::NativeHttp1Proxy,
+        Self::NativeHttp2,
+        Self::AdminControlPlane,
+        Self::AdminOpsSocket,
+        Self::MetricsHttp,
+        Self::StreamProxy,
+        Self::UdpProxy,
+    ];
+
     pub const fn key(self) -> &'static str {
         match self {
             Self::NativeHttp1Proxy => "native-http1-proxy",

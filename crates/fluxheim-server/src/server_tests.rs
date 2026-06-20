@@ -1,5 +1,7 @@
 use super::*;
 use crate::http1::DEFAULT_HTTP1_MAX_CONNECTIONS;
+use std::collections::BTreeMap;
+
 use fluxheim_config::{
     CacheConfig, Config, DownstreamProxyProtocol, RouteConfig, ServerLimitsConfig,
     StreamRouteConfig, UdpRouteConfig, VhostConfig,
@@ -187,6 +189,30 @@ fn native_runtime_cutover_summary_exports_stable_tsv() {
          metrics-http\tnative metrics HTTP service\t1.6.22\n\
          udp-proxy\tnative UDP proxy service\t1.6.23\n"
     );
+}
+
+#[test]
+fn native_runtime_cutover_targets_cover_every_blocker() {
+    let targets = include_str!("../../../docs/native-runtime-cutover-targets.tsv");
+    let mut rows = BTreeMap::new();
+    for line in targets.lines() {
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 3, "malformed cutover target row: {line}");
+        rows.insert(fields[0], (fields[1], fields[2]));
+    }
+
+    assert_eq!(rows.len(), NativeRuntimeCutoverBlocker::ALL.len());
+    for blocker in NativeRuntimeCutoverBlocker::ALL {
+        assert_eq!(
+            rows.get(blocker.key()).copied(),
+            Some((blocker.as_str(), blocker.target_release())),
+            "missing or stale native runtime cutover target for {}",
+            blocker.key()
+        );
+    }
 }
 
 #[test]
