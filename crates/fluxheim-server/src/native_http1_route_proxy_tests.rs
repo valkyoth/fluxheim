@@ -73,14 +73,16 @@ async fn route_proxy_listener(route_proxy: NativeHttp1RouteProxy) -> std::net::S
 }
 
 async fn downstream_get(proxy: std::net::SocketAddr, path: &str) -> String {
+    downstream_request(
+        proxy,
+        &format!("GET {path} HTTP/1.1\r\nHost: route.test\r\nConnection: close\r\n\r\n"),
+    )
+    .await
+}
+
+async fn downstream_request(proxy: std::net::SocketAddr, request: &str) -> String {
     let mut client = TcpStream::connect(proxy).await.unwrap();
-    client
-        .write_all(
-            format!("GET {path} HTTP/1.1\r\nHost: route.test\r\nConnection: close\r\n\r\n")
-                .as_bytes(),
-        )
-        .await
-        .unwrap();
+    client.write_all(request.as_bytes()).await.unwrap();
     let mut response = Vec::new();
     client.read_to_end(&mut response).await.unwrap();
     String::from_utf8(response).unwrap()
@@ -210,6 +212,26 @@ async fn native_route_proxy_redirect_rejects_unsafe_uri_expansion() {
 
     assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     assert!(response.ends_with("invalid redirect target\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_rejects_route_body_over_limit() {
+    let route = NativeHttp1RouteProxyRoute::exact(
+        "/upload",
+        vec!["POST".to_owned()],
+        NativeHttp1Proxy::new(NativeHttp1Upstream::new("127.0.0.1:9")),
+    )
+    .with_max_request_body_bytes(4);
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_request(
+        proxy,
+        "POST /upload HTTP/1.1\r\nHost: route.test\r\nContent-Length: 5\r\nConnection: close\r\n\r\n12345",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 413 Payload Too Large\r\n"));
+    assert!(response.ends_with("payload too large\n"));
 }
 
 #[test]

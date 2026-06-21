@@ -21,6 +21,7 @@ pub struct NativeHttp1RouteProxyRoute {
     matcher: NativeHttp1RouteMatcher,
     strip_prefix: Option<String>,
     rewrite_prefix: Option<String>,
+    max_request_body_bytes: Option<u64>,
     action: NativeHttp1RouteAction,
 }
 
@@ -92,6 +93,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Exact(path.into()),
             strip_prefix: None,
             rewrite_prefix: None,
+            max_request_body_bytes: None,
             action: NativeHttp1RouteAction::Proxy(proxy),
         }
     }
@@ -102,6 +104,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Prefix(path.into()),
             strip_prefix: None,
             rewrite_prefix: None,
+            max_request_body_bytes: None,
             action: NativeHttp1RouteAction::Proxy(proxy),
         }
     }
@@ -112,6 +115,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Fallback,
             strip_prefix: None,
             rewrite_prefix: None,
+            max_request_body_bytes: None,
             action: NativeHttp1RouteAction::Proxy(proxy),
         }
     }
@@ -127,6 +131,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Exact(path.into()),
             strip_prefix: None,
             rewrite_prefix: None,
+            max_request_body_bytes: None,
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
                 status,
@@ -145,6 +150,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Prefix(path.into()),
             strip_prefix: None,
             rewrite_prefix: None,
+            max_request_body_bytes: None,
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
                 status,
@@ -186,6 +192,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher,
             strip_prefix: route.strip_prefix.clone(),
             rewrite_prefix: route.rewrite_prefix.clone(),
+            max_request_body_bytes: route.max_request_body_bytes.map(|bytes| bytes.as_u64()),
             action,
         })
     }
@@ -197,6 +204,11 @@ impl NativeHttp1RouteProxyRoute {
 
     pub fn with_rewrite_prefix(mut self, rewrite_prefix: impl Into<String>) -> Self {
         self.rewrite_prefix = Some(rewrite_prefix.into());
+        self
+    }
+
+    pub const fn with_max_request_body_bytes(mut self, max_request_body_bytes: u64) -> Self {
+        self.max_request_body_bytes = Some(max_request_body_bytes);
         self
     }
 
@@ -238,6 +250,10 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                         .close_connection();
                 }
             };
+            if route_or_fallback.request_body_too_large(&request) {
+                return NativeHttp1Response::new(413, "Payload Too Large", b"payload too large\n")
+                    .close_connection();
+            }
             match route_or_fallback {
                 RouteOrFallback::Route(route) => route.handle(request).await,
                 RouteOrFallback::Fallback(proxy) => proxy.handle(request).await,
@@ -262,6 +278,15 @@ impl<'a> RouteOrFallback<'a> {
         match self {
             Self::Route(route) => rewrite_route_request(request, route, path, query),
             Self::Fallback(_) => Some(request),
+        }
+    }
+
+    fn request_body_too_large(self, request: &NativeHttp1Request) -> bool {
+        match self {
+            Self::Route(route) => route
+                .max_request_body_bytes
+                .is_some_and(|limit| (request.body.len() as u64) > limit),
+            Self::Fallback(_) => false,
         }
     }
 }

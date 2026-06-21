@@ -158,6 +158,7 @@ fi
 - Continue native route/policy parity with native HTTP/1 route redirect
   actions.
 - Support safe native redirect expansion for {uri}, {path}, and {query}.
+- Enforce native route request-body limits before forwarding matched requests.
 - Keep richer route policies and proxy integrations on the documented
   compatibility path until their native parity tests are added.
 

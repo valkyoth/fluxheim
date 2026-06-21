@@ -10,6 +10,8 @@ surface.
 
 - Add native HTTP/1 route redirect actions to `NativeHttp1RouteProxyRoute`.
 - Support `{uri}`, `{path}`, and `{query}` expansion for native route redirects.
+- Enforce route-level `max_request_body_bytes` in the native HTTP/1 route
+  proxy before forwarding matched requests.
 - Allow native route proxy construction from redirect-only route config without
   requiring a dummy upstream proxy.
 - Update release metadata, RPM metadata, and container tag documentation for
@@ -21,6 +23,8 @@ surface.
 - Reject unsafe redirect expansions containing control characters, whitespace,
   braces, backslashes, non-HTTP(S) schemes, or ambiguous double-slash request
   paths.
+- Return `413 Payload Too Large` for native route-proxy requests that exceed a
+  matched route-specific body limit.
 - Keep regex routes and richer route policies on the compatibility path until
   their native execution has dedicated parity tests.
 
@@ -28,5 +32,6 @@ surface.
 
 - Normal proxy profiles still compile the Pingora compatibility runtime in this
   release. The native route proxy now covers exact/prefix/fallback proxy routes
-  plus route redirects, but header/access/body/compression policy and rich
-  proxy integrations remain targeted for the next 1.6.x slices.
+  plus route redirects and route request-body limits, but header/access and
+  compression policy plus rich proxy integrations remain targeted for the next
+  1.6.x slices.
