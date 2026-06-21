@@ -910,6 +910,11 @@ fn route_redirect_location(
     if !safe_forward_path(&path) || uri.chars().any(char::is_control) {
         return None;
     }
+    if redirect_template_substitutes_query_into_path(&redirect.to)
+        && !redirect_query_path_expansion_safe(query.as_deref().unwrap_or_default())
+    {
+        return None;
+    }
 
     let location = redirect
         .to
@@ -917,6 +922,21 @@ fn route_redirect_location(
         .replace("{path}", &path)
         .replace("{query}", query.as_deref().unwrap_or_default());
     valid_redirect_location(&location).then_some(location)
+}
+
+fn redirect_template_substitutes_query_into_path(template: &str) -> bool {
+    let Some(query_token) = template.find("{query}") else {
+        return false;
+    };
+    let query_tail = template.find(['?', '#']).unwrap_or(template.len());
+    query_token < query_tail
+}
+
+fn redirect_query_path_expansion_safe(query: &str) -> bool {
+    if query.is_empty() || query.chars().any(char::is_control) {
+        return query.is_empty();
+    }
+    safe_forward_path(&format!("/{query}"))
 }
 
 fn valid_redirect_location(location: &str) -> bool {
