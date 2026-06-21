@@ -24,6 +24,7 @@ const READ_CHUNK_BYTES: usize = 8192;
 pub struct NativeHttp1Request {
     pub method: String,
     pub peer_addr: Option<SocketAddr>,
+    pub downstream_tls: bool,
     pub target: String,
     pub version: Http1Version,
     pub headers: Vec<(String, String)>,
@@ -157,8 +158,22 @@ where
 }
 
 pub async fn serve_native_http1_connection<S, H>(
+    stream: S,
+    peer_addr: Option<SocketAddr>,
+    policy: DownstreamHttp1Policy,
+    handler: Arc<H>,
+) -> Result<(), NativeHttp1Error>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+    H: NativeHttp1Handler,
+{
+    serve_native_http1_connection_with_tls(stream, peer_addr, false, policy, handler).await
+}
+
+async fn serve_native_http1_connection_with_tls<S, H>(
     mut stream: S,
     peer_addr: Option<SocketAddr>,
+    downstream_tls: bool,
     policy: DownstreamHttp1Policy,
     handler: Arc<H>,
 ) -> Result<(), NativeHttp1Error>
@@ -212,7 +227,7 @@ where
             (
                 close_after_response,
                 body_framing,
-                owned_request_from_head(&head, peer_addr),
+                owned_request_from_head(&head, peer_addr, downstream_tls),
             )
         };
         let body = match read_body(policy, &mut stream, &mut buffer, head_len, body_framing).await {
@@ -318,7 +333,7 @@ where
                     let handshake = timeout(policy.tls_handshake_timeout(), acceptor.accept(stream)).await;
                     match handshake {
                         Ok(Ok(stream)) => {
-                            let _ = serve_native_http1_connection(stream, Some(peer_addr), policy, handler).await;
+                            let _ = serve_native_http1_connection_with_tls(stream, Some(peer_addr), true, policy, handler).await;
                         }
                         Ok(Err(error)) => {
                             log::debug!(
@@ -387,7 +402,7 @@ where
                             .await;
                     match handshake {
                         Ok(Ok(())) => {
-                            let _ = serve_native_http1_connection(stream, Some(peer_addr), policy, handler).await;
+                            let _ = serve_native_http1_connection_with_tls(stream, Some(peer_addr), true, policy, handler).await;
                         }
                         Ok(Err(error)) => {
                             log::debug!(
@@ -460,10 +475,12 @@ where
 fn owned_request_from_head(
     head: &fluxheim_protocol::Http1RequestHead<'_>,
     peer_addr: Option<SocketAddr>,
+    downstream_tls: bool,
 ) -> NativeHttp1Request {
     NativeHttp1Request {
         method: head.method.to_owned(),
         peer_addr,
+        downstream_tls,
         target: head.target.to_owned(),
         version: head.version,
         headers: owned_headers(&head.headers),

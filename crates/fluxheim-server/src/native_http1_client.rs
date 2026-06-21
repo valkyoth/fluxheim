@@ -370,7 +370,6 @@ where
             || name.eq_ignore_ascii_case("content-length")
             || name.eq_ignore_ascii_case("transfer-encoding")
             || name.eq_ignore_ascii_case("via")
-            || name.eq_ignore_ascii_case("x-forwarded-for")
         {
             continue;
         }

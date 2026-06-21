@@ -18,11 +18,18 @@ use fluxheim_compression::{
     content_encoding_value_is_active, content_type_is_compressible,
     input_length_within_compression_bounds, parse_accept_encoding_qvalue,
 };
+#[cfg(not(feature = "privacy-mode"))]
+use fluxheim_config::ForwardedClientIpHeaderMode;
 use fluxheim_config::{
     HeaderPolicyConfig, HeaderValues, RequestHeaderPolicyConfig, ResponseHeaderPolicyConfig,
     ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
 };
-use fluxheim_headers::{rewrite_header_prefix, rewrite_refresh_url, rewrite_set_cookie_value};
+#[cfg(not(feature = "privacy-mode"))]
+use fluxheim_headers::build_forwarded_header;
+use fluxheim_headers::{
+    SPOOFABLE_CLIENT_IP_HEADERS, rewrite_header_prefix, rewrite_refresh_url,
+    rewrite_set_cookie_value,
+};
 use fluxheim_protocol::{
     Http1RequestTarget, http1_request_target, route_method_matches, route_prefix_matches_path,
     route_strip_prefix_suffix,
@@ -80,6 +87,17 @@ struct NativeHttp1RouteRedirect {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct NativeRouteRequestHeaderPolicy {
     enabled: bool,
+    strip_inbound_client_ip_headers: bool,
+    #[cfg(not(feature = "privacy-mode"))]
+    x_forwarded_for: ForwardedClientIpHeaderMode,
+    #[cfg(not(feature = "privacy-mode"))]
+    x_real_ip: bool,
+    #[cfg(not(feature = "privacy-mode"))]
+    x_forwarded_host: bool,
+    #[cfg(not(feature = "privacy-mode"))]
+    x_forwarded_proto: bool,
+    #[cfg(not(feature = "privacy-mode"))]
+    forwarded: bool,
     unset: Vec<String>,
     set: Vec<(String, String)>,
     append: Vec<(String, String)>,
@@ -1002,10 +1020,58 @@ fn redirect_location_path_safe(location: &str) -> bool {
     path.is_empty() || safe_forward_path(path)
 }
 
+#[cfg(not(feature = "privacy-mode"))]
+fn header_value<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a str> {
+    request
+        .headers
+        .iter()
+        .find(|(header_name, value)| {
+            header_name.eq_ignore_ascii_case(name) && !value.trim().is_empty()
+        })
+        .map(|(_, value)| value.trim())
+}
+
+fn strip_spoofable_client_ip_headers(request: &mut NativeHttp1Request) {
+    request.headers.retain(|(header_name, _)| {
+        !SPOOFABLE_CLIENT_IP_HEADERS
+            .iter()
+            .any(|blocked| header_name.eq_ignore_ascii_case(blocked))
+    });
+}
+
+#[cfg(not(feature = "privacy-mode"))]
+fn remove_request_header(request: &mut NativeHttp1Request, name: &str) {
+    request
+        .headers
+        .retain(|(header_name, _)| !header_name.eq_ignore_ascii_case(name));
+}
+
+#[cfg(not(feature = "privacy-mode"))]
+fn replace_request_header(
+    request: &mut NativeHttp1Request,
+    name: impl Into<String>,
+    value: impl Into<String>,
+) {
+    let name = name.into();
+    remove_request_header(request, &name);
+    request.headers.push((name, value.into()));
+}
+
 impl NativeRouteRequestHeaderPolicy {
     pub(crate) fn from_policy(policy: &RequestHeaderPolicyConfig) -> Self {
         Self {
             enabled: policy.enabled,
+            strip_inbound_client_ip_headers: policy.strip_inbound_client_ip_headers,
+            #[cfg(not(feature = "privacy-mode"))]
+            x_forwarded_for: policy.x_forwarded_for,
+            #[cfg(not(feature = "privacy-mode"))]
+            x_real_ip: policy.x_real_ip,
+            #[cfg(not(feature = "privacy-mode"))]
+            x_forwarded_host: policy.x_forwarded_host,
+            #[cfg(not(feature = "privacy-mode"))]
+            x_forwarded_proto: policy.x_forwarded_proto,
+            #[cfg(not(feature = "privacy-mode"))]
+            forwarded: policy.forwarded,
             unset: policy.effective_unset(),
             set: policy.effective_set().into_iter().collect(),
             append: flatten_append_headers(&policy.append),
@@ -1015,6 +1081,21 @@ impl NativeRouteRequestHeaderPolicy {
     fn from_overlay(overlay: &fluxheim_config::RequestHeaderPolicyOverlayConfig) -> Self {
         Self {
             enabled: overlay.enabled.unwrap_or(true),
+            strip_inbound_client_ip_headers: overlay
+                .strip_inbound_client_ip_headers
+                .unwrap_or(false),
+            #[cfg(not(feature = "privacy-mode"))]
+            x_forwarded_for: overlay
+                .x_forwarded_for
+                .unwrap_or(ForwardedClientIpHeaderMode::Off),
+            #[cfg(not(feature = "privacy-mode"))]
+            x_real_ip: overlay.x_real_ip.unwrap_or(false),
+            #[cfg(not(feature = "privacy-mode"))]
+            x_forwarded_host: overlay.x_forwarded_host.unwrap_or(false),
+            #[cfg(not(feature = "privacy-mode"))]
+            x_forwarded_proto: overlay.x_forwarded_proto.unwrap_or(false),
+            #[cfg(not(feature = "privacy-mode"))]
+            forwarded: overlay.forwarded.unwrap_or(false),
             unset: overlay.effective_unset(),
             set: overlay.effective_set().into_iter().collect(),
             append: flatten_append_headers(&overlay.append),
@@ -1023,8 +1104,14 @@ impl NativeRouteRequestHeaderPolicy {
 
     pub(crate) fn apply(&self, request: &mut NativeHttp1Request) {
         if !self.enabled {
+            #[cfg(feature = "privacy-mode")]
+            strip_spoofable_client_ip_headers(request);
             return;
         }
+        #[cfg(not(feature = "privacy-mode"))]
+        self.apply_forwarded_headers(request);
+        #[cfg(feature = "privacy-mode")]
+        strip_spoofable_client_ip_headers(request);
         for name in &self.unset {
             request
                 .headers
@@ -1038,6 +1125,73 @@ impl NativeRouteRequestHeaderPolicy {
         }
         for (name, value) in &self.append {
             request.headers.push((name.clone(), value.clone()));
+        }
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    fn apply_forwarded_headers(&self, request: &mut NativeHttp1Request) {
+        let original_x_forwarded_for = header_value(request, "x-forwarded-for").map(str::to_owned);
+        let original_host = header_value(request, "host").map(str::to_owned);
+        let proto = if request.downstream_tls {
+            "https"
+        } else {
+            "http"
+        };
+
+        if self.strip_inbound_client_ip_headers {
+            strip_spoofable_client_ip_headers(request);
+        }
+
+        let client_ip = request.peer_addr.map(|addr| addr.ip());
+        match (self.x_forwarded_for, client_ip) {
+            (ForwardedClientIpHeaderMode::Off, _) => {
+                remove_request_header(request, "x-forwarded-for")
+            }
+            (ForwardedClientIpHeaderMode::Replace, Some(ip)) => {
+                replace_request_header(request, "x-forwarded-for", ip.to_string());
+            }
+            (ForwardedClientIpHeaderMode::Append, Some(ip)) => {
+                let value = original_x_forwarded_for
+                    .filter(|value| !value.trim().is_empty())
+                    .map(|value| format!("{value}, {ip}"))
+                    .unwrap_or_else(|| ip.to_string());
+                replace_request_header(request, "x-forwarded-for", value);
+            }
+            (ForwardedClientIpHeaderMode::Replace | ForwardedClientIpHeaderMode::Append, None) => {
+                remove_request_header(request, "x-forwarded-for");
+            }
+        }
+
+        if self.x_real_ip {
+            if let Some(ip) = client_ip {
+                replace_request_header(request, "x-real-ip", ip.to_string());
+            } else {
+                remove_request_header(request, "x-real-ip");
+            }
+        }
+
+        if self.x_forwarded_host {
+            if let Some(host) = &original_host {
+                replace_request_header(request, "x-forwarded-host", host.clone());
+            } else {
+                remove_request_header(request, "x-forwarded-host");
+            }
+        }
+
+        if self.x_forwarded_proto {
+            replace_request_header(request, "x-forwarded-proto", proto);
+        }
+
+        if self.forwarded {
+            if let Some(ip) = client_ip {
+                replace_request_header(
+                    request,
+                    "forwarded",
+                    build_forwarded_header(ip, original_host.as_deref(), proto),
+                );
+            } else {
+                remove_request_header(request, "forwarded");
+            }
         }
     }
 }

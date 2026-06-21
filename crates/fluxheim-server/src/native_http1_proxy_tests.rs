@@ -330,6 +330,77 @@ async fn native_proxy_applies_header_policy() {
     assert!(response.ends_with("ok"));
 }
 
+#[cfg(not(feature = "privacy-mode"))]
+#[tokio::test]
+async fn native_proxy_applies_default_forwarded_header_policy() {
+    let upstream = upstream(|request, mut stream| async move {
+        let request = String::from_utf8(request).unwrap();
+        assert!(request.contains("x-forwarded-for: 127.0.0.1\r\n"));
+        assert!(request.contains("x-forwarded-host: proxy.test\r\n"));
+        assert!(request.contains("x-forwarded-proto: http\r\n"));
+        assert!(!request.to_ascii_lowercase().contains("x-real-ip:"));
+        assert!(!request.contains("x-forwarded-for: 192.0.2.9\r\n"));
+        assert!(!request.contains("forwarded: for=192.0.2.9\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    })
+    .await;
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new(upstream.to_string()))
+        .with_header_policy(&fluxheim_config::HeaderPolicyConfig::default());
+    let proxy = proxy_listener_for(proxy).await;
+
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+    client
+        .write_all(
+            b"GET /forwarded HTTP/1.1\r\n\
+              Host: proxy.test\r\n\
+              X-Forwarded-For: 192.0.2.9\r\n\
+              Forwarded: for=192.0.2.9\r\n\
+              Connection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 204 No Content\r\n"));
+}
+
+#[cfg(not(feature = "privacy-mode"))]
+#[tokio::test]
+async fn native_proxy_honors_forwarded_for_off_policy() {
+    let upstream = upstream(|request, mut stream| async move {
+        let request = String::from_utf8(request).unwrap();
+        assert!(!request.to_ascii_lowercase().contains("x-forwarded-for:"));
+        assert!(request.contains("x-forwarded-host: proxy.test\r\n"));
+        assert!(request.contains("x-forwarded-proto: http\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    })
+    .await;
+    let mut headers = fluxheim_config::HeaderPolicyConfig::default();
+    headers.request.x_forwarded_for = fluxheim_config::ForwardedClientIpHeaderMode::Off;
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new(upstream.to_string()))
+        .with_header_policy(&headers);
+    let proxy = proxy_listener_for(proxy).await;
+
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+    client
+        .write_all(b"GET /forwarded HTTP/1.1\r\nHost: proxy.test\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 204 No Content\r\n"));
+}
+
 #[tokio::test]
 async fn native_proxy_fails_over_get_to_second_static_upstream() {
     let first = unused_local_address().await;

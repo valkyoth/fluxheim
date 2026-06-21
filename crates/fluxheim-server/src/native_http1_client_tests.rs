@@ -41,6 +41,7 @@ fn request() -> NativeHttp1Request {
     NativeHttp1Request {
         method: "GET".to_owned(),
         peer_addr: None,
+        downstream_tls: false,
         target: "/hello?name=fluxheim".to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![
@@ -410,11 +411,10 @@ async fn native_upstream_strips_request_hop_by_hop_headers() {
 
 #[cfg(not(feature = "privacy-mode"))]
 #[tokio::test]
-async fn native_upstream_adds_owned_proxy_headers() {
+async fn native_upstream_appends_owned_via_header() {
     let addr = upstream(|request, mut stream| async move {
         let request = String::from_utf8(request).unwrap();
         assert!(request.contains("via: 1.0 prior, 1.1 fluxheim\r\n"));
-        assert!(request.contains("x-forwarded-for: 198.51.100.17\r\n"));
         assert!(!request.contains("x-forwarded-for: 192.0.2.9\r\n"));
         stream
             .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")

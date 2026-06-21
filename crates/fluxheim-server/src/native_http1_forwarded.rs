@@ -29,13 +29,6 @@ where
         )
         .await?;
 
-    #[cfg(not(feature = "privacy-mode"))]
-    if let Some(peer_addr) = request.peer_addr {
-        stream
-            .write_all(format!("x-forwarded-for: {}\r\n", peer_addr.ip()).as_bytes())
-            .await?;
-    }
-
     Ok(())
 }
 

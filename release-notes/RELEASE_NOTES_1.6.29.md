@@ -1,7 +1,8 @@
 # Fluxheim 1.6.29 Release Notes
 
 Fluxheim 1.6.29 continues the Pingora-exit work by moving inherited
-compression and header-policy behavior into the native HTTP/1 proxy path.
+compression, header-policy behavior, and safe forwarded-header ownership into
+the native HTTP/1 proxy path.
 
 ## Highlights
 
@@ -13,6 +14,11 @@ compression and header-policy behavior into the native HTTP/1 proxy path.
   route overlay before building native request and response header policies.
 - Root and vhost header mutation policy no longer blocks native HTTP/1 proxy
   cutover when it only uses supported header set/remove/append behavior.
+- Native HTTP/1 proxy handling now owns the safe forwarded-client-IP header
+  modes: `X-Forwarded-For = off`, `X-Forwarded-For = replace`, `X-Real-IP`,
+  `X-Forwarded-Host`, `X-Forwarded-Proto`, and RFC `Forwarded`.
+- The native cutover inventory still rejects `X-Forwarded-For = append` until
+  trusted proxy-chain state is threaded through the native runtime.
 - Root and vhost compression no longer blocks native HTTP/1 proxy cutover when
   a matching compression backend feature is compiled.
 - Live native listener tests now prove plain-proxy gzip compression, inherited
@@ -30,6 +36,11 @@ compression and header-policy behavior into the native HTTP/1 proxy path.
 - Native route request headers are removed or overwritten before the upstream
   request is sent, matching the compatibility-path policy order for the
   supported mutation subset.
+- The low-level native upstream writer no longer hardcodes client-IP forwarding;
+  proxy/header policy now owns `X-Forwarded-For` so privacy-mode and ordinary
+  builds share one explicit policy boundary.
+- Privacy-mode native proxy builds strip spoofable inbound client-IP headers and
+  do not compile the non-privacy forwarded-header synthesis helpers.
 - Native route responses now apply inherited standard security headers such as
   `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, CSP, and HSTS
   where configured.
@@ -37,7 +48,7 @@ compression and header-policy behavior into the native HTTP/1 proxy path.
 ## Compatibility
 
 This release does not remove Pingora from normal builds yet. The remaining
-compatibility blockers are forwarded-client-IP ownership overrides,
+compatibility blockers are trusted-chain forwarded-client-IP append,
 auth-request subrequests, traffic mirroring, access/rate/concurrency policy,
 vhost redirects, ACME-challenge routing, route rewrite templates, per-proxy
 downstream timeout/min-send-rate policy, advanced upstream transport knobs,

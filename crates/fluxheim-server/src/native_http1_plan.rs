@@ -1,4 +1,6 @@
-use fluxheim_config::{AccessPolicyConfig, Config, ProxyConfig, RouteConfig, VhostConfig};
+use fluxheim_config::{
+    AccessPolicyConfig, Config, ForwardedClientIpHeaderMode, ProxyConfig, RouteConfig, VhostConfig,
+};
 
 use crate::{DownstreamHttp1Policy, NativeHttp1Proxy, NativeHttp1ProxyConfigError};
 
@@ -213,12 +215,7 @@ fn header_policy_supported(headers: &fluxheim_config::HeaderPolicyConfig) -> boo
 fn request_header_policy_supported(request: &fluxheim_config::RequestHeaderPolicyConfig) -> bool {
     let defaults = fluxheim_config::RequestHeaderPolicyConfig::default();
     request.enabled == defaults.enabled
-        && request.strip_inbound_client_ip_headers == defaults.strip_inbound_client_ip_headers
-        && request.x_forwarded_for == defaults.x_forwarded_for
-        && request.x_real_ip == defaults.x_real_ip
-        && request.x_forwarded_host == defaults.x_forwarded_host
-        && request.x_forwarded_proto == defaults.x_forwarded_proto
-        && request.forwarded == defaults.forwarded
+        && request.x_forwarded_for != ForwardedClientIpHeaderMode::Append
 }
 
 fn vhost_header_overlay_supported(headers: &fluxheim_config::VhostHeaderPolicyConfig) -> bool {
@@ -228,12 +225,7 @@ fn vhost_header_overlay_supported(headers: &fluxheim_config::VhostHeaderPolicyCo
 fn route_request_header_policy_supported(
     request: &fluxheim_config::RequestHeaderPolicyOverlayConfig,
 ) -> bool {
-    request.strip_inbound_client_ip_headers.is_none()
-        && request.x_forwarded_for.is_none()
-        && request.x_real_ip.is_none()
-        && request.x_forwarded_host.is_none()
-        && request.x_forwarded_proto.is_none()
-        && request.forwarded.is_none()
+    request.x_forwarded_for != Some(ForwardedClientIpHeaderMode::Append)
 }
 
 fn route_response_header_policy_supported(

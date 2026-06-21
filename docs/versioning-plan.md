@@ -2741,21 +2741,25 @@ available for the stabilization/security-only follow-up.
 - `v1.6.29`: move inherited global/vhost compression and root/vhost/route
   header policy onto the native HTTP/1 proxy and route proxy. Prove plain proxy
   compression, inherited route compression, request-header mutation,
-  response-header mutation, and standard response security headers with live
-  native listener tests. Keep forwarded-client-IP ownership, auth-request
+  response-header mutation, standard response security headers, and safe
+  forwarded-header ownership modes with live native listener tests. Support
+  `X-Forwarded-For = off`, `X-Forwarded-For = replace`, `X-Real-IP`,
+  `X-Forwarded-Host`, `X-Forwarded-Proto`, and RFC `Forwarded` on the native
+  path while keeping trusted-chain `X-Forwarded-For = append` blocked until the
+  native runtime has explicit trusted-proxy chain state. Keep auth-request
   subrequests, traffic mirroring, access/rate/concurrency policy, vhost
   redirects, ACME-challenge routing, route rewrite templates, per-proxy
   downstream timeout/min-send-rate policy, advanced upstream transport knobs,
-  cache, PHP-FPM, dynamic discovery, and load-balancer state explicitly
-  reported as compatibility blockers until they have native parity tests.
+  cache, PHP-FPM, dynamic discovery, and load-balancer state explicitly reported
+  as compatibility blockers until they have native parity tests.
 - `v1.6.30`: finish the remaining native HTTP policy blockers that do not need
-  cache or PHP state: forwarded-client-IP ownership, auth-request subrequests,
-  traffic mirroring, vhost access/rate/concurrency policy, vhost redirects,
-  ACME-challenge routing, route access/rate/concurrency/grpc flags, route
-  rewrite-template handling, per-proxy downstream timeout/min-send-rate policy,
-  and advanced upstream transport knobs that do not require cache, PHP, dynamic
-  discovery, or load-balancer state. Add live native listener tests for each
-  path and keep unsupported configs explicitly reported in the cutover
+  cache or PHP state: trusted-chain forwarded-header append, auth-request
+  subrequests, traffic mirroring, vhost access/rate/concurrency policy, vhost
+  redirects, ACME-challenge routing, route access/rate/concurrency/grpc flags,
+  route rewrite-template handling, per-proxy downstream timeout/min-send-rate
+  policy, and advanced upstream transport knobs that do not require cache, PHP,
+  dynamic discovery, or load-balancer state. Add live native listener tests for
+  each path and keep unsupported configs explicitly reported in the cutover
   inventory.
 - `v1.6.31`: move cache and PHP-FPM rich proxy integrations onto native
   adapters. Cache work must cover lookup/fill/stale, Vary/Range/conditional

@@ -16,10 +16,13 @@ behavior when the change improves security or project direction.
 - Move root/vhost/route header-policy inheritance into the native HTTP/1 route
   proxy, including request mutation, response mutation, response rewrites, and
   standard security response headers.
+- Move safe forwarded-client-IP header ownership into the native HTTP/1 proxy
+  path for `off`/`replace` modes plus `X-Real-IP`, `X-Forwarded-Host`,
+  `X-Forwarded-Proto`, and RFC `Forwarded`.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
-- Keep forwarded-client-IP ownership overrides, auth-request, traffic mirror,
+- Keep trusted-chain `X-Forwarded-For = append`, auth-request, traffic mirror,
   access/rate/concurrency, cache, PHP-FPM, dynamic discovery, and advanced
   load-balancer state reported as explicit compatibility blockers.
 
@@ -27,6 +30,8 @@ behavior when the change improves security or project direction.
 
 - Add live native listener tests proving inherited request-header removal/set
   rules before upstream forwarding.
+- Add live native listener tests proving default forwarded-header synthesis and
+  `X-Forwarded-For = off` policy behavior on the native proxy path.
 - Add live native listener tests proving inherited response-header and standard
   security-header emission on route responses.
 - Add live native listener tests proving plain-proxy gzip compression and
