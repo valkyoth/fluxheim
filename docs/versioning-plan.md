@@ -2713,9 +2713,11 @@ Planned `1.6.x` sequence:
   symlink-safe path planning, with real native HTTP/1 listener tests. Also move
   explicit route request-header unset/set/append mutations into the native route
   proxy while keeping forwarded-client-IP ownership shortcuts on the
-  compatibility path. Keep cache lookup/fill/stale paths, PHP-FPM routing,
-  auth-request, traffic mirror, compression, and advanced load-balancer policy
-  selection targeted for the next compatibility-removal slices.
+  compatibility path. Add native default round-robin selection for multiple
+  static upstreams while keeping weighted, health-aware, persistence, dynamic
+  discovery, and hash-based load-balancer policies on the compatibility path.
+  Keep cache lookup/fill/stale paths, PHP-FPM routing, auth-request, traffic
+  mirror, and compression targeted for the next compatibility-removal slices.
 - `v1.6.28`: remove remaining Pingora runtime/listener/TLS adapter crates,
   vendored Pingora patches, compatibility shims, and Pingora-specific docs from
   normal builds. This is the final Pingora-free proof release: `cargo tree`,

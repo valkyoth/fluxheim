@@ -160,10 +160,14 @@ fi
   metadata, and directory listings.
 - Apply route-level native request-header mutation overlays before forwarding
   matched proxy routes upstream.
+- Round-robin successful native HTTP/1 proxy requests across multiple static
+  upstreams while preserving safe-method failover.
 - Harden native static path containment, symlink rejection, and body-open
   revalidation.
 - Keep forwarded-client-IP shortcut ownership on the compatibility path until
   native parity tests cover it.
+- Keep advanced load-balancer policies on the compatibility path while default
+  static-upstream round-robin moves native.
 - Keep cache, PHP-FPM, auth-request, traffic mirror, compression, and advanced
   load-balancer integrations on the compatibility path until native parity
   tests land.

@@ -18,6 +18,8 @@ behavior when the change improves security or project direction.
   metadata, and directory listings.
 - Apply route-level native request-header mutation overlays before matched
   proxy routes are forwarded upstream.
+- Round-robin successful requests across multiple configured static upstreams
+  in the native HTTP/1 proxy, while preserving safe-method failover.
 - Keep native static-web route tests split from generic route-proxy tests so
   the feature proof stays reviewable.
 - Add `fluxheim-web` as an explicit `fluxheim-server` dependency for the native
@@ -38,6 +40,9 @@ behavior when the change improves security or project direction.
   streaming body path is enabled.
 - Keep forwarded-client-IP ownership shortcuts on the compatibility path while
   allowing only the explicit route request-header mutation subset natively.
+- Keep weighted, health-aware, persistence, dynamic-discovery, and hash-based
+  load-balancer policies on the compatibility path while moving the default
+  static-upstream round-robin behavior native.
 - Keep cache, PHP-FPM, auth-request, traffic mirror, compression, and advanced
   load-balancer policy integrations on the compatibility path until their
   native execution has dedicated parity tests.

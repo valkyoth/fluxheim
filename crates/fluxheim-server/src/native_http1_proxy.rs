@@ -1,14 +1,17 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::NativeHttp1UpstreamTls;
 use crate::{NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1Upstream};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct NativeHttp1Proxy {
     upstreams: Vec<NativeHttp1Upstream>,
+    next_upstream: Arc<AtomicUsize>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -80,6 +83,7 @@ impl NativeHttp1Proxy {
     pub fn new(upstream: NativeHttp1Upstream) -> Self {
         Self {
             upstreams: vec![upstream],
+            next_upstream: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -89,7 +93,10 @@ impl NativeHttp1Proxy {
         if upstreams.is_empty() {
             return Err(NativeHttp1ProxyConfigError::MissingUpstream);
         }
-        Ok(Self { upstreams })
+        Ok(Self {
+            upstreams,
+            next_upstream: Arc::new(AtomicUsize::new(0)),
+        })
     }
 
     pub fn upstream(&self) -> &NativeHttp1Upstream {
@@ -189,6 +196,14 @@ impl NativeHttp1Proxy {
     }
 }
 
+impl PartialEq for NativeHttp1Proxy {
+    fn eq(&self, other: &Self) -> bool {
+        self.upstreams == other.upstreams
+    }
+}
+
+impl Eq for NativeHttp1Proxy {}
+
 impl NativeHttp1Handler for NativeHttp1Proxy {
     fn handle<'a>(
         &'a self,
@@ -197,10 +212,14 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
         Box::pin(async move {
             let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
             let mut last_error = None;
-            for (index, upstream) in self.upstreams.iter().enumerate() {
+            let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
+            let total = self.upstreams.len();
+            for attempt in 0..total {
+                let index = start.wrapping_add(attempt) % total;
+                let upstream = &self.upstreams[index];
                 match upstream.send(&request).await {
                     Ok(response) => return response,
-                    Err(error) if retry_allowed && index + 1 < self.upstreams.len() => {
+                    Err(error) if retry_allowed && attempt + 1 < total => {
                         last_error = Some(error);
                     }
                     Err(error) => {

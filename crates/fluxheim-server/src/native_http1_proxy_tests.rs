@@ -190,6 +190,37 @@ async fn native_proxy_fails_over_get_to_second_static_upstream() {
 }
 
 #[tokio::test]
+async fn native_proxy_round_robins_successful_static_upstreams() {
+    let first = upstream(|request, mut stream| async move {
+        let request = String::from_utf8(request).unwrap();
+        assert!(request.starts_with("GET /balanced HTTP/1.1\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 5\r\nx-origin: one\r\n\r\none-1")
+            .await
+            .unwrap();
+    })
+    .await;
+    let second = upstream(|request, mut stream| async move {
+        let request = String::from_utf8(request).unwrap();
+        assert!(request.starts_with("GET /balanced HTTP/1.1\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 5\r\nx-origin: two\r\n\r\ntwo-2")
+            .await
+            .unwrap();
+    })
+    .await;
+    let proxy = failover_proxy_listener(first, second).await;
+
+    let first_response = downstream_get(proxy, "/balanced").await;
+    let second_response = downstream_get(proxy, "/balanced").await;
+
+    assert!(first_response.contains("x-origin: one\r\n"));
+    assert!(first_response.ends_with("one-1"));
+    assert!(second_response.contains("x-origin: two\r\n"));
+    assert!(second_response.ends_with("two-2"));
+}
+
+#[tokio::test]
 async fn native_proxy_does_not_fail_over_unsafe_method() {
     let first = unused_local_address().await;
     let second = upstream(|_, mut stream| async move {

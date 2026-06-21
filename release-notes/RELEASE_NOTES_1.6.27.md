@@ -10,6 +10,9 @@ web serving onto the native HTTP/1 route adapter.
   ranges, `HEAD`, cache-control metadata, and directory listings.
 - Route-level native request-header mutation overlays now apply before matched
   proxy routes are forwarded upstream.
+- Multiple configured static upstreams now round-robin successful native HTTP/1
+  proxy requests, with safe-method failover still available when an upstream
+  fails.
 - The server crate now depends directly on `fluxheim-web` for pure web response
   planning instead of using the root compatibility adapter.
 - Static-web and request-header route tests run through a real local native
@@ -26,6 +29,9 @@ web serving onto the native HTTP/1 route adapter.
 - Forwarded-client-IP shortcut ownership remains a compatibility-path blocker;
   only explicit request-header unset/set/append mutations are marked native
   ready in this release.
+- Advanced load-balancer behavior such as weights, health state, persistence,
+  dynamic discovery, and hash-based selection remains on the compatibility path;
+  this release only moves default static-upstream round-robin native.
 
 ## Compatibility
 
