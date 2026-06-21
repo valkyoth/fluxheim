@@ -105,6 +105,7 @@ awk -F '\t' '
     }
     /^native-runtime-adapter:/ { next }
     /^config tester: ok$/ { next }
+    $1 == "native-http1-proxy-candidate" { next }
     $1 == "blocker" { next }
     NF == 0 { next }
     NF != 3 {
@@ -138,6 +139,7 @@ awk -F '\t' '
     }
     /^native-runtime-adapter:/ { next }
     /^config tester: ok$/ { next }
+    $1 == "native-http1-proxy-candidate" { next }
     $1 == "blocker" { next }
     NF == 0 { next }
     NF != 3 {
@@ -167,6 +169,7 @@ awk -F '\t' '
 awk -F '\t' '
     /^native-runtime-adapter:/ { next }
     /^config tester: ok$/ { next }
+    $1 == "native-http1-proxy-candidate" { next }
     $1 == "blocker" { next }
     NF == 0 { next }
     NF != 3 {

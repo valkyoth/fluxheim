@@ -2689,12 +2689,28 @@ Planned `1.6.x` sequence:
   Pingora runtime/listener/TLS adapter crates in normal builds until the next
   checkpoint so the final deletion is reviewed as a focused dependency-removal
   change.
-- `v1.6.25`: remove remaining Pingora runtime/listener/TLS adapter crates,
+- `v1.6.25`: harden the Pingora-exit evidence before final deletion. Add
+  per-proxy native HTTP/1 candidate rows to the runtime cutover report so
+  cache, web, PHP, auth, traffic mirror, rewrite, compression, and advanced
+  load-balancer blockers are visible per configured scope. Re-scope the
+  dependency exception target to the final deletion release rather than
+  pretending the rich proxy path can be removed without finishing those parity
+  slices.
+- `v1.6.26`: move native route/policy execution closer to parity for ordinary
+  proxy configs: route matching, header policy, access policy, redirects,
+  prefix rewrite/strip, request body limits, forwarded-header handling, and
+  compression hooks should be exercised through native request/response types.
+- `v1.6.27`: move rich proxy integrations onto native adapters where possible:
+  cache lookup/fill/stale paths, static web fallback, PHP-FPM routing,
+  auth-request, traffic mirror, and load-balancer policy selection. Keep tests
+  split by feature so each former Pingora callback responsibility has a native
+  smoke or unit proof.
+- `v1.6.28`: remove remaining Pingora runtime/listener/TLS adapter crates,
   vendored Pingora patches, compatibility shims, and Pingora-specific docs from
   normal builds. This is the final Pingora-free proof release: `cargo tree`,
   release containers, RPM builds, source builds, and focused artifacts must all
   prove no normal Fluxheim build compiles vendored Pingora code.
-- `v1.6.26`: stabilization/security-only release for the Pingora-free runtime
+- `v1.6.29`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
   checks, long-running soak tests, runtime-baseline comparisons, and
@@ -2703,7 +2719,7 @@ Planned `1.6.x` sequence:
   where practical, using crate-scoped patches and tests. Keep third-party
   transitive `zeroize` use inside crates such as rustls/AWS-LC untouched, and
   avoid mixing this secret-container migration into the runtime cutover slices.
-- `v1.6.27`: native load-balancer compatibility polish after Pingora is gone
+- `v1.6.30`: native load-balancer compatibility polish after Pingora is gone
   from normal builds. Add a Fluxheim-owned nginx/Ketama-compatible consistent
   hash selection mode for operators migrating from nginx or Pingora Ketama
   behavior. Keep the existing rendezvous consistent-hash and bounded-load

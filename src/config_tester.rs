@@ -141,7 +141,31 @@ fn runtime_cutover_report(config: &Config) -> Result<String, Box<dyn Error + Sen
     let summary = plan.native_runtime_cutover_summary();
     let mut report = format!("native-runtime-adapter: {:?}\n", plan.runtime_adapter());
     report.push_str(&summary.to_tsv());
+    report.push_str("native-http1-proxy-candidate\tscope\tstatus\treason\n");
+    for candidate in plan.native_http1_proxy_candidates() {
+        report.push_str("native-http1-proxy-candidate\t");
+        report.push_str(&runtime_cutover_field(candidate.scope()));
+        report.push('\t');
+        if let Some(reason) = candidate.unsupported_reason() {
+            report.push_str("compatibility-required\t");
+            report.push_str(&runtime_cutover_field(&reason.to_string()));
+        } else {
+            report.push_str("native-ready\t");
+            report.push('-');
+        }
+        report.push('\n');
+    }
     Ok(report)
+}
+
+fn runtime_cutover_field(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\t' | '\n' | '\r' => ' ',
+            character => character,
+        })
+        .collect()
 }
 
 fn validate_profile_config(
@@ -752,6 +776,8 @@ mod tests {
         assert!(!report.contains("native-http2\tnative HTTP/2 downstream parity\t1.6.24\n"));
         assert!(!report.contains("admin-control-plane\tnative admin control plane\t1.6.22\n"));
         assert!(!report.contains("metrics-http\tnative metrics HTTP service\t1.6.22\n"));
+        assert!(report.contains("native-http1-proxy-candidate\tscope\tstatus\treason\n"));
+        assert!(report.contains("native-http1-proxy-candidate\tproxy\tnative-ready\t-\n"));
     }
 
     #[test]

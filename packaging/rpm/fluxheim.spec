@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.24
+Version:        1.6.25
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jun 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.25-1
+- Add native HTTP/1 proxy candidate rows to runtime cutover evidence.
+- Re-scope final Pingora dependency deletion to 1.6.28 after route/policy and
+  rich proxy parity slices.
+- Update release metadata for 1.6.25.
+
 * Sat Jun 20 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.24-1
 - Promote native HTTP/2 downstream parity to cutover-ready after completing
   the safety-hook proof.
@@ -189,7 +195,7 @@ fi
 - Re-scope the final Pingora runtime-removal work into measured native cutover
   slices instead of forcing an unsafe production switch.
 - Keep the remaining Pingora compatibility dependency exceptions active until
-  the 1.6.24 final proof target.
+  the 1.6.25 final proof target.
 - Wrap OpenSSL downstream private-key PEM buffers in the Fluxheim
   `sanitization` crate before OpenSSL key import.
 - Update release metadata for the 1.6.20 native runtime cutover contract.

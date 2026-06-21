@@ -7,6 +7,29 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.25 - 2026-06-21
+
+### Changed
+
+- Start the final Pingora-removal checkpoint with explicit compatibility
+  evidence instead of deleting the remaining runtime adapter before rich proxy
+  parity is complete.
+- Extend `fluxheim-config-tester --runtime-cutover` with
+  `native-http1-proxy-candidate` rows that show each configured proxy scope,
+  whether it is native-ready, and the compatibility reason when it is not.
+- Re-scope the remaining Pingora dependency exception target to `1.6.28`, with
+  `1.6.26` and `1.6.27` reserved for native route/policy and rich proxy
+  integration parity.
+- Update release metadata, RPM metadata, and container tag documentation for
+  `v1.6.25`.
+
+### Security
+
+- Keep the native runtime cutover gate strict for blocker rows while allowing
+  non-blocking candidate-detail rows in the evidence report.
+- Keep Pingora dependency exceptions enforced by target version so the final
+  deletion cannot drift past the documented release without CI failing.
+
 ## 1.6.24 - 2026-06-20
 
 ### Changed
