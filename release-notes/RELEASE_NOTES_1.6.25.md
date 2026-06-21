@@ -31,6 +31,13 @@ for ordinary exact, prefix, and fallback proxy routes.
   while allowing candidate-detail rows for audit visibility.
 - Reject invalid native route-proxy request targets and unsafe rewritten paths
   before forwarding.
+- Reject ambiguous interior double-slash forward paths in the native
+  route-proxy strip/rewrite path.
+- Keep regex routes marked as compatibility-required until native regex route
+  matching is implemented.
+- Validate native HTTP/1 proxy candidate row shape in the runtime cutover gate
+  before ignoring those rows for blocker status.
+- Reject single-dot route path segments during config validation.
 - Keep the dependency exception gate active so documented Pingora removal
   targets remain enforced by CI.
 

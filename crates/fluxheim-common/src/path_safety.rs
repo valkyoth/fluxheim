@@ -12,6 +12,9 @@ pub fn safe_forward_path(path: &str) -> bool {
     {
         return false;
     }
+    if path.len() > 1 && path.contains("//") {
+        return false;
+    }
 
     path.split('/').all(safe_forward_path_segment)
 }
@@ -95,6 +98,13 @@ mod tests {
         assert!(!safe_forward_path("/public/./admin"));
         assert!(!safe_forward_path("/public/%2e/admin"));
         assert!(safe_forward_path("/.well-known/acme-challenge/token"));
+    }
+
+    #[test]
+    fn rejects_empty_interior_segments() {
+        assert!(!safe_forward_path("//admin"));
+        assert!(!safe_forward_path("/public//admin"));
+        assert!(safe_forward_path("/"));
     }
 
     #[test]

@@ -190,7 +190,8 @@ fn vhost_policy_supported(vhost: &VhostConfig) -> bool {
 }
 
 fn route_policy_supported(route: &RouteConfig) -> bool {
-    !access_policy_active(&route.access)
+    route.path_regex.is_none()
+        && !access_policy_active(&route.access)
         && !route.rate_limit.enabled
         && !route.concurrency.enabled
         && !route.grpc.enabled

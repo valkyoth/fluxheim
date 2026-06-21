@@ -154,3 +154,16 @@ async fn native_route_proxy_rejects_unsafe_rewritten_path() {
     assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     assert!(response.ends_with("bad request\n"));
 }
+
+#[tokio::test]
+async fn native_route_proxy_rejects_double_slash_after_stripped_prefix() {
+    let upstream = upstream_expect_path("/never", "never").await;
+    let route = NativeHttp1RouteProxyRoute::prefix("/api", Vec::new(), proxy_for(upstream))
+        .with_strip_prefix("/api");
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/api//evil").await;
+
+    assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    assert!(response.ends_with("bad request\n"));
+}

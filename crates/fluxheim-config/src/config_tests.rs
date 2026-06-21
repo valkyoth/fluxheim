@@ -12309,6 +12309,32 @@ fn rejects_invalid_vhost_routes() {
 
     let config: Config = toml::from_str(
         r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "bad"
+            path_prefix = "/one/"
+            strip_prefix = "/one/"
+            rewrite_prefix = "/upstream/./"
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:6012"]
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidRouteRewritePrefix {
+            vhost: "gateway".to_owned(),
+            route: "bad".to_owned(),
+        })
+    );
+
+    let config: Config = toml::from_str(
+        r#"
             [server]
             regex_enabled = true
 

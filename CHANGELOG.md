@@ -33,6 +33,14 @@ behavior when the change improves security or project direction.
   non-blocking candidate-detail rows in the evidence report.
 - Fail closed in the native route-proxy primitive for invalid request targets
   and unsafe rewritten paths.
+- Reject interior double-slash forward paths in the native route-proxy path so
+  stripped or rewritten targets cannot be misclassified as upstream failures or
+  forwarded with ambiguous path semantics.
+- Mark regex routes as native HTTP/1 compatibility blockers until the native
+  route proxy supports regex matchers, and validate candidate-row shape in the
+  native runtime cutover gate before ignoring candidate-detail rows.
+- Reject single-dot route path segments at config validation time so invalid
+  strip/rewrite prefixes fail at startup instead of at request time.
 - Keep Pingora dependency exceptions enforced by target version so the final
   deletion cannot drift past the documented release without CI failing.
 

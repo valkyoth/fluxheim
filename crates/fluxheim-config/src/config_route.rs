@@ -469,7 +469,9 @@ pub fn validate_route_path(
         || value.contains('?')
         || value.contains('#')
         || value.chars().any(char::is_control)
-        || value.split('/').any(|segment| segment == "..")
+        || value
+            .split('/')
+            .any(|segment| matches!(segment, "." | ".."))
     {
         return Err(ConfigError::InvalidRouteMatcher {
             vhost: String::new(),

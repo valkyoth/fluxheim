@@ -158,6 +158,8 @@ fi
 - Add native HTTP/1 proxy candidate rows to runtime cutover evidence.
 - Add the first native HTTP/1 route-proxy execution primitive for exact,
   prefix, and fallback routes with prefix strip/rewrite support.
+- Harden native route-proxy path validation, regex-route cutover reporting,
+  candidate-row validation, and route path config validation.
 - Re-scope final Pingora dependency deletion to 1.6.28 after remaining native
   policy and rich proxy parity slices.
 - Update release metadata for 1.6.25.
