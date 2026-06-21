@@ -313,6 +313,7 @@ impl NativeHttp1Proxy {
             .iter()
             .find(|page| page.status == status)
             .and_then(|page| page.web.handle_error_page(request, &page.path, status))
+            .map(NativeHttp1Response::close_connection)
     }
 }
 

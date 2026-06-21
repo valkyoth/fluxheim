@@ -136,6 +136,17 @@ impl NativeHttp1StaticWeb {
                 return None;
             }
         };
+        let plan = plan_static_response(
+            StaticResponseFile {
+                len: file.len,
+                modified: file.modified,
+            },
+            &request.method,
+            StaticResponseConditions::default(),
+        );
+        if plan.response_body_bytes > MAX_NATIVE_STATIC_BODY_BYTES {
+            return None;
+        }
         self.file_response_with_status(
             request,
             &file,

@@ -77,7 +77,8 @@ cargo test --locked -p fluxheim-server native_http2_preview \
 cargo test --locked -p fluxheim-server native_proxy \
     >"$out_dir/server-native-http1-proxy-tests.txt" 2>&1
 
-scripts/validate-pingora-dependency-policy.sh check \
+FLUXHEIM_PINGORA_POLICY_DIR="$out_dir/pingora-dependency-policy" \
+    scripts/validate-pingora-dependency-policy.sh check \
     >"$out_dir/pingora-dependency-policy.txt" 2>&1
 
 cargo run --quiet --locked --no-default-features --features profile-full,udp-proxy \

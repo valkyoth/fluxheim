@@ -2734,27 +2734,40 @@ Planned `1.6.x` sequence:
   on the compatibility path until each has native parity tests.
 - `v1.6.29`: finish the remaining native HTTP policy blockers that do not need
   cache or PHP state: forwarded-client-IP ownership, auth-request subrequests,
-  traffic mirroring, and inherited global/vhost compression policy. Add live
-  native listener tests for each path and keep unsupported configs explicitly
-  reported in the cutover inventory.
+  traffic mirroring, inherited global/vhost compression policy, root/vhost
+  header policy, vhost access/rate/concurrency policy, vhost redirects,
+  ACME-challenge routing, vhost static-web dispatch, route access/rate/
+  concurrency/grpc flags, route rewrite-template handling, per-proxy
+  downstream timeout/min-send-rate policy, and advanced upstream transport
+  knobs that do not require cache, PHP, dynamic discovery, or load-balancer
+  state. Add live native listener tests for each path and keep unsupported
+  configs explicitly reported in the cutover inventory.
 - `v1.6.30`: move cache and PHP-FPM rich proxy integrations onto native
   adapters. Cache work must cover lookup/fill/stale, Vary/Range/conditional
   semantics, peer-fill guardrails, and purge visibility. PHP-FPM work must
   cover SCRIPT_NAME/PATH_INFO safety, deny prefixes, spool limits, TCP/Unix
   upstream policies, and custom PHP error pages. Keep the compatibility path
-  until fixture and smoke tests prove parity.
+  until fixture and smoke tests prove parity. Also make sure root/vhost cache
+  policy and route cache policy all report native-ready only after the native
+  cache adapter owns the full request/response/cache-key path.
 - `v1.6.31`: finish native load-balancer compatibility and remove the final
-  Pingora runtime/listener/TLS adapter crates from normal builds. Add a
-  Fluxheim-owned nginx/Ketama-compatible consistent hash selection mode for
-  operators migrating from nginx or Pingora Ketama behavior. Keep the existing
-  rendezvous consistent-hash and bounded-load consistent modes as the default
-  Fluxheim algorithms, but document that the compatibility mode is for matching
-  nginx-style request-to-backend mapping. Do not depend on `pingora-ketama`;
-  implement and test the ring behavior in Fluxheim with golden vectors and
-  membership-change remapping tests. This is the final Pingora-free proof
-  release: `cargo tree`, release containers, RPM builds, source builds, and
-  focused artifacts must all prove no normal Fluxheim build compiles vendored
-  Pingora code.
+  Pingora runtime/listener/TLS adapter crates from normal builds. This release
+  must close the remaining proxy gates that need runtime/load-balancer state:
+  dynamic discovery, health-aware selection, persistence, priority groups,
+  locality, backup/drain/disabled policy, max-in-flight, aliases/tags, static
+  weight parity, upstream PROXY protocol, websocket upgrade, upstream HTTP/2,
+  native TLS listener selection, native service supervision, admin/metrics/
+  stream/UDP service registration, and remaining Pingora HTTP/error/cache
+  boundary adapters. Add a Fluxheim-owned nginx/Ketama-compatible consistent
+  hash selection mode for operators migrating from nginx or Pingora Ketama
+  behavior. Keep the existing rendezvous consistent-hash and bounded-load
+  consistent modes as the default Fluxheim algorithms, but document that the
+  compatibility mode is for matching nginx-style request-to-backend mapping.
+  Do not depend on `pingora-ketama`; implement and test the ring behavior in
+  Fluxheim with golden vectors and membership-change remapping tests. This is
+  the final Pingora-free proof release: `cargo tree`, release containers, RPM
+  builds, source builds, and focused artifacts must all prove no normal
+  Fluxheim build compiles vendored Pingora code.
 - `v1.6.32`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
@@ -2770,6 +2783,12 @@ Stable exit criteria:
 - `cargo tree` for every supported official profile contains no Pingora crate.
 - Release containers, RPM builds, source builds, and focused artifacts compile
   without vendored Pingora code.
+- `fluxheim-config-tester --runtime-cutover` reports no blockers for the
+  representative config, and every real compatibility gate in
+  `NativeHttp1ProxyConfigError`, `root_policy_supported`,
+  `vhost_policy_supported`, `route_policy_supported`, and the native runtime
+  summary has either native support, a parity test, or a deliberately documented
+  removal/behavior-change note.
 - `1.6.0` baseline evidence exists before runtime cutovers begin, and later
   `1.6.x` runtime releases compare against it. Regressions in latency, memory,
   startup time, binary size, connection cost, cache hit path, TLS handshake

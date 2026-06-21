@@ -13,6 +13,8 @@ features onto the native HTTP/1 route/proxy adapters.
   only, `200 OK`, compressible content type, bounded input/output size,
   `Accept-Encoding` negotiation, no active `Content-Encoding`, no `Range`
   response, no `Set-Cookie`, and no request `Authorization` or `Cookie`.
+- Native route compression now ranks enabled codecs by the client's
+  `Accept-Encoding` q-values before falling back to Fluxheim's tie-break order.
 - `proxy.error_pages` now builds on the native HTTP/1 proxy for static 502/504
   fallback pages backed by `fluxheim-web`.
 - Native custom proxy error pages preserve the proxy failure status while using
@@ -30,6 +32,8 @@ features onto the native HTTP/1 route/proxy adapters.
 - Custom proxy error pages only serve files resolved by the native static-web
   resolver; directory listings, missing files, forbidden paths, and oversized
   bodies fall back to the standard 502/504 response.
+- Custom proxy error-page responses now close the downstream connection after
+  the upstream failure, matching the built-in 502/504 failure responses.
 - Native error-page serving uses the same symlink-safe `fluxheim-web` path
   validation and rooted file-open behavior as native static routes.
 

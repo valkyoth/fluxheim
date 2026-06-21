@@ -267,8 +267,31 @@ async fn native_proxy_serves_configured_error_page_on_bad_gateway() {
         response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"),
         "unexpected response: {response:?}"
     );
+    assert!(response.contains("\r\nConnection: close\r\n"));
     assert!(response.contains("content-type: text/html"));
     assert!(response.ends_with("native custom 502\n"));
+}
+
+#[tokio::test]
+async fn native_proxy_falls_back_when_configured_error_page_is_too_large() {
+    let errors = tempfile::tempdir().unwrap();
+    let oversized = std::fs::File::create(errors.path().join("502.html")).unwrap();
+    oversized.set_len(64 * 1024 * 1024 + 1).unwrap();
+    let mut config = proxy_config_with_error_page(errors.path().to_path_buf());
+    config.upstream = Some(unused_local_address().await.to_string());
+    let proxy = NativeHttp1Proxy::from_proxy_config(&config, DownstreamHttp1Policy::default())
+        .unwrap()
+        .unwrap();
+    let proxy = proxy_listener_for(proxy).await;
+
+    let response = downstream_get(proxy, "/failing").await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert!(!response.starts_with("HTTP/1.1 413 Payload Too Large\r\n"));
+    assert!(response.ends_with("bad gateway\n"));
 }
 
 #[tokio::test]

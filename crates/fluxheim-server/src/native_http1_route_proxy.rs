@@ -15,8 +15,8 @@ use fluxheim_common::path_safety::safe_forward_path;
 ))]
 use fluxheim_compression::{
     ResponseCompressionEncoder, cache_control_directive_blocks_compression,
-    content_encoding_value_is_active, content_type_is_compressible, encoding_token_allows,
-    input_length_within_compression_bounds,
+    content_encoding_value_is_active, content_type_is_compressible,
+    input_length_within_compression_bounds, parse_accept_encoding_qvalue,
 };
 use fluxheim_config::{
     HeaderValues, ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
@@ -587,30 +587,64 @@ fn selected_route_compression(
         return None;
     }
 
+    let mut candidates = Vec::new();
     #[cfg(feature = "compression-brotli")]
-    if config.brotli && request_accepts_encoding(request, "br") {
-        return Some(ResponseCompressionEncoder::brotli(
-            config.brotli_quality,
-            compression_max_output_bytes(config),
-        ));
+    if config.brotli
+        && let Some(quality) = request_accept_encoding_quality(request, "br")
+    {
+        candidates.push((quality, 0u8, "br"));
     }
     #[cfg(feature = "compression-zstd")]
-    if config.zstd && request_accepts_encoding(request, "zstd") {
-        return ResponseCompressionEncoder::zstd(
-            config.zstd_level,
-            compression_max_output_bytes(config),
-        )
-        .ok();
+    if config.zstd
+        && let Some(quality) = request_accept_encoding_quality(request, "zstd")
+    {
+        candidates.push((quality, 1u8, "zstd"));
     }
     #[cfg(feature = "compression-gzip")]
-    if config.gzip && request_accepts_encoding(request, "gzip") {
-        return Some(ResponseCompressionEncoder::gzip(
-            config.gzip_level,
-            compression_max_output_bytes(config),
-        ));
+    if config.gzip
+        && let Some(quality) = request_accept_encoding_quality(request, "gzip")
+    {
+        candidates.push((quality, 2u8, "gzip"));
+    }
+    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+
+    for (_, _, encoding) in candidates {
+        if let Some(encoder) = route_compression_encoder(encoding, config) {
+            return Some(encoder);
+        }
     }
 
     None
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn route_compression_encoder(
+    encoding: &str,
+    config: &fluxheim_config::CompressionConfig,
+) -> Option<ResponseCompressionEncoder> {
+    match encoding {
+        #[cfg(feature = "compression-brotli")]
+        "br" => Some(ResponseCompressionEncoder::brotli(
+            config.brotli_quality,
+            compression_max_output_bytes(config),
+        )),
+        #[cfg(feature = "compression-zstd")]
+        "zstd" => ResponseCompressionEncoder::zstd(
+            config.zstd_level,
+            compression_max_output_bytes(config),
+        )
+        .ok(),
+        #[cfg(feature = "compression-gzip")]
+        "gzip" => Some(ResponseCompressionEncoder::gzip(
+            config.gzip_level,
+            compression_max_output_bytes(config),
+        )),
+        _ => None,
+    }
 }
 
 #[cfg(any(
@@ -627,13 +661,50 @@ fn compression_max_output_bytes(config: &fluxheim_config::CompressionConfig) -> 
     feature = "compression-gzip",
     feature = "compression-zstd"
 ))]
-fn request_accepts_encoding(request: &NativeHttp1Request, expected: &str) -> bool {
-    request
+fn request_accept_encoding_quality(request: &NativeHttp1Request, expected: &str) -> Option<u16> {
+    let mut wildcard_quality = None;
+    for token in request
         .headers
         .iter()
         .filter(|(name, _)| name.eq_ignore_ascii_case("accept-encoding"))
         .flat_map(|(_, value)| value.split(','))
-        .any(|token| encoding_token_allows(token, expected))
+    {
+        let Some((coding, quality)) = accept_encoding_token_quality(token) else {
+            continue;
+        };
+        if coding.eq_ignore_ascii_case(expected) {
+            return (quality > 0).then_some(quality);
+        }
+        if coding == "*" && quality > 0 {
+            wildcard_quality = Some(wildcard_quality.unwrap_or(0).max(quality));
+        }
+    }
+    wildcard_quality
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn accept_encoding_token_quality(token: &str) -> Option<(&str, u16)> {
+    let mut parts = token.split(';');
+    let coding = parts.next().unwrap_or_default().trim();
+    if coding.is_empty() {
+        return None;
+    }
+    let mut quality = 1000u16;
+    for (name, value) in parts
+        .map(str::trim)
+        .filter_map(|parameter| parameter.split_once('='))
+    {
+        if !name.trim().eq_ignore_ascii_case("q") {
+            continue;
+        }
+        quality = parse_accept_encoding_qvalue(value.trim())?;
+        break;
+    }
+    Some((coding, quality))
 }
 
 #[cfg(any(
