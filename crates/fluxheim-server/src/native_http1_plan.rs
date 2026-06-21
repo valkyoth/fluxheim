@@ -199,7 +199,7 @@ fn route_policy_supported(route: &RouteConfig) -> bool {
         && !route.concurrency.enabled
         && !route.grpc.enabled
         && route.rewrite_template.is_none()
-        && route.headers.request == fluxheim_config::RequestHeaderPolicyOverlayConfig::default()
+        && route_request_header_policy_supported(&route.headers.request)
         && route_response_header_policy_supported(&route.headers.response)
         && route
             .cache
@@ -210,6 +210,17 @@ fn route_policy_supported(route: &RouteConfig) -> bool {
             .as_ref()
             .is_none_or(|compression| !compression.enabled)
         && route.php.as_ref().is_none_or(|php| !php.enabled)
+}
+
+fn route_request_header_policy_supported(
+    request: &fluxheim_config::RequestHeaderPolicyOverlayConfig,
+) -> bool {
+    request.strip_inbound_client_ip_headers.is_none()
+        && request.x_forwarded_for.is_none()
+        && request.x_real_ip.is_none()
+        && request.x_forwarded_host.is_none()
+        && request.x_forwarded_proto.is_none()
+        && request.forwarded.is_none()
 }
 
 fn route_response_header_policy_supported(

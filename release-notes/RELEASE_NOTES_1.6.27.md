@@ -8,9 +8,12 @@ web serving onto the native HTTP/1 route adapter.
 - Native HTTP/1 route static-web adapter backed by the `fluxheim-web` crate.
 - Native static file responses support ETags, conditional requests, byte
   ranges, `HEAD`, cache-control metadata, and directory listings.
+- Route-level native request-header mutation overlays now apply before matched
+  proxy routes are forwarded upstream.
 - The server crate now depends directly on `fluxheim-web` for pure web response
   planning instead of using the root compatibility adapter.
-- Static-web route tests run through a real local native HTTP/1 listener.
+- Static-web and request-header route tests run through a real local native
+  HTTP/1 listener.
 
 ## Security Notes
 
@@ -20,6 +23,9 @@ web serving onto the native HTTP/1 route adapter.
   before opening the file.
 - Buffered native static responses are capped at 64 MiB until the final native
   streaming body path is completed.
+- Forwarded-client-IP shortcut ownership remains a compatibility-path blocker;
+  only explicit request-header unset/set/append mutations are marked native
+  ready in this release.
 
 ## Compatibility
 

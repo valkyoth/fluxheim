@@ -16,6 +16,8 @@ behavior when the change improves security or project direction.
 - Serve route-level native static files through the Fluxheim-owned HTTP/1
   listener with conditional requests, ETags, byte ranges, `HEAD`, cache-control
   metadata, and directory listings.
+- Apply route-level native request-header mutation overlays before matched
+  proxy routes are forwarded upstream.
 - Keep native static-web route tests split from generic route-proxy tests so
   the feature proof stays reviewable.
 - Add `fluxheim-web` as an explicit `fluxheim-server` dependency for the native
@@ -34,6 +36,8 @@ behavior when the change improves security or project direction.
   still rooted under the configured web root and is still a regular file.
 - Bound native buffered static responses to 64 MiB until the final native
   streaming body path is enabled.
+- Keep forwarded-client-IP ownership shortcuts on the compatibility path while
+  allowing only the explicit route request-header mutation subset natively.
 - Keep cache, PHP-FPM, auth-request, traffic mirror, compression, and advanced
   load-balancer policy integrations on the compatibility path until their
   native execution has dedicated parity tests.

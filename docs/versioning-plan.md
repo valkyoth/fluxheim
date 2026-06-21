@@ -2710,10 +2710,12 @@ Planned `1.6.x` sequence:
 - `v1.6.27`: start moving rich proxy integrations onto native adapters by
   landing route-level native static web serving. Reuse `fluxheim-web` for
   ETags, conditional requests, ranges, `HEAD`, directory listings, and
-  symlink-safe path planning, with real native HTTP/1 listener tests. Keep cache
-  lookup/fill/stale paths, PHP-FPM routing, auth-request, traffic mirror,
-  compression, and advanced load-balancer policy selection targeted for the
-  next compatibility-removal slices.
+  symlink-safe path planning, with real native HTTP/1 listener tests. Also move
+  explicit route request-header unset/set/append mutations into the native route
+  proxy while keeping forwarded-client-IP ownership shortcuts on the
+  compatibility path. Keep cache lookup/fill/stale paths, PHP-FPM routing,
+  auth-request, traffic mirror, compression, and advanced load-balancer policy
+  selection targeted for the next compatibility-removal slices.
 - `v1.6.28`: remove remaining Pingora runtime/listener/TLS adapter crates,
   vendored Pingora patches, compatibility shims, and Pingora-specific docs from
   normal builds. This is the final Pingora-free proof release: `cargo tree`,

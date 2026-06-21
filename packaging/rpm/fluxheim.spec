@@ -158,8 +158,12 @@ fi
 - Add native HTTP/1 route static-web serving backed by fluxheim-web.
 - Support native route static ETags, conditionals, ranges, HEAD, cache-control
   metadata, and directory listings.
+- Apply route-level native request-header mutation overlays before forwarding
+  matched proxy routes upstream.
 - Harden native static path containment, symlink rejection, and body-open
   revalidation.
+- Keep forwarded-client-IP shortcut ownership on the compatibility path until
+  native parity tests cover it.
 - Keep cache, PHP-FPM, auth-request, traffic mirror, compression, and advanced
   load-balancer integrations on the compatibility path until native parity
   tests land.

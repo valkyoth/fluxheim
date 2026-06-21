@@ -26,6 +26,7 @@ pub struct NativeHttp1RouteProxyRoute {
     strip_prefix: Option<String>,
     rewrite_prefix: Option<String>,
     max_request_body_bytes: Option<u64>,
+    request_headers: NativeRouteRequestHeaderPolicy,
     response_headers: NativeRouteResponseHeaderPolicy,
     action: NativeHttp1RouteAction,
 }
@@ -48,6 +49,14 @@ enum NativeHttp1RouteAction {
 struct NativeHttp1RouteRedirect {
     to: String,
     status: u16,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct NativeRouteRequestHeaderPolicy {
+    enabled: bool,
+    unset: Vec<String>,
+    set: Vec<(String, String)>,
+    append: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -110,6 +119,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(proxy),
         }
@@ -122,6 +132,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(proxy),
         }
@@ -134,6 +145,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(proxy),
         }
@@ -151,6 +163,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
@@ -171,6 +184,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
@@ -190,6 +204,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::StaticWeb(web),
         }
@@ -236,6 +251,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: route.strip_prefix.clone(),
             rewrite_prefix: route.rewrite_prefix.clone(),
             max_request_body_bytes: route.max_request_body_bytes.map(|bytes| bytes.as_u64()),
+            request_headers: NativeRouteRequestHeaderPolicy::from_overlay(&route.headers.request),
             response_headers: NativeRouteResponseHeaderPolicy::from_overlay(
                 &route.headers.response,
             ),
@@ -263,6 +279,14 @@ impl NativeHttp1RouteProxyRoute {
         response_headers: &ResponseHeaderPolicyOverlayConfig,
     ) -> Self {
         self.response_headers = NativeRouteResponseHeaderPolicy::from_overlay(response_headers);
+        self
+    }
+
+    pub fn with_request_header_policy(
+        mut self,
+        request_headers: &fluxheim_config::RequestHeaderPolicyOverlayConfig,
+    ) -> Self {
+        self.request_headers = NativeRouteRequestHeaderPolicy::from_overlay(request_headers);
         self
     }
 
@@ -300,18 +324,19 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 return NativeHttp1Response::new(404, "Not Found", b"not found\n")
                     .close_connection();
             };
-            let request = match route_or_fallback.rewrite_request(request, &path, query.as_deref())
-            {
-                Some(request) => request,
-                None => {
-                    return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
-                        .close_connection();
-                }
-            };
+            let mut request =
+                match route_or_fallback.rewrite_request(request, &path, query.as_deref()) {
+                    Some(request) => request,
+                    None => {
+                        return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
+                            .close_connection();
+                    }
+                };
             if route_or_fallback.request_body_too_large(&request) {
                 return NativeHttp1Response::new(413, "Payload Too Large", b"payload too large\n")
                     .close_connection();
             }
+            route_or_fallback.apply_request_headers(&mut request);
             match route_or_fallback {
                 RouteOrFallback::Route(route) => route.handle(request).await,
                 RouteOrFallback::Fallback(proxy) => proxy.handle(request).await,
@@ -345,6 +370,12 @@ impl<'a> RouteOrFallback<'a> {
                 .max_request_body_bytes
                 .is_some_and(|limit| (request.body.len() as u64) > limit),
             Self::Fallback(_) => false,
+        }
+    }
+
+    fn apply_request_headers(self, request: &mut NativeHttp1Request) {
+        if let Self::Route(route) = self {
+            route.request_headers.apply(request);
         }
     }
 }
@@ -545,6 +576,37 @@ fn redirect_location_path_safe(location: &str) -> bool {
         .unwrap_or(path_and_tail.len());
     let path = &path_and_tail[..path_end];
     !path.contains("//") && !path.split('/').any(|segment| matches!(segment, "." | ".."))
+}
+
+impl NativeRouteRequestHeaderPolicy {
+    fn from_overlay(overlay: &fluxheim_config::RequestHeaderPolicyOverlayConfig) -> Self {
+        Self {
+            enabled: overlay.enabled.unwrap_or(true),
+            unset: overlay.effective_unset(),
+            set: overlay.effective_set().into_iter().collect(),
+            append: flatten_append_headers(&overlay.append),
+        }
+    }
+
+    fn apply(&self, request: &mut NativeHttp1Request) {
+        if !self.enabled {
+            return;
+        }
+        for name in &self.unset {
+            request
+                .headers
+                .retain(|(header_name, _)| !header_name.eq_ignore_ascii_case(name));
+        }
+        for (name, value) in &self.set {
+            request
+                .headers
+                .retain(|(header_name, _)| !header_name.eq_ignore_ascii_case(name));
+            request.headers.push((name.clone(), value.clone()));
+        }
+        for (name, value) in &self.append {
+            request.headers.push((name.clone(), value.clone()));
+        }
+    }
 }
 
 impl NativeRouteResponseHeaderPolicy {

@@ -51,6 +51,54 @@ async fn upstream_expect_path(
     addr
 }
 
+async fn upstream_expect_header(
+    expected_path: &'static str,
+    expected_header: &'static str,
+    expected_value: &'static str,
+    forbidden_header: &'static str,
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(request).unwrap();
+        assert!(
+            request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
+            "unexpected upstream request: {request:?}"
+        );
+        assert!(
+            request.lines().any(|line| {
+                line.eq_ignore_ascii_case(&format!("{expected_header}: {expected_value}"))
+            }),
+            "missing expected header in upstream request: {request:?}"
+        );
+        assert!(
+            !request.lines().any(|line| {
+                line.split_once(':')
+                    .is_some_and(|(name, _)| name.eq_ignore_ascii_case(forbidden_header))
+            }),
+            "forbidden header reached upstream request: {request:?}"
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 7\r\n\r\nheaders")
+            .await
+            .unwrap();
+    });
+    addr
+}
+
 async fn route_proxy_listener(route_proxy: NativeHttp1RouteProxy) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -315,6 +363,30 @@ async fn native_route_proxy_applies_route_response_headers() {
     );
     assert!(response.contains("set-cookie: a=1\r\n"));
     assert!(response.contains("set-cookie: b=2\r\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_applies_route_request_headers_before_forwarding() {
+    let upstream = upstream_expect_header("/api/item", "x-route", "native", "x-remove").await;
+    let mut set = BTreeMap::new();
+    set.insert("x-route".to_owned(), "native".to_owned());
+    let policy = fluxheim_config::RequestHeaderPolicyOverlayConfig {
+        unset: vec!["x-remove".to_owned()],
+        set,
+        ..Default::default()
+    };
+    let route = NativeHttp1RouteProxyRoute::prefix("/api/", Vec::new(), proxy_for(upstream))
+        .with_request_header_policy(&policy);
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_request(
+        proxy,
+        "GET /api/item HTTP/1.1\r\nHost: route.test\r\nX-Remove: secret\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("headers"));
 }
 
 #[tokio::test]
