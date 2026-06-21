@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.27
+Version:        1.6.28
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,18 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jun 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.28-1
+- Add native route-level response compression for gzip, Brotli, and zstd.
+- Honor Accept-Encoding q-values when selecting native route compression
+  algorithms.
+- Add native proxy custom error-page serving for upstream failures.
+- Harden custom error-page responses to close the downstream connection.
+- Fall back to built-in proxy error responses when configured error-page files
+  are too large.
+- Harden redirect {query} path expansion against double-encoded traversal.
+- Update native runtime cutover evidence isolation and release metadata for
+  1.6.28.
+
 * Sun Jun 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.27-1
 - Add native HTTP/1 route static-web serving backed by fluxheim-web.
 - Support native route static ETags, conditionals, ranges, HEAD, cache-control
