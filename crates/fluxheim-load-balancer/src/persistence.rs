@@ -2,7 +2,7 @@ use std::net::IpAddr;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use subtle::ConstantTimeEq;
+use sanitization::ct::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
 
 use fluxheim_config::{
@@ -749,5 +749,21 @@ mod tests {
 
         let replay = TestRequest::default().with_header("cookie", format!("other_lb={token}"));
         assert_eq!(managed_cookie_key(&replay, "other_lb"), None);
+    }
+
+    #[test]
+    fn managed_cookie_hmac_rejects_tampered_tag() {
+        let key = [3_u8; MANAGED_COOKIE_KEY_BYTES];
+        let token = managed_cookie_token(b"fluxheim_lb", &key).unwrap();
+        let mut tampered = token.into_bytes();
+        let last = tampered
+            .last_mut()
+            .expect("managed-cookie token is non-empty");
+        *last = if *last == b'A' { b'B' } else { b'A' };
+        let tampered = String::from_utf8(tampered).unwrap();
+        let request =
+            TestRequest::default().with_header("cookie", format!("fluxheim_lb={tampered}"));
+
+        assert_eq!(managed_cookie_key(&request, "fluxheim_lb"), None);
     }
 }

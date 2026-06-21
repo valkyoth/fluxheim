@@ -16,9 +16,9 @@ use http::{HeaderMap, Response, StatusCode, header};
 use pingora::apps::http_app::{HttpServer, ServeHttp};
 use pingora::protocols::http::ServerSession;
 use pingora::services::listening::Service;
+use sanitization::ct::ConstantTimeEq;
 use serde::Serialize;
 use serde_json::{Value, json};
-use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::config::{AdminAuthThrottleConfig, AdminConfig, AdminHealthResponseMode, Config};
@@ -3197,7 +3197,8 @@ fn constant_time_eq(candidate: &[u8], token: &AdminToken) -> bool {
     let candidate_digest = digest_admin_token(candidate, token.mac_provider);
     let candidate_len = (candidate.len() as u64).to_le_bytes();
     let token_len = (token.len as u64).to_le_bytes();
-    bool::from(candidate_digest.ct_eq(&token.digest) & candidate_len.ct_eq(&token_len))
+    (candidate_digest.ct_eq(&token.digest) & candidate_len.ct_eq(&token_len))
+        .declassify("admin bearer-token comparison result is public")
 }
 
 fn digest_admin_token(
@@ -4240,8 +4241,9 @@ mod tests {
 
     use super::{
         AdminApp, AdminAuthThrottle, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
-        admin_services_from_config, authorized, constant_time_eq, error_response, json_response,
-        native_admin_target_parts, read_bounded_secret_file, read_secret_file,
+        admin_fingerprint_list_contains, admin_services_from_config, authorized, constant_time_eq,
+        error_response, json_response, native_admin_target_parts, read_bounded_secret_file,
+        read_secret_file,
     };
     #[cfg(feature = "cache")]
     use crate::config::ByteSize;
@@ -7842,6 +7844,7 @@ mod tests {
         let token = AdminToken::new("secret-token", false);
         assert!(authorized(Some("Bearer secret-token"), &token));
         assert!(!authorized(Some("Bearer secret"), &token));
+        assert!(!authorized(Some("Bearer secret-token-extra"), &token));
         assert!(!constant_time_eq(b"secret", &token));
         assert!(!authorized(
             Some(&format!(
@@ -7849,6 +7852,22 @@ mod tests {
                 "a".repeat(super::MAX_ADMIN_TOKEN_BYTES + 1)
             )),
             &token
+        ));
+    }
+
+    #[test]
+    fn certificate_fingerprint_comparison_uses_exact_length_match() {
+        let fingerprint = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let values = vec![fingerprint.to_owned()];
+
+        assert!(admin_fingerprint_list_contains(&values, fingerprint));
+        assert!(!admin_fingerprint_list_contains(
+            &values,
+            &fingerprint[..63]
+        ));
+        assert!(!admin_fingerprint_list_contains(
+            &values,
+            &format!("{fingerprint}a")
         ));
     }
 
