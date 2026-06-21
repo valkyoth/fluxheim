@@ -2,6 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use fluxheim_common::path_safety::safe_forward_path;
+use fluxheim_config::{HeaderValues, ResponseHeaderPolicyOverlayConfig};
 use fluxheim_protocol::{
     Http1RequestTarget, http1_request_target, route_method_matches, route_prefix_matches_path,
     route_strip_prefix_suffix,
@@ -22,6 +23,7 @@ pub struct NativeHttp1RouteProxyRoute {
     strip_prefix: Option<String>,
     rewrite_prefix: Option<String>,
     max_request_body_bytes: Option<u64>,
+    response_headers: NativeRouteResponseHeaderPolicy,
     action: NativeHttp1RouteAction,
 }
 
@@ -42,6 +44,14 @@ enum NativeHttp1RouteAction {
 struct NativeHttp1RouteRedirect {
     to: String,
     status: u16,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct NativeRouteResponseHeaderPolicy {
+    enabled: bool,
+    unset: Vec<String>,
+    set: Vec<(String, String)>,
+    append: Vec<(String, String)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -94,6 +104,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(proxy),
         }
     }
@@ -105,6 +116,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(proxy),
         }
     }
@@ -116,6 +128,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(proxy),
         }
     }
@@ -132,6 +145,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
                 status,
@@ -151,6 +165,7 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
                 status,
@@ -193,6 +208,9 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: route.strip_prefix.clone(),
             rewrite_prefix: route.rewrite_prefix.clone(),
             max_request_body_bytes: route.max_request_body_bytes.map(|bytes| bytes.as_u64()),
+            response_headers: NativeRouteResponseHeaderPolicy::from_overlay(
+                &route.headers.response,
+            ),
             action,
         })
     }
@@ -209,6 +227,14 @@ impl NativeHttp1RouteProxyRoute {
 
     pub const fn with_max_request_body_bytes(mut self, max_request_body_bytes: u64) -> Self {
         self.max_request_body_bytes = Some(max_request_body_bytes);
+        self
+    }
+
+    pub fn with_response_header_policy(
+        mut self,
+        response_headers: &ResponseHeaderPolicyOverlayConfig,
+    ) -> Self {
+        self.response_headers = NativeRouteResponseHeaderPolicy::from_overlay(response_headers);
         self
     }
 
@@ -330,10 +356,12 @@ impl NativeHttp1RouteProxyRoute {
     }
 
     async fn handle(&self, request: NativeHttp1Request) -> NativeHttp1Response {
-        match &self.action {
+        let mut response = match &self.action {
             NativeHttp1RouteAction::Proxy(proxy) => proxy.handle(request).await,
             NativeHttp1RouteAction::Redirect(redirect) => redirect_response(&request, redirect),
-        }
+        };
+        self.response_headers.apply(&mut response);
+        response
     }
 }
 
@@ -456,4 +484,77 @@ fn valid_redirect_location(location: &str) -> bool {
         && !location
             .chars()
             .any(|character| character.is_control() || character.is_whitespace())
+}
+
+impl NativeRouteResponseHeaderPolicy {
+    fn from_overlay(overlay: &ResponseHeaderPolicyOverlayConfig) -> Self {
+        let mut policy = Self {
+            enabled: overlay.enabled.unwrap_or(true),
+            unset: overlay.effective_unset(),
+            set: overlay.effective_set().into_iter().collect(),
+            append: flatten_append_headers(&overlay.append),
+        };
+        policy.apply_standard_headers(overlay);
+        policy
+    }
+
+    fn apply_standard_headers(&mut self, overlay: &ResponseHeaderPolicyOverlayConfig) {
+        if let Some(value) = &overlay.hsts {
+            self.set_optional_header(
+                "strict-transport-security",
+                value.as_ref().and_then(|hsts| hsts.header_value()),
+            );
+        }
+        if let Some(value) = &overlay.strict_transport_security {
+            self.set_optional_header("strict-transport-security", value.clone());
+        }
+        if let Some(value) = &overlay.content_security_policy {
+            self.set_optional_header("content-security-policy", value.clone());
+        }
+        if let Some(value) = &overlay.x_content_type_options {
+            self.set_optional_header("x-content-type-options", value.clone());
+        }
+        if let Some(value) = &overlay.x_frame_options {
+            self.set_optional_header("x-frame-options", value.clone());
+        }
+        if let Some(value) = &overlay.referrer_policy {
+            self.set_optional_header("referrer-policy", value.clone());
+        }
+    }
+
+    fn set_optional_header(&mut self, name: &str, value: Option<String>) {
+        if let Some(value) = value {
+            self.set.push((name.to_owned(), value));
+        } else {
+            self.unset.push(name.to_owned());
+        }
+    }
+
+    fn apply(&self, response: &mut NativeHttp1Response) {
+        if !self.enabled {
+            return;
+        }
+        for name in &self.unset {
+            response.remove_header(name);
+        }
+        for (name, value) in &self.set {
+            response.remove_header(name);
+            response.push_header(name.clone(), value.clone());
+        }
+        for (name, value) in &self.append {
+            response.push_header(name.clone(), value.clone());
+        }
+    }
+}
+
+fn flatten_append_headers(
+    append: &std::collections::BTreeMap<String, HeaderValues>,
+) -> Vec<(String, String)> {
+    let mut flattened = Vec::new();
+    for (name, values) in append {
+        for value in values.iter() {
+            flattened.push((name.clone(), value.to_owned()));
+        }
+    }
+    flattened
 }

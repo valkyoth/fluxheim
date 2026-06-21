@@ -196,7 +196,8 @@ fn route_policy_supported(route: &RouteConfig) -> bool {
         && !route.concurrency.enabled
         && !route.grpc.enabled
         && route.rewrite_template.is_none()
-        && route.headers == fluxheim_config::VhostHeaderPolicyConfig::default()
+        && route.headers.request == fluxheim_config::RequestHeaderPolicyOverlayConfig::default()
+        && route_response_header_policy_supported(&route.headers.response)
         && route
             .cache
             .as_ref()
@@ -207,6 +208,12 @@ fn route_policy_supported(route: &RouteConfig) -> bool {
             .is_none_or(|compression| !compression.enabled)
         && route.web.as_ref().is_none_or(|web| !web.enabled())
         && route.php.as_ref().is_none_or(|php| !php.enabled)
+}
+
+fn route_response_header_policy_supported(
+    response: &fluxheim_config::ResponseHeaderPolicyOverlayConfig,
+) -> bool {
+    response.rewrite == fluxheim_config::ResponseHeaderRewriteConfig::default()
 }
 
 fn access_policy_active(access: &AccessPolicyConfig) -> bool {

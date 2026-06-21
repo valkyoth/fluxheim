@@ -159,6 +159,8 @@ fi
   actions.
 - Support safe native redirect expansion for {uri}, {path}, and {query}.
 - Enforce native route request-body limits before forwarding matched requests.
+- Apply route-level native response header overlays for supported native route
+  proxy responses.
 - Keep richer route policies and proxy integrations on the documented
   compatibility path until their native parity tests are added.
 

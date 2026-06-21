@@ -2702,9 +2702,11 @@ Planned `1.6.x` sequence:
 - `v1.6.26`: move the remaining native policy execution closer to parity for
   ordinary proxy configs. Add native route redirect actions with safe `{uri}`,
   `{path}`, and `{query}` expansion, and enforce route-level request body
-  limits before forwarding. Keep header policy, access policy,
-  forwarded-header handling, and compression hooks targeted for follow-up
-  slices with native request/response tests.
+  limits before forwarding. Apply route-level response header overlays for
+  supported native route-proxy responses. Keep request-header mutation,
+  response-header rewrites, access policy, forwarded-header handling, and
+  compression hooks targeted for follow-up slices with native request/response
+  tests.
 - `v1.6.27`: move rich proxy integrations onto native adapters where possible:
   cache lookup/fill/stale paths, static web fallback, PHP-FPM routing,
   auth-request, traffic mirror, and load-balancer policy selection. Keep tests

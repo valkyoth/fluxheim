@@ -18,6 +18,9 @@ behavior when the change improves security or project direction.
   compatibility proxy path.
 - Enforce route-level `max_request_body_bytes` in the native HTTP/1 route proxy
   before forwarding matched requests.
+- Apply route-level native response header overlays for native route proxy
+  responses, including set, append, unset, and the standard security header
+  shortcuts.
 - Allow `NativeHttp1RouteProxyRoute::from_config` to build redirect-only route
   actions without requiring a dummy native upstream proxy.
 - Update release metadata, RPM metadata, and container tag documentation for
@@ -30,8 +33,9 @@ behavior when the change improves security or project direction.
   non-HTTP(S) redirect targets.
 - Return `413 Payload Too Large` from the native route proxy when a matched
   route-specific body limit is exceeded.
-- Keep regex routes and richer route policies on the compatibility path until
-  their native execution has dedicated parity tests.
+- Keep regex routes, request-header mutation, response-header rewrites, access
+  policy, and richer proxy integrations on the compatibility path until their
+  native execution has dedicated parity tests.
 
 ## 1.6.25 - 2026-06-21
 

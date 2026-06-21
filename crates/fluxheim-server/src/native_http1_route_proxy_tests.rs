@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fluxheim_config::{HeaderValues, ResponseHeaderPolicyOverlayConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -93,10 +95,12 @@ fn proxy_for(upstream: std::net::SocketAddr) -> NativeHttp1Proxy {
 }
 
 fn response_header(response: &str, name: &str) -> Option<String> {
-    let prefix = format!("{name}:");
+    let expected = name.to_ascii_lowercase();
     response.lines().find_map(|line| {
-        line.strip_prefix(&prefix)
-            .map(|value| value.trim().to_owned())
+        let (header_name, value) = line.split_once(':')?;
+        header_name
+            .eq_ignore_ascii_case(&expected)
+            .then(|| value.trim().to_owned())
     })
 }
 
@@ -232,6 +236,81 @@ async fn native_route_proxy_rejects_route_body_over_limit() {
 
     assert!(response.starts_with("HTTP/1.1 413 Payload Too Large\r\n"));
     assert!(response.ends_with("payload too large\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_applies_route_response_headers() {
+    let mut set = BTreeMap::new();
+    set.insert("x-route".to_owned(), "native".to_owned());
+    set.insert(
+        "location".to_owned(),
+        "https://override.example/target".to_owned(),
+    );
+    let mut append = BTreeMap::new();
+    append.insert(
+        "set-cookie".to_owned(),
+        HeaderValues::Many(vec!["a=1".to_owned(), "b=2".to_owned()]),
+    );
+    let policy = ResponseHeaderPolicyOverlayConfig {
+        x_frame_options: Some(Some("DENY".to_owned())),
+        set,
+        append,
+        ..Default::default()
+    };
+    let route = NativeHttp1RouteProxyRoute::prefix_redirect(
+        "/old/",
+        Vec::new(),
+        "https://new.example{uri}",
+        302,
+    )
+    .with_response_header_policy(&policy);
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/old/path").await;
+
+    assert!(response.starts_with("HTTP/1.1 302 Found\r\n"));
+    assert_eq!(
+        response_header(&response, "x-route").as_deref(),
+        Some("native")
+    );
+    assert_eq!(
+        response_header(&response, "x-frame-options").as_deref(),
+        Some("DENY")
+    );
+    assert_eq!(
+        response_header(&response, "location").as_deref(),
+        Some("https://override.example/target")
+    );
+    assert!(response.contains("set-cookie: a=1\r\n"));
+    assert!(response.contains("set-cookie: b=2\r\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_skips_disabled_route_response_headers() {
+    let mut set = BTreeMap::new();
+    set.insert("x-route".to_owned(), "native".to_owned());
+    let policy = ResponseHeaderPolicyOverlayConfig {
+        enabled: Some(false),
+        set,
+        ..Default::default()
+    };
+    let route = NativeHttp1RouteProxyRoute::exact_redirect(
+        "/old",
+        Vec::new(),
+        "https://new.example{uri}",
+        302,
+    )
+    .with_response_header_policy(&policy);
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/old").await;
+
+    assert!(response.starts_with("HTTP/1.1 302 Found\r\n"));
+    assert_eq!(response_header(&response, "x-route"), None);
+    assert_eq!(
+        response_header(&response, "location").as_deref(),
+        Some("https://new.example/old")
+    );
 }
 
 #[test]

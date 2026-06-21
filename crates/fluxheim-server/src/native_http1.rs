@@ -79,6 +79,15 @@ impl NativeHttp1Response {
         &self.headers
     }
 
+    pub(crate) fn remove_header(&mut self, name: &str) {
+        self.headers
+            .retain(|(header_name, _)| !header_name.eq_ignore_ascii_case(name));
+    }
+
+    pub(crate) fn push_header(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.headers.push((name.into(), value.into()));
+    }
+
     pub const fn content_length(&self) -> Option<u64> {
         self.content_length
     }
