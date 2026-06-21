@@ -140,7 +140,10 @@ native HTTP/2 upstream safety, simple native proxy/cache/static/PHP cutover,
 full official-profile cutover, HTTP/2 downstream parity proof, explicit
 compatibility-blocker evidence, route/policy parity, rich proxy integration
 parity, final Pingora dependency removal, a security-only stabilization
-release, and then nginx/Ketama-compatible load-balancer hash polish. The line
+release, and then nginx/Ketama-compatible load-balancer hash polish. The
+`1.6.25` slice begins route/policy parity with a native exact/prefix/fallback
+route-proxy primitive while keeping richer policy integrations in the following
+checkpoints. The line
 should keep behavior stable while moving code into focused crates where that
 reduces review surface. Shared Wasm
 extensibility moves to `1.7`; it should cover the operational jobs normally

@@ -6,7 +6,9 @@ the remaining compatibility runtime still owns rich proxy behavior such as
 cache, web/PHP fallback, auth-request, traffic mirror, redirects, rewrites,
 compression, and advanced load-balancer policy. This release makes those
 remaining blockers visible per configured proxy scope instead of removing the
-adapter before parity is finished.
+adapter before parity is finished. It also starts the route/policy parity work
+inside the same release by adding a tested native HTTP/1 route-proxy primitive
+for ordinary exact, prefix, and fallback proxy routes.
 
 ## Changed
 
@@ -14,9 +16,12 @@ adapter before parity is finished.
   `fluxheim-config-tester --runtime-cutover`.
 - Report each configured proxy scope as `native-ready` or
   `compatibility-required` with the exact native HTTP/1 proxy reason.
+- Add native HTTP/1 route proxy handling for exact, prefix, and fallback
+  routes with method filters, longest-prefix selection, prefix strip/rewrite,
+  and query preservation.
 - Re-scope remaining Pingora dependency exceptions to `1.6.28`; `1.6.26` and
-  `1.6.27` are now the native route/policy and rich proxy integration parity
-  slices.
+  `1.6.27` are now the remaining native policy and rich proxy integration
+  parity slices.
 - Update release metadata, RPM metadata, and container tag documentation for
   `v1.6.25`.
 
@@ -24,6 +29,8 @@ adapter before parity is finished.
 
 - Keep blocker rows in the native runtime cutover evidence strictly validated
   while allowing candidate-detail rows for audit visibility.
+- Reject invalid native route-proxy request targets and unsafe rewritten paths
+  before forwarding.
 - Keep the dependency exception gate active so documented Pingora removal
   targets remain enforced by CI.
 

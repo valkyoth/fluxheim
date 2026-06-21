@@ -17,9 +17,13 @@ behavior when the change improves security or project direction.
 - Extend `fluxheim-config-tester --runtime-cutover` with
   `native-http1-proxy-candidate` rows that show each configured proxy scope,
   whether it is native-ready, and the compatibility reason when it is not.
+- Add the first native HTTP/1 route-proxy execution primitive for exact,
+  prefix, and fallback routes, including method filters, longest-prefix
+  selection, prefix stripping, prefix rewriting, query preservation, and
+  shared path-safety checks.
 - Re-scope the remaining Pingora dependency exception target to `1.6.28`, with
-  `1.6.26` and `1.6.27` reserved for native route/policy and rich proxy
-  integration parity.
+  `1.6.26` and `1.6.27` reserved for the remaining native policy and rich
+  proxy integration parity.
 - Update release metadata, RPM metadata, and container tag documentation for
   `v1.6.25`.
 
@@ -27,6 +31,8 @@ behavior when the change improves security or project direction.
 
 - Keep the native runtime cutover gate strict for blocker rows while allowing
   non-blocking candidate-detail rows in the evidence report.
+- Fail closed in the native route-proxy primitive for invalid request targets
+  and unsafe rewritten paths.
 - Keep Pingora dependency exceptions enforced by target version so the final
   deletion cannot drift past the documented release without CI failing.
 

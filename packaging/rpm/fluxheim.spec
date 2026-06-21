@@ -156,8 +156,10 @@ fi
 %changelog
 * Sun Jun 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.25-1
 - Add native HTTP/1 proxy candidate rows to runtime cutover evidence.
-- Re-scope final Pingora dependency deletion to 1.6.28 after route/policy and
-  rich proxy parity slices.
+- Add the first native HTTP/1 route-proxy execution primitive for exact,
+  prefix, and fallback routes with prefix strip/rewrite support.
+- Re-scope final Pingora dependency deletion to 1.6.28 after remaining native
+  policy and rich proxy parity slices.
 - Update release metadata for 1.6.25.
 
 * Sat Jun 20 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.24-1

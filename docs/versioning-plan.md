@@ -2692,14 +2692,17 @@ Planned `1.6.x` sequence:
 - `v1.6.25`: harden the Pingora-exit evidence before final deletion. Add
   per-proxy native HTTP/1 candidate rows to the runtime cutover report so
   cache, web, PHP, auth, traffic mirror, rewrite, compression, and advanced
-  load-balancer blockers are visible per configured scope. Re-scope the
-  dependency exception target to the final deletion release rather than
+  load-balancer blockers are visible per configured scope. Add the first native
+  HTTP/1 route-proxy execution primitive for ordinary exact, prefix, and
+  fallback proxy routes, including method filters, longest-prefix selection,
+  prefix rewrite/strip, query preservation, and safe-path validation. Re-scope
+  the dependency exception target to the final deletion release rather than
   pretending the rich proxy path can be removed without finishing those parity
   slices.
-- `v1.6.26`: move native route/policy execution closer to parity for ordinary
-  proxy configs: route matching, header policy, access policy, redirects,
-  prefix rewrite/strip, request body limits, forwarded-header handling, and
-  compression hooks should be exercised through native request/response types.
+- `v1.6.26`: move the remaining native policy execution closer to parity for
+  ordinary proxy configs: header policy, access policy, redirects, request body
+  limits, forwarded-header handling, and compression hooks should be exercised
+  through native request/response types.
 - `v1.6.27`: move rich proxy integrations onto native adapters where possible:
   cache lookup/fill/stale paths, static web fallback, PHP-FPM routing,
   auth-request, traffic mirror, and load-balancer policy selection. Keep tests

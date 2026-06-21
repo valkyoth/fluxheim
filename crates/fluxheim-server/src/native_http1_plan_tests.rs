@@ -176,7 +176,7 @@ fn server_plan_rejects_native_http1_route_proxy_candidate_with_route_policy() {
 }
 
 #[test]
-fn server_plan_rejects_native_http1_route_proxy_candidate_with_route_rewrite() {
+fn server_plan_accepts_native_http1_route_proxy_candidate_with_prefix_rewrite() {
     let config = Config {
         vhosts: vec![VhostConfig {
             name: "native.test".to_owned(),
@@ -227,10 +227,7 @@ fn server_plan_rejects_native_http1_route_proxy_candidate_with_route_rewrite() {
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
-    assert_eq!(
-        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::HttpPolicy)
-    );
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
 }
 
 #[test]
@@ -421,7 +418,10 @@ fn server_plan_reports_mixed_native_http1_proxy_cutover_summary() {
                 }),
                 web: None,
                 php: None,
-                cache: None,
+                cache: Some(CacheConfig {
+                    enabled: true,
+                    ..Default::default()
+                }),
                 compression: None,
                 headers: Default::default(),
             }],

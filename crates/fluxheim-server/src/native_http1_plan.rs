@@ -195,8 +195,6 @@ fn route_policy_supported(route: &RouteConfig) -> bool {
         && !route.concurrency.enabled
         && !route.grpc.enabled
         && route.redirect.is_none()
-        && route.strip_prefix.is_none()
-        && route.rewrite_prefix.is_none()
         && route.rewrite_template.is_none()
         && route.headers == fluxheim_config::VhostHeaderPolicyConfig::default()
         && route

@@ -1210,6 +1210,7 @@ name = "fluxheim-server"
 version = "1.6.25"
 dependencies = [
  "bytes",
+ "fluxheim-common",
  "fluxheim-config",
  "fluxheim-protocol",
  "fluxheim-runtime",
