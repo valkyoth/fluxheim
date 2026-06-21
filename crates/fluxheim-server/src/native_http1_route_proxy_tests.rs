@@ -305,6 +305,22 @@ async fn native_route_proxy_redirect_rejects_query_path_traversal_expansion() {
 }
 
 #[tokio::test]
+async fn native_route_proxy_redirect_rejects_percent_encoded_query_path_traversal_expansion() {
+    let route = NativeHttp1RouteProxyRoute::exact_redirect(
+        "/file",
+        Vec::new(),
+        "https://cdn.example/files/{query}",
+        302,
+    );
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/file?%2e%2e/%2e%2e/admin/secrets").await;
+
+    assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    assert!(response.ends_with("invalid redirect target\n"));
+}
+
+#[tokio::test]
 async fn native_route_proxy_redirect_rejects_double_slash_location_path() {
     let route = NativeHttp1RouteProxyRoute::exact_redirect(
         "/file",
@@ -315,6 +331,22 @@ async fn native_route_proxy_redirect_rejects_double_slash_location_path() {
     let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
 
     let response = downstream_get(proxy, "/file").await;
+
+    assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    assert!(response.ends_with("invalid redirect target\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_redirect_rejects_percent_encoded_double_slash_location_path() {
+    let route = NativeHttp1RouteProxyRoute::exact_redirect(
+        "/file",
+        Vec::new(),
+        "https://cdn.example/files/{query}",
+        302,
+    );
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/file?%2f%2fadmin").await;
 
     assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     assert!(response.ends_with("invalid redirect target\n"));

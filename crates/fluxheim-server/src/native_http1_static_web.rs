@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{self, Read, Seek};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use fluxheim_config::{DirectoryListingConfig, WebConfig};
@@ -90,6 +90,12 @@ impl NativeHttp1StaticWeb {
     }
 
     pub fn handle(&self, request: &NativeHttp1Request, request_path: &str) -> NativeHttp1Response {
+        if !static_web_method_allowed(&request.method) {
+            return NativeHttp1Response::new(405, "Method Not Allowed", b"method not allowed\n")
+                .with_header("allow", "GET, HEAD")
+                .close_connection();
+        }
+
         match self.resolve(request_path) {
             Ok(NativeStaticResolve::Found(file)) => self.file_response(request, &file),
             Ok(NativeStaticResolve::DirectoryListing(listing)) => {
@@ -409,14 +415,61 @@ fn open_static_body_file(file: &NativeStaticFile) -> io::Result<File> {
             "static body path escaped web root",
         ));
     }
-    let metadata = std::fs::symlink_metadata(&canonical)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    let opened = open_static_body_file_at_root(file, &relative.as_path())?;
+    let metadata = opened.metadata()?;
+    if !metadata.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "static body path is not a regular file",
         ));
     }
-    File::open(canonical)
+    Ok(opened)
+}
+
+fn open_static_body_file_at_root(
+    file: &NativeStaticFile,
+    relative_path: &Path,
+) -> io::Result<File> {
+    let directory_flags =
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC;
+    let nofollow_directory_flags = directory_flags | rustix::fs::OFlags::NOFOLLOW;
+    let file_flags =
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW;
+
+    let mut directory = rustix::fs::open(
+        &file.root,
+        nofollow_directory_flags,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(io::Error::from)?;
+    let mut components = relative_path.components().peekable();
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "static body path is not relative",
+            ));
+        };
+        let name = Path::new(name);
+        if components.peek().is_some() {
+            directory = rustix::fs::openat(
+                &directory,
+                name,
+                nofollow_directory_flags,
+                rustix::fs::Mode::empty(),
+            )
+            .map_err(io::Error::from)?;
+        } else {
+            let file = rustix::fs::openat(&directory, name, file_flags, rustix::fs::Mode::empty())
+                .map_err(io::Error::from)?;
+            return Ok(File::from(file));
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "static body path is empty",
+    ))
 }
 
 fn directory_listing_response(
@@ -436,6 +489,10 @@ fn directory_listing_response(
         .with_header("cache-control", "private, no-store")
 }
 
+fn static_web_method_allowed(method: &str) -> bool {
+    matches!(method, "GET" | "HEAD")
+}
+
 fn static_reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
@@ -444,6 +501,39 @@ fn static_reason(status: u16) -> &'static str {
         412 => "Precondition Failed",
         416 => "Range Not Satisfiable",
         _ => "OK",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::SystemTime;
+
+    use tempfile::TempDir;
+
+    use super::{NativeStaticFile, open_static_body_file};
+
+    #[cfg(unix)]
+    #[test]
+    fn open_static_body_file_rejects_symlink_swapped_after_resolution() {
+        let root = TempDir::new().unwrap();
+        let asset = root.path().join("asset.txt");
+        let outside = root.path().join("outside.txt");
+        std::fs::write(&asset, b"safe").unwrap();
+        std::fs::write(&outside, b"outside").unwrap();
+        let root_path = root.path().canonicalize().unwrap();
+        let file = NativeStaticFile {
+            root: root_path.clone(),
+            path: root_path.join("asset.txt"),
+            mime: "text/plain; charset=utf-8",
+            len: 4,
+            modified: Some(SystemTime::UNIX_EPOCH),
+        };
+
+        std::fs::remove_file(&asset).unwrap();
+        std::os::unix::fs::symlink(&outside, &asset).unwrap();
+
+        assert!(open_static_body_file(&file).is_err());
+        root.close().unwrap();
     }
 }
 

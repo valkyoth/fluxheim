@@ -165,8 +165,10 @@ fi
 - Apply static proxy.upstream_weights through native weighted round-robin.
 - Apply route-level native response rewrites for Location, Refresh, and
   Set-Cookie.
-- Harden native static path containment, symlink rejection, and body-open
-  revalidation.
+- Harden native static path containment with rooted no-symlink body opens and
+  method enforcement for non-GET/HEAD requests.
+- Harden native redirect Location validation for percent-encoded dot segments
+  and double slashes produced by template expansion.
 - Keep forwarded-client-IP shortcut ownership on the compatibility path until
   native parity tests cover it.
 - Keep health-aware, persistence, priority-group, backup/drain, dynamic

@@ -10,6 +10,7 @@ use fluxheim_protocol::{
     Http1RequestTarget, http1_request_target, route_method_matches, route_prefix_matches_path,
     route_strip_prefix_suffix,
 };
+use percent_encoding::percent_decode_str;
 
 use crate::{
     NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1Request, NativeHttp1Response,
@@ -579,7 +580,16 @@ fn redirect_location_path_safe(location: &str) -> bool {
         .find(['?', '#'])
         .unwrap_or(path_and_tail.len());
     let path = &path_and_tail[..path_end];
-    !path.contains("//") && !path.split('/').any(|segment| matches!(segment, "." | ".."))
+    let Ok(decoded_path) = percent_decode_str(path).decode_utf8() else {
+        return false;
+    };
+    redirect_path_segments_safe(path) && redirect_path_segments_safe(&decoded_path)
+}
+
+fn redirect_path_segments_safe(path: &str) -> bool {
+    !path.contains("//")
+        && !path.chars().any(char::is_control)
+        && !path.split('/').any(|segment| matches!(segment, "." | ".."))
 }
 
 impl NativeRouteRequestHeaderPolicy {

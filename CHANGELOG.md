@@ -38,8 +38,15 @@ behavior when the change improves security or project direction.
   containment model in the native static-web route adapter.
 - Reject percent-decoded dot-segment, backslash, NUL, and denied-dotfile paths
   before static files are resolved.
-- Re-open static response bodies only after confirming the requested path is
-  still rooted under the configured web root and is still a regular file.
+- Open static response bodies with rooted component-by-component `openat`
+  calls and no-symlink flags, closing the symlink-swap window between metadata
+  checks and body reads.
+- Return `405 Method Not Allowed` from the native static-web handler for
+  methods other than `GET` and `HEAD`, even when the route method list matches
+  all methods.
+- Validate native redirect `Location` URL paths after percent-decoding so
+  encoded dot segments and double slashes cannot be introduced through
+  `{query}`, `{path}`, or `{uri}` expansion.
 - Bound native buffered static responses to 64 MiB until the final native
   streaming body path is enabled.
 - Keep forwarded-client-IP ownership shortcuts on the compatibility path while
