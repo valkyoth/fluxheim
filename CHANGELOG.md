@@ -32,6 +32,9 @@ behavior when the change improves security or project direction.
   rules before upstream forwarding.
 - Add live native listener tests proving default forwarded-header synthesis and
   `X-Forwarded-For = off` policy behavior on the native proxy path.
+- Add live native route tests proving builder-applied request-header overlays
+  start from the secure forwarded-header defaults and that strip-plus-append
+  cannot preserve a spoofed inbound forwarding chain.
 - Add live native listener tests proving inherited response-header and standard
   security-header emission on route responses.
 - Add live native listener tests proving plain-proxy gzip compression and

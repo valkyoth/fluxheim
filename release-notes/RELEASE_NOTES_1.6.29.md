@@ -39,6 +39,13 @@ the native HTTP/1 proxy path.
 - The low-level native upstream writer no longer hardcodes client-IP forwarding;
   proxy/header policy now owns `X-Forwarded-For` so privacy-mode and ordinary
   builds share one explicit policy boundary.
+- Native route request-header overlay builders now start from the same secure
+  forwarded-header baseline as config-driven policy, so omitted overlay fields
+  still strip spoofable inbound client-IP headers and synthesize owned
+  forwarding context.
+- Future trusted-chain append handling reads the inbound `X-Forwarded-For` chain
+  after any configured spoofable-header stripping, so strip-plus-append degrades
+  to the direct peer address instead of preserving attacker-supplied hops.
 - Privacy-mode native proxy builds strip spoofable inbound client-IP headers and
   do not compile the non-privacy forwarded-header synthesis helpers.
 - Native route responses now apply inherited standard security headers such as

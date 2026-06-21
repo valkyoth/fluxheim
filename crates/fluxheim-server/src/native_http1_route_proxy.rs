@@ -1079,27 +1079,35 @@ impl NativeRouteRequestHeaderPolicy {
     }
 
     fn from_overlay(overlay: &fluxheim_config::RequestHeaderPolicyOverlayConfig) -> Self {
-        Self {
-            enabled: overlay.enabled.unwrap_or(true),
-            strip_inbound_client_ip_headers: overlay
-                .strip_inbound_client_ip_headers
-                .unwrap_or(false),
-            #[cfg(not(feature = "privacy-mode"))]
-            x_forwarded_for: overlay
-                .x_forwarded_for
-                .unwrap_or(ForwardedClientIpHeaderMode::Off),
-            #[cfg(not(feature = "privacy-mode"))]
-            x_real_ip: overlay.x_real_ip.unwrap_or(false),
-            #[cfg(not(feature = "privacy-mode"))]
-            x_forwarded_host: overlay.x_forwarded_host.unwrap_or(false),
-            #[cfg(not(feature = "privacy-mode"))]
-            x_forwarded_proto: overlay.x_forwarded_proto.unwrap_or(false),
-            #[cfg(not(feature = "privacy-mode"))]
-            forwarded: overlay.forwarded.unwrap_or(false),
-            unset: overlay.effective_unset(),
-            set: overlay.effective_set().into_iter().collect(),
-            append: flatten_append_headers(&overlay.append),
+        let mut policy = Self::from_policy(&RequestHeaderPolicyConfig::default());
+        if let Some(enabled) = overlay.enabled {
+            policy.enabled = enabled;
         }
+        if let Some(strip) = overlay.strip_inbound_client_ip_headers {
+            policy.strip_inbound_client_ip_headers = strip;
+        }
+        #[cfg(not(feature = "privacy-mode"))]
+        {
+            if let Some(mode) = overlay.x_forwarded_for {
+                policy.x_forwarded_for = mode;
+            }
+            if let Some(x_real_ip) = overlay.x_real_ip {
+                policy.x_real_ip = x_real_ip;
+            }
+            if let Some(x_forwarded_host) = overlay.x_forwarded_host {
+                policy.x_forwarded_host = x_forwarded_host;
+            }
+            if let Some(x_forwarded_proto) = overlay.x_forwarded_proto {
+                policy.x_forwarded_proto = x_forwarded_proto;
+            }
+            if let Some(forwarded) = overlay.forwarded {
+                policy.forwarded = forwarded;
+            }
+        }
+        policy.unset = overlay.effective_unset();
+        policy.set = overlay.effective_set().into_iter().collect();
+        policy.append = flatten_append_headers(&overlay.append);
+        policy
     }
 
     pub(crate) fn apply(&self, request: &mut NativeHttp1Request) {
@@ -1130,7 +1138,6 @@ impl NativeRouteRequestHeaderPolicy {
 
     #[cfg(not(feature = "privacy-mode"))]
     fn apply_forwarded_headers(&self, request: &mut NativeHttp1Request) {
-        let original_x_forwarded_for = header_value(request, "x-forwarded-for").map(str::to_owned);
         let original_host = header_value(request, "host").map(str::to_owned);
         let proto = if request.downstream_tls {
             "https"
@@ -1142,6 +1149,7 @@ impl NativeRouteRequestHeaderPolicy {
             strip_spoofable_client_ip_headers(request);
         }
 
+        let original_x_forwarded_for = header_value(request, "x-forwarded-for").map(str::to_owned);
         let client_ip = request.peer_addr.map(|addr| addr.ip());
         match (self.x_forwarded_for, client_ip) {
             (ForwardedClientIpHeaderMode::Off, _) => {
