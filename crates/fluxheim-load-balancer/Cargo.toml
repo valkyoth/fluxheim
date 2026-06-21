@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-load-balancer"
-version = "1.6.26"
+version = "1.6.27"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"

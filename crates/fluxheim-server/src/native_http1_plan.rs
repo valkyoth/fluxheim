@@ -123,7 +123,7 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
             &mut candidates,
         );
         for route in &vhost.routes {
-            if route.redirect.is_some() {
+            if route.redirect.is_some() || route.web.as_ref().is_some_and(|web| web.enabled()) {
                 continue;
             }
             if let Some(proxy) = &route.proxy {
@@ -209,7 +209,6 @@ fn route_policy_supported(route: &RouteConfig) -> bool {
             .compression
             .as_ref()
             .is_none_or(|compression| !compression.enabled)
-        && route.web.as_ref().is_none_or(|web| !web.enabled())
         && route.php.as_ref().is_none_or(|php| !php.enabled)
 }
 

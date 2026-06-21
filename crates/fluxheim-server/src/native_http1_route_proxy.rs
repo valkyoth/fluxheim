@@ -8,7 +8,10 @@ use fluxheim_protocol::{
     route_strip_prefix_suffix,
 };
 
-use crate::{NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1Request, NativeHttp1Response};
+use crate::{
+    NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1Request, NativeHttp1Response,
+    NativeHttp1StaticWeb,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1RouteProxy {
@@ -38,6 +41,7 @@ enum NativeHttp1RouteMatcher {
 enum NativeHttp1RouteAction {
     Proxy(NativeHttp1Proxy),
     Redirect(NativeHttp1RouteRedirect),
+    StaticWeb(NativeHttp1StaticWeb),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,6 +63,7 @@ pub enum NativeHttp1RouteProxyConfigError {
     MissingRouteAction,
     RegexRoute,
     RewriteTemplate,
+    StaticWeb,
 }
 
 impl std::fmt::Display for NativeHttp1RouteProxyConfigError {
@@ -73,6 +78,7 @@ impl std::fmt::Display for NativeHttp1RouteProxyConfigError {
             Self::RewriteTemplate => {
                 formatter.write_str("native route proxy does not yet support rewrite_template")
             }
+            Self::StaticWeb => formatter.write_str("native route static web config is invalid"),
         }
     }
 }
@@ -173,6 +179,22 @@ impl NativeHttp1RouteProxyRoute {
         }
     }
 
+    pub fn prefix_static_web(
+        path: impl Into<String>,
+        methods: Vec<String>,
+        web: NativeHttp1StaticWeb,
+    ) -> Self {
+        Self {
+            methods,
+            matcher: NativeHttp1RouteMatcher::Prefix(path.into()),
+            strip_prefix: None,
+            rewrite_prefix: None,
+            max_request_body_bytes: None,
+            response_headers: NativeRouteResponseHeaderPolicy::default(),
+            action: NativeHttp1RouteAction::StaticWeb(web),
+        }
+    }
+
     pub fn from_config(
         route: &fluxheim_config::RouteConfig,
         proxy: Option<NativeHttp1Proxy>,
@@ -197,6 +219,12 @@ impl NativeHttp1RouteProxyRoute {
                 to: redirect.to.clone(),
                 status: redirect.status,
             })
+        } else if let Some(web) = route.web.as_ref().filter(|web| web.enabled()) {
+            NativeHttp1RouteAction::StaticWeb(
+                NativeHttp1StaticWeb::from_config(web)
+                    .map_err(|_| NativeHttp1RouteProxyConfigError::StaticWeb)?
+                    .ok_or(NativeHttp1RouteProxyConfigError::MissingRouteAction)?,
+            )
         } else {
             NativeHttp1RouteAction::Proxy(
                 proxy.ok_or(NativeHttp1RouteProxyConfigError::MissingRouteAction)?,
@@ -241,12 +269,16 @@ impl NativeHttp1RouteProxyRoute {
     pub fn proxy(&self) -> Option<&NativeHttp1Proxy> {
         match &self.action {
             NativeHttp1RouteAction::Proxy(proxy) => Some(proxy),
-            NativeHttp1RouteAction::Redirect(_) => None,
+            NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => None,
         }
     }
 
     pub fn is_redirect(&self) -> bool {
         matches!(self.action, NativeHttp1RouteAction::Redirect(_))
+    }
+
+    pub fn is_static_web(&self) -> bool {
+        matches!(self.action, NativeHttp1RouteAction::StaticWeb(_))
     }
 }
 
@@ -359,6 +391,13 @@ impl NativeHttp1RouteProxyRoute {
         let mut response = match &self.action {
             NativeHttp1RouteAction::Proxy(proxy) => proxy.handle(request).await,
             NativeHttp1RouteAction::Redirect(redirect) => redirect_response(&request, redirect),
+            NativeHttp1RouteAction::StaticWeb(web) => {
+                let Some((path, _)) = request_path_and_query(&request) else {
+                    return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
+                        .close_connection();
+                };
+                web.handle(&request, &path)
+            }
         };
         self.response_headers.apply(&mut response);
         response

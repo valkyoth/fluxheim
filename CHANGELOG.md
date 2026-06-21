@@ -7,6 +7,37 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.27 - 2026-06-21
+
+### Changed
+
+- Continue the native rich-integration parity work by adding a native HTTP/1
+  route static-web adapter backed by the `fluxheim-web` crate.
+- Serve route-level native static files through the Fluxheim-owned HTTP/1
+  listener with conditional requests, ETags, byte ranges, `HEAD`, cache-control
+  metadata, and directory listings.
+- Keep native static-web route tests split from generic route-proxy tests so
+  the feature proof stays reviewable.
+- Add `fluxheim-web` as an explicit `fluxheim-server` dependency for the native
+  static-web boundary instead of reaching back into the root compatibility
+  adapter.
+- Update release metadata, RPM metadata, and container tag documentation for
+  `v1.6.27`.
+
+### Security
+
+- Reuse the existing symlink-safe web-root validation and per-request path
+  containment model in the native static-web route adapter.
+- Reject percent-decoded dot-segment, backslash, NUL, and denied-dotfile paths
+  before static files are resolved.
+- Re-open static response bodies only after confirming the requested path is
+  still rooted under the configured web root and is still a regular file.
+- Bound native buffered static responses to 64 MiB until the final native
+  streaming body path is enabled.
+- Keep cache, PHP-FPM, auth-request, traffic mirror, compression, and advanced
+  load-balancer policy integrations on the compatibility path until their
+  native execution has dedicated parity tests.
+
 ## 1.6.26 - 2026-06-21
 
 ### Changed

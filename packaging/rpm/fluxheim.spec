@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.26
+Version:        1.6.27
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,17 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jun 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.27-1
+- Add native HTTP/1 route static-web serving backed by fluxheim-web.
+- Support native route static ETags, conditionals, ranges, HEAD, cache-control
+  metadata, and directory listings.
+- Harden native static path containment, symlink rejection, and body-open
+  revalidation.
+- Keep cache, PHP-FPM, auth-request, traffic mirror, compression, and advanced
+  load-balancer integrations on the compatibility path until native parity
+  tests land.
+- Update release metadata for 1.6.27.
+
 * Sun Jun 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.26-1
 - Continue native route/policy parity with native HTTP/1 route redirect
   actions.
