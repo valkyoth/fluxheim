@@ -7,6 +7,28 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.26 - 2026-06-21
+
+### Changed
+
+- Continue the native route/policy parity slice by adding route redirect
+  actions to the native HTTP/1 route proxy.
+- Support native redirect expansion for `{uri}`, `{path}`, and `{query}` with
+  the same absolute `http://` / `https://` location safety model used by the
+  compatibility proxy path.
+- Allow `NativeHttp1RouteProxyRoute::from_config` to build redirect-only route
+  actions without requiring a dummy native upstream proxy.
+- Update release metadata, RPM metadata, and container tag documentation for
+  `v1.6.26`.
+
+### Security
+
+- Reject unsafe native redirect expansions, including ambiguous double-slash
+  request paths, control characters, whitespace, braces, backslashes, and
+  non-HTTP(S) redirect targets.
+- Keep regex routes and richer route policies on the compatibility path until
+  their native execution has dedicated parity tests.
+
 ## 1.6.25 - 2026-06-21
 
 ### Changed

@@ -90,6 +90,14 @@ fn proxy_for(upstream: std::net::SocketAddr) -> NativeHttp1Proxy {
     NativeHttp1Proxy::new(NativeHttp1Upstream::new(upstream.to_string()))
 }
 
+fn response_header(response: &str, name: &str) -> Option<String> {
+    let prefix = format!("{name}:");
+    response.lines().find_map(|line| {
+        line.strip_prefix(&prefix)
+            .map(|value| value.trim().to_owned())
+    })
+}
+
 #[tokio::test]
 async fn native_route_proxy_rewrites_prefix_before_forwarding() {
     let upstream = upstream_expect_path("/internal/v1/items?id=7", "rewritten").await;
@@ -166,4 +174,76 @@ async fn native_route_proxy_rejects_double_slash_after_stripped_prefix() {
 
     assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     assert!(response.ends_with("bad request\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_redirect_expands_uri_template() {
+    let route = NativeHttp1RouteProxyRoute::prefix_redirect(
+        "/old/",
+        Vec::new(),
+        "https://new.example{uri}",
+        301,
+    );
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/old/path?x=1").await;
+
+    assert!(response.starts_with("HTTP/1.1 301 Moved Permanently\r\n"));
+    assert_eq!(
+        response_header(&response, "location").as_deref(),
+        Some("https://new.example/old/path?x=1")
+    );
+    assert!(response.contains("Content-Length: 0\r\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_redirect_rejects_unsafe_uri_expansion() {
+    let route = NativeHttp1RouteProxyRoute::prefix_redirect(
+        "/old",
+        Vec::new(),
+        "https://new.example{uri}",
+        308,
+    );
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/old//admin").await;
+
+    assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    assert!(response.ends_with("invalid redirect target\n"));
+}
+
+#[test]
+fn native_route_proxy_builds_redirect_route_from_config_without_proxy() {
+    let route = fluxheim_config::RouteConfig {
+        name: "redirect".to_owned(),
+        path_exact: Some("/old".to_owned()),
+        path_prefix: None,
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: Some(fluxheim_config::RouteRedirectConfig {
+            to: "https://new.example{uri}".to_owned(),
+            status: 308,
+        }),
+        proxy: None,
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
+    };
+
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, None).unwrap();
+
+    assert!(route.is_redirect());
+    assert!(route.proxy().is_none());
 }

@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.25
+Version:        1.6.26
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jun 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.26-1
+- Continue native route/policy parity with native HTTP/1 route redirect
+  actions.
+- Support safe native redirect expansion for {uri}, {path}, and {query}.
+- Keep richer route policies and proxy integrations on the documented
+  compatibility path until their native parity tests are added.
+
 * Sun Jun 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.25-1
 - Add native HTTP/1 proxy candidate rows to runtime cutover evidence.
 - Add the first native HTTP/1 route-proxy execution primitive for exact,

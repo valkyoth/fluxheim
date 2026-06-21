@@ -21,7 +21,7 @@ pub struct NativeHttp1RouteProxyRoute {
     matcher: NativeHttp1RouteMatcher,
     strip_prefix: Option<String>,
     rewrite_prefix: Option<String>,
-    proxy: NativeHttp1Proxy,
+    action: NativeHttp1RouteAction,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,11 +31,22 @@ enum NativeHttp1RouteMatcher {
     Fallback,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum NativeHttp1RouteAction {
+    Proxy(NativeHttp1Proxy),
+    Redirect(NativeHttp1RouteRedirect),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NativeHttp1RouteRedirect {
+    to: String,
+    status: u16,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeHttp1RouteProxyConfigError {
     MissingRouteAction,
     RegexRoute,
-    RedirectRoute,
     RewriteTemplate,
 }
 
@@ -47,9 +58,6 @@ impl std::fmt::Display for NativeHttp1RouteProxyConfigError {
             }
             Self::RegexRoute => {
                 formatter.write_str("native route proxy does not yet support regex routes")
-            }
-            Self::RedirectRoute => {
-                formatter.write_str("native route proxy does not yet support route redirects")
             }
             Self::RewriteTemplate => {
                 formatter.write_str("native route proxy does not yet support rewrite_template")
@@ -84,7 +92,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Exact(path.into()),
             strip_prefix: None,
             rewrite_prefix: None,
-            proxy,
+            action: NativeHttp1RouteAction::Proxy(proxy),
         }
     }
 
@@ -94,7 +102,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Prefix(path.into()),
             strip_prefix: None,
             rewrite_prefix: None,
-            proxy,
+            action: NativeHttp1RouteAction::Proxy(proxy),
         }
     }
 
@@ -104,19 +112,52 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Fallback,
             strip_prefix: None,
             rewrite_prefix: None,
-            proxy,
+            action: NativeHttp1RouteAction::Proxy(proxy),
+        }
+    }
+
+    pub fn exact_redirect(
+        path: impl Into<String>,
+        methods: Vec<String>,
+        to: impl Into<String>,
+        status: u16,
+    ) -> Self {
+        Self {
+            methods,
+            matcher: NativeHttp1RouteMatcher::Exact(path.into()),
+            strip_prefix: None,
+            rewrite_prefix: None,
+            action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
+                to: to.into(),
+                status,
+            }),
+        }
+    }
+
+    pub fn prefix_redirect(
+        path: impl Into<String>,
+        methods: Vec<String>,
+        to: impl Into<String>,
+        status: u16,
+    ) -> Self {
+        Self {
+            methods,
+            matcher: NativeHttp1RouteMatcher::Prefix(path.into()),
+            strip_prefix: None,
+            rewrite_prefix: None,
+            action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
+                to: to.into(),
+                status,
+            }),
         }
     }
 
     pub fn from_config(
         route: &fluxheim_config::RouteConfig,
-        proxy: NativeHttp1Proxy,
+        proxy: Option<NativeHttp1Proxy>,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
         if route.path_regex.is_some() {
             return Err(NativeHttp1RouteProxyConfigError::RegexRoute);
-        }
-        if route.redirect.is_some() {
-            return Err(NativeHttp1RouteProxyConfigError::RedirectRoute);
         }
         if route.rewrite_template.is_some() {
             return Err(NativeHttp1RouteProxyConfigError::RewriteTemplate);
@@ -130,12 +171,22 @@ impl NativeHttp1RouteProxyRoute {
         } else {
             return Err(NativeHttp1RouteProxyConfigError::MissingRouteAction);
         };
+        let action = if let Some(redirect) = &route.redirect {
+            NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
+                to: redirect.to.clone(),
+                status: redirect.status,
+            })
+        } else {
+            NativeHttp1RouteAction::Proxy(
+                proxy.ok_or(NativeHttp1RouteProxyConfigError::MissingRouteAction)?,
+            )
+        };
         Ok(Self {
             methods: route.methods.clone(),
             matcher,
             strip_prefix: route.strip_prefix.clone(),
             rewrite_prefix: route.rewrite_prefix.clone(),
-            proxy,
+            action,
         })
     }
 
@@ -149,8 +200,15 @@ impl NativeHttp1RouteProxyRoute {
         self
     }
 
-    pub fn proxy(&self) -> &NativeHttp1Proxy {
-        &self.proxy
+    pub fn proxy(&self) -> Option<&NativeHttp1Proxy> {
+        match &self.action {
+            NativeHttp1RouteAction::Proxy(proxy) => Some(proxy),
+            NativeHttp1RouteAction::Redirect(_) => None,
+        }
+    }
+
+    pub fn is_redirect(&self) -> bool {
+        matches!(self.action, NativeHttp1RouteAction::Redirect(_))
     }
 }
 
@@ -165,26 +223,46 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .close_connection();
             };
             let route = self.select_route(&request.method, &path);
-            let Some(proxy) = route
-                .map(NativeHttp1RouteProxyRoute::proxy)
-                .or(self.fallback.as_ref())
+            let Some(route_or_fallback) = route
+                .map(RouteOrFallback::Route)
+                .or_else(|| self.fallback.as_ref().map(RouteOrFallback::Fallback))
             else {
                 return NativeHttp1Response::new(404, "Not Found", b"not found\n")
                     .close_connection();
             };
-            let request = if let Some(route) = route {
-                match rewrite_route_request(request, route, &path, query.as_deref()) {
-                    Some(request) => request,
-                    None => {
-                        return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
-                            .close_connection();
-                    }
+            let request = match route_or_fallback.rewrite_request(request, &path, query.as_deref())
+            {
+                Some(request) => request,
+                None => {
+                    return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
+                        .close_connection();
                 }
-            } else {
-                request
             };
-            proxy.handle(request).await
+            match route_or_fallback {
+                RouteOrFallback::Route(route) => route.handle(request).await,
+                RouteOrFallback::Fallback(proxy) => proxy.handle(request).await,
+            }
         })
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RouteOrFallback<'a> {
+    Route(&'a NativeHttp1RouteProxyRoute),
+    Fallback(&'a NativeHttp1Proxy),
+}
+
+impl<'a> RouteOrFallback<'a> {
+    fn rewrite_request(
+        self,
+        request: NativeHttp1Request,
+        path: &str,
+        query: Option<&str>,
+    ) -> Option<NativeHttp1Request> {
+        match self {
+            Self::Route(route) => rewrite_route_request(request, route, path, query),
+            Self::Fallback(_) => Some(request),
+        }
     }
 }
 
@@ -223,6 +301,13 @@ impl NativeHttp1RouteProxyRoute {
         match &self.matcher {
             NativeHttp1RouteMatcher::Prefix(prefix) => prefix.len(),
             _ => 0,
+        }
+    }
+
+    async fn handle(&self, request: NativeHttp1Request) -> NativeHttp1Response {
+        match &self.action {
+            NativeHttp1RouteAction::Proxy(proxy) => proxy.handle(request).await,
+            NativeHttp1RouteAction::Redirect(redirect) => redirect_response(&request, redirect),
         }
     }
 }
@@ -289,4 +374,61 @@ fn join_route_rewrite_prefix(rewrite_prefix: &str, suffix: &str) -> Option<Strin
     };
 
     safe_forward_path(&rewritten_path).then_some(rewritten_path)
+}
+
+fn redirect_response(
+    request: &NativeHttp1Request,
+    redirect: &NativeHttp1RouteRedirect,
+) -> NativeHttp1Response {
+    let Some(location) = route_redirect_location(request, redirect) else {
+        return NativeHttp1Response::new(400, "Bad Request", b"invalid redirect target\n")
+            .close_connection();
+    };
+    NativeHttp1Response::new(
+        redirect.status,
+        redirect_reason(redirect.status),
+        Vec::new(),
+    )
+    .with_header("location", location)
+}
+
+fn redirect_reason(status: u16) -> &'static str {
+    match status {
+        301 => "Moved Permanently",
+        302 => "Found",
+        307 => "Temporary Redirect",
+        308 => "Permanent Redirect",
+        _ => "Redirect",
+    }
+}
+
+fn route_redirect_location(
+    request: &NativeHttp1Request,
+    redirect: &NativeHttp1RouteRedirect,
+) -> Option<String> {
+    let (path, query) = request_path_and_query(request)?;
+    let uri = query
+        .as_deref()
+        .map(|query| format!("{path}?{query}"))
+        .unwrap_or_else(|| path.clone());
+    if !safe_forward_path(&path) || uri.chars().any(char::is_control) {
+        return None;
+    }
+
+    let location = redirect
+        .to
+        .replace("{uri}", &uri)
+        .replace("{path}", &path)
+        .replace("{query}", query.as_deref().unwrap_or_default());
+    valid_redirect_location(&location).then_some(location)
+}
+
+fn valid_redirect_location(location: &str) -> bool {
+    (location.starts_with("https://") || location.starts_with("http://"))
+        && !location.contains('{')
+        && !location.contains('}')
+        && !location.contains('\\')
+        && !location
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
 }
