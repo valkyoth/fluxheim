@@ -21,6 +21,7 @@ tls-openssl-fips = ["tls-openssl"]
 bytes = "1.11.1"
 fluxheim-common = { path = "../fluxheim-common" }
 fluxheim-config = { path = "../fluxheim-config" }
+fluxheim-headers = { path = "../fluxheim-headers" }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-runtime = { path = "../fluxheim-runtime" }
 fluxheim-web = { path = "../fluxheim-web" }

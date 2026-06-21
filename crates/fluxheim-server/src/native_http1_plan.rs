@@ -224,9 +224,9 @@ fn route_request_header_policy_supported(
 }
 
 fn route_response_header_policy_supported(
-    response: &fluxheim_config::ResponseHeaderPolicyOverlayConfig,
+    _response: &fluxheim_config::ResponseHeaderPolicyOverlayConfig,
 ) -> bool {
-    response.rewrite == fluxheim_config::ResponseHeaderRewriteConfig::default()
+    true
 }
 
 fn access_policy_active(access: &AccessPolicyConfig) -> bool {

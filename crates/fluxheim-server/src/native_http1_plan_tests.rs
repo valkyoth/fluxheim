@@ -483,7 +483,7 @@ fn server_plan_rejects_native_http1_route_proxy_candidate_with_forwarded_request
 }
 
 #[test]
-fn server_plan_rejects_native_http1_route_proxy_candidate_with_response_rewrite() {
+fn server_plan_accepts_native_http1_route_proxy_candidate_with_response_rewrite() {
     let mut response_headers = fluxheim_config::ResponseHeaderPolicyOverlayConfig::default();
     response_headers.rewrite.location = vec![fluxheim_config::ResponseHeaderRewriteRuleConfig {
         from: "https://origin.example/".to_owned(),
@@ -542,9 +542,10 @@ fn server_plan_rejects_native_http1_route_proxy_candidate_with_response_rewrite(
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::HttpPolicy)
+        None
     );
 }
 
@@ -727,7 +728,7 @@ fn server_plan_rejects_native_http1_proxy_candidate_with_vhost_redirect() {
 fn server_plan_rejects_native_http1_proxy_candidate_with_advanced_load_balance_policy() {
     let mut config = Config::default();
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];
-    config.proxy.upstream_weights = vec![2, 1];
+    config.proxy.upstream_priority_groups = vec![0, 1];
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 

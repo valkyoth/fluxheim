@@ -1212,6 +1212,7 @@ dependencies = [
  "bytes",
  "fluxheim-common",
  "fluxheim-config",
+ "fluxheim-headers",
  "fluxheim-protocol",
  "fluxheim-runtime",
  "fluxheim-web",

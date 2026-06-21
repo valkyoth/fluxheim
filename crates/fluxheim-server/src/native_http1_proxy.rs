@@ -11,6 +11,7 @@ use crate::{NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeH
 #[derive(Clone, Debug)]
 pub struct NativeHttp1Proxy {
     upstreams: Vec<NativeHttp1Upstream>,
+    upstream_slots: Vec<usize>,
     next_upstream: Arc<AtomicUsize>,
 }
 
@@ -83,6 +84,7 @@ impl NativeHttp1Proxy {
     pub fn new(upstream: NativeHttp1Upstream) -> Self {
         Self {
             upstreams: vec![upstream],
+            upstream_slots: vec![0],
             next_upstream: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -93,8 +95,32 @@ impl NativeHttp1Proxy {
         if upstreams.is_empty() {
             return Err(NativeHttp1ProxyConfigError::MissingUpstream);
         }
+        let upstream_slots = (0..upstreams.len()).collect();
         Ok(Self {
             upstreams,
+            upstream_slots,
+            next_upstream: Arc::new(AtomicUsize::new(0)),
+        })
+    }
+
+    pub fn from_weighted_upstreams(
+        upstreams: Vec<NativeHttp1Upstream>,
+        weights: &[usize],
+    ) -> Result<Self, NativeHttp1ProxyConfigError> {
+        if upstreams.is_empty() {
+            return Err(NativeHttp1ProxyConfigError::MissingUpstream);
+        }
+        let mut upstream_slots = Vec::new();
+        for (index, _) in upstreams.iter().enumerate() {
+            let weight = weights.get(index).copied().unwrap_or(1);
+            upstream_slots.extend(std::iter::repeat_n(index, weight));
+        }
+        if upstream_slots.is_empty() {
+            return Err(NativeHttp1ProxyConfigError::MissingUpstream);
+        }
+        Ok(Self {
+            upstreams,
+            upstream_slots,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -105,6 +131,10 @@ impl NativeHttp1Proxy {
 
     pub fn upstreams(&self) -> &[NativeHttp1Upstream] {
         &self.upstreams
+    }
+
+    pub fn upstream_slots(&self) -> &[usize] {
+        &self.upstream_slots
     }
 
     pub fn from_proxy_config(
@@ -192,13 +222,13 @@ impl NativeHttp1Proxy {
             native_upstream = native_upstream.with_pool_max_idle(pool_max_idle);
             native_upstreams.push(native_upstream);
         }
-        Self::from_upstreams(native_upstreams).map(Some)
+        Self::from_weighted_upstreams(native_upstreams, &proxy.upstream_weights).map(Some)
     }
 }
 
 impl PartialEq for NativeHttp1Proxy {
     fn eq(&self, other: &Self) -> bool {
-        self.upstreams == other.upstreams
+        self.upstreams == other.upstreams && self.upstream_slots == other.upstream_slots
     }
 }
 
@@ -213,13 +243,21 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
             let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
             let mut last_error = None;
             let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
-            let total = self.upstreams.len();
+            let total = self.upstream_slots.len();
+            let mut attempted = vec![false; self.upstreams.len()];
+            let mut unique_attempts = 0usize;
             for attempt in 0..total {
-                let index = start.wrapping_add(attempt) % total;
+                let slot = start.wrapping_add(attempt) % total;
+                let index = self.upstream_slots[slot];
+                if attempted[index] {
+                    continue;
+                }
+                attempted[index] = true;
+                unique_attempts += 1;
                 let upstream = &self.upstreams[index];
                 match upstream.send(&request).await {
                     Ok(response) => return response,
-                    Err(error) if retry_allowed && attempt + 1 < total => {
+                    Err(error) if retry_allowed && unique_attempts < self.upstreams.len() => {
                         last_error = Some(error);
                     }
                     Err(error) => {
@@ -261,8 +299,7 @@ fn proxy_requires_advanced_load_balancer(proxy: &fluxheim_config::ProxyConfig) -
     if proxy.load_balance != fluxheim_config::LoadBalanceConfig::default() {
         return true;
     }
-    !proxy.upstream_weights.is_empty()
-        || !proxy.upstream_priority_groups.is_empty()
+    !proxy.upstream_priority_groups.is_empty()
         || !proxy.upstream_localities.is_empty()
         || !proxy.preferred_upstream_localities.is_empty()
         || !proxy.upstream_max_in_flight.is_empty()

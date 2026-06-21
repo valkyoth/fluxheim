@@ -2,7 +2,10 @@ use std::future::Future;
 use std::pin::Pin;
 
 use fluxheim_common::path_safety::safe_forward_path;
-use fluxheim_config::{HeaderValues, ResponseHeaderPolicyOverlayConfig};
+use fluxheim_config::{
+    HeaderValues, ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
+};
+use fluxheim_headers::{rewrite_header_prefix, rewrite_refresh_url, rewrite_set_cookie_value};
 use fluxheim_protocol::{
     Http1RequestTarget, http1_request_target, route_method_matches, route_prefix_matches_path,
     route_strip_prefix_suffix,
@@ -65,6 +68,7 @@ struct NativeRouteResponseHeaderPolicy {
     unset: Vec<String>,
     set: Vec<(String, String)>,
     append: Vec<(String, String)>,
+    rewrite: ResponseHeaderRewriteConfig,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -616,6 +620,7 @@ impl NativeRouteResponseHeaderPolicy {
             unset: overlay.effective_unset(),
             set: overlay.effective_set().into_iter().collect(),
             append: flatten_append_headers(&overlay.append),
+            rewrite: overlay.rewrite.clone(),
         };
         policy.apply_standard_headers(overlay);
         policy
@@ -657,6 +662,7 @@ impl NativeRouteResponseHeaderPolicy {
         if !self.enabled {
             return;
         }
+        apply_response_rewrites(response, &self.rewrite);
         for name in &self.unset {
             response.remove_header(name);
         }
@@ -667,6 +673,84 @@ impl NativeRouteResponseHeaderPolicy {
         for (name, value) in &self.append {
             response.push_header(name.clone(), value.clone());
         }
+    }
+}
+
+fn apply_response_rewrites(
+    response: &mut NativeHttp1Response,
+    rewrite: &ResponseHeaderRewriteConfig,
+) {
+    rewrite_response_header_values(
+        response,
+        "location",
+        &rewrite.location,
+        rewrite_header_prefix,
+    );
+    rewrite_response_header_values(response, "refresh", &rewrite.refresh, rewrite_refresh_url);
+    rewrite_set_cookie_header_values(response, rewrite);
+}
+
+fn rewrite_response_header_values(
+    response: &mut NativeHttp1Response,
+    name: &'static str,
+    rules: &[fluxheim_config::ResponseHeaderRewriteRuleConfig],
+    rewrite_value: fn(&str, &[fluxheim_config::ResponseHeaderRewriteRuleConfig]) -> Option<String>,
+) {
+    if rules.is_empty() {
+        return;
+    }
+    let mut changed = false;
+    let mut rewritten = Vec::with_capacity(response.headers().len());
+    for (header_name, header_value) in response.headers() {
+        if header_name.eq_ignore_ascii_case(name)
+            && let Some(value) = rewrite_value(header_value, rules)
+        {
+            rewritten.push((header_name.clone(), value));
+            changed = true;
+        } else {
+            rewritten.push((header_name.clone(), header_value.clone()));
+        }
+    }
+    if changed {
+        replace_response_headers(response, rewritten);
+    }
+}
+
+fn rewrite_set_cookie_header_values(
+    response: &mut NativeHttp1Response,
+    rewrite: &ResponseHeaderRewriteConfig,
+) {
+    if rewrite.cookie_domain.is_empty() && rewrite.cookie_path.is_empty() {
+        return;
+    }
+    let mut changed = false;
+    let mut rewritten = Vec::with_capacity(response.headers().len());
+    for (header_name, header_value) in response.headers() {
+        if header_name.eq_ignore_ascii_case("set-cookie")
+            && let Some(value) = rewrite_set_cookie_value(header_value, rewrite)
+        {
+            rewritten.push((header_name.clone(), value));
+            changed = true;
+        } else {
+            rewritten.push((header_name.clone(), header_value.clone()));
+        }
+    }
+    if changed {
+        replace_response_headers(response, rewritten);
+    }
+}
+
+fn replace_response_headers(response: &mut NativeHttp1Response, headers: Vec<(String, String)>) {
+    let names = response
+        .headers()
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    for name in names {
+        response.remove_header(&name);
+    }
+    for (name, value) in headers {
+        response.push_header(name, value);
     }
 }
 

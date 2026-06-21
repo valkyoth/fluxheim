@@ -99,6 +99,28 @@ async fn upstream_expect_header(
     addr
 }
 
+async fn upstream_response(response: &'static str) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+    addr
+}
+
 async fn route_proxy_listener(route_proxy: NativeHttp1RouteProxy) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -363,6 +385,55 @@ async fn native_route_proxy_applies_route_response_headers() {
     );
     assert!(response.contains("set-cookie: a=1\r\n"));
     assert!(response.contains("set-cookie: b=2\r\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_applies_route_response_rewrites() {
+    let upstream = upstream_response(
+        "HTTP/1.1 302 Found\r\n\
+         location: http://backend.internal/login\r\n\
+         refresh: 0;url=http://backend.internal/next\r\n\
+         set-cookie: sid=1; Domain=backend.internal; Path=/internal\r\n\
+         content-length: 0\r\n\r\n",
+    )
+    .await;
+    let policy = ResponseHeaderPolicyOverlayConfig {
+        rewrite: fluxheim_config::ResponseHeaderRewriteConfig {
+            location: vec![fluxheim_config::ResponseHeaderRewriteRuleConfig {
+                from: "http://backend.internal/".to_owned(),
+                to: "https://edge.example/".to_owned(),
+            }],
+            refresh: vec![fluxheim_config::ResponseHeaderRewriteRuleConfig {
+                from: "http://backend.internal/".to_owned(),
+                to: "https://edge.example/".to_owned(),
+            }],
+            cookie_domain: vec![fluxheim_config::ResponseHeaderRewriteRuleConfig {
+                from: "backend.internal".to_owned(),
+                to: "edge.example".to_owned(),
+            }],
+            cookie_path: vec![fluxheim_config::ResponseHeaderRewriteRuleConfig {
+                from: "/internal".to_owned(),
+                to: "/".to_owned(),
+            }],
+        },
+        ..Default::default()
+    };
+    let route = NativeHttp1RouteProxyRoute::prefix("/api/", Vec::new(), proxy_for(upstream))
+        .with_response_header_policy(&policy);
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/api/login").await;
+
+    assert!(response.starts_with("HTTP/1.1 302 Found\r\n"));
+    assert_eq!(
+        response_header(&response, "location").as_deref(),
+        Some("https://edge.example/login")
+    );
+    assert_eq!(
+        response_header(&response, "refresh").as_deref(),
+        Some("0;url=https://edge.example/next")
+    );
+    assert!(response.contains("set-cookie: sid=1; Domain=edge.example; Path=/\r\n"));
 }
 
 #[tokio::test]

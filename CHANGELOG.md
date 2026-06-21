@@ -20,6 +20,10 @@ behavior when the change improves security or project direction.
   proxy routes are forwarded upstream.
 - Round-robin successful requests across multiple configured static upstreams
   in the native HTTP/1 proxy, while preserving safe-method failover.
+- Apply route-level native response rewrite rules for `Location`, `Refresh`,
+  and `Set-Cookie` through the shared `fluxheim-headers` rewrite helpers.
+- Honor static `proxy.upstream_weights` in the native HTTP/1 proxy with a
+  bounded weighted round-robin slot table.
 - Keep native static-web route tests split from generic route-proxy tests so
   the feature proof stays reviewable.
 - Add `fluxheim-web` as an explicit `fluxheim-server` dependency for the native
@@ -40,9 +44,9 @@ behavior when the change improves security or project direction.
   streaming body path is enabled.
 - Keep forwarded-client-IP ownership shortcuts on the compatibility path while
   allowing only the explicit route request-header mutation subset natively.
-- Keep weighted, health-aware, persistence, dynamic-discovery, and hash-based
-  load-balancer policies on the compatibility path while moving the default
-  static-upstream round-robin behavior native.
+- Keep health-aware, persistence, dynamic-discovery, priority-group,
+  backup/drain, and hash-based load-balancer policies on the compatibility path
+  while moving static upstream round-robin and static weights native.
 - Keep cache, PHP-FPM, auth-request, traffic mirror, compression, and advanced
   load-balancer policy integrations on the compatibility path until their
   native execution has dedicated parity tests.

@@ -13,10 +13,15 @@ web serving onto the native HTTP/1 route adapter.
 - Multiple configured static upstreams now round-robin successful native HTTP/1
   proxy requests, with safe-method failover still available when an upstream
   fails.
+- Static `proxy.upstream_weights` now drive native weighted round-robin without
+  requiring the compatibility load-balancer runtime.
+- Route-level response rewrite rules for `Location`, `Refresh`, and
+  `Set-Cookie` now execute in the native route proxy through the shared
+  `fluxheim-headers` rewrite helpers.
 - The server crate now depends directly on `fluxheim-web` for pure web response
   planning instead of using the root compatibility adapter.
-- Static-web and request-header route tests run through a real local native
-  HTTP/1 listener.
+- Static-web, header policy, response rewrite, and weighted-upstream route
+  tests run through real local native HTTP/1 listeners.
 
 ## Security Notes
 
@@ -29,9 +34,10 @@ web serving onto the native HTTP/1 route adapter.
 - Forwarded-client-IP shortcut ownership remains a compatibility-path blocker;
   only explicit request-header unset/set/append mutations are marked native
   ready in this release.
-- Advanced load-balancer behavior such as weights, health state, persistence,
-  dynamic discovery, and hash-based selection remains on the compatibility path;
-  this release only moves default static-upstream round-robin native.
+- Advanced load-balancer behavior such as health state, persistence, dynamic
+  discovery, priority groups, backup/drain state, and hash-based selection
+  remains on the compatibility path; this release moves static upstream
+  round-robin and static weights native.
 
 ## Compatibility
 

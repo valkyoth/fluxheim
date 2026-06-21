@@ -38,11 +38,16 @@ where
 }
 
 async fn proxy_listener(upstream: std::net::SocketAddr) -> std::net::SocketAddr {
+    proxy_listener_for(NativeHttp1Proxy::new(NativeHttp1Upstream::new(
+        upstream.to_string(),
+    )))
+    .await
+}
+
+async fn proxy_listener_for(proxy: NativeHttp1Proxy) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let proxy = Arc::new(NativeHttp1Proxy::new(NativeHttp1Upstream::new(
-        upstream.to_string(),
-    )));
+    let proxy = Arc::new(proxy);
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
         serve_native_http1_listener(listener, DownstreamHttp1Policy::default(), proxy, async {
@@ -56,6 +61,46 @@ async fn proxy_listener(upstream: std::net::SocketAddr) -> std::net::SocketAddr 
         let _ = shutdown_tx.send(());
     });
     addr
+}
+
+async fn counting_upstream(
+    body: &'static str,
+    responses: usize,
+) -> (std::net::SocketAddr, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let count = Arc::new(AtomicUsize::new(0));
+    let count_for_task = Arc::clone(&count);
+    tokio::spawn(async move {
+        for _ in 0..responses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            count_for_task.fetch_add(1, Ordering::Relaxed);
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        }
+    });
+    (addr, count)
 }
 
 async fn failover_proxy_listener(
@@ -221,6 +266,31 @@ async fn native_proxy_round_robins_successful_static_upstreams() {
 }
 
 #[tokio::test]
+async fn native_proxy_weighted_round_robins_static_upstreams() {
+    let (first, first_count) = counting_upstream("one", 2).await;
+    let (second, second_count) = counting_upstream("two", 1).await;
+    let proxy = NativeHttp1Proxy::from_weighted_upstreams(
+        vec![
+            NativeHttp1Upstream::new(first.to_string()),
+            NativeHttp1Upstream::new(second.to_string()),
+        ],
+        &[2, 1],
+    )
+    .unwrap();
+    let proxy = proxy_listener_for(proxy).await;
+
+    let first_response = downstream_get(proxy, "/weighted").await;
+    let second_response = downstream_get(proxy, "/weighted").await;
+    let third_response = downstream_get(proxy, "/weighted").await;
+
+    assert!(first_response.ends_with("one"));
+    assert!(second_response.ends_with("one"));
+    assert!(third_response.ends_with("two"));
+    assert_eq!(first_count.load(Ordering::Relaxed), 2);
+    assert_eq!(second_count.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
 async fn native_proxy_does_not_fail_over_unsafe_method() {
     let first = unused_local_address().await;
     let second = upstream(|_, mut stream| async move {
@@ -368,6 +438,21 @@ fn native_proxy_config_accepts_ordered_static_upstreams() {
 }
 
 #[test]
+fn native_proxy_config_accepts_weighted_static_upstreams() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+        upstream_weights: vec![2, 1],
+        ..Default::default()
+    };
+
+    let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
+        .unwrap()
+        .expect("native proxy");
+
+    assert_eq!(native.upstream_slots(), &[0, 0, 1]);
+}
+
+#[test]
 fn native_proxy_config_applies_pool_capacity() {
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -411,16 +496,6 @@ fn native_proxy_config_rejects_unsupported_upstream_features() {
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
         Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy)
-    );
-
-    let proxy = fluxheim_config::ProxyConfig {
-        upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
-        upstream_weights: vec![2, 1],
-        ..Default::default()
-    };
-    assert_eq!(
-        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
-        Err(NativeHttp1ProxyConfigError::LoadBalancing)
     );
 
     let proxy = fluxheim_config::ProxyConfig {
