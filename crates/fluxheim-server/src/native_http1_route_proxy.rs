@@ -477,13 +477,35 @@ fn route_redirect_location(
 }
 
 fn valid_redirect_location(location: &str) -> bool {
-    (location.starts_with("https://") || location.starts_with("http://"))
-        && !location.contains('{')
+    if !(location.starts_with("https://") || location.starts_with("http://"))
+        || !redirect_location_path_safe(location)
+    {
+        return false;
+    }
+    !location.contains('{')
         && !location.contains('}')
         && !location.contains('\\')
         && !location
             .chars()
             .any(|character| character.is_control() || character.is_whitespace())
+}
+
+fn redirect_location_path_safe(location: &str) -> bool {
+    let Some(rest) = location
+        .strip_prefix("https://")
+        .or_else(|| location.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let path_and_tail = rest
+        .find('/')
+        .map(|path_start| &rest[path_start..])
+        .unwrap_or_default();
+    let path_end = path_and_tail
+        .find(['?', '#'])
+        .unwrap_or(path_and_tail.len());
+    let path = &path_and_tail[..path_end];
+    !path.contains("//") && !path.split('/').any(|segment| matches!(segment, "." | ".."))
 }
 
 impl NativeRouteResponseHeaderPolicy {

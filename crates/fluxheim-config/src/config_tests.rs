@@ -160,6 +160,18 @@ fn rejects_redirect_query_template_inside_url_authority() {
     assert!(!crate::config_route::valid_redirect_target_template(
         "https://trusted%2finternal.example{uri}"
     ));
+    assert!(!crate::config_route::valid_redirect_target_template(
+        "https://example.test/{path}"
+    ));
+    assert!(!crate::config_route::valid_redirect_target_template(
+        "https://example.test/files/{uri}"
+    ));
+    assert!(!crate::config_route::valid_redirect_target_template(
+        "https://example.test/files/../admin{uri}"
+    ));
+    assert!(crate::config_route::valid_redirect_target_template(
+        "https://example.test/search?next=/{uri}"
+    ));
     assert!(crate::config_route::valid_redirect_target_template(
         "https://example.test/search?{query}"
     ));

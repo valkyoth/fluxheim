@@ -161,6 +161,8 @@ fi
 - Enforce native route request-body limits before forwarding matched requests.
 - Apply route-level native response header overlays for supported native route
   proxy responses.
+- Harden native redirect Location validation and native proxy candidate
+  accounting for redirect-shadowed route proxies.
 - Keep richer route policies and proxy integrations on the documented
   compatibility path until their native parity tests are added.
 

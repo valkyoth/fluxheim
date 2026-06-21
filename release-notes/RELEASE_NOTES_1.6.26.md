@@ -27,6 +27,12 @@ route proxy for the already-supported native response paths.
 - Reject unsafe redirect expansions containing control characters, whitespace,
   braces, backslashes, non-HTTP(S) schemes, or ambiguous double-slash request
   paths.
+- Reject expanded native redirect `Location` URL paths containing dot segments
+  or double slashes, including `{query}` path-position traversal attempts.
+- Reject redirect templates that would place `{path}` or `{uri}` immediately
+  after a literal slash in the URL path, preventing predictable `//` expansion.
+- Exclude route proxy configs shadowed by route redirects from native proxy
+  cutover candidate accounting.
 - Return `413 Payload Too Large` for native route-proxy requests that exceed a
   matched route-specific body limit.
 - Keep regex routes, request-header mutation, response-header rewrites, access

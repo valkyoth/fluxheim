@@ -606,6 +606,8 @@ pub fn valid_redirect_target_template(value: &str) -> bool {
             .chars()
             .any(|character| character.is_control() || character.is_whitespace())
         || redirect_template_authority_contains(value, "{query}")
+        || redirect_template_path_contains(value, "/{path}")
+        || redirect_template_path_contains(value, "/{uri}")
     {
         return false;
     }
@@ -628,7 +630,7 @@ pub fn valid_redirect_target_template(value: &str) -> bool {
         return false;
     };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    valid_http_authority(authority)
+    valid_http_authority(authority) && redirect_template_path_safe(&expanded)
 }
 
 fn redirect_template_authority_contains(value: &str, needle: &str) -> bool {
@@ -640,4 +642,29 @@ fn redirect_template_authority_contains(value: &str, needle: &str) -> bool {
     };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     authority.contains(needle)
+}
+
+fn redirect_template_path_contains(value: &str, needle: &str) -> bool {
+    redirect_template_path(value).is_some_and(|path| path.contains(needle))
+}
+
+fn redirect_template_path_safe(value: &str) -> bool {
+    let Some(path) = redirect_template_path(value) else {
+        return false;
+    };
+    !path.contains("//") && !path.split('/').any(|segment| matches!(segment, "." | ".."))
+}
+
+fn redirect_template_path(value: &str) -> Option<&str> {
+    let rest = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))?;
+    let path_and_tail = rest
+        .find('/')
+        .map(|path_start| &rest[path_start..])
+        .unwrap_or_default();
+    let path_end = path_and_tail
+        .find(['?', '#'])
+        .unwrap_or(path_and_tail.len());
+    Some(&path_and_tail[..path_end])
 }

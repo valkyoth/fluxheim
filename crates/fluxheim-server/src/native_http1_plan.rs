@@ -123,6 +123,9 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
             &mut candidates,
         );
         for route in &vhost.routes {
+            if route.redirect.is_some() {
+                continue;
+            }
             if let Some(proxy) = &route.proxy {
                 push_proxy_candidate(
                     format!("vhost {:?} route {:?} proxy", vhost.name, route.name),
