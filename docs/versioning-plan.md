@@ -2722,12 +2722,40 @@ Planned `1.6.x` sequence:
   `fluxheim-headers`.
   Keep cache lookup/fill/stale paths, PHP-FPM routing, auth-request, traffic
   mirror, and compression targeted for the next compatibility-removal slices.
-- `v1.6.28`: remove remaining Pingora runtime/listener/TLS adapter crates,
-  vendored Pingora patches, compatibility shims, and Pingora-specific docs from
-  normal builds. This is the final Pingora-free proof release: `cargo tree`,
-  release containers, RPM builds, source builds, and focused artifacts must all
-  prove no normal Fluxheim build compiles vendored Pingora code.
-- `v1.6.29`: stabilization/security-only release for the Pingora-free runtime
+- `v1.6.28`: continue the native rich-proxy parity work instead of forcing an
+  unsafe final deletion. Move route-level response compression onto the native
+  HTTP/1 route proxy through `fluxheim-compression`, with gzip/brotli/zstd
+  feature mapping and live native listener tests. Move `proxy.error_pages`
+  onto the native HTTP/1 proxy by serving configured static fallback pages
+  through `fluxheim-web` on 502/504 failures. Keep inherited global/vhost
+  compression, cache lookup/fill/stale, PHP-FPM, auth-request, traffic mirror,
+  forwarded-client-IP ownership shortcuts, dynamic discovery, health-aware
+  load-balancing, persistence, priority/backup/drain, and hash-based selection
+  on the compatibility path until each has native parity tests.
+- `v1.6.29`: finish the remaining native HTTP policy blockers that do not need
+  cache or PHP state: forwarded-client-IP ownership, auth-request subrequests,
+  traffic mirroring, and inherited global/vhost compression policy. Add live
+  native listener tests for each path and keep unsupported configs explicitly
+  reported in the cutover inventory.
+- `v1.6.30`: move cache and PHP-FPM rich proxy integrations onto native
+  adapters. Cache work must cover lookup/fill/stale, Vary/Range/conditional
+  semantics, peer-fill guardrails, and purge visibility. PHP-FPM work must
+  cover SCRIPT_NAME/PATH_INFO safety, deny prefixes, spool limits, TCP/Unix
+  upstream policies, and custom PHP error pages. Keep the compatibility path
+  until fixture and smoke tests prove parity.
+- `v1.6.31`: finish native load-balancer compatibility and remove the final
+  Pingora runtime/listener/TLS adapter crates from normal builds. Add a
+  Fluxheim-owned nginx/Ketama-compatible consistent hash selection mode for
+  operators migrating from nginx or Pingora Ketama behavior. Keep the existing
+  rendezvous consistent-hash and bounded-load consistent modes as the default
+  Fluxheim algorithms, but document that the compatibility mode is for matching
+  nginx-style request-to-backend mapping. Do not depend on `pingora-ketama`;
+  implement and test the ring behavior in Fluxheim with golden vectors and
+  membership-change remapping tests. This is the final Pingora-free proof
+  release: `cargo tree`, release containers, RPM builds, source builds, and
+  focused artifacts must all prove no normal Fluxheim build compiles vendored
+  Pingora code.
+- `v1.6.32`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
   checks, long-running soak tests, runtime-baseline comparisons, and
@@ -2736,14 +2764,6 @@ Planned `1.6.x` sequence:
   where practical, using crate-scoped patches and tests. Keep third-party
   transitive `zeroize` use inside crates such as rustls/AWS-LC untouched, and
   avoid mixing this secret-container migration into the runtime cutover slices.
-- `v1.6.30`: native load-balancer compatibility polish after Pingora is gone
-  from normal builds. Add a Fluxheim-owned nginx/Ketama-compatible consistent
-  hash selection mode for operators migrating from nginx or Pingora Ketama
-  behavior. Keep the existing rendezvous consistent-hash and bounded-load
-  consistent modes as the default Fluxheim algorithms, but document that the
-  compatibility mode is for matching nginx-style request-to-backend mapping.
-  Do not depend on `pingora-ketama`; implement and test the ring behavior in
-  Fluxheim with golden vectors and membership-change remapping tests.
 
 Stable exit criteria:
 

@@ -115,6 +115,35 @@ impl NativeHttp1StaticWeb {
         }
     }
 
+    pub fn handle_error_page(
+        &self,
+        request: &NativeHttp1Request,
+        request_path: &str,
+        status: u16,
+    ) -> Option<NativeHttp1Response> {
+        let file = match self.resolve(request_path) {
+            Ok(NativeStaticResolve::Found(file)) => file,
+            Ok(
+                NativeStaticResolve::DirectoryListing(_)
+                | NativeStaticResolve::NotFound
+                | NativeStaticResolve::Forbidden,
+            ) => return None,
+            Err(error) => {
+                log::warn!(
+                    target: "fluxheim::native_http1",
+                    "static error page response failed: {error}"
+                );
+                return None;
+            }
+        };
+        self.file_response_with_status(
+            request,
+            &file,
+            StaticResponseConditions::default(),
+            Some(status),
+        )
+    }
+
     fn resolve(&self, request_path: &str) -> io::Result<NativeStaticResolve> {
         let Some(relative_path) = self.relative_request_path(request_path)? else {
             return Ok(NativeStaticResolve::Forbidden);
@@ -284,33 +313,45 @@ impl NativeHttp1StaticWeb {
         request: &NativeHttp1Request,
         file: &NativeStaticFile,
     ) -> NativeHttp1Response {
+        self.file_response_with_status(request, file, static_conditions(request), None)
+            .unwrap_or_else(|| {
+                NativeHttp1Response::new(500, "Internal Server Error", b"internal error\n")
+                    .close_connection()
+            })
+    }
+
+    fn file_response_with_status(
+        &self,
+        request: &NativeHttp1Request,
+        file: &NativeStaticFile,
+        conditions: StaticResponseConditions<'_>,
+        status_override: Option<u16>,
+    ) -> Option<NativeHttp1Response> {
         let plan = plan_static_response(
             StaticResponseFile {
                 len: file.len,
                 modified: file.modified,
             },
             &request.method,
-            static_conditions(request),
+            conditions,
         );
         if plan.response_body_bytes > MAX_NATIVE_STATIC_BODY_BYTES {
-            return NativeHttp1Response::new(
-                413,
-                "Payload Too Large",
-                b"static response too large\n",
-            )
-            .close_connection();
+            return Some(
+                NativeHttp1Response::new(413, "Payload Too Large", b"static response too large\n")
+                    .close_connection(),
+            );
         }
 
         let body = match read_static_body(file, plan.body) {
             Ok(body) => body,
             Err(error) => {
                 log::warn!(target: "fluxheim::native_http1", "static file read failed: {error}");
-                return NativeHttp1Response::new(500, "Internal Server Error", b"internal error\n")
-                    .close_connection();
+                return None;
             }
         };
 
-        let mut response = NativeHttp1Response::new(plan.status, static_reason(plan.status), body)
+        let status = status_override.unwrap_or(plan.status);
+        let mut response = NativeHttp1Response::new(status, static_reason(status), body)
             .with_header("content-type", file.mime)
             .with_header("cache-control", self.cache_control.clone())
             .with_header("etag", plan.etag)
@@ -327,7 +368,7 @@ impl NativeHttp1StaticWeb {
         if let Some(content_range) = plan.content_range {
             response = response.with_header("content-range", content_range);
         }
-        response
+        Some(response)
     }
 }
 
@@ -499,6 +540,8 @@ fn static_reason(status: u16) -> &'static str {
         206 => "Partial Content",
         304 => "Not Modified",
         412 => "Precondition Failed",
+        502 => "Bad Gateway",
+        504 => "Gateway Timeout",
         416 => "Range Not Satisfiable",
         _ => "OK",
     }

@@ -1,7 +1,11 @@
 use std::collections::BTreeMap;
+#[cfg(feature = "compression-gzip")]
+use std::io::Read as _;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "compression-gzip")]
+use flate2::read::GzDecoder;
 use fluxheim_config::{HeaderValues, ResponseHeaderPolicyOverlayConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -153,11 +157,15 @@ async fn downstream_get(proxy: std::net::SocketAddr, path: &str) -> String {
 }
 
 async fn downstream_request(proxy: std::net::SocketAddr, request: &str) -> String {
+    String::from_utf8(downstream_request_bytes(proxy, request).await).unwrap()
+}
+
+async fn downstream_request_bytes(proxy: std::net::SocketAddr, request: &str) -> Vec<u8> {
     let mut client = TcpStream::connect(proxy).await.unwrap();
     client.write_all(request.as_bytes()).await.unwrap();
     let mut response = Vec::new();
     client.read_to_end(&mut response).await.unwrap();
-    String::from_utf8(response).unwrap()
+    response
 }
 
 fn proxy_for(upstream: std::net::SocketAddr) -> NativeHttp1Proxy {
@@ -506,6 +514,55 @@ async fn native_route_proxy_applies_route_request_headers_before_forwarding() {
 
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.ends_with("headers"));
+}
+
+#[cfg(feature = "compression-gzip")]
+#[tokio::test]
+async fn native_route_proxy_applies_gzip_route_compression() {
+    let upstream = upstream_response(
+        "HTTP/1.1 200 OK\r\n\
+         content-type: text/plain\r\n\
+         etag: \"origin-tag\"\r\n\r\n\
+         hello native compression hello native compression hello native compression \
+         hello native compression hello native compression hello native compression \
+         hello native compression hello native compression hello native compression \
+         hello native compression hello native compression hello native compression \
+         hello native compression hello native compression hello native compression \
+         hello native compression hello native compression hello native compression \
+         hello native compression hello native compression hello native compression \
+         hello native compression hello native compression hello native compression",
+    )
+    .await;
+    let route = NativeHttp1RouteProxyRoute::prefix("/asset/", Vec::new(), proxy_for(upstream))
+        .with_compression_config(fluxheim_config::CompressionConfig {
+            enabled: true,
+            gzip: true,
+            min_bytes: fluxheim_config::ByteSize::from_bytes(1),
+            max_input_bytes: fluxheim_config::ByteSize::from_bytes(4096),
+            max_output_bytes: fluxheim_config::ByteSize::from_bytes(4096),
+            ..Default::default()
+        });
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_request_bytes(
+        proxy,
+        "GET /asset/text HTTP/1.1\r\nHost: route.test\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let split = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .unwrap();
+    let head = String::from_utf8(response[..split].to_vec()).unwrap();
+    let body = &response[split + 4..];
+
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(head.contains("\r\ncontent-encoding: gzip"));
+    assert!(head.contains("\r\nvary: accept-encoding"));
+    assert!(!head.contains("\r\netag:"));
+    let mut decoded = String::new();
+    GzDecoder::new(body).read_to_string(&mut decoded).unwrap();
+    assert!(decoded.contains("hello native compression"));
 }
 
 #[tokio::test]

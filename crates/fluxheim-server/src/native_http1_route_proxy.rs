@@ -1,7 +1,23 @@
 use std::future::Future;
 use std::pin::Pin;
 
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+use bytes::Bytes;
 use fluxheim_common::path_safety::safe_forward_path;
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+use fluxheim_compression::{
+    ResponseCompressionEncoder, cache_control_directive_blocks_compression,
+    content_encoding_value_is_active, content_type_is_compressible, encoding_token_allows,
+    input_length_within_compression_bounds,
+};
 use fluxheim_config::{
     HeaderValues, ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
 };
@@ -29,6 +45,12 @@ pub struct NativeHttp1RouteProxyRoute {
     strip_prefix: Option<String>,
     rewrite_prefix: Option<String>,
     max_request_body_bytes: Option<u64>,
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    compression: Option<fluxheim_config::CompressionConfig>,
     request_headers: NativeRouteRequestHeaderPolicy,
     response_headers: NativeRouteResponseHeaderPolicy,
     action: NativeHttp1RouteAction,
@@ -123,6 +145,12 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression: None,
             request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(proxy),
@@ -136,6 +164,12 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression: None,
             request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(proxy),
@@ -149,6 +183,12 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression: None,
             request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(proxy),
@@ -167,6 +207,12 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression: None,
             request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
@@ -188,6 +234,12 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression: None,
             request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
@@ -208,6 +260,12 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: None,
             rewrite_prefix: None,
             max_request_body_bytes: None,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression: None,
             request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::StaticWeb(web),
@@ -255,6 +313,12 @@ impl NativeHttp1RouteProxyRoute {
             strip_prefix: route.strip_prefix.clone(),
             rewrite_prefix: route.rewrite_prefix.clone(),
             max_request_body_bytes: route.max_request_body_bytes.map(|bytes| bytes.as_u64()),
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression: route.compression.clone(),
             request_headers: NativeRouteRequestHeaderPolicy::from_overlay(&route.headers.request),
             response_headers: NativeRouteResponseHeaderPolicy::from_overlay(
                 &route.headers.response,
@@ -275,6 +339,19 @@ impl NativeHttp1RouteProxyRoute {
 
     pub const fn with_max_request_body_bytes(mut self, max_request_body_bytes: u64) -> Self {
         self.max_request_body_bytes = Some(max_request_body_bytes);
+        self
+    }
+
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    pub fn with_compression_config(
+        mut self,
+        compression: fluxheim_config::CompressionConfig,
+    ) -> Self {
+        self.compression = Some(compression);
         self
     }
 
@@ -423,6 +500,12 @@ impl NativeHttp1RouteProxyRoute {
     }
 
     async fn handle(&self, request: NativeHttp1Request) -> NativeHttp1Response {
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        let compression_request = request.clone();
         let mut response = match &self.action {
             NativeHttp1RouteAction::Proxy(proxy) => proxy.handle(request).await,
             NativeHttp1RouteAction::Redirect(redirect) => redirect_response(&request, redirect),
@@ -435,7 +518,222 @@ impl NativeHttp1RouteProxyRoute {
             }
         };
         self.response_headers.apply(&mut response);
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        if let Some(compression) = &self.compression {
+            apply_route_compression(&compression_request, &mut response, compression);
+        }
         response
+    }
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn apply_route_compression(
+    request: &NativeHttp1Request,
+    response: &mut NativeHttp1Response,
+    config: &fluxheim_config::CompressionConfig,
+) {
+    let Some(mut encoder) = selected_route_compression(request, response, config) else {
+        return;
+    };
+    let input = Bytes::copy_from_slice(response.body());
+    match encoder.encode_chunk(Some(&input), true) {
+        Ok(encoded) => {
+            response.remove_header("content-encoding");
+            response.remove_header("content-length");
+            response.remove_header("etag");
+            response.push_header("content-encoding", encoder.encoding);
+            append_vary_accept_encoding(response);
+            response.replace_body(encoded.to_vec());
+        }
+        Err(error) => {
+            log::debug!(
+                target: "fluxheim::native",
+                "native route response compression skipped: {error}"
+            );
+        }
+    }
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn selected_route_compression(
+    request: &NativeHttp1Request,
+    response: &NativeHttp1Response,
+    config: &fluxheim_config::CompressionConfig,
+) -> Option<ResponseCompressionEncoder> {
+    if !(config.enabled
+        && request.method == "GET"
+        && response.status() == 200
+        && !response_has_content_encoding(response)
+        && !response_has_header(response, "content-range")
+        && !response_has_header(response, "set-cookie")
+        && !request_has_header(request, "authorization")
+        && !request_has_header(request, "cookie")
+        && !response_cache_control_blocks_compression(response)
+        && response_content_type_is_compressible(response)
+        && response_content_length_in_compression_bounds(response, config))
+    {
+        return None;
+    }
+
+    #[cfg(feature = "compression-brotli")]
+    if config.brotli && request_accepts_encoding(request, "br") {
+        return Some(ResponseCompressionEncoder::brotli(
+            config.brotli_quality,
+            compression_max_output_bytes(config),
+        ));
+    }
+    #[cfg(feature = "compression-zstd")]
+    if config.zstd && request_accepts_encoding(request, "zstd") {
+        return ResponseCompressionEncoder::zstd(
+            config.zstd_level,
+            compression_max_output_bytes(config),
+        )
+        .ok();
+    }
+    #[cfg(feature = "compression-gzip")]
+    if config.gzip && request_accepts_encoding(request, "gzip") {
+        return Some(ResponseCompressionEncoder::gzip(
+            config.gzip_level,
+            compression_max_output_bytes(config),
+        ));
+    }
+
+    None
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn compression_max_output_bytes(config: &fluxheim_config::CompressionConfig) -> usize {
+    usize::try_from(config.max_output_bytes.as_u64()).unwrap_or(usize::MAX)
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn request_accepts_encoding(request: &NativeHttp1Request, expected: &str) -> bool {
+    request
+        .headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("accept-encoding"))
+        .flat_map(|(_, value)| value.split(','))
+        .any(|token| encoding_token_allows(token, expected))
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn response_has_content_encoding(response: &NativeHttp1Response) -> bool {
+    response
+        .headers()
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("content-encoding"))
+        .any(|(_, value)| content_encoding_value_is_active(value))
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn request_has_header(request: &NativeHttp1Request, name: &str) -> bool {
+    request
+        .headers
+        .iter()
+        .any(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn response_has_header(response: &NativeHttp1Response, name: &str) -> bool {
+    response
+        .headers()
+        .iter()
+        .any(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn response_cache_control_blocks_compression(response: &NativeHttp1Response) -> bool {
+    response
+        .headers()
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("cache-control"))
+        .flat_map(|(_, value)| value.split(','))
+        .map(str::trim)
+        .any(cache_control_directive_blocks_compression)
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn response_content_type_is_compressible(response: &NativeHttp1Response) -> bool {
+    response
+        .headers()
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        .is_some_and(|(_, value)| content_type_is_compressible(value))
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn response_content_length_in_compression_bounds(
+    response: &NativeHttp1Response,
+    config: &fluxheim_config::CompressionConfig,
+) -> bool {
+    let length = response
+        .content_length()
+        .unwrap_or_else(|| response.body().len() as u64);
+    input_length_within_compression_bounds(
+        length,
+        config.min_bytes.as_u64(),
+        config.max_input_bytes.as_u64(),
+    )
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn append_vary_accept_encoding(response: &mut NativeHttp1Response) {
+    let has_accept_encoding = response
+        .headers()
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("vary"))
+        .flat_map(|(_, value)| value.split(','))
+        .any(|field| field.trim().eq_ignore_ascii_case("accept-encoding"));
+    if !has_accept_encoding {
+        response.push_header("vary", "accept-encoding");
     }
 }
 

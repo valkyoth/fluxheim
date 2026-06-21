@@ -10,6 +10,10 @@ description = "Internal Fluxheim listener and server boundary types."
 [features]
 default = []
 privacy-mode = []
+compression = ["dep:fluxheim-compression"]
+compression-brotli = ["compression", "fluxheim-compression/brotli"]
+compression-gzip = ["compression", "fluxheim-compression/gzip"]
+compression-zstd = ["compression", "fluxheim-compression/zstd"]
 tls-rustls-backend = ["dep:rustls", "dep:rustls-native-certs", "dep:tokio-rustls", "rustls/ring"]
 tls-rustls = ["tls-rustls-backend", "rustls/ring"]
 tls-rustls-fips = ["tls-rustls-backend", "rustls/fips"]
@@ -20,6 +24,7 @@ tls-openssl-fips = ["tls-openssl"]
 [dependencies]
 bytes = "1.11.1"
 fluxheim-common = { path = "../fluxheim-common" }
+fluxheim-compression = { path = "../fluxheim-compression", optional = true }
 fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-headers = { path = "../fluxheim-headers" }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
@@ -42,5 +47,6 @@ zeroize = "1.8.2"
 rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
 
 [dev-dependencies]
+flate2 = "1.1.5"
 rcgen = { version = "0.14.8", default-features = false, features = ["pem", "ring"] }
 tempfile = "3.27.0"

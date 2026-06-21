@@ -65,7 +65,7 @@ impl NativeRuntimeCutoverBlocker {
             Self::AdminControlPlane | Self::AdminOpsSocket | Self::MetricsHttp => "1.6.22",
             Self::StreamProxy | Self::UdpProxy => "1.6.23",
             Self::NativeHttp2 => "1.6.24",
-            Self::NativeHttp1Proxy => "1.6.28",
+            Self::NativeHttp1Proxy => "1.6.31",
         }
     }
 }

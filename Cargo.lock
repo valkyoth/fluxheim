@@ -1210,7 +1210,9 @@ name = "fluxheim-server"
 version = "1.6.27"
 dependencies = [
  "bytes",
+ "flate2",
  "fluxheim-common",
+ "fluxheim-compression",
  "fluxheim-config",
  "fluxheim-headers",
  "fluxheim-protocol",

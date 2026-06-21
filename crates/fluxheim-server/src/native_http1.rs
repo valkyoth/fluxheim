@@ -95,6 +95,16 @@ impl NativeHttp1Response {
     pub fn body(&self) -> &[u8] {
         &self.body
     }
+
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    pub(crate) fn replace_body(&mut self, body: impl Into<Vec<u8>>) {
+        self.body = body.into();
+        self.content_length = None;
+    }
 }
 
 #[derive(Debug)]

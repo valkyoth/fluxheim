@@ -205,10 +205,7 @@ fn route_policy_supported(route: &RouteConfig) -> bool {
             .cache
             .as_ref()
             .is_none_or(|cache| !cache_enabled(cache))
-        && route
-            .compression
-            .as_ref()
-            .is_none_or(|compression| !compression.enabled)
+        && route_compression_supported(route.compression.as_ref())
         && route.php.as_ref().is_none_or(|php| !php.enabled)
 }
 
@@ -244,4 +241,29 @@ fn access_policy_active(access: &AccessPolicyConfig) -> bool {
 
 fn cache_enabled(cache: &fluxheim_config::CacheConfig) -> bool {
     cache.enabled || cache.local_static
+}
+
+fn route_compression_supported(compression: Option<&fluxheim_config::CompressionConfig>) -> bool {
+    let Some(compression) = compression else {
+        return true;
+    };
+    !compression.enabled || native_route_compression_compiled()
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+const fn native_route_compression_compiled() -> bool {
+    true
+}
+
+#[cfg(not(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+)))]
+const fn native_route_compression_compiled() -> bool {
+    false
 }

@@ -59,9 +59,9 @@ proxy = [
     "dep:zeroize",
 ]
 compression = ["proxy"]
-compression-brotli = ["compression", "fluxheim-compression/brotli"]
-compression-gzip = ["compression", "fluxheim-compression/gzip"]
-compression-zstd = ["compression", "fluxheim-compression/zstd"]
+compression-brotli = ["compression", "fluxheim-compression/brotli", "fluxheim-server/compression-brotli"]
+compression-gzip = ["compression", "fluxheim-compression/gzip", "fluxheim-server/compression-gzip"]
+compression-zstd = ["compression", "fluxheim-compression/zstd", "fluxheim-server/compression-zstd"]
 load-balancer = [
     "proxy",
     "dep:fluxheim-load-balancer",

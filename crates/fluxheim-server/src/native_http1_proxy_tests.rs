@@ -175,6 +175,22 @@ async fn unused_local_address() -> std::net::SocketAddr {
     address
 }
 
+fn proxy_config_with_error_page(root: std::path::PathBuf) -> fluxheim_config::ProxyConfig {
+    fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:9".to_owned()),
+        connect_timeout_secs: Some(1),
+        error_pages: vec![fluxheim_config::ProxyErrorPageConfig {
+            status: 502,
+            path: "/502.html".to_owned(),
+            web: fluxheim_config::WebConfig {
+                root: Some(root),
+                ..Default::default()
+            },
+        }],
+        ..Default::default()
+    }
+}
+
 #[tokio::test]
 async fn native_proxy_forwards_downstream_request_to_upstream() {
     let upstream = upstream(|request, mut stream| async move {
@@ -232,6 +248,27 @@ async fn native_proxy_fails_over_get_to_second_static_upstream() {
     );
     assert!(response.contains("x-origin: second\r\n"));
     assert!(response.ends_with("second upstream"));
+}
+
+#[tokio::test]
+async fn native_proxy_serves_configured_error_page_on_bad_gateway() {
+    let errors = tempfile::tempdir().unwrap();
+    std::fs::write(errors.path().join("502.html"), "native custom 502\n").unwrap();
+    let mut config = proxy_config_with_error_page(errors.path().to_path_buf());
+    config.upstream = Some(unused_local_address().await.to_string());
+    let proxy = NativeHttp1Proxy::from_proxy_config(&config, DownstreamHttp1Policy::default())
+        .unwrap()
+        .unwrap();
+    let proxy = proxy_listener_for(proxy).await;
+
+    let response = downstream_get(proxy, "/failing").await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert!(response.contains("content-type: text/html"));
+    assert!(response.ends_with("native custom 502\n"));
 }
 
 #[tokio::test]
@@ -538,22 +575,10 @@ fn native_proxy_config_rejects_unsupported_proxy_policy_layers() {
         Err(NativeHttp1ProxyConfigError::TrafficMirror)
     );
 
-    let proxy = fluxheim_config::ProxyConfig {
-        upstream: Some("127.0.0.1:3000".to_owned()),
-        error_pages: vec![fluxheim_config::ProxyErrorPageConfig {
-            status: 502,
-            path: "/502.html".to_owned(),
-            web: fluxheim_config::WebConfig {
-                root: Some(std::path::PathBuf::from("/srv/errors")),
-                ..Default::default()
-            },
-        }],
-        ..Default::default()
-    };
-    assert_eq!(
-        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
-        Err(NativeHttp1ProxyConfigError::ErrorPages)
-    );
+    let errors = tempfile::tempdir().unwrap();
+    std::fs::write(errors.path().join("502.html"), "native error page\n").unwrap();
+    let proxy = proxy_config_with_error_page(errors.path().to_path_buf());
+    assert!(NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()).is_ok());
 }
 
 #[test]

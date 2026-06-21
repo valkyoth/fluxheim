@@ -6,13 +6,24 @@ use std::time::Duration;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::NativeHttp1UpstreamTls;
-use crate::{NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1Upstream};
+use crate::{
+    NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb,
+    NativeHttp1Upstream,
+};
 
 #[derive(Clone, Debug)]
 pub struct NativeHttp1Proxy {
     upstreams: Vec<NativeHttp1Upstream>,
     upstream_slots: Vec<usize>,
+    error_pages: Vec<NativeHttp1ProxyErrorPage>,
     next_upstream: Arc<AtomicUsize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NativeHttp1ProxyErrorPage {
+    status: u16,
+    path: String,
+    web: NativeHttp1StaticWeb,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,7 +52,7 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
             Self::DownstreamPolicy => formatter
                 .write_str("native HTTP/1 proxy does not yet support per-proxy downstream policy"),
             Self::ErrorPages => {
-                formatter.write_str("native HTTP/1 proxy does not yet support proxy error pages")
+                formatter.write_str("native HTTP/1 proxy rejected proxy error page config")
             }
             Self::HttpPolicy => formatter
                 .write_str("native HTTP/1 proxy does not yet support Fluxheim HTTP policy layers"),
@@ -85,6 +96,7 @@ impl NativeHttp1Proxy {
         Self {
             upstreams: vec![upstream],
             upstream_slots: vec![0],
+            error_pages: Vec::new(),
             next_upstream: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -99,6 +111,7 @@ impl NativeHttp1Proxy {
         Ok(Self {
             upstreams,
             upstream_slots,
+            error_pages: Vec::new(),
             next_upstream: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -121,6 +134,7 @@ impl NativeHttp1Proxy {
         Ok(Self {
             upstreams,
             upstream_slots,
+            error_pages: Vec::new(),
             next_upstream: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -184,9 +198,6 @@ impl NativeHttp1Proxy {
         if proxy.mirror.enabled {
             return Err(NativeHttp1ProxyConfigError::TrafficMirror);
         }
-        if !proxy.error_pages.is_empty() {
-            return Err(NativeHttp1ProxyConfigError::ErrorPages);
-        }
         if proxy_requires_advanced_upstream_transport(proxy) {
             return Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy);
         }
@@ -222,13 +233,17 @@ impl NativeHttp1Proxy {
             native_upstream = native_upstream.with_pool_max_idle(pool_max_idle);
             native_upstreams.push(native_upstream);
         }
-        Self::from_weighted_upstreams(native_upstreams, &proxy.upstream_weights).map(Some)
+        let mut native = Self::from_weighted_upstreams(native_upstreams, &proxy.upstream_weights)?;
+        native.error_pages = native_error_pages_from_config(proxy)?;
+        Ok(Some(native))
     }
 }
 
 impl PartialEq for NativeHttp1Proxy {
     fn eq(&self, other: &Self) -> bool {
-        self.upstreams == other.upstreams && self.upstream_slots == other.upstream_slots
+        self.upstreams == other.upstreams
+            && self.upstream_slots == other.upstream_slots
+            && self.error_pages == other.error_pages
     }
 }
 
@@ -266,17 +281,56 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     }
                 }
             }
-            if last_error
+            let status = if last_error
                 .as_ref()
                 .is_some_and(native_proxy_error_is_timeout)
             {
-                NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
-                    .close_connection()
+                504
             } else {
-                NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n").close_connection()
-            }
+                502
+            };
+            self.error_page_response(&request, status)
+                .unwrap_or_else(|| {
+                    if status == 504 {
+                        NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
+                            .close_connection()
+                    } else {
+                        NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
+                            .close_connection()
+                    }
+                })
         })
     }
+}
+
+impl NativeHttp1Proxy {
+    fn error_page_response(
+        &self,
+        request: &NativeHttp1Request,
+        status: u16,
+    ) -> Option<NativeHttp1Response> {
+        self.error_pages
+            .iter()
+            .find(|page| page.status == status)
+            .and_then(|page| page.web.handle_error_page(request, &page.path, status))
+    }
+}
+
+fn native_error_pages_from_config(
+    proxy: &fluxheim_config::ProxyConfig,
+) -> Result<Vec<NativeHttp1ProxyErrorPage>, NativeHttp1ProxyConfigError> {
+    let mut pages = Vec::with_capacity(proxy.error_pages.len());
+    for page in &proxy.error_pages {
+        let web = NativeHttp1StaticWeb::from_config(&page.web)
+            .map_err(|_| NativeHttp1ProxyConfigError::ErrorPages)?
+            .ok_or(NativeHttp1ProxyConfigError::ErrorPages)?;
+        pages.push(NativeHttp1ProxyErrorPage {
+            status: page.status,
+            path: page.path.clone(),
+            web,
+        });
+    }
+    Ok(pages)
 }
 
 fn native_proxy_error_is_timeout(error: &crate::NativeHttp1Error) -> bool {

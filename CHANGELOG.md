@@ -7,6 +7,38 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.28 - 2026-06-21
+
+### Changed
+
+- Continue the native rich-proxy parity work by adding route-level response
+  compression to the native HTTP/1 route proxy.
+- Wire `fluxheim-server` to the existing `fluxheim-compression` crate for
+  gzip, brotli, and zstd feature builds.
+- Add native route compression eligibility checks matching the compatibility
+  path: safe methods/status, content negotiation, cache-control and privacy
+  exclusions, and configured input/output bounds.
+- Move `proxy.error_pages` onto the native HTTP/1 proxy for static 502/504
+  fallback pages backed by `fluxheim-web`.
+- Preserve configured static proxy error-page bodies while keeping the original
+  proxy failure status.
+- Keep the final Pingora dependency deletion later in the 1.6 line so the
+  remaining cache, PHP-FPM, auth-request, traffic mirror, inherited
+  compression, forwarded-client-IP, and advanced load-balancer blockers can be
+  removed with their own parity tests.
+
+### Security
+
+- Native compression strips origin `ETag` and `Content-Length`, appends
+  `Vary: accept-encoding`, and lets native response framing compute the final
+  compressed length.
+- Native compression skips the transform if encoder initialization or output
+  bounds fail instead of emitting a partially transformed response.
+- Native proxy error pages use the same symlink-safe static-web resolution and
+  rooted file-open behavior as native static routes.
+- Custom proxy error pages fall back to standard 502/504 responses if the
+  configured page is missing, forbidden, a directory listing, or too large.
+
 ## 1.6.27 - 2026-06-21
 
 ### Changed
@@ -109,8 +141,8 @@ behavior when the change improves security or project direction.
   prefix, and fallback routes, including method filters, longest-prefix
   selection, prefix stripping, prefix rewriting, query preservation, and
   shared path-safety checks.
-- Re-scope the remaining Pingora dependency exception target to `1.6.28`, with
-  `1.6.26` and `1.6.27` reserved for the remaining native policy and rich
+- Re-scope the remaining Pingora dependency exception target to `1.6.31`, with
+  the next 1.6.x releases reserved for the remaining native policy and rich
   proxy integration parity.
 - Update release metadata, RPM metadata, and container tag documentation for
   `v1.6.25`.
