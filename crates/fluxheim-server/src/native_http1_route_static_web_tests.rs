@@ -42,6 +42,14 @@ async fn downstream_get(proxy: std::net::SocketAddr, path: &str) -> String {
     .await
 }
 
+async fn downstream_post(proxy: std::net::SocketAddr, path: &str) -> String {
+    downstream_request(
+        proxy,
+        &format!("POST {path} HTTP/1.1\r\nHost: route.test\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"),
+    )
+    .await
+}
+
 async fn downstream_request(proxy: std::net::SocketAddr, request: &str) -> String {
     let mut client = TcpStream::connect(proxy).await.unwrap();
     client.write_all(request.as_bytes()).await.unwrap();
@@ -122,6 +130,30 @@ async fn native_route_proxy_serves_static_web_range() {
         Some("bytes 1-3/6")
     );
     assert!(response.ends_with("bcd"));
+
+    root.close().unwrap();
+}
+
+#[tokio::test]
+async fn native_route_proxy_static_web_rejects_non_get_head_method() {
+    let root = TempDir::new().unwrap();
+    fs::write(root.path().join("asset.txt"), b"native-static\n").unwrap();
+    let route = NativeHttp1RouteProxyRoute::prefix_static_web(
+        "/files/",
+        Vec::new(),
+        native_static_web(root.path()),
+    )
+    .with_strip_prefix("/files/");
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_post(proxy, "/files/asset.txt").await;
+
+    assert!(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
+    assert_eq!(
+        response_header(&response, "allow").as_deref(),
+        Some("GET, HEAD")
+    );
+    assert!(response.ends_with("method not allowed\n"));
 
     root.close().unwrap();
 }

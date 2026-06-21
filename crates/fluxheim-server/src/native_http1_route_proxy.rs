@@ -579,7 +579,7 @@ fn redirect_location_path_safe(location: &str) -> bool {
         .find(['?', '#'])
         .unwrap_or(path_and_tail.len());
     let path = &path_and_tail[..path_end];
-    !path.contains("//") && !path.split('/').any(|segment| matches!(segment, "." | ".."))
+    path.is_empty() || safe_forward_path(path)
 }
 
 impl NativeRouteRequestHeaderPolicy {

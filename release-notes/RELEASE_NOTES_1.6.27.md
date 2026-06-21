@@ -27,8 +27,15 @@ web serving onto the native HTTP/1 route adapter.
 
 - Native static-web path resolution rejects decoded dot segments, NUL bytes,
   backslashes, denied dotfiles, and symlink escapes.
-- Static response body reads re-check the rooted path and regular-file status
-  before opening the file.
+- Static response body reads use rooted component-by-component `openat` with
+  no-symlink opens for every directory component and the final file, closing the
+  symlink-swap window between metadata checks and body reads.
+- Native route static-web handling now rejects methods other than `GET` and
+  `HEAD` with `405 Method Not Allowed`, even when the route method list matches
+  all methods.
+- Native redirect `Location` path validation now reuses the bounded multi-pass
+  forward-path safety check, rejecting single- and double-encoded dot-segment
+  or slash expansions from `{query}`, `{path}`, or `{uri}` templates.
 - Buffered native static responses are capped at 64 MiB until the final native
   streaming body path is completed.
 - Forwarded-client-IP shortcut ownership remains a compatibility-path blocker;
