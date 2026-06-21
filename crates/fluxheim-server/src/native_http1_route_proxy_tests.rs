@@ -516,6 +516,82 @@ async fn native_route_proxy_applies_route_request_headers_before_forwarding() {
     assert!(response.ends_with("headers"));
 }
 
+#[tokio::test]
+async fn native_route_proxy_inherits_base_request_and_response_headers_from_config() {
+    let upstream =
+        upstream_expect_header("/api/item", "x-root-request", "native", "x-remove").await;
+    let mut base_headers = fluxheim_config::HeaderPolicyConfig::default();
+    base_headers.request.unset.push("x-remove".to_owned());
+    base_headers
+        .request
+        .set
+        .insert("x-root-request".to_owned(), "native".to_owned());
+    base_headers
+        .response
+        .set
+        .insert("x-root-response".to_owned(), "native".to_owned());
+    let mut route_headers = fluxheim_config::VhostHeaderPolicyConfig::default();
+    route_headers
+        .response
+        .set
+        .insert("x-route-response".to_owned(), "native".to_owned());
+    let route_config = fluxheim_config::RouteConfig {
+        name: "api".to_owned(),
+        path_exact: None,
+        path_prefix: Some("/api/".to_owned()),
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: None,
+        proxy: Some(fluxheim_config::ProxyConfig {
+            upstreams: vec![upstream.to_string()],
+            ..Default::default()
+        }),
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: route_headers,
+    };
+    let route = NativeHttp1RouteProxyRoute::from_config_with_inherited(
+        &route_config,
+        Some(proxy_for(upstream)),
+        &base_headers,
+        None,
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_request(
+        proxy,
+        "GET /api/item HTTP/1.1\r\nHost: route.test\r\nX-Remove: secret\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(
+        response_header(&response, "x-root-response").as_deref(),
+        Some("native")
+    );
+    assert_eq!(
+        response_header(&response, "x-route-response").as_deref(),
+        Some("native")
+    );
+    assert_eq!(
+        response_header(&response, "x-content-type-options").as_deref(),
+        Some("nosniff")
+    );
+}
+
 #[cfg(feature = "compression-gzip")]
 #[tokio::test]
 async fn native_route_proxy_applies_gzip_route_compression() {
@@ -563,6 +639,83 @@ async fn native_route_proxy_applies_gzip_route_compression() {
     let mut decoded = String::new();
     GzDecoder::new(body).read_to_string(&mut decoded).unwrap();
     assert!(decoded.contains("hello native compression"));
+}
+
+#[cfg(feature = "compression-gzip")]
+#[tokio::test]
+async fn native_route_proxy_inherits_gzip_compression_config() {
+    let upstream = upstream_response(
+        "HTTP/1.1 200 OK\r\n\
+         content-type: text/plain\r\n\r\n\
+         inherited native compression inherited native compression \
+         inherited native compression inherited native compression \
+         inherited native compression inherited native compression",
+    )
+    .await;
+    let route_config = fluxheim_config::RouteConfig {
+        name: "asset".to_owned(),
+        path_exact: None,
+        path_prefix: Some("/asset/".to_owned()),
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: None,
+        proxy: Some(fluxheim_config::ProxyConfig {
+            upstreams: vec![upstream.to_string()],
+            ..Default::default()
+        }),
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
+    };
+    let inherited = fluxheim_config::CompressionConfig {
+        enabled: true,
+        gzip: true,
+        min_bytes: fluxheim_config::ByteSize::from_bytes(1),
+        max_input_bytes: fluxheim_config::ByteSize::from_bytes(4096),
+        max_output_bytes: fluxheim_config::ByteSize::from_bytes(4096),
+        ..Default::default()
+    };
+    let route = NativeHttp1RouteProxyRoute::from_config_with_inherited(
+        &route_config,
+        Some(proxy_for(upstream)),
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        Some(&inherited),
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_request_bytes(
+        proxy,
+        "GET /asset/text HTTP/1.1\r\nHost: route.test\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let split = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .unwrap();
+    let head = String::from_utf8(response[..split].to_vec()).unwrap();
+    let body = &response[split + 4..];
+
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(
+        response_header(&head, "content-encoding").as_deref(),
+        Some("gzip")
+    );
+    let mut decoded = String::new();
+    GzDecoder::new(body).read_to_string(&mut decoded).unwrap();
+    assert!(decoded.contains("inherited native compression"));
 }
 
 #[cfg(all(feature = "compression-gzip", feature = "compression-zstd"))]

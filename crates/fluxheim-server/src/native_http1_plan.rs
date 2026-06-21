@@ -170,8 +170,8 @@ fn push_proxy_candidate(
 }
 
 fn root_policy_supported(config: &Config) -> bool {
-    config.headers == fluxheim_config::HeaderPolicyConfig::default()
-        && !config.compression.enabled
+    header_policy_supported(&config.headers)
+        && compression_supported(&config.compression)
         && !cache_enabled(&config.cache)
         && !config.web.enabled()
 }
@@ -182,12 +182,9 @@ fn vhost_policy_supported(vhost: &VhostConfig) -> bool {
         && !vhost.concurrency.enabled
         && !vhost.redirect.enabled
         && !vhost.acme_challenge.enabled
-        && vhost.headers == fluxheim_config::VhostHeaderPolicyConfig::default()
+        && vhost_header_overlay_supported(&vhost.headers)
         && !cache_enabled(&vhost.cache)
-        && vhost
-            .compression
-            .as_ref()
-            .is_none_or(|compression| !compression.enabled)
+        && vhost.compression.as_ref().is_none_or(compression_supported)
         && !vhost.php.enabled
         && !vhost.web.enabled()
 }
@@ -205,8 +202,27 @@ fn route_policy_supported(route: &RouteConfig) -> bool {
             .cache
             .as_ref()
             .is_none_or(|cache| !cache_enabled(cache))
-        && route_compression_supported(route.compression.as_ref())
+        && route.compression.as_ref().is_none_or(compression_supported)
         && route.php.as_ref().is_none_or(|php| !php.enabled)
+}
+
+fn header_policy_supported(headers: &fluxheim_config::HeaderPolicyConfig) -> bool {
+    request_header_policy_supported(&headers.request)
+}
+
+fn request_header_policy_supported(request: &fluxheim_config::RequestHeaderPolicyConfig) -> bool {
+    let defaults = fluxheim_config::RequestHeaderPolicyConfig::default();
+    request.enabled == defaults.enabled
+        && request.strip_inbound_client_ip_headers == defaults.strip_inbound_client_ip_headers
+        && request.x_forwarded_for == defaults.x_forwarded_for
+        && request.x_real_ip == defaults.x_real_ip
+        && request.x_forwarded_host == defaults.x_forwarded_host
+        && request.x_forwarded_proto == defaults.x_forwarded_proto
+        && request.forwarded == defaults.forwarded
+}
+
+fn vhost_header_overlay_supported(headers: &fluxheim_config::VhostHeaderPolicyConfig) -> bool {
+    route_request_header_policy_supported(&headers.request)
 }
 
 fn route_request_header_policy_supported(
@@ -243,10 +259,7 @@ fn cache_enabled(cache: &fluxheim_config::CacheConfig) -> bool {
     cache.enabled || cache.local_static
 }
 
-fn route_compression_supported(compression: Option<&fluxheim_config::CompressionConfig>) -> bool {
-    let Some(compression) = compression else {
-        return true;
-    };
+fn compression_supported(compression: &fluxheim_config::CompressionConfig) -> bool {
     !compression.enabled || native_route_compression_compiled()
 }
 

@@ -2,6 +2,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+#[cfg(feature = "compression-gzip")]
+use flate2::read::GzDecoder;
+#[cfg(feature = "compression-gzip")]
+use std::io::Read as _;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -168,11 +172,69 @@ async fn downstream_get(proxy: std::net::SocketAddr, path: &str) -> String {
     String::from_utf8(response).unwrap()
 }
 
+#[cfg(feature = "compression-gzip")]
+async fn downstream_request_bytes(proxy: std::net::SocketAddr, request: &str) -> Vec<u8> {
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+    client.write_all(request.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.unwrap();
+    response
+}
+
 async fn unused_local_address() -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     drop(listener);
     address
+}
+
+#[cfg(feature = "compression-gzip")]
+#[tokio::test]
+async fn native_proxy_applies_gzip_compression_config() {
+    let upstream = upstream(|_, mut stream| async move {
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\n\
+                  content-type: text/plain\r\n\
+                  etag: \"origin\"\r\n\r\n\
+                  hello native proxy compression hello native proxy compression \
+                  hello native proxy compression hello native proxy compression \
+                  hello native proxy compression hello native proxy compression",
+            )
+            .await
+            .unwrap();
+    })
+    .await;
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new(upstream.to_string()))
+        .with_compression_config(fluxheim_config::CompressionConfig {
+            enabled: true,
+            gzip: true,
+            min_bytes: fluxheim_config::ByteSize::from_bytes(1),
+            max_input_bytes: fluxheim_config::ByteSize::from_bytes(4096),
+            max_output_bytes: fluxheim_config::ByteSize::from_bytes(4096),
+            ..Default::default()
+        });
+    let proxy = proxy_listener_for(proxy).await;
+
+    let response = downstream_request_bytes(
+        proxy,
+        "GET /asset.txt HTTP/1.1\r\nHost: proxy.test\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let split = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .unwrap();
+    let head = String::from_utf8(response[..split].to_vec()).unwrap();
+    let body = &response[split + 4..];
+
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(head.contains("\r\ncontent-encoding: gzip"));
+    assert!(head.contains("\r\nvary: accept-encoding"));
+    assert!(!head.contains("\r\netag:"));
+    let mut decoded = String::new();
+    GzDecoder::new(body).read_to_string(&mut decoded).unwrap();
+    assert!(decoded.contains("hello native proxy compression"));
 }
 
 fn proxy_config_with_error_page(root: std::path::PathBuf) -> fluxheim_config::ProxyConfig {
@@ -222,6 +284,50 @@ async fn native_proxy_forwards_downstream_request_to_upstream() {
     );
     assert!(response.contains("x-origin: native\r\n"));
     assert!(response.ends_with("hello native"));
+}
+
+#[tokio::test]
+async fn native_proxy_applies_header_policy() {
+    let upstream = upstream(|request, mut stream| async move {
+        let request = String::from_utf8(request).unwrap();
+        assert!(request.starts_with("GET /headers HTTP/1.1\r\n"));
+        assert!(request.contains("x-root-request: native\r\n"));
+        assert!(!request.contains("x-remove:"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nx-remove-response: old\r\n\r\nok")
+            .await
+            .unwrap();
+    })
+    .await;
+    let mut headers = fluxheim_config::HeaderPolicyConfig::default();
+    headers.request.unset.push("x-remove".to_owned());
+    headers
+        .request
+        .set
+        .insert("x-root-request".to_owned(), "native".to_owned());
+    headers.response.unset.push("x-remove-response".to_owned());
+    headers
+        .response
+        .set
+        .insert("x-root-response".to_owned(), "native".to_owned());
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new(upstream.to_string()))
+        .with_header_policy(&headers);
+    let proxy = proxy_listener_for(proxy).await;
+
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+    client
+        .write_all(b"GET /headers HTTP/1.1\r\nHost: proxy.test\r\nX-Remove: secret\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains("x-root-response: native\r\n"));
+    assert!(response.contains("x-content-type-options: nosniff\r\n"));
+    assert!(!response.contains("x-remove-response:"));
+    assert!(response.ends_with("ok"));
 }
 
 #[tokio::test]

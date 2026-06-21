@@ -6,6 +6,15 @@ use std::time::Duration;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::NativeHttp1UpstreamTls;
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+use crate::native_http1_route_proxy::apply_native_response_compression;
+use crate::native_http1_route_proxy::{
+    NativeRouteRequestHeaderPolicy, NativeRouteResponseHeaderPolicy,
+};
 use crate::{
     NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb,
     NativeHttp1Upstream,
@@ -16,6 +25,14 @@ pub struct NativeHttp1Proxy {
     upstreams: Vec<NativeHttp1Upstream>,
     upstream_slots: Vec<usize>,
     error_pages: Vec<NativeHttp1ProxyErrorPage>,
+    request_headers: NativeRouteRequestHeaderPolicy,
+    response_headers: NativeRouteResponseHeaderPolicy,
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    compression: Option<fluxheim_config::CompressionConfig>,
     next_upstream: Arc<AtomicUsize>,
 }
 
@@ -97,6 +114,14 @@ impl NativeHttp1Proxy {
             upstreams: vec![upstream],
             upstream_slots: vec![0],
             error_pages: Vec::new(),
+            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            response_headers: NativeRouteResponseHeaderPolicy::default(),
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -112,6 +137,14 @@ impl NativeHttp1Proxy {
             upstreams,
             upstream_slots,
             error_pages: Vec::new(),
+            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            response_headers: NativeRouteResponseHeaderPolicy::default(),
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -135,6 +168,14 @@ impl NativeHttp1Proxy {
             upstreams,
             upstream_slots,
             error_pages: Vec::new(),
+            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            response_headers: NativeRouteResponseHeaderPolicy::default(),
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -149,6 +190,25 @@ impl NativeHttp1Proxy {
 
     pub fn upstream_slots(&self) -> &[usize] {
         &self.upstream_slots
+    }
+
+    pub fn with_header_policy(mut self, headers: &fluxheim_config::HeaderPolicyConfig) -> Self {
+        self.request_headers = NativeRouteRequestHeaderPolicy::from_policy(&headers.request);
+        self.response_headers = NativeRouteResponseHeaderPolicy::from_policy(&headers.response);
+        self
+    }
+
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    pub fn with_compression_config(
+        mut self,
+        compression: fluxheim_config::CompressionConfig,
+    ) -> Self {
+        self.compression = Some(compression);
+        self
     }
 
     pub fn from_proxy_config(
@@ -241,9 +301,27 @@ impl NativeHttp1Proxy {
 
 impl PartialEq for NativeHttp1Proxy {
     fn eq(&self, other: &Self) -> bool {
-        self.upstreams == other.upstreams
+        let equal = self.upstreams == other.upstreams
             && self.upstream_slots == other.upstream_slots
             && self.error_pages == other.error_pages
+            && self.request_headers == other.request_headers
+            && self.response_headers == other.response_headers;
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        {
+            equal && self.compression == other.compression
+        }
+        #[cfg(not(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        )))]
+        {
+            equal
+        }
     }
 }
 
@@ -256,6 +334,14 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>> {
         Box::pin(async move {
             let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            let compression_request = request.clone();
+            let mut request = request;
+            self.request_headers.apply(&mut request);
             let mut last_error = None;
             let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
             let total = self.upstream_slots.len();
@@ -271,7 +357,30 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 unique_attempts += 1;
                 let upstream = &self.upstreams[index];
                 match upstream.send(&request).await {
-                    Ok(response) => return response,
+                    Ok(mut response) => {
+                        self.response_headers.apply(&mut response);
+                        #[cfg(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        ))]
+                        {
+                            if let Some(compression) = &self.compression {
+                                apply_native_response_compression(
+                                    &compression_request,
+                                    &mut response,
+                                    compression,
+                                );
+                            }
+                            return response;
+                        }
+                        #[cfg(not(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        )))]
+                        return response;
+                    }
                     Err(error) if retry_allowed && unique_attempts < self.upstreams.len() => {
                         last_error = Some(error);
                     }

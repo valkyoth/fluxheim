@@ -19,7 +19,8 @@ use fluxheim_compression::{
     input_length_within_compression_bounds, parse_accept_encoding_qvalue,
 };
 use fluxheim_config::{
-    HeaderValues, ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
+    HeaderPolicyConfig, HeaderValues, RequestHeaderPolicyConfig, ResponseHeaderPolicyConfig,
+    ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
 };
 use fluxheim_headers::{rewrite_header_prefix, rewrite_refresh_url, rewrite_set_cookie_value};
 use fluxheim_protocol::{
@@ -65,7 +66,7 @@ enum NativeHttp1RouteMatcher {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum NativeHttp1RouteAction {
-    Proxy(NativeHttp1Proxy),
+    Proxy(Box<NativeHttp1Proxy>),
     Redirect(NativeHttp1RouteRedirect),
     StaticWeb(NativeHttp1StaticWeb),
 }
@@ -77,7 +78,7 @@ struct NativeHttp1RouteRedirect {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct NativeRouteRequestHeaderPolicy {
+pub(crate) struct NativeRouteRequestHeaderPolicy {
     enabled: bool,
     unset: Vec<String>,
     set: Vec<(String, String)>,
@@ -85,7 +86,7 @@ struct NativeRouteRequestHeaderPolicy {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct NativeRouteResponseHeaderPolicy {
+pub(crate) struct NativeRouteResponseHeaderPolicy {
     enabled: bool,
     unset: Vec<String>,
     set: Vec<(String, String)>,
@@ -153,7 +154,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
-            action: NativeHttp1RouteAction::Proxy(proxy),
+            action: NativeHttp1RouteAction::Proxy(Box::new(proxy)),
         }
     }
 
@@ -172,7 +173,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
-            action: NativeHttp1RouteAction::Proxy(proxy),
+            action: NativeHttp1RouteAction::Proxy(Box::new(proxy)),
         }
     }
 
@@ -191,7 +192,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: NativeRouteRequestHeaderPolicy::default(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
-            action: NativeHttp1RouteAction::Proxy(proxy),
+            action: NativeHttp1RouteAction::Proxy(Box::new(proxy)),
         }
     }
 
@@ -276,6 +277,21 @@ impl NativeHttp1RouteProxyRoute {
         route: &fluxheim_config::RouteConfig,
         proxy: Option<NativeHttp1Proxy>,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        Self::from_config_with_inherited(route, proxy, &HeaderPolicyConfig::default(), None)
+    }
+
+    pub fn from_config_with_inherited(
+        route: &fluxheim_config::RouteConfig,
+        proxy: Option<NativeHttp1Proxy>,
+        base_headers: &HeaderPolicyConfig,
+        inherited_compression: Option<&fluxheim_config::CompressionConfig>,
+    ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        #[cfg(not(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        )))]
+        let _ = inherited_compression;
         if route.path_regex.is_some() {
             return Err(NativeHttp1RouteProxyConfigError::RegexRoute);
         }
@@ -303,10 +319,11 @@ impl NativeHttp1RouteProxyRoute {
                     .ok_or(NativeHttp1RouteProxyConfigError::MissingRouteAction)?,
             )
         } else {
-            NativeHttp1RouteAction::Proxy(
+            NativeHttp1RouteAction::Proxy(Box::new(
                 proxy.ok_or(NativeHttp1RouteProxyConfigError::MissingRouteAction)?,
-            )
+            ))
         };
+        let headers = base_headers.with_vhost_overlay(&route.headers);
         Ok(Self {
             methods: route.methods.clone(),
             matcher,
@@ -318,11 +335,12 @@ impl NativeHttp1RouteProxyRoute {
                 feature = "compression-gzip",
                 feature = "compression-zstd"
             ))]
-            compression: route.compression.clone(),
-            request_headers: NativeRouteRequestHeaderPolicy::from_overlay(&route.headers.request),
-            response_headers: NativeRouteResponseHeaderPolicy::from_overlay(
-                &route.headers.response,
-            ),
+            compression: route
+                .compression
+                .clone()
+                .or_else(|| inherited_compression.cloned()),
+            request_headers: NativeRouteRequestHeaderPolicy::from_policy(&headers.request),
+            response_headers: NativeRouteResponseHeaderPolicy::from_policy(&headers.response),
             action,
         })
     }
@@ -373,7 +391,7 @@ impl NativeHttp1RouteProxyRoute {
 
     pub fn proxy(&self) -> Option<&NativeHttp1Proxy> {
         match &self.action {
-            NativeHttp1RouteAction::Proxy(proxy) => Some(proxy),
+            NativeHttp1RouteAction::Proxy(proxy) => Some(proxy.as_ref()),
             NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => None,
         }
     }
@@ -536,6 +554,19 @@ impl NativeHttp1RouteProxyRoute {
     feature = "compression-zstd"
 ))]
 fn apply_route_compression(
+    request: &NativeHttp1Request,
+    response: &mut NativeHttp1Response,
+    config: &fluxheim_config::CompressionConfig,
+) {
+    apply_native_response_compression(request, response, config);
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+pub(crate) fn apply_native_response_compression(
     request: &NativeHttp1Request,
     response: &mut NativeHttp1Response,
     config: &fluxheim_config::CompressionConfig,
@@ -972,6 +1003,15 @@ fn redirect_location_path_safe(location: &str) -> bool {
 }
 
 impl NativeRouteRequestHeaderPolicy {
+    pub(crate) fn from_policy(policy: &RequestHeaderPolicyConfig) -> Self {
+        Self {
+            enabled: policy.enabled,
+            unset: policy.effective_unset(),
+            set: policy.effective_set().into_iter().collect(),
+            append: flatten_append_headers(&policy.append),
+        }
+    }
+
     fn from_overlay(overlay: &fluxheim_config::RequestHeaderPolicyOverlayConfig) -> Self {
         Self {
             enabled: overlay.enabled.unwrap_or(true),
@@ -981,7 +1021,7 @@ impl NativeRouteRequestHeaderPolicy {
         }
     }
 
-    fn apply(&self, request: &mut NativeHttp1Request) {
+    pub(crate) fn apply(&self, request: &mut NativeHttp1Request) {
         if !self.enabled {
             return;
         }
@@ -1003,6 +1043,18 @@ impl NativeRouteRequestHeaderPolicy {
 }
 
 impl NativeRouteResponseHeaderPolicy {
+    pub(crate) fn from_policy(policy: &ResponseHeaderPolicyConfig) -> Self {
+        let mut native = Self {
+            enabled: policy.enabled,
+            unset: policy.effective_unset(),
+            set: policy.effective_set().into_iter().collect(),
+            append: flatten_append_headers(&policy.append),
+            rewrite: policy.rewrite.clone(),
+        };
+        native.apply_standard_headers_from_policy(policy);
+        native
+    }
+
     fn from_overlay(overlay: &ResponseHeaderPolicyOverlayConfig) -> Self {
         let mut policy = Self {
             enabled: overlay.enabled.unwrap_or(true),
@@ -1013,6 +1065,28 @@ impl NativeRouteResponseHeaderPolicy {
         };
         policy.apply_standard_headers(overlay);
         policy
+    }
+
+    fn apply_standard_headers_from_policy(&mut self, policy: &ResponseHeaderPolicyConfig) {
+        if let Some(value) = &policy.strict_transport_security {
+            self.set_optional_header("strict-transport-security", Some(value.clone()));
+        } else if let Some(hsts) = &policy.hsts
+            && let Some(value) = hsts.header_value()
+        {
+            self.set_optional_header("strict-transport-security", Some(value));
+        }
+        if let Some(value) = &policy.content_security_policy {
+            self.set_optional_header("content-security-policy", Some(value.clone()));
+        }
+        if let Some(value) = &policy.x_content_type_options {
+            self.set_optional_header("x-content-type-options", Some(value.clone()));
+        }
+        if let Some(value) = &policy.x_frame_options {
+            self.set_optional_header("x-frame-options", Some(value.clone()));
+        }
+        if let Some(value) = &policy.referrer_policy {
+            self.set_optional_header("referrer-policy", Some(value.clone()));
+        }
     }
 
     fn apply_standard_headers(&mut self, overlay: &ResponseHeaderPolicyOverlayConfig) {
@@ -1047,7 +1121,7 @@ impl NativeRouteResponseHeaderPolicy {
         }
     }
 
-    fn apply(&self, response: &mut NativeHttp1Response) {
+    pub(crate) fn apply(&self, response: &mut NativeHttp1Response) {
         if !self.enabled {
             return;
         }

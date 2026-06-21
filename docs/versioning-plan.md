@@ -2458,6 +2458,12 @@ Replacement rules for 1.6:
 
 Planned `1.6.x` sequence:
 
+The remaining `1.6.x` entries are implementation checkpoints, not mandatory
+public tags. To keep external pentest and release costs sustainable, continue
+committing checkpoint work through the final Pingora-removal proof, then publish
+the combined Pingora-exit result as the next `1.6.29` release and keep `1.6.30`
+available for the stabilization/security-only follow-up.
+
 - `v1.6.0`: Pingora-exit foundation. Freeze current HTTP/proxy/cache/LB
   behavior into golden tests, migration fixtures, smoke scripts, packet-level
   HTTP fixtures, cache fixtures, TLS fixtures, and release gates. Add
@@ -2732,17 +2738,26 @@ Planned `1.6.x` sequence:
   forwarded-client-IP ownership shortcuts, dynamic discovery, health-aware
   load-balancing, persistence, priority/backup/drain, and hash-based selection
   on the compatibility path until each has native parity tests.
-- `v1.6.29`: finish the remaining native HTTP policy blockers that do not need
+- `v1.6.29`: move inherited global/vhost compression and root/vhost/route
+  header policy onto the native HTTP/1 proxy and route proxy. Prove plain proxy
+  compression, inherited route compression, request-header mutation,
+  response-header mutation, and standard response security headers with live
+  native listener tests. Keep forwarded-client-IP ownership, auth-request
+  subrequests, traffic mirroring, access/rate/concurrency policy, vhost
+  redirects, ACME-challenge routing, route rewrite templates, per-proxy
+  downstream timeout/min-send-rate policy, advanced upstream transport knobs,
+  cache, PHP-FPM, dynamic discovery, and load-balancer state explicitly
+  reported as compatibility blockers until they have native parity tests.
+- `v1.6.30`: finish the remaining native HTTP policy blockers that do not need
   cache or PHP state: forwarded-client-IP ownership, auth-request subrequests,
-  traffic mirroring, inherited global/vhost compression policy, root/vhost
-  header policy, vhost access/rate/concurrency policy, vhost redirects,
-  ACME-challenge routing, vhost static-web dispatch, route access/rate/
-  concurrency/grpc flags, route rewrite-template handling, per-proxy
-  downstream timeout/min-send-rate policy, and advanced upstream transport
-  knobs that do not require cache, PHP, dynamic discovery, or load-balancer
-  state. Add live native listener tests for each path and keep unsupported
-  configs explicitly reported in the cutover inventory.
-- `v1.6.30`: move cache and PHP-FPM rich proxy integrations onto native
+  traffic mirroring, vhost access/rate/concurrency policy, vhost redirects,
+  ACME-challenge routing, route access/rate/concurrency/grpc flags, route
+  rewrite-template handling, per-proxy downstream timeout/min-send-rate policy,
+  and advanced upstream transport knobs that do not require cache, PHP, dynamic
+  discovery, or load-balancer state. Add live native listener tests for each
+  path and keep unsupported configs explicitly reported in the cutover
+  inventory.
+- `v1.6.31`: move cache and PHP-FPM rich proxy integrations onto native
   adapters. Cache work must cover lookup/fill/stale, Vary/Range/conditional
   semantics, peer-fill guardrails, and purge visibility. PHP-FPM work must
   cover SCRIPT_NAME/PATH_INFO safety, deny prefixes, spool limits, TCP/Unix
@@ -2750,7 +2765,7 @@ Planned `1.6.x` sequence:
   until fixture and smoke tests prove parity. Also make sure root/vhost cache
   policy and route cache policy all report native-ready only after the native
   cache adapter owns the full request/response/cache-key path.
-- `v1.6.31`: finish native load-balancer compatibility and remove the final
+- `v1.6.32`: finish native load-balancer compatibility and remove the final
   Pingora runtime/listener/TLS adapter crates from normal builds. This release
   must close the remaining proxy gates that need runtime/load-balancer state:
   dynamic discovery, health-aware selection, persistence, priority groups,
@@ -2768,7 +2783,7 @@ Planned `1.6.x` sequence:
   the final Pingora-free proof release: `cargo tree`, release containers, RPM
   builds, source builds, and focused artifacts must all prove no normal
   Fluxheim build compiles vendored Pingora code.
-- `v1.6.32`: stabilization/security-only release for the Pingora-free runtime
+- `v1.6.33`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
   checks, long-running soak tests, runtime-baseline comparisons, and

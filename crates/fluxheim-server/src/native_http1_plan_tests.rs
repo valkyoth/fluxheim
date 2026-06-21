@@ -102,16 +102,51 @@ fn server_plan_collects_vhost_and_route_native_http1_proxy_candidates() {
 }
 
 #[test]
-fn server_plan_rejects_native_http1_proxy_candidate_with_root_policy() {
+fn server_plan_tracks_root_compression_native_feature_support() {
     let mut config = Config::default();
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
     config.compression.enabled = true;
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
+    #[cfg(not(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    )))]
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
         Some(NativeHttp1ProxyConfigError::HttpPolicy)
+    );
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
+}
+
+#[test]
+fn server_plan_accepts_native_http1_proxy_candidate_with_root_header_mutation() {
+    let mut config = Config::default();
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
+    config
+        .headers
+        .request
+        .set
+        .insert("x-root".to_owned(), "native".to_owned());
+    config
+        .headers
+        .response
+        .set
+        .insert("x-root-response".to_owned(), "native".to_owned());
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        None
     );
 }
 
@@ -828,13 +863,126 @@ fn server_plan_reports_compatibility_required_native_http1_proxy_summary() {
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
     let summary = plan.native_http1_proxy_cutover_summary();
 
+    #[cfg(not(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    )))]
+    {
+        assert_eq!(
+            summary.status(),
+            NativeHttp1ProxyCutoverStatus::CompatibilityRequired
+        );
+        assert_eq!(summary.total(), 1);
+        assert_eq!(summary.eligible(), 0);
+        assert_eq!(summary.unsupported(), 1);
+    }
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    {
+        assert_eq!(summary.status(), NativeHttp1ProxyCutoverStatus::NativeReady);
+        assert_eq!(summary.total(), 1);
+        assert_eq!(summary.eligible(), 1);
+        assert_eq!(summary.unsupported(), 0);
+    }
+}
+
+#[test]
+fn server_plan_accepts_native_http1_route_proxy_candidate_with_vhost_header_overlay() {
+    let mut headers = fluxheim_config::VhostHeaderPolicyConfig::default();
+    headers
+        .request
+        .set
+        .insert("x-vhost".to_owned(), "native".to_owned());
+    headers
+        .response
+        .set
+        .insert("x-vhost-response".to_owned(), "native".to_owned());
+    let config = Config {
+        vhosts: vec![VhostConfig {
+            name: "native.test".to_owned(),
+            hosts: vec!["native.test".to_owned()],
+            max_request_body_bytes: None,
+            access: Default::default(),
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            tls: Default::default(),
+            acme_challenge: Default::default(),
+            redirect: Default::default(),
+            proxy: fluxheim_config::ProxyConfig {
+                upstreams: vec!["127.0.0.1:3001".to_owned()],
+                ..Default::default()
+            },
+            cache: CacheConfig::default(),
+            compression: None,
+            headers,
+            php: Default::default(),
+            web: Default::default(),
+            routes: Vec::new(),
+        }],
+        ..Default::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
     assert_eq!(
-        summary.status(),
-        NativeHttp1ProxyCutoverStatus::CompatibilityRequired
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        None
     );
-    assert_eq!(summary.total(), 1);
-    assert_eq!(summary.eligible(), 0);
-    assert_eq!(summary.unsupported(), 1);
+}
+
+#[test]
+fn server_plan_tracks_vhost_compression_native_feature_support() {
+    let config = Config {
+        vhosts: vec![VhostConfig {
+            name: "native.test".to_owned(),
+            hosts: vec!["native.test".to_owned()],
+            max_request_body_bytes: None,
+            access: Default::default(),
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            tls: Default::default(),
+            acme_challenge: Default::default(),
+            redirect: Default::default(),
+            proxy: fluxheim_config::ProxyConfig {
+                upstreams: vec!["127.0.0.1:3001".to_owned()],
+                ..Default::default()
+            },
+            cache: CacheConfig::default(),
+            compression: Some(fluxheim_config::CompressionConfig {
+                enabled: true,
+                gzip: true,
+                ..Default::default()
+            }),
+            headers: Default::default(),
+            php: Default::default(),
+            web: Default::default(),
+            routes: Vec::new(),
+        }],
+        ..Default::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    #[cfg(not(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    )))]
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::HttpPolicy)
+    );
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
 }
 
 #[test]

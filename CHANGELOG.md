@@ -7,6 +7,32 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.29 - 2026-06-21
+
+### Changed
+
+- Move inherited global/vhost compression policy into the native HTTP/1 proxy
+  and native route proxy.
+- Move root/vhost/route header-policy inheritance into the native HTTP/1 route
+  proxy, including request mutation, response mutation, response rewrites, and
+  standard security response headers.
+- Relax native HTTP/1 cutover inventory checks so root/vhost compression is
+  native-ready when a compression feature is compiled, while still failing
+  closed without gzip/brotli/zstd support.
+- Keep forwarded-client-IP ownership overrides, auth-request, traffic mirror,
+  access/rate/concurrency, cache, PHP-FPM, dynamic discovery, and advanced
+  load-balancer state reported as explicit compatibility blockers.
+
+### Security
+
+- Add live native listener tests proving inherited request-header removal/set
+  rules before upstream forwarding.
+- Add live native listener tests proving inherited response-header and standard
+  security-header emission on route responses.
+- Add live native listener tests proving plain-proxy gzip compression and
+  inherited route gzip compression strip stale entity headers and emit
+  `Vary: accept-encoding`.
+
 ## 1.6.28 - 2026-06-21
 
 ### Changed
