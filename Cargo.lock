@@ -3226,9 +3226,9 @@ dependencies = [
 
 [[package]]
 name = "sanitization"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fbb455919a30bfc235cd956c90ba1ff774888c7c66c0743eeaf720ebc5ac64d"
+checksum = "133acc816fcf0664d38213dd281dfdd29d6e0a6f717ae55e831c2570c6ce1b77"
 
 [[package]]
 name = "schannel"
