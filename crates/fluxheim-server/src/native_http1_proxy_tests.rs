@@ -766,7 +766,7 @@ fn native_proxy_config_applies_downstream_read_timeout() {
 
 #[test]
 fn native_proxy_config_applies_portable_socket_options() {
-    let proxy = fluxheim_config::ProxyConfig {
+    let mut proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),
         upstream_tcp_recv_buffer_bytes: Some(fluxheim_config::ByteSize::from_bytes(65_536)),
         upstream_dscp: Some(10),
@@ -775,6 +775,15 @@ fn native_proxy_config_applies_portable_socket_options() {
         upstream_tcp_keepalive_count: Some(3),
         ..Default::default()
     };
+    #[cfg(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "cygwin",
+    ))]
+    {
+        proxy.upstream_tcp_user_timeout_ms = Some(15000);
+    }
 
     let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
         .unwrap()
@@ -786,6 +795,16 @@ fn native_proxy_config_applies_portable_socket_options() {
     assert_eq!(keepalive.idle(), Duration::from_secs(30));
     assert_eq!(keepalive.interval(), Duration::from_secs(10));
     assert_eq!(keepalive.count(), 3);
+    #[cfg(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "cygwin",
+    ))]
+    assert_eq!(
+        native.upstream().tcp_user_timeout(),
+        Some(Duration::from_millis(15000))
+    );
 }
 
 #[test]
@@ -813,7 +832,7 @@ async fn native_proxy_socket_options_connect_to_upstream() {
             .unwrap();
     })
     .await;
-    let proxy = fluxheim_config::ProxyConfig {
+    let mut proxy = fluxheim_config::ProxyConfig {
         upstream: Some(upstream.to_string()),
         upstream_tcp_recv_buffer_bytes: Some(fluxheim_config::ByteSize::from_bytes(65_536)),
         upstream_dscp: Some(10),
@@ -822,6 +841,15 @@ async fn native_proxy_socket_options_connect_to_upstream() {
         upstream_tcp_keepalive_count: Some(3),
         ..Default::default()
     };
+    #[cfg(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "cygwin",
+    ))]
+    {
+        proxy.upstream_tcp_user_timeout_ms = Some(15000);
+    }
     let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
         .unwrap()
         .expect("native proxy");
@@ -959,18 +987,26 @@ fn native_proxy_config_rejects_unsupported_transport_and_accepts_downstream_time
         Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy)
     );
 
-    let proxy = fluxheim_config::ProxyConfig {
-        upstream: Some("127.0.0.1:3000".to_owned()),
-        upstream_tcp_keepalive_idle_secs: Some(30),
-        upstream_tcp_keepalive_interval_secs: Some(10),
-        upstream_tcp_keepalive_count: Some(3),
-        upstream_tcp_user_timeout_ms: Some(15000),
-        ..Default::default()
-    };
-    assert_eq!(
-        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
-        Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy)
-    );
+    #[cfg(not(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "cygwin",
+    )))]
+    {
+        let proxy = fluxheim_config::ProxyConfig {
+            upstream: Some("127.0.0.1:3000".to_owned()),
+            upstream_tcp_keepalive_idle_secs: Some(30),
+            upstream_tcp_keepalive_interval_secs: Some(10),
+            upstream_tcp_keepalive_count: Some(3),
+            upstream_tcp_user_timeout_ms: Some(15000),
+            ..Default::default()
+        };
+        assert_eq!(
+            NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+            Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy)
+        );
+    }
 
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),

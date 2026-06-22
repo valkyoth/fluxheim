@@ -340,6 +340,8 @@ impl NativeHttp1Proxy {
             native_upstream = native_upstream.with_recv_buffer_size(recv_buffer_size);
             native_upstream = native_upstream.with_dscp(proxy.upstream_dscp);
             native_upstream = native_upstream.with_tcp_keepalive(native_tcp_keepalive(proxy)?);
+            native_upstream =
+                native_upstream.with_tcp_user_timeout(native_tcp_user_timeout(proxy)?);
             native_upstream = native_upstream
                 .with_pool_idle_timeout(proxy.upstream_idle_timeout_secs.map(Duration::from_secs));
             native_upstream = native_upstream.with_pool_max_idle(pool_max_idle);
@@ -558,10 +560,19 @@ fn proxy_requires_auth_request(proxy: &fluxheim_config::ProxyConfig) -> bool {
 }
 
 fn proxy_requires_advanced_upstream_transport(proxy: &fluxheim_config::ProxyConfig) -> bool {
-    proxy.upstream_tcp_user_timeout_ms.is_some()
+    proxy.upstream_tcp_user_timeout_ms.is_some() && !native_tcp_user_timeout_supported()
         || proxy.upstream_tcp_fast_open
         || proxy.upstream_h2_max_streams.is_some()
         || proxy.upstream_h2_ping_interval_secs.is_some()
+}
+
+const fn native_tcp_user_timeout_supported() -> bool {
+    cfg!(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "cygwin",
+    ))
 }
 
 fn native_tcp_keepalive(
@@ -584,6 +595,18 @@ fn native_tcp_keepalive(
         }
         _ => Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy),
     }
+}
+
+fn native_tcp_user_timeout(
+    proxy: &fluxheim_config::ProxyConfig,
+) -> Result<Option<Duration>, NativeHttp1ProxyConfigError> {
+    let Some(timeout_ms) = proxy.upstream_tcp_user_timeout_ms else {
+        return Ok(None);
+    };
+    if !native_tcp_user_timeout_supported() {
+        return Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy);
+    }
+    Ok(Some(Duration::from_millis(timeout_ms)))
 }
 
 fn native_http1_static_failover_method_allowed(method: &str) -> bool {

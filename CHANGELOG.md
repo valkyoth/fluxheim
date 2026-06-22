@@ -52,12 +52,14 @@ behavior when the change improves security or project direction.
   `upstream_tcp_keepalive_interval_secs`, and
   `upstream_tcp_keepalive_count`) onto native HTTP/1 upstream sockets before
   connect.
+- Move `proxy.upstream_tcp_user_timeout_ms` onto native HTTP/1 upstream sockets
+  on targets where the OS exposes `TCP_USER_TIMEOUT`.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
 - Keep auth-request, traffic mirror, cert/Geo access, cache, PHP-FPM, dynamic
-  discovery, managed local ACME challenge serving, upstream TCP
-  user-timeout/fast-open knobs, and advanced load-balancer state
+  discovery, managed local ACME challenge serving, upstream TCP Fast Open, and
+  advanced load-balancer state
   reported as explicit compatibility blockers.
 
 ### Security
@@ -127,8 +129,8 @@ behavior when the change improves security or project direction.
   accepted and propagated to native upstreams while other advanced TCP socket
   knobs still block native cutover.
 - Add native proxy config and live loopback tests proving native upstream
-  receive-buffer, DSCP, and TCP keepalive socket options are accepted and still
-  connect.
+  receive-buffer, DSCP, TCP keepalive, and supported TCP user-timeout socket
+  options are accepted and still connect.
 - Send `408 Request Timeout` before closing native HTTP/1 connections that
   exceed the selected request-body timeout, and ensure redirect/static routes
   do not inherit fallback proxy body-read timeouts.

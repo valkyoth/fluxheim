@@ -34,6 +34,7 @@ pub struct NativeHttp1Upstream {
     recv_buffer_size: Option<u32>,
     dscp: Option<u8>,
     tcp_keepalive: Option<NativeTcpKeepalivePolicy>,
+    tcp_user_timeout: Option<Duration>,
     max_head_bytes: usize,
     max_body_bytes: usize,
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -103,6 +104,7 @@ impl std::fmt::Debug for NativeHttp1Upstream {
             .field("recv_buffer_size", &self.recv_buffer_size)
             .field("dscp", &self.dscp)
             .field("tcp_keepalive", &self.tcp_keepalive)
+            .field("tcp_user_timeout", &self.tcp_user_timeout)
             .field("max_head_bytes", &self.max_head_bytes)
             .field("max_body_bytes", &self.max_body_bytes)
             .field("tls", {
@@ -131,6 +133,7 @@ impl PartialEq for NativeHttp1Upstream {
             && self.recv_buffer_size == other.recv_buffer_size
             && self.dscp == other.dscp
             && self.tcp_keepalive == other.tcp_keepalive
+            && self.tcp_user_timeout == other.tcp_user_timeout
             && self.max_head_bytes == other.max_head_bytes
             && self.max_body_bytes == other.max_body_bytes
             && {
@@ -162,6 +165,7 @@ impl NativeHttp1Upstream {
             recv_buffer_size: None,
             dscp: None,
             tcp_keepalive: None,
+            tcp_user_timeout: None,
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -180,6 +184,7 @@ impl NativeHttp1Upstream {
             recv_buffer_size: None,
             dscp: None,
             tcp_keepalive: None,
+            tcp_user_timeout: None,
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -237,6 +242,15 @@ impl NativeHttp1Upstream {
 
     pub const fn tcp_keepalive(&self) -> Option<NativeTcpKeepalivePolicy> {
         self.tcp_keepalive
+    }
+
+    pub const fn with_tcp_user_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.tcp_user_timeout = timeout;
+        self
+    }
+
+    pub const fn tcp_user_timeout(&self) -> Option<Duration> {
+        self.tcp_user_timeout
     }
 
     pub const fn with_max_body_bytes(mut self, max_body_bytes: usize) -> Self {
@@ -393,6 +407,7 @@ impl NativeHttp1Upstream {
                 self.recv_buffer_size,
                 self.dscp,
                 self.tcp_keepalive,
+                self.tcp_user_timeout,
             ),
         )
         .await
@@ -430,6 +445,7 @@ async fn connect_upstream(
     recv_buffer_size: Option<u32>,
     dscp: Option<u8>,
     tcp_keepalive: Option<NativeTcpKeepalivePolicy>,
+    tcp_user_timeout: Option<Duration>,
 ) -> Result<TcpStream, NativeHttp1Error> {
     let mut addresses = tokio::net::lookup_host(authority)
         .await
@@ -457,6 +473,9 @@ async fn connect_upstream(
     if let Some(tcp_keepalive) = tcp_keepalive {
         set_socket_tcp_keepalive(&socket, tcp_keepalive)?;
     }
+    if let Some(tcp_user_timeout) = tcp_user_timeout {
+        set_socket_tcp_user_timeout(&socket, tcp_user_timeout)?;
+    }
     socket.connect(address).await.map_err(NativeHttp1Error::Io)
 }
 
@@ -471,6 +490,37 @@ fn set_socket_tcp_keepalive(
     SockRef::from(socket)
         .set_tcp_keepalive(&keepalive)
         .map_err(NativeHttp1Error::Io)
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "fuchsia",
+    target_os = "linux",
+    target_os = "cygwin",
+))]
+fn set_socket_tcp_user_timeout(
+    socket: &TcpSocket,
+    timeout: Duration,
+) -> Result<(), NativeHttp1Error> {
+    SockRef::from(socket)
+        .set_tcp_user_timeout(Some(timeout))
+        .map_err(NativeHttp1Error::Io)
+}
+
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "fuchsia",
+    target_os = "linux",
+    target_os = "cygwin",
+)))]
+fn set_socket_tcp_user_timeout(
+    _socket: &TcpSocket,
+    _timeout: Duration,
+) -> Result<(), NativeHttp1Error> {
+    Err(NativeHttp1Error::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "native HTTP/1 upstream TCP user timeout is not supported on this target",
+    )))
 }
 
 fn set_socket_dscp(
