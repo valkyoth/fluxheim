@@ -737,7 +737,7 @@ async fn native_route_proxy_route_rate_limit_rejects_second_request() {
 }
 
 #[tokio::test]
-async fn native_route_proxy_rate_limit_delay_counts_against_concurrency() {
+async fn native_route_proxy_rate_limit_delay_does_not_consume_concurrency() {
     let vhost = fluxheim_config::VhostConfig {
         name: "route.test".to_owned(),
         hosts: vec!["route.test".to_owned()],
@@ -745,11 +745,11 @@ async fn native_route_proxy_rate_limit_delay_counts_against_concurrency() {
         access: Default::default(),
         rate_limit: fluxheim_config::RateLimitConfig {
             enabled: true,
-            requests_per_second: 1,
+            requests_per_second: 10,
             burst: 1,
             status: 429,
             mode: fluxheim_config::RateLimitMode::Delay,
-            max_delay_ms: 2_000,
+            max_delay_ms: 500,
             ..Default::default()
         },
         concurrency: fluxheim_config::ConcurrencyLimitConfig {
@@ -788,12 +788,11 @@ async fn native_route_proxy_rate_limit_delay_counts_against_concurrency() {
     assert!(first.starts_with("HTTP/1.1 308 Permanent Redirect\r\n"));
 
     let delayed = tokio::spawn(async move { downstream_get(proxy, "/delayed").await });
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    let rejected = downstream_get(proxy, "/delayed").await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let not_rejected_by_concurrency = downstream_get(proxy, "/delayed").await;
     let delayed = delayed.await.unwrap();
 
-    assert!(rejected.starts_with("HTTP/1.1 503 Too Many Requests\r\n"));
-    assert!(rejected.ends_with("too many requests\n"));
+    assert!(not_rejected_by_concurrency.starts_with("HTTP/1.1 308 Permanent Redirect\r\n"));
     assert!(delayed.starts_with("HTTP/1.1 308 Permanent Redirect\r\n"));
 }
 

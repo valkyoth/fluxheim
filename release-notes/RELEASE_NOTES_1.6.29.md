@@ -104,8 +104,8 @@ the native HTTP/1 proxy path.
   response is produced.
 - Native rate limits are enforced before rewrite, local static, redirect, or
   upstream proxy actions run; excess requests are rejected before the native
-  upstream path is reached, and delay-mode sleeps are counted against
-  configured concurrency budgets.
+  upstream path is reached, and delay-mode sleeps run before concurrency permit
+  acquisition so delayed requests cannot exhaust configured concurrency budgets.
 - Native trusted-proxy client restoration joins duplicate inbound
   `X-Forwarded-For` headers before ACL and rate-limit identity decisions.
 - Malformed `X-Forwarded-For` trusted-proxy chains now fail closed on both the

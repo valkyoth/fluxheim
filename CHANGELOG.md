@@ -92,8 +92,9 @@ behavior when the change improves security or project direction.
 - Reject malformed `X-Forwarded-For` trusted-proxy chains on both the native
   header crate path and the compatibility proxy path, falling back to the
   direct peer instead of skipping poisoned hops.
-- Hold native concurrency permits while delay-mode rate limiting sleeps, so
-  delayed requests remain counted against vhost and route concurrency budgets.
+- Run delay-mode rate-limit sleeps before native concurrency permit
+  acquisition, so delayed requests cannot exhaust vhost or route concurrency
+  budgets while waiting.
 - Bound native rate-limit table eviction sweeps to avoid repeated full-table
   scans on every new identity when the bucket table is full.
 - Add native proxy config tests proving response-side downstream policy is
