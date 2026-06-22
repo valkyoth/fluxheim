@@ -79,6 +79,9 @@ the native HTTP/1 proxy path.
 - Native regex rewrite templates percent-encode bounded capture values and
   reject rewritten paths that would traverse or introduce unsafe forwarding
   paths before any upstream connection is opened.
+- Native regex rewrite captures now encode slash characters and fail closed
+  under the native safe-forward-path policy, so regex captures cannot introduce
+  path hierarchy that was not present in the static rewrite template.
 - Native access policy denies before redirects, static-web actions, or upstream
   proxying run, so rejected requests cannot be transformed into downstream
   effects first.
@@ -102,6 +105,10 @@ the native HTTP/1 proxy path.
 - Native route responses now apply inherited standard security headers such as
   `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, CSP, and HSTS
   where configured.
+- The configuration reference now warns that disabling inbound forwarded-header
+  stripping while also disabling owned `X-Forwarded-Host` or
+  `X-Forwarded-Proto` synthesis permits client-supplied values for those
+  headers to reach upstreams.
 
 ## Compatibility
 

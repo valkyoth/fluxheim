@@ -909,6 +909,12 @@ client-IP forwarding remains stripped. IPv4-mapped IPv6 socket addresses such as
 rate-limit, and GeoIP decisions, so IPv4 CIDR rules apply consistently on
 dual-stack listeners.
 
+Warning: setting `strip_inbound_client_ip_headers = false` together with
+`x_forwarded_host = false` or `x_forwarded_proto = false` allows
+client-supplied `X-Forwarded-Host` or `X-Forwarded-Proto` values to reach the
+upstream unchanged. Only use that combination when the upstream validates those
+headers independently.
+
 Request header values can use a small safe dynamic template set:
 
 - `{host}`: original request `Host` header.

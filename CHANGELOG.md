@@ -63,6 +63,9 @@ behavior when the change improves security or project direction.
   for trusted peers and strips untrusted spoofed chains for direct clients.
 - Add native route tests proving regex rewrite templates percent-encode bounded
   captures and reject traversal-producing captures before proxying upstream.
+- Encode slash characters in native regex rewrite captures and reject the
+  resulting unsafe path, keeping path hierarchy in the static template rather
+  than attacker-controlled capture data.
 - Add live native route tests proving vhost and route access policies deny
   before redirects, static-web actions, or upstream proxying can run.
 - Add live native route tests proving trusted proxy sources restore the
@@ -85,6 +88,9 @@ behavior when the change improves security or project direction.
 - Add live native listener tests proving plain-proxy gzip compression and
   inherited route gzip compression strip stale entity headers and emit
   `Vary: accept-encoding`.
+- Document the dual opt-out risk of disabling inbound forwarded-header
+  stripping while also disabling owned `X-Forwarded-Host` or
+  `X-Forwarded-Proto` synthesis.
 
 ## 1.6.28 - 2026-06-21
 

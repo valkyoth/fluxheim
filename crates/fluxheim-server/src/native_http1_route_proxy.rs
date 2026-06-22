@@ -176,7 +176,6 @@ pub enum NativeHttp1RouteProxyConfigError {
     MissingRouteAction,
     Proxy(NativeHttp1ProxyConfigError),
     RegexRoute,
-    RewriteTemplate,
     StaticWeb,
 }
 
@@ -193,9 +192,6 @@ impl std::fmt::Display for NativeHttp1RouteProxyConfigError {
             Self::RegexRoute => {
                 formatter.write_str("native route proxy regex route configuration error")
             }
-            Self::RewriteTemplate => {
-                formatter.write_str("native route proxy does not yet support rewrite_template")
-            }
             Self::StaticWeb => formatter.write_str("native route static web config is invalid"),
         }
     }
@@ -205,11 +201,9 @@ impl std::error::Error for NativeHttp1RouteProxyConfigError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Proxy(error) => Some(error),
-            Self::AccessPolicy
-            | Self::MissingRouteAction
-            | Self::RegexRoute
-            | Self::RewriteTemplate
-            | Self::StaticWeb => None,
+            Self::AccessPolicy | Self::MissingRouteAction | Self::RegexRoute | Self::StaticWeb => {
+                None
+            }
         }
     }
 }
@@ -852,6 +846,9 @@ impl NativeHttp1RouteProxy {
 }
 
 fn decoded_route_policy_path(path: &str) -> Option<String> {
+    // One decode pass mirrors the compatibility access-policy path check. This
+    // catches ordinary encoded route aliases such as /%61dmin while avoiding a
+    // second, independent route-normalization model for double-encoded input.
     if !path.as_bytes().contains(&b'%') {
         return None;
     }
@@ -1300,7 +1297,7 @@ fn route_regex_capture_value<'a>(
 
 fn append_route_regex_capture_value(rewritten: &mut String, value: &str) {
     for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
             rewritten.push(char::from(byte));
         } else {
             static HEX: &[u8; 16] = b"0123456789ABCDEF";
