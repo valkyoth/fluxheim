@@ -124,6 +124,9 @@ the native HTTP/1 proxy path.
   transport blockers.
 - Native proxy config and live loopback tests now prove receive-buffer and DSCP
   socket options are accepted and still connect through the native proxy path.
+- Native DSCP fallback compilation now covers targets without Tokio IPv6
+  traffic-class support, and the receive-buffer conversion rejects an
+  impossible oversized value instead of silently ignoring it.
 - Config validation and native regex route compilation now apply the same
   explicit NFA and DFA cache limits.
 - Privacy-mode native route proxy handling now strips spoofable

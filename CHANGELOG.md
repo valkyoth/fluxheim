@@ -107,6 +107,9 @@ behavior when the change improves security or project direction.
   knobs still block native cutover.
 - Add native proxy config and live loopback tests proving native upstream
   receive-buffer and DSCP socket options are accepted and still connect.
+- Keep native DSCP socket-option fallback compilation portable across targets
+  without Tokio IPv6 traffic-class support, and reject an impossible oversized
+  receive-buffer conversion instead of silently dropping it.
 - Set identical NFA and DFA regex cache limits for config validation and native
   regex route compilation.
 - Strip spoofable `X-Forwarded-Host` and `X-Forwarded-Proto` headers in

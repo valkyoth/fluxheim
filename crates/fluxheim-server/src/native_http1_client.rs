@@ -484,6 +484,17 @@ fn set_socket_dscp_v6(_socket: &TcpSocket, _traffic_class: u32) -> Result<(), Na
     target_os = "illumos",
     target_os = "haiku",
     target_os = "wasi",
+    not(any(
+        target_os = "android",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "cygwin",
+    )),
 ))]
 fn unsupported_dscp_error() -> Result<(), NativeHttp1Error> {
     Err(NativeHttp1Error::Io(std::io::Error::new(

@@ -766,6 +766,22 @@ fn native_proxy_config_applies_portable_socket_options() {
     assert_eq!(native.upstream().dscp(), Some(10));
 }
 
+#[test]
+fn native_proxy_config_rejects_oversized_socket_receive_buffer() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_tcp_recv_buffer_bytes: Some(fluxheim_config::ByteSize::from_bytes(
+            u64::from(u32::MAX) + 1,
+        )),
+        ..Default::default()
+    };
+
+    let error =
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()).unwrap_err();
+
+    assert_eq!(error, NativeHttp1ProxyConfigError::UpstreamTransportPolicy);
+}
+
 #[tokio::test]
 async fn native_proxy_socket_options_connect_to_upstream() {
     let upstream = upstream(|_, mut stream| async move {

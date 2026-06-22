@@ -317,12 +317,16 @@ impl NativeHttp1Proxy {
             if let Some(timeout) = proxy.send_timeout_secs {
                 native_upstream = native_upstream.with_write_timeout(Duration::from_secs(timeout));
             }
-            native_upstream = native_upstream.with_recv_buffer_size(
-                proxy
-                    .upstream_tcp_recv_buffer_bytes
-                    .map(fluxheim_config::ByteSize::as_u64)
-                    .and_then(|bytes| u32::try_from(bytes).ok()),
-            );
+            let recv_buffer_size = match proxy
+                .upstream_tcp_recv_buffer_bytes
+                .map(fluxheim_config::ByteSize::as_u64)
+                .map(u32::try_from)
+            {
+                Some(Ok(bytes)) => Some(bytes),
+                Some(Err(_)) => return Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy),
+                None => None,
+            };
+            native_upstream = native_upstream.with_recv_buffer_size(recv_buffer_size);
             native_upstream = native_upstream.with_dscp(proxy.upstream_dscp);
             native_upstream = native_upstream
                 .with_pool_idle_timeout(proxy.upstream_idle_timeout_secs.map(Duration::from_secs));
