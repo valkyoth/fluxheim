@@ -184,6 +184,10 @@ pub trait NativeHttp1Handler: Send + Sync + 'static {
         &'a self,
         request: NativeHttp1Request,
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>>;
+
+    fn request_body_timeout(&self, _request: &NativeHttp1Request) -> Option<Duration> {
+        None
+    }
 }
 
 impl<F, Fut> NativeHttp1Handler for F
@@ -272,7 +276,19 @@ where
                 owned_request_from_head(&head, peer_addr, downstream_tls),
             )
         };
-        let body = match read_body(policy, &mut stream, &mut buffer, head_len, body_framing).await {
+        let request_body_timeout = handler
+            .request_body_timeout(&request)
+            .unwrap_or(policy.request_body_timeout());
+        let body = match read_body(
+            policy,
+            request_body_timeout,
+            &mut stream,
+            &mut buffer,
+            head_len,
+            body_framing,
+        )
+        .await
+        {
             Ok(body) => body,
             Err(NativeHttp1Error::Parse(Http1ParseError::BodyTooLarge)) => {
                 write_response(
@@ -539,6 +555,7 @@ fn owned_headers(headers: &[Http1Header<'_>]) -> Vec<(String, String)> {
 
 async fn read_body<S>(
     policy: DownstreamHttp1Policy,
+    request_body_timeout: Duration,
     stream: &mut S,
     buffer: &mut Vec<u8>,
     head_len: usize,
@@ -548,7 +565,7 @@ where
     S: AsyncRead + Unpin,
 {
     timeout(
-        policy.request_body_timeout(),
+        request_body_timeout,
         read_body_inner(stream, buffer, head_len, framing, policy.max_body_bytes()),
     )
     .await

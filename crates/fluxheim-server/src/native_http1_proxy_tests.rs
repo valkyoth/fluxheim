@@ -750,6 +750,21 @@ fn native_proxy_config_applies_total_connection_timeout() {
 }
 
 #[test]
+fn native_proxy_config_applies_downstream_read_timeout() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        downstream_read_timeout_secs: Some(7),
+        ..Default::default()
+    };
+
+    let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
+        .unwrap()
+        .expect("native proxy");
+
+    assert_eq!(native.request_body_timeout(), Some(Duration::from_secs(7)));
+}
+
+#[test]
 fn native_proxy_config_applies_portable_socket_options() {
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -805,6 +820,42 @@ async fn native_proxy_socket_options_connect_to_upstream() {
 
     assert_eq!(response.status(), 200);
     assert_eq!(response.body(), b"socket-policy");
+}
+
+#[tokio::test]
+async fn native_proxy_request_body_timeout_is_enforced_before_upstream() {
+    let upstream_hits = Arc::new(AtomicUsize::new(0));
+    let upstream_hits_for_task = Arc::clone(&upstream_hits);
+    let upstream = upstream(move |_, mut stream| {
+        let upstream_hits = Arc::clone(&upstream_hits_for_task);
+        async move {
+            upstream_hits.fetch_add(1, Ordering::AcqRel);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\nunexpected")
+                .await
+                .unwrap();
+        }
+    })
+    .await;
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new(upstream.to_string()))
+        .with_request_body_timeout(Some(Duration::from_millis(25)));
+    let proxy = proxy_listener_for(proxy).await;
+    let mut stream = TcpStream::connect(proxy).await.unwrap();
+
+    stream
+        .write_all(
+            b"POST /slow HTTP/1.1\r\nHost: proxy.test\r\nContent-Length: 5\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut byte = [0u8; 1];
+    let read = tokio::time::timeout(Duration::from_secs(1), stream.read(&mut byte))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(read, 0);
+    assert_eq!(upstream_hits.load(Ordering::Acquire), 0);
 }
 
 #[test]
@@ -882,7 +933,7 @@ fn native_proxy_config_rejects_unsupported_proxy_policy_layers() {
 }
 
 #[test]
-fn native_proxy_config_rejects_unsupported_transport_and_downstream_policy() {
+fn native_proxy_config_rejects_unsupported_transport_and_accepts_downstream_timeout() {
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),
         upstream_tcp_keepalive_idle_secs: Some(30),
@@ -898,8 +949,5 @@ fn native_proxy_config_rejects_unsupported_transport_and_downstream_policy() {
         downstream_read_timeout_secs: Some(1),
         ..Default::default()
     };
-    assert_eq!(
-        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
-        Err(NativeHttp1ProxyConfigError::DownstreamPolicy)
-    );
+    assert!(NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()).is_ok());
 }

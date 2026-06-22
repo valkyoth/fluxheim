@@ -38,6 +38,9 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 upstream socket creation now honors
   `proxy.upstream_tcp_recv_buffer_bytes` and `proxy.upstream_dscp` before
   connecting.
+- Native HTTP/1 request-body parsing now honors
+  `proxy.downstream_read_timeout_secs` selected by the matched proxy before
+  forwarding to upstreams.
 - Root and vhost compression no longer blocks native HTTP/1 proxy cutover when
   a matching compression backend feature is compiled.
 - Native route-proxy construction now mirrors the compatibility route order for
@@ -124,6 +127,9 @@ the native HTTP/1 proxy path.
   transport blockers.
 - Native proxy config and live loopback tests now prove receive-buffer and DSCP
   socket options are accepted and still connect through the native proxy path.
+- Native proxy tests now prove a slow request body times out before any
+  upstream connection is attempted when `proxy.downstream_read_timeout_secs`
+  is selected.
 - Native DSCP fallback compilation now covers targets without Tokio IPv6
   traffic-class support, and the receive-buffer conversion rejects an
   impossible oversized value instead of silently ignoring it.
@@ -151,8 +157,8 @@ the native HTTP/1 proxy path.
 
 This release does not remove Pingora from normal builds yet. The remaining
 compatibility blockers are auth-request subrequests, traffic mirroring,
-cert/Geo access policy, managed local ACME challenge serving, route per-proxy
-downstream request-read timeout policy, advanced upstream TCP keepalive,
-user-timeout and fast-open knobs, cache lookup/fill/stale behavior, PHP-FPM
-routing, dynamic discovery, health-aware load balancing, persistence,
+cert/Geo access policy, managed local ACME challenge serving, advanced
+upstream TCP keepalive, user-timeout and fast-open knobs, cache
+lookup/fill/stale behavior, PHP-FPM routing, dynamic discovery, health-aware
+load balancing, persistence,
 priority/backup/drain state, and hash-based load-balancer selection.

@@ -13,8 +13,9 @@ use tokio::net::{TcpListener, TcpStream};
 #[cfg(not(feature = "privacy-mode"))]
 use crate::ProxyProtocolTrustedSource;
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1Proxy, NativeHttp1RouteProxy, NativeHttp1RouteProxyRoute,
-    NativeHttp1Upstream, serve_native_http1_listener,
+    DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1Request,
+    NativeHttp1RouteProxy, NativeHttp1RouteProxyRoute, NativeHttp1Upstream,
+    serve_native_http1_listener,
 };
 
 async fn upstream_expect_path(
@@ -263,6 +264,18 @@ async fn downstream_request_bytes(proxy: std::net::SocketAddr, request: &str) ->
 
 fn proxy_for(upstream: std::net::SocketAddr) -> NativeHttp1Proxy {
     NativeHttp1Proxy::new(NativeHttp1Upstream::new(upstream.to_string()))
+}
+
+fn route_test_request(path: &str) -> NativeHttp1Request {
+    NativeHttp1Request {
+        method: "GET".to_owned(),
+        peer_addr: None,
+        downstream_tls: false,
+        target: path.to_owned(),
+        version: fluxheim_protocol::Http1Version::Http11,
+        headers: vec![("host".to_owned(), "route.test".to_owned())],
+        body: Vec::new(),
+    }
 }
 
 fn response_header(response: &str, name: &str) -> Option<String> {
@@ -1091,6 +1104,27 @@ async fn native_route_proxy_uses_fallback_when_method_does_not_match() {
 
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.ends_with("fallback"));
+}
+
+#[test]
+fn native_route_proxy_selects_route_request_body_timeout() {
+    let route_upstream = "127.0.0.1:3000".parse().unwrap();
+    let fallback_upstream = "127.0.0.1:3001".parse().unwrap();
+    let route = NativeHttp1RouteProxyRoute::prefix(
+        "/api/",
+        Vec::new(),
+        proxy_for(route_upstream).with_request_body_timeout(Some(Duration::from_secs(4))),
+    );
+    let proxy = NativeHttp1RouteProxy::new(vec![route], Some(proxy_for(fallback_upstream)));
+
+    assert_eq!(
+        proxy.request_body_timeout(&route_test_request("/api/upload")),
+        Some(Duration::from_secs(4))
+    );
+    assert_eq!(
+        proxy.request_body_timeout(&route_test_request("/other")),
+        None
+    );
 }
 
 #[tokio::test]

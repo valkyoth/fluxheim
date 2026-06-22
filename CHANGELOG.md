@@ -34,7 +34,9 @@ behavior when the change improves security or project direction.
 - Move vhost and route local rate limiting into the native HTTP/1 route proxy,
   including token-bucket rejection and delay-mode admission.
 - Move per-proxy downstream response write timeout, total response timeout, and
-  minimum send-rate policy onto native HTTP/1 proxy responses.
+  minimum send-rate policy onto native HTTP/1 proxy responses, and move
+  per-proxy downstream request-read timeout onto native HTTP/1 request-body
+  parsing.
 - Move `proxy.upstream_total_connection_timeout_secs` onto the native HTTP/1
   upstream establishment path, covering DNS, TCP connect, and TLS handshake.
 - Move `proxy.upstream_tcp_recv_buffer_bytes` and `proxy.upstream_dscp` onto
@@ -43,8 +45,9 @@ behavior when the change improves security or project direction.
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
 - Keep auth-request, traffic mirror, cert/Geo access, cache, PHP-FPM, dynamic
-  discovery, managed local ACME challenge serving, and advanced load-balancer
-  state reported as explicit compatibility blockers.
+  discovery, managed local ACME challenge serving, advanced upstream TCP
+  keepalive/user-timeout/fast-open knobs, and advanced load-balancer state
+  reported as explicit compatibility blockers.
 
 ### Security
 

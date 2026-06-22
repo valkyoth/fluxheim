@@ -31,6 +31,7 @@ pub struct NativeHttp1Proxy {
     request_headers: NativeRouteRequestHeaderPolicy,
     response_headers: NativeRouteResponseHeaderPolicy,
     response_write_policy: NativeHttp1ResponseWritePolicy,
+    request_body_timeout: Option<Duration>,
     #[cfg(any(
         feature = "compression-brotli",
         feature = "compression-gzip",
@@ -50,7 +51,6 @@ struct NativeHttp1ProxyErrorPage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeHttp1ProxyConfigError {
     DynamicUpstreamDiscovery,
-    DownstreamPolicy,
     ErrorPages,
     HttpPolicy,
     LoadBalancing,
@@ -70,8 +70,6 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
         match self {
             Self::DynamicUpstreamDiscovery => formatter
                 .write_str("native HTTP/1 proxy does not yet support dynamic upstream discovery"),
-            Self::DownstreamPolicy => formatter
-                .write_str("native HTTP/1 proxy does not yet support per-proxy downstream policy"),
             Self::ErrorPages => {
                 formatter.write_str("native HTTP/1 proxy rejected proxy error page config")
             }
@@ -121,6 +119,7 @@ impl NativeHttp1Proxy {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             response_write_policy: NativeHttp1ResponseWritePolicy::default(),
+            request_body_timeout: None,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -145,6 +144,7 @@ impl NativeHttp1Proxy {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             response_write_policy: NativeHttp1ResponseWritePolicy::default(),
+            request_body_timeout: None,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -177,6 +177,7 @@ impl NativeHttp1Proxy {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             response_write_policy: NativeHttp1ResponseWritePolicy::default(),
+            request_body_timeout: None,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -201,6 +202,15 @@ impl NativeHttp1Proxy {
 
     pub const fn response_write_policy(&self) -> NativeHttp1ResponseWritePolicy {
         self.response_write_policy
+    }
+
+    pub const fn request_body_timeout(&self) -> Option<Duration> {
+        self.request_body_timeout
+    }
+
+    pub const fn with_request_body_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.request_body_timeout = timeout;
+        self
     }
 
     pub fn with_header_policy(mut self, headers: &fluxheim_config::HeaderPolicyConfig) -> Self {
@@ -285,9 +295,6 @@ impl NativeHttp1Proxy {
         if proxy_requires_advanced_upstream_transport(proxy) {
             return Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy);
         }
-        if proxy_requires_per_proxy_downstream_policy(proxy) {
-            return Err(NativeHttp1ProxyConfigError::DownstreamPolicy);
-        }
         if proxy_requires_advanced_load_balancer(proxy) {
             return Err(NativeHttp1ProxyConfigError::LoadBalancing);
         }
@@ -336,6 +343,7 @@ impl NativeHttp1Proxy {
         let mut native = Self::from_weighted_upstreams(native_upstreams, &proxy.upstream_weights)?;
         native.error_pages = native_error_pages_from_config(proxy)?;
         native.response_write_policy = native_response_write_policy_from_config(proxy);
+        native.request_body_timeout = proxy.downstream_read_timeout_secs.map(Duration::from_secs);
         Ok(Some(native))
     }
 }
@@ -347,7 +355,8 @@ impl PartialEq for NativeHttp1Proxy {
             && self.error_pages == other.error_pages
             && self.request_headers == other.request_headers
             && self.response_headers == other.response_headers
-            && self.response_write_policy == other.response_write_policy;
+            && self.response_write_policy == other.response_write_policy
+            && self.request_body_timeout == other.request_body_timeout;
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -455,6 +464,10 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 })
         })
     }
+
+    fn request_body_timeout(&self, _request: &NativeHttp1Request) -> Option<Duration> {
+        self.request_body_timeout
+    }
 }
 
 impl NativeHttp1Proxy {
@@ -547,11 +560,6 @@ fn proxy_requires_advanced_upstream_transport(proxy: &fluxheim_config::ProxyConf
         || proxy.upstream_tcp_fast_open
         || proxy.upstream_h2_max_streams.is_some()
         || proxy.upstream_h2_ping_interval_secs.is_some()
-}
-
-fn proxy_requires_per_proxy_downstream_policy(proxy: &fluxheim_config::ProxyConfig) -> bool {
-    let defaults = fluxheim_config::ProxyConfig::default();
-    proxy.downstream_read_timeout_secs != defaults.downstream_read_timeout_secs
 }
 
 fn native_http1_static_failover_method_allowed(method: &str) -> bool {

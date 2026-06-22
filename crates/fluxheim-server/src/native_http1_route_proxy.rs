@@ -1098,6 +1098,17 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             }
         })
     }
+
+    fn request_body_timeout(&self, request: &NativeHttp1Request) -> Option<Duration> {
+        let (path, _) = request_path_and_query(request)?;
+        self.select_route(&request.method, &path)
+            .and_then(NativeHttp1RouteProxyRoute::request_body_timeout)
+            .or_else(|| {
+                self.fallback
+                    .as_ref()
+                    .and_then(NativeHttp1Proxy::request_body_timeout)
+            })
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1287,6 +1298,13 @@ fn decoded_route_policy_path(path: &str) -> Option<String> {
 }
 
 impl NativeHttp1RouteProxyRoute {
+    fn request_body_timeout(&self) -> Option<Duration> {
+        match &self.action {
+            NativeHttp1RouteAction::Proxy(proxy) => proxy.request_body_timeout(),
+            NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => None,
+        }
+    }
+
     fn prefix_len(&self) -> usize {
         match &self.matcher {
             NativeHttp1RouteMatcher::Prefix(prefix) => prefix.len(),
