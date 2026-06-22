@@ -269,7 +269,7 @@ fn server_plan_rejects_native_http1_route_proxy_candidate_with_disabled_request_
 }
 
 #[test]
-fn server_plan_rejects_native_http1_route_proxy_candidate_with_regex_route() {
+fn server_plan_accepts_native_http1_route_proxy_candidate_with_regex_rewrite_template() {
     let mut config = Config::default();
     config.server.regex_enabled = true;
     config.vhosts = vec![VhostConfig {
@@ -292,13 +292,15 @@ fn server_plan_rejects_native_http1_route_proxy_candidate_with_regex_route() {
             name: "api".to_owned(),
             path_exact: None,
             path_prefix: None,
-            path_regex: Some("^/api/v[0-9]+/".to_owned()),
+            path_regex: Some(r"^/api/v(?P<version>[0-9]+)/(?P<rest>.*)$".to_owned()),
             methods: Vec::new(),
             fallback: false,
             https_redirect_exempt: false,
             strip_prefix: None,
             rewrite_prefix: None,
-            rewrite_template: None,
+            rewrite_template: Some(
+                "/internal/v{route.regex.version}/{route.regex.rest}".to_owned(),
+            ),
             max_request_body_bytes: None,
             access: Default::default(),
             rate_limit: Default::default(),
@@ -319,9 +321,10 @@ fn server_plan_rejects_native_http1_route_proxy_candidate_with_regex_route() {
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::HttpPolicy)
+        None
     );
 }
 

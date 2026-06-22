@@ -204,12 +204,10 @@ fn vhost_policy_supported(vhost: &VhostConfig) -> bool {
 }
 
 fn route_policy_supported(route: &RouteConfig) -> bool {
-    route.path_regex.is_none()
-        && !access_policy_active(&route.access)
+    !access_policy_active(&route.access)
         && !route.rate_limit.enabled
         && !route.concurrency.enabled
         && !route.grpc.enabled
-        && route.rewrite_template.is_none()
         && route_request_header_policy_supported(&route.headers.request)
         && route_response_header_policy_supported(&route.headers.response)
         && route

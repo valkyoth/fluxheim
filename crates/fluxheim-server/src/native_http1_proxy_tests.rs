@@ -336,9 +336,9 @@ async fn native_proxy_applies_default_forwarded_header_policy() {
     let upstream = upstream(|request, mut stream| async move {
         let request = String::from_utf8(request).unwrap();
         assert!(request.contains("x-forwarded-for: 127.0.0.1\r\n"));
+        assert!(request.contains("x-real-ip: 127.0.0.1\r\n"));
         assert!(request.contains("x-forwarded-host: proxy.test\r\n"));
         assert!(request.contains("x-forwarded-proto: http\r\n"));
-        assert!(!request.to_ascii_lowercase().contains("x-real-ip:"));
         assert!(!request.contains("x-forwarded-for: 192.0.2.9\r\n"));
         assert!(!request.contains("forwarded: for=192.0.2.9\r\n"));
         stream

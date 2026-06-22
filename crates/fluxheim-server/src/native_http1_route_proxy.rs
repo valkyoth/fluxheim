@@ -40,6 +40,9 @@ use crate::{
     NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb, ProxyProtocolTrustedSource,
 };
 
+const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
+const MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES: usize = 256;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1RouteProxy {
     routes: Vec<NativeHttp1RouteProxyRoute>,
@@ -52,6 +55,7 @@ pub struct NativeHttp1RouteProxyRoute {
     matcher: NativeHttp1RouteMatcher,
     strip_prefix: Option<String>,
     rewrite_prefix: Option<String>,
+    rewrite_template: Option<String>,
     max_request_body_bytes: Option<u64>,
     #[cfg(any(
         feature = "compression-brotli",
@@ -68,7 +72,46 @@ pub struct NativeHttp1RouteProxyRoute {
 enum NativeHttp1RouteMatcher {
     Exact(String),
     Prefix(String),
+    Regex(NativeRegexRouteMatcher),
     Fallback,
+}
+
+#[derive(Clone)]
+struct NativeRegexRouteMatcher {
+    pattern: String,
+    regex: regex::Regex,
+}
+
+impl std::fmt::Debug for NativeRegexRouteMatcher {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NativeRegexRouteMatcher")
+            .field("pattern", &self.pattern)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for NativeRegexRouteMatcher {
+    fn eq(&self, other: &Self) -> bool {
+        self.pattern == other.pattern
+    }
+}
+
+impl Eq for NativeRegexRouteMatcher {}
+
+impl NativeRegexRouteMatcher {
+    fn from_pattern(pattern: &str) -> Result<Self, regex::Error> {
+        Ok(Self {
+            pattern: pattern.to_owned(),
+            regex: regex::RegexBuilder::new(pattern)
+                .size_limit(fluxheim_config::MAX_ROUTE_REGEX_PROGRAM_BYTES)
+                .build()?,
+        })
+    }
+
+    fn is_match(&self, path: &str) -> bool {
+        self.regex.is_match(path)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -259,6 +302,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Exact(path.into()),
             strip_prefix: None,
             rewrite_prefix: None,
+            rewrite_template: None,
             max_request_body_bytes: None,
             #[cfg(any(
                 feature = "compression-brotli",
@@ -278,6 +322,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Prefix(path.into()),
             strip_prefix: None,
             rewrite_prefix: None,
+            rewrite_template: None,
             max_request_body_bytes: None,
             #[cfg(any(
                 feature = "compression-brotli",
@@ -297,6 +342,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Fallback,
             strip_prefix: None,
             rewrite_prefix: None,
+            rewrite_template: None,
             max_request_body_bytes: None,
             #[cfg(any(
                 feature = "compression-brotli",
@@ -321,6 +367,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Exact(path.into()),
             strip_prefix: None,
             rewrite_prefix: None,
+            rewrite_template: None,
             max_request_body_bytes: None,
             #[cfg(any(
                 feature = "compression-brotli",
@@ -348,6 +395,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Prefix(path.into()),
             strip_prefix: None,
             rewrite_prefix: None,
+            rewrite_template: None,
             max_request_body_bytes: None,
             #[cfg(any(
                 feature = "compression-brotli",
@@ -374,6 +422,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher: NativeHttp1RouteMatcher::Prefix(path.into()),
             strip_prefix: None,
             rewrite_prefix: None,
+            rewrite_template: None,
             max_request_body_bytes: None,
             #[cfg(any(
                 feature = "compression-brotli",
@@ -406,16 +455,15 @@ impl NativeHttp1RouteProxyRoute {
             feature = "compression-zstd"
         )))]
         let _ = inherited_compression;
-        if route.path_regex.is_some() {
-            return Err(NativeHttp1RouteProxyConfigError::RegexRoute);
-        }
-        if route.rewrite_template.is_some() {
-            return Err(NativeHttp1RouteProxyConfigError::RewriteTemplate);
-        }
         let matcher = if let Some(path) = &route.path_exact {
             NativeHttp1RouteMatcher::Exact(path.clone())
         } else if let Some(path) = &route.path_prefix {
             NativeHttp1RouteMatcher::Prefix(path.clone())
+        } else if let Some(pattern) = &route.path_regex {
+            NativeHttp1RouteMatcher::Regex(
+                NativeRegexRouteMatcher::from_pattern(pattern)
+                    .map_err(|_| NativeHttp1RouteProxyConfigError::RegexRoute)?,
+            )
         } else if route.fallback {
             NativeHttp1RouteMatcher::Fallback
         } else {
@@ -445,6 +493,7 @@ impl NativeHttp1RouteProxyRoute {
             matcher,
             strip_prefix: route.strip_prefix.clone(),
             rewrite_prefix: route.rewrite_prefix.clone(),
+            rewrite_template: route.rewrite_template.clone(),
             max_request_body_bytes: route.max_request_body_bytes.map(|bytes| bytes.as_u64()),
             #[cfg(any(
                 feature = "compression-brotli",
@@ -612,6 +661,7 @@ impl NativeHttp1RouteProxy {
     fn select_route(&self, method: &str, path: &str) -> Option<&NativeHttp1RouteProxyRoute> {
         let mut fallback = None;
         let mut best_prefix = None;
+        let mut first_regex = None;
         for route in &self.routes {
             if !route_method_matches(&route.methods, method) {
                 continue;
@@ -630,11 +680,16 @@ impl NativeHttp1RouteProxy {
                         best_prefix = Some(route);
                     }
                 }
+                NativeHttp1RouteMatcher::Regex(regex)
+                    if first_regex.is_none() && regex.is_match(path) =>
+                {
+                    first_regex = Some(route);
+                }
                 NativeHttp1RouteMatcher::Fallback => fallback = Some(route),
                 _ => {}
             }
         }
-        best_prefix.or(fallback)
+        best_prefix.or(first_regex).or(fallback)
     }
 }
 
@@ -988,6 +1043,17 @@ fn rewrite_route_request(
     path: &str,
     query: Option<&str>,
 ) -> Option<NativeHttp1Request> {
+    if let Some(template) = route.rewrite_template.as_deref() {
+        let rewritten_path = route_rewrite_template_path(path, &route.matcher, template)?;
+        if !safe_forward_path(&rewritten_path) {
+            return None;
+        }
+        request.target = query
+            .map(|query| format!("{rewritten_path}?{query}"))
+            .unwrap_or(rewritten_path);
+        return Some(request);
+    }
+
     let Some(strip_prefix) = route.strip_prefix.as_deref() else {
         return Some(request);
     };
@@ -1008,6 +1074,70 @@ fn rewrite_route_request(
         .map(|query| format!("{rewritten_path}?{query}"))
         .unwrap_or(rewritten_path);
     Some(request)
+}
+
+fn route_rewrite_template_path(
+    path: &str,
+    matcher: &NativeHttp1RouteMatcher,
+    template: &str,
+) -> Option<String> {
+    let NativeHttp1RouteMatcher::Regex(regex_matcher) = matcher else {
+        return None;
+    };
+    let captures = regex_matcher.regex.captures(path)?;
+    let mut rewritten = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        rewritten.push_str(&rest[..open]);
+        let after_open = &rest[open + 1..];
+        let close = after_open.find('}')?;
+        let variable = &after_open[..close];
+        if let Some(value) = route_regex_capture_value(&regex_matcher.regex, &captures, variable) {
+            append_route_regex_capture_value(&mut rewritten, value);
+        }
+        rest = &after_open[close + 1..];
+    }
+    rewritten.push_str(rest);
+    if rewritten.contains('{') || rewritten.contains('}') {
+        return None;
+    }
+    Some(rewritten)
+}
+
+fn route_regex_capture_value<'a>(
+    regex: &regex::Regex,
+    captures: &'a regex::Captures<'a>,
+    variable: &str,
+) -> Option<&'a str> {
+    let key = variable.strip_prefix("route.regex.")?;
+    let value = if key.bytes().all(|byte| byte.is_ascii_digit()) {
+        let index = key.parse::<usize>().ok()?;
+        if index >= MAX_ROUTE_REGEX_CAPTURE_VALUES {
+            return None;
+        }
+        captures.get(index)?.as_str()
+    } else {
+        let index = regex
+            .capture_names()
+            .enumerate()
+            .take(MAX_ROUTE_REGEX_CAPTURE_VALUES)
+            .find_map(|(index, name)| (name == Some(key)).then_some(index))?;
+        captures.get(index)?.as_str()
+    };
+    (value.len() <= MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES).then_some(value)
+}
+
+fn append_route_regex_capture_value(rewritten: &mut String, value: &str) {
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
+            rewritten.push(char::from(byte));
+        } else {
+            static HEX: &[u8; 16] = b"0123456789ABCDEF";
+            rewritten.push('%');
+            rewritten.push(char::from(HEX[usize::from(byte >> 4)]));
+            rewritten.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+    }
 }
 
 fn join_route_rewrite_prefix(rewrite_prefix: &str, suffix: &str) -> Option<String> {

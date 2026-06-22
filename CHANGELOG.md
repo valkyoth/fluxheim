@@ -24,6 +24,9 @@ behavior when the change improves security or project direction.
 - Move trusted-chain `X-Forwarded-For = append` support into the native
   request-header policy using the same trusted-source matcher as downstream
   PROXY protocol planning.
+- Move regex route matching and path-only `rewrite_template` capture expansion
+  into the native HTTP/1 route proxy, preserving exact/longest-prefix/first-regex
+  route precedence.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
@@ -56,6 +59,8 @@ behavior when the change improves security or project direction.
   request-header policy instead of a no-op policy.
 - Add native route tests proving trusted append preserves the forwarded chain
   for trusted peers and strips untrusted spoofed chains for direct clients.
+- Add native route tests proving regex rewrite templates percent-encode bounded
+  captures and reject traversal-producing captures before proxying upstream.
 - Harden native trusted-source CIDR matching against directly constructed
   invalid prefix lengths, so invalid values fail closed without shift overflow.
 - Align `RequestHeaderPolicyConfig::default()` with the TOML missing-field

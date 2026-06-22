@@ -20,6 +20,9 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 route proxy handling now owns trusted-chain
   `X-Forwarded-For = append` for routes and programmatic builders, preserving
   inbound chains only when the direct peer matches configured trusted sources.
+- Native HTTP/1 route proxy handling now owns regex route matching and
+  path-only `rewrite_template` capture expansion, including exact route,
+  longest-prefix route, first-regex route, and fallback precedence.
 - Root and vhost compression no longer blocks native HTTP/1 proxy cutover when
   a matching compression backend feature is compiled.
 - Native route-proxy construction now mirrors the compatibility route order for
@@ -70,6 +73,9 @@ the native HTTP/1 proxy path.
 - Native trusted append uses the same effective-client-IP restoration helper as
   the compatibility path, so untrusted direct peers cannot preserve spoofed
   inbound forwarding chains.
+- Native regex rewrite templates percent-encode bounded capture values and
+  reject rewritten paths that would traverse or introduce unsafe forwarding
+  paths before any upstream connection is opened.
 - Native trusted-source CIDR matching now rejects directly constructed invalid
   prefix lengths without relying on implicit shift arithmetic.
 - Programmatic request-header policy defaults now match TOML deserialization for
@@ -86,7 +92,7 @@ the native HTTP/1 proxy path.
 This release does not remove Pingora from normal builds yet. The remaining
 compatibility blockers are auth-request subrequests, traffic mirroring,
 access/rate/concurrency policy, managed local ACME challenge serving, route
-rewrite templates, per-proxy downstream timeout/min-send-rate policy, advanced
-upstream transport knobs, cache lookup/fill/stale behavior, PHP-FPM routing,
-dynamic discovery, health-aware load balancing, persistence,
-priority/backup/drain state, and hash-based load-balancer selection.
+per-proxy downstream timeout/min-send-rate policy, advanced upstream transport
+knobs, cache lookup/fill/stale behavior, PHP-FPM routing, dynamic discovery,
+health-aware load balancing, persistence, priority/backup/drain state, and
+hash-based load-balancer selection.
