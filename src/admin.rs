@@ -4350,6 +4350,7 @@ mod tests {
         fluxheim_server::NativeHttp1Request {
             method: method.to_owned(),
             peer_addr: Some("127.0.0.1:59000".parse().unwrap()),
+            downstream_tls: false,
             target: target.to_owned(),
             version: fluxheim_protocol::Http1Version::Http11,
             headers,
