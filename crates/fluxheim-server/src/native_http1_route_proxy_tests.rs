@@ -736,6 +736,67 @@ async fn native_route_proxy_route_rate_limit_rejects_second_request() {
     assert!(second.ends_with("rate limited\n"));
 }
 
+#[tokio::test]
+async fn native_route_proxy_rate_limit_delay_counts_against_concurrency() {
+    let vhost = fluxheim_config::VhostConfig {
+        name: "route.test".to_owned(),
+        hosts: vec!["route.test".to_owned()],
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: fluxheim_config::RateLimitConfig {
+            enabled: true,
+            requests_per_second: 1,
+            burst: 1,
+            status: 429,
+            mode: fluxheim_config::RateLimitMode::Delay,
+            max_delay_ms: 2_000,
+            ..Default::default()
+        },
+        concurrency: fluxheim_config::ConcurrencyLimitConfig {
+            enabled: true,
+            max_in_flight: 1,
+            max_queue: 0,
+            queue_timeout_ms: 0,
+            status: 503,
+        },
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: fluxheim_config::VhostRedirectConfig {
+            enabled: true,
+            to: Some("https://target.example{uri}".to_owned()),
+            status: 308,
+        },
+        proxy: Default::default(),
+        cache: Default::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: Default::default(),
+        routes: Vec::new(),
+    };
+    let route_proxy = NativeHttp1RouteProxy::from_vhost_config(
+        &vhost,
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        None,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(route_proxy).await;
+
+    let first = downstream_get(proxy, "/delayed").await;
+    assert!(first.starts_with("HTTP/1.1 308 Permanent Redirect\r\n"));
+
+    let delayed = tokio::spawn(async move { downstream_get(proxy, "/delayed").await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let rejected = downstream_get(proxy, "/delayed").await;
+    let delayed = delayed.await.unwrap();
+
+    assert!(rejected.starts_with("HTTP/1.1 503 Too Many Requests\r\n"));
+    assert!(rejected.ends_with("too many requests\n"));
+    assert!(delayed.starts_with("HTTP/1.1 308 Permanent Redirect\r\n"));
+}
+
 #[cfg(not(feature = "privacy-mode"))]
 #[tokio::test]
 async fn native_route_proxy_vhost_access_uses_trusted_forwarded_chain() {
@@ -791,6 +852,15 @@ async fn native_route_proxy_vhost_access_uses_trusted_forwarded_chain() {
          Connection: close\r\n\r\n",
     )
     .await;
+    let duplicate_header_denied = downstream_request(
+        proxy,
+        "GET /trusted HTTP/1.1\r\n\
+         Host: route.test\r\n\
+         X-Forwarded-For: 203.0.113.5\r\n\
+         X-Forwarded-For: 203.0.113.6\r\n\
+         Connection: close\r\n\r\n",
+    )
+    .await;
 
     assert!(allowed.starts_with("HTTP/1.1 308 Permanent Redirect\r\n"));
     assert_eq!(
@@ -798,6 +868,7 @@ async fn native_route_proxy_vhost_access_uses_trusted_forwarded_chain() {
         Some("https://target.example/trusted")
     );
     assert!(denied.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(duplicate_header_denied.starts_with("HTTP/1.1 403 Forbidden\r\n"));
 }
 
 #[cfg(not(feature = "privacy-mode"))]

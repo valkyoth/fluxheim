@@ -97,9 +97,14 @@ the native HTTP/1 proxy path.
 - Native concurrency limits are enforced before rewrite, local static,
   redirect, or upstream proxy actions run; permits are held until the native
   response is produced.
-- Native rate limits are enforced before concurrency permits, rewrite, local
-  static, redirect, or upstream proxy actions run; excess requests are rejected
-  before the native upstream path is reached.
+- Native rate limits are enforced before rewrite, local static, redirect, or
+  upstream proxy actions run; excess requests are rejected before the native
+  upstream path is reached, and delay-mode sleeps are counted against
+  configured concurrency budgets.
+- Native trusted-proxy client restoration joins duplicate inbound
+  `X-Forwarded-For` headers before ACL and rate-limit identity decisions.
+- Native rate-limit table eviction sweeps are bounded so a full bucket table
+  cannot trigger repeated full-table scans on every new identity.
 - Config validation and native regex route compilation now apply the same
   explicit NFA and DFA cache limits.
 - Privacy-mode native route proxy handling now strips spoofable

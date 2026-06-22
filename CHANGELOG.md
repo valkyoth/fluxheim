@@ -82,6 +82,13 @@ behavior when the change improves security or project direction.
   a second request while the first request still holds the native upstream path.
 - Add live native route tests proving vhost and route rate limits reject
   excess requests before the native upstream path is reached.
+- Join duplicate inbound `X-Forwarded-For` headers before native trusted-proxy
+  client restoration, preventing an attacker-controlled earlier duplicate from
+  steering native ACL or rate-limit identity.
+- Hold native concurrency permits while delay-mode rate limiting sleeps, so
+  delayed requests remain counted against vhost and route concurrency budgets.
+- Bound native rate-limit table eviction sweeps to avoid repeated full-table
+  scans on every new identity when the bucket table is full.
 - Set identical NFA and DFA regex cache limits for config validation and native
   regex route compilation.
 - Strip spoofable `X-Forwarded-Host` and `X-Forwarded-Proto` headers in

@@ -48,6 +48,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
 const MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES: usize = 256;
+const NATIVE_RATE_LIMIT_MIN_PRUNE_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1RouteProxy {
@@ -200,7 +201,13 @@ struct NativeRateLimitBucket {
 
 #[derive(Debug)]
 struct NativeRateLimitState {
-    buckets: Mutex<HashMap<NativeRateLimitKey, NativeRateLimitBucket>>,
+    buckets: Mutex<NativeRateLimitBuckets>,
+}
+
+#[derive(Debug)]
+struct NativeRateLimitBuckets {
+    entries: HashMap<NativeRateLimitKey, NativeRateLimitBucket>,
+    last_pruned_at: Option<Instant>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -392,7 +399,10 @@ impl Default for NativeRateLimit {
             max_delay: Duration::from_millis(1000),
             reject_indeterminate: false,
             state: Arc::new(NativeRateLimitState {
-                buckets: Mutex::new(HashMap::new()),
+                buckets: Mutex::new(NativeRateLimitBuckets {
+                    entries: HashMap::new(),
+                    last_pruned_at: None,
+                }),
             }),
         }
     }
@@ -416,7 +426,10 @@ impl NativeRateLimit {
             max_delay: Duration::from_millis(config.max_delay_ms),
             reject_indeterminate: config.reject_indeterminate,
             state: Arc::new(NativeRateLimitState {
-                buckets: Mutex::new(HashMap::new()),
+                buckets: Mutex::new(NativeRateLimitBuckets {
+                    entries: HashMap::new(),
+                    last_pruned_at: None,
+                }),
             }),
         }
     }
@@ -441,14 +454,23 @@ impl NativeRateLimit {
                 std::process::abort();
             }
         };
-        if !buckets.contains_key(&key) && buckets.len() >= self.table_max_entries {
-            buckets.retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.entry_ttl);
-            if buckets.len() >= self.table_max_entries {
+        if !buckets.entries.contains_key(&key) && buckets.entries.len() >= self.table_max_entries {
+            let should_prune = buckets.last_pruned_at.is_none_or(|last_pruned_at| {
+                now.saturating_duration_since(last_pruned_at)
+                    >= NATIVE_RATE_LIMIT_MIN_PRUNE_INTERVAL
+            });
+            if should_prune {
+                buckets
+                    .entries
+                    .retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.entry_ttl);
+                buckets.last_pruned_at = Some(now);
+            }
+            if buckets.entries.len() >= self.table_max_entries {
                 return NativeRateLimitDecision::Reject(self.status);
             }
         }
 
-        let bucket = buckets.entry(key).or_insert(NativeRateLimitBucket {
+        let bucket = buckets.entries.entry(key).or_insert(NativeRateLimitBucket {
             tokens: self.burst,
             updated_at: now,
             last_seen: now,
@@ -1031,6 +1053,18 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .close_connection();
             }
             let concurrency_route = decoded_policy_route.or(selected_route);
+            let _concurrency_permits =
+                match self.acquire_concurrency_permits(concurrency_route).await {
+                    Ok(permits) => permits,
+                    Err(status) => {
+                        return NativeHttp1Response::new(
+                            status,
+                            "Too Many Requests",
+                            b"too many requests\n",
+                        )
+                        .close_connection();
+                    }
+                };
             match self.check_rate_limits(concurrency_route, client_ip) {
                 NativeRateLimitDecision::Allow => {}
                 NativeRateLimitDecision::Delay(delay) => {
@@ -1045,18 +1079,6 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .close_connection();
                 }
             }
-            let _concurrency_permits =
-                match self.acquire_concurrency_permits(concurrency_route).await {
-                    Ok(permits) => permits,
-                    Err(status) => {
-                        return NativeHttp1Response::new(
-                            status,
-                            "Too Many Requests",
-                            b"too many requests\n",
-                        )
-                        .close_connection();
-                    }
-                };
             let mut request =
                 match route_or_fallback.rewrite_request(request, &path, query.as_deref()) {
                     Some(request) => request,
@@ -1178,14 +1200,14 @@ impl NativeHttp1RouteProxy {
         let direct_ip = request.peer_addr.map(|addr| addr.ip());
         #[cfg(not(feature = "privacy-mode"))]
         {
-            let original_x_forwarded_for = header_value(request, "x-forwarded-for");
+            let original_x_forwarded_for = joined_header_value(request, "x-forwarded-for");
             let trusted_direct_peer = direct_ip.is_some_and(|ip| self.trusted_source_contains(ip));
             let trusted_proxy_matcher = |ip| self.trusted_source_contains(ip);
             direct_ip.map(|ip| {
                 effective_client_ip(
                     ip,
                     trusted_direct_peer,
-                    original_x_forwarded_for,
+                    original_x_forwarded_for.as_deref(),
                     Some(&trusted_proxy_matcher),
                 )
             })
@@ -1845,6 +1867,23 @@ fn header_value<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a s
         .map(|(_, value)| value.trim())
 }
 
+#[cfg(not(feature = "privacy-mode"))]
+fn joined_header_value(request: &NativeHttp1Request, name: &str) -> Option<String> {
+    let mut values = request
+        .headers
+        .iter()
+        .filter(|(header_name, value)| {
+            header_name.eq_ignore_ascii_case(name) && !value.trim().is_empty()
+        })
+        .map(|(_, value)| value.trim());
+    let first = values.next()?.to_owned();
+    Some(values.fold(first, |mut joined, value| {
+        joined.push_str(", ");
+        joined.push_str(value);
+        joined
+    }))
+}
+
 fn strip_spoofable_client_ip_headers(request: &mut NativeHttp1Request) {
     request.headers.retain(|(header_name, _)| {
         !SPOOFABLE_CLIENT_IP_HEADERS
@@ -1965,7 +2004,7 @@ impl NativeRouteRequestHeaderPolicy {
             strip_spoofable_client_ip_headers(request);
         }
 
-        let original_x_forwarded_for = header_value(request, "x-forwarded-for").map(str::to_owned);
+        let original_x_forwarded_for = joined_header_value(request, "x-forwarded-for");
         let direct_ip = request.peer_addr.map(|addr| addr.ip());
         let trusted_direct_peer = direct_ip.is_some_and(|ip| self.trusted_source_contains(ip));
         let trusted_proxy_matcher = |ip| self.trusted_source_contains(ip);
@@ -1986,7 +2025,7 @@ impl NativeRouteRequestHeaderPolicy {
             }
             (ForwardedClientIpHeaderMode::Append, Some(ip)) => {
                 let value = trusted_direct_peer
-                    .then_some(original_x_forwarded_for)
+                    .then_some(original_x_forwarded_for.as_deref())
                     .flatten()
                     .filter(|value| !value.trim().is_empty())
                     .map(|value| format!("{value}, {ip}"))
