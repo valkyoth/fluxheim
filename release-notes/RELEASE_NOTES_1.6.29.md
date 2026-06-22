@@ -53,6 +53,10 @@ the native HTTP/1 proxy path.
   the `traffic-mirror` feature is compiled, including recursion protection,
   sampling, forwarded-header selection, mirror response caps, and per-target
   in-flight limits.
+- Native HTTP/1 proxy handling now supports `proxy.auth_request` when the
+  `auth-request` server feature is compiled, including trusted context header
+  synthesis, bounded blocking subrequests, response-header allowlisting, and
+  deny-before-forwarding behavior.
 - Native HTTP/1 route proxy handling now honors route-scoped
   `[vhosts.routes.grpc]` validation, rejecting non-POST requests, duplicate
   `Content-Type` headers, and non-gRPC content types before forwarding.
@@ -151,6 +155,9 @@ the native HTTP/1 proxy path.
   typed request context does not satisfy the configured policy.
 - Native HTTP/1 proxy tests now prove traffic mirroring reaches a local mirror
   endpoint without changing the origin response.
+- Native HTTP/1 proxy tests now prove auth-request allow responses can inject
+  configured upstream headers and auth-request deny responses stop before any
+  upstream connection is made.
 - Native proxy tests now prove a slow request body times out before any
   upstream connection is attempted when `proxy.downstream_read_timeout_secs`
   is selected.
@@ -191,8 +198,8 @@ the native HTTP/1 proxy path.
 ## Compatibility
 
 This release does not remove Pingora from normal builds yet. The remaining
-compatibility blockers are auth-request subrequests, cert/Geo access policy,
-managed local ACME challenge serving, upstream TCP Fast Open, cache
+compatibility blockers are cert/Geo access policy, managed local ACME
+challenge serving, upstream TCP Fast Open, cache
 lookup/fill/stale behavior, PHP-FPM routing, dynamic discovery, health-aware
 load balancing, persistence,
 priority/backup/drain state, and hash-based load-balancer selection.

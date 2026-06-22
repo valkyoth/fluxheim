@@ -65,6 +65,10 @@ behavior when the change improves security or project direction.
   `traffic-mirror` feature is compiled, preserving recursion protection,
   sampling, forwarded-header selection, response-body caps, and per-target
   in-flight limits.
+- Move `proxy.auth_request` onto the native HTTP/1 proxy when the
+  `auth-request` server feature is compiled, including trusted context header
+  synthesis, bounded blocking subrequests, response-header allowlisting, and
+  deny-before-forwarding behavior.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
@@ -149,6 +153,9 @@ behavior when the change improves security or project direction.
   context does not satisfy the route policy.
 - Add a live native HTTP/1 proxy test proving a mirrored request reaches a
   local mirror endpoint while the origin response remains unchanged.
+- Add live native HTTP/1 proxy tests proving auth-request allow responses can
+  inject configured upstream headers and auth-request deny responses stop
+  before any upstream connection is made.
 - Send `408 Request Timeout` before closing native HTTP/1 connections that
   exceed the selected request-body timeout, and ensure redirect/static routes
   do not inherit fallback proxy body-read timeouts.

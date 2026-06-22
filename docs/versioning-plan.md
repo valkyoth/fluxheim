@@ -2771,16 +2771,17 @@ available for the stabilization/security-only follow-up.
   next cert/Geo access-policy slice, and teach the native route-proxy access
   evaluator to consume that context without lifting the cutover blocker yet.
   Move safe-method traffic mirroring onto the native HTTP/1 proxy when the
-  `traffic-mirror` feature is compiled. Keep auth-request subrequests,
+  `traffic-mirror` feature is compiled. Move `proxy.auth_request` onto the
+  native HTTP/1 proxy when the `auth-request` server feature is compiled. Keep
   cert/Geo access policy, managed local ACME challenge serving, upstream TCP
   Fast Open, cache, PHP-FPM, dynamic discovery, and load-balancer state
   explicitly reported as compatibility blockers until they have native parity
   tests.
 - `v1.6.30`: finish the remaining native HTTP policy blockers that do not need
-  cache or PHP state: auth-request subrequests, vhost cert/Geo access policy,
-  vhost managed local ACME challenge serving, route cert/Geo access, and
-  upstream TCP Fast Open if it can be implemented safely without cache, PHP,
-  dynamic discovery, or load-balancer state. Add live native
+  cache or PHP state: vhost cert/Geo access policy, vhost managed local ACME
+  challenge serving, route cert/Geo access, and upstream TCP Fast Open if it
+  can be implemented safely without cache, PHP, dynamic discovery, or
+  load-balancer state. Add live native
   listener tests for each path and keep unsupported configs explicitly reported
   in the cutover inventory.
 - `v1.6.31`: move cache and PHP-FPM rich proxy integrations onto native

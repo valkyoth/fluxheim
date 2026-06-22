@@ -9,6 +9,7 @@ description = "Internal Fluxheim listener and server boundary types."
 
 [features]
 default = []
+auth-request = ["dep:ureq"]
 privacy-mode = []
 compression = ["dep:fluxheim-compression"]
 compression-brotli = ["compression", "fluxheim-compression/brotli"]

@@ -47,6 +47,8 @@ pub struct NativeHttp1Proxy {
     compression: Option<fluxheim_config::CompressionConfig>,
     #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
     mirror: Option<NativeTrafficMirror>,
+    #[cfg(feature = "auth-request")]
+    auth_request: Option<NativeAuthRequest>,
     next_upstream: Arc<AtomicUsize>,
 }
 
@@ -80,6 +82,29 @@ struct NativeTrafficMirrorRequest {
     max_response_bytes: u64,
     max_in_flight: usize,
     slot_key: String,
+}
+
+#[cfg(feature = "auth-request")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NativeAuthRequest {
+    url: String,
+    forward_headers: Vec<String>,
+    allow_response_headers: Vec<String>,
+    timeout: Duration,
+    max_response_bytes: u64,
+}
+
+#[cfg(feature = "auth-request")]
+#[derive(Debug)]
+enum NativeAuthRequestDecision {
+    Allow { headers: Vec<(String, String)> },
+    Deny { status: u16, body: Vec<u8> },
+}
+
+#[cfg(feature = "auth-request")]
+#[derive(Debug)]
+struct NativeAuthRequestInput {
+    headers: Vec<(String, zeroize::Zeroizing<String>)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -166,6 +191,8 @@ impl NativeHttp1Proxy {
             compression: None,
             #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
             mirror: None,
+            #[cfg(feature = "auth-request")]
+            auth_request: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -193,6 +220,8 @@ impl NativeHttp1Proxy {
             compression: None,
             #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
             mirror: None,
+            #[cfg(feature = "auth-request")]
+            auth_request: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -228,6 +257,8 @@ impl NativeHttp1Proxy {
             compression: None,
             #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
             mirror: None,
+            #[cfg(feature = "auth-request")]
+            auth_request: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -330,6 +361,7 @@ impl NativeHttp1Proxy {
         {
             return Err(NativeHttp1ProxyConfigError::DynamicUpstreamDiscovery);
         }
+        #[cfg(not(feature = "auth-request"))]
         if proxy_requires_auth_request(proxy) {
             return Err(NativeHttp1ProxyConfigError::AuthRequest);
         }
@@ -396,6 +428,10 @@ impl NativeHttp1Proxy {
         {
             native.mirror = NativeTrafficMirror::from_config(&proxy.mirror);
         }
+        #[cfg(feature = "auth-request")]
+        {
+            native.auth_request = NativeAuthRequest::from_config(&proxy.auth_request);
+        }
         Ok(Some(native))
     }
 }
@@ -413,6 +449,7 @@ impl PartialEq for NativeHttp1Proxy {
             feature = "compression-brotli",
             feature = "compression-gzip",
             feature = "compression-zstd",
+            feature = "auth-request",
             all(feature = "traffic-mirror", not(feature = "privacy-mode"))
         ))]
         let mut equal = base_equal;
@@ -428,10 +465,15 @@ impl PartialEq for NativeHttp1Proxy {
         {
             equal = equal && self.mirror == other.mirror;
         }
+        #[cfg(feature = "auth-request")]
+        {
+            equal = equal && self.auth_request == other.auth_request;
+        }
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
             feature = "compression-zstd",
+            feature = "auth-request",
             all(feature = "traffic-mirror", not(feature = "privacy-mode"))
         ))]
         {
@@ -441,6 +483,7 @@ impl PartialEq for NativeHttp1Proxy {
             feature = "compression-brotli",
             feature = "compression-gzip",
             feature = "compression-zstd",
+            feature = "auth-request",
             all(feature = "traffic-mirror", not(feature = "privacy-mode"))
         )))]
         {
@@ -458,6 +501,35 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>> {
         Box::pin(async move {
             let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
+            let mut request = request;
+            #[cfg(feature = "auth-request")]
+            if let Some(auth_request) = &self.auth_request {
+                match auth_request.authorize(&request).await {
+                    Ok(NativeAuthRequestDecision::Allow { headers }) => {
+                        apply_native_auth_request_headers(&mut request, &headers);
+                    }
+                    Ok(NativeAuthRequestDecision::Deny { status, body }) => {
+                        return NativeHttp1Response::new(
+                            status,
+                            native_auth_status_reason(status),
+                            body,
+                        )
+                        .close_connection();
+                    }
+                    Err(error) => {
+                        log::debug!(
+                            target: "fluxheim::auth_request",
+                            "native auth_request failed: {error}"
+                        );
+                        return NativeHttp1Response::new(
+                            502,
+                            "Bad Gateway",
+                            b"auth_request failed\n".as_slice(),
+                        )
+                        .close_connection();
+                    }
+                }
+            }
             #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
             if let Some(mirror) = &self.mirror {
                 mirror.spawn_if_selected(&request);
@@ -468,7 +540,6 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 feature = "compression-zstd"
             ))]
             let compression_request = self.compression.as_ref().map(|_| request.clone());
-            let mut request = request;
             self.request_headers.apply(&mut request);
             let mut last_error = None;
             let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
@@ -572,6 +643,185 @@ fn native_response_write_policy_from_config(
             .map(Duration::from_secs),
         proxy.downstream_min_send_rate_bytes_per_sec,
     )
+}
+
+#[cfg(feature = "auth-request")]
+impl NativeAuthRequest {
+    fn from_config(config: &fluxheim_config::AuthRequestConfig) -> Option<Self> {
+        if !config.enabled {
+            return None;
+        }
+        Some(Self {
+            url: config.url.clone()?,
+            forward_headers: config.forward_headers.clone(),
+            allow_response_headers: config.allow_response_headers.clone(),
+            timeout: Duration::from_secs(
+                config
+                    .connect_timeout_secs
+                    .saturating_add(config.read_timeout_secs),
+            ),
+            max_response_bytes: config.max_response_bytes.as_u64(),
+        })
+    }
+
+    async fn authorize(
+        &self,
+        request: &NativeHttp1Request,
+    ) -> std::io::Result<NativeAuthRequestDecision> {
+        let auth = self.clone();
+        let input = self.input(request);
+        tokio::task::spawn_blocking(move || auth.fetch_decision(&input))
+            .await
+            .map_err(|error| std::io::Error::other(error.to_string()))?
+    }
+
+    fn input(&self, request: &NativeHttp1Request) -> NativeAuthRequestInput {
+        let mut headers = Vec::new();
+        for name in &self.forward_headers {
+            if let Some(value) = native_auth_context_header_value(name, request)
+                .or_else(|| native_request_header_values_joined_for_auth(request, name))
+            {
+                headers.push((name.clone(), zeroize::Zeroizing::new(value)));
+            }
+        }
+        NativeAuthRequestInput { headers }
+    }
+
+    fn fetch_decision(
+        &self,
+        input: &NativeAuthRequestInput,
+    ) -> std::io::Result<NativeAuthRequestDecision> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(self.timeout))
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let mut builder = agent.get(&self.url).header("cache-control", "no-store");
+        for (name, value) in &input.headers {
+            builder = builder.header(name.as_str(), value.as_str());
+        }
+        let mut response = builder
+            .call()
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        let status = response.status().as_u16();
+        let body = response
+            .body_mut()
+            .with_config()
+            .limit(self.max_response_bytes.saturating_add(1))
+            .read_to_vec()
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        if body.len() as u64 > self.max_response_bytes {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "auth_request response exceeds configured body limit",
+            ));
+        }
+        if (200..300).contains(&status) {
+            return Ok(NativeAuthRequestDecision::Allow {
+                headers: self.allowed_response_headers(&response),
+            });
+        }
+        let status = if (400..600).contains(&status) {
+            status
+        } else {
+            500
+        };
+        Ok(NativeAuthRequestDecision::Deny { status, body })
+    }
+
+    fn allowed_response_headers(
+        &self,
+        response: &ureq::http::Response<ureq::Body>,
+    ) -> Vec<(String, String)> {
+        response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                if !self
+                    .allow_response_headers
+                    .iter()
+                    .any(|allowed| allowed.eq_ignore_ascii_case(name.as_str()))
+                {
+                    return None;
+                }
+                value
+                    .to_str()
+                    .ok()
+                    .map(|value| (name.as_str().to_ascii_lowercase(), value.to_owned()))
+            })
+            .collect()
+    }
+}
+
+#[cfg(feature = "auth-request")]
+fn native_auth_context_header_value(name: &str, request: &NativeHttp1Request) -> Option<String> {
+    if name.eq_ignore_ascii_case("x-original-uri")
+        || name.eq_ignore_ascii_case("x-forwarded-uri")
+        || name.eq_ignore_ascii_case("x-auth-request-redirect")
+    {
+        return Some(request.target.clone());
+    }
+    if name.eq_ignore_ascii_case("x-forwarded-for") || name.eq_ignore_ascii_case("x-real-ip") {
+        #[cfg(not(feature = "privacy-mode"))]
+        {
+            return request.peer_addr.map(|peer| peer.ip().to_string());
+        }
+        #[cfg(feature = "privacy-mode")]
+        {
+            return None;
+        }
+    }
+    if name.eq_ignore_ascii_case("x-forwarded-host") {
+        return native_request_header_values(request, "host")
+            .next()
+            .map(str::to_owned);
+    }
+    if name.eq_ignore_ascii_case("x-forwarded-proto") {
+        return Some(
+            if request.downstream_tls {
+                "https"
+            } else {
+                "http"
+            }
+            .to_owned(),
+        );
+    }
+    None
+}
+
+#[cfg(feature = "auth-request")]
+fn apply_native_auth_request_headers(
+    request: &mut NativeHttp1Request,
+    headers: &[(String, String)],
+) {
+    for (name, value) in headers {
+        native_request_replace_header(request, name, value);
+    }
+}
+
+#[cfg(feature = "auth-request")]
+fn native_request_replace_header(request: &mut NativeHttp1Request, name: &str, value: &str) {
+    request
+        .headers
+        .retain(|(header_name, _)| !header_name.eq_ignore_ascii_case(name));
+    request.headers.push((name.to_owned(), value.to_owned()));
+}
+
+#[cfg(feature = "auth-request")]
+fn native_auth_status_reason(status: u16) -> &'static str {
+    match status {
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => "Forbidden",
+    }
 }
 
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
@@ -796,7 +1046,10 @@ fn send_native_traffic_mirror_request(request: &NativeTrafficMirrorRequest) -> s
     Ok(())
 }
 
-#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+#[cfg(any(
+    feature = "auth-request",
+    all(feature = "traffic-mirror", not(feature = "privacy-mode"))
+))]
 fn native_request_header_values<'a>(
     request: &'a NativeHttp1Request,
     name: &'a str,
@@ -812,6 +1065,22 @@ fn native_request_header_values<'a>(
 fn native_request_header_values_joined(request: &NativeHttp1Request, name: &str) -> Option<String> {
     fluxheim_headers::join_header_values(
         native_request_header_values(request, name).filter(|value| !value.trim().is_empty()),
+    )
+}
+
+#[cfg(feature = "auth-request")]
+fn native_request_header_values_joined_for_auth(
+    request: &NativeHttp1Request,
+    name: &str,
+) -> Option<String> {
+    let separator = if name.eq_ignore_ascii_case("cookie") {
+        "; "
+    } else {
+        ", "
+    };
+    fluxheim_headers::join_header_values_with_separator(
+        native_request_header_values(request, name).filter(|value| !value.trim().is_empty()),
+        separator,
     )
 }
 
@@ -863,6 +1132,7 @@ fn proxy_requires_advanced_load_balancer(proxy: &fluxheim_config::ProxyConfig) -
         || !proxy.disabled_upstreams.is_empty()
 }
 
+#[cfg(not(feature = "auth-request"))]
 fn proxy_requires_auth_request(proxy: &fluxheim_config::ProxyConfig) -> bool {
     proxy.auth_request.enabled
         || proxy.auth_request.url.is_some()

@@ -57,6 +57,7 @@ proxy = [
     "dep:sanitization",
     "dep:ureq",
     "dep:zeroize",
+    "fluxheim-server/auth-request",
 ]
 compression = ["proxy"]
 compression-brotli = ["compression", "fluxheim-compression/brotli", "fluxheim-server/compression-brotli"]
