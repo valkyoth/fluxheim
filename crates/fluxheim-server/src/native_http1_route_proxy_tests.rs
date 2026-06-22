@@ -105,6 +105,49 @@ async fn upstream_expect_header(
     addr
 }
 
+#[cfg(feature = "privacy-mode")]
+async fn upstream_expect_headers_absent(
+    expected_path: &'static str,
+    forbidden_headers: &'static [&'static str],
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(request).unwrap();
+        assert!(
+            request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
+            "unexpected upstream request: {request:?}"
+        );
+        for forbidden_header in forbidden_headers {
+            assert!(
+                !request.lines().any(|line| {
+                    line.split_once(':')
+                        .is_some_and(|(name, _)| name.eq_ignore_ascii_case(forbidden_header))
+                }),
+                "forbidden header {forbidden_header:?} reached upstream request: {request:?}"
+            );
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 7\r\n\r\nheaders")
+            .await
+            .unwrap();
+    });
+    addr
+}
+
 async fn upstream_response(response: &'static str) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -314,8 +357,11 @@ async fn native_route_proxy_default_constructor_applies_safe_request_headers() {
 #[cfg(feature = "privacy-mode")]
 #[tokio::test]
 async fn native_route_proxy_privacy_mode_strips_spoofable_headers_after_mutation() {
-    let upstream =
-        upstream_expect_header("/privacy", "host", "route.test", "x-forwarded-for").await;
+    let upstream = upstream_expect_headers_absent(
+        "/privacy",
+        &["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto"],
+    )
+    .await;
     let mut overlay = fluxheim_config::RequestHeaderPolicyOverlayConfig::default();
     overlay
         .set
@@ -329,6 +375,8 @@ async fn native_route_proxy_privacy_mode_strips_spoofable_headers_after_mutation
         "GET /privacy HTTP/1.1\r\n\
          Host: route.test\r\n\
          X-Forwarded-For: 203.0.113.9\r\n\
+         X-Forwarded-Host: admin.internal\r\n\
+         X-Forwarded-Proto: https\r\n\
          Connection: close\r\n\r\n",
     )
     .await;

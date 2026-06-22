@@ -61,6 +61,10 @@ behavior when the change improves security or project direction.
   for trusted peers and strips untrusted spoofed chains for direct clients.
 - Add native route tests proving regex rewrite templates percent-encode bounded
   captures and reject traversal-producing captures before proxying upstream.
+- Set identical NFA and DFA regex cache limits for config validation and native
+  regex route compilation.
+- Strip spoofable `X-Forwarded-Host` and `X-Forwarded-Proto` headers in
+  privacy-mode native route proxy handling.
 - Harden native trusted-source CIDR matching against directly constructed
   invalid prefix lengths, so invalid values fail closed without shift overflow.
 - Align `RequestHeaderPolicyConfig::default()` with the TOML missing-field

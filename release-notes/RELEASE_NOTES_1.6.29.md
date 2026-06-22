@@ -76,6 +76,11 @@ the native HTTP/1 proxy path.
 - Native regex rewrite templates percent-encode bounded capture values and
   reject rewritten paths that would traverse or introduce unsafe forwarding
   paths before any upstream connection is opened.
+- Config validation and native regex route compilation now apply the same
+  explicit NFA and DFA cache limits.
+- Privacy-mode native route proxy handling now strips spoofable
+  `X-Forwarded-Host` and `X-Forwarded-Proto` headers along with client-IP
+  forwarding headers.
 - Native trusted-source CIDR matching now rejects directly constructed invalid
   prefix lengths without relying on implicit shift arithmetic.
 - Programmatic request-header policy defaults now match TOML deserialization for

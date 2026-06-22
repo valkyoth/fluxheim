@@ -554,6 +554,7 @@ pub fn validate_route_regex(value: &str) -> Result<(), ConfigError> {
     }
     regex::RegexBuilder::new(value)
         .size_limit(MAX_ROUTE_REGEX_PROGRAM_BYTES)
+        .dfa_size_limit(MAX_ROUTE_REGEX_PROGRAM_BYTES)
         .build()
         .map_err(|_| ConfigError::InvalidRouteRegex {
             vhost: String::new(),

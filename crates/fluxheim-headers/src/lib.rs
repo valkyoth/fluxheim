@@ -19,6 +19,8 @@ pub const SPOOFABLE_CLIENT_IP_HEADERS: &[&str] = &[
     "x-forwarded-for",
     "x-real-ip",
     "forwarded",
+    "x-forwarded-host",
+    "x-forwarded-proto",
     "cf-connecting-ip",
     "true-client-ip",
     "x-client-ip",

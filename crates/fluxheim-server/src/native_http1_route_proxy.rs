@@ -105,6 +105,7 @@ impl NativeRegexRouteMatcher {
             pattern: pattern.to_owned(),
             regex: regex::RegexBuilder::new(pattern)
                 .size_limit(fluxheim_config::MAX_ROUTE_REGEX_PROGRAM_BYTES)
+                .dfa_size_limit(fluxheim_config::MAX_ROUTE_REGEX_PROGRAM_BYTES)
                 .build()?,
         })
     }
@@ -174,7 +175,7 @@ impl std::fmt::Display for NativeHttp1RouteProxyConfigError {
             }
             Self::Proxy(error) => write!(formatter, "{error}"),
             Self::RegexRoute => {
-                formatter.write_str("native route proxy does not yet support regex routes")
+                formatter.write_str("native route proxy regex route configuration error")
             }
             Self::RewriteTemplate => {
                 formatter.write_str("native route proxy does not yet support rewrite_template")
