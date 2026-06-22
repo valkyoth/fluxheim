@@ -143,7 +143,7 @@ impl Default for RequestHeaderPolicyConfig {
             x_forwarded_for: ForwardedClientIpHeaderMode::Replace,
             #[cfg(feature = "privacy-mode")]
             x_forwarded_for: ForwardedClientIpHeaderMode::Off,
-            x_real_ip: false,
+            x_real_ip: true,
             x_forwarded_host: true,
             x_forwarded_proto: true,
             forwarded: false,

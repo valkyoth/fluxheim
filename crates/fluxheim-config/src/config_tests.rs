@@ -2231,6 +2231,21 @@ fn parses_request_header_policy() {
 }
 
 #[test]
+fn request_header_policy_default_matches_deserialization_for_real_ip() {
+    let config: Config = toml::from_str(
+        r#"
+            [headers.request]
+            enabled = true
+            "#,
+    )
+    .unwrap();
+
+    assert!(super::RequestHeaderPolicyConfig::default().x_real_ip);
+    assert!(config.headers.request.x_real_ip);
+    config.validate().unwrap();
+}
+
+#[test]
 fn validates_dynamic_request_header_values() {
     let config: Config = toml::from_str(
         r#"

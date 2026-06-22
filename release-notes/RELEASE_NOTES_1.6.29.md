@@ -70,6 +70,11 @@ the native HTTP/1 proxy path.
 - Native trusted append uses the same effective-client-IP restoration helper as
   the compatibility path, so untrusted direct peers cannot preserve spoofed
   inbound forwarding chains.
+- Native trusted-source CIDR matching now rejects directly constructed invalid
+  prefix lengths without relying on implicit shift arithmetic.
+- Programmatic request-header policy defaults now match TOML deserialization for
+  `X-Real-IP`, avoiding divergent native route behavior between config-built and
+  builder-created routes.
 - Privacy-mode native proxy builds strip spoofable inbound client-IP headers and
   do not compile the non-privacy forwarded-header synthesis helpers.
 - Native route responses now apply inherited standard security headers such as

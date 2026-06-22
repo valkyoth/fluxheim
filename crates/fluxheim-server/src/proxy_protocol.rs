@@ -56,19 +56,25 @@ fn normalize_ipv4_mapped_ip(address: IpAddr) -> IpAddr {
 }
 
 fn ipv4_prefix_match(network: Ipv4Addr, address: Ipv4Addr, prefix: u8) -> bool {
+    if prefix > 32 {
+        return false;
+    }
     let mask = if prefix == 0 {
         0
     } else {
-        u32::MAX << (32 - prefix)
+        u32::MAX << (32u32 - u32::from(prefix))
     };
     u32::from(network) & mask == u32::from(address) & mask
 }
 
 fn ipv6_prefix_match(network: Ipv6Addr, address: Ipv6Addr, prefix: u8) -> bool {
+    if prefix > 128 {
+        return false;
+    }
     let mask = if prefix == 0 {
         0
     } else {
-        u128::MAX << (128 - prefix)
+        u128::MAX << (128u32 - u32::from(prefix))
     };
     u128::from(network) & mask == u128::from(address) & mask
 }
@@ -150,5 +156,20 @@ mod tests {
         };
         assert!(v4_cidr.contains("::ffff:198.51.100.42".parse().unwrap()));
         assert!(!v4_cidr.contains("::ffff:198.51.101.42".parse().unwrap()));
+    }
+
+    #[test]
+    fn trusted_source_rejects_directly_constructed_invalid_prefixes() {
+        let invalid_v4 = ProxyProtocolTrustedSource::Cidr {
+            network: "198.51.100.0".parse().unwrap(),
+            prefix: 33,
+        };
+        assert!(!invalid_v4.contains("198.51.100.42".parse().unwrap()));
+
+        let invalid_v6 = ProxyProtocolTrustedSource::Cidr {
+            network: "2001:db8::".parse().unwrap(),
+            prefix: 129,
+        };
+        assert!(!invalid_v6.contains("2001:db8::42".parse().unwrap()));
     }
 }

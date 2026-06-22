@@ -56,6 +56,11 @@ behavior when the change improves security or project direction.
   request-header policy instead of a no-op policy.
 - Add native route tests proving trusted append preserves the forwarded chain
   for trusted peers and strips untrusted spoofed chains for direct clients.
+- Harden native trusted-source CIDR matching against directly constructed
+  invalid prefix lengths, so invalid values fail closed without shift overflow.
+- Align `RequestHeaderPolicyConfig::default()` with the TOML missing-field
+  default for `x_real_ip`, keeping config-driven and programmatic native route
+  construction consistent.
 - Add live native listener tests proving inherited response-header and standard
   security-header emission on route responses.
 - Add live native listener tests proving plain-proxy gzip compression and
