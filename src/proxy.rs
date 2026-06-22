@@ -10309,13 +10309,22 @@ fn grpc_route_rejection_status(
     if request.method.as_str() != "POST" {
         return Some(GrpcRouteRejectionStatus::MethodNotAllowed);
     }
-    if grpc.require_content_type
-        && !request_header_values(request, "content-type").any(grpc_content_type)
-    {
+    if grpc.require_content_type && !grpc_content_type_header_valid(request) {
         return Some(GrpcRouteRejectionStatus::UnsupportedMediaType);
     }
 
     None
+}
+
+fn grpc_content_type_header_valid(request: &RequestHeader) -> bool {
+    let mut values = request.headers.get_all("content-type").iter();
+    let Some(value) = values.next() else {
+        return false;
+    };
+    if values.next().is_some() {
+        return false;
+    }
+    value.to_str().is_ok_and(grpc_content_type)
 }
 
 fn grpc_content_type(value: &str) -> bool {
@@ -10324,7 +10333,10 @@ fn grpc_content_type(value: &str) -> bool {
         .map(|(media_type, _)| media_type)
         .unwrap_or(value)
         .trim();
-    media_type == "application/grpc" || media_type.starts_with("application/grpc+")
+    media_type.eq_ignore_ascii_case("application/grpc")
+        || media_type
+            .get(.."application/grpc+".len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("application/grpc+"))
 }
 
 fn request_limit_status(
@@ -14159,6 +14171,8 @@ mod tests {
         assert!(grpc_content_type("application/grpc"));
         assert!(grpc_content_type("application/grpc+proto"));
         assert!(grpc_content_type("application/grpc+json; charset=utf-8"));
+        assert!(grpc_content_type("Application/gRPC"));
+        assert!(grpc_content_type("APPLICATION/GRPC+PROTO; charset=utf-8"));
         assert!(!grpc_content_type("application/json"));
         assert!(!grpc_content_type("text/plain"));
     }
@@ -14183,9 +14197,22 @@ mod tests {
 
         let mut grpc_request = RequestHeader::build("POST", b"/service.Method", None).unwrap();
         grpc_request
-            .insert_header("content-type", "application/grpc+proto")
+            .insert_header("content-type", "Application/gRPC+Proto")
             .unwrap();
         assert_eq!(grpc_route_rejection_status(&grpc, &grpc_request), None);
+
+        let mut duplicate_content_type_request =
+            RequestHeader::build("POST", b"/service.Method", None).unwrap();
+        duplicate_content_type_request
+            .append_header("content-type", "application/grpc")
+            .unwrap();
+        duplicate_content_type_request
+            .append_header("content-type", "text/plain")
+            .unwrap();
+        assert_eq!(
+            grpc_route_rejection_status(&grpc, &duplicate_content_type_request),
+            Some(super::GrpcRouteRejectionStatus::UnsupportedMediaType)
+        );
     }
 
     #[test]

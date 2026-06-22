@@ -36,6 +36,9 @@ behavior when the change improves security or project direction.
 - Move route-scoped gRPC request validation into the native HTTP/1 route proxy,
   rejecting non-POST requests, duplicate `Content-Type` headers, and
   non-gRPC content types before proxy forwarding.
+- Align the compatibility proxy's gRPC route `Content-Type` gate with the
+  native path by rejecting duplicate `Content-Type` headers and accepting
+  RFC-compliant case-insensitive gRPC media types.
 - Move per-proxy downstream response write timeout, total response timeout, and
   minimum send-rate policy onto native HTTP/1 proxy responses, and move
   per-proxy downstream request-read timeout onto native HTTP/1 request-body
@@ -112,6 +115,9 @@ behavior when the change improves security or project direction.
   requests, rejects duplicate `Content-Type`, emits gRPC status metadata on
   local rejections, and forwards valid case-insensitive `application/grpc*`
   requests.
+- Add compatibility-path gRPC policy tests proving duplicate `Content-Type`
+  headers are rejected and case-insensitive `application/grpc*` media types are
+  accepted.
 - Add native proxy config tests proving total upstream connection timeout is
   accepted and propagated to native upstreams while other advanced TCP socket
   knobs still block native cutover.

@@ -44,6 +44,9 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 route proxy handling now honors route-scoped
   `[vhosts.routes.grpc]` validation, rejecting non-POST requests, duplicate
   `Content-Type` headers, and non-gRPC content types before forwarding.
+- The compatibility proxy's gRPC route `Content-Type` gate now matches the
+  native gate by rejecting duplicate `Content-Type` headers and accepting
+  case-insensitive gRPC media types.
 - Root and vhost compression no longer blocks native HTTP/1 proxy cutover when
   a matching compression backend feature is compiled.
 - Native route-proxy construction now mirrors the compatibility route order for
@@ -135,6 +138,9 @@ the native HTTP/1 proxy path.
 - Native route tests now prove gRPC policy rejects non-gRPC requests, rejects
   duplicate `Content-Type`, emits gRPC status metadata on local rejections, and
   forwards valid case-insensitive `application/grpc*` requests.
+- Compatibility-path gRPC policy tests now prove duplicate `Content-Type`
+  headers are rejected and case-insensitive `application/grpc*` media types are
+  accepted.
 - Native HTTP/1 now sends `408 Request Timeout` before closing connections that
   exceed the selected request-body timeout.
 - Native route proxy timeout selection no longer lets redirect or static-web
