@@ -2746,21 +2746,24 @@ available for the stabilization/security-only follow-up.
   `X-Forwarded-For = off`, `X-Forwarded-For = replace`, `X-Real-IP`,
   `X-Forwarded-Host`, `X-Forwarded-Proto`, and RFC `Forwarded` on the native
   path while keeping trusted-chain `X-Forwarded-For = append` blocked until the
-  native runtime has explicit trusted-proxy chain state. Keep auth-request
-  subrequests, traffic mirroring, access/rate/concurrency policy, vhost
-  redirects, ACME-challenge routing, route rewrite templates, per-proxy
-  downstream timeout/min-send-rate policy, advanced upstream transport knobs,
-  cache, PHP-FPM, dynamic discovery, and load-balancer state explicitly reported
-  as compatibility blockers until they have native parity tests.
+  native runtime has explicit trusted-proxy chain state. Move vhost redirect
+  fallback routes and explicit ACME HTTP-01 upstream challenge routes into
+  native route-proxy construction and the cutover inventory, preserving the
+  compatibility route order. Keep auth-request subrequests, traffic mirroring,
+  access/rate/concurrency policy, managed local ACME challenge serving, route
+  rewrite templates, per-proxy downstream timeout/min-send-rate policy,
+  advanced upstream transport knobs, cache, PHP-FPM, dynamic discovery, and
+  load-balancer state explicitly reported as compatibility blockers until they
+  have native parity tests.
 - `v1.6.30`: finish the remaining native HTTP policy blockers that do not need
   cache or PHP state: trusted-chain forwarded-header append, auth-request
   subrequests, traffic mirroring, vhost access/rate/concurrency policy, vhost
-  redirects, ACME-challenge routing, route access/rate/concurrency/grpc flags,
-  route rewrite-template handling, per-proxy downstream timeout/min-send-rate
-  policy, and advanced upstream transport knobs that do not require cache, PHP,
-  dynamic discovery, or load-balancer state. Add live native listener tests for
-  each path and keep unsupported configs explicitly reported in the cutover
-  inventory.
+  managed local ACME challenge serving, route access/rate/concurrency/grpc
+  flags, route rewrite-template handling, per-proxy downstream
+  timeout/min-send-rate policy, and advanced upstream transport knobs that do
+  not require cache, PHP, dynamic discovery, or load-balancer state. Add live
+  native listener tests for each path and keep unsupported configs explicitly
+  reported in the cutover inventory.
 - `v1.6.31`: move cache and PHP-FPM rich proxy integrations onto native
   adapters. Cache work must cover lookup/fill/stale, Vary/Range/conditional
   semantics, peer-fill guardrails, and purge visibility. PHP-FPM work must

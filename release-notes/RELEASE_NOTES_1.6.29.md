@@ -21,6 +21,12 @@ the native HTTP/1 proxy path.
   trusted proxy-chain state is threaded through the native runtime.
 - Root and vhost compression no longer blocks native HTTP/1 proxy cutover when
   a matching compression backend feature is compiled.
+- Native route-proxy construction now mirrors the compatibility route order for
+  vhost synthetic routes: explicit ACME HTTP-01 upstream challenge routes,
+  configured routes, then vhost redirect fallback routes.
+- Vhost redirects and explicit ACME HTTP-01 upstream challenge routes no longer
+  block the native cutover inventory when their generated route policies are
+  otherwise native-safe.
 - Live native listener tests now prove plain-proxy gzip compression, inherited
   route gzip compression, inherited request-header mutation, inherited
   response-header mutation, and standard response security headers.
@@ -46,6 +52,9 @@ the native HTTP/1 proxy path.
 - Future trusted-chain append handling reads the inbound `X-Forwarded-For` chain
   after any configured spoofable-header stripping, so strip-plus-append degrades
   to the direct peer address instead of preserving attacker-supplied hops.
+- Native route tests prove ACME challenge paths are selected before a vhost
+  redirect fallback, preserving the HTTP-01 exception ordering used by the
+  compatibility path for explicit upstream challenge forwarding.
 - Privacy-mode native proxy builds strip spoofable inbound client-IP headers and
   do not compile the non-privacy forwarded-header synthesis helpers.
 - Native route responses now apply inherited standard security headers such as
@@ -57,7 +66,7 @@ the native HTTP/1 proxy path.
 This release does not remove Pingora from normal builds yet. The remaining
 compatibility blockers are trusted-chain forwarded-client-IP append,
 auth-request subrequests, traffic mirroring, access/rate/concurrency policy,
-vhost redirects, ACME-challenge routing, route rewrite templates, per-proxy
+managed local ACME challenge serving, route rewrite templates, per-proxy
 downstream timeout/min-send-rate policy, advanced upstream transport knobs,
 cache lookup/fill/stale behavior, PHP-FPM routing, dynamic discovery,
 health-aware load balancing, persistence, priority/backup/drain state, and

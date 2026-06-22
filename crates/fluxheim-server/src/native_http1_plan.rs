@@ -124,7 +124,13 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
             pool_max_idle,
             &mut candidates,
         );
-        for route in &vhost.routes {
+        for route in vhost
+            .acme_challenge
+            .route_config()
+            .into_iter()
+            .chain(vhost.routes.iter().cloned())
+            .chain(vhost.redirect.route_config())
+        {
             if route.redirect.is_some() || route.web.as_ref().is_some_and(|web| web.enabled()) {
                 continue;
             }
@@ -132,7 +138,7 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
                 push_proxy_candidate(
                     format!("vhost {:?} route {:?} proxy", vhost.name, route.name),
                     proxy,
-                    vhost_policy_supported(vhost) && route_policy_supported(route),
+                    vhost_policy_supported(vhost) && route_policy_supported(&route),
                     policy,
                     pool_max_idle,
                     &mut candidates,
@@ -182,13 +188,21 @@ fn vhost_policy_supported(vhost: &VhostConfig) -> bool {
     !access_policy_active(&vhost.access)
         && !vhost.rate_limit.enabled
         && !vhost.concurrency.enabled
-        && !vhost.redirect.enabled
-        && !vhost.acme_challenge.enabled
         && vhost_header_overlay_supported(&vhost.headers)
         && !cache_enabled(&vhost.cache)
         && vhost.compression.as_ref().is_none_or(compression_supported)
         && !vhost.php.enabled
         && !vhost.web.enabled()
+        && vhost
+            .acme_challenge
+            .route_config()
+            .as_ref()
+            .is_none_or(route_policy_supported)
+        && vhost
+            .redirect
+            .route_config()
+            .as_ref()
+            .is_none_or(route_policy_supported)
 }
 
 fn route_policy_supported(route: &RouteConfig) -> bool {

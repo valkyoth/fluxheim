@@ -751,7 +751,7 @@ fn disabled_empty_access_policy_does_not_block_native_http1_proxy_candidate() {
 }
 
 #[test]
-fn server_plan_rejects_native_http1_proxy_candidate_with_vhost_routing_policy() {
+fn server_plan_accepts_native_http1_proxy_candidate_with_vhost_acme_challenge_route() {
     let config = Config {
         vhosts: vec![VhostConfig {
             name: "native.test".to_owned(),
@@ -782,15 +782,20 @@ fn server_plan_rejects_native_http1_proxy_candidate_with_vhost_routing_policy() 
     };
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let candidates = plan.native_http1_proxy_candidates();
 
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0].scope(), "vhost \"native.test\" proxy");
+    assert!(candidates[0].is_eligible());
     assert_eq!(
-        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::HttpPolicy)
+        candidates[1].scope(),
+        "vhost \"native.test\" route \"acme-http-01\" proxy"
     );
+    assert!(candidates[1].is_eligible());
 }
 
 #[test]
-fn server_plan_rejects_native_http1_proxy_candidate_with_vhost_redirect() {
+fn server_plan_accepts_native_http1_proxy_candidate_with_vhost_redirect() {
     let config = Config {
         vhosts: vec![VhostConfig {
             name: "redir.test".to_owned(),
@@ -822,10 +827,8 @@ fn server_plan_rejects_native_http1_proxy_candidate_with_vhost_redirect() {
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
-    assert_eq!(
-        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::HttpPolicy)
-    );
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
 }
 
 #[test]

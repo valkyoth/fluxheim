@@ -36,8 +36,8 @@ use fluxheim_protocol::{
 };
 
 use crate::{
-    NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1Request, NativeHttp1Response,
-    NativeHttp1StaticWeb,
+    DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1ProxyConfigError,
+    NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -115,6 +115,7 @@ pub(crate) struct NativeRouteResponseHeaderPolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeHttp1RouteProxyConfigError {
     MissingRouteAction,
+    Proxy(NativeHttp1ProxyConfigError),
     RegexRoute,
     RewriteTemplate,
     StaticWeb,
@@ -126,6 +127,7 @@ impl std::fmt::Display for NativeHttp1RouteProxyConfigError {
             Self::MissingRouteAction => {
                 formatter.write_str("native route proxy requires an action")
             }
+            Self::Proxy(error) => write!(formatter, "{error}"),
             Self::RegexRoute => {
                 formatter.write_str("native route proxy does not yet support regex routes")
             }
@@ -137,7 +139,17 @@ impl std::fmt::Display for NativeHttp1RouteProxyConfigError {
     }
 }
 
-impl std::error::Error for NativeHttp1RouteProxyConfigError {}
+impl std::error::Error for NativeHttp1RouteProxyConfigError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Proxy(error) => Some(error),
+            Self::MissingRouteAction
+            | Self::RegexRoute
+            | Self::RewriteTemplate
+            | Self::StaticWeb => None,
+        }
+    }
+}
 
 impl NativeHttp1RouteProxy {
     pub fn new(
@@ -153,6 +165,60 @@ impl NativeHttp1RouteProxy {
 
     pub fn fallback(&self) -> Option<&NativeHttp1Proxy> {
         self.fallback.as_ref()
+    }
+
+    pub fn from_vhost_config(
+        vhost: &fluxheim_config::VhostConfig,
+        base_headers: &HeaderPolicyConfig,
+        inherited_compression: Option<&fluxheim_config::CompressionConfig>,
+        policy: DownstreamHttp1Policy,
+        pool_max_idle: usize,
+    ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        let headers = base_headers.with_vhost_overlay(&vhost.headers);
+        let inherited_compression = vhost.compression.as_ref().or(inherited_compression);
+        let fallback =
+            NativeHttp1Proxy::from_proxy_config_with_pool_size(&vhost.proxy, policy, pool_max_idle)
+                .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        let fallback = fallback.map(|proxy| {
+            if let Some(compression) = inherited_compression.cloned() {
+                proxy.with_compression_config(compression)
+            } else {
+                proxy
+            }
+        });
+
+        let mut routes = Vec::new();
+        for route in vhost
+            .acme_challenge
+            .route_config()
+            .into_iter()
+            .chain(vhost.routes.iter().cloned())
+            .chain(vhost.redirect.route_config())
+        {
+            let proxy = if let Some(proxy_config) = route.proxy.as_ref() {
+                NativeHttp1Proxy::from_proxy_config_with_pool_size(
+                    proxy_config,
+                    policy,
+                    pool_max_idle,
+                )
+                .map_err(NativeHttp1RouteProxyConfigError::Proxy)?
+            } else {
+                None
+            };
+            routes.push(NativeHttp1RouteProxyRoute::from_config_with_inherited(
+                &route,
+                proxy,
+                &headers,
+                inherited_compression,
+            )?);
+        }
+
+        Ok(Self { routes, fallback })
     }
 }
 
