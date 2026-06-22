@@ -1218,6 +1218,7 @@ dependencies = [
  "fluxheim-protocol",
  "fluxheim-runtime",
  "fluxheim-web",
+ "getrandom 0.4.3",
  "h2",
  "http",
  "httpdate",
@@ -1229,11 +1230,13 @@ dependencies = [
  "rustix",
  "rustls",
  "rustls-native-certs 0.8.4",
+ "sha2",
  "socket2",
  "tempfile",
  "tokio",
  "tokio-openssl",
  "tokio-rustls",
+ "ureq",
  "zeroize",
 ]
 

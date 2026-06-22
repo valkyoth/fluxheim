@@ -1,7 +1,11 @@
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -23,6 +27,9 @@ use crate::{
     NativeHttp1StaticWeb, NativeHttp1Upstream, NativeTcpKeepalivePolicy,
 };
 
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+const NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
+
 #[derive(Clone, Debug)]
 pub struct NativeHttp1Proxy {
     upstreams: Vec<NativeHttp1Upstream>,
@@ -38,6 +45,8 @@ pub struct NativeHttp1Proxy {
         feature = "compression-zstd"
     ))]
     compression: Option<fluxheim_config::CompressionConfig>,
+    #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+    mirror: Option<NativeTrafficMirror>,
     next_upstream: Arc<AtomicUsize>,
 }
 
@@ -46,6 +55,31 @@ struct NativeHttp1ProxyErrorPage {
     status: u16,
     path: String,
     web: NativeHttp1StaticWeb,
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NativeTrafficMirror {
+    base_url: String,
+    sample_per_mille: u16,
+    methods: Vec<String>,
+    forward_headers: Vec<String>,
+    timeout: Duration,
+    max_response_bytes: u64,
+    max_in_flight: usize,
+    slot_key: String,
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+#[derive(Debug)]
+struct NativeTrafficMirrorRequest {
+    method: String,
+    url: String,
+    headers: Vec<(String, String)>,
+    timeout: Duration,
+    max_response_bytes: u64,
+    max_in_flight: usize,
+    slot_key: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -130,6 +164,8 @@ impl NativeHttp1Proxy {
                 feature = "compression-zstd"
             ))]
             compression: None,
+            #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+            mirror: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -155,6 +191,8 @@ impl NativeHttp1Proxy {
                 feature = "compression-zstd"
             ))]
             compression: None,
+            #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+            mirror: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -188,6 +226,8 @@ impl NativeHttp1Proxy {
                 feature = "compression-zstd"
             ))]
             compression: None,
+            #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+            mirror: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -293,6 +333,7 @@ impl NativeHttp1Proxy {
         if proxy_requires_auth_request(proxy) {
             return Err(NativeHttp1ProxyConfigError::AuthRequest);
         }
+        #[cfg(not(all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
         if proxy.mirror.enabled {
             return Err(NativeHttp1ProxyConfigError::TrafficMirror);
         }
@@ -351,13 +392,17 @@ impl NativeHttp1Proxy {
         native.error_pages = native_error_pages_from_config(proxy)?;
         native.response_write_policy = native_response_write_policy_from_config(proxy);
         native.request_body_timeout = proxy.downstream_read_timeout_secs.map(Duration::from_secs);
+        #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+        {
+            native.mirror = NativeTrafficMirror::from_config(&proxy.mirror);
+        }
         Ok(Some(native))
     }
 }
 
 impl PartialEq for NativeHttp1Proxy {
     fn eq(&self, other: &Self) -> bool {
-        let equal = self.upstreams == other.upstreams
+        let base_equal = self.upstreams == other.upstreams
             && self.upstream_slots == other.upstream_slots
             && self.error_pages == other.error_pages
             && self.request_headers == other.request_headers
@@ -367,18 +412,39 @@ impl PartialEq for NativeHttp1Proxy {
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
+            feature = "compression-zstd",
+            all(feature = "traffic-mirror", not(feature = "privacy-mode"))
+        ))]
+        let mut equal = base_equal;
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
             feature = "compression-zstd"
         ))]
         {
-            equal && self.compression == other.compression
+            equal = equal && self.compression == other.compression;
+        }
+        #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+        {
+            equal = equal && self.mirror == other.mirror;
+        }
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd",
+            all(feature = "traffic-mirror", not(feature = "privacy-mode"))
+        ))]
+        {
+            equal
         }
         #[cfg(not(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
-            feature = "compression-zstd"
+            feature = "compression-zstd",
+            all(feature = "traffic-mirror", not(feature = "privacy-mode"))
         )))]
         {
-            equal
+            base_equal
         }
     }
 }
@@ -392,6 +458,10 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>> {
         Box::pin(async move {
             let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
+            #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+            if let Some(mirror) = &self.mirror {
+                mirror.spawn_if_selected(&request);
+            }
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -501,6 +571,247 @@ fn native_response_write_policy_from_config(
             .downstream_total_response_timeout_secs
             .map(Duration::from_secs),
         proxy.downstream_min_send_rate_bytes_per_sec,
+    )
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+impl NativeTrafficMirror {
+    fn from_config(config: &fluxheim_config::TrafficMirrorConfig) -> Option<Self> {
+        if !config.enabled {
+            return None;
+        }
+        Some(Self {
+            base_url: config.base_url.clone()?,
+            sample_per_mille: config.sample_per_mille,
+            methods: config.methods.clone(),
+            forward_headers: config.forward_headers.clone(),
+            timeout: Duration::from_secs(config.timeout_secs),
+            max_response_bytes: config.max_response_bytes.as_u64(),
+            max_in_flight: config.max_in_flight,
+            slot_key: config.base_url.as_deref().unwrap_or_default().to_owned(),
+        })
+    }
+
+    fn spawn_if_selected(&self, request: &NativeHttp1Request) {
+        let Some(mirror_request) = self.request(request) else {
+            return;
+        };
+        let Some(_slot) = acquire_native_traffic_mirror_slot(
+            &mirror_request.slot_key,
+            mirror_request.max_in_flight,
+        ) else {
+            return;
+        };
+        tokio::task::spawn_blocking(move || {
+            let _slot = _slot;
+            if let Err(error) = send_native_traffic_mirror_request(&mirror_request) {
+                log::debug!(
+                    target: "fluxheim::traffic_mirror",
+                    "native traffic mirror request failed: {error}"
+                );
+            }
+        });
+    }
+
+    fn request(&self, request: &NativeHttp1Request) -> Option<NativeTrafficMirrorRequest> {
+        if native_request_header_values(request, "x-fluxheim-mirror")
+            .next()
+            .is_some()
+            || !self.methods.iter().any(|method| method == &request.method)
+            || !native_traffic_mirror_sample_selected(request, self.sample_per_mille)
+        {
+            return None;
+        }
+        let path_and_query = native_request_path_and_query(request)?;
+        let url = native_traffic_mirror_url(&self.base_url, path_and_query)?;
+        let mut headers = Vec::new();
+        for name in &self.forward_headers {
+            if let Some(value) = native_request_header_values_joined(request, name) {
+                headers.push((name.clone(), value));
+            }
+        }
+        Some(NativeTrafficMirrorRequest {
+            method: request.method.clone(),
+            url,
+            headers,
+            timeout: self.timeout,
+            max_response_bytes: self.max_response_bytes,
+            max_in_flight: self.max_in_flight,
+            slot_key: self.slot_key.clone(),
+        })
+    }
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+struct NativeTrafficMirrorSlot {
+    counter: Arc<AtomicUsize>,
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+impl Drop for NativeTrafficMirrorSlot {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn acquire_native_traffic_mirror_slot(
+    key: &str,
+    max_in_flight: usize,
+) -> Option<NativeTrafficMirrorSlot> {
+    static NATIVE_TRAFFIC_MIRROR_INFLIGHT: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> =
+        OnceLock::new();
+    let mut map = NATIVE_TRAFFIC_MIRROR_INFLIGHT
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|_| {
+            log::error!(
+                target: "fluxheim::security",
+                "native traffic mirror in-flight lock poisoned; aborting"
+            );
+            std::process::abort();
+        });
+    if map.len() >= NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS && !map.contains_key(key) {
+        map.retain(|_, counter| counter.load(Ordering::Acquire) > 0);
+        if map.len() >= NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS {
+            return None;
+        }
+    }
+    let counter = map
+        .entry(key.to_owned())
+        .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
+        .clone();
+    drop(map);
+
+    loop {
+        let current = counter.load(Ordering::Acquire);
+        if current >= max_in_flight {
+            return None;
+        }
+        let next = current.checked_add(1)?;
+        match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return Some(NativeTrafficMirrorSlot { counter }),
+            Err(_) => continue,
+        }
+    }
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn native_traffic_mirror_url(base_url: &str, path_and_query: &str) -> Option<String> {
+    if path_and_query.contains('#')
+        || !fluxheim_common::path_safety::safe_forward_path_and_query(path_and_query)
+    {
+        return None;
+    }
+    let mut url = base_url.trim_end_matches('/').to_owned();
+    url.push_str(path_and_query);
+    Some(url)
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn native_request_path_and_query(request: &NativeHttp1Request) -> Option<&str> {
+    if request.target.starts_with('/') {
+        return Some(request.target.as_str());
+    }
+    None
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn native_traffic_mirror_sample_selected(
+    request: &NativeHttp1Request,
+    sample_per_mille: u16,
+) -> bool {
+    if sample_per_mille >= 1000 {
+        return true;
+    }
+    use sha2::{Digest, Sha256};
+
+    static NATIVE_TRAFFIC_MIRROR_SAMPLE_SALT: OnceLock<[u8; 16]> = OnceLock::new();
+    let salt = NATIVE_TRAFFIC_MIRROR_SAMPLE_SALT.get_or_init(|| {
+        let mut salt = [0_u8; 16];
+        if let Err(error) = getrandom::fill(&mut salt) {
+            log::error!(
+                target: "fluxheim::security",
+                "native traffic mirror sampling salt generation failed: {error}; aborting"
+            );
+            std::process::abort();
+        }
+        salt
+    });
+
+    let mut hasher = Sha256::new();
+    hasher.update(salt);
+    hasher.update(b"\n");
+    hasher.update(request.method.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(request.target.as_bytes());
+    if let Some(host) = native_request_header_values(request, "host").next() {
+        hasher.update(b"\n");
+        hasher.update(host.as_bytes());
+    }
+    let digest = hasher.finalize();
+    let bucket = u16::from_be_bytes([digest[0], digest[1]]) % 1000;
+    bucket < sample_per_mille
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn send_native_traffic_mirror_request(request: &NativeTrafficMirrorRequest) -> std::io::Result<()> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(request.timeout))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut builder = match request.method.as_str() {
+        "GET" => agent.get(&request.url),
+        "HEAD" => agent.head(&request.url),
+        "OPTIONS" => agent.options(&request.url),
+        "TRACE" => agent.trace(&request.url),
+        _ => {
+            return Err(std::io::Error::other(
+                "traffic mirror method is not supported",
+            ));
+        }
+    }
+    .header("cache-control", "no-store")
+    .header("x-fluxheim-mirror", "1");
+    for (name, value) in &request.headers {
+        builder = builder.header(name.as_str(), value.as_str());
+    }
+    let mut response = builder
+        .call()
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    let body = response
+        .body_mut()
+        .with_config()
+        .limit(request.max_response_bytes.saturating_add(1))
+        .read_to_vec()
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    if body.len() as u64 > request.max_response_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "traffic mirror response exceeds configured body limit",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn native_request_header_values<'a>(
+    request: &'a NativeHttp1Request,
+    name: &'a str,
+) -> impl Iterator<Item = &'a str> {
+    request
+        .headers
+        .iter()
+        .filter(move |(header_name, _)| header_name.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn native_request_header_values_joined(request: &NativeHttp1Request, name: &str) -> Option<String> {
+    fluxheim_headers::join_header_values(
+        native_request_header_values(request, name).filter(|value| !value.trim().is_empty()),
     )
 }
 

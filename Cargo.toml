@@ -69,7 +69,7 @@ load-balancer = [
 ]
 stream-proxy = ["proxy", "dep:fluxheim-stream", "fluxheim-config/stream-proxy"]
 udp-proxy = ["proxy", "fluxheim-config/udp-proxy"]
-traffic-mirror = ["proxy", "fluxheim-config/traffic-mirror"]
+traffic-mirror = ["proxy", "fluxheim-config/traffic-mirror", "fluxheim-server/traffic-mirror"]
 geoip = ["proxy", "fluxheim-config/geoip", "fluxheim-geoip/runtime"]
 cache = ["dep:bytes", "dep:moka", "dep:sha2", "fluxheim-config/cache", "pingora?/cache"]
 web = [

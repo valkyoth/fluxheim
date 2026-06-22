@@ -187,6 +187,24 @@ async fn downstream_get(proxy: std::net::SocketAddr, path: &str) -> String {
     String::from_utf8(response).unwrap()
 }
 
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+async fn mirror_endpoint() -> (std::net::SocketAddr, tokio::sync::oneshot::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let request = read_request_head(&mut stream).await;
+        let request = String::from_utf8(request).unwrap();
+        let _ = tx.send(request);
+        stream
+            .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    });
+    (addr, rx)
+}
+
 #[cfg(feature = "compression-gzip")]
 async fn downstream_request_bytes(proxy: std::net::SocketAddr, request: &str) -> Vec<u8> {
     let mut client = TcpStream::connect(proxy).await.unwrap();
@@ -515,6 +533,60 @@ async fn native_proxy_round_robins_successful_static_upstreams() {
     assert!(first_response.ends_with("one-1"));
     assert!(second_response.contains("x-origin: two\r\n"));
     assert!(second_response.ends_with("two-2"));
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+#[tokio::test]
+async fn native_proxy_mirrors_safe_requests_without_changing_origin_response() {
+    let upstream = upstream(|_, mut stream| async move {
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 9\r\n\r\norigin-ok")
+            .await
+            .unwrap();
+    })
+    .await;
+    let (mirror, mirror_rx) = mirror_endpoint().await;
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some(upstream.to_string()),
+        mirror: fluxheim_config::TrafficMirrorConfig {
+            enabled: true,
+            base_url: Some(format!("http://{mirror}/shadow")),
+            sample_per_mille: 1000,
+            methods: vec!["GET".to_owned()],
+            forward_headers: vec!["x-request-id".to_owned()],
+            timeout_secs: 2,
+            max_response_bytes: fluxheim_config::ByteSize::from_bytes(1024),
+            max_in_flight: 1,
+        },
+        ..Default::default()
+    };
+    let proxy = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
+        .unwrap()
+        .unwrap();
+    let proxy = proxy_listener_for(proxy).await;
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+    client
+        .write_all(
+            b"GET /asset.png?q=1 HTTP/1.1\r\n\
+              Host: proxy.test\r\n\
+              X-Request-Id: mirror-1\r\n\
+              Connection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+    let mirrored = tokio::time::timeout(Duration::from_secs(2), mirror_rx)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("origin-ok"));
+    assert!(mirrored.starts_with("GET /shadow/asset.png?q=1 HTTP/1.1\r\n"));
+    assert!(mirrored.contains("\r\nx-fluxheim-mirror: 1\r\n"));
+    assert!(mirrored.contains("\r\nx-request-id: mirror-1\r\n"));
 }
 
 #[tokio::test]
@@ -966,10 +1038,13 @@ fn native_proxy_config_rejects_unsupported_proxy_policy_layers() {
         },
         ..Default::default()
     };
+    #[cfg(not(all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
         Err(NativeHttp1ProxyConfigError::TrafficMirror)
     );
+    #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+    assert!(NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()).is_ok());
 
     let errors = tempfile::tempdir().unwrap();
     std::fs::write(errors.path().join("502.html"), "native error page\n").unwrap();

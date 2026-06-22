@@ -61,6 +61,10 @@ behavior when the change improves security or project direction.
   fingerprint and Geo country/ASN allow/deny policy when typed request context
   is present. The native cutover planner still reports cert/Geo policy as a
   blocker until runtime TLS/Geo context population is wired end to end.
+- Move safe-method traffic mirroring onto the native HTTP/1 proxy when the
+  `traffic-mirror` feature is compiled, preserving recursion protection,
+  sampling, forwarded-header selection, response-body caps, and per-target
+  in-flight limits.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
@@ -143,6 +147,8 @@ behavior when the change improves security or project direction.
 - Add native route-proxy tests proving client-certificate fingerprint policy
   and Geo country/ASN policy deny before upstream forwarding when request
   context does not satisfy the route policy.
+- Add a live native HTTP/1 proxy test proving a mirrored request reaches a
+  local mirror endpoint while the origin response remains unchanged.
 - Send `408 Request Timeout` before closing native HTTP/1 connections that
   exceed the selected request-body timeout, and ensure redirect/static routes
   do not inherit fallback proxy body-read timeouts.

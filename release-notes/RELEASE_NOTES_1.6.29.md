@@ -49,6 +49,10 @@ the native HTTP/1 proxy path.
   fingerprint and Geo country/ASN rules when typed request context is present;
   full native cutover for cert/Geo policy remains blocked until runtime
   TLS/Geo context population is wired end to end.
+- Native HTTP/1 proxy handling now supports safe-method traffic mirroring when
+  the `traffic-mirror` feature is compiled, including recursion protection,
+  sampling, forwarded-header selection, mirror response caps, and per-target
+  in-flight limits.
 - Native HTTP/1 route proxy handling now honors route-scoped
   `[vhosts.routes.grpc]` validation, rejecting non-POST requests, duplicate
   `Content-Type` headers, and non-gRPC content types before forwarding.
@@ -145,6 +149,8 @@ the native HTTP/1 proxy path.
 - Native route tests now prove client-certificate fingerprint and Geo
   country/ASN policies reject requests before upstream forwarding when the
   typed request context does not satisfy the configured policy.
+- Native HTTP/1 proxy tests now prove traffic mirroring reaches a local mirror
+  endpoint without changing the origin response.
 - Native proxy tests now prove a slow request body times out before any
   upstream connection is attempted when `proxy.downstream_read_timeout_secs`
   is selected.
@@ -185,9 +191,8 @@ the native HTTP/1 proxy path.
 ## Compatibility
 
 This release does not remove Pingora from normal builds yet. The remaining
-compatibility blockers are auth-request subrequests, traffic mirroring,
-cert/Geo access policy, managed local ACME challenge serving, advanced
-upstream TCP keepalive, user-timeout and fast-open knobs, cache
+compatibility blockers are auth-request subrequests, cert/Geo access policy,
+managed local ACME challenge serving, upstream TCP Fast Open, cache
 lookup/fill/stale behavior, PHP-FPM routing, dynamic discovery, health-aware
 load balancing, persistence,
 priority/backup/drain state, and hash-based load-balancer selection.
