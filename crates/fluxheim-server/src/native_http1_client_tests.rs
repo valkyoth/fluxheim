@@ -42,6 +42,8 @@ fn request() -> NativeHttp1Request {
         method: "GET".to_owned(),
         peer_addr: None,
         downstream_tls: false,
+        tls_identity: None,
+        geo_context: None,
         target: "/hello?name=fluxheim".to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![

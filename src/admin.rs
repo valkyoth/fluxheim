@@ -4351,6 +4351,8 @@ mod tests {
             method: method.to_owned(),
             peer_addr: Some("127.0.0.1:59000".parse().unwrap()),
             downstream_tls: false,
+            tls_identity: None,
+            geo_context: None,
             target: target.to_owned(),
             version: fluxheim_protocol::Http1Version::Http11,
             headers,

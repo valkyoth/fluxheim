@@ -42,6 +42,9 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 request-body parsing now honors
   `proxy.downstream_read_timeout_secs` selected by the matched proxy before
   forwarding to upstreams.
+- Native HTTP/1 requests now carry typed optional TLS client identity and Geo
+  context fields, laying the native boundary needed for the upcoming cert/Geo
+  access-policy cutover.
 - Native HTTP/1 route proxy handling now honors route-scoped
   `[vhosts.routes.grpc]` validation, rejecting non-POST requests, duplicate
   `Content-Type` headers, and non-gRPC content types before forwarding.
@@ -133,6 +136,8 @@ the native HTTP/1 proxy path.
 - Native proxy config and live loopback tests now prove receive-buffer and DSCP
   socket options plus TCP keepalive and supported TCP user-timeout are accepted
   and still connect through the native proxy path.
+- Native listener tests now prove plain HTTP requests leave TLS client identity
+  and Geo context unset by default.
 - Native proxy tests now prove a slow request body times out before any
   upstream connection is attempted when `proxy.downstream_read_timeout_secs`
   is selected.

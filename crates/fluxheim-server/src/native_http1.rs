@@ -27,10 +27,27 @@ pub struct NativeHttp1Request {
     pub method: String,
     pub peer_addr: Option<SocketAddr>,
     pub downstream_tls: bool,
+    pub tls_identity: Option<NativeHttp1TlsClientIdentity>,
+    pub geo_context: Option<NativeHttp1GeoContext>,
     pub target: String,
     pub version: Http1Version,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NativeHttp1TlsClientIdentity {
+    pub cipher: Option<String>,
+    pub version: Option<String>,
+    pub organization: Option<String>,
+    pub serial_number: Option<String>,
+    pub cert_sha256: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NativeHttp1GeoContext {
+    pub country_iso: Option<String>,
+    pub asn: Option<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -549,6 +566,8 @@ fn owned_request_from_head(
         method: head.method.to_owned(),
         peer_addr,
         downstream_tls,
+        tls_identity: None,
+        geo_context: None,
         target: head.target.to_owned(),
         version: head.version,
         headers: owned_headers(&head.headers),

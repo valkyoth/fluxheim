@@ -54,6 +54,9 @@ behavior when the change improves security or project direction.
   connect.
 - Move `proxy.upstream_tcp_user_timeout_ms` onto native HTTP/1 upstream sockets
   on targets where the OS exposes `TCP_USER_TIMEOUT`.
+- Add native HTTP/1 request context slots for TLS client identity and Geo
+  context so the next cert/Geo access-policy slice can consume typed request
+  facts instead of depending on compatibility-session state.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
@@ -131,6 +134,8 @@ behavior when the change improves security or project direction.
 - Add native proxy config and live loopback tests proving native upstream
   receive-buffer, DSCP, TCP keepalive, and supported TCP user-timeout socket
   options are accepted and still connect.
+- Add a live native HTTP/1 listener test proving plain listener requests leave
+  TLS client identity and Geo context unset by default.
 - Send `408 Request Timeout` before closing native HTTP/1 connections that
   exceed the selected request-body timeout, and ensure redirect/static routes
   do not inherit fallback proxy body-read timeouts.

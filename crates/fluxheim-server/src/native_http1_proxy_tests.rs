@@ -73,6 +73,8 @@ fn native_proxy_test_request() -> NativeHttp1Request {
         method: "GET".to_owned(),
         peer_addr: None,
         downstream_tls: false,
+        tls_identity: None,
+        geo_context: None,
         target: "/socket-policy".to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![("host".to_owned(), "proxy.test".to_owned())],

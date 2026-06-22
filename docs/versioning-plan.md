@@ -2766,7 +2766,9 @@ available for the stabilization/security-only follow-up.
   targets that expose `TCP_USER_TIMEOUT`. Move
   `proxy.downstream_read_timeout_secs` onto native HTTP/1 request-body parsing
   after route/proxy selection. Move route-scoped `[vhosts.routes.grpc]`
-  request validation onto the native route proxy. Keep auth-request
+  request validation onto the native route proxy. Add native request-context
+  slots for TLS client identity and Geo context as the typed foundation for the
+  next cert/Geo access-policy slice. Keep auth-request
   subrequests, traffic mirroring, cert/Geo access policy, managed local ACME
   challenge serving, upstream TCP Fast Open, cache, PHP-FPM, dynamic
   discovery, and load-balancer state explicitly reported as compatibility

@@ -114,6 +114,27 @@ async fn native_http1_serves_keep_alive_requests() {
 }
 
 #[tokio::test]
+async fn native_http1_plain_listener_request_context_defaults_to_none() {
+    let addr = spawn_server(|request| {
+        assert!(!request.downstream_tls);
+        assert_eq!(request.tls_identity, None);
+        assert_eq!(request.geo_context, None);
+        NativeHttp1Response::new(200, "OK", "context")
+    })
+    .await;
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+
+    stream
+        .write_all(b"GET /context HTTP/1.1\r\nHost: local.test\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let response = read_response(&mut stream).await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("context"));
+}
+
+#[tokio::test]
 async fn native_http10_accepts_missing_host_and_closes_by_default() {
     let addr = spawn_server(|request| {
         assert_eq!(request.version, Http1Version::Http10);
