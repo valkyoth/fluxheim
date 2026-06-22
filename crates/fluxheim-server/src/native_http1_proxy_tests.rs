@@ -720,6 +720,24 @@ fn native_proxy_config_applies_pool_capacity() {
 }
 
 #[test]
+fn native_proxy_config_applies_total_connection_timeout() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_total_connection_timeout_secs: Some(9),
+        ..Default::default()
+    };
+
+    let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
+        .unwrap()
+        .expect("native proxy");
+
+    assert_eq!(
+        native.upstream().total_connection_timeout(),
+        Some(Duration::from_secs(9))
+    );
+}
+
+#[test]
 fn native_proxy_config_returns_none_without_upstream() {
     let proxy = fluxheim_config::ProxyConfig::disabled();
 

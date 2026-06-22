@@ -26,6 +26,7 @@ pub(crate) type NativeHttp1Stream = Box<dyn NativeHttp1Io>;
 #[derive(Clone)]
 pub struct NativeHttp1Upstream {
     authority: String,
+    total_connection_timeout: Option<Duration>,
     connect_timeout: Duration,
     read_timeout: Duration,
     write_timeout: Duration,
@@ -62,6 +63,7 @@ impl std::fmt::Debug for NativeHttp1Upstream {
         formatter
             .debug_struct("NativeHttp1Upstream")
             .field("authority", &self.authority)
+            .field("total_connection_timeout", &self.total_connection_timeout)
             .field("connect_timeout", &self.connect_timeout)
             .field("read_timeout", &self.read_timeout)
             .field("write_timeout", &self.write_timeout)
@@ -86,6 +88,7 @@ impl std::fmt::Debug for NativeHttp1Upstream {
 impl PartialEq for NativeHttp1Upstream {
     fn eq(&self, other: &Self) -> bool {
         self.authority == other.authority
+            && self.total_connection_timeout == other.total_connection_timeout
             && self.connect_timeout == other.connect_timeout
             && self.read_timeout == other.read_timeout
             && self.write_timeout == other.write_timeout
@@ -113,6 +116,7 @@ impl NativeHttp1Upstream {
         let policy = DownstreamHttp1Policy::default();
         Self {
             authority: authority.into(),
+            total_connection_timeout: None,
             connect_timeout: Duration::from_secs(5),
             read_timeout: Duration::from_secs(30),
             write_timeout: Duration::from_secs(30),
@@ -127,6 +131,7 @@ impl NativeHttp1Upstream {
     pub fn from_policy(authority: impl Into<String>, policy: DownstreamHttp1Policy) -> Self {
         Self {
             authority: authority.into(),
+            total_connection_timeout: None,
             connect_timeout: Duration::from_secs(5),
             read_timeout: Duration::from_secs(30),
             write_timeout: Duration::from_secs(30),
@@ -141,6 +146,15 @@ impl NativeHttp1Upstream {
     pub const fn with_connect_timeout(mut self, timeout: Duration) -> Self {
         self.connect_timeout = timeout;
         self
+    }
+
+    pub const fn with_total_connection_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.total_connection_timeout = timeout;
+        self
+    }
+
+    pub const fn total_connection_timeout(&self) -> Option<Duration> {
+        self.total_connection_timeout
     }
 
     pub const fn with_read_timeout(mut self, timeout: Duration) -> Self {
@@ -291,6 +305,15 @@ impl NativeHttp1Upstream {
     }
 
     async fn connect_stream(&self) -> Result<NativeHttp1Stream, NativeHttp1Error> {
+        if let Some(timeout_duration) = self.total_connection_timeout {
+            return timeout(timeout_duration, self.connect_stream_inner())
+                .await
+                .map_err(|_| timeout_error("native HTTP/1 upstream total connection timeout"))?;
+        }
+        self.connect_stream_inner().await
+    }
+
+    async fn connect_stream_inner(&self) -> Result<NativeHttp1Stream, NativeHttp1Error> {
         let stream = timeout(self.connect_timeout, connect_upstream(&self.authority))
             .await
             .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;

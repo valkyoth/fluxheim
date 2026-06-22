@@ -306,6 +306,11 @@ impl NativeHttp1Proxy {
                 native_upstream =
                     native_upstream.with_connect_timeout(Duration::from_secs(timeout));
             }
+            native_upstream = native_upstream.with_total_connection_timeout(
+                proxy
+                    .upstream_total_connection_timeout_secs
+                    .map(Duration::from_secs),
+            );
             if let Some(timeout) = proxy.read_timeout_secs {
                 native_upstream = native_upstream.with_read_timeout(Duration::from_secs(timeout));
             }
@@ -524,8 +529,7 @@ fn proxy_requires_auth_request(proxy: &fluxheim_config::ProxyConfig) -> bool {
 }
 
 fn proxy_requires_advanced_upstream_transport(proxy: &fluxheim_config::ProxyConfig) -> bool {
-    proxy.upstream_total_connection_timeout_secs.is_some()
-        || proxy.upstream_tcp_keepalive_idle_secs.is_some()
+    proxy.upstream_tcp_keepalive_idle_secs.is_some()
         || proxy.upstream_tcp_keepalive_interval_secs.is_some()
         || proxy.upstream_tcp_keepalive_count.is_some()
         || proxy.upstream_tcp_user_timeout_ms.is_some()

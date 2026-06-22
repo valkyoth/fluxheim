@@ -35,6 +35,8 @@ behavior when the change improves security or project direction.
   including token-bucket rejection and delay-mode admission.
 - Move per-proxy downstream response write timeout, total response timeout, and
   minimum send-rate policy onto native HTTP/1 proxy responses.
+- Move `proxy.upstream_total_connection_timeout_secs` onto the native HTTP/1
+  upstream establishment path, covering DNS, TCP connect, and TLS handshake.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
@@ -94,6 +96,9 @@ behavior when the change improves security or project direction.
 - Add native proxy config tests proving response-side downstream policy is
   accepted while non-default downstream request-read timeout remains a native
   listener-policy blocker.
+- Add native proxy config tests proving total upstream connection timeout is
+  accepted and propagated to native upstreams while other advanced TCP socket
+  knobs still block native cutover.
 - Set identical NFA and DFA regex cache limits for config validation and native
   regex route compilation.
 - Strip spoofable `X-Forwarded-Host` and `X-Forwarded-Proto` headers in
