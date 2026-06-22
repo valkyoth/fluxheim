@@ -34,7 +34,8 @@ behavior when the change improves security or project direction.
 - Move vhost and route local rate limiting into the native HTTP/1 route proxy,
   including token-bucket rejection and delay-mode admission.
 - Move route-scoped gRPC request validation into the native HTTP/1 route proxy,
-  rejecting non-POST and non-gRPC content types before proxy forwarding.
+  rejecting non-POST requests, duplicate `Content-Type` headers, and
+  non-gRPC content types before proxy forwarding.
 - Move per-proxy downstream response write timeout, total response timeout, and
   minimum send-rate policy onto native HTTP/1 proxy responses, and move
   per-proxy downstream request-read timeout onto native HTTP/1 request-body
@@ -108,7 +109,9 @@ behavior when the change improves security or project direction.
   downstream policy and downstream request-read timeout are enforced on the
   native path.
 - Add live native route tests proving gRPC route policy rejects non-gRPC
-  requests and forwards valid `application/grpc*` requests.
+  requests, rejects duplicate `Content-Type`, emits gRPC status metadata on
+  local rejections, and forwards valid case-insensitive `application/grpc*`
+  requests.
 - Add native proxy config tests proving total upstream connection timeout is
   accepted and propagated to native upstreams while other advanced TCP socket
   knobs still block native cutover.

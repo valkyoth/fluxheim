@@ -1177,15 +1177,34 @@ async fn native_route_proxy_grpc_policy_rejects_non_grpc_requests() {
         "POST /grpc/service.Method HTTP/1.1\r\nHost: route.test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
     )
     .await;
+    let duplicate_media_response = downstream_request(
+        proxy,
+        "POST /grpc/service.Method HTTP/1.1\r\nHost: route.test\r\nContent-Type: application/grpc\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    )
+    .await;
 
     assert!(method_response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
     assert_eq!(
         response_header(&method_response, "allow").as_deref(),
         Some("POST")
     );
+    assert_eq!(
+        response_header(&method_response, "grpc-status").as_deref(),
+        Some("12")
+    );
     assert!(method_response.ends_with("method not allowed\n"));
     assert!(media_response.starts_with("HTTP/1.1 415 Unsupported Media Type\r\n"));
+    assert_eq!(
+        response_header(&media_response, "grpc-status").as_deref(),
+        Some("3")
+    );
     assert!(media_response.ends_with("unsupported media type\n"));
+    assert!(duplicate_media_response.starts_with("HTTP/1.1 415 Unsupported Media Type\r\n"));
+    assert_eq!(
+        response_header(&duplicate_media_response, "grpc-status").as_deref(),
+        Some("3")
+    );
+    assert!(duplicate_media_response.ends_with("unsupported media type\n"));
 }
 
 #[tokio::test]
@@ -1200,7 +1219,7 @@ async fn native_route_proxy_grpc_policy_allows_grpc_content_type() {
 
     let response = downstream_request(
         proxy,
-        "POST /grpc/service.Method HTTP/1.1\r\nHost: route.test\r\nContent-Type: application/grpc+proto; charset=utf-8\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        "POST /grpc/service.Method HTTP/1.1\r\nHost: route.test\r\nContent-Type: Application/gRPC+Proto; charset=utf-8\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
     )
     .await;
 
