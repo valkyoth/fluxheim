@@ -3109,11 +3109,10 @@ fn effective_client_ip_from_forwarded_for(
     };
 
     let mut last_valid_hop = None;
-    for hop in forwarded_for
-        .split(',')
-        .rev()
-        .filter_map(|hop| parse_forwarded_for_ip(hop).map(normalize_ipv4_mapped_ip))
-    {
+    for raw_hop in forwarded_for.split(',').rev() {
+        let Some(hop) = parse_forwarded_for_ip(raw_hop).map(normalize_ipv4_mapped_ip) else {
+            return direct_ip;
+        };
         last_valid_hop.get_or_insert(hop);
         if !trusted_proxy(hop) {
             return hop;
@@ -11106,7 +11105,7 @@ mod tests {
     }
 
     #[test]
-    fn access_policy_skips_malformed_forwarded_for_hops() {
+    fn access_policy_rejects_malformed_forwarded_for_chain() {
         let direct = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 254));
         let restored = effective_client_ip_from_forwarded_for(
             direct,
@@ -11115,7 +11114,7 @@ mod tests {
             |ip| matches!(ip, IpAddr::V4(ip) if ip.octets()[0] == 10),
         );
 
-        assert_eq!(restored, IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)));
+        assert_eq!(restored, direct);
     }
 
     #[test]

@@ -267,11 +267,10 @@ pub fn effective_client_ip(
     };
 
     let mut last_valid_hop = None;
-    for hop in original_x_forwarded_for
-        .split(',')
-        .rev()
-        .filter_map(parse_x_forwarded_for_ip)
-    {
+    for raw_hop in original_x_forwarded_for.split(',').rev() {
+        let Some(hop) = parse_x_forwarded_for_ip(raw_hop) else {
+            return direct_ip;
+        };
         last_valid_hop.get_or_insert(hop);
         if !trusted_proxy_matcher(hop) {
             return hop;
@@ -447,6 +446,29 @@ mod tests {
         );
         assert_eq!(
             effective_client_ip(direct, false, Some("198.51.100.9"), Some(&matcher)),
+            direct
+        );
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
+    fn rejects_malformed_trusted_forwarded_chain() {
+        let direct = IpAddr::V4(Ipv4Addr::new(10, 89, 0, 254));
+        let matcher = |address: IpAddr| match address {
+            IpAddr::V4(address) => {
+                address == Ipv4Addr::new(10, 89, 0, 254)
+                    || address == Ipv4Addr::new(203, 0, 113, 10)
+            }
+            IpAddr::V6(_) => false,
+        };
+
+        assert_eq!(
+            effective_client_ip(
+                direct,
+                true,
+                Some("198.51.100.9, not-an-ip, 203.0.113.10"),
+                Some(&matcher),
+            ),
             direct
         );
     }

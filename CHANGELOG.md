@@ -89,6 +89,9 @@ behavior when the change improves security or project direction.
 - Join duplicate inbound `X-Forwarded-For` headers before native trusted-proxy
   client restoration, preventing an attacker-controlled earlier duplicate from
   steering native ACL or rate-limit identity.
+- Reject malformed `X-Forwarded-For` trusted-proxy chains on both the native
+  header crate path and the compatibility proxy path, falling back to the
+  direct peer instead of skipping poisoned hops.
 - Hold native concurrency permits while delay-mode rate limiting sleeps, so
   delayed requests remain counted against vhost and route concurrency budgets.
 - Bound native rate-limit table eviction sweeps to avoid repeated full-table

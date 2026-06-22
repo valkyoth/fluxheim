@@ -108,6 +108,9 @@ the native HTTP/1 proxy path.
   configured concurrency budgets.
 - Native trusted-proxy client restoration joins duplicate inbound
   `X-Forwarded-For` headers before ACL and rate-limit identity decisions.
+- Malformed `X-Forwarded-For` trusted-proxy chains now fail closed on both the
+  native header crate path and the compatibility proxy path, falling back to
+  the direct peer address instead of skipping poisoned hops.
 - Native rate-limit table eviction sweeps are bounded so a full bucket table
   cannot trigger repeated full-table scans on every new identity.
 - Native proxy config now accepts response-side downstream policy while keeping
