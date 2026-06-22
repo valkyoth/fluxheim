@@ -279,6 +279,7 @@ async fn native_route_proxy_builds_vhost_acme_and_redirect_routes_from_config() 
     );
 }
 
+#[cfg(not(feature = "privacy-mode"))]
 #[tokio::test]
 async fn native_route_proxy_vhost_fallback_applies_merged_header_policy() {
     let upstream = upstream_expect_header(
@@ -333,6 +334,225 @@ async fn native_route_proxy_vhost_fallback_applies_merged_header_policy() {
     assert!(response.ends_with("headers"));
 }
 
+#[tokio::test]
+async fn native_route_proxy_vhost_access_denies_before_redirect() {
+    let vhost = fluxheim_config::VhostConfig {
+        name: "route.test".to_owned(),
+        hosts: vec!["route.test".to_owned()],
+        max_request_body_bytes: None,
+        access: fluxheim_config::AccessPolicyConfig {
+            deny: vec!["127.0.0.1".to_owned()],
+            ..Default::default()
+        },
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: fluxheim_config::VhostRedirectConfig {
+            enabled: true,
+            to: Some("https://target.example{uri}".to_owned()),
+            status: 308,
+        },
+        proxy: Default::default(),
+        cache: Default::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: Default::default(),
+        routes: Vec::new(),
+    };
+    let route_proxy = NativeHttp1RouteProxy::from_vhost_config(
+        &vhost,
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        None,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(route_proxy).await;
+
+    let response = downstream_get(proxy, "/blocked").await;
+
+    assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(response.ends_with("forbidden\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_route_access_denies_before_route_action() {
+    let route = fluxheim_config::RouteConfig {
+        name: "admin".to_owned(),
+        path_exact: Some("/admin".to_owned()),
+        path_prefix: None,
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: fluxheim_config::AccessPolicyConfig {
+            deny: vec!["127.0.0.1".to_owned()],
+            ..Default::default()
+        },
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: Some(fluxheim_config::RouteRedirectConfig {
+            to: "https://target.example/admin".to_owned(),
+            status: 302,
+        }),
+        proxy: None,
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
+    };
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, None).unwrap();
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/admin").await;
+
+    assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(response.ends_with("forbidden\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_route_access_checks_decoded_policy_path() {
+    let protected = fluxheim_config::RouteConfig {
+        name: "admin".to_owned(),
+        path_exact: Some("/admin".to_owned()),
+        path_prefix: None,
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: fluxheim_config::AccessPolicyConfig {
+            deny: vec!["127.0.0.1".to_owned()],
+            ..Default::default()
+        },
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: Some(fluxheim_config::RouteRedirectConfig {
+            to: "https://target.example/admin".to_owned(),
+            status: 302,
+        }),
+        proxy: None,
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
+    };
+    let fallback = fluxheim_config::RouteConfig {
+        name: "fallback".to_owned(),
+        path_exact: None,
+        path_prefix: None,
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: true,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: Some(fluxheim_config::RouteRedirectConfig {
+            to: "https://target.example/fallback".to_owned(),
+            status: 302,
+        }),
+        proxy: None,
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
+    };
+    let protected = NativeHttp1RouteProxyRoute::from_config(&protected, None).unwrap();
+    let fallback = NativeHttp1RouteProxyRoute::from_config(&fallback, None).unwrap();
+    let proxy =
+        route_proxy_listener(NativeHttp1RouteProxy::new(vec![protected, fallback], None)).await;
+
+    let response = downstream_get(proxy, "/%61dmin").await;
+
+    assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(response.ends_with("forbidden\n"));
+}
+
+#[cfg(not(feature = "privacy-mode"))]
+#[tokio::test]
+async fn native_route_proxy_vhost_access_uses_trusted_forwarded_chain() {
+    let vhost = fluxheim_config::VhostConfig {
+        name: "route.test".to_owned(),
+        hosts: vec!["route.test".to_owned()],
+        max_request_body_bytes: None,
+        access: fluxheim_config::AccessPolicyConfig {
+            allow: vec!["203.0.113.5".to_owned()],
+            ..Default::default()
+        },
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: fluxheim_config::VhostRedirectConfig {
+            enabled: true,
+            to: Some("https://target.example{uri}".to_owned()),
+            status: 308,
+        },
+        proxy: Default::default(),
+        cache: Default::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: Default::default(),
+        routes: Vec::new(),
+    };
+    let route_proxy = NativeHttp1RouteProxy::from_vhost_config_with_trusted_sources(
+        &vhost,
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        None,
+        DownstreamHttp1Policy::default(),
+        0,
+        &[ProxyProtocolTrustedSource::Ip("127.0.0.1".parse().unwrap())],
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(route_proxy).await;
+
+    let allowed = downstream_request(
+        proxy,
+        "GET /trusted HTTP/1.1\r\n\
+         Host: route.test\r\n\
+         X-Forwarded-For: 203.0.113.5\r\n\
+         Connection: close\r\n\r\n",
+    )
+    .await;
+    let denied = downstream_request(
+        proxy,
+        "GET /trusted HTTP/1.1\r\n\
+         Host: route.test\r\n\
+         X-Forwarded-For: 203.0.113.6\r\n\
+         Connection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(allowed.starts_with("HTTP/1.1 308 Permanent Redirect\r\n"));
+    assert_eq!(
+        response_header(&allowed, "location").as_deref(),
+        Some("https://target.example/trusted")
+    );
+    assert!(denied.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+}
+
+#[cfg(not(feature = "privacy-mode"))]
 #[tokio::test]
 async fn native_route_proxy_default_constructor_applies_safe_request_headers() {
     let upstream =

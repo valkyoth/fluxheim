@@ -23,6 +23,9 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 route proxy handling now owns regex route matching and
   path-only `rewrite_template` capture expansion, including exact route,
   longest-prefix route, first-regex route, and fallback precedence.
+- Native HTTP/1 route proxy handling now owns IP/CIDR allow/deny access policy
+  at both vhost and route scope, using trusted `X-Forwarded-For` client
+  restoration when configured trusted sources identify the direct peer.
 - Root and vhost compression no longer blocks native HTTP/1 proxy cutover when
   a matching compression backend feature is compiled.
 - Native route-proxy construction now mirrors the compatibility route order for
@@ -76,6 +79,14 @@ the native HTTP/1 proxy path.
 - Native regex rewrite templates percent-encode bounded capture values and
   reject rewritten paths that would traverse or introduce unsafe forwarding
   paths before any upstream connection is opened.
+- Native access policy denies before redirects, static-web actions, or upstream
+  proxying run, so rejected requests cannot be transformed into downstream
+  effects first.
+- Native vhost access policy uses the same trusted forwarded-chain restoration
+  helper as forwarded-header synthesis, so allow/deny decisions see the
+  effective client IP only when the direct peer is trusted.
+- Native route access policy also checks a percent-decoded policy path, matching
+  the compatibility path's encoded-route bypass hardening for access decisions.
 - Config validation and native regex route compilation now apply the same
   explicit NFA and DFA cache limits.
 - Privacy-mode native route proxy handling now strips spoofable
@@ -96,8 +107,8 @@ the native HTTP/1 proxy path.
 
 This release does not remove Pingora from normal builds yet. The remaining
 compatibility blockers are auth-request subrequests, traffic mirroring,
-access/rate/concurrency policy, managed local ACME challenge serving, route
-per-proxy downstream timeout/min-send-rate policy, advanced upstream transport
-knobs, cache lookup/fill/stale behavior, PHP-FPM routing, dynamic discovery,
-health-aware load balancing, persistence, priority/backup/drain state, and
-hash-based load-balancer selection.
+cert/Geo access policy, rate/concurrency policy, managed local ACME challenge
+serving, route per-proxy downstream timeout/min-send-rate policy, advanced
+upstream transport knobs, cache lookup/fill/stale behavior, PHP-FPM routing,
+dynamic discovery, health-aware load balancing, persistence,
+priority/backup/drain state, and hash-based load-balancer selection.

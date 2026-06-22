@@ -813,6 +813,81 @@ fn disabled_empty_access_policy_does_not_block_native_http1_proxy_candidate() {
 }
 
 #[test]
+fn ip_access_policy_does_not_block_native_http1_proxy_candidate() {
+    let config = Config {
+        vhosts: vec![VhostConfig {
+            name: "native.test".to_owned(),
+            hosts: vec!["native.test".to_owned()],
+            max_request_body_bytes: None,
+            access: fluxheim_config::AccessPolicyConfig {
+                allow: vec!["127.0.0.1".to_owned()],
+                deny: vec!["198.51.100.0/24".to_owned()],
+                ..Default::default()
+            },
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            tls: Default::default(),
+            acme_challenge: Default::default(),
+            redirect: Default::default(),
+            proxy: fluxheim_config::ProxyConfig {
+                upstreams: vec!["127.0.0.1:3001".to_owned()],
+                ..Default::default()
+            },
+            cache: CacheConfig::default(),
+            compression: None,
+            headers: Default::default(),
+            php: Default::default(),
+            web: Default::default(),
+            routes: Vec::new(),
+        }],
+        ..Default::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
+}
+
+#[test]
+fn cert_and_geo_access_policy_still_blocks_native_http1_proxy_candidate() {
+    let config = Config {
+        vhosts: vec![VhostConfig {
+            name: "native.test".to_owned(),
+            hosts: vec!["native.test".to_owned()],
+            max_request_body_bytes: None,
+            access: fluxheim_config::AccessPolicyConfig {
+                require_client_cert: true,
+                allow_countries: vec!["SE".to_owned()],
+                ..Default::default()
+            },
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            tls: Default::default(),
+            acme_challenge: Default::default(),
+            redirect: Default::default(),
+            proxy: fluxheim_config::ProxyConfig {
+                upstreams: vec!["127.0.0.1:3001".to_owned()],
+                ..Default::default()
+            },
+            cache: CacheConfig::default(),
+            compression: None,
+            headers: Default::default(),
+            php: Default::default(),
+            web: Default::default(),
+            routes: Vec::new(),
+        }],
+        ..Default::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::HttpPolicy)
+    );
+}
+
+#[test]
 fn server_plan_accepts_native_http1_proxy_candidate_with_vhost_acme_challenge_route() {
     let config = Config {
         vhosts: vec![VhostConfig {

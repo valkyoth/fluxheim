@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::net::IpAddr;
 use std::pin::Pin;
 
 #[cfg(any(
@@ -21,8 +22,8 @@ use fluxheim_compression::{
 #[cfg(not(feature = "privacy-mode"))]
 use fluxheim_config::ForwardedClientIpHeaderMode;
 use fluxheim_config::{
-    HeaderPolicyConfig, HeaderValues, RequestHeaderPolicyConfig, ResponseHeaderPolicyConfig,
-    ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
+    AccessPolicyConfig, HeaderPolicyConfig, HeaderValues, RequestHeaderPolicyConfig,
+    ResponseHeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
 };
 use fluxheim_headers::{
     SPOOFABLE_CLIENT_IP_HEADERS, rewrite_header_prefix, rewrite_refresh_url,
@@ -47,6 +48,9 @@ const MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES: usize = 256;
 pub struct NativeHttp1RouteProxy {
     routes: Vec<NativeHttp1RouteProxyRoute>,
     fallback: Option<NativeHttp1Proxy>,
+    access: NativeIpAccessPolicy,
+    #[cfg(not(feature = "privacy-mode"))]
+    trusted_sources: Vec<ProxyProtocolTrustedSource>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -65,6 +69,7 @@ pub struct NativeHttp1RouteProxyRoute {
     compression: Option<fluxheim_config::CompressionConfig>,
     request_headers: NativeRouteRequestHeaderPolicy,
     response_headers: NativeRouteResponseHeaderPolicy,
+    access: NativeIpAccessPolicy,
     action: NativeHttp1RouteAction,
 }
 
@@ -158,8 +163,16 @@ pub(crate) struct NativeRouteResponseHeaderPolicy {
     rewrite: ResponseHeaderRewriteConfig,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct NativeIpAccessPolicy {
+    enabled: bool,
+    allow: Vec<ProxyProtocolTrustedSource>,
+    deny: Vec<ProxyProtocolTrustedSource>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeHttp1RouteProxyConfigError {
+    AccessPolicy,
     MissingRouteAction,
     Proxy(NativeHttp1ProxyConfigError),
     RegexRoute,
@@ -170,6 +183,9 @@ pub enum NativeHttp1RouteProxyConfigError {
 impl std::fmt::Display for NativeHttp1RouteProxyConfigError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::AccessPolicy => {
+                formatter.write_str("native route proxy access policy configuration error")
+            }
             Self::MissingRouteAction => {
                 formatter.write_str("native route proxy requires an action")
             }
@@ -189,7 +205,8 @@ impl std::error::Error for NativeHttp1RouteProxyConfigError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Proxy(error) => Some(error),
-            Self::MissingRouteAction
+            Self::AccessPolicy
+            | Self::MissingRouteAction
             | Self::RegexRoute
             | Self::RewriteTemplate
             | Self::StaticWeb => None,
@@ -197,12 +214,74 @@ impl std::error::Error for NativeHttp1RouteProxyConfigError {
     }
 }
 
+impl NativeIpAccessPolicy {
+    fn from_config(access: &AccessPolicyConfig) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        if !access.enabled {
+            return Ok(Self::default());
+        }
+        if access.require_client_cert
+            || !access.allow_client_cert_sha256.is_empty()
+            || !access.deny_client_cert_sha256.is_empty()
+            || !access.allow_countries.is_empty()
+            || !access.deny_countries.is_empty()
+            || !access.allow_asns.is_empty()
+            || !access.deny_asns.is_empty()
+        {
+            return Err(NativeHttp1RouteProxyConfigError::AccessPolicy);
+        }
+        Ok(Self {
+            enabled: true,
+            allow: parse_native_access_sources(&access.allow)?,
+            deny: parse_native_access_sources(&access.deny)?,
+        })
+    }
+
+    fn allows(&self, client_ip: Option<IpAddr>) -> bool {
+        if !self.enabled {
+            return true;
+        }
+        let ip_restrictive = !self.allow.is_empty() || !self.deny.is_empty();
+        let Some(client_ip) = client_ip else {
+            return !ip_restrictive;
+        };
+        if self.deny.iter().any(|source| source.contains(client_ip)) {
+            return false;
+        }
+        self.allow.is_empty() || self.allow.iter().any(|source| source.contains(client_ip))
+    }
+}
+
+fn parse_native_access_sources(
+    values: &[String],
+) -> Result<Vec<ProxyProtocolTrustedSource>, NativeHttp1RouteProxyConfigError> {
+    values
+        .iter()
+        .map(
+            |value| match fluxheim_protocol::parse_proxy_protocol_trusted_source(value) {
+                Ok(fluxheim_protocol::ProxyProtocolTrustedSource::Ip(address)) => {
+                    Ok(ProxyProtocolTrustedSource::Ip(address))
+                }
+                Ok(fluxheim_protocol::ProxyProtocolTrustedSource::Cidr { network, prefix }) => {
+                    Ok(ProxyProtocolTrustedSource::Cidr { network, prefix })
+                }
+                Err(_) => Err(NativeHttp1RouteProxyConfigError::AccessPolicy),
+            },
+        )
+        .collect()
+}
+
 impl NativeHttp1RouteProxy {
     pub fn new(
         routes: Vec<NativeHttp1RouteProxyRoute>,
         fallback: Option<NativeHttp1Proxy>,
     ) -> Self {
-        Self { routes, fallback }
+        Self {
+            routes,
+            fallback,
+            access: NativeIpAccessPolicy::default(),
+            #[cfg(not(feature = "privacy-mode"))]
+            trusted_sources: Vec::new(),
+        }
     }
 
     pub fn routes(&self) -> &[NativeHttp1RouteProxyRoute] {
@@ -241,6 +320,7 @@ impl NativeHttp1RouteProxy {
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
         let headers = base_headers.with_vhost_overlay(&vhost.headers);
         let inherited_compression = vhost.compression.as_ref().or(inherited_compression);
+        let access = NativeIpAccessPolicy::from_config(&vhost.access)?;
         let fallback =
             NativeHttp1Proxy::from_proxy_config_with_pool_size(&vhost.proxy, policy, pool_max_idle)
                 .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
@@ -292,7 +372,13 @@ impl NativeHttp1RouteProxy {
             routes.push(route);
         }
 
-        Ok(Self { routes, fallback })
+        Ok(Self {
+            routes,
+            fallback,
+            access,
+            #[cfg(not(feature = "privacy-mode"))]
+            trusted_sources: trusted_sources.to_vec(),
+        })
     }
 }
 
@@ -313,6 +399,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
+            access: NativeIpAccessPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
@@ -333,6 +420,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
+            access: NativeIpAccessPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
@@ -353,6 +441,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
+            access: NativeIpAccessPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
@@ -378,6 +467,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
+            access: NativeIpAccessPolicy::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
                 status,
@@ -406,6 +496,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
+            access: NativeIpAccessPolicy::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
                 status,
@@ -433,6 +524,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
+            access: NativeIpAccessPolicy::default(),
             action: NativeHttp1RouteAction::StaticWeb(web),
         }
     }
@@ -507,6 +599,7 @@ impl NativeHttp1RouteProxyRoute {
                 .or_else(|| inherited_compression.cloned()),
             request_headers: NativeRouteRequestHeaderPolicy::from_policy(&headers.request),
             response_headers: NativeRouteResponseHeaderPolicy::from_policy(&headers.response),
+            access: NativeIpAccessPolicy::from_config(&route.access)?,
             action,
         })
     }
@@ -594,14 +687,23 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
                     .close_connection();
             };
-            let route = self.select_route(&request.method, &path);
-            let Some(route_or_fallback) = route
+            let selected_route = self.select_route(&request.method, &path);
+            let decoded_policy_route = self.select_decoded_policy_route(&request.method, &path);
+            let Some(route_or_fallback) = selected_route
                 .map(RouteOrFallback::Route)
                 .or_else(|| self.fallback.as_ref().map(RouteOrFallback::Fallback))
             else {
                 return NativeHttp1Response::new(404, "Not Found", b"not found\n")
                     .close_connection();
             };
+            let client_ip = self.access_client_ip(&request);
+            if !self.access.allows(client_ip)
+                || !route_or_fallback.access_allows(client_ip)
+                || decoded_policy_route.is_some_and(|route| !route.access.allows(client_ip))
+            {
+                return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
+                    .close_connection();
+            }
             let mut request =
                 match route_or_fallback.rewrite_request(request, &path, query.as_deref()) {
                     Some(request) => request,
@@ -656,10 +758,36 @@ impl<'a> RouteOrFallback<'a> {
             route.request_headers.apply(request);
         }
     }
+
+    fn access_allows(self, client_ip: Option<IpAddr>) -> bool {
+        match self {
+            Self::Route(route) => route.access.allows(client_ip),
+            Self::Fallback(_) => true,
+        }
+    }
 }
 
 impl NativeHttp1RouteProxy {
     fn select_route(&self, method: &str, path: &str) -> Option<&NativeHttp1RouteProxyRoute> {
+        self.select_route_with_fallback(method, path, true)
+    }
+
+    fn select_decoded_policy_route(
+        &self,
+        method: &str,
+        path: &str,
+    ) -> Option<&NativeHttp1RouteProxyRoute> {
+        decoded_route_policy_path(path)
+            .as_deref()
+            .and_then(|decoded_path| self.select_route_with_fallback(method, decoded_path, false))
+    }
+
+    fn select_route_with_fallback(
+        &self,
+        method: &str,
+        path: &str,
+        include_fallback: bool,
+    ) -> Option<&NativeHttp1RouteProxyRoute> {
         let mut fallback = None;
         let mut best_prefix = None;
         let mut first_regex = None;
@@ -686,12 +814,54 @@ impl NativeHttp1RouteProxy {
                 {
                     first_regex = Some(route);
                 }
-                NativeHttp1RouteMatcher::Fallback => fallback = Some(route),
+                NativeHttp1RouteMatcher::Fallback if include_fallback => fallback = Some(route),
                 _ => {}
             }
         }
         best_prefix.or(first_regex).or(fallback)
     }
+
+    fn access_client_ip(&self, request: &NativeHttp1Request) -> Option<IpAddr> {
+        let direct_ip = request.peer_addr.map(|addr| addr.ip());
+        #[cfg(not(feature = "privacy-mode"))]
+        {
+            let original_x_forwarded_for = header_value(request, "x-forwarded-for");
+            let trusted_direct_peer = direct_ip.is_some_and(|ip| self.trusted_source_contains(ip));
+            let trusted_proxy_matcher = |ip| self.trusted_source_contains(ip);
+            return direct_ip.map(|ip| {
+                effective_client_ip(
+                    ip,
+                    trusted_direct_peer,
+                    original_x_forwarded_for,
+                    Some(&trusted_proxy_matcher),
+                )
+            });
+        }
+        #[cfg(feature = "privacy-mode")]
+        {
+            direct_ip
+        }
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    fn trusted_source_contains(&self, address: IpAddr) -> bool {
+        self.trusted_sources
+            .iter()
+            .any(|source| source.contains(address))
+    }
+}
+
+fn decoded_route_policy_path(path: &str) -> Option<String> {
+    if !path.as_bytes().contains(&b'%') {
+        return None;
+    }
+    let decoded = percent_encoding::percent_decode_str(path)
+        .decode_utf8()
+        .ok()?;
+    if decoded == path || decoded.contains('\0') || !decoded.starts_with('/') {
+        return None;
+    }
+    Some(decoded.into_owned())
 }
 
 impl NativeHttp1RouteProxyRoute {

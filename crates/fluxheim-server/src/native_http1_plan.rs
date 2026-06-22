@@ -183,7 +183,7 @@ fn root_policy_supported(config: &Config) -> bool {
 }
 
 fn vhost_policy_supported(vhost: &VhostConfig) -> bool {
-    !access_policy_active(&vhost.access)
+    access_policy_native_supported(&vhost.access)
         && !vhost.rate_limit.enabled
         && !vhost.concurrency.enabled
         && vhost_header_overlay_supported(&vhost.headers)
@@ -204,7 +204,7 @@ fn vhost_policy_supported(vhost: &VhostConfig) -> bool {
 }
 
 fn route_policy_supported(route: &RouteConfig) -> bool {
-    !access_policy_active(&route.access)
+    access_policy_native_supported(&route.access)
         && !route.rate_limit.enabled
         && !route.concurrency.enabled
         && !route.grpc.enabled
@@ -247,11 +247,9 @@ fn route_response_header_policy_supported(
     true
 }
 
-fn access_policy_active(access: &AccessPolicyConfig) -> bool {
-    access.enabled
-        && (!access.allow.is_empty()
-            || !access.deny.is_empty()
-            || access.require_client_cert
+fn access_policy_native_supported(access: &AccessPolicyConfig) -> bool {
+    !access.enabled
+        || !(access.require_client_cert
             || !access.allow_client_cert_sha256.is_empty()
             || !access.deny_client_cert_sha256.is_empty()
             || !access.allow_countries.is_empty()

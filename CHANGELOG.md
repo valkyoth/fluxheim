@@ -27,12 +27,14 @@ behavior when the change improves security or project direction.
 - Move regex route matching and path-only `rewrite_template` capture expansion
   into the native HTTP/1 route proxy, preserving exact/longest-prefix/first-regex
   route precedence.
+- Move IP/CIDR vhost and route access allow/deny policy into the native HTTP/1
+  route proxy, including trusted `X-Forwarded-For` client restoration.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
-- Keep auth-request, traffic mirror, access/rate/concurrency, cache, PHP-FPM,
-  dynamic discovery, managed local ACME challenge serving, and advanced
-  load-balancer state reported as explicit compatibility blockers.
+- Keep auth-request, traffic mirror, cert/Geo access, rate/concurrency, cache,
+  PHP-FPM, dynamic discovery, managed local ACME challenge serving, and
+  advanced load-balancer state reported as explicit compatibility blockers.
 
 ### Security
 
@@ -61,6 +63,14 @@ behavior when the change improves security or project direction.
   for trusted peers and strips untrusted spoofed chains for direct clients.
 - Add native route tests proving regex rewrite templates percent-encode bounded
   captures and reject traversal-producing captures before proxying upstream.
+- Add live native route tests proving vhost and route access policies deny
+  before redirects, static-web actions, or upstream proxying can run.
+- Add live native route tests proving trusted proxy sources restore the
+  effective client IP from `X-Forwarded-For` before native access allow/deny
+  decisions.
+- Add live native route tests proving route access policy also checks a
+  percent-decoded policy path, preventing encoded path variants from falling
+  through to a less restricted route.
 - Set identical NFA and DFA regex cache limits for config validation and native
   regex route compilation.
 - Strip spoofable `X-Forwarded-Host` and `X-Forwarded-Proto` headers in
