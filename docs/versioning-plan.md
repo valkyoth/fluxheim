@@ -2763,19 +2763,19 @@ available for the stabilization/security-only follow-up.
   establishment. Move `proxy.upstream_tcp_recv_buffer_bytes` and
   `proxy.upstream_dscp` onto native upstream socket creation. Move
   `proxy.downstream_read_timeout_secs` onto native HTTP/1 request-body parsing
-  after route/proxy selection. Keep auth-request subrequests, traffic
-  mirroring, cert/Geo access policy, managed local ACME challenge serving,
-  advanced upstream TCP keepalive/user-timeout/fast-open knobs, cache, PHP-FPM,
-  dynamic discovery, and load-balancer state explicitly reported as
-  compatibility blockers until they have native parity tests.
+  after route/proxy selection. Move route-scoped `[vhosts.routes.grpc]`
+  request validation onto the native route proxy. Keep auth-request
+  subrequests, traffic mirroring, cert/Geo access policy, managed local ACME
+  challenge serving, advanced upstream TCP keepalive/user-timeout/fast-open
+  knobs, cache, PHP-FPM, dynamic discovery, and load-balancer state explicitly
+  reported as compatibility blockers until they have native parity tests.
 - `v1.6.30`: finish the remaining native HTTP policy blockers that do not need
   cache or PHP state: auth-request subrequests, traffic mirroring, vhost
   cert/Geo access policy, vhost managed local ACME challenge serving, route
-  cert/Geo access and grpc flags, and advanced upstream TCP
-  keepalive/user-timeout/fast-open knobs that do not require cache, PHP,
-  dynamic discovery, or load-balancer state. Add live native listener tests for
-  each path and keep unsupported configs explicitly reported in the cutover
-  inventory.
+  cert/Geo access, and advanced upstream TCP keepalive/user-timeout/fast-open
+  knobs that do not require cache, PHP, dynamic discovery, or load-balancer
+  state. Add live native listener tests for each path and keep unsupported
+  configs explicitly reported in the cutover inventory.
 - `v1.6.31`: move cache and PHP-FPM rich proxy integrations onto native
   adapters. Cache work must cover lookup/fill/stale, Vary/Range/conditional
   semantics, peer-fill guardrails, and purge visibility. PHP-FPM work must

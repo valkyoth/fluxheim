@@ -6,7 +6,7 @@ use std::time::Duration;
 
 #[cfg(feature = "compression-gzip")]
 use flate2::read::GzDecoder;
-use fluxheim_config::{HeaderValues, ResponseHeaderPolicyOverlayConfig};
+use fluxheim_config::{GrpcRouteConfig, HeaderValues, ResponseHeaderPolicyOverlayConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -19,6 +19,14 @@ use crate::{
 };
 
 async fn upstream_expect_path(
+    expected_path: &'static str,
+    body: &'static str,
+) -> std::net::SocketAddr {
+    upstream_expect_method_path("GET", expected_path, body).await
+}
+
+async fn upstream_expect_method_path(
+    expected_method: &'static str,
     expected_path: &'static str,
     body: &'static str,
 ) -> std::net::SocketAddr {
@@ -40,7 +48,7 @@ async fn upstream_expect_path(
         }
         let request = String::from_utf8(request).unwrap();
         assert!(
-            request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
+            request.starts_with(&format!("{expected_method} {expected_path} HTTP/1.1\r\n")),
             "unexpected upstream request: {request:?}"
         );
         stream
@@ -1148,6 +1156,56 @@ fn native_route_proxy_does_not_inherit_fallback_timeout_for_redirect_route() {
         proxy.request_body_timeout(&route_test_request("/fallback")),
         Some(Duration::from_secs(99))
     );
+}
+
+#[tokio::test]
+async fn native_route_proxy_grpc_policy_rejects_non_grpc_requests() {
+    let route = NativeHttp1RouteProxyRoute::prefix(
+        "/grpc/",
+        Vec::new(),
+        proxy_for("127.0.0.1:9".parse().unwrap()),
+    )
+    .with_grpc_policy(GrpcRouteConfig {
+        enabled: true,
+        require_content_type: true,
+    });
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let method_response = downstream_get(proxy, "/grpc/service.Method").await;
+    let media_response = downstream_request(
+        proxy,
+        "POST /grpc/service.Method HTTP/1.1\r\nHost: route.test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(method_response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
+    assert_eq!(
+        response_header(&method_response, "allow").as_deref(),
+        Some("POST")
+    );
+    assert!(method_response.ends_with("method not allowed\n"));
+    assert!(media_response.starts_with("HTTP/1.1 415 Unsupported Media Type\r\n"));
+    assert!(media_response.ends_with("unsupported media type\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_grpc_policy_allows_grpc_content_type() {
+    let upstream = upstream_expect_method_path("POST", "/grpc/service.Method", "grpc").await;
+    let route = NativeHttp1RouteProxyRoute::prefix("/grpc/", Vec::new(), proxy_for(upstream))
+        .with_grpc_policy(GrpcRouteConfig {
+            enabled: true,
+            require_content_type: true,
+        });
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_request(
+        proxy,
+        "POST /grpc/service.Method HTTP/1.1\r\nHost: route.test\r\nContent-Type: application/grpc+proto; charset=utf-8\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("grpc"));
 }
 
 #[tokio::test]

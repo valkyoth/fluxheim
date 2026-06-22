@@ -26,8 +26,9 @@ use fluxheim_compression::{
 #[cfg(not(feature = "privacy-mode"))]
 use fluxheim_config::ForwardedClientIpHeaderMode;
 use fluxheim_config::{
-    AccessPolicyConfig, HeaderPolicyConfig, HeaderValues, RateLimitMode, RequestHeaderPolicyConfig,
-    ResponseHeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
+    AccessPolicyConfig, GrpcRouteConfig, HeaderPolicyConfig, HeaderValues, RateLimitMode,
+    RequestHeaderPolicyConfig, ResponseHeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig,
+    ResponseHeaderRewriteConfig,
 };
 use fluxheim_headers::{
     SPOOFABLE_CLIENT_IP_HEADERS, rewrite_header_prefix, rewrite_refresh_url,
@@ -80,6 +81,7 @@ pub struct NativeHttp1RouteProxyRoute {
     access: NativeIpAccessPolicy,
     rate_limit: NativeRateLimit,
     concurrency: NativeConcurrencyLimit,
+    grpc: GrpcRouteConfig,
     action: NativeHttp1RouteAction,
 }
 
@@ -736,6 +738,7 @@ impl NativeHttp1RouteProxyRoute {
             access: NativeIpAccessPolicy::default(),
             rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
+            grpc: GrpcRouteConfig::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
@@ -759,6 +762,7 @@ impl NativeHttp1RouteProxyRoute {
             access: NativeIpAccessPolicy::default(),
             rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
+            grpc: GrpcRouteConfig::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
@@ -782,6 +786,7 @@ impl NativeHttp1RouteProxyRoute {
             access: NativeIpAccessPolicy::default(),
             rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
+            grpc: GrpcRouteConfig::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
@@ -810,6 +815,7 @@ impl NativeHttp1RouteProxyRoute {
             access: NativeIpAccessPolicy::default(),
             rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
+            grpc: GrpcRouteConfig::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
                 status,
@@ -841,6 +847,7 @@ impl NativeHttp1RouteProxyRoute {
             access: NativeIpAccessPolicy::default(),
             rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
+            grpc: GrpcRouteConfig::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
                 status,
@@ -871,6 +878,7 @@ impl NativeHttp1RouteProxyRoute {
             access: NativeIpAccessPolicy::default(),
             rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
+            grpc: GrpcRouteConfig::default(),
             action: NativeHttp1RouteAction::StaticWeb(web),
         }
     }
@@ -948,6 +956,7 @@ impl NativeHttp1RouteProxyRoute {
             access: NativeIpAccessPolicy::from_config(&route.access)?,
             rate_limit: NativeRateLimit::from_config(&route.rate_limit),
             concurrency: NativeConcurrencyLimit::from_config(&route.concurrency),
+            grpc: route.grpc,
             action,
         })
     }
@@ -964,6 +973,11 @@ impl NativeHttp1RouteProxyRoute {
 
     pub const fn with_max_request_body_bytes(mut self, max_request_body_bytes: u64) -> Self {
         self.max_request_body_bytes = Some(max_request_body_bytes);
+        self
+    }
+
+    pub const fn with_grpc_policy(mut self, grpc: GrpcRouteConfig) -> Self {
+        self.grpc = grpc;
         self
     }
 
@@ -1079,6 +1093,9 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                         .close_connection();
                     }
                 };
+            if let Some(response) = route_or_fallback.grpc_rejection_response(&request) {
+                return response;
+            }
             let mut request =
                 match route_or_fallback.rewrite_request(request, &path, query.as_deref()) {
                     Some(request) => request,
@@ -1148,6 +1165,13 @@ impl<'a> RouteOrFallback<'a> {
         match self {
             Self::Route(route) => route.access.allows(client_ip),
             Self::Fallback(_) => true,
+        }
+    }
+
+    fn grpc_rejection_response(self, request: &NativeHttp1Request) -> Option<NativeHttp1Response> {
+        match self {
+            Self::Route(route) => native_grpc_rejection_response(&route.grpc, request),
+            Self::Fallback(_) => None,
         }
     }
 }
@@ -1294,6 +1318,51 @@ fn decoded_route_policy_path(path: &str) -> Option<String> {
         return None;
     }
     Some(decoded.into_owned())
+}
+
+fn native_grpc_rejection_response(
+    grpc: &GrpcRouteConfig,
+    request: &NativeHttp1Request,
+) -> Option<NativeHttp1Response> {
+    if !grpc.enabled {
+        return None;
+    }
+    if request.method != "POST" {
+        return Some(
+            NativeHttp1Response::new(405, "Method Not Allowed", b"method not allowed\n")
+                .with_header("Allow", "POST")
+                .close_connection(),
+        );
+    }
+    if grpc.require_content_type
+        && !native_request_header_values(request, "content-type").any(native_grpc_content_type)
+    {
+        return Some(
+            NativeHttp1Response::new(415, "Unsupported Media Type", b"unsupported media type\n")
+                .close_connection(),
+        );
+    }
+    None
+}
+
+fn native_grpc_content_type(value: &str) -> bool {
+    let media_type = value
+        .split_once(';')
+        .map(|(media_type, _)| media_type)
+        .unwrap_or(value)
+        .trim();
+    media_type == "application/grpc" || media_type.starts_with("application/grpc+")
+}
+
+fn native_request_header_values<'a>(
+    request: &'a NativeHttp1Request,
+    name: &'a str,
+) -> impl Iterator<Item = &'a str> {
+    request
+        .headers
+        .iter()
+        .filter(move |(header_name, _)| header_name.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
 }
 
 impl NativeHttp1RouteProxyRoute {

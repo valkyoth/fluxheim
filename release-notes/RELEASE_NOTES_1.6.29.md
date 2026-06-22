@@ -41,6 +41,9 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 request-body parsing now honors
   `proxy.downstream_read_timeout_secs` selected by the matched proxy before
   forwarding to upstreams.
+- Native HTTP/1 route proxy handling now honors route-scoped
+  `[vhosts.routes.grpc]` validation, rejecting non-POST and non-gRPC content
+  types before forwarding.
 - Root and vhost compression no longer blocks native HTTP/1 proxy cutover when
   a matching compression backend feature is compiled.
 - Native route-proxy construction now mirrors the compatibility route order for
@@ -129,6 +132,8 @@ the native HTTP/1 proxy path.
 - Native proxy tests now prove a slow request body times out before any
   upstream connection is attempted when `proxy.downstream_read_timeout_secs`
   is selected.
+- Native route tests now prove gRPC policy rejects non-gRPC requests and
+  forwards valid `application/grpc*` requests.
 - Native HTTP/1 now sends `408 Request Timeout` before closing connections that
   exceed the selected request-body timeout.
 - Native route proxy timeout selection no longer lets redirect or static-web

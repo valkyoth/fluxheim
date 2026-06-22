@@ -203,7 +203,6 @@ fn vhost_policy_supported(vhost: &VhostConfig) -> bool {
 
 fn route_policy_supported(route: &RouteConfig) -> bool {
     access_policy_native_supported(&route.access)
-        && !route.grpc.enabled
         && route_request_header_policy_supported(&route.headers.request)
         && route_response_header_policy_supported(&route.headers.response)
         && route
