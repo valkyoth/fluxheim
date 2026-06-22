@@ -35,6 +35,9 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 upstream establishment now honors
   `proxy.upstream_total_connection_timeout_secs` across DNS, TCP connect, and
   optional TLS handshake setup.
+- Native HTTP/1 upstream socket creation now honors
+  `proxy.upstream_tcp_recv_buffer_bytes` and `proxy.upstream_dscp` before
+  connecting.
 - Root and vhost compression no longer blocks native HTTP/1 proxy cutover when
   a matching compression backend feature is compiled.
 - Native route-proxy construction now mirrors the compatibility route order for
@@ -117,7 +120,10 @@ the native HTTP/1 proxy path.
   non-default downstream request-read timeout as a native listener-policy
   blocker.
 - Native proxy config now accepts total upstream connection timeout while
-  keeping lower-level TCP socket tuning as an explicit native transport blocker.
+  keeping keepalive/user-timeout/fast-open TCP tuning as explicit native
+  transport blockers.
+- Native proxy config and live loopback tests now prove receive-buffer and DSCP
+  socket options are accepted and still connect through the native proxy path.
 - Config validation and native regex route compilation now apply the same
   explicit NFA and DFA cache limits.
 - Privacy-mode native route proxy handling now strips spoofable
@@ -143,7 +149,7 @@ the native HTTP/1 proxy path.
 This release does not remove Pingora from normal builds yet. The remaining
 compatibility blockers are auth-request subrequests, traffic mirroring,
 cert/Geo access policy, managed local ACME challenge serving, route per-proxy
-downstream request-read timeout policy, advanced upstream TCP socket knobs,
-cache lookup/fill/stale behavior, PHP-FPM routing, dynamic discovery,
-health-aware load balancing, persistence, priority/backup/drain state, and
-hash-based load-balancer selection.
+downstream request-read timeout policy, advanced upstream TCP keepalive,
+user-timeout and fast-open knobs, cache lookup/fill/stale behavior, PHP-FPM
+routing, dynamic discovery, health-aware load balancing, persistence,
+priority/backup/drain state, and hash-based load-balancer selection.

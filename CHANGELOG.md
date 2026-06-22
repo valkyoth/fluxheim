@@ -37,6 +37,8 @@ behavior when the change improves security or project direction.
   minimum send-rate policy onto native HTTP/1 proxy responses.
 - Move `proxy.upstream_total_connection_timeout_secs` onto the native HTTP/1
   upstream establishment path, covering DNS, TCP connect, and TLS handshake.
+- Move `proxy.upstream_tcp_recv_buffer_bytes` and `proxy.upstream_dscp` onto
+  native HTTP/1 upstream socket creation before connect.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
@@ -103,6 +105,8 @@ behavior when the change improves security or project direction.
 - Add native proxy config tests proving total upstream connection timeout is
   accepted and propagated to native upstreams while other advanced TCP socket
   knobs still block native cutover.
+- Add native proxy config and live loopback tests proving native upstream
+  receive-buffer and DSCP socket options are accepted and still connect.
 - Set identical NFA and DFA regex cache limits for config validation and native
   regex route compilation.
 - Strip spoofable `X-Forwarded-Host` and `X-Forwarded-Proto` headers in

@@ -10,8 +10,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1Proxy, NativeHttp1ProxyConfigError,
-    NativeHttp1ResponseWritePolicy, NativeHttp1Upstream,
+    DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1ProxyConfigError,
+    NativeHttp1Request, NativeHttp1ResponseWritePolicy, NativeHttp1Upstream,
     native_http1_test_utils::read_request_head, serve_native_http1_listener,
 };
 
@@ -66,6 +66,18 @@ async fn proxy_listener_for(proxy: NativeHttp1Proxy) -> std::net::SocketAddr {
         let _ = shutdown_tx.send(());
     });
     addr
+}
+
+fn native_proxy_test_request() -> NativeHttp1Request {
+    NativeHttp1Request {
+        method: "GET".to_owned(),
+        peer_addr: None,
+        downstream_tls: false,
+        target: "/socket-policy".to_owned(),
+        version: fluxheim_protocol::Http1Version::Http11,
+        headers: vec![("host".to_owned(), "proxy.test".to_owned())],
+        body: Vec::new(),
+    }
 }
 
 async fn counting_upstream(
@@ -735,6 +747,48 @@ fn native_proxy_config_applies_total_connection_timeout() {
         native.upstream().total_connection_timeout(),
         Some(Duration::from_secs(9))
     );
+}
+
+#[test]
+fn native_proxy_config_applies_portable_socket_options() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_tcp_recv_buffer_bytes: Some(fluxheim_config::ByteSize::from_bytes(65_536)),
+        upstream_dscp: Some(10),
+        ..Default::default()
+    };
+
+    let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
+        .unwrap()
+        .expect("native proxy");
+
+    assert_eq!(native.upstream().recv_buffer_size(), Some(65_536));
+    assert_eq!(native.upstream().dscp(), Some(10));
+}
+
+#[tokio::test]
+async fn native_proxy_socket_options_connect_to_upstream() {
+    let upstream = upstream(|_, mut stream| async move {
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 13\r\n\r\nsocket-policy")
+            .await
+            .unwrap();
+    })
+    .await;
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some(upstream.to_string()),
+        upstream_tcp_recv_buffer_bytes: Some(fluxheim_config::ByteSize::from_bytes(65_536)),
+        upstream_dscp: Some(10),
+        ..Default::default()
+    };
+    let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
+        .unwrap()
+        .expect("native proxy");
+
+    let response = native.handle(native_proxy_test_request()).await;
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.body(), b"socket-policy");
 }
 
 #[test]

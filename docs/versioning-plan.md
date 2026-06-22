@@ -2760,17 +2760,20 @@ available for the stabilization/security-only follow-up.
   response write timeout, total response timeout, and minimum send-rate policy
   onto native HTTP/1 proxy responses. Move
   `proxy.upstream_total_connection_timeout_secs` onto native upstream
-  establishment. Keep auth-request subrequests, traffic mirroring, cert/Geo
-  access policy, managed local ACME challenge serving, per-proxy downstream
-  request-read timeout policy, advanced upstream TCP socket knobs, cache,
-  PHP-FPM, dynamic discovery, and load-balancer state explicitly reported as
-  compatibility blockers until they have native parity tests.
+  establishment. Move `proxy.upstream_tcp_recv_buffer_bytes` and
+  `proxy.upstream_dscp` onto native upstream socket creation. Keep auth-request
+  subrequests, traffic mirroring, cert/Geo access policy, managed local ACME
+  challenge serving, per-proxy downstream request-read timeout policy, advanced
+  upstream TCP keepalive/user-timeout/fast-open knobs, cache, PHP-FPM, dynamic
+  discovery, and load-balancer state explicitly reported as compatibility
+  blockers until they have native parity tests.
 - `v1.6.30`: finish the remaining native HTTP policy blockers that do not need
   cache or PHP state: auth-request subrequests, traffic mirroring, vhost
   cert/Geo access policy, vhost managed local ACME challenge serving, route
   cert/Geo access and grpc flags, per-proxy downstream request-read timeout
-  policy, and advanced upstream TCP socket knobs that do not require cache, PHP,
-  dynamic discovery, or load-balancer state. Add live native listener tests for
+  policy, and advanced upstream TCP keepalive/user-timeout/fast-open knobs that
+  do not require cache, PHP, dynamic discovery, or load-balancer state. Add live
+  native listener tests for
   each path and keep unsupported configs explicitly reported in the cutover
   inventory.
 - `v1.6.31`: move cache and PHP-FPM rich proxy integrations onto native

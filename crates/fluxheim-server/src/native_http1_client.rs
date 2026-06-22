@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use fluxheim_protocol::{Http1ParseError, http1_request_target};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
@@ -30,6 +30,8 @@ pub struct NativeHttp1Upstream {
     connect_timeout: Duration,
     read_timeout: Duration,
     write_timeout: Duration,
+    recv_buffer_size: Option<u32>,
+    dscp: Option<u8>,
     max_head_bytes: usize,
     max_body_bytes: usize,
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -67,6 +69,8 @@ impl std::fmt::Debug for NativeHttp1Upstream {
             .field("connect_timeout", &self.connect_timeout)
             .field("read_timeout", &self.read_timeout)
             .field("write_timeout", &self.write_timeout)
+            .field("recv_buffer_size", &self.recv_buffer_size)
+            .field("dscp", &self.dscp)
             .field("max_head_bytes", &self.max_head_bytes)
             .field("max_body_bytes", &self.max_body_bytes)
             .field("tls", {
@@ -92,6 +96,8 @@ impl PartialEq for NativeHttp1Upstream {
             && self.connect_timeout == other.connect_timeout
             && self.read_timeout == other.read_timeout
             && self.write_timeout == other.write_timeout
+            && self.recv_buffer_size == other.recv_buffer_size
+            && self.dscp == other.dscp
             && self.max_head_bytes == other.max_head_bytes
             && self.max_body_bytes == other.max_body_bytes
             && {
@@ -120,6 +126,8 @@ impl NativeHttp1Upstream {
             connect_timeout: Duration::from_secs(5),
             read_timeout: Duration::from_secs(30),
             write_timeout: Duration::from_secs(30),
+            recv_buffer_size: None,
+            dscp: None,
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -135,6 +143,8 @@ impl NativeHttp1Upstream {
             connect_timeout: Duration::from_secs(5),
             read_timeout: Duration::from_secs(30),
             write_timeout: Duration::from_secs(30),
+            recv_buffer_size: None,
+            dscp: None,
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -165,6 +175,24 @@ impl NativeHttp1Upstream {
     pub const fn with_write_timeout(mut self, timeout: Duration) -> Self {
         self.write_timeout = timeout;
         self
+    }
+
+    pub const fn with_recv_buffer_size(mut self, size: Option<u32>) -> Self {
+        self.recv_buffer_size = size;
+        self
+    }
+
+    pub const fn recv_buffer_size(&self) -> Option<u32> {
+        self.recv_buffer_size
+    }
+
+    pub const fn with_dscp(mut self, dscp: Option<u8>) -> Self {
+        self.dscp = dscp;
+        self
+    }
+
+    pub const fn dscp(&self) -> Option<u8> {
+        self.dscp
     }
 
     pub const fn with_max_body_bytes(mut self, max_body_bytes: usize) -> Self {
@@ -314,9 +342,12 @@ impl NativeHttp1Upstream {
     }
 
     async fn connect_stream_inner(&self) -> Result<NativeHttp1Stream, NativeHttp1Error> {
-        let stream = timeout(self.connect_timeout, connect_upstream(&self.authority))
-            .await
-            .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
+        let stream = timeout(
+            self.connect_timeout,
+            connect_upstream(&self.authority, self.recv_buffer_size, self.dscp),
+        )
+        .await
+        .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
         #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
         if let Some(tls) = &self.tls {
             return timeout(self.connect_timeout, tls.connect(stream, &self.authority))
@@ -345,7 +376,11 @@ fn native_http1_retry_method_allowed(method: &str) -> bool {
     matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE")
 }
 
-async fn connect_upstream(authority: &str) -> Result<TcpStream, NativeHttp1Error> {
+async fn connect_upstream(
+    authority: &str,
+    recv_buffer_size: Option<u32>,
+    dscp: Option<u8>,
+) -> Result<TcpStream, NativeHttp1Error> {
     let mut addresses = tokio::net::lookup_host(authority)
         .await
         .map_err(NativeHttp1Error::Io)?;
@@ -355,9 +390,106 @@ async fn connect_upstream(authority: &str) -> Result<TcpStream, NativeHttp1Error
             "upstream authority did not resolve",
         ))
     })?;
-    TcpStream::connect(address)
-        .await
+    let socket = if address.is_ipv4() {
+        TcpSocket::new_v4()
+    } else {
+        TcpSocket::new_v6()
+    }
+    .map_err(NativeHttp1Error::Io)?;
+    if let Some(size) = recv_buffer_size {
+        socket
+            .set_recv_buffer_size(size)
+            .map_err(NativeHttp1Error::Io)?;
+    }
+    if let Some(dscp) = dscp {
+        set_socket_dscp(&socket, address, dscp)?;
+    }
+    socket.connect(address).await.map_err(NativeHttp1Error::Io)
+}
+
+fn set_socket_dscp(
+    socket: &TcpSocket,
+    address: std::net::SocketAddr,
+    dscp: u8,
+) -> Result<(), NativeHttp1Error> {
+    let traffic_class = u32::from(dscp) << 2;
+    if address.is_ipv4() {
+        return set_socket_dscp_v4(socket, traffic_class);
+    }
+    set_socket_dscp_v6(socket, traffic_class)
+}
+
+#[cfg(not(any(
+    target_os = "fuchsia",
+    target_os = "redox",
+    target_os = "solaris",
+    target_os = "illumos",
+    target_os = "haiku",
+    target_os = "wasi",
+)))]
+fn set_socket_dscp_v4(socket: &TcpSocket, traffic_class: u32) -> Result<(), NativeHttp1Error> {
+    socket
+        .set_tos_v4(traffic_class)
         .map_err(NativeHttp1Error::Io)
+}
+
+#[cfg(any(
+    target_os = "fuchsia",
+    target_os = "redox",
+    target_os = "solaris",
+    target_os = "illumos",
+    target_os = "haiku",
+    target_os = "wasi",
+))]
+fn set_socket_dscp_v4(_socket: &TcpSocket, _traffic_class: u32) -> Result<(), NativeHttp1Error> {
+    unsupported_dscp_error()
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "fuchsia",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "cygwin",
+))]
+fn set_socket_dscp_v6(socket: &TcpSocket, traffic_class: u32) -> Result<(), NativeHttp1Error> {
+    socket
+        .set_tclass_v6(traffic_class)
+        .map_err(NativeHttp1Error::Io)
+}
+
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "fuchsia",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "cygwin",
+)))]
+fn set_socket_dscp_v6(_socket: &TcpSocket, _traffic_class: u32) -> Result<(), NativeHttp1Error> {
+    unsupported_dscp_error()
+}
+
+#[cfg(any(
+    target_os = "fuchsia",
+    target_os = "redox",
+    target_os = "solaris",
+    target_os = "illumos",
+    target_os = "haiku",
+    target_os = "wasi",
+))]
+fn unsupported_dscp_error() -> Result<(), NativeHttp1Error> {
+    Err(NativeHttp1Error::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "native HTTP/1 upstream DSCP is not supported on this target",
+    )))
 }
 
 async fn write_upstream_request<S>(

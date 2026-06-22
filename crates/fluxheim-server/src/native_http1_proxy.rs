@@ -317,6 +317,13 @@ impl NativeHttp1Proxy {
             if let Some(timeout) = proxy.send_timeout_secs {
                 native_upstream = native_upstream.with_write_timeout(Duration::from_secs(timeout));
             }
+            native_upstream = native_upstream.with_recv_buffer_size(
+                proxy
+                    .upstream_tcp_recv_buffer_bytes
+                    .map(fluxheim_config::ByteSize::as_u64)
+                    .and_then(|bytes| u32::try_from(bytes).ok()),
+            );
+            native_upstream = native_upstream.with_dscp(proxy.upstream_dscp);
             native_upstream = native_upstream
                 .with_pool_idle_timeout(proxy.upstream_idle_timeout_secs.map(Duration::from_secs));
             native_upstream = native_upstream.with_pool_max_idle(pool_max_idle);
@@ -533,8 +540,6 @@ fn proxy_requires_advanced_upstream_transport(proxy: &fluxheim_config::ProxyConf
         || proxy.upstream_tcp_keepalive_interval_secs.is_some()
         || proxy.upstream_tcp_keepalive_count.is_some()
         || proxy.upstream_tcp_user_timeout_ms.is_some()
-        || proxy.upstream_tcp_recv_buffer_bytes.is_some()
-        || proxy.upstream_dscp.is_some()
         || proxy.upstream_tcp_fast_open
         || proxy.upstream_h2_max_streams.is_some()
         || proxy.upstream_h2_ping_interval_secs.is_some()
