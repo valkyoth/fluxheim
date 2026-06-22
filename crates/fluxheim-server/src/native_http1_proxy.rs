@@ -19,8 +19,8 @@ use crate::native_http1_route_proxy::{
     default_native_request_header_policy,
 };
 use crate::{
-    NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb,
-    NativeHttp1Upstream,
+    NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1ResponseWritePolicy,
+    NativeHttp1StaticWeb, NativeHttp1Upstream,
 };
 
 #[derive(Clone, Debug)]
@@ -30,6 +30,7 @@ pub struct NativeHttp1Proxy {
     error_pages: Vec<NativeHttp1ProxyErrorPage>,
     request_headers: NativeRouteRequestHeaderPolicy,
     response_headers: NativeRouteResponseHeaderPolicy,
+    response_write_policy: NativeHttp1ResponseWritePolicy,
     #[cfg(any(
         feature = "compression-brotli",
         feature = "compression-gzip",
@@ -119,6 +120,7 @@ impl NativeHttp1Proxy {
             error_pages: Vec::new(),
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
+            response_write_policy: NativeHttp1ResponseWritePolicy::default(),
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -142,6 +144,7 @@ impl NativeHttp1Proxy {
             error_pages: Vec::new(),
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
+            response_write_policy: NativeHttp1ResponseWritePolicy::default(),
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -173,6 +176,7 @@ impl NativeHttp1Proxy {
             error_pages: Vec::new(),
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
+            response_write_policy: NativeHttp1ResponseWritePolicy::default(),
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -193,6 +197,10 @@ impl NativeHttp1Proxy {
 
     pub fn upstream_slots(&self) -> &[usize] {
         &self.upstream_slots
+    }
+
+    pub const fn response_write_policy(&self) -> NativeHttp1ResponseWritePolicy {
+        self.response_write_policy
     }
 
     pub fn with_header_policy(mut self, headers: &fluxheim_config::HeaderPolicyConfig) -> Self {
@@ -311,6 +319,7 @@ impl NativeHttp1Proxy {
         }
         let mut native = Self::from_weighted_upstreams(native_upstreams, &proxy.upstream_weights)?;
         native.error_pages = native_error_pages_from_config(proxy)?;
+        native.response_write_policy = native_response_write_policy_from_config(proxy);
         Ok(Some(native))
     }
 }
@@ -321,7 +330,8 @@ impl PartialEq for NativeHttp1Proxy {
             && self.upstream_slots == other.upstream_slots
             && self.error_pages == other.error_pages
             && self.request_headers == other.request_headers
-            && self.response_headers == other.response_headers;
+            && self.response_headers == other.response_headers
+            && self.response_write_policy == other.response_write_policy;
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -375,6 +385,7 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 match upstream.send(&request).await {
                     Ok(mut response) => {
                         self.response_headers.apply(&mut response);
+                        response = response.with_write_policy(self.response_write_policy);
                         #[cfg(any(
                             feature = "compression-brotli",
                             feature = "compression-gzip",
@@ -440,8 +451,21 @@ impl NativeHttp1Proxy {
             .iter()
             .find(|page| page.status == status)
             .and_then(|page| page.web.handle_error_page(request, &page.path, status))
+            .map(|response| response.with_write_policy(self.response_write_policy))
             .map(NativeHttp1Response::close_connection)
     }
+}
+
+fn native_response_write_policy_from_config(
+    proxy: &fluxheim_config::ProxyConfig,
+) -> NativeHttp1ResponseWritePolicy {
+    NativeHttp1ResponseWritePolicy::new(
+        proxy.downstream_write_timeout_secs.map(Duration::from_secs),
+        proxy
+            .downstream_total_response_timeout_secs
+            .map(Duration::from_secs),
+        proxy.downstream_min_send_rate_bytes_per_sec,
+    )
 }
 
 fn native_error_pages_from_config(
@@ -515,11 +539,6 @@ fn proxy_requires_advanced_upstream_transport(proxy: &fluxheim_config::ProxyConf
 fn proxy_requires_per_proxy_downstream_policy(proxy: &fluxheim_config::ProxyConfig) -> bool {
     let defaults = fluxheim_config::ProxyConfig::default();
     proxy.downstream_read_timeout_secs != defaults.downstream_read_timeout_secs
-        || proxy.downstream_write_timeout_secs != defaults.downstream_write_timeout_secs
-        || proxy.downstream_total_response_timeout_secs
-            != defaults.downstream_total_response_timeout_secs
-        || proxy.downstream_min_send_rate_bytes_per_sec
-            != defaults.downstream_min_send_rate_bytes_per_sec
 }
 
 fn native_http1_static_failover_method_allowed(method: &str) -> bool {

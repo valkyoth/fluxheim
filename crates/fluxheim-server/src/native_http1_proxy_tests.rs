@@ -10,7 +10,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1Upstream,
+    DownstreamHttp1Policy, NativeHttp1Proxy, NativeHttp1ProxyConfigError,
+    NativeHttp1ResponseWritePolicy, NativeHttp1Upstream,
     native_http1_test_utils::read_request_head, serve_native_http1_listener,
 };
 
@@ -635,6 +636,9 @@ fn native_proxy_config_accepts_plain_static_upstream() {
         connect_timeout_secs: Some(2),
         read_timeout_secs: Some(3),
         send_timeout_secs: Some(4),
+        downstream_write_timeout_secs: Some(7),
+        downstream_total_response_timeout_secs: Some(11),
+        downstream_min_send_rate_bytes_per_sec: Some(1024),
         ..Default::default()
     };
 
@@ -648,6 +652,14 @@ fn native_proxy_config_accepts_plain_static_upstream() {
             .with_connect_timeout(Duration::from_secs(2))
             .with_read_timeout(Duration::from_secs(3))
             .with_write_timeout(Duration::from_secs(4))
+    );
+    assert_eq!(
+        native.response_write_policy(),
+        NativeHttp1ResponseWritePolicy::new(
+            Some(Duration::from_secs(7)),
+            Some(Duration::from_secs(11)),
+            Some(1024)
+        )
     );
 }
 
@@ -795,7 +807,7 @@ fn native_proxy_config_rejects_unsupported_transport_and_downstream_policy() {
 
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),
-        downstream_min_send_rate_bytes_per_sec: Some(1024),
+        downstream_read_timeout_secs: Some(1),
         ..Default::default()
     };
     assert_eq!(

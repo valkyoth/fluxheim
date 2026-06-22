@@ -33,6 +33,8 @@ behavior when the change improves security or project direction.
   including immediate reject and bounded queue timeout behavior.
 - Move vhost and route local rate limiting into the native HTTP/1 route proxy,
   including token-bucket rejection and delay-mode admission.
+- Move per-proxy downstream response write timeout, total response timeout, and
+  minimum send-rate policy onto native HTTP/1 proxy responses.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
@@ -89,6 +91,9 @@ behavior when the change improves security or project direction.
   delayed requests remain counted against vhost and route concurrency budgets.
 - Bound native rate-limit table eviction sweeps to avoid repeated full-table
   scans on every new identity when the bucket table is full.
+- Add native proxy config tests proving response-side downstream policy is
+  accepted while non-default downstream request-read timeout remains a native
+  listener-policy blocker.
 - Set identical NFA and DFA regex cache limits for config validation and native
   regex route compilation.
 - Strip spoofable `X-Forwarded-Host` and `X-Forwarded-Proto` headers in

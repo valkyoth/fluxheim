@@ -41,7 +41,7 @@ pub use native_http1::serve_native_http1_openssl_listener;
 pub use native_http1::serve_native_http1_rustls_listener;
 pub use native_http1::{
     NativeHttp1Error, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
-    serve_native_http1_connection, serve_native_http1_listener,
+    NativeHttp1ResponseWritePolicy, serve_native_http1_connection, serve_native_http1_listener,
 };
 pub use native_http1_client::NativeHttp1Upstream;
 pub use native_http1_plan::{

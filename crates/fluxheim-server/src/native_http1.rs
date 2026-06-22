@@ -2,6 +2,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use fluxheim_protocol::{
     Http1BodyFraming, Http1ConnectionDirective, Http1HeadLimits, Http1Header, Http1ParseError,
@@ -19,6 +20,7 @@ use tokio_rustls::TlsAcceptor;
 use crate::DownstreamHttp1Policy;
 
 const READ_CHUNK_BYTES: usize = 8192;
+const WRITE_CHUNK_BYTES: usize = 8192;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1Request {
@@ -39,6 +41,14 @@ pub struct NativeHttp1Response {
     content_length: Option<u64>,
     body: Vec<u8>,
     close: bool,
+    write_policy: NativeHttp1ResponseWritePolicy,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct NativeHttp1ResponseWritePolicy {
+    write_timeout: Option<Duration>,
+    total_response_timeout: Option<Duration>,
+    min_send_rate_bytes_per_sec: Option<usize>,
 }
 
 impl NativeHttp1Response {
@@ -50,6 +60,7 @@ impl NativeHttp1Response {
             content_length: None,
             body: body.into(),
             close: false,
+            write_policy: NativeHttp1ResponseWritePolicy::default(),
         }
     }
 
@@ -65,6 +76,11 @@ impl NativeHttp1Response {
 
     pub const fn close_connection(mut self) -> Self {
         self.close = true;
+        self
+    }
+
+    pub const fn with_write_policy(mut self, policy: NativeHttp1ResponseWritePolicy) -> Self {
+        self.write_policy = policy;
         self
     }
 
@@ -105,6 +121,32 @@ impl NativeHttp1Response {
     pub(crate) fn replace_body(&mut self, body: impl Into<Vec<u8>>) {
         self.body = body.into();
         self.content_length = None;
+    }
+}
+
+impl NativeHttp1ResponseWritePolicy {
+    pub const fn new(
+        write_timeout: Option<Duration>,
+        total_response_timeout: Option<Duration>,
+        min_send_rate_bytes_per_sec: Option<usize>,
+    ) -> Self {
+        Self {
+            write_timeout,
+            total_response_timeout,
+            min_send_rate_bytes_per_sec,
+        }
+    }
+
+    pub const fn write_timeout(self) -> Option<Duration> {
+        self.write_timeout
+    }
+
+    pub const fn total_response_timeout(self) -> Option<Duration> {
+        self.total_response_timeout
+    }
+
+    pub const fn min_send_rate_bytes_per_sec(self) -> Option<usize> {
+        self.min_send_rate_bytes_per_sec
     }
 }
 
@@ -607,37 +649,65 @@ async fn write_response<S>(
 where
     S: AsyncWrite + Unpin,
 {
+    let policy = response.write_policy;
+    let write = write_response_inner(stream, response, close, policy);
+    if let Some(total_response_timeout) = policy.total_response_timeout {
+        timeout(total_response_timeout, write)
+            .await
+            .map_err(|_| timeout_error("response total timeout"))?
+    } else {
+        write.await
+    }
+}
+
+async fn write_response_inner<S>(
+    stream: &mut S,
+    response: NativeHttp1Response,
+    close: bool,
+    policy: NativeHttp1ResponseWritePolicy,
+) -> Result<(), NativeHttp1Error>
+where
+    S: AsyncWrite + Unpin,
+{
     let reason = sanitize_reason_phrase(&response.reason).collect::<String>();
-    stream
-        .write_all(format!("HTTP/1.1 {} {reason}\r\n", response.status).as_bytes())
-        .await?;
-    stream
-        .write_all(
-            format!(
-                "Date: {}\r\n",
-                httpdate::fmt_http_date(std::time::SystemTime::now())
-            )
-            .as_bytes(),
+    write_all_with_policy(
+        stream,
+        format!("HTTP/1.1 {} {reason}\r\n", response.status).as_bytes(),
+        policy,
+    )
+    .await?;
+    write_all_with_policy(
+        stream,
+        format!(
+            "Date: {}\r\n",
+            httpdate::fmt_http_date(std::time::SystemTime::now())
         )
-        .await?;
-    stream
-        .write_all(
-            format!(
-                "Content-Length: {}\r\n",
-                response
-                    .content_length
-                    .unwrap_or(response.body.len() as u64)
-            )
-            .as_bytes(),
+        .as_bytes(),
+        policy,
+    )
+    .await?;
+    write_all_with_policy(
+        stream,
+        format!(
+            "Content-Length: {}\r\n",
+            response
+                .content_length
+                .unwrap_or(response.body.len() as u64)
         )
-        .await?;
-    stream
-        .write_all(if close {
+        .as_bytes(),
+        policy,
+    )
+    .await?;
+    write_all_with_policy(
+        stream,
+        if close {
             b"Connection: close\r\n"
         } else {
             b"Connection: keep-alive\r\n"
-        })
-        .await?;
+        },
+        policy,
+    )
+    .await?;
     for (name, value) in response.headers {
         if name.eq_ignore_ascii_case("content-length")
             || name.eq_ignore_ascii_case("connection")
@@ -648,14 +718,81 @@ where
         if !valid_response_header(&name, &value) {
             return Err(Http1ParseError::InvalidHeaderValue.into());
         }
-        stream
-            .write_all(format!("{name}: {value}\r\n").as_bytes())
-            .await?;
+        write_all_with_policy(stream, format!("{name}: {value}\r\n").as_bytes(), policy).await?;
     }
-    stream.write_all(b"\r\n").await?;
-    stream.write_all(&response.body).await?;
-    stream.flush().await?;
+    write_all_with_policy(stream, b"\r\n", policy).await?;
+    write_body_with_policy(stream, &response.body, policy).await?;
+    flush_with_policy(stream, policy).await?;
     Ok(())
+}
+
+async fn write_all_with_policy<S>(
+    stream: &mut S,
+    bytes: &[u8],
+    policy: NativeHttp1ResponseWritePolicy,
+) -> Result<(), NativeHttp1Error>
+where
+    S: AsyncWrite + Unpin,
+{
+    if let Some(write_timeout) = policy.write_timeout {
+        timeout(write_timeout, stream.write_all(bytes))
+            .await
+            .map_err(|_| timeout_error("response write timeout"))??;
+    } else {
+        stream.write_all(bytes).await?;
+    }
+    Ok(())
+}
+
+async fn flush_with_policy<S>(
+    stream: &mut S,
+    policy: NativeHttp1ResponseWritePolicy,
+) -> Result<(), NativeHttp1Error>
+where
+    S: AsyncWrite + Unpin,
+{
+    if let Some(write_timeout) = policy.write_timeout {
+        timeout(write_timeout, stream.flush())
+            .await
+            .map_err(|_| timeout_error("response write timeout"))??;
+    } else {
+        stream.flush().await?;
+    }
+    Ok(())
+}
+
+async fn write_body_with_policy<S>(
+    stream: &mut S,
+    body: &[u8],
+    policy: NativeHttp1ResponseWritePolicy,
+) -> Result<(), NativeHttp1Error>
+where
+    S: AsyncWrite + Unpin,
+{
+    let Some(min_send_rate) = policy.min_send_rate_bytes_per_sec else {
+        return write_all_with_policy(stream, body, policy).await;
+    };
+    if body.is_empty() {
+        return Ok(());
+    }
+
+    let started_at = Instant::now();
+    let mut written = 0usize;
+    for chunk in body.chunks(WRITE_CHUNK_BYTES) {
+        write_all_with_policy(stream, chunk, policy).await?;
+        written = written.saturating_add(chunk.len());
+        let elapsed = started_at.elapsed();
+        if elapsed >= Duration::from_secs(1)
+            && (written as f64 / elapsed.as_secs_f64()) < min_send_rate as f64
+        {
+            return Err(timeout_error("response min send rate not met"));
+        }
+    }
+    Ok(())
+}
+
+fn timeout_error(message: &'static str) -> NativeHttp1Error {
+    NativeHttp1Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, message))
 }
 
 fn valid_response_header(name: &str, value: &str) -> bool {

@@ -2756,16 +2756,17 @@ available for the stabilization/security-only follow-up.
   restoration. Move vhost and route concurrency limits onto the native route
   proxy, including immediate reject and bounded queue timeout behavior. Move
   vhost and route local rate limiting onto the native route proxy, including
-  token-bucket rejection and delay-mode admission. Keep auth-request
-  subrequests, traffic mirroring, cert/Geo access policy, managed local ACME
-  challenge serving, route per-proxy downstream timeout/min-send-rate policy,
-  advanced upstream transport knobs, cache, PHP-FPM, dynamic discovery, and
-  load-balancer state explicitly reported as compatibility blockers until they
-  have native parity tests.
+  token-bucket rejection and delay-mode admission. Move per-proxy downstream
+  response write timeout, total response timeout, and minimum send-rate policy
+  onto native HTTP/1 proxy responses. Keep auth-request subrequests, traffic
+  mirroring, cert/Geo access policy, managed local ACME challenge serving,
+  per-proxy downstream request-read timeout policy, advanced upstream transport
+  knobs, cache, PHP-FPM, dynamic discovery, and load-balancer state explicitly
+  reported as compatibility blockers until they have native parity tests.
 - `v1.6.30`: finish the remaining native HTTP policy blockers that do not need
   cache or PHP state: auth-request subrequests, traffic mirroring, vhost
   cert/Geo access policy, vhost managed local ACME challenge serving, route
-  cert/Geo access and grpc flags, per-proxy downstream timeout/min-send-rate
+  cert/Geo access and grpc flags, per-proxy downstream request-read timeout
   policy, and advanced upstream transport knobs that do not require cache, PHP,
   dynamic discovery, or load-balancer state. Add live native listener tests for
   each path and keep unsupported configs explicitly reported in the cutover
