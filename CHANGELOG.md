@@ -41,6 +41,17 @@ behavior when the change improves security or project direction.
 - Add live native route tests proving vhost synthetic-route construction sends
   ACME HTTP-01 challenge paths to the configured upstream before the vhost
   redirect fallback is applied.
+- Reject native cutover for route request-header overlays that explicitly
+  disable the request header policy, preventing fallback to unsanitized
+  forwarded-client-IP headers.
+- Apply merged root/vhost header policy to native vhost fallback proxy traffic
+  so requests that miss named routes still strip spoofable client-IP headers and
+  synthesize owned forwarding context.
+- In privacy-mode builds, strip spoofable client-IP headers after request
+  header mutations so operator `set`/`append` rules cannot reintroduce
+  forwarded-client-IP fields.
+- Initialize programmatic native route constructors with the safe default
+  request-header policy instead of a no-op policy.
 - Add live native listener tests proving inherited response-header and standard
   security-header emission on route responses.
 - Add live native listener tests proving plain-proxy gzip compression and

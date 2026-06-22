@@ -179,6 +179,7 @@ impl NativeHttp1RouteProxy {
         let fallback =
             NativeHttp1Proxy::from_proxy_config_with_pool_size(&vhost.proxy, policy, pool_max_idle)
                 .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
+        let fallback = fallback.map(|proxy| proxy.with_header_policy(&headers));
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -236,7 +237,7 @@ impl NativeHttp1RouteProxyRoute {
                 feature = "compression-zstd"
             ))]
             compression: None,
-            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy)),
         }
@@ -255,7 +256,7 @@ impl NativeHttp1RouteProxyRoute {
                 feature = "compression-zstd"
             ))]
             compression: None,
-            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy)),
         }
@@ -274,7 +275,7 @@ impl NativeHttp1RouteProxyRoute {
                 feature = "compression-zstd"
             ))]
             compression: None,
-            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy)),
         }
@@ -298,7 +299,7 @@ impl NativeHttp1RouteProxyRoute {
                 feature = "compression-zstd"
             ))]
             compression: None,
-            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
@@ -325,7 +326,7 @@ impl NativeHttp1RouteProxyRoute {
                 feature = "compression-zstd"
             ))]
             compression: None,
-            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
@@ -351,7 +352,7 @@ impl NativeHttp1RouteProxyRoute {
                 feature = "compression-zstd"
             ))]
             compression: None,
-            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             action: NativeHttp1RouteAction::StaticWeb(web),
         }
@@ -461,6 +462,9 @@ impl NativeHttp1RouteProxyRoute {
         mut self,
         response_headers: &ResponseHeaderPolicyOverlayConfig,
     ) -> Self {
+        // Programmatic builders apply overlays over the safe default response
+        // policy. Config-built routes should use from_config_with_inherited()
+        // when root/vhost policy inheritance is required.
         self.response_headers = NativeRouteResponseHeaderPolicy::from_overlay(response_headers);
         self
     }
@@ -469,6 +473,9 @@ impl NativeHttp1RouteProxyRoute {
         mut self,
         request_headers: &fluxheim_config::RequestHeaderPolicyOverlayConfig,
     ) -> Self {
+        // Programmatic builders apply overlays over the safe default request
+        // policy. Config-built routes should use from_config_with_inherited()
+        // when root/vhost policy inheritance is required.
         self.request_headers = NativeRouteRequestHeaderPolicy::from_overlay(request_headers);
         self
     }
@@ -607,7 +614,7 @@ impl NativeHttp1RouteProxyRoute {
             feature = "compression-gzip",
             feature = "compression-zstd"
         ))]
-        let compression_request = request.clone();
+        let compression_request = self.compression.as_ref().map(|_| request.clone());
         let mut response = match &self.action {
             NativeHttp1RouteAction::Proxy(proxy) => proxy.handle(request).await,
             NativeHttp1RouteAction::Redirect(redirect) => redirect_response(&request, redirect),
@@ -625,8 +632,10 @@ impl NativeHttp1RouteProxyRoute {
             feature = "compression-gzip",
             feature = "compression-zstd"
         ))]
-        if let Some(compression) = &self.compression {
-            apply_route_compression(&compression_request, &mut response, compression);
+        if let Some(compression) = &self.compression
+            && let Some(compression_request) = compression_request.as_ref()
+        {
+            apply_route_compression(compression_request, &mut response, compression);
         }
         response
     }
@@ -1184,8 +1193,6 @@ impl NativeRouteRequestHeaderPolicy {
         }
         #[cfg(not(feature = "privacy-mode"))]
         self.apply_forwarded_headers(request);
-        #[cfg(feature = "privacy-mode")]
-        strip_spoofable_client_ip_headers(request);
         for name in &self.unset {
             request
                 .headers
@@ -1200,6 +1207,8 @@ impl NativeRouteRequestHeaderPolicy {
         for (name, value) in &self.append {
             request.headers.push((name.clone(), value.clone()));
         }
+        #[cfg(feature = "privacy-mode")]
+        strip_spoofable_client_ip_headers(request);
     }
 
     #[cfg(not(feature = "privacy-mode"))]
@@ -1268,6 +1277,10 @@ impl NativeRouteRequestHeaderPolicy {
             }
         }
     }
+}
+
+fn default_native_request_header_policy() -> NativeRouteRequestHeaderPolicy {
+    NativeRouteRequestHeaderPolicy::from_policy(&RequestHeaderPolicyConfig::default())
 }
 
 impl NativeRouteResponseHeaderPolicy {

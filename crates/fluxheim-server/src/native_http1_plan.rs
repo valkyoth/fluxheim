@@ -239,12 +239,17 @@ fn vhost_header_overlay_supported(headers: &fluxheim_config::VhostHeaderPolicyCo
 fn route_request_header_policy_supported(
     request: &fluxheim_config::RequestHeaderPolicyOverlayConfig,
 ) -> bool {
-    request.x_forwarded_for != Some(ForwardedClientIpHeaderMode::Append)
+    request.enabled != Some(false)
+        && request.x_forwarded_for != Some(ForwardedClientIpHeaderMode::Append)
 }
 
 fn route_response_header_policy_supported(
     _response: &fluxheim_config::ResponseHeaderPolicyOverlayConfig,
 ) -> bool {
+    // All current response overlay fields are implemented by
+    // NativeRouteResponseHeaderPolicy. Keep this helper explicit so future
+    // response-policy fields get a fail-closed review point before native
+    // cutover marks them supported.
     true
 }
 

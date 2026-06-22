@@ -339,7 +339,7 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 feature = "compression-gzip",
                 feature = "compression-zstd"
             ))]
-            let compression_request = request.clone();
+            let compression_request = self.compression.as_ref().map(|_| request.clone());
             let mut request = request;
             self.request_headers.apply(&mut request);
             let mut last_error = None;
@@ -365,9 +365,11 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                             feature = "compression-zstd"
                         ))]
                         {
-                            if let Some(compression) = &self.compression {
+                            if let Some(compression) = &self.compression
+                                && let Some(compression_request) = compression_request.as_ref()
+                            {
                                 apply_native_response_compression(
-                                    &compression_request,
+                                    compression_request,
                                     &mut response,
                                     compression,
                                 );

@@ -55,6 +55,17 @@ the native HTTP/1 proxy path.
 - Native route tests prove ACME challenge paths are selected before a vhost
   redirect fallback, preserving the HTTP-01 exception ordering used by the
   compatibility path for explicit upstream challenge forwarding.
+- Native cutover now rejects route request-header overlays that set
+  `enabled = false`, because disabling the request header policy would also
+  disable forwarded-client-IP sanitation on that native route.
+- Native vhost fallback proxy traffic now receives the merged root/vhost header
+  policy, so requests that miss named routes still strip spoofable
+  client-IP headers and synthesize owned forwarding context.
+- Privacy-mode native route request headers are stripped after all configured
+  request-header mutations, preventing operator `set` or `append` rules from
+  reintroducing spoofable forwarded-client-IP fields.
+- Programmatic native route constructors now start with the same safe default
+  request-header policy used by config-built routes, instead of a no-op policy.
 - Privacy-mode native proxy builds strip spoofable inbound client-IP headers and
   do not compile the non-privacy forwarded-header synthesis helpers.
 - Native route responses now apply inherited standard security headers such as
