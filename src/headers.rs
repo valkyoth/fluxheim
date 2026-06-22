@@ -1167,7 +1167,13 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("203.0.113.10")
         );
-        assert!(request.headers.get("x-real-ip").is_none());
+        assert_eq!(
+            request
+                .headers
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok()),
+            Some("203.0.113.10")
+        );
         assert_eq!(
             request
                 .headers
