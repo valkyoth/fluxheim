@@ -24,12 +24,12 @@ use fluxheim_config::{
     HeaderPolicyConfig, HeaderValues, RequestHeaderPolicyConfig, ResponseHeaderPolicyConfig,
     ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
 };
-#[cfg(not(feature = "privacy-mode"))]
-use fluxheim_headers::build_forwarded_header;
 use fluxheim_headers::{
     SPOOFABLE_CLIENT_IP_HEADERS, rewrite_header_prefix, rewrite_refresh_url,
     rewrite_set_cookie_value,
 };
+#[cfg(not(feature = "privacy-mode"))]
+use fluxheim_headers::{build_forwarded_header, effective_client_ip};
 use fluxheim_protocol::{
     Http1RequestTarget, http1_request_target, route_method_matches, route_prefix_matches_path,
     route_strip_prefix_suffix,
@@ -37,7 +37,7 @@ use fluxheim_protocol::{
 
 use crate::{
     DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1ProxyConfigError,
-    NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb,
+    NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb, ProxyProtocolTrustedSource,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -98,6 +98,8 @@ pub(crate) struct NativeRouteRequestHeaderPolicy {
     x_forwarded_proto: bool,
     #[cfg(not(feature = "privacy-mode"))]
     forwarded: bool,
+    #[cfg(not(feature = "privacy-mode"))]
+    trusted_sources: Vec<ProxyProtocolTrustedSource>,
     unset: Vec<String>,
     set: Vec<(String, String)>,
     append: Vec<(String, String)>,
@@ -174,12 +176,33 @@ impl NativeHttp1RouteProxy {
         policy: DownstreamHttp1Policy,
         pool_max_idle: usize,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        Self::from_vhost_config_with_trusted_sources(
+            vhost,
+            base_headers,
+            inherited_compression,
+            policy,
+            pool_max_idle,
+            &[],
+        )
+    }
+
+    pub fn from_vhost_config_with_trusted_sources(
+        vhost: &fluxheim_config::VhostConfig,
+        base_headers: &HeaderPolicyConfig,
+        inherited_compression: Option<&fluxheim_config::CompressionConfig>,
+        policy: DownstreamHttp1Policy,
+        pool_max_idle: usize,
+        #[cfg_attr(feature = "privacy-mode", allow(unused_variables))]
+        trusted_sources: &[ProxyProtocolTrustedSource],
+    ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
         let headers = base_headers.with_vhost_overlay(&vhost.headers);
         let inherited_compression = vhost.compression.as_ref().or(inherited_compression);
         let fallback =
             NativeHttp1Proxy::from_proxy_config_with_pool_size(&vhost.proxy, policy, pool_max_idle)
                 .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
         let fallback = fallback.map(|proxy| proxy.with_header_policy(&headers));
+        #[cfg(not(feature = "privacy-mode"))]
+        let fallback = fallback.map(|proxy| proxy.with_trusted_sources(trusted_sources));
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -202,21 +225,27 @@ impl NativeHttp1RouteProxy {
             .chain(vhost.redirect.route_config())
         {
             let proxy = if let Some(proxy_config) = route.proxy.as_ref() {
-                NativeHttp1Proxy::from_proxy_config_with_pool_size(
+                let proxy = NativeHttp1Proxy::from_proxy_config_with_pool_size(
                     proxy_config,
                     policy,
                     pool_max_idle,
                 )
-                .map_err(NativeHttp1RouteProxyConfigError::Proxy)?
+                .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
+                #[cfg(not(feature = "privacy-mode"))]
+                let proxy = proxy.map(|proxy| proxy.with_trusted_sources(trusted_sources));
+                proxy
             } else {
                 None
             };
-            routes.push(NativeHttp1RouteProxyRoute::from_config_with_inherited(
+            let route = NativeHttp1RouteProxyRoute::from_config_with_inherited(
                 &route,
                 proxy,
                 &headers,
                 inherited_compression,
-            )?);
+            )?;
+            #[cfg(not(feature = "privacy-mode"))]
+            let route = route.with_trusted_sources(trusted_sources);
+            routes.push(route);
         }
 
         Ok(Self { routes, fallback })
@@ -239,7 +268,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
-            action: NativeHttp1RouteAction::Proxy(Box::new(proxy)),
+            action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
 
@@ -258,7 +287,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
-            action: NativeHttp1RouteAction::Proxy(Box::new(proxy)),
+            action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
 
@@ -277,7 +306,7 @@ impl NativeHttp1RouteProxyRoute {
             compression: None,
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
-            action: NativeHttp1RouteAction::Proxy(Box::new(proxy)),
+            action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
 
@@ -405,7 +434,9 @@ impl NativeHttp1RouteProxyRoute {
             )
         } else {
             NativeHttp1RouteAction::Proxy(Box::new(
-                proxy.ok_or(NativeHttp1RouteProxyConfigError::MissingRouteAction)?,
+                proxy
+                    .ok_or(NativeHttp1RouteProxyConfigError::MissingRouteAction)?
+                    .without_header_policy(),
             ))
         };
         let headers = base_headers.with_vhost_overlay(&route.headers);
@@ -466,6 +497,13 @@ impl NativeHttp1RouteProxyRoute {
         // policy. Config-built routes should use from_config_with_inherited()
         // when root/vhost policy inheritance is required.
         self.response_headers = NativeRouteResponseHeaderPolicy::from_overlay(response_headers);
+        self
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    pub fn with_trusted_sources(mut self, trusted_sources: &[ProxyProtocolTrustedSource]) -> Self {
+        self.request_headers
+            .set_trusted_sources(trusted_sources.to_vec());
         self
     }
 
@@ -1147,6 +1185,8 @@ impl NativeRouteRequestHeaderPolicy {
             x_forwarded_proto: policy.x_forwarded_proto,
             #[cfg(not(feature = "privacy-mode"))]
             forwarded: policy.forwarded,
+            #[cfg(not(feature = "privacy-mode"))]
+            trusted_sources: Vec::new(),
             unset: policy.effective_unset(),
             set: policy.effective_set().into_iter().collect(),
             append: flatten_append_headers(&policy.append),
@@ -1225,7 +1265,17 @@ impl NativeRouteRequestHeaderPolicy {
         }
 
         let original_x_forwarded_for = header_value(request, "x-forwarded-for").map(str::to_owned);
-        let client_ip = request.peer_addr.map(|addr| addr.ip());
+        let direct_ip = request.peer_addr.map(|addr| addr.ip());
+        let trusted_direct_peer = direct_ip.is_some_and(|ip| self.trusted_source_contains(ip));
+        let trusted_proxy_matcher = |ip| self.trusted_source_contains(ip);
+        let client_ip = direct_ip.map(|ip| {
+            effective_client_ip(
+                ip,
+                trusted_direct_peer,
+                original_x_forwarded_for.as_deref(),
+                Some(&trusted_proxy_matcher),
+            )
+        });
         match (self.x_forwarded_for, client_ip) {
             (ForwardedClientIpHeaderMode::Off, _) => {
                 remove_request_header(request, "x-forwarded-for")
@@ -1234,7 +1284,9 @@ impl NativeRouteRequestHeaderPolicy {
                 replace_request_header(request, "x-forwarded-for", ip.to_string());
             }
             (ForwardedClientIpHeaderMode::Append, Some(ip)) => {
-                let value = original_x_forwarded_for
+                let value = trusted_direct_peer
+                    .then_some(original_x_forwarded_for)
+                    .flatten()
                     .filter(|value| !value.trim().is_empty())
                     .map(|value| format!("{value}, {ip}"))
                     .unwrap_or_else(|| ip.to_string());
@@ -1277,9 +1329,21 @@ impl NativeRouteRequestHeaderPolicy {
             }
         }
     }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    pub(crate) fn set_trusted_sources(&mut self, trusted_sources: Vec<ProxyProtocolTrustedSource>) {
+        self.trusted_sources = trusted_sources;
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    fn trusted_source_contains(&self, address: std::net::IpAddr) -> bool {
+        self.trusted_sources
+            .iter()
+            .any(|source| source.contains(address))
+    }
 }
 
-fn default_native_request_header_policy() -> NativeRouteRequestHeaderPolicy {
+pub(crate) fn default_native_request_header_policy() -> NativeRouteRequestHeaderPolicy {
     NativeRouteRequestHeaderPolicy::from_policy(&RequestHeaderPolicyConfig::default())
 }
 

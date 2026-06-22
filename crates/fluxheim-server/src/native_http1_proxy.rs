@@ -6,6 +6,8 @@ use std::time::Duration;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::NativeHttp1UpstreamTls;
+#[cfg(not(feature = "privacy-mode"))]
+use crate::ProxyProtocolTrustedSource;
 #[cfg(any(
     feature = "compression-brotli",
     feature = "compression-gzip",
@@ -14,6 +16,7 @@ use crate::NativeHttp1UpstreamTls;
 use crate::native_http1_route_proxy::apply_native_response_compression;
 use crate::native_http1_route_proxy::{
     NativeRouteRequestHeaderPolicy, NativeRouteResponseHeaderPolicy,
+    default_native_request_header_policy,
 };
 use crate::{
     NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb,
@@ -114,7 +117,7 @@ impl NativeHttp1Proxy {
             upstreams: vec![upstream],
             upstream_slots: vec![0],
             error_pages: Vec::new(),
-            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             #[cfg(any(
                 feature = "compression-brotli",
@@ -137,7 +140,7 @@ impl NativeHttp1Proxy {
             upstreams,
             upstream_slots,
             error_pages: Vec::new(),
-            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             #[cfg(any(
                 feature = "compression-brotli",
@@ -168,7 +171,7 @@ impl NativeHttp1Proxy {
             upstreams,
             upstream_slots,
             error_pages: Vec::new(),
-            request_headers: NativeRouteRequestHeaderPolicy::default(),
+            request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             #[cfg(any(
                 feature = "compression-brotli",
@@ -195,6 +198,19 @@ impl NativeHttp1Proxy {
     pub fn with_header_policy(mut self, headers: &fluxheim_config::HeaderPolicyConfig) -> Self {
         self.request_headers = NativeRouteRequestHeaderPolicy::from_policy(&headers.request);
         self.response_headers = NativeRouteResponseHeaderPolicy::from_policy(&headers.response);
+        self
+    }
+
+    pub(crate) fn without_header_policy(mut self) -> Self {
+        self.request_headers = NativeRouteRequestHeaderPolicy::default();
+        self.response_headers = NativeRouteResponseHeaderPolicy::default();
+        self
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    pub fn with_trusted_sources(mut self, trusted_sources: &[ProxyProtocolTrustedSource]) -> Self {
+        self.request_headers
+            .set_trusted_sources(trusted_sources.to_vec());
         self
     }
 

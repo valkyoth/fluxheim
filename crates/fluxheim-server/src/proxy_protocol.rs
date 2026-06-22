@@ -1,14 +1,37 @@
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
 use fluxheim_config::{Config, DownstreamProxyProtocol};
 
 use crate::ServerPlanError;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProxyProtocolTrustedSource {
-    Cidr {
-        network: std::net::IpAddr,
-        prefix: u8,
-    },
-    Ip(std::net::IpAddr),
+    Cidr { network: IpAddr, prefix: u8 },
+    Ip(IpAddr),
+}
+
+impl ProxyProtocolTrustedSource {
+    pub fn contains(self, address: IpAddr) -> bool {
+        let address = normalize_ipv4_mapped_ip(address);
+        match (self, address) {
+            (Self::Ip(trusted), address) => normalize_ipv4_mapped_ip(trusted) == address,
+            (
+                Self::Cidr {
+                    network: IpAddr::V4(network),
+                    prefix,
+                },
+                IpAddr::V4(address),
+            ) => ipv4_prefix_match(network, address, prefix),
+            (
+                Self::Cidr {
+                    network: IpAddr::V6(network),
+                    prefix,
+                },
+                IpAddr::V6(address),
+            ) => ipv6_prefix_match(network, address, prefix),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -20,6 +43,34 @@ pub enum ProxyProtocolPolicy {
     V2 {
         trusted_sources: Vec<ProxyProtocolTrustedSource>,
     },
+}
+
+fn normalize_ipv4_mapped_ip(address: IpAddr) -> IpAddr {
+    match address {
+        IpAddr::V6(address) => address
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V6(address)),
+        IpAddr::V4(_) => address,
+    }
+}
+
+fn ipv4_prefix_match(network: Ipv4Addr, address: Ipv4Addr, prefix: u8) -> bool {
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix)
+    };
+    u32::from(network) & mask == u32::from(address) & mask
+}
+
+fn ipv6_prefix_match(network: Ipv6Addr, address: Ipv6Addr, prefix: u8) -> bool {
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u128::MAX << (128 - prefix)
+    };
+    u128::from(network) & mask == u128::from(address) & mask
 }
 
 impl ProxyProtocolPolicy {
@@ -60,5 +111,44 @@ fn parse_proxy_protocol_trusted_source(
         fluxheim_protocol::ProxyProtocolTrustedSource::Cidr { network, prefix } => {
             Ok(ProxyProtocolTrustedSource::Cidr { network, prefix })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trusted_source_contains_exact_and_cidr_matches() {
+        let exact = ProxyProtocolTrustedSource::Ip("203.0.113.10".parse().unwrap());
+        assert!(exact.contains("203.0.113.10".parse().unwrap()));
+        assert!(!exact.contains("203.0.113.11".parse().unwrap()));
+
+        let v4_cidr = ProxyProtocolTrustedSource::Cidr {
+            network: "198.51.100.0".parse().unwrap(),
+            prefix: 24,
+        };
+        assert!(v4_cidr.contains("198.51.100.42".parse().unwrap()));
+        assert!(!v4_cidr.contains("198.51.101.42".parse().unwrap()));
+
+        let v6_cidr = ProxyProtocolTrustedSource::Cidr {
+            network: "2001:db8:abcd::".parse().unwrap(),
+            prefix: 48,
+        };
+        assert!(v6_cidr.contains("2001:db8:abcd::42".parse().unwrap()));
+        assert!(!v6_cidr.contains("2001:db8:abce::42".parse().unwrap()));
+    }
+
+    #[test]
+    fn trusted_source_matches_ipv4_mapped_ipv6_literals() {
+        let exact = ProxyProtocolTrustedSource::Ip("203.0.113.10".parse().unwrap());
+        assert!(exact.contains("::ffff:203.0.113.10".parse().unwrap()));
+
+        let v4_cidr = ProxyProtocolTrustedSource::Cidr {
+            network: "198.51.100.0".parse().unwrap(),
+            prefix: 24,
+        };
+        assert!(v4_cidr.contains("::ffff:198.51.100.42".parse().unwrap()));
+        assert!(!v4_cidr.contains("::ffff:198.51.101.42".parse().unwrap()));
     }
 }

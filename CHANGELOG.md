@@ -21,13 +21,15 @@ behavior when the change improves security or project direction.
   `X-Forwarded-Proto`, and RFC `Forwarded`.
 - Move vhost-level redirect routes and explicit ACME HTTP-01 upstream challenge
   routes into native route-proxy construction and the native cutover inventory.
+- Move trusted-chain `X-Forwarded-For = append` support into the native
+  request-header policy using the same trusted-source matcher as downstream
+  PROXY protocol planning.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
-- Keep trusted-chain `X-Forwarded-For = append`, auth-request, traffic mirror,
-  access/rate/concurrency, cache, PHP-FPM, dynamic discovery, managed local
-  ACME challenge serving, and advanced load-balancer state reported as explicit
-  compatibility blockers.
+- Keep auth-request, traffic mirror, access/rate/concurrency, cache, PHP-FPM,
+  dynamic discovery, managed local ACME challenge serving, and advanced
+  load-balancer state reported as explicit compatibility blockers.
 
 ### Security
 
@@ -52,6 +54,8 @@ behavior when the change improves security or project direction.
   forwarded-client-IP fields.
 - Initialize programmatic native route constructors with the safe default
   request-header policy instead of a no-op policy.
+- Add native route tests proving trusted append preserves the forwarded chain
+  for trusted peers and strips untrusted spoofed chains for direct clients.
 - Add live native listener tests proving inherited response-header and standard
   security-header emission on route responses.
 - Add live native listener tests proving plain-proxy gzip compression and

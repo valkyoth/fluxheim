@@ -17,8 +17,9 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 proxy handling now owns the safe forwarded-client-IP header
   modes: `X-Forwarded-For = off`, `X-Forwarded-For = replace`, `X-Real-IP`,
   `X-Forwarded-Host`, `X-Forwarded-Proto`, and RFC `Forwarded`.
-- The native cutover inventory still rejects `X-Forwarded-For = append` until
-  trusted proxy-chain state is threaded through the native runtime.
+- Native HTTP/1 route proxy handling now owns trusted-chain
+  `X-Forwarded-For = append` for routes and programmatic builders, preserving
+  inbound chains only when the direct peer matches configured trusted sources.
 - Root and vhost compression no longer blocks native HTTP/1 proxy cutover when
   a matching compression backend feature is compiled.
 - Native route-proxy construction now mirrors the compatibility route order for
@@ -66,6 +67,9 @@ the native HTTP/1 proxy path.
   reintroducing spoofable forwarded-client-IP fields.
 - Programmatic native route constructors now start with the same safe default
   request-header policy used by config-built routes, instead of a no-op policy.
+- Native trusted append uses the same effective-client-IP restoration helper as
+  the compatibility path, so untrusted direct peers cannot preserve spoofed
+  inbound forwarding chains.
 - Privacy-mode native proxy builds strip spoofable inbound client-IP headers and
   do not compile the non-privacy forwarded-header synthesis helpers.
 - Native route responses now apply inherited standard security headers such as
@@ -75,10 +79,9 @@ the native HTTP/1 proxy path.
 ## Compatibility
 
 This release does not remove Pingora from normal builds yet. The remaining
-compatibility blockers are trusted-chain forwarded-client-IP append,
-auth-request subrequests, traffic mirroring, access/rate/concurrency policy,
-managed local ACME challenge serving, route rewrite templates, per-proxy
-downstream timeout/min-send-rate policy, advanced upstream transport knobs,
-cache lookup/fill/stale behavior, PHP-FPM routing, dynamic discovery,
-health-aware load balancing, persistence, priority/backup/drain state, and
-hash-based load-balancer selection.
+compatibility blockers are auth-request subrequests, traffic mirroring,
+access/rate/concurrency policy, managed local ACME challenge serving, route
+rewrite templates, per-proxy downstream timeout/min-send-rate policy, advanced
+upstream transport knobs, cache lookup/fill/stale behavior, PHP-FPM routing,
+dynamic discovery, health-aware load balancing, persistence,
+priority/backup/drain state, and hash-based load-balancer selection.

@@ -512,7 +512,7 @@ fn server_plan_accepts_native_http1_route_proxy_candidate_with_request_header_mu
 }
 
 #[test]
-fn server_plan_rejects_native_http1_route_proxy_candidate_with_forwarded_append_policy() {
+fn server_plan_accepts_native_http1_route_proxy_candidate_with_forwarded_append_policy() {
     let config = Config {
         vhosts: vec![VhostConfig {
             name: "native.test".to_owned(),
@@ -569,9 +569,10 @@ fn server_plan_rejects_native_http1_route_proxy_candidate_with_forwarded_append_
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::HttpPolicy)
+        None
     );
 }
 
