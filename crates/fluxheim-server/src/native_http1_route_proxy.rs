@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 #[cfg(any(
     feature = "compression-brotli",
@@ -25,7 +26,7 @@ use fluxheim_compression::{
 #[cfg(not(feature = "privacy-mode"))]
 use fluxheim_config::ForwardedClientIpHeaderMode;
 use fluxheim_config::{
-    AccessPolicyConfig, HeaderPolicyConfig, HeaderValues, RequestHeaderPolicyConfig,
+    AccessPolicyConfig, HeaderPolicyConfig, HeaderValues, RateLimitMode, RequestHeaderPolicyConfig,
     ResponseHeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
 };
 use fluxheim_headers::{
@@ -53,6 +54,7 @@ pub struct NativeHttp1RouteProxy {
     routes: Vec<NativeHttp1RouteProxyRoute>,
     fallback: Option<NativeHttp1Proxy>,
     access: NativeIpAccessPolicy,
+    rate_limit: NativeRateLimit,
     concurrency: NativeConcurrencyLimit,
     #[cfg(not(feature = "privacy-mode"))]
     trusted_sources: Vec<ProxyProtocolTrustedSource>,
@@ -75,6 +77,7 @@ pub struct NativeHttp1RouteProxyRoute {
     request_headers: NativeRouteRequestHeaderPolicy,
     response_headers: NativeRouteResponseHeaderPolicy,
     access: NativeIpAccessPolicy,
+    rate_limit: NativeRateLimit,
     concurrency: NativeConcurrencyLimit,
     action: NativeHttp1RouteAction,
 }
@@ -175,6 +178,67 @@ struct NativeIpAccessPolicy {
     allow: Vec<ProxyProtocolTrustedSource>,
     deny: Vec<ProxyProtocolTrustedSource>,
 }
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum NativeRateLimitKey {
+    Ip(IpAddr),
+    Indeterminate,
+}
+
+impl From<Option<IpAddr>> for NativeRateLimitKey {
+    fn from(value: Option<IpAddr>) -> Self {
+        value.map(Self::Ip).unwrap_or(Self::Indeterminate)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct NativeRateLimitBucket {
+    tokens: f64,
+    updated_at: Instant,
+    last_seen: Instant,
+}
+
+#[derive(Debug)]
+struct NativeRateLimitState {
+    buckets: Mutex<HashMap<NativeRateLimitKey, NativeRateLimitBucket>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum NativeRateLimitDecision {
+    Allow,
+    Delay(Duration),
+    Reject(u16),
+}
+
+#[derive(Clone, Debug)]
+struct NativeRateLimit {
+    enabled: bool,
+    requests_per_second: f64,
+    burst: f64,
+    status: u16,
+    table_max_entries: usize,
+    entry_ttl: Duration,
+    mode: RateLimitMode,
+    max_delay: Duration,
+    reject_indeterminate: bool,
+    state: Arc<NativeRateLimitState>,
+}
+
+impl PartialEq for NativeRateLimit {
+    fn eq(&self, other: &Self) -> bool {
+        self.enabled == other.enabled
+            && self.requests_per_second == other.requests_per_second
+            && self.burst == other.burst
+            && self.status == other.status
+            && self.table_max_entries == other.table_max_entries
+            && self.entry_ttl == other.entry_ttl
+            && self.mode == other.mode
+            && self.max_delay == other.max_delay
+            && self.reject_indeterminate == other.reject_indeterminate
+    }
+}
+
+impl Eq for NativeRateLimit {}
 
 #[derive(Debug)]
 struct NativeConcurrencyPermit {
@@ -315,6 +379,109 @@ fn parse_native_access_sources(
         .collect()
 }
 
+impl Default for NativeRateLimit {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            requests_per_second: 0.0,
+            burst: 0.0,
+            status: 429,
+            table_max_entries: 0,
+            entry_ttl: Duration::from_secs(300),
+            mode: RateLimitMode::Nodelay,
+            max_delay: Duration::from_millis(1000),
+            reject_indeterminate: false,
+            state: Arc::new(NativeRateLimitState {
+                buckets: Mutex::new(HashMap::new()),
+            }),
+        }
+    }
+}
+
+impl NativeRateLimit {
+    fn from_config(config: &fluxheim_config::RateLimitConfig) -> Self {
+        let burst = if config.burst == 0 {
+            config.requests_per_second.max(1)
+        } else {
+            config.burst
+        };
+        Self {
+            enabled: config.enabled,
+            requests_per_second: f64::from(config.requests_per_second),
+            burst: f64::from(burst),
+            status: config.status,
+            table_max_entries: config.table_max_entries,
+            entry_ttl: Duration::from_secs(config.entry_ttl_secs),
+            mode: config.mode,
+            max_delay: Duration::from_millis(config.max_delay_ms),
+            reject_indeterminate: config.reject_indeterminate,
+            state: Arc::new(NativeRateLimitState {
+                buckets: Mutex::new(HashMap::new()),
+            }),
+        }
+    }
+
+    fn check(&self, client_ip: Option<IpAddr>) -> NativeRateLimitDecision {
+        if !self.enabled {
+            return NativeRateLimitDecision::Allow;
+        }
+
+        let now = Instant::now();
+        let key = NativeRateLimitKey::from(client_ip);
+        if matches!(key, NativeRateLimitKey::Indeterminate) && self.reject_indeterminate {
+            return NativeRateLimitDecision::Reject(self.status);
+        }
+        let mut buckets = match self.state.buckets.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "native rate-limit bucket lock poisoned; aborting to avoid inconsistent edge limits"
+                );
+                std::process::abort();
+            }
+        };
+        if !buckets.contains_key(&key) && buckets.len() >= self.table_max_entries {
+            buckets.retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.entry_ttl);
+            if buckets.len() >= self.table_max_entries {
+                return NativeRateLimitDecision::Reject(self.status);
+            }
+        }
+
+        let bucket = buckets.entry(key).or_insert(NativeRateLimitBucket {
+            tokens: self.burst,
+            updated_at: now,
+            last_seen: now,
+        });
+        let elapsed = now.duration_since(bucket.updated_at).as_secs_f64();
+        bucket.tokens = self
+            .burst
+            .min(bucket.tokens + elapsed * self.requests_per_second);
+        bucket.updated_at = now;
+        bucket.last_seen = now;
+
+        if bucket.tokens >= 1.0 {
+            bucket.tokens -= 1.0;
+            return NativeRateLimitDecision::Allow;
+        }
+
+        if !matches!(self.mode, RateLimitMode::Delay) || bucket.tokens <= -self.burst {
+            return NativeRateLimitDecision::Reject(self.status);
+        }
+
+        if !self.requests_per_second.is_finite() || self.requests_per_second <= 0.0 {
+            return NativeRateLimitDecision::Reject(self.status);
+        }
+        let wait = Duration::from_secs_f64((1.0 - bucket.tokens) / self.requests_per_second);
+        if wait > self.max_delay {
+            return NativeRateLimitDecision::Reject(self.status);
+        }
+
+        bucket.tokens -= 1.0;
+        NativeRateLimitDecision::Delay(wait)
+    }
+}
+
 impl Default for NativeConcurrencyLimit {
     fn default() -> Self {
         Self {
@@ -418,6 +585,7 @@ impl NativeHttp1RouteProxy {
             routes,
             fallback,
             access: NativeIpAccessPolicy::default(),
+            rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
             #[cfg(not(feature = "privacy-mode"))]
             trusted_sources: Vec::new(),
@@ -461,6 +629,7 @@ impl NativeHttp1RouteProxy {
         let headers = base_headers.with_vhost_overlay(&vhost.headers);
         let inherited_compression = vhost.compression.as_ref().or(inherited_compression);
         let access = NativeIpAccessPolicy::from_config(&vhost.access)?;
+        let rate_limit = NativeRateLimit::from_config(&vhost.rate_limit);
         let concurrency = NativeConcurrencyLimit::from_config(&vhost.concurrency);
         let fallback =
             NativeHttp1Proxy::from_proxy_config_with_pool_size(&vhost.proxy, policy, pool_max_idle)
@@ -517,6 +686,7 @@ impl NativeHttp1RouteProxy {
             routes,
             fallback,
             access,
+            rate_limit,
             concurrency,
             #[cfg(not(feature = "privacy-mode"))]
             trusted_sources: trusted_sources.to_vec(),
@@ -542,6 +712,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
@@ -564,6 +735,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
@@ -586,6 +758,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
@@ -613,6 +786,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
@@ -643,6 +817,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
@@ -672,6 +847,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::StaticWeb(web),
         }
@@ -748,6 +924,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: NativeRouteRequestHeaderPolicy::from_policy(&headers.request),
             response_headers: NativeRouteResponseHeaderPolicy::from_policy(&headers.response),
             access: NativeIpAccessPolicy::from_config(&route.access)?,
+            rate_limit: NativeRateLimit::from_config(&route.rate_limit),
             concurrency: NativeConcurrencyLimit::from_config(&route.concurrency),
             action,
         })
@@ -854,6 +1031,20 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .close_connection();
             }
             let concurrency_route = decoded_policy_route.or(selected_route);
+            match self.check_rate_limits(concurrency_route, client_ip) {
+                NativeRateLimitDecision::Allow => {}
+                NativeRateLimitDecision::Delay(delay) => {
+                    tokio::time::sleep(delay).await;
+                }
+                NativeRateLimitDecision::Reject(status) => {
+                    return NativeHttp1Response::new(
+                        status,
+                        "Too Many Requests",
+                        b"rate limited\n",
+                    )
+                    .close_connection();
+                }
+            }
             let _concurrency_permits =
                 match self.acquire_concurrency_permits(concurrency_route).await {
                     Ok(permits) => permits,
@@ -1010,6 +1201,34 @@ impl NativeHttp1RouteProxy {
         self.trusted_sources
             .iter()
             .any(|source| source.contains(address))
+    }
+
+    fn check_rate_limits(
+        &self,
+        route: Option<&NativeHttp1RouteProxyRoute>,
+        client_ip: Option<IpAddr>,
+    ) -> NativeRateLimitDecision {
+        let mut delay = None;
+        match self.rate_limit.check(client_ip) {
+            NativeRateLimitDecision::Allow => {}
+            NativeRateLimitDecision::Delay(vhost_delay) => delay = Some(vhost_delay),
+            decision => return decision,
+        }
+        if let Some(route) = route {
+            match route.rate_limit.check(client_ip) {
+                NativeRateLimitDecision::Allow => {}
+                NativeRateLimitDecision::Delay(route_delay) => {
+                    delay = Some(
+                        delay.map_or(route_delay, |current: Duration| current.max(route_delay)),
+                    );
+                }
+                decision => return decision,
+            }
+        }
+
+        delay
+            .map(NativeRateLimitDecision::Delay)
+            .unwrap_or(NativeRateLimitDecision::Allow)
     }
 
     async fn acquire_concurrency_permits(

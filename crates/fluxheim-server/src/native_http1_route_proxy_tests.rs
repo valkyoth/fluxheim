@@ -638,6 +638,104 @@ async fn native_route_proxy_route_concurrency_rejects_second_request() {
     assert!(first.ends_with("released"));
 }
 
+#[tokio::test]
+async fn native_route_proxy_vhost_rate_limit_rejects_second_request() {
+    let upstream = upstream_expect_path("/limited", "first").await;
+    let vhost = fluxheim_config::VhostConfig {
+        name: "route.test".to_owned(),
+        hosts: vec!["route.test".to_owned()],
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: fluxheim_config::RateLimitConfig {
+            enabled: true,
+            requests_per_second: 1,
+            burst: 1,
+            status: 429,
+            ..Default::default()
+        },
+        concurrency: Default::default(),
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: Default::default(),
+        proxy: fluxheim_config::ProxyConfig {
+            upstreams: vec![upstream.to_string()],
+            ..Default::default()
+        },
+        cache: Default::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: Default::default(),
+        routes: Vec::new(),
+    };
+    let route_proxy = NativeHttp1RouteProxy::from_vhost_config(
+        &vhost,
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        None,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(route_proxy).await;
+
+    let first = downstream_get(proxy, "/limited").await;
+    let second = downstream_get(proxy, "/limited").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("first"));
+    assert!(second.starts_with("HTTP/1.1 429 Too Many Requests\r\n"));
+    assert!(second.ends_with("rate limited\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_route_rate_limit_rejects_second_request() {
+    let upstream = upstream_expect_path("/limited", "first").await;
+    let route_config = fluxheim_config::RouteConfig {
+        name: "limited".to_owned(),
+        path_exact: Some("/limited".to_owned()),
+        path_prefix: None,
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: fluxheim_config::RateLimitConfig {
+            enabled: true,
+            requests_per_second: 1,
+            burst: 1,
+            status: 429,
+            ..Default::default()
+        },
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: None,
+        proxy: Some(fluxheim_config::ProxyConfig {
+            upstreams: vec![upstream.to_string()],
+            ..Default::default()
+        }),
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
+    };
+    let route =
+        NativeHttp1RouteProxyRoute::from_config(&route_config, Some(proxy_for(upstream))).unwrap();
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let first = downstream_get(proxy, "/limited").await;
+    let second = downstream_get(proxy, "/limited").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("first"));
+    assert!(second.starts_with("HTTP/1.1 429 Too Many Requests\r\n"));
+    assert!(second.ends_with("rate limited\n"));
+}
+
 #[cfg(not(feature = "privacy-mode"))]
 #[tokio::test]
 async fn native_route_proxy_vhost_access_uses_trusted_forwarded_chain() {

@@ -28,6 +28,8 @@ the native HTTP/1 proxy path.
   restoration when configured trusted sources identify the direct peer.
 - Native HTTP/1 route proxy handling now owns vhost and route concurrency
   limits, including immediate rejection and bounded queued waits.
+- Native HTTP/1 route proxy handling now owns vhost and route local rate
+  limits, including token-bucket rejection and delay-mode admission.
 - Root and vhost compression no longer blocks native HTTP/1 proxy cutover when
   a matching compression backend feature is compiled.
 - Native route-proxy construction now mirrors the compatibility route order for
@@ -95,6 +97,9 @@ the native HTTP/1 proxy path.
 - Native concurrency limits are enforced before rewrite, local static,
   redirect, or upstream proxy actions run; permits are held until the native
   response is produced.
+- Native rate limits are enforced before concurrency permits, rewrite, local
+  static, redirect, or upstream proxy actions run; excess requests are rejected
+  before the native upstream path is reached.
 - Config validation and native regex route compilation now apply the same
   explicit NFA and DFA cache limits.
 - Privacy-mode native route proxy handling now strips spoofable
@@ -119,8 +124,8 @@ the native HTTP/1 proxy path.
 
 This release does not remove Pingora from normal builds yet. The remaining
 compatibility blockers are auth-request subrequests, traffic mirroring,
-cert/Geo access policy, rate limiting, managed local ACME challenge serving,
-route per-proxy downstream timeout/min-send-rate policy, advanced upstream
-transport knobs, cache lookup/fill/stale behavior, PHP-FPM routing, dynamic
-discovery, health-aware load balancing, persistence, priority/backup/drain
-state, and hash-based load-balancer selection.
+cert/Geo access policy, managed local ACME challenge serving, route per-proxy
+downstream timeout/min-send-rate policy, advanced upstream transport knobs,
+cache lookup/fill/stale behavior, PHP-FPM routing, dynamic discovery,
+health-aware load balancing, persistence, priority/backup/drain state, and
+hash-based load-balancer selection.

@@ -31,12 +31,14 @@ behavior when the change improves security or project direction.
   route proxy, including trusted `X-Forwarded-For` client restoration.
 - Move vhost and route concurrency limits into the native HTTP/1 route proxy,
   including immediate reject and bounded queue timeout behavior.
+- Move vhost and route local rate limiting into the native HTTP/1 route proxy,
+  including token-bucket rejection and delay-mode admission.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
-- Keep auth-request, traffic mirror, cert/Geo access, rate limiting, cache,
-  PHP-FPM, dynamic discovery, managed local ACME challenge serving, and
-  advanced load-balancer state reported as explicit compatibility blockers.
+- Keep auth-request, traffic mirror, cert/Geo access, cache, PHP-FPM, dynamic
+  discovery, managed local ACME challenge serving, and advanced load-balancer
+  state reported as explicit compatibility blockers.
 
 ### Security
 
@@ -78,6 +80,8 @@ behavior when the change improves security or project direction.
   through to a less restricted route.
 - Add live native route tests proving vhost and route concurrency limits reject
   a second request while the first request still holds the native upstream path.
+- Add live native route tests proving vhost and route rate limits reject
+  excess requests before the native upstream path is reached.
 - Set identical NFA and DFA regex cache limits for config validation and native
   regex route compilation.
 - Strip spoofable `X-Forwarded-Host` and `X-Forwarded-Proto` headers in
