@@ -13,9 +13,9 @@ use tokio::net::{TcpListener, TcpStream};
 #[cfg(not(feature = "privacy-mode"))]
 use crate::ProxyProtocolTrustedSource;
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1Request,
-    NativeHttp1RouteProxy, NativeHttp1RouteProxyRoute, NativeHttp1Upstream,
-    serve_native_http1_listener,
+    DownstreamHttp1Policy, NativeHttp1GeoContext, NativeHttp1Handler, NativeHttp1Proxy,
+    NativeHttp1Request, NativeHttp1RouteProxy, NativeHttp1RouteProxyRoute,
+    NativeHttp1TlsClientIdentity, NativeHttp1Upstream, serve_native_http1_listener,
 };
 
 async fn upstream_expect_path(
@@ -891,6 +891,143 @@ async fn native_route_proxy_vhost_access_uses_trusted_forwarded_chain() {
     );
     assert!(denied.starts_with("HTTP/1.1 403 Forbidden\r\n"));
     assert!(duplicate_header_denied.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_access_policy_checks_tls_client_identity() {
+    let allowed = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let denied = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let upstream = upstream_expect_path("/mtls", "mtls-ok").await;
+    let route_config = fluxheim_config::RouteConfig {
+        name: "mtls".to_owned(),
+        path_prefix: Some("/mtls".to_owned()),
+        path_exact: None,
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: fluxheim_config::AccessPolicyConfig {
+            require_client_cert: true,
+            allow_client_cert_sha256: vec![allowed.to_owned()],
+            deny_client_cert_sha256: vec![denied.to_owned()],
+            ..Default::default()
+        },
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: None,
+        proxy: Some(fluxheim_config::ProxyConfig {
+            upstreams: vec![upstream.to_string()],
+            ..Default::default()
+        }),
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
+    };
+    let route =
+        NativeHttp1RouteProxyRoute::from_config(&route_config, Some(proxy_for(upstream))).unwrap();
+    let proxy = NativeHttp1RouteProxy::new(vec![route], None);
+
+    let mut allowed_request = route_test_request("/mtls");
+    allowed_request.tls_identity = Some(NativeHttp1TlsClientIdentity {
+        cert_sha256: Some(allowed.to_ascii_uppercase()),
+        ..Default::default()
+    });
+    let mut denied_request = route_test_request("/mtls");
+    denied_request.tls_identity = Some(NativeHttp1TlsClientIdentity {
+        cert_sha256: Some(denied.to_owned()),
+        ..Default::default()
+    });
+    let mut unknown_request = route_test_request("/mtls");
+    unknown_request.tls_identity = Some(NativeHttp1TlsClientIdentity {
+        cert_sha256: Some(
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_owned(),
+        ),
+        ..Default::default()
+    });
+
+    let allowed_response = proxy.handle(allowed_request).await;
+    let denied_response = proxy.handle(denied_request).await;
+    let unknown_response = proxy.handle(unknown_request).await;
+    let missing_response = proxy.handle(route_test_request("/mtls")).await;
+
+    assert_eq!(allowed_response.status(), 200);
+    assert_eq!(allowed_response.body(), b"mtls-ok");
+    assert_eq!(denied_response.status(), 403);
+    assert_eq!(unknown_response.status(), 403);
+    assert_eq!(missing_response.status(), 403);
+}
+
+#[tokio::test]
+async fn native_route_proxy_access_policy_checks_geo_context() {
+    let upstream = upstream_expect_path("/geo", "geo-ok").await;
+    let route_config = fluxheim_config::RouteConfig {
+        name: "geo".to_owned(),
+        path_prefix: Some("/geo".to_owned()),
+        path_exact: None,
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: fluxheim_config::AccessPolicyConfig {
+            allow_countries: vec!["SE".to_owned()],
+            deny_asns: vec![64512],
+            ..Default::default()
+        },
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: None,
+        proxy: Some(fluxheim_config::ProxyConfig {
+            upstreams: vec![upstream.to_string()],
+            ..Default::default()
+        }),
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
+    };
+    let route =
+        NativeHttp1RouteProxyRoute::from_config(&route_config, Some(proxy_for(upstream))).unwrap();
+    let proxy = NativeHttp1RouteProxy::new(vec![route], None);
+
+    let mut allowed_request = route_test_request("/geo");
+    allowed_request.geo_context = Some(NativeHttp1GeoContext {
+        country_iso: Some("se".to_owned()),
+        asn: Some(12552),
+    });
+    let mut denied_country_request = route_test_request("/geo");
+    denied_country_request.geo_context = Some(NativeHttp1GeoContext {
+        country_iso: Some("NO".to_owned()),
+        asn: Some(12552),
+    });
+    let mut denied_asn_request = route_test_request("/geo");
+    denied_asn_request.geo_context = Some(NativeHttp1GeoContext {
+        country_iso: Some("SE".to_owned()),
+        asn: Some(64512),
+    });
+
+    let allowed_response = proxy.handle(allowed_request).await;
+    let denied_country_response = proxy.handle(denied_country_request).await;
+    let denied_asn_response = proxy.handle(denied_asn_request).await;
+    let missing_response = proxy.handle(route_test_request("/geo")).await;
+
+    assert_eq!(allowed_response.status(), 200);
+    assert_eq!(allowed_response.body(), b"geo-ok");
+    assert_eq!(denied_country_response.status(), 403);
+    assert_eq!(denied_asn_response.status(), 403);
+    assert_eq!(missing_response.status(), 403);
 }
 
 #[cfg(not(feature = "privacy-mode"))]

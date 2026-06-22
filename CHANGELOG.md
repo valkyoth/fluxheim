@@ -57,6 +57,10 @@ behavior when the change improves security or project direction.
 - Add native HTTP/1 request context slots for TLS client identity and Geo
   context so the next cert/Geo access-policy slice can consume typed request
   facts instead of depending on compatibility-session state.
+- Teach the native route-proxy access evaluator to enforce client-certificate
+  fingerprint and Geo country/ASN allow/deny policy when typed request context
+  is present. The native cutover planner still reports cert/Geo policy as a
+  blocker until runtime TLS/Geo context population is wired end to end.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
@@ -136,6 +140,9 @@ behavior when the change improves security or project direction.
   options are accepted and still connect.
 - Add a live native HTTP/1 listener test proving plain listener requests leave
   TLS client identity and Geo context unset by default.
+- Add native route-proxy tests proving client-certificate fingerprint policy
+  and Geo country/ASN policy deny before upstream forwarding when request
+  context does not satisfy the route policy.
 - Send `408 Request Timeout` before closing native HTTP/1 connections that
   exceed the selected request-body timeout, and ensure redirect/static routes
   do not inherit fallback proxy body-read timeouts.

@@ -45,6 +45,10 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 requests now carry typed optional TLS client identity and Geo
   context fields, laying the native boundary needed for the upcoming cert/Geo
   access-policy cutover.
+- Native route-proxy access evaluation can now enforce client-certificate
+  fingerprint and Geo country/ASN rules when typed request context is present;
+  full native cutover for cert/Geo policy remains blocked until runtime
+  TLS/Geo context population is wired end to end.
 - Native HTTP/1 route proxy handling now honors route-scoped
   `[vhosts.routes.grpc]` validation, rejecting non-POST requests, duplicate
   `Content-Type` headers, and non-gRPC content types before forwarding.
@@ -138,6 +142,9 @@ the native HTTP/1 proxy path.
   and still connect through the native proxy path.
 - Native listener tests now prove plain HTTP requests leave TLS client identity
   and Geo context unset by default.
+- Native route tests now prove client-certificate fingerprint and Geo
+  country/ASN policies reject requests before upstream forwarding when the
+  typed request context does not satisfy the configured policy.
 - Native proxy tests now prove a slow request body times out before any
   upstream connection is attempted when `proxy.downstream_read_timeout_secs`
   is selected.

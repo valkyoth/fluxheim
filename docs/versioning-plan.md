@@ -2768,7 +2768,9 @@ available for the stabilization/security-only follow-up.
   after route/proxy selection. Move route-scoped `[vhosts.routes.grpc]`
   request validation onto the native route proxy. Add native request-context
   slots for TLS client identity and Geo context as the typed foundation for the
-  next cert/Geo access-policy slice. Keep auth-request
+  next cert/Geo access-policy slice, and teach the native route-proxy access
+  evaluator to consume that context without lifting the cutover blocker yet.
+  Keep auth-request
   subrequests, traffic mirroring, cert/Geo access policy, managed local ACME
   challenge serving, upstream TCP Fast Open, cache, PHP-FPM, dynamic
   discovery, and load-balancer state explicitly reported as compatibility

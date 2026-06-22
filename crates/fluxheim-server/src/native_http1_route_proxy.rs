@@ -180,6 +180,13 @@ struct NativeIpAccessPolicy {
     enabled: bool,
     allow: Vec<ProxyProtocolTrustedSource>,
     deny: Vec<ProxyProtocolTrustedSource>,
+    require_client_cert: bool,
+    allow_client_cert_sha256: Vec<String>,
+    deny_client_cert_sha256: Vec<String>,
+    allow_countries: Vec<String>,
+    deny_countries: Vec<String>,
+    allow_asns: Vec<u32>,
+    deny_asns: Vec<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -337,36 +344,117 @@ impl NativeIpAccessPolicy {
         if !access.enabled {
             return Ok(Self::default());
         }
-        if access.require_client_cert
-            || !access.allow_client_cert_sha256.is_empty()
-            || !access.deny_client_cert_sha256.is_empty()
-            || !access.allow_countries.is_empty()
-            || !access.deny_countries.is_empty()
-            || !access.allow_asns.is_empty()
-            || !access.deny_asns.is_empty()
-        {
-            return Err(NativeHttp1RouteProxyConfigError::AccessPolicy);
-        }
         Ok(Self {
             enabled: true,
             allow: parse_native_access_sources(&access.allow)?,
             deny: parse_native_access_sources(&access.deny)?,
+            require_client_cert: access.require_client_cert,
+            allow_client_cert_sha256: normalized_access_strings(&access.allow_client_cert_sha256),
+            deny_client_cert_sha256: normalized_access_strings(&access.deny_client_cert_sha256),
+            allow_countries: normalized_access_strings(&access.allow_countries),
+            deny_countries: normalized_access_strings(&access.deny_countries),
+            allow_asns: access.allow_asns.clone(),
+            deny_asns: access.deny_asns.clone(),
         })
     }
 
-    fn allows(&self, client_ip: Option<IpAddr>) -> bool {
+    fn allows(
+        &self,
+        client_ip: Option<IpAddr>,
+        tls_identity: Option<&crate::NativeHttp1TlsClientIdentity>,
+        geo_context: Option<&crate::NativeHttp1GeoContext>,
+    ) -> bool {
         if !self.enabled {
             return true;
         }
         let ip_restrictive = !self.allow.is_empty() || !self.deny.is_empty();
-        let Some(client_ip) = client_ip else {
-            return !ip_restrictive;
-        };
-        if self.deny.iter().any(|source| source.contains(client_ip)) {
+        if let Some(client_ip) = client_ip {
+            if self.deny.iter().any(|source| source.contains(client_ip)) {
+                return false;
+            }
+            if !self.allow.is_empty() && !self.allow.iter().any(|source| source.contains(client_ip))
+            {
+                return false;
+            }
+        } else if ip_restrictive {
             return false;
         }
-        self.allow.is_empty() || self.allow.iter().any(|source| source.contains(client_ip))
+        self.allows_client_certificate(tls_identity) && self.allows_geo(geo_context)
     }
+
+    fn allows_client_certificate(
+        &self,
+        tls_identity: Option<&crate::NativeHttp1TlsClientIdentity>,
+    ) -> bool {
+        let cert_sha256 = tls_identity
+            .and_then(|identity| identity.cert_sha256.as_deref())
+            .map(str::to_ascii_lowercase);
+        if self.require_client_cert && cert_sha256.is_none() {
+            return false;
+        }
+        let Some(cert_sha256) = cert_sha256.as_deref() else {
+            return self.allow_client_cert_sha256.is_empty();
+        };
+        if self
+            .deny_client_cert_sha256
+            .iter()
+            .any(|denied| denied == cert_sha256)
+        {
+            return false;
+        }
+        self.allow_client_cert_sha256.is_empty()
+            || self
+                .allow_client_cert_sha256
+                .iter()
+                .any(|allowed| allowed == cert_sha256)
+    }
+
+    fn allows_geo(&self, geo_context: Option<&crate::NativeHttp1GeoContext>) -> bool {
+        let has_allow = !self.allow_countries.is_empty() || !self.allow_asns.is_empty();
+        let has_deny = !self.deny_countries.is_empty() || !self.deny_asns.is_empty();
+        if !has_allow && !has_deny {
+            return true;
+        }
+        let Some(geo_context) = geo_context else {
+            return !has_allow;
+        };
+        let country = geo_context
+            .country_iso
+            .as_deref()
+            .map(str::to_ascii_lowercase);
+        if country
+            .as_deref()
+            .is_some_and(|country| self.deny_countries.iter().any(|denied| denied == country))
+        {
+            return false;
+        }
+        if !self.allow_countries.is_empty()
+            && !country.as_deref().is_some_and(|country| {
+                self.allow_countries
+                    .iter()
+                    .any(|allowed| allowed == country)
+            })
+        {
+            return false;
+        }
+        if geo_context
+            .asn
+            .is_some_and(|asn| self.deny_asns.contains(&asn))
+        {
+            return false;
+        }
+        self.allow_asns.is_empty()
+            || geo_context
+                .asn
+                .is_some_and(|asn| self.allow_asns.contains(&asn))
+    }
+}
+
+fn normalized_access_strings(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
 }
 
 fn parse_native_access_sources(
@@ -1060,9 +1148,12 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .close_connection();
             };
             let client_ip = self.access_client_ip(&request);
-            if !self.access.allows(client_ip)
-                || !route_or_fallback.access_allows(client_ip)
-                || decoded_policy_route.is_some_and(|route| !route.access.allows(client_ip))
+            let tls_identity = request.tls_identity.as_ref();
+            let geo_context = request.geo_context.as_ref();
+            if !self.access.allows(client_ip, tls_identity, geo_context)
+                || !route_or_fallback.access_allows(client_ip, tls_identity, geo_context)
+                || decoded_policy_route
+                    .is_some_and(|route| !route.access.allows(client_ip, tls_identity, geo_context))
             {
                 return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
                     .close_connection();
@@ -1162,9 +1253,14 @@ impl<'a> RouteOrFallback<'a> {
         }
     }
 
-    fn access_allows(self, client_ip: Option<IpAddr>) -> bool {
+    fn access_allows(
+        self,
+        client_ip: Option<IpAddr>,
+        tls_identity: Option<&crate::NativeHttp1TlsClientIdentity>,
+        geo_context: Option<&crate::NativeHttp1GeoContext>,
+    ) -> bool {
         match self {
-            Self::Route(route) => route.access.allows(client_ip),
+            Self::Route(route) => route.access.allows(client_ip, tls_identity, geo_context),
             Self::Fallback(_) => true,
         }
     }
