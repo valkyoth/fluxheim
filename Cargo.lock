@@ -1229,6 +1229,7 @@ dependencies = [
  "rustix",
  "rustls",
  "rustls-native-certs 0.8.4",
+ "socket2",
  "tempfile",
  "tokio",
  "tokio-openssl",

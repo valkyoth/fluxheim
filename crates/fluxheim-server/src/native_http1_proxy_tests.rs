@@ -770,6 +770,9 @@ fn native_proxy_config_applies_portable_socket_options() {
         upstream: Some("127.0.0.1:3000".to_owned()),
         upstream_tcp_recv_buffer_bytes: Some(fluxheim_config::ByteSize::from_bytes(65_536)),
         upstream_dscp: Some(10),
+        upstream_tcp_keepalive_idle_secs: Some(30),
+        upstream_tcp_keepalive_interval_secs: Some(10),
+        upstream_tcp_keepalive_count: Some(3),
         ..Default::default()
     };
 
@@ -779,6 +782,10 @@ fn native_proxy_config_applies_portable_socket_options() {
 
     assert_eq!(native.upstream().recv_buffer_size(), Some(65_536));
     assert_eq!(native.upstream().dscp(), Some(10));
+    let keepalive = native.upstream().tcp_keepalive().unwrap();
+    assert_eq!(keepalive.idle(), Duration::from_secs(30));
+    assert_eq!(keepalive.interval(), Duration::from_secs(10));
+    assert_eq!(keepalive.count(), 3);
 }
 
 #[test]
@@ -810,6 +817,9 @@ async fn native_proxy_socket_options_connect_to_upstream() {
         upstream: Some(upstream.to_string()),
         upstream_tcp_recv_buffer_bytes: Some(fluxheim_config::ByteSize::from_bytes(65_536)),
         upstream_dscp: Some(10),
+        upstream_tcp_keepalive_idle_secs: Some(30),
+        upstream_tcp_keepalive_interval_secs: Some(10),
+        upstream_tcp_keepalive_count: Some(3),
         ..Default::default()
     };
     let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
@@ -942,6 +952,32 @@ fn native_proxy_config_rejects_unsupported_transport_and_accepts_downstream_time
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),
         upstream_tcp_keepalive_idle_secs: Some(30),
+        ..Default::default()
+    };
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy)
+    );
+
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_tcp_keepalive_idle_secs: Some(30),
+        upstream_tcp_keepalive_interval_secs: Some(10),
+        upstream_tcp_keepalive_count: Some(3),
+        upstream_tcp_user_timeout_ms: Some(15000),
+        ..Default::default()
+    };
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy)
+    );
+
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_tcp_keepalive_idle_secs: Some(30),
+        upstream_tcp_keepalive_interval_secs: Some(10),
+        upstream_tcp_keepalive_count: Some(3),
+        upstream_tcp_fast_open: true,
         ..Default::default()
     };
     assert_eq!(

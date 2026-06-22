@@ -43,7 +43,7 @@ pub use native_http1::{
     NativeHttp1Error, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
     NativeHttp1ResponseWritePolicy, serve_native_http1_connection, serve_native_http1_listener,
 };
-pub use native_http1_client::NativeHttp1Upstream;
+pub use native_http1_client::{NativeHttp1Upstream, NativeTcpKeepalivePolicy};
 pub use native_http1_plan::{
     NativeHttp1ProxyCandidate, NativeHttp1ProxyCutoverStatus, NativeHttp1ProxyCutoverSummary,
 };

@@ -20,7 +20,7 @@ use crate::native_http1_route_proxy::{
 };
 use crate::{
     NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1ResponseWritePolicy,
-    NativeHttp1StaticWeb, NativeHttp1Upstream,
+    NativeHttp1StaticWeb, NativeHttp1Upstream, NativeTcpKeepalivePolicy,
 };
 
 #[derive(Clone, Debug)]
@@ -339,6 +339,7 @@ impl NativeHttp1Proxy {
             };
             native_upstream = native_upstream.with_recv_buffer_size(recv_buffer_size);
             native_upstream = native_upstream.with_dscp(proxy.upstream_dscp);
+            native_upstream = native_upstream.with_tcp_keepalive(native_tcp_keepalive(proxy)?);
             native_upstream = native_upstream
                 .with_pool_idle_timeout(proxy.upstream_idle_timeout_secs.map(Duration::from_secs));
             native_upstream = native_upstream.with_pool_max_idle(pool_max_idle);
@@ -557,13 +558,32 @@ fn proxy_requires_auth_request(proxy: &fluxheim_config::ProxyConfig) -> bool {
 }
 
 fn proxy_requires_advanced_upstream_transport(proxy: &fluxheim_config::ProxyConfig) -> bool {
-    proxy.upstream_tcp_keepalive_idle_secs.is_some()
-        || proxy.upstream_tcp_keepalive_interval_secs.is_some()
-        || proxy.upstream_tcp_keepalive_count.is_some()
-        || proxy.upstream_tcp_user_timeout_ms.is_some()
+    proxy.upstream_tcp_user_timeout_ms.is_some()
         || proxy.upstream_tcp_fast_open
         || proxy.upstream_h2_max_streams.is_some()
         || proxy.upstream_h2_ping_interval_secs.is_some()
+}
+
+fn native_tcp_keepalive(
+    proxy: &fluxheim_config::ProxyConfig,
+) -> Result<Option<NativeTcpKeepalivePolicy>, NativeHttp1ProxyConfigError> {
+    match (
+        proxy.upstream_tcp_keepalive_idle_secs,
+        proxy.upstream_tcp_keepalive_interval_secs,
+        proxy.upstream_tcp_keepalive_count,
+    ) {
+        (None, None, None) => Ok(None),
+        (Some(idle_secs), Some(interval_secs), Some(count)) => {
+            let count = u32::try_from(count)
+                .map_err(|_| NativeHttp1ProxyConfigError::UpstreamTransportPolicy)?;
+            Ok(Some(NativeTcpKeepalivePolicy::new(
+                Duration::from_secs(idle_secs),
+                Duration::from_secs(interval_secs),
+                count,
+            )))
+        }
+        _ => Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy),
+    }
 }
 
 fn native_http1_static_failover_method_allowed(method: &str) -> bool {

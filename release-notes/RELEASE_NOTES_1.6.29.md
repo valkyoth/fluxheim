@@ -36,8 +36,8 @@ the native HTTP/1 proxy path.
   `proxy.upstream_total_connection_timeout_secs` across DNS, TCP connect, and
   optional TLS handshake setup.
 - Native HTTP/1 upstream socket creation now honors
-  `proxy.upstream_tcp_recv_buffer_bytes` and `proxy.upstream_dscp` before
-  connecting.
+  `proxy.upstream_tcp_recv_buffer_bytes`, `proxy.upstream_dscp`, and the
+  upstream TCP keepalive triple before connecting.
 - Native HTTP/1 request-body parsing now honors
   `proxy.downstream_read_timeout_secs` selected by the matched proxy before
   forwarding to upstreams.
@@ -128,10 +128,11 @@ the native HTTP/1 proxy path.
 - Native proxy config now accepts response-side downstream policy and per-proxy
   downstream request-read timeout policy on the native path.
 - Native proxy config now accepts total upstream connection timeout while
-  keeping keepalive/user-timeout/fast-open TCP tuning as explicit native
-  transport blockers.
+  keeping user-timeout and Fast Open TCP tuning as explicit native transport
+  blockers.
 - Native proxy config and live loopback tests now prove receive-buffer and DSCP
-  socket options are accepted and still connect through the native proxy path.
+  socket options plus TCP keepalive are accepted and still connect through the
+  native proxy path.
 - Native proxy tests now prove a slow request body times out before any
   upstream connection is attempted when `proxy.downstream_read_timeout_secs`
   is selected.

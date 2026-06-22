@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fluxheim_protocol::{Http1ParseError, http1_request_target};
+use socket2::{SockRef, TcpKeepalive};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::Mutex;
@@ -32,6 +33,7 @@ pub struct NativeHttp1Upstream {
     write_timeout: Duration,
     recv_buffer_size: Option<u32>,
     dscp: Option<u8>,
+    tcp_keepalive: Option<NativeTcpKeepalivePolicy>,
     max_head_bytes: usize,
     max_body_bytes: usize,
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -49,6 +51,35 @@ struct NativeHttp1Pool {
 struct IdleNativeHttp1Connection {
     stream: NativeHttp1Stream,
     inserted_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeTcpKeepalivePolicy {
+    idle: Duration,
+    interval: Duration,
+    count: u32,
+}
+
+impl NativeTcpKeepalivePolicy {
+    pub const fn new(idle: Duration, interval: Duration, count: u32) -> Self {
+        Self {
+            idle,
+            interval,
+            count,
+        }
+    }
+
+    pub const fn idle(&self) -> Duration {
+        self.idle
+    }
+
+    pub const fn interval(&self) -> Duration {
+        self.interval
+    }
+
+    pub const fn count(&self) -> u32 {
+        self.count
+    }
 }
 
 impl std::fmt::Debug for IdleNativeHttp1Connection {
@@ -71,6 +102,7 @@ impl std::fmt::Debug for NativeHttp1Upstream {
             .field("write_timeout", &self.write_timeout)
             .field("recv_buffer_size", &self.recv_buffer_size)
             .field("dscp", &self.dscp)
+            .field("tcp_keepalive", &self.tcp_keepalive)
             .field("max_head_bytes", &self.max_head_bytes)
             .field("max_body_bytes", &self.max_body_bytes)
             .field("tls", {
@@ -98,6 +130,7 @@ impl PartialEq for NativeHttp1Upstream {
             && self.write_timeout == other.write_timeout
             && self.recv_buffer_size == other.recv_buffer_size
             && self.dscp == other.dscp
+            && self.tcp_keepalive == other.tcp_keepalive
             && self.max_head_bytes == other.max_head_bytes
             && self.max_body_bytes == other.max_body_bytes
             && {
@@ -128,6 +161,7 @@ impl NativeHttp1Upstream {
             write_timeout: Duration::from_secs(30),
             recv_buffer_size: None,
             dscp: None,
+            tcp_keepalive: None,
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -145,6 +179,7 @@ impl NativeHttp1Upstream {
             write_timeout: Duration::from_secs(30),
             recv_buffer_size: None,
             dscp: None,
+            tcp_keepalive: None,
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -193,6 +228,15 @@ impl NativeHttp1Upstream {
 
     pub const fn dscp(&self) -> Option<u8> {
         self.dscp
+    }
+
+    pub const fn with_tcp_keepalive(mut self, keepalive: Option<NativeTcpKeepalivePolicy>) -> Self {
+        self.tcp_keepalive = keepalive;
+        self
+    }
+
+    pub const fn tcp_keepalive(&self) -> Option<NativeTcpKeepalivePolicy> {
+        self.tcp_keepalive
     }
 
     pub const fn with_max_body_bytes(mut self, max_body_bytes: usize) -> Self {
@@ -344,7 +388,12 @@ impl NativeHttp1Upstream {
     async fn connect_stream_inner(&self) -> Result<NativeHttp1Stream, NativeHttp1Error> {
         let stream = timeout(
             self.connect_timeout,
-            connect_upstream(&self.authority, self.recv_buffer_size, self.dscp),
+            connect_upstream(
+                &self.authority,
+                self.recv_buffer_size,
+                self.dscp,
+                self.tcp_keepalive,
+            ),
         )
         .await
         .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
@@ -380,6 +429,7 @@ async fn connect_upstream(
     authority: &str,
     recv_buffer_size: Option<u32>,
     dscp: Option<u8>,
+    tcp_keepalive: Option<NativeTcpKeepalivePolicy>,
 ) -> Result<TcpStream, NativeHttp1Error> {
     let mut addresses = tokio::net::lookup_host(authority)
         .await
@@ -404,7 +454,23 @@ async fn connect_upstream(
     if let Some(dscp) = dscp {
         set_socket_dscp(&socket, address, dscp)?;
     }
+    if let Some(tcp_keepalive) = tcp_keepalive {
+        set_socket_tcp_keepalive(&socket, tcp_keepalive)?;
+    }
     socket.connect(address).await.map_err(NativeHttp1Error::Io)
+}
+
+fn set_socket_tcp_keepalive(
+    socket: &TcpSocket,
+    keepalive: NativeTcpKeepalivePolicy,
+) -> Result<(), NativeHttp1Error> {
+    let keepalive = TcpKeepalive::new()
+        .with_time(keepalive.idle())
+        .with_interval(keepalive.interval())
+        .with_retries(keepalive.count());
+    SockRef::from(socket)
+        .set_tcp_keepalive(&keepalive)
+        .map_err(NativeHttp1Error::Io)
 }
 
 fn set_socket_dscp(
