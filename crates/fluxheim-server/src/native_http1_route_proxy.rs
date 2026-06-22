@@ -1,6 +1,9 @@
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 #[cfg(any(
     feature = "compression-brotli",
@@ -40,6 +43,7 @@ use crate::{
     DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1ProxyConfigError,
     NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb, ProxyProtocolTrustedSource,
 };
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
 const MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES: usize = 256;
@@ -49,6 +53,7 @@ pub struct NativeHttp1RouteProxy {
     routes: Vec<NativeHttp1RouteProxyRoute>,
     fallback: Option<NativeHttp1Proxy>,
     access: NativeIpAccessPolicy,
+    concurrency: NativeConcurrencyLimit,
     #[cfg(not(feature = "privacy-mode"))]
     trusted_sources: Vec<ProxyProtocolTrustedSource>,
 }
@@ -70,6 +75,7 @@ pub struct NativeHttp1RouteProxyRoute {
     request_headers: NativeRouteRequestHeaderPolicy,
     response_headers: NativeRouteResponseHeaderPolicy,
     access: NativeIpAccessPolicy,
+    concurrency: NativeConcurrencyLimit,
     action: NativeHttp1RouteAction,
 }
 
@@ -170,6 +176,51 @@ struct NativeIpAccessPolicy {
     deny: Vec<ProxyProtocolTrustedSource>,
 }
 
+#[derive(Debug)]
+struct NativeConcurrencyPermit {
+    permit: Option<OwnedSemaphorePermit>,
+}
+
+impl Drop for NativeConcurrencyPermit {
+    fn drop(&mut self) {
+        let _ = self.permit.take();
+    }
+}
+
+#[derive(Debug)]
+struct NativeQueuedConcurrencyWaiter {
+    queued: Arc<AtomicUsize>,
+}
+
+impl Drop for NativeQueuedConcurrencyWaiter {
+    fn drop(&mut self) {
+        self.queued.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[derive(Clone, Debug)]
+struct NativeConcurrencyLimit {
+    enabled: bool,
+    max_in_flight: usize,
+    max_queue: usize,
+    status: u16,
+    queue_timeout: Duration,
+    semaphore: Arc<Semaphore>,
+    queued: Arc<AtomicUsize>,
+}
+
+impl PartialEq for NativeConcurrencyLimit {
+    fn eq(&self, other: &Self) -> bool {
+        self.enabled == other.enabled
+            && self.max_in_flight == other.max_in_flight
+            && self.max_queue == other.max_queue
+            && self.status == other.status
+            && self.queue_timeout == other.queue_timeout
+    }
+}
+
+impl Eq for NativeConcurrencyLimit {}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeHttp1RouteProxyConfigError {
     AccessPolicy,
@@ -264,6 +315,100 @@ fn parse_native_access_sources(
         .collect()
 }
 
+impl Default for NativeConcurrencyLimit {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_in_flight: 0,
+            max_queue: 0,
+            status: 503,
+            queue_timeout: Duration::ZERO,
+            semaphore: Arc::new(Semaphore::new(0)),
+            queued: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+impl NativeConcurrencyLimit {
+    fn from_config(config: &fluxheim_config::ConcurrencyLimitConfig) -> Self {
+        let max_queue = if config.max_queue == 0 {
+            config
+                .max_in_flight
+                .saturating_mul(4)
+                .max(config.max_in_flight)
+                .min(1_000_000)
+        } else {
+            config.max_queue
+        };
+        Self {
+            enabled: config.enabled,
+            max_in_flight: config.max_in_flight,
+            max_queue,
+            status: config.status,
+            queue_timeout: Duration::from_millis(config.queue_timeout_ms),
+            semaphore: Arc::new(Semaphore::new(config.max_in_flight)),
+            queued: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    async fn acquire(&self) -> Result<Option<NativeConcurrencyPermit>, u16> {
+        if !self.enabled {
+            return Ok(None);
+        }
+
+        match Arc::clone(&self.semaphore).try_acquire_owned() {
+            Ok(permit) => {
+                return Ok(Some(NativeConcurrencyPermit {
+                    permit: Some(permit),
+                }));
+            }
+            Err(_) if self.queue_timeout.is_zero() => return Err(self.status),
+            Err(_) => {}
+        }
+
+        if !self.try_enter_queue() {
+            return Err(self.status);
+        }
+        let queued = NativeQueuedConcurrencyWaiter {
+            queued: Arc::clone(&self.queued),
+        };
+        let result = tokio::time::timeout(
+            self.queue_timeout,
+            Arc::clone(&self.semaphore).acquire_owned(),
+        )
+        .await;
+        drop(queued);
+
+        match result {
+            Ok(Ok(permit)) => Ok(Some(NativeConcurrencyPermit {
+                permit: Some(permit),
+            })),
+            Ok(Err(_)) | Err(_) => Err(self.status),
+        }
+    }
+
+    fn try_enter_queue(&self) -> bool {
+        let mut current = self.queued.load(Ordering::Acquire);
+        loop {
+            if current >= self.max_queue {
+                return false;
+            }
+            let Some(next) = current.checked_add(1) else {
+                return false;
+            };
+            match self.queued.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(observed) => current = observed,
+            }
+        }
+    }
+}
+
 impl NativeHttp1RouteProxy {
     pub fn new(
         routes: Vec<NativeHttp1RouteProxyRoute>,
@@ -273,6 +418,7 @@ impl NativeHttp1RouteProxy {
             routes,
             fallback,
             access: NativeIpAccessPolicy::default(),
+            concurrency: NativeConcurrencyLimit::default(),
             #[cfg(not(feature = "privacy-mode"))]
             trusted_sources: Vec::new(),
         }
@@ -315,6 +461,7 @@ impl NativeHttp1RouteProxy {
         let headers = base_headers.with_vhost_overlay(&vhost.headers);
         let inherited_compression = vhost.compression.as_ref().or(inherited_compression);
         let access = NativeIpAccessPolicy::from_config(&vhost.access)?;
+        let concurrency = NativeConcurrencyLimit::from_config(&vhost.concurrency);
         let fallback =
             NativeHttp1Proxy::from_proxy_config_with_pool_size(&vhost.proxy, policy, pool_max_idle)
                 .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
@@ -370,6 +517,7 @@ impl NativeHttp1RouteProxy {
             routes,
             fallback,
             access,
+            concurrency,
             #[cfg(not(feature = "privacy-mode"))]
             trusted_sources: trusted_sources.to_vec(),
         })
@@ -394,6 +542,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
@@ -415,6 +564,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
@@ -436,6 +586,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
         }
     }
@@ -462,6 +613,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
                 status,
@@ -491,6 +643,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::Redirect(NativeHttp1RouteRedirect {
                 to: to.into(),
                 status,
@@ -519,6 +672,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             access: NativeIpAccessPolicy::default(),
+            concurrency: NativeConcurrencyLimit::default(),
             action: NativeHttp1RouteAction::StaticWeb(web),
         }
     }
@@ -594,6 +748,7 @@ impl NativeHttp1RouteProxyRoute {
             request_headers: NativeRouteRequestHeaderPolicy::from_policy(&headers.request),
             response_headers: NativeRouteResponseHeaderPolicy::from_policy(&headers.response),
             access: NativeIpAccessPolicy::from_config(&route.access)?,
+            concurrency: NativeConcurrencyLimit::from_config(&route.concurrency),
             action,
         })
     }
@@ -698,6 +853,19 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
                     .close_connection();
             }
+            let concurrency_route = decoded_policy_route.or(selected_route);
+            let _concurrency_permits =
+                match self.acquire_concurrency_permits(concurrency_route).await {
+                    Ok(permits) => permits,
+                    Err(status) => {
+                        return NativeHttp1Response::new(
+                            status,
+                            "Too Many Requests",
+                            b"too many requests\n",
+                        )
+                        .close_connection();
+                    }
+                };
             let mut request =
                 match route_or_fallback.rewrite_request(request, &path, query.as_deref()) {
                     Some(request) => request,
@@ -822,14 +990,14 @@ impl NativeHttp1RouteProxy {
             let original_x_forwarded_for = header_value(request, "x-forwarded-for");
             let trusted_direct_peer = direct_ip.is_some_and(|ip| self.trusted_source_contains(ip));
             let trusted_proxy_matcher = |ip| self.trusted_source_contains(ip);
-            return direct_ip.map(|ip| {
+            direct_ip.map(|ip| {
                 effective_client_ip(
                     ip,
                     trusted_direct_peer,
                     original_x_forwarded_for,
                     Some(&trusted_proxy_matcher),
                 )
-            });
+            })
         }
         #[cfg(feature = "privacy-mode")]
         {
@@ -842,6 +1010,22 @@ impl NativeHttp1RouteProxy {
         self.trusted_sources
             .iter()
             .any(|source| source.contains(address))
+    }
+
+    async fn acquire_concurrency_permits(
+        &self,
+        route: Option<&NativeHttp1RouteProxyRoute>,
+    ) -> Result<Vec<NativeConcurrencyPermit>, u16> {
+        let mut permits = Vec::with_capacity(2);
+        if let Some(permit) = self.concurrency.acquire().await? {
+            permits.push(permit);
+        }
+        if let Some(route) = route
+            && let Some(permit) = route.concurrency.acquire().await?
+        {
+            permits.push(permit);
+        }
+        Ok(permits)
     }
 }
 

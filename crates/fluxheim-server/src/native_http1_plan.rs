@@ -185,7 +185,6 @@ fn root_policy_supported(config: &Config) -> bool {
 fn vhost_policy_supported(vhost: &VhostConfig) -> bool {
     access_policy_native_supported(&vhost.access)
         && !vhost.rate_limit.enabled
-        && !vhost.concurrency.enabled
         && vhost_header_overlay_supported(&vhost.headers)
         && !cache_enabled(&vhost.cache)
         && vhost.compression.as_ref().is_none_or(compression_supported)
@@ -206,7 +205,6 @@ fn vhost_policy_supported(vhost: &VhostConfig) -> bool {
 fn route_policy_supported(route: &RouteConfig) -> bool {
     access_policy_native_supported(&route.access)
         && !route.rate_limit.enabled
-        && !route.concurrency.enabled
         && !route.grpc.enabled
         && route_request_header_policy_supported(&route.headers.request)
         && route_response_header_policy_supported(&route.headers.response)

@@ -2753,17 +2753,17 @@ available for the stabilization/security-only follow-up.
   tests for safe capture encoding and unsafe rewritten-path rejection. Move
   IP/CIDR vhost and route access allow/deny policy onto the native route proxy
   with live tests for direct-peer denial and trusted forwarded-chain client
-  restoration. Keep auth-request subrequests, traffic mirroring, cert/Geo
-  access policy, rate/concurrency policy, managed local ACME challenge serving,
-  route per-proxy downstream timeout/min-send-rate policy, advanced upstream
-  transport knobs, cache, PHP-FPM, dynamic discovery, and load-balancer state
-  explicitly reported as compatibility blockers until they have native parity
-  tests.
+  restoration. Move vhost and route concurrency limits onto the native route
+  proxy, including immediate reject and bounded queue timeout behavior. Keep
+  auth-request subrequests, traffic mirroring, cert/Geo access policy, rate
+  limiting, managed local ACME challenge serving, route per-proxy downstream
+  timeout/min-send-rate policy, advanced upstream transport knobs, cache,
+  PHP-FPM, dynamic discovery, and load-balancer state explicitly reported as
+  compatibility blockers until they have native parity tests.
 - `v1.6.30`: finish the remaining native HTTP policy blockers that do not need
   cache or PHP state: auth-request subrequests, traffic mirroring, vhost
-  cert/Geo access and rate/concurrency policy, vhost managed local ACME
-  challenge serving, route cert/Geo access, rate/concurrency, and grpc flags,
-  per-proxy downstream
+  cert/Geo access and rate-limit policy, vhost managed local ACME challenge
+  serving, route cert/Geo access, rate-limit, and grpc flags, per-proxy downstream
   timeout/min-send-rate policy, and advanced upstream transport knobs that do
   not require cache, PHP, dynamic discovery, or load-balancer state. Add live
   native listener tests for each path and keep unsupported configs explicitly

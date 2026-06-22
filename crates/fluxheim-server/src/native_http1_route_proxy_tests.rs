@@ -170,6 +170,54 @@ async fn upstream_response(response: &'static str) -> std::net::SocketAddr {
     addr
 }
 
+async fn upstream_hold_response(
+    expected_path: &'static str,
+    body: &'static str,
+) -> (
+    std::net::SocketAddr,
+    tokio::sync::oneshot::Receiver<()>,
+    tokio::sync::oneshot::Sender<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (observed_tx, observed_rx) = tokio::sync::oneshot::channel::<()>();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(request).unwrap();
+        assert!(
+            request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
+            "unexpected upstream request: {request:?}"
+        );
+        let _ = observed_tx.send(());
+        let _ = release_rx.await;
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    (addr, observed_rx, release_tx)
+}
+
 async fn route_proxy_listener(route_proxy: NativeHttp1RouteProxy) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -486,6 +534,108 @@ async fn native_route_proxy_route_access_checks_decoded_policy_path() {
 
     assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
     assert!(response.ends_with("forbidden\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_vhost_concurrency_rejects_second_request() {
+    let (upstream, observed, release) = upstream_hold_response("/slow", "released").await;
+    let vhost = fluxheim_config::VhostConfig {
+        name: "route.test".to_owned(),
+        hosts: vec!["route.test".to_owned()],
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: fluxheim_config::ConcurrencyLimitConfig {
+            enabled: true,
+            max_in_flight: 1,
+            status: 429,
+            ..Default::default()
+        },
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: Default::default(),
+        proxy: fluxheim_config::ProxyConfig {
+            upstreams: vec![upstream.to_string()],
+            ..Default::default()
+        },
+        cache: Default::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: Default::default(),
+        routes: Vec::new(),
+    };
+    let route_proxy = NativeHttp1RouteProxy::from_vhost_config(
+        &vhost,
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        None,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(route_proxy).await;
+    let first = tokio::spawn(async move { downstream_get(proxy, "/slow").await });
+    observed.await.unwrap();
+
+    let rejected = downstream_get(proxy, "/slow").await;
+    release.send(()).unwrap();
+    let first = first.await.unwrap();
+
+    assert!(rejected.starts_with("HTTP/1.1 429 Too Many Requests\r\n"));
+    assert!(rejected.ends_with("too many requests\n"));
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("released"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_route_concurrency_rejects_second_request() {
+    let (upstream, observed, release) = upstream_hold_response("/slow", "released").await;
+    let route_config = fluxheim_config::RouteConfig {
+        name: "slow".to_owned(),
+        path_exact: Some("/slow".to_owned()),
+        path_prefix: None,
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: fluxheim_config::ConcurrencyLimitConfig {
+            enabled: true,
+            max_in_flight: 1,
+            status: 429,
+            ..Default::default()
+        },
+        grpc: Default::default(),
+        redirect: None,
+        proxy: Some(fluxheim_config::ProxyConfig {
+            upstreams: vec![upstream.to_string()],
+            ..Default::default()
+        }),
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
+    };
+    let route =
+        NativeHttp1RouteProxyRoute::from_config(&route_config, Some(proxy_for(upstream))).unwrap();
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+    let first = tokio::spawn(async move { downstream_get(proxy, "/slow").await });
+    observed.await.unwrap();
+
+    let rejected = downstream_get(proxy, "/slow").await;
+    release.send(()).unwrap();
+    let first = first.await.unwrap();
+
+    assert!(rejected.starts_with("HTTP/1.1 429 Too Many Requests\r\n"));
+    assert!(rejected.ends_with("too many requests\n"));
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("released"));
 }
 
 #[cfg(not(feature = "privacy-mode"))]

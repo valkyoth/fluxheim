@@ -26,6 +26,8 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 route proxy handling now owns IP/CIDR allow/deny access policy
   at both vhost and route scope, using trusted `X-Forwarded-For` client
   restoration when configured trusted sources identify the direct peer.
+- Native HTTP/1 route proxy handling now owns vhost and route concurrency
+  limits, including immediate rejection and bounded queued waits.
 - Root and vhost compression no longer blocks native HTTP/1 proxy cutover when
   a matching compression backend feature is compiled.
 - Native route-proxy construction now mirrors the compatibility route order for
@@ -90,6 +92,9 @@ the native HTTP/1 proxy path.
   effective client IP only when the direct peer is trusted.
 - Native route access policy also checks a percent-decoded policy path, matching
   the compatibility path's encoded-route bypass hardening for access decisions.
+- Native concurrency limits are enforced before rewrite, local static,
+  redirect, or upstream proxy actions run; permits are held until the native
+  response is produced.
 - Config validation and native regex route compilation now apply the same
   explicit NFA and DFA cache limits.
 - Privacy-mode native route proxy handling now strips spoofable
@@ -114,8 +119,8 @@ the native HTTP/1 proxy path.
 
 This release does not remove Pingora from normal builds yet. The remaining
 compatibility blockers are auth-request subrequests, traffic mirroring,
-cert/Geo access policy, rate/concurrency policy, managed local ACME challenge
-serving, route per-proxy downstream timeout/min-send-rate policy, advanced
-upstream transport knobs, cache lookup/fill/stale behavior, PHP-FPM routing,
-dynamic discovery, health-aware load balancing, persistence,
-priority/backup/drain state, and hash-based load-balancer selection.
+cert/Geo access policy, rate limiting, managed local ACME challenge serving,
+route per-proxy downstream timeout/min-send-rate policy, advanced upstream
+transport knobs, cache lookup/fill/stale behavior, PHP-FPM routing, dynamic
+discovery, health-aware load balancing, persistence, priority/backup/drain
+state, and hash-based load-balancer selection.
