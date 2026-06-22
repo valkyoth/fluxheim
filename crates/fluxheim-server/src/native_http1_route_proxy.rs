@@ -1101,13 +1101,12 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
 
     fn request_body_timeout(&self, request: &NativeHttp1Request) -> Option<Duration> {
         let (path, _) = request_path_and_query(request)?;
-        self.select_route(&request.method, &path)
-            .and_then(NativeHttp1RouteProxyRoute::request_body_timeout)
-            .or_else(|| {
-                self.fallback
-                    .as_ref()
-                    .and_then(NativeHttp1Proxy::request_body_timeout)
-            })
+        if let Some(route) = self.select_route(&request.method, &path) {
+            return route.request_body_timeout();
+        }
+        self.fallback
+            .as_ref()
+            .and_then(NativeHttp1Proxy::request_body_timeout)
     }
 }
 

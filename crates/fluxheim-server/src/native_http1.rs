@@ -310,6 +310,16 @@ where
                 .await?;
                 return Err(error.into());
             }
+            Err(NativeHttp1Error::Io(error)) if error.kind() == std::io::ErrorKind::TimedOut => {
+                write_response(
+                    &mut stream,
+                    NativeHttp1Response::new(408, "Request Timeout", b"request timeout\n")
+                        .close_connection(),
+                    true,
+                )
+                .await?;
+                return Ok(());
+            }
             Err(error) => return Err(error),
         };
         let mut request = request;

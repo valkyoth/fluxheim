@@ -55,6 +55,7 @@ pub enum NativeHttp1ProxyConfigError {
     HttpPolicy,
     LoadBalancing,
     MissingUpstream,
+    RecvBufferTooLarge,
     TrafficMirror,
     AuthRequest,
     UpstreamHttp2,
@@ -80,6 +81,9 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
             ),
             Self::MissingUpstream => {
                 formatter.write_str("native HTTP/1 proxy requires an upstream")
+            }
+            Self::RecvBufferTooLarge => {
+                formatter.write_str("native HTTP/1 proxy upstream receive buffer size is too large")
             }
             Self::TrafficMirror => {
                 formatter.write_str("native HTTP/1 proxy does not yet support traffic mirroring")
@@ -330,7 +334,7 @@ impl NativeHttp1Proxy {
                 .map(u32::try_from)
             {
                 Some(Ok(bytes)) => Some(bytes),
-                Some(Err(_)) => return Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy),
+                Some(Err(_)) => return Err(NativeHttp1ProxyConfigError::RecvBufferTooLarge),
                 None => None,
             };
             native_upstream = native_upstream.with_recv_buffer_size(recv_buffer_size);

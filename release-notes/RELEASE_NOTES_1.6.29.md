@@ -119,9 +119,8 @@ the native HTTP/1 proxy path.
   the direct peer address instead of skipping poisoned hops.
 - Native rate-limit table eviction sweeps are bounded so a full bucket table
   cannot trigger repeated full-table scans on every new identity.
-- Native proxy config now accepts response-side downstream policy while keeping
-  non-default downstream request-read timeout as a native listener-policy
-  blocker.
+- Native proxy config now accepts response-side downstream policy and per-proxy
+  downstream request-read timeout policy on the native path.
 - Native proxy config now accepts total upstream connection timeout while
   keeping keepalive/user-timeout/fast-open TCP tuning as explicit native
   transport blockers.
@@ -130,9 +129,14 @@ the native HTTP/1 proxy path.
 - Native proxy tests now prove a slow request body times out before any
   upstream connection is attempted when `proxy.downstream_read_timeout_secs`
   is selected.
+- Native HTTP/1 now sends `408 Request Timeout` before closing connections that
+  exceed the selected request-body timeout.
+- Native route proxy timeout selection no longer lets redirect or static-web
+  routes inherit a fallback proxy's longer request-body timeout.
 - Native DSCP fallback compilation now covers targets without Tokio IPv6
   traffic-class support, and the receive-buffer conversion rejects an
-  impossible oversized value instead of silently ignoring it.
+  impossible oversized value with a dedicated diagnostic instead of silently
+  ignoring it.
 - Config validation and native regex route compilation now apply the same
   explicit NFA and DFA cache limits.
 - Privacy-mode native route proxy handling now strips spoofable

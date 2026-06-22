@@ -364,13 +364,11 @@ async fn native_http1_times_out_slow_request_body() {
         )
         .await
         .unwrap();
-    let error = join.await.unwrap().unwrap_err();
+    let response = read_response(&mut stream).await;
 
-    assert!(matches!(
-        error,
-        crate::NativeHttp1Error::Io(ref io_error)
-            if io_error.kind() == std::io::ErrorKind::TimedOut
-    ));
+    join.await.unwrap().unwrap();
+    assert!(response.starts_with("HTTP/1.1 408 Request Timeout\r\n"));
+    assert!(response.ends_with("request timeout\n"));
 }
 
 #[tokio::test]

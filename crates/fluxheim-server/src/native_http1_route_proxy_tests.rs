@@ -1127,6 +1127,29 @@ fn native_route_proxy_selects_route_request_body_timeout() {
     );
 }
 
+#[test]
+fn native_route_proxy_does_not_inherit_fallback_timeout_for_redirect_route() {
+    let fallback_upstream = "127.0.0.1:3001".parse().unwrap();
+    let route = NativeHttp1RouteProxyRoute::prefix_redirect(
+        "/old/",
+        Vec::new(),
+        "https://route.test/new{uri}".to_owned(),
+        308,
+    );
+    let fallback =
+        proxy_for(fallback_upstream).with_request_body_timeout(Some(Duration::from_secs(99)));
+    let proxy = NativeHttp1RouteProxy::new(vec![route], Some(fallback));
+
+    assert_eq!(
+        proxy.request_body_timeout(&route_test_request("/old/path")),
+        None
+    );
+    assert_eq!(
+        proxy.request_body_timeout(&route_test_request("/fallback")),
+        Some(Duration::from_secs(99))
+    );
+}
+
 #[tokio::test]
 async fn native_route_proxy_rejects_unsafe_rewritten_path() {
     let upstream = upstream_expect_path("/never", "never").await;

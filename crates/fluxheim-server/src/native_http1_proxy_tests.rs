@@ -794,7 +794,7 @@ fn native_proxy_config_rejects_oversized_socket_receive_buffer() {
     let error =
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()).unwrap_err();
 
-    assert_eq!(error, NativeHttp1ProxyConfigError::UpstreamTransportPolicy);
+    assert_eq!(error, NativeHttp1ProxyConfigError::RecvBufferTooLarge);
 }
 
 #[tokio::test]
@@ -854,7 +854,12 @@ async fn native_proxy_request_body_timeout_is_enforced_before_upstream() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(read, 0);
+    assert_ne!(read, 0);
+    let mut response = vec![byte[0]];
+    stream.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 408 Request Timeout\r\n"));
+    assert!(response.ends_with("request timeout\n"));
     assert_eq!(upstream_hits.load(Ordering::Acquire), 0);
 }
 
