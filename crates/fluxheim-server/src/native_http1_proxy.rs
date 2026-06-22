@@ -864,9 +864,7 @@ impl NativeTrafficMirror {
     }
 
     fn request(&self, request: &NativeHttp1Request) -> Option<NativeTrafficMirrorRequest> {
-        if native_request_header_values(request, "x-fluxheim-mirror")
-            .next()
-            .is_some()
+        if native_request_has_valid_mirror_marker(request)
             || !self.methods.iter().any(|method| method == &request.method)
             || !native_traffic_mirror_sample_selected(request, self.sample_per_mille)
         {
@@ -1024,7 +1022,11 @@ fn send_native_traffic_mirror_request(request: &NativeTrafficMirrorRequest) -> s
         }
     }
     .header("cache-control", "no-store")
-    .header("x-fluxheim-mirror", "1");
+    .header("x-fluxheim-mirror", "1")
+    .header(
+        "x-fluxheim-mirror-signature",
+        native_traffic_mirror_marker_signature(),
+    );
     for (name, value) in &request.headers {
         builder = builder.header(name.as_str(), value.as_str());
     }
@@ -1044,6 +1046,43 @@ fn send_native_traffic_mirror_request(request: &NativeTrafficMirrorRequest) -> s
         ));
     }
     Ok(())
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn native_request_has_valid_mirror_marker(request: &NativeHttp1Request) -> bool {
+    let marker_present =
+        native_request_header_values(request, "x-fluxheim-mirror").any(|value| value.trim() == "1");
+    if !marker_present {
+        return false;
+    }
+    native_request_header_values(request, "x-fluxheim-mirror-signature")
+        .any(|value| value.trim() == native_traffic_mirror_marker_signature())
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn native_traffic_mirror_marker_signature() -> &'static str {
+    static SIGNATURE: OnceLock<String> = OnceLock::new();
+    SIGNATURE.get_or_init(|| {
+        use sha2::{Digest, Sha256};
+        let mut secret = [0_u8; 32];
+        if let Err(error) = getrandom::fill(&mut secret) {
+            log::error!(
+                target: "fluxheim::security",
+                "native traffic mirror marker secret generation failed: {error}; aborting"
+            );
+            std::process::abort();
+        }
+        let mut hasher = Sha256::new();
+        hasher.update(secret);
+        hasher.update(b"\nfluxheim-native-mirror-v1");
+        let digest = hasher.finalize();
+        let mut signature = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            use std::fmt::Write as _;
+            let _ = write!(&mut signature, "{byte:02x}");
+        }
+        signature
+    })
 }
 
 #[cfg(any(

@@ -156,6 +156,9 @@ behavior when the change improves security or project direction.
 - Add live native HTTP/1 proxy tests proving auth-request allow responses can
   inject configured upstream headers and auth-request deny responses stop
   before any upstream connection is made.
+- Harden native traffic mirroring so client-supplied `X-Fluxheim-Mirror`
+  headers cannot suppress mirroring; only Fluxheim's signed internal mirror
+  marker is honored for loop prevention.
 - Send `408 Request Timeout` before closing native HTTP/1 connections that
   exceed the selected request-body timeout, and ensure redirect/static routes
   do not inherit fallback proxy body-read timeouts.

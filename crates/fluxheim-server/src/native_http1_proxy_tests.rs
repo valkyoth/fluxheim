@@ -587,6 +587,8 @@ async fn native_proxy_mirrors_safe_requests_without_changing_origin_response() {
             b"GET /asset.png?q=1 HTTP/1.1\r\n\
               Host: proxy.test\r\n\
               X-Request-Id: mirror-1\r\n\
+              X-Fluxheim-Mirror: 1\r\n\
+              X-Fluxheim-Mirror-Signature: attacker\r\n\
               Connection: close\r\n\r\n",
         )
         .await
@@ -603,6 +605,7 @@ async fn native_proxy_mirrors_safe_requests_without_changing_origin_response() {
     assert!(response.ends_with("origin-ok"));
     assert!(mirrored.starts_with("GET /shadow/asset.png?q=1 HTTP/1.1\r\n"));
     assert!(mirrored.contains("\r\nx-fluxheim-mirror: 1\r\n"));
+    assert!(mirrored.contains("\r\nx-fluxheim-mirror-signature: "));
     assert!(mirrored.contains("\r\nx-request-id: mirror-1\r\n"));
 }
 

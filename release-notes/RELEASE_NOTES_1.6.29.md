@@ -158,6 +158,9 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 proxy tests now prove auth-request allow responses can inject
   configured upstream headers and auth-request deny responses stop before any
   upstream connection is made.
+- Native traffic mirroring now honors only Fluxheim's signed internal mirror
+  marker for loop prevention, so client-supplied `X-Fluxheim-Mirror` headers
+  cannot suppress the configured mirror feed.
 - Native proxy tests now prove a slow request body times out before any
   upstream connection is attempted when `proxy.downstream_read_timeout_secs`
   is selected.
