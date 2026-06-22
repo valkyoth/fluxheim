@@ -159,6 +159,9 @@ behavior when the change improves security or project direction.
 - Harden native traffic mirroring so client-supplied `X-Fluxheim-Mirror`
   headers cannot suppress mirroring; only Fluxheim's signed internal mirror
   marker is honored for loop prevention.
+- Compare native traffic-mirror marker signatures with
+  `sanitization::ct::ConstantTimeEq` and update the project to
+  `sanitization` 1.2.1 and `rustls` 0.23.41.
 - Send `408 Request Timeout` before closing native HTTP/1 connections that
   exceed the selected request-body timeout, and ensure redirect/static routes
   do not inherit fallback proxy body-read timeouts.

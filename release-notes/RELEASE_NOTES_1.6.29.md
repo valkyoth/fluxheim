@@ -161,6 +161,9 @@ the native HTTP/1 proxy path.
 - Native traffic mirroring now honors only Fluxheim's signed internal mirror
   marker for loop prevention, so client-supplied `X-Fluxheim-Mirror` headers
   cannot suppress the configured mirror feed.
+- Native traffic-mirror marker signatures are now compared through
+  `sanitization::ct::ConstantTimeEq`; this release also updates
+  `sanitization` to 1.2.1 and `rustls` to 0.23.41.
 - Native proxy tests now prove a slow request body times out before any
   upstream connection is attempted when `proxy.downstream_read_timeout_secs`
   is selected.

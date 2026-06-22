@@ -26,6 +26,8 @@ use crate::{
     NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1ResponseWritePolicy,
     NativeHttp1StaticWeb, NativeHttp1Upstream, NativeTcpKeepalivePolicy,
 };
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+use sanitization::ct::ConstantTimeEq;
 
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 const NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
@@ -1056,7 +1058,17 @@ fn native_request_has_valid_mirror_marker(request: &NativeHttp1Request) -> bool 
         return false;
     }
     native_request_header_values(request, "x-fluxheim-mirror-signature")
-        .any(|value| value.trim() == native_traffic_mirror_marker_signature())
+        .any(native_traffic_mirror_marker_signature_matches)
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn native_traffic_mirror_marker_signature_matches(value: &str) -> bool {
+    let candidate = value.trim().as_bytes();
+    let expected = native_traffic_mirror_marker_signature().as_bytes();
+    candidate.len() == expected.len()
+        && candidate
+            .ct_eq(expected)
+            .declassify("native traffic mirror marker match result is public")
 }
 
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
@@ -1231,4 +1243,25 @@ fn native_tcp_user_timeout(
 
 fn native_http1_static_failover_method_allowed(method: &str) -> bool {
     matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE")
+}
+
+#[cfg(all(test, feature = "traffic-mirror", not(feature = "privacy-mode")))]
+mod tests {
+    use super::{
+        native_traffic_mirror_marker_signature, native_traffic_mirror_marker_signature_matches,
+    };
+
+    #[test]
+    fn native_mirror_marker_signature_uses_sanitization_constant_time_match() {
+        let signature = native_traffic_mirror_marker_signature();
+
+        assert!(native_traffic_mirror_marker_signature_matches(signature));
+        assert!(native_traffic_mirror_marker_signature_matches(&format!(
+            " {signature} "
+        )));
+        assert!(!native_traffic_mirror_marker_signature_matches("attacker"));
+        assert!(!native_traffic_mirror_marker_signature_matches(
+            &signature[..signature.len() - 1]
+        ));
+    }
 }
