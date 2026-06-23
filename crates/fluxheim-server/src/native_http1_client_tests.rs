@@ -503,6 +503,36 @@ async fn native_upstream_falls_back_when_explicit_h2c_upgrade_is_not_accepted() 
     assert_eq!(response.body(), b"http1 fallback");
 }
 
+#[tokio::test]
+async fn native_upstream_falls_back_when_explicit_h2c_upgrade_connection_closes() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut probe, _) = listener.accept().await.unwrap();
+        let upgrade = String::from_utf8(read_request_head(&mut probe).await).unwrap();
+        assert!(upgrade.starts_with("OPTIONS * HTTP/1.1\r\n"));
+        drop(probe);
+
+        let (mut fallback, _) = listener.accept().await.unwrap();
+        let request = String::from_utf8(read_request_head(&mut fallback).await).unwrap();
+        assert!(request.starts_with("GET /hello?name=fluxheim HTTP/1.1\r\n"));
+        fallback
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 17\r\n\r\nclosed then http1")
+            .await
+            .unwrap();
+    });
+
+    let response = NativeHttp1Upstream::new(addr.to_string())
+        .with_http1_and_http2_policy(DownstreamHttp2Policy::default())
+        .with_h2c_upgrade(true)
+        .send(&request())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.body(), b"closed then http1");
+}
+
 #[cfg(not(feature = "privacy-mode"))]
 #[tokio::test]
 async fn native_upstream_appends_owned_via_header() {

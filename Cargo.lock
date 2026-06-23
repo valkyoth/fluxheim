@@ -1209,7 +1209,7 @@ dependencies = [
 name = "fluxheim-server"
 version = "1.6.29"
 dependencies = [
- "base64-ng",
+ "base64",
  "bytes",
  "flate2",
  "fluxheim-common",

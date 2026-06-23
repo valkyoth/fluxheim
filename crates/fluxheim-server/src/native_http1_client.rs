@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use bytes::Bytes;
 use fluxheim_protocol::{Http1ParseError, http1_request_target};
 use h2::client::SendRequest;
@@ -873,7 +874,7 @@ impl NativeHttp1Upstream {
         &self,
         mut stream: NativeHttp1Stream,
     ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
-        let settings = h2c_upgrade_settings_header(self.http2_policy)?;
+        let settings = h2c_upgrade_settings_header(self.http2_policy);
         let request = format!(
             "OPTIONS * HTTP/1.1\r\n\
              Host: {}\r\n\
@@ -914,7 +915,7 @@ async fn read_h2c_upgrade_response_head(
                 "native h2c upgrade response headers are too large",
             )));
         }
-        if head.windows(4).any(|window| window == b"\r\n\r\n") {
+        if head.len() >= 4 && head[head.len() - 4..] == *b"\r\n\r\n" {
             return Ok(head);
         }
     }
@@ -963,18 +964,12 @@ fn validate_h2c_upgrade_response(head: &[u8]) -> Result<(), NativeHttp1Error> {
     Ok(())
 }
 
-fn h2c_upgrade_settings_header(policy: DownstreamHttp2Policy) -> Result<String, NativeHttp1Error> {
+fn h2c_upgrade_settings_header(policy: DownstreamHttp2Policy) -> String {
     let mut settings = Vec::with_capacity(18);
     push_h2_setting(&mut settings, 0x4, policy.initial_window_size());
     push_h2_setting(&mut settings, 0x5, policy.max_frame_size());
     push_h2_setting(&mut settings, 0x6, policy.max_header_list_size());
-    base64_ng::URL_SAFE_NO_PAD
-        .encode_string(&settings)
-        .map_err(|error| {
-            NativeHttp1Error::Io(std::io::Error::other(format!(
-                "native h2c settings encoding failed: {error}"
-            )))
-        })
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&settings)
 }
 
 fn push_h2_setting(settings: &mut Vec<u8>, id: u16, value: u32) {
@@ -988,7 +983,12 @@ fn h2c_upgrade_error_can_fallback(error: &NativeHttp1Error) -> bool {
         NativeHttp1Error::Io(error)
             if matches!(
                 error.kind(),
-                std::io::ErrorKind::InvalidData | std::io::ErrorKind::Unsupported
+                std::io::ErrorKind::InvalidData
+                    | std::io::ErrorKind::Unsupported
+                    | std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::BrokenPipe
             )
     )
 }

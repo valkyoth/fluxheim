@@ -114,6 +114,15 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
   the upstream is plaintext, and `proxy.upstream_http_version =
   "http1-and-http2"`, keeping h2c Upgrade out of TLS and prior-knowledge H2
   configurations.
+- Explicit h2c Upgrade fallback now treats a closed/reset probe connection as
+  an upgrade refusal and retries the original downstream request on a fresh
+  HTTP/1.1 connection, while still treating probe timeouts as ambiguous and
+  non-replayable.
+- The h2c Upgrade response-head reader now checks only the trailing terminator
+  bytes while reading one byte at a time, preserving post-upgrade H2 frames
+  without an O(n²) scan.
+- The h2c `HTTP2-Settings` header is now encoded with the established `base64`
+  crate and uses an infallible encoding path.
 
 ## Compatibility Notes
 
