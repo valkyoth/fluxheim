@@ -162,9 +162,9 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
                     "native HTTP/1 proxy auth subrequests require the auth-request feature",
                 )
             }
-            Self::UpstreamHttp2 => {
-                formatter.write_str("native HTTP/1 proxy does not yet support HTTP/2 upstreams")
-            }
+            Self::UpstreamHttp2 => formatter.write_str(
+                "native HTTP/1 proxy rejected unsupported upstream HTTP/2 mode",
+            ),
             Self::UpstreamProxyProtocol => formatter
                 .write_str("native HTTP/1 proxy does not yet support upstream PROXY protocol"),
             Self::UpstreamTls => {

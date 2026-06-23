@@ -21,6 +21,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Live native proxy tests now prove downstream HTTP/1 requests can be forwarded
   to an in-process HTTP/2 origin, and that two downstream requests reuse one
   upstream H2 connection.
+- Additional native proxy tests prove H2 upstream pools reconnect after an
+  origin closes a pooled H2 connection and round-robin across multiple static
+  H2 upstreams.
 
 ## Security Notes
 
@@ -42,6 +45,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native upstream H2 pool creation no longer holds the pool mutex across TCP
   connect and H2 handshake work, avoiding serialized cold-start failures when an
   origin is unavailable.
+- Native diagnostics now distinguish supported plaintext upstream H2 from
+  unsupported H2 modes such as TLS ALPN negotiation, `http1-and-http2` fallback,
+  and upstream H2 keepalive pings.
 
 ## Compatibility Notes
 

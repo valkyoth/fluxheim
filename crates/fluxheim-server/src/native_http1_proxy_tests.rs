@@ -97,6 +97,83 @@ async fn h2_upstream(requests: usize) -> (std::net::SocketAddr, Arc<AtomicUsize>
     (addr, accepted_connections)
 }
 
+async fn h2_upstream_with_body(
+    body: &'static str,
+    requests: usize,
+) -> (std::net::SocketAddr, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted_connections = Arc::new(AtomicUsize::new(0));
+    let accepted_connections_for_task = Arc::clone(&accepted_connections);
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        accepted_connections_for_task.fetch_add(1, Ordering::AcqRel);
+        let mut connection = h2::server::handshake(stream).await.unwrap();
+        for _ in 0..requests {
+            let Some(stream) = connection.accept().await else {
+                panic!("expected native H2 upstream request");
+            };
+            let (request, mut respond) = stream.unwrap();
+            assert_eq!(request.method(), http::Method::GET);
+            assert_eq!(
+                request.uri().path_and_query().unwrap().as_str(),
+                "/h2-origin"
+            );
+            let response = http::Response::builder()
+                .status(http::StatusCode::OK)
+                .header("x-origin-proto", "h2")
+                .body(())
+                .unwrap();
+            let mut send = respond.send_response(response, false).unwrap();
+            send.send_data(Bytes::from_static(body.as_bytes()), true)
+                .unwrap();
+        }
+        connection.graceful_shutdown();
+        let _ = tokio::time::timeout(
+            Duration::from_secs(1),
+            std::future::poll_fn(|context| connection.poll_closed(context)),
+        )
+        .await;
+    });
+    (addr, accepted_connections)
+}
+
+async fn h2_reconnecting_upstream(
+    body: &'static str,
+    connections: usize,
+) -> (std::net::SocketAddr, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted_connections = Arc::new(AtomicUsize::new(0));
+    let accepted_connections_for_task = Arc::clone(&accepted_connections);
+    tokio::spawn(async move {
+        for _ in 0..connections {
+            let (stream, _) = listener.accept().await.unwrap();
+            accepted_connections_for_task.fetch_add(1, Ordering::AcqRel);
+            let mut connection = h2::server::handshake(stream).await.unwrap();
+            let Some(stream) = connection.accept().await else {
+                panic!("expected native H2 upstream request");
+            };
+            let (_request, mut respond) = stream.unwrap();
+            let response = http::Response::builder()
+                .status(http::StatusCode::OK)
+                .header("x-origin-proto", "h2")
+                .body(())
+                .unwrap();
+            let mut send = respond.send_response(response, false).unwrap();
+            send.send_data(Bytes::from_static(body.as_bytes()), true)
+                .unwrap();
+            connection.graceful_shutdown();
+            let _ = tokio::time::timeout(
+                Duration::from_secs(1),
+                std::future::poll_fn(|context| connection.poll_closed(context)),
+            )
+            .await;
+        }
+    });
+    (addr, accepted_connections)
+}
+
 async fn h2_blocking_upstream() -> (std::net::SocketAddr, tokio::sync::oneshot::Receiver<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -496,6 +573,69 @@ async fn native_proxy_http2_upstream_stream_slot_wait_is_bounded() {
     }
     first_task.abort();
     let _ = first_task.await;
+}
+
+#[tokio::test]
+async fn native_proxy_http2_upstream_reconnects_after_origin_goaway() {
+    let (upstream, accepted_connections) = h2_reconnecting_upstream("h2 reconnect\n", 2).await;
+    let proxy_config = fluxheim_config::ProxyConfig {
+        upstream: Some(upstream.to_string()),
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_h2_max_streams: Some(1),
+        read_timeout_secs: Some(5),
+        send_timeout_secs: Some(5),
+        ..Default::default()
+    };
+    let proxy =
+        NativeHttp1Proxy::from_proxy_config(&proxy_config, DownstreamHttp1Policy::default())
+            .unwrap()
+            .unwrap();
+    let proxy = proxy_listener_for(proxy).await;
+
+    let first_response = downstream_get(proxy, "/h2-origin").await;
+    let second_response = downstream_get(proxy, "/h2-origin").await;
+
+    assert!(first_response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first_response.ends_with("h2 reconnect\n"));
+    assert!(second_response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second_response.ends_with("h2 reconnect\n"));
+    assert_eq!(accepted_connections.load(Ordering::Acquire), 2);
+}
+
+#[tokio::test]
+async fn native_proxy_round_robins_successful_http2_static_upstreams() {
+    let (first, first_connections) = h2_upstream_with_body("h2-one\n", 1).await;
+    let (second, second_connections) = h2_upstream_with_body("h2-two\n", 1).await;
+    let proxy_config = fluxheim_config::ProxyConfig {
+        upstreams: vec![first.to_string(), second.to_string()],
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_h2_max_streams: Some(4),
+        read_timeout_secs: Some(5),
+        send_timeout_secs: Some(5),
+        ..Default::default()
+    };
+    let proxy =
+        NativeHttp1Proxy::from_proxy_config(&proxy_config, DownstreamHttp1Policy::default())
+            .unwrap()
+            .unwrap();
+    assert_eq!(proxy.upstreams().len(), 2);
+    assert!(
+        proxy
+            .upstreams()
+            .iter()
+            .all(NativeHttp1Upstream::uses_http2)
+    );
+    let proxy = proxy_listener_for(proxy).await;
+
+    let first_response = downstream_get(proxy, "/h2-origin").await;
+    let second_response = downstream_get(proxy, "/h2-origin").await;
+
+    assert!(first_response.contains("x-origin-proto: h2\r\n"));
+    assert!(first_response.ends_with("h2-one\n"));
+    assert!(second_response.contains("x-origin-proto: h2\r\n"));
+    assert!(second_response.ends_with("h2-two\n"));
+    assert_eq!(first_connections.load(Ordering::Acquire), 1);
+    assert_eq!(second_connections.load(Ordering::Acquire), 1);
 }
 
 #[test]

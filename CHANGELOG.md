@@ -25,6 +25,9 @@ behavior when the change improves security or project direction.
 - Add live native proxy tests that forward downstream HTTP/1 requests to an
   in-process HTTP/2 origin and prove two downstream requests reuse one upstream
   H2 connection.
+- Add live native proxy tests proving native HTTP/2 upstreams reconnect after an
+  origin closes a pooled H2 connection and round-robin across multiple static
+  H2 upstreams.
 
 ### Security
 
@@ -40,6 +43,9 @@ behavior when the change improves security or project direction.
 - Validate pooled native upstream H2 requests against H2-specific header-count,
   URI, and body limits before acquiring stream capacity or opening an upstream
   connection.
+- Replace the generic native upstream-H2 blocker message with an unsupported
+  HTTP/2 mode diagnostic so valid plaintext H2 support is no longer described
+  as entirely unsupported.
 - Fail closed for invalid programmatic upstream H2 stream limits instead of
   silently falling back to the default policy.
 - Avoid holding the native upstream H2 pool mutex across TCP connect and H2
