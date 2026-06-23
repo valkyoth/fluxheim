@@ -174,6 +174,45 @@ async fn h2_reconnecting_upstream(
     (addr, accepted_connections)
 }
 
+async fn h2_reset_then_ok_upstream() -> (std::net::SocketAddr, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted_connections = Arc::new(AtomicUsize::new(0));
+    let accepted_connections_for_task = Arc::clone(&accepted_connections);
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        accepted_connections_for_task.fetch_add(1, Ordering::AcqRel);
+        let mut connection = h2::server::handshake(stream).await.unwrap();
+
+        let Some(stream) = connection.accept().await else {
+            panic!("expected first native H2 upstream request");
+        };
+        let (_request, mut respond) = stream.unwrap();
+        respond.send_reset(h2::Reason::CANCEL);
+
+        let Some(stream) = connection.accept().await else {
+            panic!("expected second native H2 upstream request");
+        };
+        let (_request, mut respond) = stream.unwrap();
+        let response = http::Response::builder()
+            .status(http::StatusCode::OK)
+            .header("x-origin-proto", "h2")
+            .body(())
+            .unwrap();
+        let mut send = respond.send_response(response, false).unwrap();
+        send.send_data(Bytes::from_static(b"h2 survived reset\n"), true)
+            .unwrap();
+
+        connection.graceful_shutdown();
+        let _ = tokio::time::timeout(
+            Duration::from_secs(1),
+            std::future::poll_fn(|context| connection.poll_closed(context)),
+        )
+        .await;
+    });
+    (addr, accepted_connections)
+}
+
 async fn h2_blocking_upstream() -> (std::net::SocketAddr, tokio::sync::oneshot::Receiver<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -640,6 +679,38 @@ async fn native_proxy_http2_upstream_reconnects_after_origin_goaway() {
     assert!(second_response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(second_response.ends_with("h2 reconnect\n"));
     assert_eq!(accepted_connections.load(Ordering::Acquire), 2);
+}
+
+#[tokio::test]
+async fn native_proxy_http2_upstream_stream_reset_keeps_pooled_connection() {
+    let (upstream, accepted_connections) = h2_reset_then_ok_upstream().await;
+    let proxy_config = fluxheim_config::ProxyConfig {
+        upstream: Some(upstream.to_string()),
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_h2_max_streams: Some(1),
+        read_timeout_secs: Some(5),
+        send_timeout_secs: Some(5),
+        ..Default::default()
+    };
+    let proxy =
+        NativeHttp1Proxy::from_proxy_config(&proxy_config, DownstreamHttp1Policy::default())
+            .unwrap()
+            .unwrap();
+    let proxy = proxy_listener_for(proxy).await;
+
+    let first_response = downstream_get(proxy, "/h2-origin").await;
+    let second_response = downstream_get(proxy, "/h2-origin").await;
+
+    assert!(
+        first_response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"),
+        "unexpected first response: {first_response:?}"
+    );
+    assert!(
+        second_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected second response: {second_response:?}"
+    );
+    assert!(second_response.ends_with("h2 survived reset\n"));
+    assert_eq!(accepted_connections.load(Ordering::Acquire), 1);
 }
 
 #[tokio::test]
