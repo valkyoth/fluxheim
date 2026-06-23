@@ -118,6 +118,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
   an upgrade refusal and retries the original downstream request on a fresh
   HTTP/1.1 connection, while still treating probe timeouts as ambiguous and
   non-replayable.
+- H2 stream-capacity closure is no longer classified as a transport-level
+  broken pipe, so explicit h2c mixed-mode fallback cannot downgrade and replay
+  a request after an upstream H2 stream has already been opened.
 - The h2c Upgrade response-head reader now checks only the trailing terminator
   bytes while reading one byte at a time, preserving post-upgrade H2 frames
   without an O(n²) scan.

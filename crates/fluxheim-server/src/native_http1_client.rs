@@ -1352,7 +1352,7 @@ fn native_http2_error(error: NativeHttp2StackError) -> NativeHttp1Error {
         | NativeHttp2StackError::BodyTooLarge { .. }
         | NativeHttp2StackError::ProhibitedResponseHeader { .. }
         | NativeHttp2StackError::ResponseBuild(_) => std::io::ErrorKind::InvalidData,
-        NativeHttp2StackError::ResponseCapacityClosed => std::io::ErrorKind::BrokenPipe,
+        NativeHttp2StackError::ResponseCapacityClosed => std::io::ErrorKind::Other,
         NativeHttp2StackError::Handshake(_)
         | NativeHttp2StackError::RequestReady(_)
         | NativeHttp2StackError::SendRequest(_)
@@ -1444,8 +1444,21 @@ fn timeout_error(message: &'static str) -> NativeHttp1Error {
 
 #[cfg(test)]
 mod tests {
-    use super::native_http2_response_to_http1;
-    use crate::NativeHttp2UpstreamResponse;
+    use super::{
+        h2c_upgrade_error_can_fallback, native_http2_error, native_http2_response_to_http1,
+    };
+    use crate::{NativeHttp1Error, NativeHttp2StackError, NativeHttp2UpstreamResponse};
+
+    #[test]
+    fn response_capacity_closed_does_not_trigger_h2c_fallback() {
+        let error = native_http2_error(NativeHttp2StackError::ResponseCapacityClosed);
+
+        assert!(!h2c_upgrade_error_can_fallback(&error));
+        match error {
+            NativeHttp1Error::Io(error) => assert_eq!(error.kind(), std::io::ErrorKind::Other),
+            other => panic!("expected native HTTP/2 error to map to IO error, got {other:?}"),
+        }
+    }
 
     #[test]
     fn h2_response_conversion_strips_hop_by_hop_headers() {
