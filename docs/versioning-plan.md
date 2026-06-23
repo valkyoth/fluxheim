@@ -2767,9 +2767,11 @@ available for the stabilization/security-only follow-up.
   `proxy.downstream_read_timeout_secs` onto native HTTP/1 request-body parsing
   after route/proxy selection. Move route-scoped `[vhosts.routes.grpc]`
   request validation onto the native route proxy. Add native request-context
-  slots for TLS client identity and Geo context as the typed foundation for the
-  next cert/Geo access-policy slice, and teach the native route-proxy access
-  evaluator to consume that context without lifting the cutover blocker yet.
+  slots for TLS client identity and Geo context, populate TLS identity from
+  native rustls/OpenSSL listener handshakes, let handlers attach Geo context,
+  and teach the native route-proxy access evaluator to consume those typed
+  facts so cert/Geo access policy no longer blocks the native HTTP/1 cutover
+  inventory.
   Move safe-method traffic mirroring onto the native HTTP/1 proxy when the
   `traffic-mirror` feature is compiled. Move `proxy.auth_request` onto the
   native HTTP/1 proxy when the `auth-request` server feature is compiled.
@@ -2781,8 +2783,8 @@ available for the stabilization/security-only follow-up.
   native path, and either implement upstream TCP Fast Open safely or document it
   as an explicitly unsupported native blocker. Add live native listener tests
   for each path and keep cache, PHP-FPM, dynamic discovery, load-balancer state,
-  and upstream HTTP/2 explicitly reported as compatibility blockers until they
-  have native parity tests.
+  upstream TCP Fast Open, and upstream HTTP/2 explicitly reported as
+  compatibility blockers until they have native parity tests.
 - `v1.6.30`: build the native upstream HTTP/2 connection-manager parity layer.
   This release owns the policy that low-level `h2` protocol crates do not
   provide by themselves: per-upstream H2 connection pools keyed by backend/TLS/
