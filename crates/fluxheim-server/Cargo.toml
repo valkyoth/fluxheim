@@ -40,7 +40,7 @@ getrandom = { version = "0.4.3", optional = true }
 h2 = { version = "0.4.15", features = ["unstable"] }
 http = "1.4.2"
 httpdate = "1.0.3"
-log = "0.4.32"
+log = "0.4.33"
 base64-ng = "1.0.8"
 openssl = { version = "0.10.81", optional = true }
 percent-encoding = "2.3.2"

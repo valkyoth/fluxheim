@@ -599,10 +599,10 @@ impl NativeHttp1Upstream {
         {
             drop(stream);
             let _ = request;
-            return Err(NativeHttp1Error::Io(std::io::Error::new(
+            Err(NativeHttp1Error::Io(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
                 "native HTTP/2 on negotiated upstream stream requires a TLS backend",
-            )));
+            )))
         }
         #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
         {
@@ -873,7 +873,7 @@ impl NativeHttp1Upstream {
         &self,
         mut stream: NativeHttp1Stream,
     ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
-        let settings = h2c_upgrade_settings_header(self.http2_policy);
+        let settings = h2c_upgrade_settings_header(self.http2_policy)?;
         let request = format!(
             "OPTIONS * HTTP/1.1\r\n\
              Host: {}\r\n\
@@ -963,14 +963,18 @@ fn validate_h2c_upgrade_response(head: &[u8]) -> Result<(), NativeHttp1Error> {
     Ok(())
 }
 
-fn h2c_upgrade_settings_header(policy: DownstreamHttp2Policy) -> String {
+fn h2c_upgrade_settings_header(policy: DownstreamHttp2Policy) -> Result<String, NativeHttp1Error> {
     let mut settings = Vec::with_capacity(18);
     push_h2_setting(&mut settings, 0x4, policy.initial_window_size());
     push_h2_setting(&mut settings, 0x5, policy.max_frame_size());
     push_h2_setting(&mut settings, 0x6, policy.max_header_list_size());
     base64_ng::URL_SAFE_NO_PAD
         .encode_string(&settings)
-        .expect("base64url encoding fixed-size h2c settings should not fail")
+        .map_err(|error| {
+            NativeHttp1Error::Io(std::io::Error::other(format!(
+                "native h2c settings encoding failed: {error}"
+            )))
+        })
 }
 
 fn push_h2_setting(settings: &mut Vec<u8>, id: u16, value: u32) {

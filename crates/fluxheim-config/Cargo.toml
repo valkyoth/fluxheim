@@ -29,7 +29,7 @@ udp-proxy = []
 
 [dependencies]
 fluxheim-protocol = { path = "../fluxheim-protocol" }
-log = "0.4.32"
+log = "0.4.33"
 regex = "1.12.4"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"
