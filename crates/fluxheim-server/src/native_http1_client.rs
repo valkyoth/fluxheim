@@ -23,6 +23,7 @@ use crate::native_http1_upstream_response::{
 };
 use crate::native_http2_client::{
     native_http2_upstream_client_on_io, send_native_http2_upstream_request,
+    validate_outbound_request,
 };
 use crate::{
     DownstreamHttp1Policy, DownstreamHttp2Policy, NativeHttp1Error, NativeHttp1Request,
@@ -434,13 +435,6 @@ impl NativeHttp1Upstream {
         &self,
         request: &NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
-        let _slot = self
-            .http2_pool
-            .stream_slots
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| std::io::Error::other("native HTTP/2 stream pool closed"))?;
         let request = native_http2_upstream_request(
             request,
             &self.authority,
@@ -455,8 +449,21 @@ impl NativeHttp1Upstream {
                 }
             }),
         )?;
+        validate_outbound_request(&request, self.http2_policy).map_err(native_http2_error)?;
+        let _slot = timeout(
+            self.connect_timeout,
+            self.http2_pool.stream_slots.clone().acquire_owned(),
+        )
+        .await
+        .map_err(|_| {
+            NativeHttp1Error::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "native HTTP/2 stream slot timeout: all upstream H2 capacity in use",
+            ))
+        })?
+        .map_err(|_| std::io::Error::other("native HTTP/2 stream pool closed"))?;
         let client = self.http2_client().await?;
-        let retry_allowed = native_http1_retry_method_allowed(&request.method.to_string());
+        let retry_allowed = native_http1_retry_method_allowed(request.method.as_str());
         let response = if retry_allowed {
             let retry_request = request.clone();
             match send_native_http2_upstream_request(client, self.http2_policy, request).await {
@@ -490,14 +497,21 @@ impl NativeHttp1Upstream {
     }
 
     async fn http2_client(&self) -> Result<SendRequest<Bytes>, NativeHttp1Error> {
-        let mut connection = self.http2_pool.connection.lock().await;
-        if let Some(pooled) = connection.as_ref() {
-            return Ok(pooled.client.clone());
+        {
+            let connection = self.http2_pool.connection.lock().await;
+            if let Some(pooled) = connection.as_ref() {
+                return Ok(pooled.client.clone());
+            }
         }
         let stream = self.connect_stream().await?;
         let (client, driver) = native_http2_upstream_client_on_io(stream, self.http2_policy)
             .await
             .map_err(native_http2_error)?;
+        let mut connection = self.http2_pool.connection.lock().await;
+        if let Some(pooled) = connection.as_ref() {
+            driver.abort();
+            return Ok(pooled.client.clone());
+        }
         *connection = Some(NativeHttp2PooledConnection {
             client: client.clone(),
             driver,

@@ -27,12 +27,21 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native upstream H2 handshakes are now bounded by the selected H2 policy
   timeout so an origin that accepts TCP and then stalls the HTTP/2 preface cannot
   freeze upstream setup indefinitely.
+- Native upstream H2 stream-slot waits are now bounded by the connect timeout so
+  later downstream requests cannot wait indefinitely when all upstream H2 stream
+  capacity is occupied by slow responses.
 - Native upstream H2 requests and responses use the existing bounded H2 client
   policy: decoded header-count/list limits, URI/body limits, response body
   timeout, request upload lifetime, response header validation, and prohibited
   hop-by-hop response-header rejection.
+- Pooled native upstream H2 requests now run the same outbound H2 validation as
+  one-shot H2 requests before acquiring stream capacity or opening an upstream
+  connection.
 - Invalid programmatic upstream H2 stream limits now fail closed instead of
   silently reverting to the default policy.
+- Native upstream H2 pool creation no longer holds the pool mutex across TCP
+  connect and H2 handshake work, avoiding serialized cold-start failures when an
+  origin is unavailable.
 
 ## Compatibility Notes
 

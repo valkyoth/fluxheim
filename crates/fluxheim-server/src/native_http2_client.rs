@@ -166,7 +166,7 @@ fn outbound_request_head(
         .map_err(NativeHttp2StackError::ResponseBuild)
 }
 
-fn validate_outbound_request(
+pub(crate) fn validate_outbound_request(
     request: &NativeHttp2UpstreamRequest,
     policy: DownstreamHttp2Policy,
 ) -> Result<(), NativeHttp2StackError> {

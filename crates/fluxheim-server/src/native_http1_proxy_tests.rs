@@ -11,8 +11,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1ProxyConfigError,
-    NativeHttp1Request, NativeHttp1ResponseWritePolicy, NativeHttp1Upstream,
+    DownstreamHttp1Policy, DownstreamHttp2Policy, NativeHttp1Error, NativeHttp1Handler,
+    NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1Request,
+    NativeHttp1ResponseWritePolicy, NativeHttp1Upstream,
     native_http1_test_utils::read_request_head, serve_native_http1_listener,
 };
 
@@ -96,6 +97,26 @@ async fn h2_upstream(requests: usize) -> (std::net::SocketAddr, Arc<AtomicUsize>
     (addr, accepted_connections)
 }
 
+async fn h2_blocking_upstream() -> (std::net::SocketAddr, tokio::sync::oneshot::Receiver<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut connection = h2::server::handshake(stream).await.unwrap();
+        let Some(stream) = connection.accept().await else {
+            panic!("expected native H2 upstream request");
+        };
+        let (_request, _respond) = stream.unwrap();
+        let _ = accepted_tx.send(());
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            std::future::pending::<()>().await;
+        })
+        .await;
+    });
+    (addr, accepted_rx)
+}
+
 async fn proxy_listener_for(proxy: NativeHttp1Proxy) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -126,6 +147,13 @@ fn native_proxy_test_request() -> NativeHttp1Request {
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![("host".to_owned(), "proxy.test".to_owned())],
         body: Vec::new(),
+    }
+}
+
+fn native_proxy_test_request_for(target: &str) -> NativeHttp1Request {
+    NativeHttp1Request {
+        target: target.to_owned(),
+        ..native_proxy_test_request()
     }
 }
 
@@ -421,6 +449,53 @@ async fn native_proxy_forwards_downstream_request_to_http2_upstream() {
         assert!(response.ends_with(&format!("h2 upstream {index}\n")));
     }
     assert_eq!(accepted_connections.load(Ordering::Acquire), 1);
+}
+
+#[tokio::test]
+async fn native_proxy_http2_upstream_rejects_too_many_headers_before_connect() {
+    let upstream = NativeHttp1Upstream::new("127.0.0.1:9")
+        .with_http2_policy(DownstreamHttp2Policy::default().with_max_concurrent_streams(1));
+    let mut request = native_proxy_test_request_for("/h2-origin");
+    for index in 0..101 {
+        request
+            .headers
+            .push((format!("x-extra-{index}"), "1".to_owned()));
+    }
+
+    let error = upstream.send(&request).await.unwrap_err();
+    match error {
+        NativeHttp1Error::Io(error) => assert_eq!(error.kind(), std::io::ErrorKind::InvalidData),
+        NativeHttp1Error::Parse(error) => panic!("unexpected parse error: {error:?}"),
+    }
+}
+
+#[tokio::test]
+async fn native_proxy_http2_upstream_stream_slot_wait_is_bounded() {
+    let (origin, accepted) = h2_blocking_upstream().await;
+    let upstream = Arc::new(
+        NativeHttp1Upstream::new(origin.to_string())
+            .with_connect_timeout(Duration::from_millis(50))
+            .with_http2_policy(
+                DownstreamHttp2Policy::default()
+                    .with_max_concurrent_streams(1)
+                    .with_handler_timeout(Duration::from_secs(5)),
+            ),
+    );
+    let first = native_proxy_test_request_for("/h2-origin");
+    let first_upstream = Arc::clone(&upstream);
+    let first_task = tokio::spawn(async move { first_upstream.send(&first).await });
+    accepted.await.unwrap();
+
+    let second = native_proxy_test_request_for("/h2-origin");
+    let started = std::time::Instant::now();
+    let error = upstream.send(&second).await.unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(1));
+    match error {
+        NativeHttp1Error::Io(error) => assert_eq!(error.kind(), std::io::ErrorKind::TimedOut),
+        NativeHttp1Error::Parse(error) => panic!("unexpected parse error: {error:?}"),
+    }
+    first_task.abort();
+    let _ = first_task.await;
 }
 
 #[test]

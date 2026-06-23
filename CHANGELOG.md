@@ -30,12 +30,21 @@ behavior when the change improves security or project direction.
 
 - Bound native upstream H2 handshakes with the selected H2 policy timeout so a
   TCP-accepted origin cannot stall the upstream setup indefinitely.
+- Bound native upstream H2 stream-slot waits with the connect timeout so a slow
+  origin cannot park later downstream requests indefinitely behind exhausted H2
+  stream capacity.
 - Reuse the native H2 client-side limits for upstream requests and responses,
   including decoded header-count/list caps, URI/body caps, response-body
   timeout, request upload lifetime, response header validation, and prohibited
   hop-by-hop response-header rejection.
+- Validate pooled native upstream H2 requests against H2-specific header-count,
+  URI, and body limits before acquiring stream capacity or opening an upstream
+  connection.
 - Fail closed for invalid programmatic upstream H2 stream limits instead of
   silently falling back to the default policy.
+- Avoid holding the native upstream H2 pool mutex across TCP connect and H2
+  handshake work, preventing cold-start failures from serializing all waiting
+  requests behind one lock.
 
 ## 1.6.29 - 2026-06-23
 
