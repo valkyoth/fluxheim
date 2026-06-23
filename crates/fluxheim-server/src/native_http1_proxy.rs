@@ -147,10 +147,14 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
                 formatter.write_str("native HTTP/1 proxy upstream receive buffer size is too large")
             }
             Self::TrafficMirror => {
-                formatter.write_str("native HTTP/1 proxy does not yet support traffic mirroring")
+                formatter.write_str(
+                    "native HTTP/1 proxy traffic mirroring requires the traffic-mirror feature and a non-privacy build",
+                )
             }
             Self::AuthRequest => {
-                formatter.write_str("native HTTP/1 proxy does not yet support auth subrequests")
+                formatter.write_str(
+                    "native HTTP/1 proxy auth subrequests require the auth-request feature",
+                )
             }
             Self::UpstreamHttp2 => {
                 formatter.write_str("native HTTP/1 proxy does not yet support HTTP/2 upstreams")

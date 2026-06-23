@@ -164,6 +164,9 @@ the native HTTP/1 proxy path.
 - Native HTTP/1 proxy tests now prove auth-request allow responses can inject
   configured upstream headers and auth-request deny responses stop before any
   upstream connection is made.
+- Native cutover-plan tests now prove `proxy.auth_request` and safe-method
+  traffic mirroring are native-ready only when their matching server feature
+  gates are compiled.
 - Native traffic mirroring now honors only Fluxheim's signed internal mirror
   marker for loop prevention, so client-supplied `X-Fluxheim-Mirror` headers
   cannot suppress the configured mirror feed.

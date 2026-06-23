@@ -57,6 +57,48 @@ fn server_plan_keeps_upstream_http2_as_native_blocker() {
 }
 
 #[test]
+fn server_plan_tracks_auth_request_native_feature_support() {
+    let mut config = Config::default();
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
+    config.proxy.auth_request = fluxheim_config::AuthRequestConfig {
+        enabled: true,
+        url: Some("http://127.0.0.1:3002/auth".to_owned()),
+        ..Default::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    #[cfg(not(feature = "auth-request"))]
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::AuthRequest)
+    );
+    #[cfg(feature = "auth-request")]
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
+}
+
+#[test]
+fn server_plan_tracks_traffic_mirror_native_feature_support() {
+    let mut config = Config::default();
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
+    config.proxy.mirror = fluxheim_config::TrafficMirrorConfig {
+        enabled: true,
+        base_url: Some("http://127.0.0.1:3002/shadow".to_owned()),
+        ..Default::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    #[cfg(not(all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::TrafficMirror)
+    );
+    #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
+}
+
+#[test]
 fn server_plan_collects_vhost_and_route_native_http1_proxy_candidates() {
     let config = Config {
         vhosts: vec![VhostConfig {

@@ -75,6 +75,9 @@ behavior when the change improves security or project direction.
   `auth-request` server feature is compiled, including trusted context header
   synthesis, bounded blocking subrequests, response-header allowlisting, and
   deny-before-forwarding behavior.
+- Add native cutover-plan tests proving auth-request and safe-method traffic
+  mirroring are native-ready only when their matching server feature gates are
+  compiled.
 - Add native proxy and cutover-plan tests proving upstream HTTP/2 and H2 tuning
   knobs remain explicit native blockers for the dedicated 1.6.30 upstream H2
   connection-manager slice.
