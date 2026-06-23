@@ -1,7 +1,14 @@
 use super::*;
 use bytes::Bytes;
 use std::future::poll_fn;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll};
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+
+use crate::native_http2_client::native_http2_upstream_client_on_io_with_keepalive;
 
 #[tokio::test]
 async fn native_http2_upstream_preserves_request_and_response_trailers() {
@@ -244,6 +251,140 @@ async fn native_http2_upstream_surfaces_stream_reset() {
 
     assert!(matches!(error, NativeHttp2StackError::Stream(_)));
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_upstream_keepalive_sends_ping_frame() {
+    let (client_io, server_io) = tokio::io::duplex(4096);
+    let saw_ping = Arc::new(AtomicBool::new(false));
+    let saw_ping_for_server = Arc::clone(&saw_ping);
+    let server = tokio::spawn(async move {
+        let observed = ObservedHttp2Read::new(server_io, Arc::clone(&saw_ping_for_server));
+        let mut connection = h2::server::handshake(observed).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !saw_ping_for_server.load(Ordering::Acquire) {
+                tokio::select! {
+                    stream = connection.accept() => {
+                        if stream.is_none() {
+                            break;
+                        }
+                    }
+                    _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+                }
+            }
+        })
+        .await
+        .expect("expected native upstream H2 keepalive ping");
+        assert!(saw_ping_for_server.load(Ordering::Acquire));
+        drive_test_server_to_close(connection).await;
+    });
+    let policy = DownstreamHttp2Policy::default().with_handler_timeout(Duration::from_secs(1));
+    let (client, driver) = native_http2_upstream_client_on_io_with_keepalive(
+        client_io,
+        policy,
+        Some(Duration::from_millis(10)),
+    )
+    .await
+    .unwrap();
+    let _ready_client = tokio::time::timeout(Duration::from_secs(1), client.ready())
+        .await
+        .unwrap()
+        .unwrap();
+
+    server.await.unwrap();
+    driver.abort_and_join().await;
+}
+
+struct ObservedHttp2Read<T> {
+    inner: T,
+    saw_client_ping: Arc<AtomicBool>,
+    preface_remaining: usize,
+    frame_buffer: Vec<u8>,
+}
+
+impl<T> ObservedHttp2Read<T> {
+    fn new(inner: T, saw_client_ping: Arc<AtomicBool>) -> Self {
+        Self {
+            inner,
+            saw_client_ping,
+            preface_remaining: 24,
+            frame_buffer: Vec::new(),
+        }
+    }
+
+    fn observe(&mut self, mut bytes: &[u8]) {
+        if self.preface_remaining > 0 {
+            let skipped = self.preface_remaining.min(bytes.len());
+            self.preface_remaining -= skipped;
+            bytes = &bytes[skipped..];
+        }
+        if bytes.is_empty() {
+            return;
+        }
+        self.frame_buffer.extend_from_slice(bytes);
+        while self.frame_buffer.len() >= 9 {
+            let length = ((self.frame_buffer[0] as usize) << 16)
+                | ((self.frame_buffer[1] as usize) << 8)
+                | self.frame_buffer[2] as usize;
+            if self.frame_buffer.len() < 9 + length {
+                break;
+            }
+            let frame_type = self.frame_buffer[3];
+            let flags = self.frame_buffer[4];
+            let stream_id = u32::from_be_bytes([
+                self.frame_buffer[5],
+                self.frame_buffer[6],
+                self.frame_buffer[7],
+                self.frame_buffer[8],
+            ]) & 0x7fff_ffff;
+            if frame_type == 6 && flags & 0x1 == 0 && stream_id == 0 && length == 8 {
+                self.saw_client_ping.store(true, Ordering::Release);
+            }
+            self.frame_buffer.drain(..9 + length);
+        }
+    }
+}
+
+impl<T: AsyncRead + Unpin> AsyncRead for ObservedHttp2Read<T> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let before = buffer.filled().len();
+        match Pin::new(&mut self.inner).poll_read(context, buffer) {
+            Poll::Ready(Ok(())) => {
+                let after = buffer.filled().len();
+                self.observe(&buffer.filled()[before..after]);
+                Poll::Ready(Ok(()))
+            }
+            other => other,
+        }
+    }
+}
+
+impl<T: AsyncWrite + Unpin> AsyncWrite for ObservedHttp2Read<T> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(context, buffer)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(context)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(context)
+    }
 }
 
 async fn drive_test_server_to_close<T>(mut connection: h2::server::Connection<T, Bytes>)

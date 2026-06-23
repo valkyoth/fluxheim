@@ -56,7 +56,7 @@ fn server_plan_accepts_plain_upstream_http2_candidate() {
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::UpstreamHttp2)
+        None
     );
 
     config.proxy.upstream_h2_ping_interval_secs = None;

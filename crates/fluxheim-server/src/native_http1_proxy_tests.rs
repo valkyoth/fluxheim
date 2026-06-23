@@ -769,6 +769,7 @@ fn native_proxy_config_maps_http2_handler_timeout_from_read_timeout() {
         upstream: Some("127.0.0.1:3000".to_owned()),
         upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
         read_timeout_secs: Some(7),
+        upstream_h2_ping_interval_secs: Some(11),
         ..Default::default()
     };
 
@@ -783,6 +784,10 @@ fn native_proxy_config_maps_http2_handler_timeout_from_read_timeout() {
     assert_eq!(
         native.upstream().http2_policy().response_body_timeout(),
         Duration::from_secs(7)
+    );
+    assert_eq!(
+        native.upstream().http2_keepalive_interval(),
+        Some(Duration::from_secs(11))
     );
 }
 
@@ -1680,10 +1685,7 @@ fn native_proxy_config_keeps_unsupported_upstream_http2_modes_as_explicit_blocke
         upstream_h2_ping_interval_secs: Some(30),
         ..Default::default()
     };
-    assert_eq!(
-        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
-        Err(NativeHttp1ProxyConfigError::UpstreamHttp2)
-    );
+    assert!(NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()).is_ok());
 }
 
 #[test]

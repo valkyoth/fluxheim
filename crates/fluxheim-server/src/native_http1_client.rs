@@ -9,7 +9,6 @@ use socket2::{SockRef, TcpKeepalive};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::{Mutex, Semaphore};
-use tokio::task::JoinHandle;
 use tokio::time::{Instant as TokioInstant, timeout, timeout_at};
 use zeroize::Zeroizing;
 
@@ -22,8 +21,8 @@ use crate::native_http1_upstream_response::{
     read_upstream_response, read_upstream_response_for_pool,
 };
 use crate::native_http2_client::{
-    native_http2_upstream_client_on_io, send_native_http2_upstream_request,
-    validate_outbound_request,
+    NativeHttp2ConnectionDriver, native_http2_upstream_client_on_io_with_keepalive,
+    send_native_http2_upstream_request, validate_outbound_request,
 };
 use crate::{
     DownstreamHttp1Policy, DownstreamHttp2Policy, NativeHttp1Error, NativeHttp1Request,
@@ -50,6 +49,7 @@ pub struct NativeHttp1Upstream {
     dscp: Option<u8>,
     tcp_keepalive: Option<NativeTcpKeepalivePolicy>,
     tcp_user_timeout: Option<Duration>,
+    http2_keepalive_interval: Option<Duration>,
     max_head_bytes: usize,
     max_body_bytes: usize,
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -80,7 +80,7 @@ struct NativeHttp2Pool {
 
 struct NativeHttp2PooledConnection {
     client: SendRequest<Bytes>,
-    driver: JoinHandle<()>,
+    driver: NativeHttp2ConnectionDriver,
 }
 
 struct IdleNativeHttp1Connection {
@@ -165,6 +165,7 @@ impl std::fmt::Debug for NativeHttp1Upstream {
             .field("dscp", &self.dscp)
             .field("tcp_keepalive", &self.tcp_keepalive)
             .field("tcp_user_timeout", &self.tcp_user_timeout)
+            .field("http2_keepalive_interval", &self.http2_keepalive_interval)
             .field("max_head_bytes", &self.max_head_bytes)
             .field("max_body_bytes", &self.max_body_bytes)
             .field("tls", {
@@ -200,6 +201,7 @@ impl PartialEq for NativeHttp1Upstream {
             && self.dscp == other.dscp
             && self.tcp_keepalive == other.tcp_keepalive
             && self.tcp_user_timeout == other.tcp_user_timeout
+            && self.http2_keepalive_interval == other.http2_keepalive_interval
             && self.max_head_bytes == other.max_head_bytes
             && self.max_body_bytes == other.max_body_bytes
             && {
@@ -234,6 +236,7 @@ impl NativeHttp1Upstream {
             dscp: None,
             tcp_keepalive: None,
             tcp_user_timeout: None,
+            http2_keepalive_interval: None,
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -258,6 +261,7 @@ impl NativeHttp1Upstream {
             dscp: None,
             tcp_keepalive: None,
             tcp_user_timeout: None,
+            http2_keepalive_interval: None,
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -343,6 +347,15 @@ impl NativeHttp1Upstream {
 
     pub const fn tcp_user_timeout(&self) -> Option<Duration> {
         self.tcp_user_timeout
+    }
+
+    pub const fn with_http2_keepalive_interval(mut self, interval: Option<Duration>) -> Self {
+        self.http2_keepalive_interval = interval;
+        self
+    }
+
+    pub const fn http2_keepalive_interval(&self) -> Option<Duration> {
+        self.http2_keepalive_interval
     }
 
     pub const fn with_max_body_bytes(mut self, max_body_bytes: usize) -> Self {
@@ -555,11 +568,17 @@ impl NativeHttp1Upstream {
             let policy = self
                 .http2_policy
                 .with_handler_timeout(self.http2_policy.handler_timeout().min(remaining));
-            let (client, driver) =
-                timeout_at(deadline, native_http2_upstream_client_on_io(stream, policy))
-                    .await
-                    .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
-                    .map_err(native_http2_error)?;
+            let (client, driver) = timeout_at(
+                deadline,
+                native_http2_upstream_client_on_io_with_keepalive(
+                    stream,
+                    policy,
+                    self.http2_keepalive_interval,
+                ),
+            )
+            .await
+            .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
+            .map_err(native_http2_error)?;
             let client = timeout_at(deadline, client.ready())
                 .await
                 .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
@@ -567,9 +586,13 @@ impl NativeHttp1Upstream {
             return Ok(NativeHttp2PooledConnection { client, driver });
         }
         let stream = self.connect_stream_inner().await?;
-        let (client, driver) = native_http2_upstream_client_on_io(stream, self.http2_policy)
-            .await
-            .map_err(native_http2_error)?;
+        let (client, driver) = native_http2_upstream_client_on_io_with_keepalive(
+            stream,
+            self.http2_policy,
+            self.http2_keepalive_interval,
+        )
+        .await
+        .map_err(native_http2_error)?;
         let client = timeout(self.http2_policy.handler_timeout(), client.ready())
             .await
             .map_err(|_| native_http2_error(NativeHttp2StackError::RequestReadyTimeout))?

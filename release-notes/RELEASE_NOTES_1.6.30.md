@@ -14,10 +14,11 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
   h2 errors, and retries safe methods once after a pre-response pooled-handle
   failure.
 - Native upstream H2 policy now receives `proxy.read_timeout_secs`,
-  `proxy.send_timeout_secs`, and `proxy.upstream_h2_max_streams`.
-- TLS ALPN-negotiated upstream HTTP/2, `http1-and-http2` fallback negotiation,
-  and `proxy.upstream_h2_ping_interval_secs` remain explicit native blockers
-  until the final upstream transport cutover.
+  `proxy.send_timeout_secs`, `proxy.upstream_h2_max_streams`, and
+  `proxy.upstream_h2_ping_interval_secs`.
+- TLS ALPN-negotiated upstream HTTP/2 and `http1-and-http2` fallback
+  negotiation remain explicit native blockers until the final upstream
+  transport cutover.
 - Live native proxy tests now prove downstream HTTP/1 requests can be forwarded
   to an in-process HTTP/2 origin, and that two downstream requests reuse one
   upstream H2 connection.
@@ -55,16 +56,21 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
   connection.
 - Stream-scoped H2 failures no longer invalidate the whole H2 pool unless the
   h2 error reports a GOAWAY/connection-level condition.
+- Native plaintext upstream H2 keepalive pings run in a separate bounded task,
+  wait for PONGs with the selected H2 handler timeout, and abort the connection
+  driver when the peer stops acknowledging pings.
+- A wire-level native upstream H2 test now observes an actual client PING frame
+  through a real h2 server IO wrapper, proving configured keepalive is emitted
+  instead of only accepted by config.
 - H2-only knobs on HTTP/1 upstream configs are rejected instead of silently
   ignored, and H1/H2 upstream request writers now share the same predicate for
   Fluxheim-owned header stripping.
 - Native diagnostics now distinguish supported plaintext upstream H2 from
-  unsupported H2 modes such as TLS ALPN negotiation, `http1-and-http2` fallback,
-  and upstream H2 keepalive pings.
+  unsupported H2 modes such as TLS ALPN negotiation and `http1-and-http2`
+  fallback.
 
 ## Compatibility Notes
 
 - This release enables plaintext h2c/prior-knowledge origins on the native path.
-  Operators using TLS ALPN H2, `http1-and-http2` negotiation, or upstream H2
-  keepalive pings still use the compatibility runtime until those pieces have
-  native parity tests.
+  Operators using TLS ALPN H2 or `http1-and-http2` negotiation still use the
+  compatibility runtime until those pieces have native parity tests.

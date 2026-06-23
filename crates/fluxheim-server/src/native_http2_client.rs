@@ -2,11 +2,34 @@ use bytes::Bytes;
 use h2::client::SendRequest;
 use http::{HeaderMap, Method, StatusCode, Uri};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::task::JoinHandle;
+use tokio::task::{AbortHandle, JoinHandle};
 use zeroize::Zeroizing;
 
 use crate::native_http2_stack::{send_data_bounded, validate_response_headers};
 use crate::{DownstreamHttp2Policy, NativeHttp2StackError};
+
+#[derive(Debug)]
+pub(crate) struct NativeHttp2ConnectionDriver {
+    connection: JoinHandle<()>,
+    keepalive: Option<JoinHandle<()>>,
+}
+
+impl NativeHttp2ConnectionDriver {
+    pub(crate) fn abort(&self) {
+        self.connection.abort();
+        if let Some(keepalive) = &self.keepalive {
+            keepalive.abort();
+        }
+    }
+
+    pub(crate) async fn abort_and_join(self) {
+        self.abort();
+        let _ = self.connection.await;
+        if let Some(keepalive) = self.keepalive {
+            let _ = keepalive.await;
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp2UpstreamRequest {
@@ -84,18 +107,29 @@ where
     let result = send_native_http2_upstream_request(client, policy, request).await;
     // This is a one-request, one-connection helper used by tests and fallback
     // paths. Pooled upstream connections own their driver task separately.
-    connection_driver.abort();
-    let _ = connection_driver.await;
+    connection_driver.abort_and_join().await;
     result
 }
 
 pub(crate) async fn native_http2_upstream_client_on_io<T>(
     io: T,
     policy: DownstreamHttp2Policy,
-) -> Result<(SendRequest<Bytes>, JoinHandle<()>), NativeHttp2StackError>
+) -> Result<(SendRequest<Bytes>, NativeHttp2ConnectionDriver), NativeHttp2StackError>
 where
     T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
+    native_http2_upstream_client_on_io_with_keepalive(io, policy, None).await
+}
+
+pub(crate) async fn native_http2_upstream_client_on_io_with_keepalive<T>(
+    io: T,
+    policy: DownstreamHttp2Policy,
+    keepalive_interval: Option<std::time::Duration>,
+) -> Result<(SendRequest<Bytes>, NativeHttp2ConnectionDriver), NativeHttp2StackError>
+where
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
+    let keepalive_interval = keepalive_interval.filter(|interval| !interval.is_zero());
     let mut builder = h2::client::Builder::new();
     builder.max_header_list_size(policy.max_header_list_size());
     builder.max_concurrent_streams(policy.max_concurrent_streams());
@@ -104,11 +138,12 @@ where
     builder.max_send_buffer_size(policy.max_send_buffer_size());
     builder.max_concurrent_reset_streams(policy.max_pending_accept_reset_streams());
 
-    let (client, connection) =
+    let (client, mut connection) =
         tokio::time::timeout(policy.handler_timeout(), builder.handshake::<_, Bytes>(io))
             .await
             .map_err(|_| NativeHttp2StackError::HandshakeTimeout)?
             .map_err(NativeHttp2StackError::Handshake)?;
+    let ping_pong = keepalive_interval.and_then(|_| connection.ping_pong());
     let connection_driver = tokio::spawn(async move {
         if let Err(error) = connection.await {
             log::debug!(
@@ -117,7 +152,56 @@ where
             );
         }
     });
-    Ok((client, connection_driver))
+    let keepalive = match (keepalive_interval, ping_pong) {
+        (Some(interval), Some(ping_pong)) => Some(spawn_native_http2_keepalive(
+            ping_pong,
+            interval,
+            policy.handler_timeout(),
+            connection_driver.abort_handle(),
+        )),
+        _ => None,
+    };
+    Ok((
+        client,
+        NativeHttp2ConnectionDriver {
+            connection: connection_driver,
+            keepalive,
+        },
+    ))
+}
+
+fn spawn_native_http2_keepalive(
+    mut ping_pong: h2::PingPong,
+    interval: std::time::Duration,
+    timeout_duration: std::time::Duration,
+    connection_abort: AbortHandle,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            match tokio::time::timeout(timeout_duration, ping_pong.ping(h2::Ping::opaque())).await {
+                Ok(Ok(_pong)) => {}
+                Ok(Err(error)) => {
+                    log::debug!(
+                        target: "fluxheim::native_http2",
+                        "native HTTP/2 upstream keepalive ping failed: {error}"
+                    );
+                    connection_abort.abort();
+                    break;
+                }
+                Err(_) => {
+                    log::debug!(
+                        target: "fluxheim::native_http2",
+                        "native HTTP/2 upstream keepalive ping timed out"
+                    );
+                    connection_abort.abort();
+                    break;
+                }
+            }
+        }
+    })
 }
 
 pub(crate) async fn send_native_http2_upstream_request(

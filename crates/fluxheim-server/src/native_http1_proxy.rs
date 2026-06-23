@@ -367,8 +367,7 @@ impl NativeHttp1Proxy {
         match proxy.upstream_http_version {
             fluxheim_config::UpstreamHttpVersion::Http1
                 if proxy.upstream_h2_max_streams.is_none() => {}
-            fluxheim_config::UpstreamHttpVersion::Http2
-                if !proxy.upstream_tls && proxy.upstream_h2_ping_interval_secs.is_none() => {}
+            fluxheim_config::UpstreamHttpVersion::Http2 if !proxy.upstream_tls => {}
             fluxheim_config::UpstreamHttpVersion::Http2
             | fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => {
                 return Err(NativeHttp1ProxyConfigError::UpstreamHttp2);
@@ -426,6 +425,11 @@ impl NativeHttp1Proxy {
             if proxy.upstream_http_version == fluxheim_config::UpstreamHttpVersion::Http2 {
                 native_upstream =
                     native_upstream.with_http2_policy(native_http2_policy_from_config(proxy)?);
+                native_upstream = native_upstream.with_http2_keepalive_interval(
+                    proxy
+                        .upstream_h2_ping_interval_secs
+                        .map(Duration::from_secs),
+                );
             }
             let recv_buffer_size = match proxy
                 .upstream_tcp_recv_buffer_bytes
@@ -1246,7 +1250,6 @@ fn proxy_requires_auth_request(proxy: &fluxheim_config::ProxyConfig) -> bool {
 fn proxy_requires_advanced_upstream_transport(proxy: &fluxheim_config::ProxyConfig) -> bool {
     proxy.upstream_tcp_user_timeout_ms.is_some() && !native_tcp_user_timeout_supported()
         || proxy.upstream_tcp_fast_open
-        || proxy.upstream_h2_ping_interval_secs.is_some()
 }
 
 fn native_http2_policy_from_config(
