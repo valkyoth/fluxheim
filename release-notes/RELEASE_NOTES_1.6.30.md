@@ -29,6 +29,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native proxy live tests now also prove weighted static upstream selection
   preserves the configured slot order while forwarding every selected upstream
   request over HTTP/2.
+- Native proxy live tests now prove safe-method failover works across static
+  HTTP/2 upstreams and that unsafe methods are not replayed to another H2
+  upstream after a failed first attempt.
 
 ## Security Notes
 

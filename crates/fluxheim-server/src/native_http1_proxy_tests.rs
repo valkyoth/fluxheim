@@ -805,6 +805,74 @@ async fn native_proxy_weighted_round_robins_successful_http2_static_upstreams() 
     assert_eq!(second_connections.load(Ordering::Acquire), 1);
 }
 
+#[tokio::test]
+async fn native_proxy_http2_safe_method_fails_over_to_second_static_upstream() {
+    let first = unused_local_address().await;
+    let (second, second_connections) = h2_upstream_with_body("h2 failover\n", 1).await;
+    let proxy_config = fluxheim_config::ProxyConfig {
+        upstreams: vec![first.to_string(), second.to_string()],
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_h2_max_streams: Some(4),
+        connect_timeout_secs: Some(1),
+        read_timeout_secs: Some(5),
+        send_timeout_secs: Some(5),
+        ..Default::default()
+    };
+    let proxy =
+        NativeHttp1Proxy::from_proxy_config(&proxy_config, DownstreamHttp1Policy::default())
+            .unwrap()
+            .unwrap();
+    let proxy = proxy_listener_for(proxy).await;
+
+    let response = downstream_get(proxy, "/h2-origin").await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert!(response.contains("x-origin-proto: h2\r\n"));
+    assert!(response.ends_with("h2 failover\n"));
+    assert_eq!(second_connections.load(Ordering::Acquire), 1);
+}
+
+#[tokio::test]
+async fn native_proxy_http2_does_not_fail_over_unsafe_method() {
+    let first = unused_local_address().await;
+    let (second, second_connections) = h2_upstream_with_body("h2 unsafe replay\n", 1).await;
+    let proxy_config = fluxheim_config::ProxyConfig {
+        upstreams: vec![first.to_string(), second.to_string()],
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_h2_max_streams: Some(4),
+        connect_timeout_secs: Some(1),
+        read_timeout_secs: Some(5),
+        send_timeout_secs: Some(5),
+        ..Default::default()
+    };
+    let proxy =
+        NativeHttp1Proxy::from_proxy_config(&proxy_config, DownstreamHttp1Policy::default())
+            .unwrap()
+            .unwrap();
+    let proxy = proxy_listener_for(proxy).await;
+
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+    client
+        .write_all(
+            b"POST /h2-origin HTTP/1.1\r\nHost: proxy.test\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata",
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+
+    assert!(
+        response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert!(response.ends_with("bad gateway\n"));
+    assert_eq!(second_connections.load(Ordering::Acquire), 0);
+}
+
 #[test]
 fn native_proxy_config_accepts_plain_http2_upstream() {
     let proxy = fluxheim_config::ProxyConfig {
