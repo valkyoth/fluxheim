@@ -72,6 +72,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Live rustls upstream tests now prove TLS `http1-and-http2` fallback selects
   HTTP/2 when the origin negotiates `h2` and falls back to HTTP/1.1 when no
   HTTP/2 ALPN protocol is selected.
+- Native cutover-plan tests now prove TLS `http1-and-http2` upstream fallback
+  is native-ready when a TLS backend is compiled, while plaintext
+  `http1-and-http2` remains an explicit compatibility-runtime exception.
 - Native upstream H2 stream permits are now named and explicitly released after
   response conversion, keeping the lifetime visible to reviewers and avoiding
   accidental future movement of the permit guard.

@@ -66,6 +66,20 @@ fn server_plan_accepts_plain_upstream_http2_candidate() {
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
         Some(NativeHttp1ProxyConfigError::UpstreamHttp2)
     );
+
+    config.proxy.upstream_tls = true;
+    config.proxy.upstream_sni = Some("localhost".to_owned());
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::UpstreamTls)
+    );
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        None
+    );
 }
 
 #[test]
