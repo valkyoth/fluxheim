@@ -1263,6 +1263,11 @@ the origin is known to accept cleartext HTTP/2. `upstream_h2_max_streams`
 limits concurrent streams per upstream HTTP/2 connection and must be between
 1 and 1024. `upstream_h2_ping_interval_secs` enables upstream HTTP/2 keepalive
 pings. Both h2 settings require `upstream_http_version` to allow HTTP/2.
+During the 1.6 native preview, the native HTTP/1 proxy path supports plaintext
+h2c/prior-knowledge upstreams for `upstream_http_version = "http2"`.
+TLS ALPN-negotiated upstream HTTP/2, `http1-and-http2` fallback negotiation,
+and upstream H2 keepalive pings remain compatibility-runtime features until the
+native upstream transport cutover has parity tests for them.
 For explicit gRPC routes, set route-scoped `[vhosts.routes.grpc] enabled =
 true`; Fluxheim then requires the route proxy to allow upstream HTTP/2, rejects
 non-`POST` requests, accepts only `application/grpc` or `application/grpc+*`

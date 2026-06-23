@@ -16,7 +16,11 @@ const BODY_PREALLOC_HINT_BYTES: usize = 64 * 1024;
 #[derive(Debug)]
 pub enum NativeHttp2StackError {
     Handshake(h2::Error),
+    HandshakeTimeout,
     Stream(h2::Error),
+    RequestReadyTimeout,
+    RequestReady(h2::Error),
+    SendRequest(h2::Error),
     TooManyHeaders { count: usize, limit: usize },
     UriTooLarge { len: usize, limit: usize },
     BodyReadTimeout,
@@ -35,7 +39,26 @@ impl std::fmt::Display for NativeHttp2StackError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Handshake(error) => write!(formatter, "native HTTP/2 handshake failed: {error}"),
+            Self::HandshakeTimeout => write!(formatter, "native HTTP/2 handshake timed out"),
             Self::Stream(error) => write!(formatter, "native HTTP/2 stream failed: {error}"),
+            Self::RequestReadyTimeout => {
+                write!(
+                    formatter,
+                    "native HTTP/2 upstream request readiness timed out"
+                )
+            }
+            Self::RequestReady(error) => {
+                write!(
+                    formatter,
+                    "native HTTP/2 upstream request readiness failed: {error}"
+                )
+            }
+            Self::SendRequest(error) => {
+                write!(
+                    formatter,
+                    "native HTTP/2 upstream request send failed: {error}"
+                )
+            }
             Self::TooManyHeaders { count, limit } => write!(
                 formatter,
                 "native HTTP/2 request has too many decoded headers: {count} > {limit}"

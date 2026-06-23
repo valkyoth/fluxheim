@@ -7,6 +7,36 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.30 - 2026-06-23
+
+### Changed
+
+- Move native upstream HTTP/2 support for plaintext h2c/prior-knowledge
+  origins into the native HTTP/1 proxy path when
+  `proxy.upstream_http_version = "http2"` and `upstream_tls = false`.
+- Add a native upstream HTTP/2 connection pool that keeps the h2 connection
+  driver alive across requests, reserves stream capacity with
+  `proxy.upstream_h2_max_streams`, invalidates stale handles on h2 errors, and
+  retries safe methods once after a pre-response pooled-handle failure.
+- Map `proxy.read_timeout_secs`, `proxy.send_timeout_secs`, and
+  `proxy.upstream_h2_max_streams` onto the native HTTP/2 upstream policy while
+  keeping TLS ALPN HTTP/2, `http1-and-http2` fallback negotiation, and upstream
+  H2 keepalive pings as explicit compatibility-runtime blockers.
+- Add live native proxy tests that forward downstream HTTP/1 requests to an
+  in-process HTTP/2 origin and prove two downstream requests reuse one upstream
+  H2 connection.
+
+### Security
+
+- Bound native upstream H2 handshakes with the selected H2 policy timeout so a
+  TCP-accepted origin cannot stall the upstream setup indefinitely.
+- Reuse the native H2 client-side limits for upstream requests and responses,
+  including decoded header-count/list caps, URI/body caps, response-body
+  timeout, request upload lifetime, response header validation, and prohibited
+  hop-by-hop response-header rejection.
+- Fail closed for invalid programmatic upstream H2 stream limits instead of
+  silently falling back to the default policy.
+
 ## 1.6.29 - 2026-06-23
 
 ### Changed

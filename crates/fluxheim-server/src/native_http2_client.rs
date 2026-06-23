@@ -1,6 +1,8 @@
 use bytes::Bytes;
+use h2::client::SendRequest;
 use http::{HeaderMap, Method, StatusCode, Uri};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::task::JoinHandle;
 use zeroize::Zeroizing;
 
 use crate::native_http2_stack::{send_data_bounded, validate_response_headers};
@@ -80,6 +82,22 @@ where
 {
     validate_outbound_request(&request, policy)?;
 
+    let (client, connection_driver) = native_http2_upstream_client_on_io(io, policy).await?;
+    let result = send_native_http2_upstream_request(client, policy, request).await;
+    // This is a one-request, one-connection helper used by tests and fallback
+    // paths. Pooled upstream connections own their driver task separately.
+    connection_driver.abort();
+    let _ = connection_driver.await;
+    result
+}
+
+pub(crate) async fn native_http2_upstream_client_on_io<T>(
+    io: T,
+    policy: DownstreamHttp2Policy,
+) -> Result<(SendRequest<Bytes>, JoinHandle<()>), NativeHttp2StackError>
+where
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
     let mut builder = h2::client::Builder::new();
     builder.max_header_list_size(policy.max_header_list_size());
     builder.max_concurrent_streams(policy.max_concurrent_streams());
@@ -88,10 +106,11 @@ where
     builder.max_send_buffer_size(policy.max_send_buffer_size());
     builder.max_concurrent_reset_streams(policy.max_pending_accept_reset_streams());
 
-    let (client, connection) = builder
-        .handshake::<_, Bytes>(io)
-        .await
-        .map_err(NativeHttp2StackError::Handshake)?;
+    let (client, connection) =
+        tokio::time::timeout(policy.handler_timeout(), builder.handshake::<_, Bytes>(io))
+            .await
+            .map_err(|_| NativeHttp2StackError::HandshakeTimeout)?
+            .map_err(NativeHttp2StackError::Handshake)?;
     let connection_driver = tokio::spawn(async move {
         if let Err(error) = connection.await {
             log::debug!(
@@ -100,30 +119,23 @@ where
             );
         }
     });
-
-    let result = send_native_http2_upstream_request(client, policy, request).await;
-    // This is a one-request, one-connection preview client. It intentionally
-    // aborts the driver instead of flushing GOAWAY; do not copy this teardown
-    // for future pooled HTTP/2 upstream connections.
-    connection_driver.abort();
-    let _ = connection_driver.await;
-    result
+    Ok((client, connection_driver))
 }
 
-async fn send_native_http2_upstream_request(
+pub(crate) async fn send_native_http2_upstream_request(
     client: h2::client::SendRequest<Bytes>,
     policy: DownstreamHttp2Policy,
     request: NativeHttp2UpstreamRequest,
 ) -> Result<NativeHttp2UpstreamResponse, NativeHttp2StackError> {
     let mut client = tokio::time::timeout(policy.handler_timeout(), client.ready())
         .await
-        .map_err(|_| NativeHttp2StackError::HandlerTimeout)?
-        .map_err(NativeHttp2StackError::Stream)?;
+        .map_err(|_| NativeHttp2StackError::RequestReadyTimeout)?
+        .map_err(NativeHttp2StackError::RequestReady)?;
     let end_on_headers = request.body.is_empty() && request.trailers.is_none();
     let head = outbound_request_head(&request)?;
     let (response, mut send_stream) = client
         .send_request(head, end_on_headers)
-        .map_err(NativeHttp2StackError::SendResponse)?;
+        .map_err(NativeHttp2StackError::SendRequest)?;
     if !end_on_headers {
         tokio::time::timeout(
             policy.response_write_lifetime(),

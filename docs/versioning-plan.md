@@ -2785,21 +2785,20 @@ available for the stabilization/security-only follow-up.
   for each path and keep cache, PHP-FPM, dynamic discovery, load-balancer state,
   upstream TCP Fast Open, and upstream HTTP/2 explicitly reported as
   compatibility blockers until they have native parity tests.
-- `v1.6.30`: build the native upstream HTTP/2 connection-manager parity layer.
-  This release owns the policy that low-level `h2` protocol crates do not
-  provide by themselves: per-upstream H2 connection pools keyed by backend/TLS/
-  SNI/ALPN/CA/client-cert/socket policy, atomic stream-capacity reservation for
-  `proxy.upstream_h2_max_streams`, a Tokio connection-driver task per pooled
-  connection, request/response translation with safe retry classification,
-  GOAWAY handling, `proxy.upstream_h2_ping_interval_secs` keepalive and timeout
-  handling, backpressure when all streams are at capacity, separate connect/TLS/
-  H2-handshake/request-upload/response-header/response-body/total-response/
-  idle timeout accounting, and passive-health classification that never lets
-  downstream disconnects or client-side throttling poison backend health. Add
-  real H2 upstream tests for concurrent streams, stream-capacity limits,
-  GOAWAY, ping timeout, retry-before-response, no retry after partial response,
-  TLS ALPN, load-balanced H2 upstreams, slow-response timeout, and downstream
-  disconnect behavior.
+- `v1.6.30`: move plaintext native upstream HTTP/2 forwarding into the native
+  HTTP/1 proxy path. Support `proxy.upstream_http_version = "http2"` for h2c/
+  prior-knowledge origins, map `proxy.read_timeout_secs`,
+  `proxy.send_timeout_secs`, and `proxy.upstream_h2_max_streams` onto the native
+  H2 policy, keep a Tokio connection-driver task per pooled h2 connection,
+  reserve stream capacity with `proxy.upstream_h2_max_streams`, fail closed on
+  invalid programmatic stream limits, bound the H2 handshake, invalidate stale
+  pooled handles on h2 errors, and retry safe methods once after a pre-response
+  pooled-handle failure. Add live proxy tests proving downstream HTTP/1 requests
+  forward to an in-process H2 origin and reuse one upstream H2 connection. Keep
+  TLS ALPN-negotiated upstream H2, `http1-and-http2` fallback negotiation,
+  `proxy.upstream_h2_ping_interval_secs`, GOAWAY-specific policy, and full
+  load-balanced H2 transport parity as explicit native blockers until the final
+  transport cutover has targeted tests for them.
 - `v1.6.31`: move cache and PHP-FPM rich proxy integrations onto native
   adapters. Cache work must cover lookup/fill/stale, Vary/Range/conditional
   semantics, peer-fill guardrails, and purge visibility. PHP-FPM work must

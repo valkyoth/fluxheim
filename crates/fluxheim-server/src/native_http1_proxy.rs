@@ -23,8 +23,9 @@ use crate::native_http1_route_proxy::{
     default_native_request_header_policy,
 };
 use crate::{
-    NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeHttp1ResponseWritePolicy,
-    NativeHttp1StaticWeb, NativeHttp1Upstream, NativeTcpKeepalivePolicy,
+    DownstreamHttp2Policy, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
+    NativeHttp1ResponseWritePolicy, NativeHttp1StaticWeb, NativeHttp1Upstream,
+    NativeTcpKeepalivePolicy,
 };
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 use sanitization::ct::ConstantTimeEq;
@@ -363,7 +364,17 @@ impl NativeHttp1Proxy {
         if proxy.websocket {
             return Err(NativeHttp1ProxyConfigError::WebSocket);
         }
-        if proxy.upstream_http_version != fluxheim_config::UpstreamHttpVersion::Http1 {
+        match proxy.upstream_http_version {
+            fluxheim_config::UpstreamHttpVersion::Http1 => {}
+            fluxheim_config::UpstreamHttpVersion::Http2 if !proxy.upstream_tls => {}
+            fluxheim_config::UpstreamHttpVersion::Http2
+            | fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => {
+                return Err(NativeHttp1ProxyConfigError::UpstreamHttp2);
+            }
+        }
+        if proxy.upstream_http_version == fluxheim_config::UpstreamHttpVersion::Http2
+            && proxy.upstream_h2_ping_interval_secs.is_some()
+        {
             return Err(NativeHttp1ProxyConfigError::UpstreamHttp2);
         }
         if proxy.upstreams_file.is_some()
@@ -411,6 +422,10 @@ impl NativeHttp1Proxy {
             }
             if let Some(timeout) = proxy.send_timeout_secs {
                 native_upstream = native_upstream.with_write_timeout(Duration::from_secs(timeout));
+            }
+            if proxy.upstream_http_version == fluxheim_config::UpstreamHttpVersion::Http2 {
+                native_upstream =
+                    native_upstream.with_http2_policy(native_http2_policy_from_config(proxy)?);
             }
             let recv_buffer_size = match proxy
                 .upstream_tcp_recv_buffer_bytes
@@ -1231,8 +1246,27 @@ fn proxy_requires_auth_request(proxy: &fluxheim_config::ProxyConfig) -> bool {
 fn proxy_requires_advanced_upstream_transport(proxy: &fluxheim_config::ProxyConfig) -> bool {
     proxy.upstream_tcp_user_timeout_ms.is_some() && !native_tcp_user_timeout_supported()
         || proxy.upstream_tcp_fast_open
-        || proxy.upstream_h2_max_streams.is_some()
         || proxy.upstream_h2_ping_interval_secs.is_some()
+}
+
+fn native_http2_policy_from_config(
+    proxy: &fluxheim_config::ProxyConfig,
+) -> Result<DownstreamHttp2Policy, NativeHttp1ProxyConfigError> {
+    let mut policy = DownstreamHttp2Policy::default();
+    if let Some(read_timeout_secs) = proxy.read_timeout_secs {
+        policy = policy.with_response_body_timeout(Duration::from_secs(read_timeout_secs));
+    }
+    if let Some(write_timeout_secs) = proxy.send_timeout_secs {
+        policy = policy.with_response_write_lifetime(Duration::from_secs(write_timeout_secs));
+    }
+    if let Some(max_streams) = proxy.upstream_h2_max_streams {
+        let max_streams = u32::try_from(max_streams)
+            .ok()
+            .filter(|max_streams| *max_streams > 0)
+            .ok_or(NativeHttp1ProxyConfigError::UpstreamHttp2)?;
+        policy = policy.with_max_concurrent_streams(max_streams);
+    }
+    Ok(policy)
 }
 
 const fn native_tcp_user_timeout_supported() -> bool {

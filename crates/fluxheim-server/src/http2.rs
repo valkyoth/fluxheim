@@ -116,6 +116,11 @@ impl DownstreamHttp2Policy {
         self.max_concurrent_streams
     }
 
+    pub(crate) const fn with_max_concurrent_streams(mut self, streams: u32) -> Self {
+        self.max_concurrent_streams = streams;
+        self
+    }
+
     pub const fn initial_window_size(&self) -> u32 {
         self.initial_window_size
     }

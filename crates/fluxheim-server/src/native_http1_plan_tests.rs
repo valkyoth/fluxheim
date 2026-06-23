@@ -35,24 +35,36 @@ fn server_plan_collects_native_http1_proxy_candidates() {
 }
 
 #[test]
-fn server_plan_keeps_upstream_http2_as_native_blocker() {
+fn server_plan_accepts_plain_upstream_http2_candidate() {
     let mut config = Config::default();
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
     config.proxy.upstream_http_version = fluxheim_config::UpstreamHttpVersion::Http2;
+    config.proxy.upstream_h2_max_streams = Some(64);
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        None
+    );
+    assert_eq!(
+        plan.native_http1_proxy_cutover_summary().status(),
+        NativeHttp1ProxyCutoverStatus::NativeReady
+    );
+
+    config.proxy.upstream_h2_ping_interval_secs = Some(30);
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
         Some(NativeHttp1ProxyConfigError::UpstreamHttp2)
     );
 
-    config.proxy.upstream_http_version = fluxheim_config::UpstreamHttpVersion::Http1;
-    config.proxy.upstream_h2_max_streams = Some(64);
+    config.proxy.upstream_h2_ping_interval_secs = None;
+    config.proxy.upstream_http_version = fluxheim_config::UpstreamHttpVersion::Http1AndHttp2;
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::UpstreamTransportPolicy)
+        Some(NativeHttp1ProxyConfigError::UpstreamHttp2)
     );
 }
 

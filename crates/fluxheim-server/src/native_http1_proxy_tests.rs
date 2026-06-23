@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use bytes::Bytes;
 #[cfg(feature = "compression-gzip")]
 use flate2::read::GzDecoder;
 #[cfg(feature = "compression-gzip")]
@@ -47,6 +48,52 @@ async fn proxy_listener(upstream: std::net::SocketAddr) -> std::net::SocketAddr 
         upstream.to_string(),
     )))
     .await
+}
+
+async fn h2_upstream(requests: usize) -> (std::net::SocketAddr, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted_connections = Arc::new(AtomicUsize::new(0));
+    let accepted_connections_for_task = Arc::clone(&accepted_connections);
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        accepted_connections_for_task.fetch_add(1, Ordering::AcqRel);
+        let mut connection = h2::server::handshake(stream).await.unwrap();
+        for index in 0..requests {
+            let Some(stream) = connection.accept().await else {
+                panic!("expected native H2 upstream request");
+            };
+            let (request, mut respond) = stream.unwrap();
+            assert_eq!(request.method(), http::Method::GET);
+            assert_eq!(
+                request.uri().path_and_query().unwrap().as_str(),
+                "/h2-origin"
+            );
+            assert_eq!(
+                request.uri().authority().unwrap().as_str(),
+                addr.to_string()
+            );
+            assert_eq!(request.headers().get("x-test").unwrap(), "h2");
+            assert!(request.headers().get("host").is_none());
+            assert!(request.headers().get("connection").is_none());
+            assert!(request.headers().get("via").is_some());
+            let response = http::Response::builder()
+                .status(http::StatusCode::OK)
+                .header("x-origin-proto", "h2")
+                .body(())
+                .unwrap();
+            let mut send = respond.send_response(response, false).unwrap();
+            send.send_data(Bytes::from(format!("h2 upstream {index}\n")), true)
+                .unwrap();
+        }
+        connection.graceful_shutdown();
+        let _ = tokio::time::timeout(
+            Duration::from_secs(1),
+            std::future::poll_fn(|context| connection.poll_closed(context)),
+        )
+        .await;
+    });
+    (addr, accepted_connections)
 }
 
 async fn proxy_listener_for(proxy: NativeHttp1Proxy) -> std::net::SocketAddr {
@@ -334,6 +381,60 @@ async fn native_proxy_forwards_downstream_request_to_upstream() {
     );
     assert!(response.contains("x-origin: native\r\n"));
     assert!(response.ends_with("hello native"));
+}
+
+#[tokio::test]
+async fn native_proxy_forwards_downstream_request_to_http2_upstream() {
+    let (upstream, accepted_connections) = h2_upstream(2).await;
+    let proxy_config = fluxheim_config::ProxyConfig {
+        upstream: Some(upstream.to_string()),
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_h2_max_streams: Some(8),
+        read_timeout_secs: Some(5),
+        send_timeout_secs: Some(5),
+        ..Default::default()
+    };
+    let proxy =
+        NativeHttp1Proxy::from_proxy_config(&proxy_config, DownstreamHttp1Policy::default())
+            .unwrap()
+            .unwrap();
+    assert!(proxy.upstream().uses_http2());
+    let proxy = proxy_listener_for(proxy).await;
+
+    for index in 0..2 {
+        let mut client = TcpStream::connect(proxy).await.unwrap();
+        client
+            .write_all(
+                b"GET /h2-origin HTTP/1.1\r\nHost: proxy.test\r\nX-Test: h2\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).await.unwrap();
+        let response = String::from_utf8(response).unwrap();
+
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK\r\n"),
+            "unexpected response: {response:?}"
+        );
+        assert!(response.contains("x-origin-proto: h2\r\n"));
+        assert!(response.ends_with(&format!("h2 upstream {index}\n")));
+    }
+    assert_eq!(accepted_connections.load(Ordering::Acquire), 1);
+}
+
+#[test]
+fn native_proxy_config_accepts_plain_http2_upstream() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_h2_max_streams: Some(64),
+        ..Default::default()
+    };
+    let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
+        .unwrap()
+        .unwrap();
+    assert!(native.upstream().uses_http2());
 }
 
 #[tokio::test]
@@ -1181,10 +1282,10 @@ fn native_proxy_config_rejects_unsupported_proxy_policy_layers() {
 }
 
 #[test]
-fn native_proxy_config_keeps_upstream_http2_as_explicit_blocker() {
+fn native_proxy_config_keeps_unsupported_upstream_http2_modes_as_explicit_blocker() {
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),
-        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http1AndHttp2,
         ..Default::default()
     };
     assert_eq!(
@@ -1194,22 +1295,30 @@ fn native_proxy_config_keeps_upstream_http2_as_explicit_blocker() {
 
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),
-        upstream_h2_max_streams: Some(64),
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_tls: true,
         ..Default::default()
     };
+    #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
-        Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy)
+        Err(NativeHttp1ProxyConfigError::UpstreamTls)
+    );
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamHttp2)
     );
 
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
         upstream_h2_ping_interval_secs: Some(30),
         ..Default::default()
     };
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
-        Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy)
+        Err(NativeHttp1ProxyConfigError::UpstreamHttp2)
     );
 }
 
