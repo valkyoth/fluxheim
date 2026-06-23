@@ -43,12 +43,15 @@ the native HTTP/1 proxy path.
   `proxy.downstream_read_timeout_secs` selected by the matched proxy before
   forwarding to upstreams.
 - Native HTTP/1 requests now carry typed optional TLS client identity and Geo
-  context fields, laying the native boundary needed for the upcoming cert/Geo
-  access-policy cutover.
-- Native route-proxy access evaluation can now enforce client-certificate
-  fingerprint and Geo country/ASN rules when typed request context is present;
-  full native cutover for cert/Geo policy remains blocked until runtime
-  TLS/Geo context population is wired end to end.
+  context fields. Rustls and OpenSSL listener tests prove downstream TLS
+  request context is populated with negotiated protocol, cipher, and peer
+  certificate fingerprint where available.
+- Native route-proxy access evaluation now enforces client-certificate
+  fingerprint and Geo country/ASN rules when typed request context is present,
+  so cert/Geo policy no longer blocks the native HTTP/1 cutover inventory.
+- Managed local ACME HTTP-01 challenge serving now has a native route action.
+  Live route-proxy tests prove direct and alias vhost challenge ownership, safe
+  token-file loading, GET/HEAD handling, and `405 Allow: GET, HEAD` behavior.
 - Native HTTP/1 proxy handling now supports safe-method traffic mirroring when
   the `traffic-mirror` feature is compiled, including recursion protection,
   sampling, forwarded-header selection, mirror response caps, and per-target
@@ -204,8 +207,7 @@ the native HTTP/1 proxy path.
 ## Compatibility
 
 This release does not remove Pingora from normal builds yet. The remaining
-compatibility blockers are cert/Geo access policy, managed local ACME
-challenge serving, upstream TCP Fast Open, cache
-lookup/fill/stale behavior, PHP-FPM routing, dynamic discovery, health-aware
-load balancing, persistence,
-priority/backup/drain state, and hash-based load-balancer selection.
+compatibility blockers are upstream TCP Fast Open, cache lookup/fill/stale
+behavior, PHP-FPM routing, dynamic discovery, health-aware load balancing,
+persistence, priority/backup/drain state, hash-based load-balancer selection,
+and upstream HTTP/2 connection-manager parity.

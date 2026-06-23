@@ -12,8 +12,8 @@ use crate::serve_native_http1_openssl_listener;
 #[cfg(feature = "tls-rustls-backend")]
 use crate::serve_native_http1_rustls_listener;
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1Request, NativeHttp1Response, serve_native_http1_connection,
-    serve_native_http1_listener,
+    DownstreamHttp1Policy, NativeHttp1GeoContext, NativeHttp1Handler, NativeHttp1Request,
+    NativeHttp1Response, serve_native_http1_connection, serve_native_http1_listener,
 };
 
 async fn spawn_server(
@@ -88,6 +88,16 @@ async fn read_response_head(stream: &mut TcpStream) -> String {
     }
 }
 
+#[cfg(feature = "tls-rustls-backend")]
+fn hex_lower(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
+}
+
 #[tokio::test]
 async fn native_http1_serves_keep_alive_requests() {
     let addr = spawn_server(|request| {
@@ -132,6 +142,60 @@ async fn native_http1_plain_listener_request_context_defaults_to_none() {
 
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.ends_with("context"));
+}
+
+struct GeoContextTestHandler;
+
+impl NativeHttp1Handler for GeoContextTestHandler {
+    fn handle<'a>(
+        &'a self,
+        request: NativeHttp1Request,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = NativeHttp1Response> + Send + 'a>> {
+        Box::pin(async move {
+            assert_eq!(
+                request.geo_context,
+                Some(NativeHttp1GeoContext {
+                    country_iso: Some("SE".to_owned()),
+                    asn: Some(12552),
+                })
+            );
+            NativeHttp1Response::new(200, "OK", "geo-context")
+        })
+    }
+
+    fn prepare_request_context(&self, request: &mut NativeHttp1Request) {
+        request.geo_context = Some(NativeHttp1GeoContext {
+            country_iso: Some("SE".to_owned()),
+            asn: Some(12552),
+        });
+    }
+}
+
+#[tokio::test]
+async fn native_http1_handler_can_populate_request_context_before_handling() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (stream, peer_addr) = listener.accept().await.unwrap();
+        serve_native_http1_connection(
+            stream,
+            Some(peer_addr),
+            DownstreamHttp1Policy::default(),
+            Arc::new(GeoContextTestHandler),
+        )
+        .await
+        .unwrap();
+    });
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+
+    stream
+        .write_all(b"GET /context HTTP/1.1\r\nHost: local.test\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let response = read_response(&mut stream).await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("geo-context"));
 }
 
 #[tokio::test]
@@ -471,7 +535,8 @@ async fn native_http1_listener_serves_until_shutdown() {
 async fn native_http1_rustls_listener_serves_request() {
     use rcgen::{CertificateParams, KeyPair};
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject};
-    use rustls::{ClientConfig, RootCertStore};
+    use rustls::{ClientConfig, RootCertStore, server::WebPkiClientVerifier};
+    use sha2::{Digest, Sha256};
     use tokio_rustls::TlsConnector;
 
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -485,25 +550,41 @@ async fn native_http1_rustls_listener_serves_request() {
     let certs = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    let private_key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).unwrap();
+    let server_private_key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).unwrap();
+    let client_private_key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).unwrap();
+    let expected_client_cert_sha256 = hex_lower(&Sha256::digest(certs[0].as_ref()));
+    let mut client_auth_roots = RootCertStore::empty();
+    client_auth_roots.add(certs[0].clone()).unwrap();
+    let client_verifier = WebPkiClientVerifier::builder(Arc::new(client_auth_roots))
+        .build()
+        .unwrap();
     let server_config = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs.clone(), private_key)
+        .with_client_cert_verifier(client_verifier)
+        .with_single_cert(certs.clone(), server_private_key)
         .unwrap();
 
     let mut roots = RootCertStore::empty();
     roots.add(certs[0].clone()).unwrap();
     let client_config = ClientConfig::builder()
         .with_root_certificates(roots)
-        .with_no_client_auth();
+        .with_client_auth_cert(certs.clone(), client_private_key)
+        .unwrap();
     let connector = TlsConnector::from(Arc::new(client_config));
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    let handler = Arc::new(|request: NativeHttp1Request| async move {
-        assert_eq!(request.target, "/secure");
-        NativeHttp1Response::new(200, "OK", b"native tls listener".as_slice())
+    let handler = Arc::new(move |request: NativeHttp1Request| {
+        let expected_client_cert_sha256 = expected_client_cert_sha256.clone();
+        async move {
+            assert_eq!(request.target, "/secure");
+            assert!(request.downstream_tls);
+            let identity = request.tls_identity.expect("TLS identity");
+            assert!(identity.version.is_some());
+            assert!(identity.cipher.is_some());
+            assert_eq!(identity.cert_sha256, Some(expected_client_cert_sha256));
+            NativeHttp1Response::new(200, "OK", b"native tls listener".as_slice())
+        }
     });
     let join = tokio::spawn(async move {
         serve_native_http1_rustls_listener(
@@ -572,6 +653,11 @@ async fn native_http1_openssl_listener_serves_request() {
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let handler = Arc::new(|request: NativeHttp1Request| async move {
         assert_eq!(request.target, "/secure");
+        assert!(request.downstream_tls);
+        let identity = request.tls_identity.expect("TLS identity");
+        assert!(identity.version.is_some());
+        assert!(identity.cipher.is_some());
+        assert_eq!(identity.cert_sha256, None);
         NativeHttp1Response::new(200, "OK", b"native openssl listener".as_slice())
     });
     let join = tokio::spawn(async move {

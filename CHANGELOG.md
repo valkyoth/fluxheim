@@ -55,12 +55,15 @@ behavior when the change improves security or project direction.
 - Move `proxy.upstream_tcp_user_timeout_ms` onto native HTTP/1 upstream sockets
   on targets where the OS exposes `TCP_USER_TIMEOUT`.
 - Add native HTTP/1 request context slots for TLS client identity and Geo
-  context so the next cert/Geo access-policy slice can consume typed request
-  facts instead of depending on compatibility-session state.
+  context, populate downstream TLS identity from the native rustls/OpenSSL
+  listener paths, and let handlers attach Geo context before policy evaluation.
 - Teach the native route-proxy access evaluator to enforce client-certificate
   fingerprint and Geo country/ASN allow/deny policy when typed request context
-  is present. The native cutover planner still reports cert/Geo policy as a
-  blocker until runtime TLS/Geo context population is wired end to end.
+  is present, so cert/Geo policy no longer blocks the native HTTP/1 cutover
+  inventory.
+- Move managed local ACME HTTP-01 challenge serving onto the native route
+  proxy, including alias-vhost ownership, safe token-file loading, GET/HEAD
+  handling, and method rejection parity with the compatibility path.
 - Move safe-method traffic mirroring onto the native HTTP/1 proxy when the
   `traffic-mirror` feature is compiled, preserving recursion protection,
   sampling, forwarded-header selection, response-body caps, and per-target
@@ -72,10 +75,9 @@ behavior when the change improves security or project direction.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
-- Keep auth-request, traffic mirror, cert/Geo access, cache, PHP-FPM, dynamic
-  discovery, managed local ACME challenge serving, upstream TCP Fast Open, and
-  advanced load-balancer state
-  reported as explicit compatibility blockers.
+- Keep cache, PHP-FPM, dynamic discovery, upstream TCP Fast Open, upstream
+  HTTP/2 connection-manager parity, and advanced load-balancer state reported
+  as explicit compatibility blockers.
 
 ### Security
 

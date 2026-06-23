@@ -30,6 +30,8 @@ use fluxheim_config::{
     RequestHeaderPolicyConfig, ResponseHeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig,
     ResponseHeaderRewriteConfig,
 };
+#[cfg(feature = "acme")]
+use fluxheim_config::{AcmeChallenge, Config};
 use fluxheim_headers::{
     SPOOFABLE_CLIENT_IP_HEADERS, rewrite_header_prefix, rewrite_refresh_url,
     rewrite_set_cookie_value,
@@ -45,6 +47,8 @@ use crate::{
     DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1ProxyConfigError,
     NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb, ProxyProtocolTrustedSource,
 };
+#[cfg(feature = "acme")]
+use crate::{NativeHttp1AcmeHttp01Store, native_http1_acme::http_01_token_from_path};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
@@ -134,6 +138,8 @@ impl NativeRegexRouteMatcher {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum NativeHttp1RouteAction {
+    #[cfg(feature = "acme")]
+    AcmeHttp01(NativeHttp1AcmeHttp01Store),
     Proxy(Box<NativeHttp1Proxy>),
     Redirect(NativeHttp1RouteRedirect),
     StaticWeb(NativeHttp1StaticWeb),
@@ -304,6 +310,8 @@ impl Eq for NativeConcurrencyLimit {}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeHttp1RouteProxyConfigError {
     AccessPolicy,
+    #[cfg(feature = "acme")]
+    AcmeStorage,
     MissingRouteAction,
     Proxy(NativeHttp1ProxyConfigError),
     RegexRoute,
@@ -315,6 +323,10 @@ impl std::fmt::Display for NativeHttp1RouteProxyConfigError {
         match self {
             Self::AccessPolicy => {
                 formatter.write_str("native route proxy access policy configuration error")
+            }
+            #[cfg(feature = "acme")]
+            Self::AcmeStorage => {
+                formatter.write_str("native route proxy ACME storage is not configured")
             }
             Self::MissingRouteAction => {
                 formatter.write_str("native route proxy requires an action")
@@ -335,6 +347,8 @@ impl std::error::Error for NativeHttp1RouteProxyConfigError {
             Self::AccessPolicy | Self::MissingRouteAction | Self::RegexRoute | Self::StaticWeb => {
                 None
             }
+            #[cfg(feature = "acme")]
+            Self::AcmeStorage => None,
         }
     }
 }
@@ -712,6 +726,51 @@ impl NativeHttp1RouteProxy {
         self.fallback.as_ref()
     }
 
+    #[cfg(feature = "acme")]
+    pub fn from_config(
+        config: &Config,
+        vhost: &fluxheim_config::VhostConfig,
+        base_headers: &HeaderPolicyConfig,
+        inherited_compression: Option<&fluxheim_config::CompressionConfig>,
+        policy: DownstreamHttp1Policy,
+        pool_max_idle: usize,
+    ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        Self::from_config_with_trusted_sources(
+            config,
+            vhost,
+            base_headers,
+            inherited_compression,
+            policy,
+            pool_max_idle,
+            &[],
+        )
+    }
+
+    #[cfg(feature = "acme")]
+    pub fn from_config_with_trusted_sources(
+        config: &Config,
+        vhost: &fluxheim_config::VhostConfig,
+        base_headers: &HeaderPolicyConfig,
+        inherited_compression: Option<&fluxheim_config::CompressionConfig>,
+        policy: DownstreamHttp1Policy,
+        pool_max_idle: usize,
+        #[cfg_attr(feature = "privacy-mode", allow(unused_variables))]
+        trusted_sources: &[ProxyProtocolTrustedSource],
+    ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        let mut proxy = Self::from_vhost_config_with_trusted_sources(
+            vhost,
+            base_headers,
+            inherited_compression,
+            policy,
+            pool_max_idle,
+            trusted_sources,
+        )?;
+        if let Some(route) = native_managed_http_01_route(config, vhost, base_headers)? {
+            proxy.routes.insert(0, route);
+        }
+        Ok(proxy)
+    }
+
     pub fn from_vhost_config(
         vhost: &fluxheim_config::VhostConfig,
         base_headers: &HeaderPolicyConfig,
@@ -804,6 +863,76 @@ impl NativeHttp1RouteProxy {
             trusted_sources: trusted_sources.to_vec(),
         })
     }
+}
+
+#[cfg(feature = "acme")]
+fn native_managed_http_01_route(
+    config: &Config,
+    vhost: &fluxheim_config::VhostConfig,
+    base_headers: &HeaderPolicyConfig,
+) -> Result<Option<NativeHttp1RouteProxyRoute>, NativeHttp1RouteProxyConfigError> {
+    if vhost.acme_challenge.enabled
+        || !config.tls.acme.enabled
+        || config.tls.acme.challenge != AcmeChallenge::Http01
+    {
+        return Ok(None);
+    }
+
+    let Some(storage) = config.tls.acme.storage.as_deref() else {
+        return Err(NativeHttp1RouteProxyConfigError::AcmeStorage);
+    };
+    let Some(owner) = native_managed_http_01_owner_vhost(config, vhost) else {
+        return Ok(None);
+    };
+
+    Ok(Some(NativeHttp1RouteProxyRoute::acme_http_01(
+        owner,
+        storage,
+        base_headers,
+    )))
+}
+
+#[cfg(feature = "acme")]
+fn native_managed_http_01_owner_vhost<'a>(
+    config: &'a Config,
+    request_vhost: &'a fluxheim_config::VhostConfig,
+) -> Option<&'a str> {
+    if request_vhost.tls.enabled && request_vhost.tls.acme.enabled {
+        return Some(&request_vhost.name);
+    }
+
+    let request_hosts: std::collections::HashSet<String> = request_vhost
+        .hosts
+        .iter()
+        .filter_map(|host| fluxheim_config::config_net::normalize_host(host))
+        .collect();
+    if request_hosts.is_empty() {
+        return None;
+    }
+
+    config.vhosts.iter().find_map(|candidate| {
+        if !candidate.tls.enabled || !candidate.tls.acme.enabled {
+            return None;
+        }
+
+        let domains: Box<dyn Iterator<Item = &str> + '_> = if candidate.tls.acme.domains.is_empty()
+        {
+            Box::new(candidate.hosts.iter().map(String::as_str))
+        } else {
+            Box::new(candidate.tls.acme.domains.iter().map(String::as_str))
+        };
+
+        for domain in domains {
+            let Some(domain) = fluxheim_config::config_net::normalize_host(domain) else {
+                continue;
+            };
+            if request_hosts.contains(&domain) {
+                return Some(candidate.name.as_str());
+            }
+        }
+
+        None
+    })
 }
 
 impl NativeHttp1RouteProxyRoute {
@@ -971,6 +1100,37 @@ impl NativeHttp1RouteProxyRoute {
         }
     }
 
+    #[cfg(feature = "acme")]
+    fn acme_http_01(
+        vhost_name: &str,
+        storage: &std::path::Path,
+        base_headers: &HeaderPolicyConfig,
+    ) -> Self {
+        Self {
+            methods: Vec::new(),
+            matcher: NativeHttp1RouteMatcher::Prefix("/.well-known/acme-challenge/".to_owned()),
+            strip_prefix: None,
+            rewrite_prefix: None,
+            rewrite_template: None,
+            max_request_body_bytes: None,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression: None,
+            request_headers: NativeRouteRequestHeaderPolicy::from_policy(&base_headers.request),
+            response_headers: NativeRouteResponseHeaderPolicy::from_policy(&base_headers.response),
+            access: NativeIpAccessPolicy::default(),
+            rate_limit: NativeRateLimit::default(),
+            concurrency: NativeConcurrencyLimit::default(),
+            grpc: GrpcRouteConfig::default(),
+            action: NativeHttp1RouteAction::AcmeHttp01(NativeHttp1AcmeHttp01Store::new(
+                storage, vhost_name,
+            )),
+        }
+    }
+
     pub fn from_config(
         route: &fluxheim_config::RouteConfig,
         proxy: Option<NativeHttp1Proxy>,
@@ -1115,6 +1275,8 @@ impl NativeHttp1RouteProxyRoute {
     pub fn proxy(&self) -> Option<&NativeHttp1Proxy> {
         match &self.action {
             NativeHttp1RouteAction::Proxy(proxy) => Some(proxy.as_ref()),
+            #[cfg(feature = "acme")]
+            NativeHttp1RouteAction::AcmeHttp01(_) => None,
             NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => None,
         }
     }
@@ -1478,6 +1640,8 @@ fn native_request_header_values<'a>(
 impl NativeHttp1RouteProxyRoute {
     fn request_body_timeout(&self) -> Option<Duration> {
         match &self.action {
+            #[cfg(feature = "acme")]
+            NativeHttp1RouteAction::AcmeHttp01(_) => None,
             NativeHttp1RouteAction::Proxy(proxy) => proxy.request_body_timeout(),
             NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => None,
         }
@@ -1498,6 +1662,10 @@ impl NativeHttp1RouteProxyRoute {
         ))]
         let compression_request = self.compression.as_ref().map(|_| request.clone());
         let mut response = match &self.action {
+            #[cfg(feature = "acme")]
+            NativeHttp1RouteAction::AcmeHttp01(store) => {
+                native_acme_http_01_response(&request, store)
+            }
             NativeHttp1RouteAction::Proxy(proxy) => proxy.handle(request).await,
             NativeHttp1RouteAction::Redirect(redirect) => redirect_response(&request, redirect),
             NativeHttp1RouteAction::StaticWeb(web) => {
@@ -1521,6 +1689,53 @@ impl NativeHttp1RouteProxyRoute {
         }
         response
     }
+}
+
+#[cfg(feature = "acme")]
+fn native_acme_http_01_response(
+    request: &NativeHttp1Request,
+    store: &NativeHttp1AcmeHttp01Store,
+) -> NativeHttp1Response {
+    if request.method != "GET" && request.method != "HEAD" {
+        return NativeHttp1Response::new(405, "Method Not Allowed", Vec::new())
+            .with_header("Allow", "GET, HEAD")
+            .with_content_length(0);
+    }
+
+    let Some((path, _)) = request_path_and_query(request) else {
+        return NativeHttp1Response::new(400, "Bad Request", b"bad request\n").close_connection();
+    };
+    let Some(token) = http_01_token_from_path(&path) else {
+        return NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection();
+    };
+
+    let key_authorization = match store.load_key_authorization(token) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection();
+        }
+        Err(error) => {
+            log::error!("failed to load ACME HTTP-01 challenge token: {error}");
+            return NativeHttp1Response::new(
+                500,
+                "Internal Server Error",
+                b"internal server error\n",
+            )
+            .close_connection();
+        }
+    };
+
+    let content_length = key_authorization.len() as u64;
+    let body = if request.method == "HEAD" {
+        Vec::new()
+    } else {
+        key_authorization.into_bytes()
+    };
+
+    NativeHttp1Response::new(200, "OK", body)
+        .with_header("content-type", "text/plain")
+        .with_header("cache-control", "no-store")
+        .with_content_length(content_length)
 }
 
 #[cfg(any(

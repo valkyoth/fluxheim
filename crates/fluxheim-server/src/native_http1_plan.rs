@@ -242,15 +242,8 @@ fn route_response_header_policy_supported(
     true
 }
 
-fn access_policy_native_supported(access: &AccessPolicyConfig) -> bool {
-    !access.enabled
-        || !(access.require_client_cert
-            || !access.allow_client_cert_sha256.is_empty()
-            || !access.deny_client_cert_sha256.is_empty()
-            || !access.allow_countries.is_empty()
-            || !access.deny_countries.is_empty()
-            || !access.allow_asns.is_empty()
-            || !access.deny_asns.is_empty())
+fn access_policy_native_supported(_access: &AccessPolicyConfig) -> bool {
+    true
 }
 
 fn cache_enabled(cache: &fluxheim_config::CacheConfig) -> bool {

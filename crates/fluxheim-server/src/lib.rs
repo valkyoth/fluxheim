@@ -12,6 +12,8 @@ mod http1;
 mod http2;
 mod listener;
 mod native_http1;
+#[cfg(feature = "acme")]
+mod native_http1_acme;
 mod native_http1_client;
 mod native_http1_forwarded;
 mod native_http1_plan;
@@ -41,9 +43,11 @@ pub use native_http1::serve_native_http1_openssl_listener;
 pub use native_http1::serve_native_http1_rustls_listener;
 pub use native_http1::{
     NativeHttp1Error, NativeHttp1GeoContext, NativeHttp1Handler, NativeHttp1Request,
-    NativeHttp1Response, NativeHttp1ResponseWritePolicy, NativeHttp1TlsClientIdentity,
-    serve_native_http1_connection, serve_native_http1_listener,
+    NativeHttp1RequestContext, NativeHttp1Response, NativeHttp1ResponseWritePolicy,
+    NativeHttp1TlsClientIdentity, serve_native_http1_connection, serve_native_http1_listener,
 };
+#[cfg(feature = "acme")]
+pub use native_http1_acme::NativeHttp1AcmeHttp01Store;
 pub use native_http1_client::{NativeHttp1Upstream, NativeTcpKeepalivePolicy};
 pub use native_http1_plan::{
     NativeHttp1ProxyCandidate, NativeHttp1ProxyCutoverStatus, NativeHttp1ProxyCutoverSummary,

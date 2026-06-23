@@ -110,6 +110,7 @@ tls-openssl-iso19790 = ["tls-openssl-fips"]
 acme = [
     "tls",
     "fluxheim-config/acme",
+    "fluxheim-server/acme",
     "fluxheim-tls/acme",
     "dep:instant-acme",
     "dep:serde_json",

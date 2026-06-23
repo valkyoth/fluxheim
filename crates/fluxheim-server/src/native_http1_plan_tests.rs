@@ -849,7 +849,7 @@ fn ip_access_policy_does_not_block_native_http1_proxy_candidate() {
 }
 
 #[test]
-fn cert_and_geo_access_policy_still_blocks_native_http1_proxy_candidate() {
+fn cert_and_geo_access_policy_does_not_block_native_http1_proxy_candidate() {
     let config = Config {
         vhosts: vec![VhostConfig {
             name: "native.test".to_owned(),
@@ -881,9 +881,10 @@ fn cert_and_geo_access_policy_still_blocks_native_http1_proxy_candidate() {
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::HttpPolicy)
+        None
     );
 }
 

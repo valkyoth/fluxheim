@@ -50,6 +50,13 @@ pub struct NativeHttp1GeoContext {
     pub asn: Option<u32>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NativeHttp1RequestContext {
+    pub downstream_tls: bool,
+    pub tls_identity: Option<NativeHttp1TlsClientIdentity>,
+    pub geo_context: Option<NativeHttp1GeoContext>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1Response {
     status: u16,
@@ -202,6 +209,8 @@ pub trait NativeHttp1Handler: Send + Sync + 'static {
         request: NativeHttp1Request,
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>>;
 
+    fn prepare_request_context(&self, _request: &mut NativeHttp1Request) {}
+
     fn request_body_timeout(&self, _request: &NativeHttp1Request) -> Option<Duration> {
         None
     }
@@ -230,13 +239,20 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
     H: NativeHttp1Handler,
 {
-    serve_native_http1_connection_with_tls(stream, peer_addr, false, policy, handler).await
+    serve_native_http1_connection_with_context(
+        stream,
+        peer_addr,
+        NativeHttp1RequestContext::default(),
+        policy,
+        handler,
+    )
+    .await
 }
 
-async fn serve_native_http1_connection_with_tls<S, H>(
+async fn serve_native_http1_connection_with_context<S, H>(
     mut stream: S,
     peer_addr: Option<SocketAddr>,
-    downstream_tls: bool,
+    request_context: NativeHttp1RequestContext,
     policy: DownstreamHttp1Policy,
     handler: Arc<H>,
 ) -> Result<(), NativeHttp1Error>
@@ -290,7 +306,7 @@ where
             (
                 close_after_response,
                 body_framing,
-                owned_request_from_head(&head, peer_addr, downstream_tls),
+                owned_request_from_head(&head, peer_addr, &request_context),
             )
         };
         let request_body_timeout = handler
@@ -341,6 +357,7 @@ where
         };
         let mut request = request;
         request.body = body;
+        handler.prepare_request_context(&mut request);
 
         let response = handler.handle(request).await;
         let should_close = close_after_response || response.close;
@@ -418,7 +435,8 @@ where
                     let handshake = timeout(policy.tls_handshake_timeout(), acceptor.accept(stream)).await;
                     match handshake {
                         Ok(Ok(stream)) => {
-                            let _ = serve_native_http1_connection_with_tls(stream, Some(peer_addr), true, policy, handler).await;
+                            let request_context = native_rustls_request_context(&stream);
+                            let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, policy, handler).await;
                         }
                         Ok(Err(error)) => {
                             log::debug!(
@@ -487,7 +505,8 @@ where
                             .await;
                     match handshake {
                         Ok(Ok(())) => {
-                            let _ = serve_native_http1_connection_with_tls(stream, Some(peer_addr), true, policy, handler).await;
+                            let request_context = native_openssl_request_context(&stream);
+                            let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, policy, handler).await;
                         }
                         Ok(Err(error)) => {
                             log::debug!(
@@ -560,14 +579,14 @@ where
 fn owned_request_from_head(
     head: &fluxheim_protocol::Http1RequestHead<'_>,
     peer_addr: Option<SocketAddr>,
-    downstream_tls: bool,
+    request_context: &NativeHttp1RequestContext,
 ) -> NativeHttp1Request {
     NativeHttp1Request {
         method: head.method.to_owned(),
         peer_addr,
-        downstream_tls,
-        tls_identity: None,
-        geo_context: None,
+        downstream_tls: request_context.downstream_tls,
+        tls_identity: request_context.tls_identity.clone(),
+        geo_context: request_context.geo_context.clone(),
         target: head.target.to_owned(),
         version: head.version,
         headers: owned_headers(&head.headers),
@@ -580,6 +599,88 @@ fn owned_headers(headers: &[Http1Header<'_>]) -> Vec<(String, String)> {
         .iter()
         .map(|header| (header.name.to_owned(), header.value.to_owned()))
         .collect()
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+fn native_rustls_request_context<S>(
+    stream: &tokio_rustls::server::TlsStream<S>,
+) -> NativeHttp1RequestContext {
+    let (_, connection) = stream.get_ref();
+    NativeHttp1RequestContext {
+        downstream_tls: true,
+        tls_identity: Some(NativeHttp1TlsClientIdentity {
+            cipher: connection
+                .negotiated_cipher_suite()
+                .map(|suite| format!("{:?}", suite.suite())),
+            version: connection
+                .protocol_version()
+                .map(|version| format!("{version:?}")),
+            organization: None,
+            serial_number: None,
+            cert_sha256: connection
+                .peer_certificates()
+                .and_then(|certificates| certificates.first())
+                .map(|certificate| sha256_hex(certificate.as_ref())),
+        }),
+        geo_context: None,
+    }
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+fn native_openssl_request_context<S>(stream: &SslStream<S>) -> NativeHttp1RequestContext {
+    let ssl = stream.ssl();
+    let peer_certificate = ssl.peer_certificate();
+    NativeHttp1RequestContext {
+        downstream_tls: true,
+        tls_identity: Some(NativeHttp1TlsClientIdentity {
+            cipher: ssl.current_cipher().map(|cipher| cipher.name().to_owned()),
+            version: Some(ssl.version_str().to_owned()),
+            organization: peer_certificate
+                .as_ref()
+                .and_then(openssl_certificate_organization),
+            serial_number: peer_certificate
+                .as_ref()
+                .and_then(openssl_certificate_serial),
+            cert_sha256: peer_certificate
+                .as_ref()
+                .and_then(|certificate| certificate.to_der().ok())
+                .map(|der| sha256_hex(&der)),
+        }),
+        geo_context: None,
+    }
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+fn openssl_certificate_organization(certificate: &openssl::x509::X509) -> Option<String> {
+    certificate
+        .subject_name()
+        .entries_by_nid(openssl::nid::Nid::ORGANIZATIONNAME)
+        .next()
+        .and_then(|entry| entry.data().as_utf8().ok())
+        .map(|value| value.to_string())
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+fn openssl_certificate_serial(certificate: &openssl::x509::X509) -> Option<String> {
+    certificate
+        .serial_number()
+        .to_bn()
+        .ok()
+        .and_then(|serial| serial.to_hex_str().ok())
+        .map(|serial| serial.to_string())
+}
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+fn sha256_hex(input: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::digest(input);
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
 }
 
 async fn read_body<S>(
