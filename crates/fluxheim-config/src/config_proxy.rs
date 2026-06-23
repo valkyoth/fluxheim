@@ -99,6 +99,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_http_version: UpstreamHttpVersion,
     #[serde(default)]
+    pub upstream_h2c_upgrade: bool,
+    #[serde(default)]
     pub websocket: bool,
     #[serde(default)]
     pub auth_request: AuthRequestConfig,
@@ -180,6 +182,7 @@ pub struct ProxyConfigFragment {
     upstream_client_key_path: Option<PathBuf>,
     upstream_proxy_protocol: Option<UpstreamProxyProtocol>,
     upstream_http_version: Option<UpstreamHttpVersion>,
+    upstream_h2c_upgrade: Option<bool>,
     websocket: Option<bool>,
     auth_request: Option<AuthRequestConfigFragment>,
     mirror: Option<TrafficMirrorConfigFragment>,
@@ -278,6 +281,7 @@ impl Default for ProxyConfig {
             upstream_client_key_path: None,
             upstream_proxy_protocol: UpstreamProxyProtocol::Off,
             upstream_http_version: UpstreamHttpVersion::Http1,
+            upstream_h2c_upgrade: false,
             websocket: false,
             auth_request: AuthRequestConfig::default(),
             mirror: TrafficMirrorConfig::default(),
@@ -413,6 +417,9 @@ impl ProxyConfig {
         }
         if let Some(http_version) = fragment.upstream_http_version {
             self.upstream_http_version = http_version;
+        }
+        if let Some(h2c_upgrade) = fragment.upstream_h2c_upgrade {
+            self.upstream_h2c_upgrade = h2c_upgrade;
         }
         if let Some(websocket) = fragment.websocket {
             self.websocket = websocket;
@@ -1035,6 +1042,26 @@ impl ProxyConfig {
                 field: "proxy.upstream_http_version",
                 reason: "requires a configured proxy upstream",
             });
+        }
+        if self.upstream_h2c_upgrade {
+            if !self.has_configured_upstream() {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstream_h2c_upgrade",
+                    reason: "requires a configured proxy upstream",
+                });
+            }
+            if self.upstream_tls {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstream_h2c_upgrade",
+                    reason: "is only valid for plaintext upstreams",
+                });
+            }
+            if self.upstream_http_version != UpstreamHttpVersion::Http1AndHttp2 {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstream_h2c_upgrade",
+                    reason: "requires upstream_http_version = \"http1-and-http2\"",
+                });
+            }
         }
         if self.websocket && self.upstream_http_version != UpstreamHttpVersion::Http1 {
             return Err(ConfigError::InvalidProxyUpstreamPolicy {

@@ -737,6 +737,7 @@ fn parses_proxy_upstream_pool() {
         config.proxy.upstream_http_version,
         UpstreamHttpVersion::Http1AndHttp2
     );
+    assert!(!config.proxy.upstream_h2c_upgrade);
     assert_eq!(config.proxy.upstream_h2_max_streams, Some(64));
     assert_eq!(config.proxy.upstream_h2_ping_interval_secs, Some(30));
     assert_eq!(config.proxy.error_pages.len(), 1);
@@ -1725,6 +1726,47 @@ fn rejects_invalid_proxy_upstream_policy() {
     .unwrap();
     assert!(matches!(
         h2_options_without_h2.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
+    ));
+
+    let plaintext_h2c_upgrade: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_http_version = "http1-and-http2"
+            upstream_h2c_upgrade = true
+            "#,
+    )
+    .unwrap();
+    plaintext_h2c_upgrade.validate().unwrap();
+
+    let h2c_upgrade_for_pure_h2: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_http_version = "http2"
+            upstream_h2c_upgrade = true
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        h2c_upgrade_for_pure_h2.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
+    ));
+
+    let h2c_upgrade_for_tls: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_tls = true
+            upstream_sni = "origin.example.test"
+            upstream_http_version = "http1-and-http2"
+            upstream_h2c_upgrade = true
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        h2c_upgrade_for_tls.validate(),
         Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
     ));
 

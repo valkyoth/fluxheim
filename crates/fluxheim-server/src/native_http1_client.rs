@@ -6,7 +6,7 @@ use fluxheim_protocol::{Http1ParseError, http1_request_target};
 use h2::client::SendRequest;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Uri};
 use socket2::{SockRef, TcpKeepalive};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant as TokioInstant, timeout, timeout_at};
@@ -21,8 +21,8 @@ use crate::native_http1_upstream_response::{
     read_upstream_response, read_upstream_response_for_pool,
 };
 use crate::native_http2_client::{
-    NativeHttp2ConnectionDriver, native_http2_upstream_client_on_io_with_keepalive,
-    send_native_http2_upstream_request,
+    NativeHttp2ConnectionDriver, native_http2_upstream_client_on_h2c_upgraded_io,
+    native_http2_upstream_client_on_io_with_keepalive, send_native_http2_upstream_request,
 };
 use crate::{
     DownstreamHttp1Policy, DownstreamHttp2Policy, NativeHttp1Error, NativeHttp1Request,
@@ -50,6 +50,7 @@ pub(crate) enum NativeNegotiatedHttpProtocol {
 pub struct NativeHttp1Upstream {
     authority: String,
     protocol: NativeUpstreamHttpProtocol,
+    h2c_upgrade: bool,
     http2_policy: DownstreamHttp2Policy,
     total_connection_timeout: Option<Duration>,
     connect_timeout: Duration,
@@ -171,6 +172,7 @@ impl std::fmt::Debug for NativeHttp1Upstream {
             .debug_struct("NativeHttp1Upstream")
             .field("authority", &self.authority)
             .field("protocol", &self.protocol)
+            .field("h2c_upgrade", &self.h2c_upgrade)
             .field("http2_policy", &self.http2_policy)
             .field("total_connection_timeout", &self.total_connection_timeout)
             .field("connect_timeout", &self.connect_timeout)
@@ -207,6 +209,7 @@ impl PartialEq for NativeHttp1Upstream {
     fn eq(&self, other: &Self) -> bool {
         self.authority == other.authority
             && self.protocol == other.protocol
+            && self.h2c_upgrade == other.h2c_upgrade
             && self.http2_policy == other.http2_policy
             && self.total_connection_timeout == other.total_connection_timeout
             && self.connect_timeout == other.connect_timeout
@@ -242,6 +245,7 @@ impl NativeHttp1Upstream {
         Self {
             authority: authority.into(),
             protocol: NativeUpstreamHttpProtocol::Http1,
+            h2c_upgrade: false,
             http2_policy: DownstreamHttp2Policy::default(),
             total_connection_timeout: None,
             connect_timeout: Duration::from_secs(5),
@@ -267,6 +271,7 @@ impl NativeHttp1Upstream {
         Self {
             authority: authority.into(),
             protocol: NativeUpstreamHttpProtocol::Http1,
+            h2c_upgrade: false,
             http2_policy: DownstreamHttp2Policy::default(),
             total_connection_timeout: None,
             connect_timeout: Duration::from_secs(5),
@@ -312,6 +317,12 @@ impl NativeHttp1Upstream {
     pub fn with_http1_and_http2_policy(mut self, policy: DownstreamHttp2Policy) -> Self {
         self.protocol = NativeUpstreamHttpProtocol::Http1AndHttp2;
         self.http2_policy = policy;
+        self.http2_pool = Arc::new(NativeHttp2Pool::new(policy.max_concurrent_streams()));
+        self
+    }
+
+    pub const fn with_h2c_upgrade(mut self, enabled: bool) -> Self {
+        self.h2c_upgrade = enabled;
         self
     }
 
@@ -558,6 +569,20 @@ impl NativeHttp1Upstream {
         &self,
         request: &NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
+        if self.h2c_upgrade && self.cleartext_upstream() {
+            match self.send_http2(request).await {
+                Ok(response) => return Ok(response),
+                Err(error) if h2c_upgrade_error_can_fallback(&error) => {
+                    self.invalidate_http2_connection().await;
+                    log::debug!(
+                        target: "fluxheim::native_http2",
+                        "native h2c upgrade was not accepted by upstream {}, falling back to HTTP/1.1: {error}",
+                        self.authority
+                    );
+                }
+                Err(error) => return Err(error),
+            }
+        }
         let (stream, negotiated) = self.connect_negotiated_stream().await?;
         match negotiated {
             NativeNegotiatedHttpProtocol::Http2 => self.send_http2_on_stream(stream, request).await,
@@ -641,19 +666,39 @@ impl NativeHttp1Upstream {
             let remaining = deadline
                 .checked_duration_since(TokioInstant::now())
                 .ok_or_else(|| timeout_error("native HTTP/2 upstream total connection timeout"))?;
+            let stream = if self.h2c_upgrade && self.cleartext_upstream() {
+                timeout_at(deadline, self.h2c_upgrade_stream(stream))
+                    .await
+                    .map_err(|_| timeout_error("native h2c upgrade timeout"))??
+            } else {
+                stream
+            };
             let policy = self
                 .http2_policy
                 .with_handler_timeout(self.http2_policy.handler_timeout().min(remaining));
-            let (client, driver) = timeout_at(
-                deadline,
-                native_http2_upstream_client_on_io_with_keepalive(
-                    stream,
-                    policy,
-                    self.http2_keepalive_interval,
-                ),
-            )
-            .await
-            .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
+            let (client, driver) = if self.h2c_upgrade && self.cleartext_upstream() {
+                timeout_at(
+                    deadline,
+                    native_http2_upstream_client_on_h2c_upgraded_io(
+                        stream,
+                        policy,
+                        self.http2_keepalive_interval,
+                    ),
+                )
+                .await
+                .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
+            } else {
+                timeout_at(
+                    deadline,
+                    native_http2_upstream_client_on_io_with_keepalive(
+                        stream,
+                        policy,
+                        self.http2_keepalive_interval,
+                    ),
+                )
+                .await
+                .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
+            }
             .map_err(native_http2_error)?;
             let client = timeout_at(deadline, client.ready())
                 .await
@@ -662,12 +707,26 @@ impl NativeHttp1Upstream {
             return Ok(NativeHttp2PooledConnection { client, driver });
         }
         let stream = self.connect_stream_inner().await?;
-        let (client, driver) = native_http2_upstream_client_on_io_with_keepalive(
-            stream,
-            self.http2_policy,
-            self.http2_keepalive_interval,
-        )
-        .await
+        let stream = if self.h2c_upgrade && self.cleartext_upstream() {
+            self.h2c_upgrade_stream(stream).await?
+        } else {
+            stream
+        };
+        let (client, driver) = if self.h2c_upgrade && self.cleartext_upstream() {
+            native_http2_upstream_client_on_h2c_upgraded_io(
+                stream,
+                self.http2_policy,
+                self.http2_keepalive_interval,
+            )
+            .await
+        } else {
+            native_http2_upstream_client_on_io_with_keepalive(
+                stream,
+                self.http2_policy,
+                self.http2_keepalive_interval,
+            )
+            .await
+        }
         .map_err(native_http2_error)?;
         let client = timeout(self.http2_policy.handler_timeout(), client.ready())
             .await
@@ -798,6 +857,140 @@ impl NativeHttp1Upstream {
         }
         Ok(Box::new(stream) as NativeHttp1Stream)
     }
+
+    const fn cleartext_upstream(&self) -> bool {
+        #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+        {
+            self.tls.is_none()
+        }
+        #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
+        {
+            true
+        }
+    }
+
+    async fn h2c_upgrade_stream(
+        &self,
+        mut stream: NativeHttp1Stream,
+    ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
+        let settings = h2c_upgrade_settings_header(self.http2_policy)?;
+        let request = format!(
+            "OPTIONS * HTTP/1.1\r\n\
+             Host: {}\r\n\
+             Connection: Upgrade, HTTP2-Settings\r\n\
+             Upgrade: h2c\r\n\
+             HTTP2-Settings: {settings}\r\n\
+             Content-Length: 0\r\n\
+             \r\n",
+            self.authority
+        );
+        timeout(self.write_timeout, stream.write_all(request.as_bytes()))
+            .await
+            .map_err(|_| timeout_error("native h2c upgrade write timeout"))?
+            .map_err(NativeHttp1Error::Io)?;
+        let response_head = timeout(
+            self.read_timeout,
+            read_h2c_upgrade_response_head(&mut stream),
+        )
+        .await
+        .map_err(|_| timeout_error("native h2c upgrade response timeout"))??;
+        validate_h2c_upgrade_response(&response_head)?;
+        Ok(stream)
+    }
+}
+
+const MAX_H2C_UPGRADE_RESPONSE_HEAD_BYTES: usize = 8192;
+
+async fn read_h2c_upgrade_response_head(
+    stream: &mut NativeHttp1Stream,
+) -> Result<Vec<u8>, NativeHttp1Error> {
+    let mut head = Vec::new();
+    loop {
+        let byte = stream.read_u8().await.map_err(NativeHttp1Error::Io)?;
+        head.push(byte);
+        if head.len() > MAX_H2C_UPGRADE_RESPONSE_HEAD_BYTES {
+            return Err(NativeHttp1Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "native h2c upgrade response headers are too large",
+            )));
+        }
+        if head.windows(4).any(|window| window == b"\r\n\r\n") {
+            return Ok(head);
+        }
+    }
+}
+
+fn validate_h2c_upgrade_response(head: &[u8]) -> Result<(), NativeHttp1Error> {
+    let head = std::str::from_utf8(head).map_err(|_| {
+        NativeHttp1Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native h2c upgrade response headers are not valid UTF-8",
+        ))
+    })?;
+    let mut lines = head.split("\r\n");
+    let status = lines.next().unwrap_or_default();
+    if !status.starts_with("HTTP/1.1 101 ") && status != "HTTP/1.1 101" {
+        return Err(NativeHttp1Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native h2c upgrade was not accepted",
+        )));
+    }
+    let mut saw_upgrade_h2c = false;
+    for line in lines {
+        if line.is_empty() {
+            break;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            return Err(NativeHttp1Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "native h2c upgrade response has malformed header",
+            )));
+        };
+        if name.eq_ignore_ascii_case("upgrade")
+            && value
+                .split(',')
+                .any(|token| token.trim().eq_ignore_ascii_case("h2c"))
+        {
+            saw_upgrade_h2c = true;
+        }
+    }
+    if !saw_upgrade_h2c {
+        return Err(NativeHttp1Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native h2c upgrade response did not confirm h2c",
+        )));
+    }
+    Ok(())
+}
+
+fn h2c_upgrade_settings_header(policy: DownstreamHttp2Policy) -> Result<String, NativeHttp1Error> {
+    let mut settings = Vec::with_capacity(18);
+    push_h2_setting(&mut settings, 0x4, policy.initial_window_size());
+    push_h2_setting(&mut settings, 0x5, policy.max_frame_size());
+    push_h2_setting(&mut settings, 0x6, policy.max_header_list_size());
+    base64_ng::URL_SAFE_NO_PAD
+        .encode_string(&settings)
+        .map_err(|error| {
+            NativeHttp1Error::Io(std::io::Error::other(format!(
+                "native h2c settings encoding failed: {error}"
+            )))
+        })
+}
+
+fn push_h2_setting(settings: &mut Vec<u8>, id: u16, value: u32) {
+    settings.extend_from_slice(&id.to_be_bytes());
+    settings.extend_from_slice(&value.to_be_bytes());
+}
+
+fn h2c_upgrade_error_can_fallback(error: &NativeHttp1Error) -> bool {
+    matches!(
+        error,
+        NativeHttp1Error::Io(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::InvalidData | std::io::ErrorKind::Unsupported
+            )
+    )
 }
 
 fn pooled_connection_error_can_retry(error: &NativeHttp1Error) -> bool {

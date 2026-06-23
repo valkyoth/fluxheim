@@ -20,6 +20,10 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
   `proxy.upstream_http_version = "http2"` with the existing upstream TLS/SNI/CA
   policy. TLS `http1-and-http2` fallback now advertises `h2` and `http/1.1`
   and dispatches each request with the protocol selected by ALPN.
+- Plaintext `proxy.upstream_http_version = "http1-and-http2"` can now attempt
+  HTTP/1.1 h2c Upgrade only when the new `proxy.upstream_h2c_upgrade = true`
+  opt-in is set. The default remains `false`; refused upgrades fall back to a
+  fresh HTTP/1.1 connection.
 - Live native proxy tests now prove downstream HTTP/1 requests can be forwarded
   to an in-process HTTP/2 origin, and that two downstream requests reuse one
   upstream H2 connection.
@@ -32,6 +36,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native proxy live tests now prove safe-method failover works across static
   HTTP/2 upstreams and that unsafe methods are not replayed to another H2
   upstream after a failed first attempt.
+- Native upstream client tests now prove explicit plaintext h2c Upgrade reaches
+  a real in-process HTTP/2 origin, and that origins refusing Upgrade fall back
+  to HTTP/1.1 without replaying the downstream request during the probe.
 
 ## Security Notes
 
@@ -77,7 +84,8 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
   HTTP/2 ALPN protocol is selected.
 - Native cutover-plan tests now prove TLS `http1-and-http2` upstream fallback
   is native-ready when a TLS backend is compiled, while plaintext
-  `http1-and-http2` remains an explicit compatibility-runtime exception.
+  `http1-and-http2` remains HTTP/1.1-only unless `proxy.upstream_h2c_upgrade`
+  is explicitly enabled.
 - Native upstream H2 stream permits are now named and explicitly released after
   response conversion, keeping the lifetime visible to reviewers and avoiding
   accidental future movement of the permit guard.
@@ -89,9 +97,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - H2-only knobs on HTTP/1 upstream configs are rejected instead of silently
   ignored, and H1/H2 upstream request writers now share the same predicate for
   Fluxheim-owned header stripping.
-- Native diagnostics now distinguish supported upstream H2 modes from
-  unsupported modes such as plaintext `http1-and-http2`, which has no ALPN
-  negotiation point.
+- Native diagnostics now distinguish supported upstream H2 modes from invalid
+  mixed-mode configurations. Plaintext `http1-and-http2` does not use H2 unless
+  the explicit h2c Upgrade opt-in is enabled.
 - Native H2-to-HTTP/1 response conversion now strips hop-by-hop and
   proxy-owned headers such as `transfer-encoding`, `upgrade`, `keep-alive`,
   `proxy-connection`, `te`, and `trailer`, in addition to `content-length`,
@@ -99,13 +107,20 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native upstream H2 retry handling now releases the stream-capacity permit
   before rebuilding a failed pooled H2 connection, then reacquires capacity
   immediately before sending the retry stream.
-- Non-TLS native builds now classify `http1-and-http2` upstream fallback as an
-  explicit unsupported upstream-H2 mode instead of hiding it behind the broader
-  TLS-disabled diagnostic.
+- Non-TLS native builds now support plaintext `http1-and-http2` only through
+  the explicit h2c Upgrade opt-in; without it, mixed-mode plaintext fallback
+  stays on HTTP/1.1.
+- `proxy.upstream_h2c_upgrade` is rejected unless an upstream is configured,
+  the upstream is plaintext, and `proxy.upstream_http_version =
+  "http1-and-http2"`, keeping h2c Upgrade out of TLS and prior-knowledge H2
+  configurations.
 
 ## Compatibility Notes
 
 - This release enables plaintext h2c/prior-knowledge, TLS ALPN H2 origins, and
   TLS `http1-and-http2` fallback negotiation on the native path. Plaintext
-  `http1-and-http2` remains a compatibility-runtime mode because cleartext
-  upstream connections have no ALPN negotiation point.
+  `http1-and-http2` uses HTTP/1.1 by default; set
+  `proxy.upstream_h2c_upgrade = true` only for origins known to implement
+  HTTP/1.1 h2c Upgrade. This is intentionally not default because cleartext
+  origins have no ALPN negotiation point and h2c Upgrade support varies by
+  server.

@@ -356,7 +356,9 @@ impl NativeHttp1Proxy {
             return Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy);
         }
         #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
-        if proxy.upstream_http_version == fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 {
+        if proxy.upstream_http_version == fluxheim_config::UpstreamHttpVersion::Http1AndHttp2
+            && !proxy.upstream_h2c_upgrade
+        {
             return Err(NativeHttp1ProxyConfigError::UpstreamHttp2);
         }
         #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
@@ -374,6 +376,7 @@ impl NativeHttp1Proxy {
                 if proxy.upstream_h2_max_streams.is_none() => {}
             fluxheim_config::UpstreamHttpVersion::Http2 => {}
             fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 if proxy.upstream_tls => {}
+            fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 if proxy.upstream_h2c_upgrade => {}
             fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => {
                 return Err(NativeHttp1ProxyConfigError::UpstreamHttp2);
             }
@@ -437,7 +440,9 @@ impl NativeHttp1Proxy {
                     if proxy.upstream_http_version == fluxheim_config::UpstreamHttpVersion::Http2 {
                         native_upstream.with_http2_policy(http2_policy)
                     } else {
-                        native_upstream.with_http1_and_http2_policy(http2_policy)
+                        native_upstream
+                            .with_http1_and_http2_policy(http2_policy)
+                            .with_h2c_upgrade(proxy.upstream_h2c_upgrade)
                     };
                 native_upstream = native_upstream.with_http2_keepalive_interval(
                     proxy

@@ -139,8 +139,52 @@ pub(crate) async fn native_http2_upstream_client_on_io_with_keepalive<T>(
 where
     T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
+    native_http2_upstream_client_on_io_with_mode(
+        io,
+        policy,
+        keepalive_interval,
+        NativeHttp2ClientHandshakeMode::PriorKnowledge,
+    )
+    .await
+}
+
+pub(crate) async fn native_http2_upstream_client_on_h2c_upgraded_io<T>(
+    io: T,
+    policy: DownstreamHttp2Policy,
+    keepalive_interval: Option<std::time::Duration>,
+) -> Result<(SendRequest<Bytes>, NativeHttp2ConnectionDriver), NativeHttp2StackError>
+where
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
+    native_http2_upstream_client_on_io_with_mode(
+        io,
+        policy,
+        keepalive_interval,
+        NativeHttp2ClientHandshakeMode::H2cUpgrade,
+    )
+    .await
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativeHttp2ClientHandshakeMode {
+    PriorKnowledge,
+    H2cUpgrade,
+}
+
+async fn native_http2_upstream_client_on_io_with_mode<T>(
+    io: T,
+    policy: DownstreamHttp2Policy,
+    keepalive_interval: Option<std::time::Duration>,
+    mode: NativeHttp2ClientHandshakeMode,
+) -> Result<(SendRequest<Bytes>, NativeHttp2ConnectionDriver), NativeHttp2StackError>
+where
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
     let keepalive_interval = keepalive_interval.filter(|interval| !interval.is_zero());
     let mut builder = h2::client::Builder::new();
+    if mode == NativeHttp2ClientHandshakeMode::H2cUpgrade {
+        builder.initial_stream_id(3);
+    }
     builder.max_header_list_size(policy.max_header_list_size());
     builder.max_concurrent_streams(policy.max_concurrent_streams());
     builder.initial_window_size(policy.initial_window_size());

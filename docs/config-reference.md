@@ -1050,6 +1050,7 @@ upstream_client_cert_path = "/etc/fluxheim/upstreams/client-chain.pem"
 upstream_client_key_path = "/etc/fluxheim/upstreams/client-key.pem"
 upstream_proxy_protocol = "off"
 upstream_http_version = "http1"
+# upstream_h2c_upgrade = false
 websocket = false
 
 [proxy.auth_request]
@@ -1259,21 +1260,29 @@ cannot produce a same-family TCP4/TCP6 source and destination pair, it sends
 that require HTTP/2, including gRPC-style upstreams, or to `http1-and-http2`
 to allow HTTP/2 with HTTP/1.1 fallback where the selected TLS/backend connector
 can negotiate it. For plaintext origins, `http2` means h2c; use it only when
-the origin is known to accept cleartext HTTP/2. `upstream_h2_max_streams`
-limits concurrent streams per upstream HTTP/2 connection and must be between
-1 and 1024. A value of `1` intentionally serializes the native upstream H2
-pool, including cold connection setup, so latency-sensitive deployments should
-use a larger value unless the origin requires single-stream behavior.
-`upstream_h2_ping_interval_secs` enables upstream HTTP/2 keepalive pings. Both
-h2 settings require `upstream_http_version` to allow HTTP/2.
+the origin is known to accept cleartext HTTP/2 prior knowledge.
+`upstream_h2c_upgrade` defaults to `false` and is only valid for plaintext
+`upstream_http_version = "http1-and-http2"` origins. When explicitly enabled,
+Fluxheim first sends a bounded HTTP/1.1 `OPTIONS *` h2c Upgrade probe and uses
+HTTP/2 only if the origin answers `101 Switching Protocols` with `Upgrade:
+h2c`; otherwise it opens a fresh HTTP/1.1 connection. This compatibility mode
+is not enabled by default because cleartext origins have no ALPN negotiation
+point and h2c Upgrade support is not consistently implemented by upstream
+servers. `upstream_h2_max_streams` limits concurrent streams per upstream
+HTTP/2 connection and must be between 1 and 1024. A value of `1` intentionally
+serializes the native upstream H2 pool, including cold connection setup, so
+latency-sensitive deployments should use a larger value unless the origin
+requires single-stream behavior. `upstream_h2_ping_interval_secs` enables
+upstream HTTP/2 keepalive pings. Both h2 settings require
+`upstream_http_version` to allow HTTP/2.
 During the 1.6 native preview, the native HTTP/1 proxy path supports
 h2c/prior-knowledge upstreams and TLS ALPN-negotiated upstream HTTP/2 for
 `upstream_http_version = "http2"`, including `upstream_h2_max_streams` and
 `upstream_h2_ping_interval_secs`. For TLS upstreams,
 `upstream_http_version = "http1-and-http2"` advertises both `h2` and
 `http/1.1`, then sends the upstream request with the protocol selected by ALPN.
-Plaintext `http1-and-http2` remains a compatibility-runtime mode because there
-is no ALPN negotiation on cleartext upstream connections.
+Plaintext `http1-and-http2` remains HTTP/1.1-only unless
+`upstream_h2c_upgrade = true` is explicitly configured.
 For explicit gRPC routes, set route-scoped `[vhosts.routes.grpc] enabled =
 true`; Fluxheim then requires the route proxy to allow upstream HTTP/2, rejects
 non-`POST` requests, accepts only `application/grpc` or `application/grpc+*`
