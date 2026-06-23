@@ -1280,7 +1280,10 @@ Linux `TCP_USER_TIMEOUT` through the same keepalive setting and is ignored by
 non-Linux kernels. `upstream_tcp_recv_buffer_bytes` requests a receive-buffer
 size for new upstream sockets, capped at 256MiB. `upstream_dscp` accepts a DSCP
 value from 0 through 63. `upstream_tcp_fast_open` enables upstream TCP Fast Open
-where the platform and kernel allow it.
+where the platform and kernel allow it on the compatibility runtime. During the
+1.6 native-runtime cutover preview it remains an explicit native HTTP/1
+transport-policy blocker until Fluxheim has a safe native socket path with
+parity tests.
 `upstream_weights` is optional and, when set, must contain one positive weight
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must

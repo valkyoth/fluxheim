@@ -148,6 +148,9 @@ the native HTTP/1 proxy path.
   downstream request-read timeout policy on the native path.
 - Native proxy config now accepts total upstream connection timeout while
   keeping TCP Fast Open as an explicit native transport blocker.
+- The configuration reference now documents that
+  `proxy.upstream_tcp_fast_open` remains compatibility-runtime only during the
+  1.6 native preview until a safe native socket path has parity tests.
 - Native proxy config and live loopback tests now prove receive-buffer and DSCP
   socket options plus TCP keepalive and supported TCP user-timeout are accepted
   and still connect through the native proxy path.

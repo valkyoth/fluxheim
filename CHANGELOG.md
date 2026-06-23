@@ -54,6 +54,9 @@ behavior when the change improves security or project direction.
   connect.
 - Move `proxy.upstream_tcp_user_timeout_ms` onto native HTTP/1 upstream sockets
   on targets where the OS exposes `TCP_USER_TIMEOUT`.
+- Document that `proxy.upstream_tcp_fast_open` remains compatibility-runtime
+  only during the 1.6 native preview until Fluxheim has a safe native socket
+  path with parity tests.
 - Add native HTTP/1 request context slots for TLS client identity and Geo
   context, populate downstream TLS identity from the native rustls/OpenSSL
   listener paths, and let handlers attach Geo context before policy evaluation.
