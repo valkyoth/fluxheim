@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use base64::Engine as _;
 use bytes::Bytes;
 use fluxheim_protocol::{Http1ParseError, http1_request_target};
 use h2::client::SendRequest;
@@ -969,7 +968,9 @@ fn h2c_upgrade_settings_header(policy: DownstreamHttp2Policy) -> String {
     push_h2_setting(&mut settings, 0x4, policy.initial_window_size());
     push_h2_setting(&mut settings, 0x5, policy.max_frame_size());
     push_h2_setting(&mut settings, 0x6, policy.max_header_list_size());
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&settings)
+    base64_ng::URL_SAFE_NO_PAD
+        .encode_string(&settings)
+        .expect("base64url encoding fixed-size h2c settings should not fail")
 }
 
 fn push_h2_setting(settings: &mut Vec<u8>, id: u16, value: u32) {

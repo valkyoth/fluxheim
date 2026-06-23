@@ -121,8 +121,6 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - The h2c Upgrade response-head reader now checks only the trailing terminator
   bytes while reading one byte at a time, preserving post-upgrade H2 frames
   without an O(n²) scan.
-- The h2c `HTTP2-Settings` header is now encoded with the established `base64`
-  crate and uses an infallible encoding path.
 
 ## Compatibility Notes
 
