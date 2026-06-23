@@ -67,6 +67,8 @@ behavior when the change improves security or project direction.
 - Move managed local ACME HTTP-01 challenge serving onto the native route
   proxy, including alias-vhost ownership, safe token-file loading, GET/HEAD
   handling, and method rejection parity with the compatibility path.
+- Move native ACME HTTP-01 token-file loading onto Tokio's blocking pool so
+  filesystem stalls cannot block the async worker thread.
 - Move safe-method traffic mirroring onto the native HTTP/1 proxy when the
   `traffic-mirror` feature is compiled, preserving recursion protection,
   sampling, forwarded-header selection, response-body caps, and per-target
@@ -78,6 +80,13 @@ behavior when the change improves security or project direction.
 - Add native cutover-plan tests proving auth-request and safe-method traffic
   mirroring are native-ready only when their matching server feature gates are
   compiled.
+- Shard native route/vhost rate-limit tables so stale-entry pruning only blocks
+  one shard of identities at a time.
+- Strip inbound native traffic-mirror marker headers before origin forwarding,
+  while still using valid signed internal markers for recursion suppression.
+- Zeroize native auth-request 2xx response bodies that are read only for the
+  configured size cap, and keep allowlisted auth response headers in zeroizing
+  temporary storage before copying them into the upstream request.
 - Add native proxy and cutover-plan tests proving upstream HTTP/2 and H2 tuning
   knobs remain explicit native blockers for the dedicated 1.6.30 upstream H2
   connection-manager slice.

@@ -52,6 +52,8 @@ the native HTTP/1 proxy path.
 - Managed local ACME HTTP-01 challenge serving now has a native route action.
   Live route-proxy tests prove direct and alias vhost challenge ownership, safe
   token-file loading, GET/HEAD handling, and `405 Allow: GET, HEAD` behavior.
+- Native ACME HTTP-01 challenge file loading now runs on Tokio's blocking pool
+  instead of blocking the async worker thread.
 - Native HTTP/1 proxy handling now supports safe-method traffic mirroring when
   the `traffic-mirror` feature is compiled, including recursion protection,
   sampling, forwarded-header selection, mirror response caps, and per-target
@@ -144,6 +146,8 @@ the native HTTP/1 proxy path.
   the direct peer address instead of skipping poisoned hops.
 - Native rate-limit table eviction sweeps are bounded so a full bucket table
   cannot trigger repeated full-table scans on every new identity.
+- Native rate-limit tables are now sharded so stale-entry pruning only blocks
+  one shard of identities at a time.
 - Native proxy config now accepts response-side downstream policy and per-proxy
   downstream request-read timeout policy on the native path.
 - Native proxy config now accepts total upstream connection timeout while
@@ -170,9 +174,15 @@ the native HTTP/1 proxy path.
 - Native traffic mirroring now honors only Fluxheim's signed internal mirror
   marker for loop prevention, so client-supplied `X-Fluxheim-Mirror` headers
   cannot suppress the configured mirror feed.
+- Native proxy forwarding now strips inbound `X-Fluxheim-Mirror` and
+  `X-Fluxheim-Mirror-Signature` headers before forwarding to the origin.
 - Native traffic-mirror marker signatures are now compared through
   `sanitization::ct::ConstantTimeEq`; this release also updates
   `sanitization` to 1.2.1 and `rustls` to 0.23.41.
+- Native auth-request 2xx response bodies that are read only for the configured
+  size cap are now zeroized before release, and allowlisted auth response
+  headers use zeroizing temporary storage before being copied into the upstream
+  request.
 - Native proxy tests now prove a slow request body times out before any
   upstream connection is attempted when `proxy.downstream_read_timeout_secs`
   is selected.

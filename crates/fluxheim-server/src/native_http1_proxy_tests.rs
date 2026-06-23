@@ -555,7 +555,10 @@ async fn native_proxy_round_robins_successful_static_upstreams() {
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 #[tokio::test]
 async fn native_proxy_mirrors_safe_requests_without_changing_origin_response() {
-    let upstream = upstream(|_, mut stream| async move {
+    let upstream = upstream(|request, mut stream| async move {
+        let request = String::from_utf8(request).unwrap();
+        assert!(!request.contains("\r\nx-fluxheim-mirror:"));
+        assert!(!request.contains("\r\nx-fluxheim-mirror-signature:"));
         stream
             .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 9\r\n\r\norigin-ok")
             .await

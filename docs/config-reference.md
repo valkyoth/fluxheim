@@ -2926,7 +2926,10 @@ empty. `mode = "delay"` reserves future tokens and sleeps the request up to
 `max_delay_ms`; if the backlog would exceed that bounded delay budget, Fluxheim
 rejects instead of queueing indefinitely. If `burst` is omitted or zero,
 Fluxheim uses `requests_per_second` as the burst. State is bounded by
-`table_max_entries` and stale entries are pruned after `entry_ttl_secs`. Vhost
+`table_max_entries` and stale entries are pruned after `entry_ttl_secs`. The
+native HTTP/1 runtime shards the local rate-limit table so prune work only
+blocks one shard at a time, but very large `table_max_entries` values can still
+increase per-shard prune CPU under many-identity floods. Vhost
 limits are checked before route limits. If Fluxheim cannot determine an
 effective client IP, the request uses one shared anonymous bucket for that
 vhost or route; do not rely on anonymous-IP rate limiting as the only

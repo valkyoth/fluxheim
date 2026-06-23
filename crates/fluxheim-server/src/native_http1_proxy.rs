@@ -99,8 +99,13 @@ struct NativeAuthRequest {
 #[cfg(feature = "auth-request")]
 #[derive(Debug)]
 enum NativeAuthRequestDecision {
-    Allow { headers: Vec<(String, String)> },
-    Deny { status: u16, body: Vec<u8> },
+    Allow {
+        headers: Vec<(String, zeroize::Zeroizing<String>)>,
+    },
+    Deny {
+        status: u16,
+        body: Vec<u8>,
+    },
 }
 
 #[cfg(feature = "auth-request")]
@@ -537,8 +542,12 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 }
             }
             #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
-            if let Some(mirror) = &self.mirror {
-                mirror.spawn_if_selected(&request);
+            {
+                let already_mirrored = native_request_has_valid_mirror_marker(&request);
+                strip_native_traffic_mirror_headers(&mut request);
+                if !already_mirrored && let Some(mirror) = &self.mirror {
+                    mirror.spawn_if_selected(&request);
+                }
             }
             #[cfg(any(
                 feature = "compression-brotli",
@@ -711,6 +720,25 @@ impl NativeAuthRequest {
             .call()
             .map_err(|error| std::io::Error::other(error.to_string()))?;
         let status = response.status().as_u16();
+        if (200..300).contains(&status) {
+            let body = zeroize::Zeroizing::new(
+                response
+                    .body_mut()
+                    .with_config()
+                    .limit(self.max_response_bytes.saturating_add(1))
+                    .read_to_vec()
+                    .map_err(|error| std::io::Error::other(error.to_string()))?,
+            );
+            if body.len() as u64 > self.max_response_bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "auth_request response exceeds configured body limit",
+                ));
+            }
+            return Ok(NativeAuthRequestDecision::Allow {
+                headers: self.allowed_response_headers(&response),
+            });
+        }
         let body = response
             .body_mut()
             .with_config()
@@ -723,11 +751,6 @@ impl NativeAuthRequest {
                 "auth_request response exceeds configured body limit",
             ));
         }
-        if (200..300).contains(&status) {
-            return Ok(NativeAuthRequestDecision::Allow {
-                headers: self.allowed_response_headers(&response),
-            });
-        }
         let status = if (400..600).contains(&status) {
             status
         } else {
@@ -739,7 +762,7 @@ impl NativeAuthRequest {
     fn allowed_response_headers(
         &self,
         response: &ureq::http::Response<ureq::Body>,
-    ) -> Vec<(String, String)> {
+    ) -> Vec<(String, zeroize::Zeroizing<String>)> {
         response
             .headers()
             .iter()
@@ -751,10 +774,12 @@ impl NativeAuthRequest {
                 {
                     return None;
                 }
-                value
-                    .to_str()
-                    .ok()
-                    .map(|value| (name.as_str().to_ascii_lowercase(), value.to_owned()))
+                value.to_str().ok().map(|value| {
+                    (
+                        name.as_str().to_ascii_lowercase(),
+                        zeroize::Zeroizing::new(value.to_owned()),
+                    )
+                })
             })
             .collect()
     }
@@ -799,7 +824,7 @@ fn native_auth_context_header_value(name: &str, request: &NativeHttp1Request) ->
 #[cfg(feature = "auth-request")]
 fn apply_native_auth_request_headers(
     request: &mut NativeHttp1Request,
-    headers: &[(String, String)],
+    headers: &[(String, zeroize::Zeroizing<String>)],
 ) {
     for (name, value) in headers {
         native_request_replace_header(request, name, value);
@@ -1063,6 +1088,14 @@ fn native_request_has_valid_mirror_marker(request: &NativeHttp1Request) -> bool 
     }
     native_request_header_values(request, "x-fluxheim-mirror-signature")
         .any(native_traffic_mirror_marker_signature_matches)
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn strip_native_traffic_mirror_headers(request: &mut NativeHttp1Request) {
+    request.headers.retain(|(name, _)| {
+        !name.eq_ignore_ascii_case("x-fluxheim-mirror")
+            && !name.eq_ignore_ascii_case("x-fluxheim-mirror-signature")
+    });
 }
 
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]

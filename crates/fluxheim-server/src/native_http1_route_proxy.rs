@@ -54,6 +54,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
 const MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES: usize = 256;
 const NATIVE_RATE_LIMIT_MIN_PRUNE_INTERVAL: Duration = Duration::from_secs(1);
+const NATIVE_RATE_LIMIT_SHARDS: usize = 16;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1RouteProxy {
@@ -216,7 +217,7 @@ struct NativeRateLimitBucket {
 
 #[derive(Debug)]
 struct NativeRateLimitState {
-    buckets: Mutex<NativeRateLimitBuckets>,
+    shards: Box<[Mutex<NativeRateLimitBuckets>]>,
 }
 
 #[derive(Debug)]
@@ -503,10 +504,7 @@ impl Default for NativeRateLimit {
             max_delay: Duration::from_millis(1000),
             reject_indeterminate: false,
             state: Arc::new(NativeRateLimitState {
-                buckets: Mutex::new(NativeRateLimitBuckets {
-                    entries: HashMap::new(),
-                    last_pruned_at: None,
-                }),
+                shards: native_rate_limit_shards(),
             }),
         }
     }
@@ -530,10 +528,7 @@ impl NativeRateLimit {
             max_delay: Duration::from_millis(config.max_delay_ms),
             reject_indeterminate: config.reject_indeterminate,
             state: Arc::new(NativeRateLimitState {
-                buckets: Mutex::new(NativeRateLimitBuckets {
-                    entries: HashMap::new(),
-                    last_pruned_at: None,
-                }),
+                shards: native_rate_limit_shards(),
             }),
         }
     }
@@ -548,7 +543,12 @@ impl NativeRateLimit {
         if matches!(key, NativeRateLimitKey::Indeterminate) && self.reject_indeterminate {
             return NativeRateLimitDecision::Reject(self.status);
         }
-        let mut buckets = match self.state.buckets.lock() {
+        let shard = native_rate_limit_shard(key);
+        let max_entries = self
+            .table_max_entries
+            .div_ceil(NATIVE_RATE_LIMIT_SHARDS)
+            .max(1);
+        let mut buckets = match self.state.shards[shard].lock() {
             Ok(guard) => guard,
             Err(_) => {
                 log::error!(
@@ -558,7 +558,7 @@ impl NativeRateLimit {
                 std::process::abort();
             }
         };
-        if !buckets.entries.contains_key(&key) && buckets.entries.len() >= self.table_max_entries {
+        if !buckets.entries.contains_key(&key) && buckets.entries.len() >= max_entries {
             let should_prune = buckets.last_pruned_at.is_none_or(|last_pruned_at| {
                 now.saturating_duration_since(last_pruned_at)
                     >= NATIVE_RATE_LIMIT_MIN_PRUNE_INTERVAL
@@ -569,7 +569,7 @@ impl NativeRateLimit {
                     .retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.entry_ttl);
                 buckets.last_pruned_at = Some(now);
             }
-            if buckets.entries.len() >= self.table_max_entries {
+            if buckets.entries.len() >= max_entries {
                 return NativeRateLimitDecision::Reject(self.status);
             }
         }
@@ -605,6 +605,30 @@ impl NativeRateLimit {
 
         bucket.tokens -= 1.0;
         NativeRateLimitDecision::Delay(wait)
+    }
+}
+
+fn native_rate_limit_shards() -> Box<[Mutex<NativeRateLimitBuckets>]> {
+    (0..NATIVE_RATE_LIMIT_SHARDS)
+        .map(|_| {
+            Mutex::new(NativeRateLimitBuckets {
+                entries: HashMap::new(),
+                last_pruned_at: None,
+            })
+        })
+        .collect::<Vec<_>>()
+        .into_boxed_slice()
+}
+
+fn native_rate_limit_shard(key: NativeRateLimitKey) -> usize {
+    match key {
+        NativeRateLimitKey::Ip(IpAddr::V4(address)) => {
+            usize::from(address.octets()[3]) & (NATIVE_RATE_LIMIT_SHARDS - 1)
+        }
+        NativeRateLimitKey::Ip(IpAddr::V6(address)) => {
+            usize::from(address.octets()[15]) & (NATIVE_RATE_LIMIT_SHARDS - 1)
+        }
+        NativeRateLimitKey::Indeterminate => 0,
     }
 }
 
@@ -1664,7 +1688,7 @@ impl NativeHttp1RouteProxyRoute {
         let mut response = match &self.action {
             #[cfg(feature = "acme")]
             NativeHttp1RouteAction::AcmeHttp01(store) => {
-                native_acme_http_01_response(&request, store)
+                native_acme_http_01_response(&request, store).await
             }
             NativeHttp1RouteAction::Proxy(proxy) => proxy.handle(request).await,
             NativeHttp1RouteAction::Redirect(redirect) => redirect_response(&request, redirect),
@@ -1692,7 +1716,7 @@ impl NativeHttp1RouteProxyRoute {
 }
 
 #[cfg(feature = "acme")]
-fn native_acme_http_01_response(
+async fn native_acme_http_01_response(
     request: &NativeHttp1Request,
     store: &NativeHttp1AcmeHttp01Store,
 ) -> NativeHttp1Response {
@@ -1705,25 +1729,37 @@ fn native_acme_http_01_response(
     let Some((path, _)) = request_path_and_query(request) else {
         return NativeHttp1Response::new(400, "Bad Request", b"bad request\n").close_connection();
     };
-    let Some(token) = http_01_token_from_path(&path) else {
+    let Some(token) = http_01_token_from_path(&path).map(str::to_owned) else {
         return NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection();
     };
 
-    let key_authorization = match store.load_key_authorization(token) {
-        Ok(Some(value)) => value,
-        Ok(None) => {
-            return NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection();
-        }
-        Err(error) => {
-            log::error!("failed to load ACME HTTP-01 challenge token: {error}");
-            return NativeHttp1Response::new(
-                500,
-                "Internal Server Error",
-                b"internal server error\n",
-            )
-            .close_connection();
-        }
-    };
+    let store = store.clone();
+    let key_authorization =
+        match tokio::task::spawn_blocking(move || store.load_key_authorization(&token)).await {
+            Ok(Ok(Some(value))) => value,
+            Ok(Ok(None)) => {
+                return NativeHttp1Response::new(404, "Not Found", b"not found\n")
+                    .close_connection();
+            }
+            Ok(Err(error)) => {
+                log::error!("failed to load ACME HTTP-01 challenge token: {error}");
+                return NativeHttp1Response::new(
+                    500,
+                    "Internal Server Error",
+                    b"internal server error\n",
+                )
+                .close_connection();
+            }
+            Err(error) => {
+                log::error!("ACME HTTP-01 challenge token loader failed: {error}");
+                return NativeHttp1Response::new(
+                    500,
+                    "Internal Server Error",
+                    b"internal server error\n",
+                )
+                .close_connection();
+            }
+        };
 
     let content_length = key_authorization.len() as u64;
     let body = if request.method == "HEAD" {
