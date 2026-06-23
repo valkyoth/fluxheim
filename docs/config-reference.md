@@ -1269,9 +1269,11 @@ h2 settings require `upstream_http_version` to allow HTTP/2.
 During the 1.6 native preview, the native HTTP/1 proxy path supports
 h2c/prior-knowledge upstreams and TLS ALPN-negotiated upstream HTTP/2 for
 `upstream_http_version = "http2"`, including `upstream_h2_max_streams` and
-`upstream_h2_ping_interval_secs`. `http1-and-http2` fallback negotiation
-remains a compatibility-runtime feature until the native upstream transport
-cutover has parity tests for it.
+`upstream_h2_ping_interval_secs`. For TLS upstreams,
+`upstream_http_version = "http1-and-http2"` advertises both `h2` and
+`http/1.1`, then sends the upstream request with the protocol selected by ALPN.
+Plaintext `http1-and-http2` remains a compatibility-runtime mode because there
+is no ALPN negotiation on cleartext upstream connections.
 For explicit gRPC routes, set route-scoped `[vhosts.routes.grpc] enabled =
 true`; Fluxheim then requires the route proxy to allow upstream HTTP/2, rejects
 non-`POST` requests, accepts only `application/grpc` or `application/grpc+*`

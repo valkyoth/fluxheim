@@ -398,6 +398,63 @@ async fn native_proxy_forwards_to_tls_http2_upstream_with_alpn() {
     assert!(response.ends_with("hello tls h2 native"));
 }
 
+#[cfg(feature = "tls-rustls-backend")]
+#[tokio::test]
+async fn native_proxy_http1_and_http2_negotiates_tls_http2_upstream() {
+    let fixture = native_tls_fixture();
+    let upstream = tls_h2_upstream(fixture.chain_pem.clone(), fixture.key_pem.clone()).await;
+    let proxy_config = fluxheim_config::ProxyConfig {
+        upstream: Some(upstream.to_string()),
+        upstream_tls: true,
+        upstream_sni: Some("localhost".to_owned()),
+        upstream_ca_path: Some(fixture.ca_path.clone()),
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http1AndHttp2,
+        ..Default::default()
+    };
+    let native =
+        NativeHttp1Proxy::from_proxy_config(&proxy_config, DownstreamHttp1Policy::default())
+            .unwrap()
+            .expect("native fallback TLS H2 proxy");
+    let proxy = proxy_with_native(native).await;
+
+    let response = downstream_get(proxy, "/h2tls").await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert!(response.contains("x-origin: tls-h2\r\n"));
+    assert!(response.ends_with("hello tls h2 native"));
+}
+
+#[tokio::test]
+async fn native_proxy_http1_and_http2_falls_back_to_tls_http1_upstream() {
+    let fixture = native_tls_fixture();
+    let upstream = tls_upstream(fixture.chain_pem.clone(), fixture.key_pem.clone()).await;
+    let proxy_config = fluxheim_config::ProxyConfig {
+        upstream: Some(upstream.to_string()),
+        upstream_tls: true,
+        upstream_sni: Some("localhost".to_owned()),
+        upstream_ca_path: Some(fixture.ca_path.clone()),
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http1AndHttp2,
+        ..Default::default()
+    };
+    let native =
+        NativeHttp1Proxy::from_proxy_config(&proxy_config, DownstreamHttp1Policy::default())
+            .unwrap()
+            .expect("native fallback TLS HTTP/1 proxy");
+    let proxy = proxy_with_native(native).await;
+
+    let response = downstream_get(proxy, "/secure").await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert!(response.contains("x-origin: tls\r\n"));
+    assert!(response.ends_with("hello tls native"));
+}
+
 #[tokio::test]
 async fn native_proxy_rejects_tls_upstream_hostname_mismatch_by_default() {
     let fixture = native_tls_fixture();

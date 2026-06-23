@@ -27,7 +27,7 @@ use openssl::x509::{X509, store::X509StoreBuilder};
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
 use tokio_openssl::SslStream;
 
-use crate::native_http1_client::NativeHttp1Stream;
+use crate::native_http1_client::{NativeHttp1Stream, NativeNegotiatedHttpProtocol};
 use crate::{NativeHttp1Error, NativeHttp1ProxyConfigError};
 
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
@@ -104,6 +104,16 @@ impl NativeHttp1UpstreamTls {
         stream: TcpStream,
         upstream_authority: &str,
     ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
+        self.connect_with_negotiated_protocol(stream, upstream_authority)
+            .await
+            .map(|(stream, _protocol)| stream)
+    }
+
+    pub(crate) async fn connect_with_negotiated_protocol(
+        &self,
+        stream: TcpStream,
+        upstream_authority: &str,
+    ) -> Result<(NativeHttp1Stream, NativeNegotiatedHttpProtocol), NativeHttp1Error> {
         #[cfg(feature = "tls-rustls-backend")]
         {
             return self.connect_rustls(stream, upstream_authority).await;
@@ -119,7 +129,7 @@ impl NativeHttp1UpstreamTls {
         &self,
         stream: TcpStream,
         upstream_authority: &str,
-    ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
+    ) -> Result<(NativeHttp1Stream, NativeNegotiatedHttpProtocol), NativeHttp1Error> {
         let server_name = upstream_tls_server_name(self.sni.as_deref(), upstream_authority)?;
         let stream = self
             .rustls
@@ -131,7 +141,11 @@ impl NativeHttp1UpstreamTls {
                     format!("native HTTP/1 upstream TLS handshake failed: {error}"),
                 ))
             })?;
-        Ok(Box::new(stream) as NativeHttp1Stream)
+        let protocol = match stream.get_ref().1.alpn_protocol() {
+            Some(b"h2") => NativeNegotiatedHttpProtocol::Http2,
+            _ => NativeNegotiatedHttpProtocol::Http1,
+        };
+        Ok((Box::new(stream) as NativeHttp1Stream, protocol))
     }
 
     #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
@@ -139,7 +153,7 @@ impl NativeHttp1UpstreamTls {
         &self,
         stream: TcpStream,
         upstream_authority: &str,
-    ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
+    ) -> Result<(NativeHttp1Stream, NativeNegotiatedHttpProtocol), NativeHttp1Error> {
         let sni = upstream_tls_openssl_sni(self.sni.as_deref(), upstream_authority);
         let mut config = self.openssl.configure().map_err(|error| {
             NativeHttp1Error::Io(io::Error::new(
@@ -188,7 +202,11 @@ impl NativeHttp1UpstreamTls {
                     format!("native HTTP/1 upstream TLS handshake failed: {error}"),
                 ))
             })?;
-        Ok(Box::new(stream) as NativeHttp1Stream)
+        let protocol = match stream.ssl().selected_alpn_protocol() {
+            Some(b"h2") => NativeNegotiatedHttpProtocol::Http2,
+            _ => NativeNegotiatedHttpProtocol::Http1,
+        };
+        Ok((Box::new(stream) as NativeHttp1Stream, protocol))
     }
 }
 
@@ -586,8 +604,10 @@ fn client_cert_key(
 fn upstream_tls_alpn_protocols(proxy: &fluxheim_config::ProxyConfig) -> Vec<Vec<u8>> {
     match proxy.upstream_http_version {
         fluxheim_config::UpstreamHttpVersion::Http2 => vec![b"h2".to_vec()],
-        fluxheim_config::UpstreamHttpVersion::Http1
-        | fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => vec![b"http/1.1".to_vec()],
+        fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => {
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()]
+        }
+        fluxheim_config::UpstreamHttpVersion::Http1 => vec![b"http/1.1".to_vec()],
     }
 }
 
@@ -595,8 +615,8 @@ fn upstream_tls_alpn_protocols(proxy: &fluxheim_config::ProxyConfig) -> Vec<Vec<
 fn upstream_tls_alpn_protocol_wire(proxy: &fluxheim_config::ProxyConfig) -> Vec<u8> {
     match proxy.upstream_http_version {
         fluxheim_config::UpstreamHttpVersion::Http2 => b"\x02h2".to_vec(),
-        fluxheim_config::UpstreamHttpVersion::Http1
-        | fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => b"\x08http/1.1".to_vec(),
+        fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => b"\x02h2\x08http/1.1".to_vec(),
+        fluxheim_config::UpstreamHttpVersion::Http1 => b"\x08http/1.1".to_vec(),
     }
 }
 

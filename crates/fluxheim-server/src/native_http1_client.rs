@@ -36,6 +36,16 @@ impl<T> NativeHttp1Io for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 
 pub(crate) type NativeHttp1Stream = Box<dyn NativeHttp1Io>;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")),
+    allow(dead_code)
+)]
+pub(crate) enum NativeNegotiatedHttpProtocol {
+    Http1,
+    Http2,
+}
+
 #[derive(Clone)]
 pub struct NativeHttp1Upstream {
     authority: String,
@@ -62,6 +72,7 @@ pub struct NativeHttp1Upstream {
 enum NativeUpstreamHttpProtocol {
     Http1,
     Http2,
+    Http1AndHttp2,
 }
 
 #[derive(Debug, Default)]
@@ -298,6 +309,12 @@ impl NativeHttp1Upstream {
         self
     }
 
+    pub fn with_http1_and_http2_policy(mut self, policy: DownstreamHttp2Policy) -> Self {
+        self.protocol = NativeUpstreamHttpProtocol::Http1AndHttp2;
+        self.http2_policy = policy;
+        self
+    }
+
     pub const fn uses_http2(&self) -> bool {
         matches!(self.protocol, NativeUpstreamHttpProtocol::Http2)
     }
@@ -403,8 +420,12 @@ impl NativeHttp1Upstream {
         &self,
         request: &NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
-        if self.uses_http2() {
-            return self.send_http2(request).await;
+        match self.protocol {
+            NativeUpstreamHttpProtocol::Http2 => return self.send_http2(request).await,
+            NativeUpstreamHttpProtocol::Http1AndHttp2 => {
+                return self.send_http1_and_http2(request).await;
+            }
+            NativeUpstreamHttpProtocol::Http1 => {}
         }
         if self.pool.max_idle == 0 {
             let stream = self.connect_stream().await?;
@@ -525,6 +546,38 @@ impl NativeHttp1Upstream {
         let response = native_http2_response_to_http1(response);
         drop(h2_stream_permit);
         response
+    }
+
+    async fn send_http1_and_http2(
+        &self,
+        request: &NativeHttp1Request,
+    ) -> Result<NativeHttp1Response, NativeHttp1Error> {
+        let (stream, negotiated) = self.connect_negotiated_stream().await?;
+        match negotiated {
+            NativeNegotiatedHttpProtocol::Http2 => self.send_http2_on_stream(stream, request).await,
+            NativeNegotiatedHttpProtocol::Http1 => self.send_on_stream(stream, request).await,
+        }
+    }
+
+    async fn send_http2_on_stream(
+        &self,
+        stream: NativeHttp1Stream,
+        request: &NativeHttp1Request,
+    ) -> Result<NativeHttp1Response, NativeHttp1Error> {
+        let request = native_http2_upstream_request(request, &self.authority, "https")?;
+        let (client, driver) = native_http2_upstream_client_on_io_with_keepalive(
+            stream,
+            self.http2_policy,
+            self.http2_keepalive_interval,
+        )
+        .await
+        .map_err(native_http2_error)?;
+        let result = send_native_http2_upstream_request(client, self.http2_policy, request)
+            .await
+            .map(native_http2_response_to_http1)
+            .map_err(native_http2_error);
+        driver.abort_and_join().await;
+        result?
     }
 
     fn http2_request_policy(&self, fresh_connection: bool) -> DownstreamHttp2Policy {
@@ -663,6 +716,47 @@ impl NativeHttp1Upstream {
                 .map_err(|_| timeout_error("native HTTP/1 upstream total connection timeout"))?;
         }
         self.connect_stream_inner().await
+    }
+
+    async fn connect_negotiated_stream(
+        &self,
+    ) -> Result<(NativeHttp1Stream, NativeNegotiatedHttpProtocol), NativeHttp1Error> {
+        if let Some(timeout_duration) = self.total_connection_timeout {
+            return timeout(timeout_duration, self.connect_negotiated_stream_inner())
+                .await
+                .map_err(|_| timeout_error("native HTTP/1 upstream total connection timeout"))?;
+        }
+        self.connect_negotiated_stream_inner().await
+    }
+
+    async fn connect_negotiated_stream_inner(
+        &self,
+    ) -> Result<(NativeHttp1Stream, NativeNegotiatedHttpProtocol), NativeHttp1Error> {
+        let stream = timeout(
+            self.connect_timeout,
+            connect_upstream(
+                &self.authority,
+                self.recv_buffer_size,
+                self.dscp,
+                self.tcp_keepalive,
+                self.tcp_user_timeout,
+            ),
+        )
+        .await
+        .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
+        #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+        if let Some(tls) = &self.tls {
+            return timeout(
+                self.connect_timeout,
+                tls.connect_with_negotiated_protocol(stream, &self.authority),
+            )
+            .await
+            .map_err(|_| timeout_error("native HTTP/1 upstream TLS handshake timeout"))?;
+        }
+        Ok((
+            Box::new(stream) as NativeHttp1Stream,
+            NativeNegotiatedHttpProtocol::Http1,
+        ))
     }
 
     async fn connect_stream_inner(&self) -> Result<NativeHttp1Stream, NativeHttp1Error> {
