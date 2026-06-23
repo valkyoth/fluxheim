@@ -62,6 +62,14 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - A wire-level native upstream H2 test now observes an actual client PING frame
   through a real h2 server IO wrapper, proving configured keepalive is emitted
   instead of only accepted by config.
+- Native upstream H2 stream permits are now named and explicitly released after
+  response conversion, keeping the lifetime visible to reviewers and avoiding
+  accidental future movement of the permit guard.
+- Native upstream H2 outbound request validation now has one enforcement point
+  inside the H2 sender, avoiding duplicate prevalidation paths with drift-prone
+  policy inputs.
+- Native upstream H2 programmatic configuration now enforces the same 1-1024
+  stream cap as TOML validation, with a debug assertion on pool construction.
 - H2-only knobs on HTTP/1 upstream configs are rejected instead of silently
   ignored, and H1/H2 upstream request writers now share the same predicate for
   Fluxheim-owned header stripping.

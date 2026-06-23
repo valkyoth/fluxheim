@@ -22,7 +22,7 @@ use crate::native_http1_upstream_response::{
 };
 use crate::native_http2_client::{
     NativeHttp2ConnectionDriver, native_http2_upstream_client_on_io_with_keepalive,
-    send_native_http2_upstream_request, validate_outbound_request,
+    send_native_http2_upstream_request,
 };
 use crate::{
     DownstreamHttp1Policy, DownstreamHttp2Policy, NativeHttp1Error, NativeHttp1Request,
@@ -142,6 +142,10 @@ impl Drop for NativeHttp2PooledConnection {
 
 impl NativeHttp2Pool {
     fn new(max_concurrent_streams: u32) -> Self {
+        debug_assert!(
+            (max_concurrent_streams as usize) <= Semaphore::MAX_PERMITS,
+            "max_concurrent_streams exceeds Semaphore::MAX_PERMITS"
+        );
         Self {
             stream_slots: Arc::new(Semaphore::new(max_concurrent_streams as usize)),
             connection: Mutex::new(None),
@@ -469,8 +473,7 @@ impl NativeHttp1Upstream {
                 }
             }),
         )?;
-        validate_outbound_request(&request, self.http2_policy).map_err(native_http2_error)?;
-        let _h2_stream_permit = timeout(
+        let h2_stream_permit = timeout(
             self.read_timeout,
             self.http2_pool.stream_slots.clone().acquire_owned(),
         )
@@ -519,7 +522,9 @@ impl NativeHttp1Upstream {
                 }
             }
         };
-        native_http2_response_to_http1(response)
+        let response = native_http2_response_to_http1(response);
+        drop(h2_stream_permit);
+        response
     }
 
     fn http2_request_policy(&self, fresh_connection: bool) -> DownstreamHttp2Policy {

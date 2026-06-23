@@ -1261,8 +1261,11 @@ to allow HTTP/2 with HTTP/1.1 fallback where the selected TLS/backend connector
 can negotiate it. For plaintext origins, `http2` means h2c; use it only when
 the origin is known to accept cleartext HTTP/2. `upstream_h2_max_streams`
 limits concurrent streams per upstream HTTP/2 connection and must be between
-1 and 1024. `upstream_h2_ping_interval_secs` enables upstream HTTP/2 keepalive
-pings. Both h2 settings require `upstream_http_version` to allow HTTP/2.
+1 and 1024. A value of `1` intentionally serializes the native upstream H2
+pool, including cold connection setup, so latency-sensitive deployments should
+use a larger value unless the origin requires single-stream behavior.
+`upstream_h2_ping_interval_secs` enables upstream HTTP/2 keepalive pings. Both
+h2 settings require `upstream_http_version` to allow HTTP/2.
 During the 1.6 native preview, the native HTTP/1 proxy path supports plaintext
 h2c/prior-knowledge upstreams for `upstream_http_version = "http2"`, including
 `upstream_h2_max_streams` and `upstream_h2_ping_interval_secs`. TLS

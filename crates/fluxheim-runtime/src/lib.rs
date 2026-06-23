@@ -450,7 +450,7 @@ impl<T> FluxBackgroundService<T> {
     }
 
     /// Pingora compatibility only. The native `NativeBackgroundSupervisor`
-    /// ignores this value; remove it after the `1.6.24` Pingora exit.
+    /// ignores this value; remove it with the final compatibility adapter.
     #[deprecated(
         since = "1.6.21",
         note = "Pingora compatibility only; native supervisor ignores thread count"

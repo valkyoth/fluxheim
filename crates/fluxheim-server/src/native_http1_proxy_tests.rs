@@ -97,6 +97,20 @@ async fn h2_upstream(requests: usize) -> (std::net::SocketAddr, Arc<AtomicUsize>
     (addr, accepted_connections)
 }
 
+async fn h2_idle_upstream() -> (std::net::SocketAddr, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted_connections = Arc::new(AtomicUsize::new(0));
+    let accepted_connections_for_task = Arc::clone(&accepted_connections);
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        accepted_connections_for_task.fetch_add(1, Ordering::AcqRel);
+        let mut connection = h2::server::handshake(stream).await.unwrap();
+        let _ = tokio::time::timeout(Duration::from_secs(1), connection.accept()).await;
+    });
+    (addr, accepted_connections)
+}
+
 async fn h2_upstream_with_body(
     body: &'static str,
     requests: usize,
@@ -582,7 +596,8 @@ async fn native_proxy_forwards_downstream_request_to_http2_upstream() {
 
 #[tokio::test]
 async fn native_proxy_http2_upstream_rejects_too_many_headers_before_connect() {
-    let upstream = NativeHttp1Upstream::new("127.0.0.1:9")
+    let (origin, accepted_connections) = h2_idle_upstream().await;
+    let upstream = NativeHttp1Upstream::new(origin.to_string())
         .with_http2_policy(DownstreamHttp2Policy::default().with_max_concurrent_streams(1));
     let mut request = native_proxy_test_request_for("/h2-origin");
     for index in 0..101 {
@@ -596,6 +611,7 @@ async fn native_proxy_http2_upstream_rejects_too_many_headers_before_connect() {
         NativeHttp1Error::Io(error) => assert_eq!(error.kind(), std::io::ErrorKind::InvalidData),
         NativeHttp1Error::Parse(error) => panic!("unexpected parse error: {error:?}"),
     }
+    assert_eq!(accepted_connections.load(Ordering::Acquire), 0);
 }
 
 #[tokio::test]
@@ -804,6 +820,21 @@ fn native_proxy_config_rejects_http2_knobs_for_http1_upstream() {
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()).unwrap_err();
 
     assert_eq!(error, NativeHttp1ProxyConfigError::UpstreamTransportPolicy);
+}
+
+#[test]
+fn native_proxy_config_rejects_oversized_http2_stream_limit() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_h2_max_streams: Some(1025),
+        ..Default::default()
+    };
+
+    let error =
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()).unwrap_err();
+
+    assert_eq!(error, NativeHttp1ProxyConfigError::UpstreamHttp2);
 }
 
 #[tokio::test]

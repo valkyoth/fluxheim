@@ -32,6 +32,7 @@ use sanitization::ct::ConstantTimeEq;
 
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 const NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
+const MAX_NATIVE_UPSTREAM_H2_STREAMS: usize = 1024;
 
 #[derive(Clone, Debug)]
 pub struct NativeHttp1Proxy {
@@ -1268,7 +1269,9 @@ fn native_http2_policy_from_config(
     if let Some(max_streams) = proxy.upstream_h2_max_streams {
         let max_streams = u32::try_from(max_streams)
             .ok()
-            .filter(|max_streams| *max_streams > 0)
+            .filter(|max_streams| {
+                *max_streams > 0 && (*max_streams as usize) <= MAX_NATIVE_UPSTREAM_H2_STREAMS
+            })
             .ok_or(NativeHttp1ProxyConfigError::UpstreamHttp2)?;
         policy = policy.with_max_concurrent_streams(max_streams);
     }
