@@ -1266,12 +1266,12 @@ pool, including cold connection setup, so latency-sensitive deployments should
 use a larger value unless the origin requires single-stream behavior.
 `upstream_h2_ping_interval_secs` enables upstream HTTP/2 keepalive pings. Both
 h2 settings require `upstream_http_version` to allow HTTP/2.
-During the 1.6 native preview, the native HTTP/1 proxy path supports plaintext
-h2c/prior-knowledge upstreams for `upstream_http_version = "http2"`, including
-`upstream_h2_max_streams` and `upstream_h2_ping_interval_secs`. TLS
-ALPN-negotiated upstream HTTP/2 and `http1-and-http2` fallback negotiation
-remain compatibility-runtime features until the native upstream transport
-cutover has parity tests for them.
+During the 1.6 native preview, the native HTTP/1 proxy path supports
+h2c/prior-knowledge upstreams and TLS ALPN-negotiated upstream HTTP/2 for
+`upstream_http_version = "http2"`, including `upstream_h2_max_streams` and
+`upstream_h2_ping_interval_secs`. `http1-and-http2` fallback negotiation
+remains a compatibility-runtime feature until the native upstream transport
+cutover has parity tests for it.
 For explicit gRPC routes, set route-scoped `[vhosts.routes.grpc] enabled =
 true`; Fluxheim then requires the route proxy to allow upstream HTTP/2, rejects
 non-`POST` requests, accepts only `application/grpc` or `application/grpc+*`

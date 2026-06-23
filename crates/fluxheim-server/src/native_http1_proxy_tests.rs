@@ -1697,6 +1697,7 @@ fn native_proxy_config_keeps_unsupported_upstream_http2_modes_as_explicit_blocke
         upstream: Some("127.0.0.1:3000".to_owned()),
         upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
         upstream_tls: true,
+        upstream_sni: Some("localhost".to_owned()),
         ..Default::default()
     };
     #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
@@ -1705,10 +1706,7 @@ fn native_proxy_config_keeps_unsupported_upstream_http2_modes_as_explicit_blocke
         Err(NativeHttp1ProxyConfigError::UpstreamTls)
     );
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
-    assert_eq!(
-        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
-        Err(NativeHttp1ProxyConfigError::UpstreamHttp2)
-    );
+    assert!(NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()).is_ok());
 
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),

@@ -368,9 +368,8 @@ impl NativeHttp1Proxy {
         match proxy.upstream_http_version {
             fluxheim_config::UpstreamHttpVersion::Http1
                 if proxy.upstream_h2_max_streams.is_none() => {}
-            fluxheim_config::UpstreamHttpVersion::Http2 if !proxy.upstream_tls => {}
-            fluxheim_config::UpstreamHttpVersion::Http2
-            | fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => {
+            fluxheim_config::UpstreamHttpVersion::Http2 => {}
+            fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => {
                 return Err(NativeHttp1ProxyConfigError::UpstreamHttp2);
             }
             fluxheim_config::UpstreamHttpVersion::Http1 => {
@@ -619,9 +618,17 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                         return response;
                     }
                     Err(error) if retry_allowed && unique_attempts < self.upstreams.len() => {
+                        log::debug!(
+                            target: "fluxheim::native_http1",
+                            "native HTTP/1 upstream attempt failed before retry: {error:?}"
+                        );
                         last_error = Some(error);
                     }
                     Err(error) => {
+                        log::debug!(
+                            target: "fluxheim::native_http1",
+                            "native HTTP/1 upstream attempt failed: {error:?}"
+                        );
                         last_error = Some(error);
                         break;
                     }

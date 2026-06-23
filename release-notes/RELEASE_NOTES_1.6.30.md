@@ -16,9 +16,10 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native upstream H2 policy now receives `proxy.read_timeout_secs`,
   `proxy.send_timeout_secs`, `proxy.upstream_h2_max_streams`, and
   `proxy.upstream_h2_ping_interval_secs`.
-- TLS ALPN-negotiated upstream HTTP/2 and `http1-and-http2` fallback
-  negotiation remain explicit native blockers until the final upstream
-  transport cutover.
+- TLS ALPN-negotiated upstream HTTP/2 is now supported for
+  `proxy.upstream_http_version = "http2"` with the existing upstream TLS/SNI/CA
+  policy. `http1-and-http2` fallback negotiation remains an explicit native
+  blocker until the final upstream transport cutover.
 - Live native proxy tests now prove downstream HTTP/1 requests can be forwarded
   to an in-process HTTP/2 origin, and that two downstream requests reuse one
   upstream H2 connection.
@@ -62,6 +63,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - A wire-level native upstream H2 test now observes an actual client PING frame
   through a real h2 server IO wrapper, proving configured keepalive is emitted
   instead of only accepted by config.
+- A live rustls upstream test now proves the native proxy negotiates `h2` with
+  ALPN, forwards downstream HTTP/1.1 requests to a TLS HTTP/2 origin, and sends
+  an HTTPS-scheme upstream H2 request.
 - Native upstream H2 stream permits are now named and explicitly released after
   response conversion, keeping the lifetime visible to reviewers and avoiding
   accidental future movement of the permit guard.
@@ -73,12 +77,11 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - H2-only knobs on HTTP/1 upstream configs are rejected instead of silently
   ignored, and H1/H2 upstream request writers now share the same predicate for
   Fluxheim-owned header stripping.
-- Native diagnostics now distinguish supported plaintext upstream H2 from
-  unsupported H2 modes such as TLS ALPN negotiation and `http1-and-http2`
-  fallback.
+- Native diagnostics now distinguish supported upstream H2 modes from
+  unsupported H2 modes such as `http1-and-http2` fallback negotiation.
 
 ## Compatibility Notes
 
-- This release enables plaintext h2c/prior-knowledge origins on the native path.
-  Operators using TLS ALPN H2 or `http1-and-http2` negotiation still use the
-  compatibility runtime until those pieces have native parity tests.
+- This release enables plaintext h2c/prior-knowledge and TLS ALPN H2 origins on
+  the native path. Operators using `http1-and-http2` negotiation still use the
+  compatibility runtime until that fallback mode has native parity tests.

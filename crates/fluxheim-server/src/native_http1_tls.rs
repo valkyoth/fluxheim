@@ -287,6 +287,7 @@ fn build_rustls_connector(
                 alternative_name,
             }));
     }
+    config.alpn_protocols = upstream_tls_alpn_protocols(proxy);
 
     Ok(TlsConnector::from(Arc::new(config)))
 }
@@ -354,6 +355,14 @@ fn build_openssl_connector(
     ) {
         configure_openssl_client_cert(&mut builder, cert_path, key_path)?;
     }
+    builder
+        .set_alpn_protos(&upstream_tls_alpn_protocol_wire(proxy))
+        .map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("failed to configure upstream TLS ALPN protocols: {error}"),
+            ))
+        })?;
 
     Ok(builder.build())
 }
@@ -571,6 +580,24 @@ fn client_cert_key(
         ))
     })?;
     Ok((certs, key))
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+fn upstream_tls_alpn_protocols(proxy: &fluxheim_config::ProxyConfig) -> Vec<Vec<u8>> {
+    match proxy.upstream_http_version {
+        fluxheim_config::UpstreamHttpVersion::Http2 => vec![b"h2".to_vec()],
+        fluxheim_config::UpstreamHttpVersion::Http1
+        | fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => vec![b"http/1.1".to_vec()],
+    }
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+fn upstream_tls_alpn_protocol_wire(proxy: &fluxheim_config::ProxyConfig) -> Vec<u8> {
+    match proxy.upstream_http_version {
+        fluxheim_config::UpstreamHttpVersion::Http2 => b"\x02h2".to_vec(),
+        fluxheim_config::UpstreamHttpVersion::Http1
+        | fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => b"\x08http/1.1".to_vec(),
+    }
 }
 
 #[cfg(feature = "tls-rustls-backend")]
