@@ -2772,18 +2772,32 @@ available for the stabilization/security-only follow-up.
   evaluator to consume that context without lifting the cutover blocker yet.
   Move safe-method traffic mirroring onto the native HTTP/1 proxy when the
   `traffic-mirror` feature is compiled. Move `proxy.auth_request` onto the
-  native HTTP/1 proxy when the `auth-request` server feature is compiled. Keep
-  cert/Geo access policy, managed local ACME challenge serving, upstream TCP
-  Fast Open, cache, PHP-FPM, dynamic discovery, and load-balancer state
-  explicitly reported as compatibility blockers until they have native parity
-  tests.
-- `v1.6.30`: finish the remaining native HTTP policy blockers that do not need
-  cache or PHP state: vhost cert/Geo access policy, vhost managed local ACME
-  challenge serving, route cert/Geo access, and upstream TCP Fast Open if it
-  can be implemented safely without cache, PHP, dynamic discovery, or
-  load-balancer state. Add live native
-  listener tests for each path and keep unsupported configs explicitly reported
-  in the cutover inventory.
+  native HTTP/1 proxy when the `auth-request` server feature is compiled.
+  Finish the remaining native HTTP policy blockers that do not need cache, PHP,
+  dynamic discovery, or load-balancer state: wire runtime TLS client identity
+  into native request context for vhost and route certificate access policy,
+  wire Geo country/ASN context into native request context for vhost and route
+  Geo access policy, move managed local ACME HTTP-01 challenge serving onto the
+  native path, and either implement upstream TCP Fast Open safely or document it
+  as an explicitly unsupported native blocker. Add live native listener tests
+  for each path and keep cache, PHP-FPM, dynamic discovery, load-balancer state,
+  and upstream HTTP/2 explicitly reported as compatibility blockers until they
+  have native parity tests.
+- `v1.6.30`: build the native upstream HTTP/2 connection-manager parity layer.
+  This release owns the policy that low-level `h2` protocol crates do not
+  provide by themselves: per-upstream H2 connection pools keyed by backend/TLS/
+  SNI/ALPN/CA/client-cert/socket policy, atomic stream-capacity reservation for
+  `proxy.upstream_h2_max_streams`, a Tokio connection-driver task per pooled
+  connection, request/response translation with safe retry classification,
+  GOAWAY handling, `proxy.upstream_h2_ping_interval_secs` keepalive and timeout
+  handling, backpressure when all streams are at capacity, separate connect/TLS/
+  H2-handshake/request-upload/response-header/response-body/total-response/
+  idle timeout accounting, and passive-health classification that never lets
+  downstream disconnects or client-side throttling poison backend health. Add
+  real H2 upstream tests for concurrent streams, stream-capacity limits,
+  GOAWAY, ping timeout, retry-before-response, no retry after partial response,
+  TLS ALPN, load-balanced H2 upstreams, slow-response timeout, and downstream
+  disconnect behavior.
 - `v1.6.31`: move cache and PHP-FPM rich proxy integrations onto native
   adapters. Cache work must cover lookup/fill/stale, Vary/Range/conditional
   semantics, peer-fill guardrails, and purge visibility. PHP-FPM work must
@@ -2797,9 +2811,9 @@ available for the stabilization/security-only follow-up.
   must close the remaining proxy gates that need runtime/load-balancer state:
   dynamic discovery, health-aware selection, persistence, priority groups,
   locality, backup/drain/disabled policy, max-in-flight, aliases/tags, static
-  weight parity, upstream PROXY protocol, websocket upgrade, upstream HTTP/2,
-  native TLS listener selection, native service supervision, admin/metrics/
-  stream/UDP service registration, and remaining Pingora HTTP/error/cache
+  weight parity, upstream PROXY protocol, websocket upgrade, native TLS
+  listener selection, native service supervision, admin/metrics/stream/UDP
+  service registration, and remaining Pingora HTTP/error/cache
   boundary adapters. Add a Fluxheim-owned nginx/Ketama-compatible consistent
   hash selection mode for operators migrating from nginx or Pingora Ketama
   behavior. Keep the existing rendezvous consistent-hash and bounded-load
