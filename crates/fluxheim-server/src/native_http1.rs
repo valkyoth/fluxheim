@@ -656,8 +656,7 @@ fn openssl_certificate_organization(certificate: &openssl::x509::X509) -> Option
         .subject_name()
         .entries_by_nid(openssl::nid::Nid::ORGANIZATIONNAME)
         .next()
-        .and_then(|entry| entry.data().as_utf8().ok())
-        .map(|value| value.to_string())
+        .and_then(|entry| entry.data().to_string().ok())
 }
 
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
