@@ -1178,6 +1178,39 @@ fn native_proxy_config_rejects_unsupported_proxy_policy_layers() {
 }
 
 #[test]
+fn native_proxy_config_keeps_upstream_http2_as_explicit_blocker() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        ..Default::default()
+    };
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamHttp2)
+    );
+
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_h2_max_streams: Some(64),
+        ..Default::default()
+    };
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy)
+    );
+
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_h2_ping_interval_secs: Some(30),
+        ..Default::default()
+    };
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy)
+    );
+}
+
+#[test]
 fn native_proxy_config_rejects_unsupported_transport_and_accepts_downstream_timeout() {
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),

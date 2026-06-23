@@ -35,6 +35,28 @@ fn server_plan_collects_native_http1_proxy_candidates() {
 }
 
 #[test]
+fn server_plan_keeps_upstream_http2_as_native_blocker() {
+    let mut config = Config::default();
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
+    config.proxy.upstream_http_version = fluxheim_config::UpstreamHttpVersion::Http2;
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::UpstreamHttp2)
+    );
+
+    config.proxy.upstream_http_version = fluxheim_config::UpstreamHttpVersion::Http1;
+    config.proxy.upstream_h2_max_streams = Some(64);
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::UpstreamTransportPolicy)
+    );
+}
+
+#[test]
 fn server_plan_collects_vhost_and_route_native_http1_proxy_candidates() {
     let config = Config {
         vhosts: vec![VhostConfig {

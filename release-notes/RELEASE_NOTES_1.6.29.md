@@ -173,6 +173,9 @@ the native HTTP/1 proxy path.
 - Native proxy tests now prove a slow request body times out before any
   upstream connection is attempted when `proxy.downstream_read_timeout_secs`
   is selected.
+- Native proxy and cutover-plan tests now prove upstream HTTP/2 and H2 tuning
+  knobs remain explicit native blockers for the dedicated 1.6.30 upstream H2
+  connection-manager slice.
 - Native route tests now prove gRPC policy rejects non-gRPC requests, rejects
   duplicate `Content-Type`, emits gRPC status metadata on local rejections, and
   forwards valid case-insensitive `application/grpc*` requests.

@@ -75,6 +75,9 @@ behavior when the change improves security or project direction.
   `auth-request` server feature is compiled, including trusted context header
   synthesis, bounded blocking subrequests, response-header allowlisting, and
   deny-before-forwarding behavior.
+- Add native proxy and cutover-plan tests proving upstream HTTP/2 and H2 tuning
+  knobs remain explicit native blockers for the dedicated 1.6.30 upstream H2
+  connection-manager slice.
 - Relax native HTTP/1 cutover inventory checks so root/vhost compression is
   native-ready when a compression feature is compiled, while still failing
   closed without gzip/brotli/zstd support.
