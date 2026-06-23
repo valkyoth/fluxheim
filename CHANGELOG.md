@@ -7,7 +7,7 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.6.29 - 2026-06-21
+## 1.6.29 - 2026-06-23
 
 ### Changed
 

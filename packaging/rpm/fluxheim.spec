@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.28
+Version:        1.6.29
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,18 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue Jun 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.29-1
+- Move inherited compression, header-policy behavior, forwarded-header
+  ownership, access policy, concurrency, rate limiting, gRPC validation,
+  ACME HTTP-01 local challenge serving, auth-request, and safe-method traffic
+  mirroring onto the native HTTP/1 proxy path.
+- Add native downstream request/response timeout policy and native upstream
+  TCP socket option parity for receive buffers, DSCP, keepalive, and supported
+  TCP user-timeout.
+- Harden trusted forwarded-chain parsing, native rate-limit eviction, native
+  ACME token loading, mirror recursion markers, and auth-request response
+  handling during the Pingora-exit migration.
+
 * Sun Jun 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.28-1
 - Add native route-level response compression for gzip, Brotli, and zstd.
 - Honor Accept-Encoding q-values when selecting native route compression
