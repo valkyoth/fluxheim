@@ -8,7 +8,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, Uri};
 use socket2::{SockRef, TcpKeepalive};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream};
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant as TokioInstant, timeout, timeout_at};
 use zeroize::Zeroizing;
 
@@ -494,18 +494,7 @@ impl NativeHttp1Upstream {
                 }
             }),
         )?;
-        let h2_stream_permit = timeout(
-            self.read_timeout,
-            self.http2_pool.stream_slots.clone().acquire_owned(),
-        )
-        .await
-        .map_err(|_| {
-            NativeHttp1Error::Io(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "native HTTP/2 stream slot timeout: all upstream H2 capacity in use",
-            ))
-        })?
-        .map_err(|_| std::io::Error::other("native HTTP/2 stream pool closed"))?;
+        let mut h2_stream_permit = Some(self.acquire_http2_stream_permit().await?);
         let (client, fresh_connection) = self.http2_client().await?;
         let retry_allowed = native_http1_retry_method_allowed(request.method.as_str());
         let request_policy = self.http2_request_policy(fresh_connection);
@@ -514,12 +503,14 @@ impl NativeHttp1Upstream {
             match send_native_http2_upstream_request(client, request_policy, request).await {
                 Ok(response) => response,
                 Err(error) if native_http2_error_retry_safe(&error) => {
+                    drop(h2_stream_permit.take());
                     self.invalidate_http2_connection().await;
                     log::debug!(
                         target: "fluxheim::native_http2",
                         "native HTTP/2 upstream request failed before safe retry: {error}"
                     );
                     let (client, fresh_connection) = self.http2_client().await?;
+                    h2_stream_permit = Some(self.acquire_http2_stream_permit().await?);
                     let request_policy = self.http2_request_policy(fresh_connection);
                     send_native_http2_upstream_request(client, request_policy, retry_request)
                         .await
@@ -548,6 +539,21 @@ impl NativeHttp1Upstream {
         response
     }
 
+    async fn acquire_http2_stream_permit(&self) -> Result<OwnedSemaphorePermit, NativeHttp1Error> {
+        timeout(
+            self.read_timeout,
+            self.http2_pool.stream_slots.clone().acquire_owned(),
+        )
+        .await
+        .map_err(|_| {
+            NativeHttp1Error::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "native HTTP/2 stream slot timeout: all upstream H2 capacity in use",
+            ))
+        })?
+        .map_err(|_| std::io::Error::other("native HTTP/2 stream pool closed").into())
+    }
+
     async fn send_http1_and_http2(
         &self,
         request: &NativeHttp1Request,
@@ -564,20 +570,32 @@ impl NativeHttp1Upstream {
         stream: NativeHttp1Stream,
         request: &NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
-        let request = native_http2_upstream_request(request, &self.authority, "https")?;
-        let (client, driver) = native_http2_upstream_client_on_io_with_keepalive(
-            stream,
-            self.http2_policy,
-            self.http2_keepalive_interval,
-        )
-        .await
-        .map_err(native_http2_error)?;
-        let result = send_native_http2_upstream_request(client, self.http2_policy, request)
+        #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
+        {
+            drop(stream);
+            let _ = request;
+            return Err(NativeHttp1Error::Io(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "native HTTP/2 on negotiated upstream stream requires a TLS backend",
+            )));
+        }
+        #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+        {
+            let request = native_http2_upstream_request(request, &self.authority, "https")?;
+            let (client, driver) = native_http2_upstream_client_on_io_with_keepalive(
+                stream,
+                self.http2_policy,
+                self.http2_keepalive_interval,
+            )
             .await
-            .map(native_http2_response_to_http1)
-            .map_err(native_http2_error);
-        driver.abort_and_join().await;
-        result?
+            .map_err(native_http2_error)?;
+            let result = send_native_http2_upstream_request(client, self.http2_policy, request)
+                .await
+                .map(native_http2_response_to_http1)
+                .map_err(native_http2_error);
+            driver.abort_and_join().await;
+            result?
+        }
     }
 
     fn http2_request_policy(&self, fresh_connection: bool) -> DownstreamHttp2Policy {
@@ -1101,10 +1119,7 @@ fn native_http2_response_to_http1(
     let reason = status.canonical_reason().unwrap_or("");
     let mut native = NativeHttp1Response::new(status.as_u16(), reason, response.body().to_vec());
     for (name, value) in response.headers() {
-        if name == http::header::CONTENT_LENGTH
-            || name == http::header::CONNECTION
-            || name == http::header::DATE
-        {
+        if native_http2_response_header_proxy_owned_or_hop_by_hop(name) {
             continue;
         }
         let value = value
@@ -1113,6 +1128,18 @@ fn native_http2_response_to_http1(
         native = native.with_header(name.as_str(), value);
     }
     Ok(native)
+}
+
+fn native_http2_response_header_proxy_owned_or_hop_by_hop(name: &HeaderName) -> bool {
+    name == http::header::CONTENT_LENGTH
+        || name == http::header::CONNECTION
+        || name == http::header::DATE
+        || name == http::header::TRANSFER_ENCODING
+        || name == http::header::UPGRADE
+        || matches!(
+            name.as_str(),
+            "keep-alive" | "proxy-connection" | "te" | "trailer"
+        )
 }
 
 fn native_http2_error(error: NativeHttp2StackError) -> NativeHttp1Error {
@@ -1215,4 +1242,48 @@ fn upstream_hop_by_hop_header(name: &str, connection_tokens: &[String]) -> bool 
 
 fn timeout_error(message: &'static str) -> NativeHttp1Error {
     NativeHttp1Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::native_http2_response_to_http1;
+    use crate::NativeHttp2UpstreamResponse;
+
+    #[test]
+    fn h2_response_conversion_strips_hop_by_hop_headers() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::CONTENT_LENGTH, "2".parse().unwrap());
+        headers.insert(http::header::CONNECTION, "close".parse().unwrap());
+        headers.insert(
+            http::header::DATE,
+            "Tue, 23 Jun 2026 00:00:00 GMT".parse().unwrap(),
+        );
+        headers.insert(http::header::TRANSFER_ENCODING, "chunked".parse().unwrap());
+        headers.insert(http::header::UPGRADE, "websocket".parse().unwrap());
+        headers.insert("keep-alive", "timeout=5".parse().unwrap());
+        headers.insert("proxy-connection", "keep-alive".parse().unwrap());
+        headers.insert("te", "trailers".parse().unwrap());
+        headers.insert("trailer", "x-later".parse().unwrap());
+        headers.insert("x-origin", "h2".parse().unwrap());
+
+        let response = NativeHttp2UpstreamResponse::for_test(http::StatusCode::OK, headers, "ok");
+        let response = native_http2_response_to_http1(response).unwrap();
+        let header_names: Vec<_> = response
+            .headers()
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+
+        assert_eq!(response.body(), b"ok");
+        assert!(header_names.contains(&"x-origin"));
+        assert!(!header_names.contains(&"content-length"));
+        assert!(!header_names.contains(&"connection"));
+        assert!(!header_names.contains(&"date"));
+        assert!(!header_names.contains(&"transfer-encoding"));
+        assert!(!header_names.contains(&"upgrade"));
+        assert!(!header_names.contains(&"keep-alive"));
+        assert!(!header_names.contains(&"proxy-connection"));
+        assert!(!header_names.contains(&"te"));
+        assert!(!header_names.contains(&"trailer"));
+    }
 }

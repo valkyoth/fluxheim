@@ -73,7 +73,7 @@ fn server_plan_accepts_plain_upstream_http2_candidate() {
     #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::UpstreamTls)
+        Some(NativeHttp1ProxyConfigError::UpstreamHttp2)
     );
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
     assert_eq!(

@@ -78,6 +78,16 @@ pub struct NativeHttp2UpstreamResponse {
 }
 
 impl NativeHttp2UpstreamResponse {
+    #[cfg(test)]
+    pub(crate) fn for_test(status: StatusCode, headers: HeaderMap, body: impl AsRef<[u8]>) -> Self {
+        Self {
+            status,
+            headers,
+            body: Zeroizing::new(body.as_ref().to_vec()),
+            trailers: None,
+        }
+    }
+
     pub fn status(&self) -> StatusCode {
         self.status
     }

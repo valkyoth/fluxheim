@@ -89,6 +89,16 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native diagnostics now distinguish supported upstream H2 modes from
   unsupported modes such as plaintext `http1-and-http2`, which has no ALPN
   negotiation point.
+- Native H2-to-HTTP/1 response conversion now strips hop-by-hop and
+  proxy-owned headers such as `transfer-encoding`, `upgrade`, `keep-alive`,
+  `proxy-connection`, `te`, and `trailer`, in addition to `content-length`,
+  `connection`, and `date`.
+- Native upstream H2 retry handling now releases the stream-capacity permit
+  before rebuilding a failed pooled H2 connection, then reacquires capacity
+  immediately before sending the retry stream.
+- Non-TLS native builds now classify `http1-and-http2` upstream fallback as an
+  explicit unsupported upstream-H2 mode instead of hiding it behind the broader
+  TLS-disabled diagnostic.
 
 ## Compatibility Notes
 

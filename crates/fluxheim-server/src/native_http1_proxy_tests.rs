@@ -1743,7 +1743,7 @@ fn native_proxy_config_keeps_unsupported_upstream_http2_modes_as_explicit_blocke
     #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
     assert_eq!(
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
-        Err(NativeHttp1ProxyConfigError::UpstreamTls)
+        Err(NativeHttp1ProxyConfigError::UpstreamHttp2)
     );
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
     assert!(NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()).is_ok());

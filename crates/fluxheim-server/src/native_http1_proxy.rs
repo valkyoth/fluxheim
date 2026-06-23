@@ -356,6 +356,10 @@ impl NativeHttp1Proxy {
             return Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy);
         }
         #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
+        if proxy.upstream_http_version == fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 {
+            return Err(NativeHttp1ProxyConfigError::UpstreamHttp2);
+        }
+        #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
         if proxy.upstream_tls {
             return Err(NativeHttp1ProxyConfigError::UpstreamTls);
         }
