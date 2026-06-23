@@ -26,6 +26,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Additional native proxy tests prove H2 upstream pools reconnect after an
   origin closes a pooled H2 connection and round-robin across multiple static
   H2 upstreams.
+- Native proxy live tests now also prove weighted static upstream selection
+  preserves the configured slot order while forwarding every selected upstream
+  request over HTTP/2.
 
 ## Security Notes
 

@@ -765,6 +765,46 @@ async fn native_proxy_round_robins_successful_http2_static_upstreams() {
     assert_eq!(second_connections.load(Ordering::Acquire), 1);
 }
 
+#[tokio::test]
+async fn native_proxy_weighted_round_robins_successful_http2_static_upstreams() {
+    let (first, first_connections) = h2_upstream_with_body("h2-weight-one\n", 2).await;
+    let (second, second_connections) = h2_upstream_with_body("h2-weight-two\n", 1).await;
+    let proxy_config = fluxheim_config::ProxyConfig {
+        upstreams: vec![first.to_string(), second.to_string()],
+        upstream_weights: vec![2, 1],
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_h2_max_streams: Some(4),
+        read_timeout_secs: Some(5),
+        send_timeout_secs: Some(5),
+        ..Default::default()
+    };
+    let proxy =
+        NativeHttp1Proxy::from_proxy_config(&proxy_config, DownstreamHttp1Policy::default())
+            .unwrap()
+            .unwrap();
+    assert_eq!(proxy.upstream_slots(), &[0, 0, 1]);
+    assert!(
+        proxy
+            .upstreams()
+            .iter()
+            .all(NativeHttp1Upstream::uses_http2)
+    );
+    let proxy = proxy_listener_for(proxy).await;
+
+    let first_response = downstream_get(proxy, "/h2-origin").await;
+    let second_response = downstream_get(proxy, "/h2-origin").await;
+    let third_response = downstream_get(proxy, "/h2-origin").await;
+
+    assert!(first_response.contains("x-origin-proto: h2\r\n"));
+    assert!(first_response.ends_with("h2-weight-one\n"));
+    assert!(second_response.contains("x-origin-proto: h2\r\n"));
+    assert!(second_response.ends_with("h2-weight-one\n"));
+    assert!(third_response.contains("x-origin-proto: h2\r\n"));
+    assert!(third_response.ends_with("h2-weight-two\n"));
+    assert_eq!(first_connections.load(Ordering::Acquire), 1);
+    assert_eq!(second_connections.load(Ordering::Acquire), 1);
+}
+
 #[test]
 fn native_proxy_config_accepts_plain_http2_upstream() {
     let proxy = fluxheim_config::ProxyConfig {
