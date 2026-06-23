@@ -2795,11 +2795,13 @@ available for the stabilization/security-only follow-up.
   pooled handles on h2 errors, and retry safe methods once after a pre-response
   pooled-handle failure. Add live proxy tests proving downstream HTTP/1 requests
   forward to in-process plaintext and TLS/ALPN H2 origins, reuse one upstream H2
-  connection, emit configured H2 keepalive pings, and negotiate TLS
-  `http1-and-http2` fallback through ALPN. Keep plaintext `http1-and-http2`,
-  GOAWAY-specific policy, and full load-balanced H2 transport parity as
-  explicit native blockers until the final transport cutover has targeted tests
-  for them.
+  connection, emit configured H2 keepalive pings, reconnect after upstream
+  GOAWAY, preserve static ordered and weighted upstream selection while using
+  H2 transport, and negotiate TLS `http1-and-http2` fallback through ALPN. Keep
+  plaintext `http1-and-http2` as an explicit compatibility-runtime exception
+  because cleartext upstreams have no ALPN negotiation point. Keep advanced
+  health-aware/dynamic load-balancer state on the `v1.6.32` native
+  load-balancer cutover instead of mixing it into this upstream transport slice.
 - `v1.6.31`: move cache and PHP-FPM rich proxy integrations onto native
   adapters. Cache work must cover lookup/fill/stale, Vary/Range/conditional
   semantics, peer-fill guardrails, and purge visibility. PHP-FPM work must
