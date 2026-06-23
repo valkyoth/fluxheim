@@ -121,6 +121,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - H2 stream-capacity closure is no longer classified as a transport-level
   broken pipe, so explicit h2c mixed-mode fallback cannot downgrade and replay
   a request after an upstream H2 stream has already been opened.
+- The h2c `HTTP2-Settings` header now uses the infallible fixed-input encoder
+  added by `base64-ng` 1.2.2, removing the previous local dead error branch
+  while keeping Fluxheim on the hardened base64-ng dependency.
 - The h2c Upgrade response-head reader now checks only the trailing terminator
   bytes while reading one byte at a time, preserving post-upgrade H2 frames
   without an O(n²) scan.

@@ -873,7 +873,7 @@ impl NativeHttp1Upstream {
         &self,
         mut stream: NativeHttp1Stream,
     ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
-        let settings = h2c_upgrade_settings_header(self.http2_policy)?;
+        let settings = h2c_upgrade_settings_header(self.http2_policy);
         let request = format!(
             "OPTIONS * HTTP/1.1\r\n\
              Host: {}\r\n\
@@ -963,18 +963,12 @@ fn validate_h2c_upgrade_response(head: &[u8]) -> Result<(), NativeHttp1Error> {
     Ok(())
 }
 
-fn h2c_upgrade_settings_header(policy: DownstreamHttp2Policy) -> Result<String, NativeHttp1Error> {
+fn h2c_upgrade_settings_header(policy: DownstreamHttp2Policy) -> String {
     let mut settings = Vec::with_capacity(18);
     push_h2_setting(&mut settings, 0x4, policy.initial_window_size());
     push_h2_setting(&mut settings, 0x5, policy.max_frame_size());
     push_h2_setting(&mut settings, 0x6, policy.max_header_list_size());
-    base64_ng::URL_SAFE_NO_PAD
-        .encode_string(&settings)
-        .map_err(|error| {
-            NativeHttp1Error::Io(std::io::Error::other(format!(
-                "native h2c settings encoding failed: {error}"
-            )))
-        })
+    base64_ng::URL_SAFE_NO_PAD.encode_string_infallible(&settings)
 }
 
 fn push_h2_setting(settings: &mut Vec<u8>, id: u16, value: u32) {
@@ -1445,9 +1439,25 @@ fn timeout_error(message: &'static str) -> NativeHttp1Error {
 #[cfg(test)]
 mod tests {
     use super::{
-        h2c_upgrade_error_can_fallback, native_http2_error, native_http2_response_to_http1,
+        h2c_upgrade_error_can_fallback, h2c_upgrade_settings_header, native_http2_error,
+        native_http2_response_to_http1,
     };
-    use crate::{NativeHttp1Error, NativeHttp2StackError, NativeHttp2UpstreamResponse};
+    use crate::{
+        DownstreamHttp2Policy, NativeHttp1Error, NativeHttp2StackError, NativeHttp2UpstreamResponse,
+    };
+
+    #[test]
+    fn h2c_settings_header_uses_url_safe_unpadded_base64() {
+        let settings = h2c_upgrade_settings_header(DownstreamHttp2Policy::default());
+
+        assert!(!settings.is_empty());
+        assert!(!settings.contains('='));
+        assert!(
+            settings
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        );
+    }
 
     #[test]
     fn response_capacity_closed_does_not_trigger_h2c_fallback() {
