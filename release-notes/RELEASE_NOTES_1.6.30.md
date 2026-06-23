@@ -30,7 +30,7 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native upstream H2 handshakes are now bounded by the selected H2 policy
   timeout so an origin that accepts TCP and then stalls the HTTP/2 preface cannot
   freeze upstream setup indefinitely.
-- Native upstream H2 stream-slot waits are now bounded by the connect timeout so
+- Native upstream H2 stream-slot waits are now bounded by the read timeout so
   later downstream requests cannot wait indefinitely when all upstream H2 stream
   capacity is occupied by slow responses.
 - Native upstream H2 requests and responses use the existing bounded H2 client
@@ -45,6 +45,19 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native upstream H2 pool creation no longer holds the pool mutex across TCP
   connect and H2 handshake work, avoiding serialized cold-start failures when an
   origin is unavailable.
+- Native upstream H2 pool creation is serialized by a dedicated setup lock, so a
+  cold pool or post-invalidation retry cannot open one TCP/H2 connection per
+  waiting stream slot.
+- `proxy.read_timeout_secs` now also bounds native H2 request readiness and
+  response-header waits, not only response-body reads.
+- `proxy.upstream_total_connection_timeout_secs` now caps native H2 setup plus
+  the first stream-readiness/response-header phase on a newly initialized H2
+  connection.
+- Stream-scoped H2 failures no longer invalidate the whole H2 pool unless the
+  h2 error reports a GOAWAY/connection-level condition.
+- H2-only knobs on HTTP/1 upstream configs are rejected instead of silently
+  ignored, and H1/H2 upstream request writers now share the same predicate for
+  Fluxheim-owned header stripping.
 - Native diagnostics now distinguish supported plaintext upstream H2 from
   unsupported H2 modes such as TLS ALPN negotiation, `http1-and-http2` fallback,
   and upstream H2 keepalive pings.

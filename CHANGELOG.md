@@ -33,7 +33,7 @@ behavior when the change improves security or project direction.
 
 - Bound native upstream H2 handshakes with the selected H2 policy timeout so a
   TCP-accepted origin cannot stall the upstream setup indefinitely.
-- Bound native upstream H2 stream-slot waits with the connect timeout so a slow
+- Bound native upstream H2 stream-slot waits with the read timeout so a slow
   origin cannot park later downstream requests indefinitely behind exhausted H2
   stream capacity.
 - Reuse the native H2 client-side limits for upstream requests and responses,
@@ -51,6 +51,20 @@ behavior when the change improves security or project direction.
 - Avoid holding the native upstream H2 pool mutex across TCP connect and H2
   handshake work, preventing cold-start failures from serializing all waiting
   requests behind one lock.
+- Serialize native upstream H2 pool creation with a dedicated setup lock,
+  preventing cold-pool or post-invalidation reconnect storms without holding the
+  connection map lock across network I/O.
+- Map `proxy.read_timeout_secs` to native H2 handler phases, covering request
+  readiness and response-header waits in addition to response-body reads.
+- Apply `proxy.upstream_total_connection_timeout_secs` to native H2 setup and
+  the first stream-readiness/response-header phase on a freshly initialized H2
+  connection.
+- Keep stream-scoped H2 errors from invalidating the whole H2 pool unless the h2
+  error is a GOAWAY/connection-level condition.
+- Reject H2-only knobs on HTTP/1 upstream configs instead of silently ignoring
+  them.
+- Share one Fluxheim-owned upstream-header stripping predicate between the
+  native H1 and H2 upstream request writers.
 
 ## 1.6.29 - 2026-06-23
 

@@ -80,8 +80,6 @@ pub async fn send_native_http2_upstream_on_io<T>(
 where
     T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    validate_outbound_request(&request, policy)?;
-
     let (client, connection_driver) = native_http2_upstream_client_on_io(io, policy).await?;
     let result = send_native_http2_upstream_request(client, policy, request).await;
     // This is a one-request, one-connection helper used by tests and fallback
@@ -127,6 +125,7 @@ pub(crate) async fn send_native_http2_upstream_request(
     policy: DownstreamHttp2Policy,
     request: NativeHttp2UpstreamRequest,
 ) -> Result<NativeHttp2UpstreamResponse, NativeHttp2StackError> {
+    validate_outbound_request(&request, policy)?;
     let mut client = tokio::time::timeout(policy.handler_timeout(), client.ready())
         .await
         .map_err(|_| NativeHttp2StackError::RequestReadyTimeout)?

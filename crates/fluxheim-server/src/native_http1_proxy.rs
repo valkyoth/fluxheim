@@ -365,17 +365,17 @@ impl NativeHttp1Proxy {
             return Err(NativeHttp1ProxyConfigError::WebSocket);
         }
         match proxy.upstream_http_version {
-            fluxheim_config::UpstreamHttpVersion::Http1 => {}
-            fluxheim_config::UpstreamHttpVersion::Http2 if !proxy.upstream_tls => {}
+            fluxheim_config::UpstreamHttpVersion::Http1
+                if proxy.upstream_h2_max_streams.is_none() => {}
+            fluxheim_config::UpstreamHttpVersion::Http2
+                if !proxy.upstream_tls && proxy.upstream_h2_ping_interval_secs.is_none() => {}
             fluxheim_config::UpstreamHttpVersion::Http2
             | fluxheim_config::UpstreamHttpVersion::Http1AndHttp2 => {
                 return Err(NativeHttp1ProxyConfigError::UpstreamHttp2);
             }
-        }
-        if proxy.upstream_http_version == fluxheim_config::UpstreamHttpVersion::Http2
-            && proxy.upstream_h2_ping_interval_secs.is_some()
-        {
-            return Err(NativeHttp1ProxyConfigError::UpstreamHttp2);
+            fluxheim_config::UpstreamHttpVersion::Http1 => {
+                return Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy);
+            }
         }
         if proxy.upstreams_file.is_some()
             || proxy.upstreams_http_url.is_some()
@@ -1254,7 +1254,10 @@ fn native_http2_policy_from_config(
 ) -> Result<DownstreamHttp2Policy, NativeHttp1ProxyConfigError> {
     let mut policy = DownstreamHttp2Policy::default();
     if let Some(read_timeout_secs) = proxy.read_timeout_secs {
-        policy = policy.with_response_body_timeout(Duration::from_secs(read_timeout_secs));
+        let timeout = Duration::from_secs(read_timeout_secs);
+        policy = policy
+            .with_response_body_timeout(timeout)
+            .with_handler_timeout(timeout);
     }
     if let Some(write_timeout_secs) = proxy.send_timeout_secs {
         policy = policy.with_response_write_lifetime(Duration::from_secs(write_timeout_secs));

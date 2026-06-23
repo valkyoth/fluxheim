@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
+use tokio::time::{Instant as TokioInstant, timeout, timeout_at};
 use zeroize::Zeroizing;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -74,7 +74,8 @@ struct NativeHttp1Pool {
 #[derive(Debug)]
 struct NativeHttp2Pool {
     stream_slots: Arc<Semaphore>,
-    connection: Mutex<Option<NativeHttp2PooledConnection>>,
+    connection: Mutex<Option<Arc<NativeHttp2PooledConnection>>>,
+    setup: Mutex<()>,
 }
 
 struct NativeHttp2PooledConnection {
@@ -144,6 +145,7 @@ impl NativeHttp2Pool {
         Self {
             stream_slots: Arc::new(Semaphore::new(max_concurrent_streams as usize)),
             connection: Mutex::new(None),
+            setup: Mutex::new(()),
         }
     }
 }
@@ -290,6 +292,11 @@ impl NativeHttp1Upstream {
 
     pub const fn uses_http2(&self) -> bool {
         matches!(self.protocol, NativeUpstreamHttpProtocol::Http2)
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn http2_policy(&self) -> DownstreamHttp2Policy {
+        self.http2_policy
     }
 
     pub const fn with_read_timeout(mut self, timeout: Duration) -> Self {
@@ -450,8 +457,8 @@ impl NativeHttp1Upstream {
             }),
         )?;
         validate_outbound_request(&request, self.http2_policy).map_err(native_http2_error)?;
-        let _slot = timeout(
-            self.connect_timeout,
+        let _h2_stream_permit = timeout(
+            self.read_timeout,
             self.http2_pool.stream_slots.clone().acquire_owned(),
         )
         .await
@@ -462,11 +469,12 @@ impl NativeHttp1Upstream {
             ))
         })?
         .map_err(|_| std::io::Error::other("native HTTP/2 stream pool closed"))?;
-        let client = self.http2_client().await?;
+        let (client, fresh_connection) = self.http2_client().await?;
         let retry_allowed = native_http1_retry_method_allowed(request.method.as_str());
+        let request_policy = self.http2_request_policy(fresh_connection);
         let response = if retry_allowed {
             let retry_request = request.clone();
-            match send_native_http2_upstream_request(client, self.http2_policy, request).await {
+            match send_native_http2_upstream_request(client, request_policy, request).await {
                 Ok(response) => response,
                 Err(error) if native_http2_error_retry_safe(&error) => {
                     self.invalidate_http2_connection().await;
@@ -474,21 +482,26 @@ impl NativeHttp1Upstream {
                         target: "fluxheim::native_http2",
                         "native HTTP/2 upstream request failed before safe retry: {error}"
                     );
-                    let client = self.http2_client().await?;
-                    send_native_http2_upstream_request(client, self.http2_policy, retry_request)
+                    let (client, fresh_connection) = self.http2_client().await?;
+                    let request_policy = self.http2_request_policy(fresh_connection);
+                    send_native_http2_upstream_request(client, request_policy, retry_request)
                         .await
                         .map_err(native_http2_error)?
                 }
                 Err(error) => {
-                    self.invalidate_http2_connection().await;
+                    if native_http2_error_is_connection_fatal(&error) {
+                        self.invalidate_http2_connection().await;
+                    }
                     return Err(native_http2_error(error));
                 }
             }
         } else {
-            match send_native_http2_upstream_request(client, self.http2_policy, request).await {
+            match send_native_http2_upstream_request(client, request_policy, request).await {
                 Ok(response) => response,
                 Err(error) => {
-                    self.invalidate_http2_connection().await;
+                    if native_http2_error_is_connection_fatal(&error) {
+                        self.invalidate_http2_connection().await;
+                    }
                     return Err(native_http2_error(error));
                 }
             }
@@ -496,27 +509,72 @@ impl NativeHttp1Upstream {
         native_http2_response_to_http1(response)
     }
 
-    async fn http2_client(&self) -> Result<SendRequest<Bytes>, NativeHttp1Error> {
-        {
-            let connection = self.http2_pool.connection.lock().await;
-            if let Some(pooled) = connection.as_ref() {
-                return Ok(pooled.client.clone());
-            }
+    fn http2_request_policy(&self, fresh_connection: bool) -> DownstreamHttp2Policy {
+        if fresh_connection && let Some(timeout) = self.total_connection_timeout {
+            return self
+                .http2_policy
+                .with_handler_timeout(self.http2_policy.handler_timeout().min(timeout));
         }
-        let stream = self.connect_stream().await?;
+        self.http2_policy
+    }
+
+    async fn http2_client(&self) -> Result<(SendRequest<Bytes>, bool), NativeHttp1Error> {
+        if let Some(pooled) = self.http2_pool.connection.lock().await.as_ref() {
+            return Ok((pooled.client.clone(), false));
+        }
+        let setup = async {
+            let _setup = self.http2_pool.setup.lock().await;
+            if let Some(pooled) = self.http2_pool.connection.lock().await.as_ref() {
+                return Ok((pooled.client.clone(), false));
+            }
+            let pooled = Arc::new(self.connect_http2_pooled_connection().await?);
+            let client = pooled.client.clone();
+            *self.http2_pool.connection.lock().await = Some(pooled);
+            Ok((client, true))
+        };
+        if let Some(timeout_duration) = self.total_connection_timeout {
+            timeout(timeout_duration, setup)
+                .await
+                .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
+        } else {
+            setup.await
+        }
+    }
+
+    async fn connect_http2_pooled_connection(
+        &self,
+    ) -> Result<NativeHttp2PooledConnection, NativeHttp1Error> {
+        if let Some(total_timeout) = self.total_connection_timeout {
+            let deadline = TokioInstant::now() + total_timeout;
+            let stream = timeout_at(deadline, self.connect_stream_inner())
+                .await
+                .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))??;
+            let remaining = deadline
+                .checked_duration_since(TokioInstant::now())
+                .ok_or_else(|| timeout_error("native HTTP/2 upstream total connection timeout"))?;
+            let policy = self
+                .http2_policy
+                .with_handler_timeout(self.http2_policy.handler_timeout().min(remaining));
+            let (client, driver) =
+                timeout_at(deadline, native_http2_upstream_client_on_io(stream, policy))
+                    .await
+                    .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
+                    .map_err(native_http2_error)?;
+            let client = timeout_at(deadline, client.ready())
+                .await
+                .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))?
+                .map_err(|error| native_http2_error(NativeHttp2StackError::RequestReady(error)))?;
+            return Ok(NativeHttp2PooledConnection { client, driver });
+        }
+        let stream = self.connect_stream_inner().await?;
         let (client, driver) = native_http2_upstream_client_on_io(stream, self.http2_policy)
             .await
             .map_err(native_http2_error)?;
-        let mut connection = self.http2_pool.connection.lock().await;
-        if let Some(pooled) = connection.as_ref() {
-            driver.abort();
-            return Ok(pooled.client.clone());
-        }
-        *connection = Some(NativeHttp2PooledConnection {
-            client: client.clone(),
-            driver,
-        });
-        Ok(client)
+        let client = timeout(self.http2_policy.handler_timeout(), client.ready())
+            .await
+            .map_err(|_| native_http2_error(NativeHttp2StackError::RequestReadyTimeout))?
+            .map_err(|error| native_http2_error(NativeHttp2StackError::RequestReady(error)))?;
+        Ok(NativeHttp2PooledConnection { client, driver })
     }
 
     async fn invalidate_http2_connection(&self) {
@@ -827,12 +885,7 @@ where
     }
     let connection_tokens = connection_tokens(request);
     for (name, value) in &request.headers {
-        if upstream_hop_by_hop_header(name, &connection_tokens)
-            || name.eq_ignore_ascii_case("host")
-            || name.eq_ignore_ascii_case("content-length")
-            || name.eq_ignore_ascii_case("transfer-encoding")
-            || name.eq_ignore_ascii_case("via")
-        {
+        if upstream_hop_by_hop_header(name, &connection_tokens) || upstream_owned_header(name) {
             continue;
         }
         if !valid_upstream_request_header(name, value) {
@@ -880,12 +933,7 @@ fn native_http2_upstream_request(
     let mut headers = HeaderMap::new();
     let connection_tokens = connection_tokens(request);
     for (name, value) in &request.headers {
-        if upstream_hop_by_hop_header(name, &connection_tokens)
-            || name.eq_ignore_ascii_case("host")
-            || name.eq_ignore_ascii_case("content-length")
-            || name.eq_ignore_ascii_case("transfer-encoding")
-            || name.eq_ignore_ascii_case("via")
-        {
+        if upstream_hop_by_hop_header(name, &connection_tokens) || upstream_owned_header(name) {
             continue;
         }
         if !valid_upstream_request_header(name, value) {
@@ -976,6 +1024,23 @@ fn native_http2_error_retry_safe(error: &NativeHttp2StackError) -> bool {
             | NativeHttp2StackError::RequestReady(_)
             | NativeHttp2StackError::SendRequest(_)
     )
+}
+
+fn native_http2_error_is_connection_fatal(error: &NativeHttp2StackError) -> bool {
+    match error {
+        NativeHttp2StackError::RequestReadyTimeout
+        | NativeHttp2StackError::RequestReady(_)
+        | NativeHttp2StackError::SendRequest(_) => true,
+        NativeHttp2StackError::Stream(error) => error.is_go_away(),
+        _ => false,
+    }
+}
+
+fn upstream_owned_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("host")
+        || name.eq_ignore_ascii_case("content-length")
+        || name.eq_ignore_ascii_case("transfer-encoding")
+        || name.eq_ignore_ascii_case("via")
 }
 
 fn request_host(request: &NativeHttp1Request) -> Option<&str> {
