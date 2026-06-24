@@ -2,7 +2,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use fluxheim_protocol::{Http1ParseError, http1_request_target};
+use fluxheim_config::UpstreamProxyProtocol;
+use fluxheim_protocol::{
+    Http1ParseError, http1_request_target, proxy_protocol_v1_header, proxy_protocol_v2_header,
+};
 use h2::client::SendRequest;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Uri};
 use socket2::{SockRef, TcpKeepalive};
@@ -63,6 +66,7 @@ pub struct NativeHttp1Upstream {
     http2_keepalive_interval: Option<Duration>,
     max_head_bytes: usize,
     max_body_bytes: usize,
+    proxy_protocol: UpstreamProxyProtocol,
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
     tls: Option<NativeHttp1UpstreamTls>,
     pool: Arc<NativeHttp1Pool>,
@@ -185,6 +189,7 @@ impl std::fmt::Debug for NativeHttp1Upstream {
             .field("http2_keepalive_interval", &self.http2_keepalive_interval)
             .field("max_head_bytes", &self.max_head_bytes)
             .field("max_body_bytes", &self.max_body_bytes)
+            .field("proxy_protocol", &self.proxy_protocol)
             .field("tls", {
                 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
                 {
@@ -222,6 +227,7 @@ impl PartialEq for NativeHttp1Upstream {
             && self.http2_keepalive_interval == other.http2_keepalive_interval
             && self.max_head_bytes == other.max_head_bytes
             && self.max_body_bytes == other.max_body_bytes
+            && self.proxy_protocol == other.proxy_protocol
             && {
                 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
                 {
@@ -258,6 +264,7 @@ impl NativeHttp1Upstream {
             http2_keepalive_interval: None,
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
+            proxy_protocol: UpstreamProxyProtocol::Off,
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
             tls: None,
             pool: Arc::new(NativeHttp1Pool::default()),
@@ -284,6 +291,7 @@ impl NativeHttp1Upstream {
             http2_keepalive_interval: None,
             max_head_bytes: policy.max_head_bytes(),
             max_body_bytes: policy.max_body_bytes(),
+            proxy_protocol: UpstreamProxyProtocol::Off,
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
             tls: None,
             pool: Arc::new(NativeHttp1Pool::default()),
@@ -395,6 +403,16 @@ impl NativeHttp1Upstream {
         self
     }
 
+    pub const fn with_proxy_protocol(mut self, proxy_protocol: UpstreamProxyProtocol) -> Self {
+        self.proxy_protocol = proxy_protocol;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn proxy_protocol(&self) -> UpstreamProxyProtocol {
+        self.proxy_protocol
+    }
+
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
     pub fn with_tls(mut self, tls: NativeHttp1UpstreamTls) -> Self {
         self.tls = Some(tls);
@@ -438,12 +456,12 @@ impl NativeHttp1Upstream {
             }
             NativeUpstreamHttpProtocol::Http1 => {}
         }
-        if self.pool.max_idle == 0 {
-            let stream = self.connect_stream().await?;
+        if self.pool.max_idle == 0 || self.proxy_protocol != UpstreamProxyProtocol::Off {
+            let stream = self.connect_stream(request).await?;
             return self.send_on_stream(stream, request).await;
         }
 
-        let (mut stream, reused) = self.connection().await?;
+        let (mut stream, reused) = self.connection(request).await?;
         let result = self.send_on_pooled_stream(&mut stream, request).await;
         let (response, reusable) = match result {
             Ok(result) => result,
@@ -452,7 +470,7 @@ impl NativeHttp1Upstream {
                     && pooled_connection_error_can_retry(&error)
                     && native_http1_retry_method_allowed(&request.method) =>
             {
-                let fresh = self.connect_stream().await?;
+                let fresh = self.connect_stream(request).await?;
                 return self.send_on_stream(fresh, request).await;
             }
             Err(error) => return Err(error),
@@ -491,6 +509,12 @@ impl NativeHttp1Upstream {
         &self,
         request: &NativeHttp1Request,
     ) -> Result<NativeHttp1Response, NativeHttp1Error> {
+        if self.proxy_protocol != UpstreamProxyProtocol::Off {
+            return Err(NativeHttp1Error::Io(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "native HTTP/2 upstream PROXY protocol is not supported",
+            )));
+        }
         let request = native_http2_upstream_request(
             request,
             &self.authority,
@@ -583,7 +607,7 @@ impl NativeHttp1Upstream {
                 Err(error) => return Err(error),
             }
         }
-        let (stream, negotiated) = self.connect_negotiated_stream().await?;
+        let (stream, negotiated) = self.connect_negotiated_stream(request).await?;
         match negotiated {
             NativeNegotiatedHttpProtocol::Http2 => self.send_http2_on_stream(stream, request).await,
             NativeNegotiatedHttpProtocol::Http1 => self.send_on_stream(stream, request).await,
@@ -660,7 +684,7 @@ impl NativeHttp1Upstream {
     ) -> Result<NativeHttp2PooledConnection, NativeHttp1Error> {
         if let Some(total_timeout) = self.total_connection_timeout {
             let deadline = TokioInstant::now() + total_timeout;
-            let stream = timeout_at(deadline, self.connect_stream_inner())
+            let stream = timeout_at(deadline, self.connect_stream_inner_without_proxy_protocol())
                 .await
                 .map_err(|_| timeout_error("native HTTP/2 upstream total connection timeout"))??;
             let remaining = deadline
@@ -706,7 +730,7 @@ impl NativeHttp1Upstream {
                 .map_err(|error| native_http2_error(NativeHttp2StackError::RequestReady(error)))?;
             return Ok(NativeHttp2PooledConnection { client, driver });
         }
-        let stream = self.connect_stream_inner().await?;
+        let stream = self.connect_stream_inner_without_proxy_protocol().await?;
         let stream = if self.h2c_upgrade && self.cleartext_upstream() {
             self.h2c_upgrade_stream(stream).await?
         } else {
@@ -760,7 +784,10 @@ impl NativeHttp1Upstream {
         .await
     }
 
-    async fn connection(&self) -> Result<(NativeHttp1Stream, bool), NativeHttp1Error> {
+    async fn connection(
+        &self,
+        request: &NativeHttp1Request,
+    ) -> Result<(NativeHttp1Stream, bool), NativeHttp1Error> {
         let now = Instant::now();
         let mut idle = self.pool.idle.lock().await;
         while let Some(connection) = idle.pop() {
@@ -772,7 +799,7 @@ impl NativeHttp1Upstream {
             return Ok((connection.stream, true));
         }
         drop(idle);
-        let stream = self.connect_stream().await?;
+        let stream = self.connect_stream(request).await?;
         Ok((stream, false))
     }
 
@@ -786,30 +813,38 @@ impl NativeHttp1Upstream {
         }
     }
 
-    async fn connect_stream(&self) -> Result<NativeHttp1Stream, NativeHttp1Error> {
+    async fn connect_stream(
+        &self,
+        request: &NativeHttp1Request,
+    ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
         if let Some(timeout_duration) = self.total_connection_timeout {
-            return timeout(timeout_duration, self.connect_stream_inner())
+            return timeout(timeout_duration, self.connect_stream_inner(request))
                 .await
                 .map_err(|_| timeout_error("native HTTP/1 upstream total connection timeout"))?;
         }
-        self.connect_stream_inner().await
+        self.connect_stream_inner(request).await
     }
 
     async fn connect_negotiated_stream(
         &self,
+        request: &NativeHttp1Request,
     ) -> Result<(NativeHttp1Stream, NativeNegotiatedHttpProtocol), NativeHttp1Error> {
         if let Some(timeout_duration) = self.total_connection_timeout {
-            return timeout(timeout_duration, self.connect_negotiated_stream_inner())
-                .await
-                .map_err(|_| timeout_error("native HTTP/1 upstream total connection timeout"))?;
+            return timeout(
+                timeout_duration,
+                self.connect_negotiated_stream_inner(request),
+            )
+            .await
+            .map_err(|_| timeout_error("native HTTP/1 upstream total connection timeout"))?;
         }
-        self.connect_negotiated_stream_inner().await
+        self.connect_negotiated_stream_inner(request).await
     }
 
     async fn connect_negotiated_stream_inner(
         &self,
+        request: &NativeHttp1Request,
     ) -> Result<(NativeHttp1Stream, NativeNegotiatedHttpProtocol), NativeHttp1Error> {
-        let stream = timeout(
+        let mut stream = timeout(
             self.connect_timeout,
             connect_upstream(
                 &self.authority,
@@ -821,6 +856,8 @@ impl NativeHttp1Upstream {
         )
         .await
         .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
+        self.write_proxy_protocol_header(&mut stream, request)
+            .await?;
         #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
         if let Some(tls) = &self.tls {
             return timeout(
@@ -836,8 +873,25 @@ impl NativeHttp1Upstream {
         ))
     }
 
-    async fn connect_stream_inner(&self) -> Result<NativeHttp1Stream, NativeHttp1Error> {
-        let stream = timeout(
+    async fn connect_stream_inner(
+        &self,
+        request: &NativeHttp1Request,
+    ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
+        let mut stream = self.connect_tcp_stream().await?;
+        self.write_proxy_protocol_header(&mut stream, request)
+            .await?;
+        self.finish_connect_stream(stream).await
+    }
+
+    async fn connect_stream_inner_without_proxy_protocol(
+        &self,
+    ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
+        let stream = self.connect_tcp_stream().await?;
+        self.finish_connect_stream(stream).await
+    }
+
+    async fn connect_tcp_stream(&self) -> Result<TcpStream, NativeHttp1Error> {
+        timeout(
             self.connect_timeout,
             connect_upstream(
                 &self.authority,
@@ -848,7 +902,13 @@ impl NativeHttp1Upstream {
             ),
         )
         .await
-        .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))??;
+        .map_err(|_| timeout_error("native HTTP/1 upstream connect timeout"))?
+    }
+
+    async fn finish_connect_stream(
+        &self,
+        stream: TcpStream,
+    ) -> Result<NativeHttp1Stream, NativeHttp1Error> {
         #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
         if let Some(tls) = &self.tls {
             return timeout(self.connect_timeout, tls.connect(stream, &self.authority))
@@ -856,6 +916,31 @@ impl NativeHttp1Upstream {
                 .map_err(|_| timeout_error("native HTTP/1 upstream TLS handshake timeout"))?;
         }
         Ok(Box::new(stream) as NativeHttp1Stream)
+    }
+
+    async fn write_proxy_protocol_header(
+        &self,
+        stream: &mut TcpStream,
+        request: &NativeHttp1Request,
+    ) -> Result<(), NativeHttp1Error> {
+        let header = match self.proxy_protocol {
+            UpstreamProxyProtocol::Off => return Ok(()),
+            UpstreamProxyProtocol::V1 => {
+                proxy_protocol_v1_header(request.effective_client_addr, request.local_addr)
+            }
+            UpstreamProxyProtocol::V2 => {
+                proxy_protocol_v2_header(request.effective_client_addr, request.local_addr)
+            }
+        };
+        timeout(self.write_timeout, stream.write_all(&header))
+            .await
+            .map_err(|_| timeout_error("native upstream PROXY protocol write timeout"))?
+            .map_err(|error| {
+                NativeHttp1Error::Io(std::io::Error::new(
+                    error.kind(),
+                    format!("write native upstream PROXY protocol header: {error}"),
+                ))
+            })
     }
 
     const fn cleartext_upstream(&self) -> bool {

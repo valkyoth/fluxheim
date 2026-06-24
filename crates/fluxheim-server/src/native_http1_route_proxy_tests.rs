@@ -281,6 +281,8 @@ fn route_test_request(path: &str) -> NativeHttp1Request {
     NativeHttp1Request {
         method: "GET".to_owned(),
         peer_addr: None,
+        local_addr: None,
+        effective_client_addr: None,
         downstream_tls: false,
         tls_identity: None,
         geo_context: None,

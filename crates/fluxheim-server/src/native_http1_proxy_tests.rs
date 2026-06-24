@@ -283,6 +283,8 @@ fn native_proxy_test_request() -> NativeHttp1Request {
     NativeHttp1Request {
         method: "GET".to_owned(),
         peer_addr: None,
+        local_addr: None,
+        effective_client_addr: None,
         downstream_tls: false,
         tls_identity: None,
         geo_context: None,
@@ -1414,6 +1416,48 @@ async fn native_proxy_reuses_origin_connection_for_separate_downstream_clients()
 }
 
 #[tokio::test]
+async fn native_proxy_writes_upstream_proxy_protocol_v1_from_listener_context() {
+    let expected_destination_port = Arc::new(AtomicUsize::new(0));
+    let expected_destination_port_for_upstream = Arc::clone(&expected_destination_port);
+    let upstream = upstream(move |request, mut stream| {
+        let expected_destination_port = Arc::clone(&expected_destination_port_for_upstream);
+        async move {
+            let request = String::from_utf8(request).unwrap();
+            let proxy_line = request.lines().next().unwrap_or_default();
+            let fields: Vec<_> = proxy_line.split_whitespace().collect();
+            assert_eq!(fields.len(), 6);
+            assert_eq!(fields[0], "PROXY");
+            assert_eq!(fields[1], "TCP4");
+            assert_eq!(fields[2], "127.0.0.1");
+            assert_eq!(fields[3], "127.0.0.1");
+            assert_ne!(fields[4], "0");
+            assert_eq!(
+                fields[5],
+                expected_destination_port
+                    .load(Ordering::Acquire)
+                    .to_string()
+            );
+            assert!(request.contains("GET /proxy-protocol HTTP/1.1\r\n"));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")
+                .await
+                .unwrap();
+        }
+    })
+    .await;
+    let proxy = NativeHttp1Proxy::new(
+        NativeHttp1Upstream::new(upstream.to_string())
+            .with_proxy_protocol(fluxheim_config::UpstreamProxyProtocol::V1),
+    );
+    let proxy_addr = proxy_listener_for(proxy).await;
+    expected_destination_port.store(proxy_addr.port() as usize, Ordering::Release);
+
+    let response = downstream_get(proxy_addr, "/proxy-protocol").await;
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("ok"));
+}
+
+#[tokio::test]
 async fn native_proxy_maps_upstream_timeout_to_gateway_timeout() {
     let upstream = upstream(|_, stream| async move {
         let _hold_open = stream;
@@ -1537,6 +1581,44 @@ fn native_proxy_config_applies_pool_capacity() {
     .expect("native proxy");
 
     assert_eq!(native.upstream().pool_max_idle(), 16);
+}
+
+#[test]
+fn native_proxy_config_accepts_http1_upstream_proxy_protocol_and_disables_pooling() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_proxy_protocol: fluxheim_config::UpstreamProxyProtocol::V2,
+        ..Default::default()
+    };
+
+    let native = NativeHttp1Proxy::from_proxy_config_with_pool_size(
+        &proxy,
+        DownstreamHttp1Policy::default(),
+        16,
+    )
+    .unwrap()
+    .expect("native proxy");
+
+    assert_eq!(
+        native.upstream().proxy_protocol(),
+        fluxheim_config::UpstreamProxyProtocol::V2
+    );
+    assert_eq!(native.upstream().pool_max_idle(), 0);
+}
+
+#[test]
+fn native_proxy_config_rejects_upstream_proxy_protocol_with_http2() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
+        upstream_proxy_protocol: fluxheim_config::UpstreamProxyProtocol::V1,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
+        Err(NativeHttp1ProxyConfigError::UpstreamProxyProtocol)
+    );
 }
 
 #[test]

@@ -175,7 +175,7 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
                 "native HTTP/1 proxy rejected unsupported upstream HTTP/2 mode",
             ),
             Self::UpstreamProxyProtocol => formatter
-                .write_str("native HTTP/1 proxy does not yet support upstream PROXY protocol"),
+                .write_str("native HTTP/1 proxy only supports upstream PROXY protocol with forced HTTP/1 origins"),
             Self::UpstreamTls => {
                 formatter.write_str("native HTTP/1 proxy does not yet support upstream TLS")
             }
@@ -373,9 +373,6 @@ impl NativeHttp1Proxy {
         if proxy.upstream_tls {
             return Err(NativeHttp1ProxyConfigError::UpstreamTls);
         }
-        if proxy.upstream_proxy_protocol != fluxheim_config::UpstreamProxyProtocol::Off {
-            return Err(NativeHttp1ProxyConfigError::UpstreamProxyProtocol);
-        }
         if proxy.websocket {
             return Err(NativeHttp1ProxyConfigError::WebSocket);
         }
@@ -391,6 +388,11 @@ impl NativeHttp1Proxy {
             fluxheim_config::UpstreamHttpVersion::Http1 => {
                 return Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy);
             }
+        }
+        if proxy.upstream_proxy_protocol != fluxheim_config::UpstreamProxyProtocol::Off
+            && proxy.upstream_http_version != fluxheim_config::UpstreamHttpVersion::Http1
+        {
+            return Err(NativeHttp1ProxyConfigError::UpstreamProxyProtocol);
         }
         if proxy.upstreams_file.is_some()
             || proxy.upstreams_http_url.is_some()
@@ -438,6 +440,7 @@ impl NativeHttp1Proxy {
             if let Some(timeout) = proxy.send_timeout_secs {
                 native_upstream = native_upstream.with_write_timeout(Duration::from_secs(timeout));
             }
+            native_upstream = native_upstream.with_proxy_protocol(proxy.upstream_proxy_protocol);
             if matches!(
                 proxy.upstream_http_version,
                 fluxheim_config::UpstreamHttpVersion::Http2
@@ -474,6 +477,12 @@ impl NativeHttp1Proxy {
                 native_upstream.with_tcp_user_timeout(native_tcp_user_timeout(proxy)?);
             native_upstream = native_upstream
                 .with_pool_idle_timeout(proxy.upstream_idle_timeout_secs.map(Duration::from_secs));
+            let pool_max_idle =
+                if proxy.upstream_proxy_protocol == fluxheim_config::UpstreamProxyProtocol::Off {
+                    pool_max_idle
+                } else {
+                    0
+                };
             native_upstream = native_upstream.with_pool_max_idle(pool_max_idle);
             native_upstreams.push(native_upstream);
         }

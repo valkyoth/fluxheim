@@ -98,6 +98,8 @@ fn native_http1_cache_view_request(
     NativeHttp1Request {
         method: method.to_owned(),
         peer_addr: None,
+        local_addr: None,
+        effective_client_addr: None,
         downstream_tls: false,
         tls_identity: None,
         geo_context: None,

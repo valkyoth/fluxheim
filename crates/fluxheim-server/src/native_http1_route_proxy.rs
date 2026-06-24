@@ -2515,6 +2515,14 @@ impl NativeRouteRequestHeaderPolicy {
                 Some(&trusted_proxy_matcher),
             )
         });
+        if let (Some(peer_addr), Some(client_ip)) = (request.peer_addr, client_ip) {
+            let port = if peer_addr.ip() == client_ip {
+                peer_addr.port()
+            } else {
+                0
+            };
+            request.effective_client_addr = Some(std::net::SocketAddr::new(client_ip, port));
+        }
         match (self.x_forwarded_for, client_ip) {
             (ForwardedClientIpHeaderMode::Off, _) => {
                 remove_request_header(request, "x-forwarded-for")

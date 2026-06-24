@@ -84,6 +84,16 @@ exit work.
 - PHP-FPM keep-alive pool ownership now lives in `fluxheim-php-fpm` behind a
   small metrics callback boundary, so connection reuse, stale idle pruning,
   pool labels, and bounded response collection are owned by the PHP crate.
+- Native HTTP/1 upstreams now support configured PROXY protocol v1/v2 send
+  through `proxy.upstream_proxy_protocol`, using Fluxheim-owned frame builders
+  and writing the header before upstream TLS or HTTP bytes.
+- Native upstream PROXY protocol remains connection-scoped: HTTP/1 origin
+  pooling is disabled for those upstreams, and native HTTP/2 upstream
+  combinations fail closed until multiplexed per-request identity can be
+  represented safely.
+- Native requests now carry both the direct listener peer/local address and the
+  trusted-forwarded effective client address, so upstream PROXY protocol uses
+  the same client identity as native ACL/rate-limit/header policy.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -155,6 +165,12 @@ exit work.
   size accounting, while keeping root PHP compatibility tests green.
 - Added standalone and root compatibility tests proving PHP-FPM keep-alive pool
   labels remain stable after the pool move.
+- Added native upstream-client tests proving PROXY protocol v1 and v2 bytes are
+  written before HTTP request bytes, plus a live native proxy listener test
+  proving listener destination metadata reaches the upstream PROXY line.
+- Added native proxy config tests proving HTTP/1 upstream PROXY protocol is
+  accepted, origin pooling is disabled for it, and HTTP/2 upstream
+  combinations fail closed.
 - Re-ran targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

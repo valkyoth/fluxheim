@@ -27,6 +27,8 @@ const WRITE_CHUNK_BYTES: usize = 8192;
 pub struct NativeHttp1Request {
     pub method: String,
     pub peer_addr: Option<SocketAddr>,
+    pub local_addr: Option<SocketAddr>,
+    pub effective_client_addr: Option<SocketAddr>,
     pub downstream_tls: bool,
     pub tls_identity: Option<NativeHttp1TlsClientIdentity>,
     pub geo_context: Option<NativeHttp1GeoContext>,
@@ -53,6 +55,7 @@ pub struct NativeHttp1GeoContext {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NativeHttp1RequestContext {
+    pub local_addr: Option<SocketAddr>,
     pub downstream_tls: bool,
     pub tls_identity: Option<NativeHttp1TlsClientIdentity>,
     pub geo_context: Option<NativeHttp1GeoContext>,
@@ -426,6 +429,7 @@ where
     F: Future<Output = ()> + Send,
 {
     let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let local_addr = listener.local_addr().ok();
     tokio::pin!(shutdown);
     loop {
         tokio::select! {
@@ -441,7 +445,11 @@ where
                 };
                 let handler = handler.clone();
                 tokio::spawn(async move {
-                    let _ = serve_native_http1_connection(stream, Some(peer_addr), policy, handler).await;
+                    let request_context = NativeHttp1RequestContext {
+                        local_addr,
+                        ..NativeHttp1RequestContext::default()
+                    };
+                    let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, policy, handler).await;
                     drop(permit);
                 });
             }
@@ -463,6 +471,7 @@ where
 {
     let acceptor = TlsAcceptor::from(tls_config);
     let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let local_addr = listener.local_addr().ok();
     tokio::pin!(shutdown);
     loop {
         tokio::select! {
@@ -482,7 +491,8 @@ where
                     let handshake = timeout(policy.tls_handshake_timeout(), acceptor.accept(stream)).await;
                     match handshake {
                         Ok(Ok(stream)) => {
-                            let request_context = native_rustls_request_context(&stream);
+                            let mut request_context = native_rustls_request_context(&stream);
+                            request_context.local_addr = local_addr;
                             let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, policy, handler).await;
                         }
                         Ok(Err(error)) => {
@@ -519,6 +529,7 @@ where
     F: Future<Output = ()> + Send,
 {
     let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let local_addr = listener.local_addr().ok();
     tokio::pin!(shutdown);
     loop {
         tokio::select! {
@@ -552,7 +563,8 @@ where
                             .await;
                     match handshake {
                         Ok(Ok(())) => {
-                            let request_context = native_openssl_request_context(&stream);
+                            let mut request_context = native_openssl_request_context(&stream);
+                            request_context.local_addr = local_addr;
                             let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, policy, handler).await;
                         }
                         Ok(Err(error)) => {
@@ -631,6 +643,8 @@ fn owned_request_from_head(
     NativeHttp1Request {
         method: head.method.to_owned(),
         peer_addr,
+        local_addr: request_context.local_addr,
+        effective_client_addr: peer_addr,
         downstream_tls: request_context.downstream_tls,
         tls_identity: request_context.tls_identity.clone(),
         geo_context: request_context.geo_context.clone(),
@@ -654,6 +668,7 @@ fn native_rustls_request_context<S>(
 ) -> NativeHttp1RequestContext {
     let (_, connection) = stream.get_ref();
     NativeHttp1RequestContext {
+        local_addr: None,
         downstream_tls: true,
         tls_identity: Some(NativeHttp1TlsClientIdentity {
             cipher: connection
@@ -678,6 +693,7 @@ fn native_openssl_request_context<S>(stream: &SslStream<S>) -> NativeHttp1Reques
     let ssl = stream.ssl();
     let peer_certificate = ssl.peer_certificate();
     NativeHttp1RequestContext {
+        local_addr: None,
         downstream_tls: true,
         tls_identity: Some(NativeHttp1TlsClientIdentity {
             cipher: ssl.current_cipher().map(|cipher| cipher.name().to_owned()),

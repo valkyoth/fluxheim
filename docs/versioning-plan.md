@@ -2810,13 +2810,16 @@ available for the stabilization/security-only follow-up.
   upstream policies, and custom PHP error pages. Keep the compatibility path
   until fixture and smoke tests prove parity. Also make sure root/vhost cache
   policy and route cache policy all report native-ready only after the native
-  cache adapter owns the full request/response/cache-key path.
+  cache adapter owns the full request/response/cache-key path. This line also
+  moves HTTP/1 upstream PROXY protocol v1/v2 send onto the native path with
+  pooling disabled for connection-scoped identity and HTTP/2 combinations
+  rejected until they can be represented safely.
 - `v1.6.32`: finish native load-balancer compatibility and remove the final
   Pingora runtime/listener/TLS adapter crates from normal builds. This release
   must close the remaining proxy gates that need runtime/load-balancer state:
   dynamic discovery, health-aware selection, persistence, priority groups,
   locality, backup/drain/disabled policy, max-in-flight, aliases/tags, static
-  weight parity, upstream PROXY protocol, websocket upgrade, native TLS
+  weight parity, websocket upgrade, native TLS
   listener selection, native service supervision, admin/metrics/stream/UDP
   service registration, and remaining Pingora HTTP/error/cache
   boundary adapters. Add a Fluxheim-owned nginx/Ketama-compatible consistent
