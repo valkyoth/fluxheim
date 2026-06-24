@@ -77,6 +77,29 @@ fn native_static_web(root: &std::path::Path) -> NativeHttp1StaticWeb {
     .unwrap()
 }
 
+fn native_static_web_with_cache(root: &std::path::Path) -> NativeHttp1StaticWeb {
+    NativeHttp1StaticWeb::from_config_with_cache(
+        &fluxheim_config::WebConfig {
+            root: Some(root.to_path_buf()),
+            cache_control: "public, max-age=120".to_owned(),
+            ..Default::default()
+        },
+        Some(&fluxheim_config::CacheConfig {
+            enabled: true,
+            local_static: true,
+            status_header: Some("x-fluxheim-cache".to_owned()),
+            status_reason_header: Some("x-fluxheim-cache-reason".to_owned()),
+            memory: fluxheim_config::CacheMemoryConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .unwrap()
+}
+
 #[tokio::test]
 async fn native_route_proxy_serves_static_web_file() {
     let root = TempDir::new().unwrap();
@@ -102,6 +125,37 @@ async fn native_route_proxy_serves_static_web_file() {
     );
     assert!(response_header(&response, "etag").is_some());
     assert!(response.ends_with("native-static\n"));
+
+    root.close().unwrap();
+}
+
+#[tokio::test]
+async fn native_route_proxy_caches_static_web_file_in_memory() {
+    let root = TempDir::new().unwrap();
+    fs::write(root.path().join("asset.png"), b"native-static-png\n").unwrap();
+    let route = NativeHttp1RouteProxyRoute::prefix_static_web(
+        "/static/",
+        vec!["GET".to_owned()],
+        native_static_web_with_cache(root.path()),
+    )
+    .with_strip_prefix("/static/");
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let first = downstream_get(proxy, "/static/asset.png").await;
+    let second = downstream_get(proxy, "/static/asset.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(
+        response_header(&first, "x-fluxheim-cache").as_deref(),
+        Some("MISS")
+    );
+    assert!(first.ends_with("native-static-png\n"));
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(
+        response_header(&second, "x-fluxheim-cache").as_deref(),
+        Some("HIT")
+    );
+    assert!(second.ends_with("native-static-png\n"));
 
     root.close().unwrap();
 }
@@ -204,6 +258,53 @@ fn native_route_proxy_builds_static_web_route_from_config_without_proxy() {
         }),
         php: None,
         cache: None,
+        compression: None,
+        headers: Default::default(),
+    };
+
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, None).unwrap();
+
+    assert!(route.is_static_web());
+    assert!(route.proxy().is_none());
+
+    root.close().unwrap();
+}
+
+#[test]
+fn native_route_proxy_builds_static_web_route_from_config_with_memory_cache() {
+    let root = TempDir::new().unwrap();
+    let route = fluxheim_config::RouteConfig {
+        name: "web-cache".to_owned(),
+        path_exact: None,
+        path_prefix: Some("/static/".to_owned()),
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: Some("/static/".to_owned()),
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: None,
+        proxy: None,
+        web: Some(fluxheim_config::WebConfig {
+            root: Some(root.path().to_path_buf()),
+            ..Default::default()
+        }),
+        php: None,
+        cache: Some(fluxheim_config::CacheConfig {
+            enabled: true,
+            local_static: true,
+            memory: fluxheim_config::CacheMemoryConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
         compression: None,
         headers: Default::default(),
     };

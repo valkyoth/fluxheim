@@ -1,13 +1,20 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Seek};
 use std::path::{Component, Path, PathBuf};
-use std::time::SystemTime;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
-use fluxheim_config::{DirectoryListingConfig, WebConfig};
+use fluxheim_cache::{
+    CacheRequestView, StaticCacheRequest, request_cache_bypass_reason,
+    request_cache_revalidation_requested, response_cache_admission_rejection,
+    response_cache_control_max_age, static_cache_key,
+};
+use fluxheim_config::{CacheConfig, DirectoryListingConfig, WebConfig};
 use fluxheim_web::{
-    DirectoryEntry, DirectoryListing, SafeRelativePath, StaticResponseBody,
+    DirectoryEntry, DirectoryListing, SafeRelativePath, StaticCacheIdentity, StaticResponseBody,
     StaticResponseConditions, StaticResponseFile, configured_web_path_contains_symlink,
-    directory_listing_path, plan_static_response, render_directory_listing,
+    directory_listing_path, plan_static_response, render_directory_listing, static_cache_identity,
 };
 use percent_encoding::percent_decode_str;
 
@@ -24,6 +31,40 @@ pub struct NativeHttp1StaticWeb {
     directory_listing: DirectoryListingConfig,
     cache_control: String,
     expires: Option<String>,
+    cache: Option<NativeStaticMemoryCache>,
+}
+
+#[derive(Clone, Debug)]
+struct NativeStaticMemoryCache {
+    config: CacheConfig,
+    max_bytes: u64,
+    state: Arc<Mutex<NativeStaticMemoryCacheState>>,
+}
+
+impl Eq for NativeStaticMemoryCache {}
+
+impl PartialEq for NativeStaticMemoryCache {
+    fn eq(&self, other: &Self) -> bool {
+        self.config == other.config && self.max_bytes == other.max_bytes
+    }
+}
+
+#[derive(Debug, Default)]
+struct NativeStaticMemoryCacheState {
+    objects: HashMap<String, NativeStaticCacheEntry>,
+    bytes: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NativeStaticCacheEntry {
+    status: u16,
+    reason: String,
+    headers: Vec<(String, String)>,
+    content_length: Option<u64>,
+    body: Arc<[u8]>,
+    expires_at: Instant,
+    stored_at: Instant,
+    weight: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,10 +82,21 @@ struct NativeStaticFile {
     mime: &'static str,
     len: u64,
     modified: Option<SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
 }
 
 impl NativeHttp1StaticWeb {
     pub fn from_config(config: &WebConfig) -> io::Result<Option<Self>> {
+        Self::from_config_with_cache(config, None)
+    }
+
+    pub fn from_config_with_cache(
+        config: &WebConfig,
+        cache: Option<&CacheConfig>,
+    ) -> io::Result<Option<Self>> {
         let Some(root) = &config.root else {
             return Ok(None);
         };
@@ -86,7 +138,12 @@ impl NativeHttp1StaticWeb {
             directory_listing: config.directory_listing.clone(),
             cache_control: config.cache_control.clone(),
             expires: config.expires.clone(),
+            cache: cache.and_then(NativeStaticMemoryCache::from_config),
         }))
+    }
+
+    pub fn cache_supported(cache: &CacheConfig) -> bool {
+        cache.enabled && cache.local_static && cache.memory.enabled && !cache.disk.enabled
     }
 
     pub fn handle(&self, request: &NativeHttp1Request, request_path: &str) -> NativeHttp1Response {
@@ -97,7 +154,7 @@ impl NativeHttp1StaticWeb {
         }
 
         match self.resolve(request_path) {
-            Ok(NativeStaticResolve::Found(file)) => self.file_response(request, &file),
+            Ok(NativeStaticResolve::Found(file)) => self.cached_file_response(request, &file),
             Ok(NativeStaticResolve::DirectoryListing(listing)) => {
                 directory_listing_response(request, &listing)
             }
@@ -252,6 +309,11 @@ impl NativeHttp1StaticWeb {
         if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Ok(None);
         }
+        #[cfg(unix)]
+        let (device, inode) = {
+            use std::os::unix::fs::MetadataExt;
+            (metadata.dev(), metadata.ino())
+        };
 
         Ok(Some(NativeStaticFile {
             root: self.root.clone(),
@@ -259,6 +321,10 @@ impl NativeHttp1StaticWeb {
             mime: content_type_for_path(&canonical),
             len: metadata.len(),
             modified: metadata.modified().ok(),
+            #[cfg(unix)]
+            device,
+            #[cfg(unix)]
+            inode,
         }))
     }
 
@@ -331,6 +397,55 @@ impl NativeHttp1StaticWeb {
             })
     }
 
+    fn cached_file_response(
+        &self,
+        request: &NativeHttp1Request,
+        file: &NativeStaticFile,
+    ) -> NativeHttp1Response {
+        let Some(cache) = &self.cache else {
+            return self.file_response(request, file);
+        };
+        let Some(key) = cache.static_key(request, file) else {
+            return self.file_response(request, file).with_static_cache_status(
+                &cache.config,
+                "BYPASS",
+                Some("static-ineligible"),
+                None,
+            );
+        };
+        if let Some(reason) = request_cache_bypass_reason(request, &cache.config) {
+            return self.file_response(request, file).with_static_cache_status(
+                &cache.config,
+                "BYPASS",
+                Some(reason),
+                None,
+            );
+        }
+        if !request_cache_revalidation_requested(request, &cache.config)
+            && let Some(hit) = cache.get(&key)
+        {
+            return hit.to_response().with_static_cache_status(
+                &cache.config,
+                "HIT",
+                None,
+                Some(hit.age_secs()),
+            );
+        }
+
+        let response = self.file_response(request, file);
+        let cache_status = if request_cache_revalidation_requested(request, &cache.config) {
+            "REVALIDATED"
+        } else {
+            "MISS"
+        };
+        match cache.store(&key, &response) {
+            Ok(()) => response.with_static_cache_status(&cache.config, cache_status, None, None),
+            Err(reason) => {
+                response.with_static_cache_status(&cache.config, "BYPASS", Some(reason), None)
+            }
+        }
+    }
+
     fn file_response_with_status(
         &self,
         request: &NativeHttp1Request,
@@ -381,6 +496,244 @@ impl NativeHttp1StaticWeb {
         }
         Some(response)
     }
+}
+
+impl NativeStaticMemoryCache {
+    fn from_config(config: &CacheConfig) -> Option<Self> {
+        NativeHttp1StaticWeb::cache_supported(config).then(|| Self {
+            config: config.clone(),
+            max_bytes: config.memory.max_size_bytes.as_u64(),
+            state: Arc::new(Mutex::new(NativeStaticMemoryCacheState::default())),
+        })
+    }
+
+    fn static_key(&self, request: &NativeHttp1Request, file: &NativeStaticFile) -> Option<String> {
+        let host = request_header(request, "host");
+        static_cache_key(
+            &self.config,
+            &StaticCacheRequest {
+                method: request.method(),
+                host,
+                path: request.path(),
+                query: request.query(),
+                file_identity: &file.cache_identity(),
+            },
+        )
+        .map(|key| key.as_str().to_owned())
+    }
+
+    fn get(&self, key: &str) -> Option<NativeStaticCacheEntry> {
+        let now = Instant::now();
+        let mut state = lock_static_cache(&self.state);
+        match state.objects.get(key) {
+            Some(entry) if entry.expires_at > now => Some(entry.clone()),
+            Some(entry) => {
+                let weight = entry.weight;
+                state.objects.remove(key);
+                state.bytes = state.bytes.saturating_sub(weight);
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn store(&self, key: &str, response: &NativeHttp1Response) -> Result<(), &'static str> {
+        if response.status() != 200 {
+            return Err("status-not-cacheable");
+        }
+        let body_len = response.body().len() as u64;
+        if body_len == 0 {
+            return Err("empty-body");
+        }
+        if body_len > self.config.max_object_bytes.as_u64() || body_len > self.max_bytes {
+            return Err("object-too-large");
+        }
+        let headers = native_response_header_map(response);
+        if let Some(reason) =
+            response_cache_admission_rejection(response.status(), &headers, &self.config)
+        {
+            return Err(reason);
+        }
+        let Some(ttl) = static_cache_ttl(response.status(), &headers, &self.config) else {
+            return Err("ttl-missing");
+        };
+        if ttl.is_zero() {
+            return Err("ttl-zero");
+        }
+
+        let weight = static_cache_entry_weight(response, body_len);
+        if weight > self.max_bytes {
+            return Err("object-too-large");
+        }
+        let body: Arc<[u8]> = Arc::from(response.body().to_vec());
+        let entry = NativeStaticCacheEntry {
+            status: response.status(),
+            reason: response.reason().to_owned(),
+            headers: response.headers().to_vec(),
+            content_length: response.content_length(),
+            body,
+            expires_at: Instant::now() + ttl,
+            stored_at: Instant::now(),
+            weight,
+        };
+        let mut state = lock_static_cache(&self.state);
+        if let Some(previous) = state.objects.remove(key) {
+            state.bytes = state.bytes.saturating_sub(previous.weight);
+        }
+        state.bytes = state.bytes.saturating_add(weight);
+        state.objects.insert(key.to_owned(), entry);
+        prune_static_cache(&mut state, self.max_bytes);
+        Ok(())
+    }
+}
+
+impl NativeStaticCacheEntry {
+    fn to_response(&self) -> NativeHttp1Response {
+        let mut response =
+            NativeHttp1Response::new(self.status, self.reason.clone(), self.body.to_vec());
+        for (name, value) in &self.headers {
+            response = response.with_header(name.clone(), value.clone());
+        }
+        if let Some(content_length) = self.content_length {
+            response = response.with_content_length(content_length);
+        }
+        response
+    }
+
+    fn age_secs(&self) -> u64 {
+        Instant::now()
+            .saturating_duration_since(self.stored_at)
+            .as_secs()
+    }
+}
+
+impl NativeStaticFile {
+    fn cache_identity(&self) -> String {
+        static_cache_identity(StaticCacheIdentity {
+            path: &self.path,
+            len: self.len,
+            modified: self.modified,
+            #[cfg(unix)]
+            device_inode: Some((self.device, self.inode)),
+            #[cfg(not(unix))]
+            device_inode: None,
+        })
+    }
+}
+
+impl NativeHttp1Response {
+    fn with_static_cache_status(
+        mut self,
+        cache: &CacheConfig,
+        status: &str,
+        reason: Option<&str>,
+        age_secs: Option<u64>,
+    ) -> Self {
+        if let Some(header) = &cache.status_header {
+            self.push_header(header.clone(), status.to_owned());
+        }
+        if let (Some(header), Some(reason)) = (&cache.status_reason_header, reason) {
+            self.push_header(header.clone(), reason.to_owned());
+        }
+        if let Some(age_secs) = age_secs {
+            self.push_header("age", age_secs.to_string());
+        }
+        self
+    }
+}
+
+fn lock_static_cache(
+    state: &Mutex<NativeStaticMemoryCacheState>,
+) -> std::sync::MutexGuard<'_, NativeStaticMemoryCacheState> {
+    match state.lock() {
+        Ok(guard) => guard,
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::native_http1",
+                "static web memory cache mutex poisoned: {error}"
+            );
+            std::process::abort();
+        }
+    }
+}
+
+fn static_cache_ttl(
+    status: u16,
+    headers: &http::HeaderMap,
+    cache: &CacheConfig,
+) -> Option<Duration> {
+    cache
+        .status_ttls
+        .get(&status)
+        .copied()
+        .or(cache.default_status_ttl_secs)
+        .or_else(|| response_cache_control_max_age(headers))
+        .map(u64::from)
+        .map(Duration::from_secs)
+}
+
+fn static_cache_entry_weight(response: &NativeHttp1Response, body_len: u64) -> u64 {
+    response
+        .headers()
+        .iter()
+        .fold(body_len, |weight, (name, value)| {
+            weight
+                .saturating_add(name.len() as u64)
+                .saturating_add(value.len() as u64)
+                .saturating_add(4)
+        })
+}
+
+fn prune_static_cache(state: &mut NativeStaticMemoryCacheState, max_bytes: u64) {
+    let now = Instant::now();
+    let expired: Vec<String> = state
+        .objects
+        .iter()
+        .filter(|(_, entry)| entry.expires_at <= now)
+        .map(|(key, _)| key.clone())
+        .collect();
+    for key in expired {
+        if let Some(entry) = state.objects.remove(&key) {
+            state.bytes = state.bytes.saturating_sub(entry.weight);
+        }
+    }
+    if state.bytes <= max_bytes {
+        return;
+    }
+
+    let mut oldest: Vec<(String, Instant)> = state
+        .objects
+        .iter()
+        .map(|(key, entry)| (key.clone(), entry.stored_at))
+        .collect();
+    oldest.sort_by_key(|(_, stored_at)| *stored_at);
+    for (key, _) in oldest {
+        if state.bytes <= max_bytes {
+            break;
+        }
+        if let Some(entry) = state.objects.remove(&key) {
+            state.bytes = state.bytes.saturating_sub(entry.weight);
+        }
+    }
+}
+
+fn native_response_header_map(response: &NativeHttp1Response) -> http::HeaderMap {
+    let mut headers = http::HeaderMap::new();
+    for (name, value) in response.headers() {
+        let Ok(name) = http::HeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        let Ok(value) = http::HeaderValue::from_str(value) else {
+            continue;
+        };
+        headers.append(name, value);
+    }
+    if let Some(content_length) = response.content_length()
+        && let Ok(value) = http::HeaderValue::from_str(&content_length.to_string())
+    {
+        headers.insert(http::header::CONTENT_LENGTH, value);
+    }
+    headers
 }
 
 fn static_conditions(request: &NativeHttp1Request) -> StaticResponseConditions<'_> {
@@ -605,6 +958,8 @@ mod tests {
             mime: "text/plain; charset=utf-8",
             len: 4,
             modified: Some(SystemTime::UNIX_EPOCH),
+            device: 0,
+            inode: 0,
         };
 
         std::fs::remove_file(&asset).unwrap();

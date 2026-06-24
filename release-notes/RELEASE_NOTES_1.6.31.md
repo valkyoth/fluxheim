@@ -60,6 +60,12 @@ exit work.
 - Pure local-static cache keys now use the explicit `fluxheim-static-v1;`
   prefix, matching the static-cache namespace used by the compatibility cache
   wrapper and making raw key inspection unambiguous.
+- Native route-level static web now supports the memory-only
+  `cache.local_static` adapter, reusing shared cache admission, bypass,
+  revalidation, TTL, status-header, and file-identity key policy.
+- Unsupported native cache shapes still fail closed with explicit cache-policy
+  blockers: vhost cache, proxy/image cache, disk cache, and non-static route
+  cache remain compatibility-runtime work until their adapters are implemented.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -114,6 +120,11 @@ exit work.
   over-limit joined values without retaining the oversized joined result.
 - Updated standalone `fluxheim-cache` tests to assert the local-static key
   prefix is `fluxheim-static-v1;`.
+- Added live native route static-web tests proving the supported memory
+  local-static cache returns `MISS` on the first request and `HIT` on a second
+  request through the native listener.
+- Added route-config tests proving static-web routes accept the supported
+  memory local-static cache adapter.
 - Re-ran targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

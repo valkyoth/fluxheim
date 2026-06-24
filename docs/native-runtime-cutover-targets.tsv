@@ -4,5 +4,5 @@ admin-ops-socket	native admin ops socket service	1.6.22
 metrics-http	native metrics HTTP service	1.6.22
 stream-proxy	native stream proxy service	1.6.23
 udp-proxy	native UDP proxy service	1.6.23
-native-http1-proxy	native HTTP/1 proxy parity	1.6.31
+native-http1-proxy	native HTTP/1 proxy parity	1.6.32
 native-http2	native HTTP/2 downstream parity	1.6.24

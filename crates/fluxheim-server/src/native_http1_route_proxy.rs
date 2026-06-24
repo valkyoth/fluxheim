@@ -143,7 +143,7 @@ enum NativeHttp1RouteAction {
     AcmeHttp01(NativeHttp1AcmeHttp01Store),
     Proxy(Box<NativeHttp1Proxy>),
     Redirect(NativeHttp1RouteRedirect),
-    StaticWeb(NativeHttp1StaticWeb),
+    StaticWeb(Box<NativeHttp1StaticWeb>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1130,7 +1130,7 @@ impl NativeHttp1RouteProxyRoute {
             rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
             grpc: GrpcRouteConfig::default(),
-            action: NativeHttp1RouteAction::StaticWeb(web),
+            action: NativeHttp1RouteAction::StaticWeb(Box::new(web)),
         }
     }
 
@@ -1178,11 +1178,7 @@ impl NativeHttp1RouteProxyRoute {
         base_headers: &HeaderPolicyConfig,
         inherited_compression: Option<&fluxheim_config::CompressionConfig>,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
-        if route
-            .cache
-            .as_ref()
-            .is_some_and(native_cache_policy_enabled)
-        {
+        if native_route_cache_policy_blocked(route) {
             return Err(NativeHttp1RouteProxyConfigError::Proxy(
                 NativeHttp1ProxyConfigError::CachePolicy,
             ));
@@ -1218,11 +1214,11 @@ impl NativeHttp1RouteProxyRoute {
                 status: redirect.status,
             })
         } else if let Some(web) = route.web.as_ref().filter(|web| web.enabled()) {
-            NativeHttp1RouteAction::StaticWeb(
-                NativeHttp1StaticWeb::from_config(web)
+            NativeHttp1RouteAction::StaticWeb(Box::new(
+                NativeHttp1StaticWeb::from_config_with_cache(web, route.cache.as_ref())
                     .map_err(|_| NativeHttp1RouteProxyConfigError::StaticWeb)?
                     .ok_or(NativeHttp1RouteProxyConfigError::MissingRouteAction)?,
-            )
+            ))
         } else {
             NativeHttp1RouteAction::Proxy(Box::new(
                 proxy
@@ -1340,6 +1336,16 @@ impl NativeHttp1RouteProxyRoute {
 
 fn native_cache_policy_enabled(cache: &fluxheim_config::CacheConfig) -> bool {
     cache.enabled || cache.local_static
+}
+
+fn native_route_cache_policy_blocked(route: &fluxheim_config::RouteConfig) -> bool {
+    route.cache.as_ref().is_some_and(|cache| {
+        if !native_cache_policy_enabled(cache) {
+            return false;
+        }
+        let has_static_web = route.web.as_ref().is_some_and(|web| web.enabled());
+        !has_static_web || !NativeHttp1StaticWeb::cache_supported(cache)
+    })
 }
 
 impl NativeHttp1Handler for NativeHttp1RouteProxy {
