@@ -135,6 +135,39 @@ fn native_http1_request_implements_cache_request_view_for_origin_targets() {
     );
 }
 
+#[cfg(feature = "load-balancer")]
+#[test]
+fn native_http1_request_implements_load_balancer_request_view() {
+    let request = native_http1_cache_view_request(
+        "GET",
+        "/api/items?page=2",
+        vec![
+            ("X-Hash".to_owned(), "one".to_owned()),
+            ("x-hash".to_owned(), "two".to_owned()),
+            ("Cookie".to_owned(), "session=abc; shard=blue".to_owned()),
+            ("cookie".to_owned(), "other=ignored".to_owned()),
+        ],
+    );
+
+    assert_eq!(
+        fluxheim_load_balancer::LoadBalancerRequestView::uri_key(&request),
+        b"/api/items?page=2".to_vec()
+    );
+    assert_eq!(
+        fluxheim_load_balancer::LoadBalancerRequestView::header_values(&request, "x-hash")
+            .map(|value| std::str::from_utf8(value)
+                .expect("valid header value")
+                .to_owned())
+            .collect::<Vec<_>>(),
+        vec!["one".to_owned(), "two".to_owned()]
+    );
+    assert_eq!(
+        fluxheim_load_balancer::LoadBalancerRequestView::cookie_headers(&request)
+            .collect::<Vec<_>>(),
+        vec!["session=abc; shard=blue", "other=ignored"]
+    );
+}
+
 #[test]
 fn native_http1_request_cache_view_handles_absolute_targets_and_duplicate_headers() {
     let request = native_http1_cache_view_request(

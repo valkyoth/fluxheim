@@ -61,6 +61,32 @@ pub struct NativeHttp1RequestContext {
     pub geo_context: Option<NativeHttp1GeoContext>,
 }
 
+#[cfg(feature = "load-balancer")]
+impl fluxheim_load_balancer::LoadBalancerRequestView for NativeHttp1Request {
+    fn uri_key(&self) -> Vec<u8> {
+        self.target.as_bytes().to_vec()
+    }
+
+    fn header_values<'a>(&'a self, name: &str) -> Box<dyn Iterator<Item = &'a [u8]> + 'a> {
+        let name = name.to_owned();
+        Box::new(
+            self.headers
+                .iter()
+                .filter(move |(header_name, _)| header_name.eq_ignore_ascii_case(&name))
+                .map(|(_, value)| value.as_bytes()),
+        )
+    }
+
+    fn cookie_headers<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
+        Box::new(
+            self.headers
+                .iter()
+                .filter(|(header_name, _)| header_name.eq_ignore_ascii_case("cookie"))
+                .map(|(_, value)| value.as_str()),
+        )
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1Response {
     status: u16,

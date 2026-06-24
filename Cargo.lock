@@ -1223,6 +1223,7 @@ dependencies = [
  "fluxheim-compression",
  "fluxheim-config",
  "fluxheim-headers",
+ "fluxheim-load-balancer",
  "fluxheim-protocol",
  "fluxheim-runtime",
  "fluxheim-web",

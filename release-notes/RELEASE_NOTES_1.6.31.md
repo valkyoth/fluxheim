@@ -110,6 +110,10 @@ exit work.
 - The native runtime cutover evidence report now includes downstream HTTP/1
   and HTTP/2 launch-policy rows, giving final-runner hardening values a stable
   diffable contract.
+- `NativeHttp1Request` now implements the load-balancer request-view trait
+  behind the `fluxheim-server/load-balancer` feature, preparing native
+  persistence and hash selection to consume native request metadata without a
+  Pingora request adapter.
 - The metrics service now has a concrete native HTTP handler around the
   existing Prometheus response generator, giving the future native runner a
   direct handler for metrics HTTP.
@@ -214,6 +218,8 @@ exit work.
   duplicate listener binds.
 - Added native launch-policy TSV coverage for representative HTTP/1 and HTTP/2
   hardening values.
+- Added feature-gated native request-view tests proving URI keys, repeated
+  header values, and Cookie headers are exposed to `fluxheim-load-balancer`.
 - Re-ran targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

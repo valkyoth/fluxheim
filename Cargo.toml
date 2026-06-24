@@ -67,6 +67,7 @@ load-balancer = [
     "proxy",
     "dep:fluxheim-load-balancer",
     "fluxheim-config/load-balancer",
+    "fluxheim-server/load-balancer",
 ]
 stream-proxy = ["proxy", "dep:fluxheim-stream", "fluxheim-config/stream-proxy"]
 udp-proxy = ["proxy", "fluxheim-config/udp-proxy"]

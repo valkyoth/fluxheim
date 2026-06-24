@@ -16,6 +16,7 @@ compression = ["dep:fluxheim-compression"]
 compression-brotli = ["compression", "fluxheim-compression/brotli"]
 compression-gzip = ["compression", "fluxheim-compression/gzip"]
 compression-zstd = ["compression", "fluxheim-compression/zstd"]
+load-balancer = ["dep:fluxheim-load-balancer"]
 tls-rustls-backend = ["dep:rustls", "dep:rustls-native-certs", "dep:sha2", "dep:tokio-rustls", "rustls/ring"]
 tls-rustls = ["tls-rustls-backend", "rustls/ring"]
 tls-rustls-fips = ["tls-rustls-backend", "rustls/fips"]
@@ -31,6 +32,7 @@ fluxheim-cache = { path = "../fluxheim-cache" }
 fluxheim-compression = { path = "../fluxheim-compression", optional = true }
 fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-headers = { path = "../fluxheim-headers" }
+fluxheim-load-balancer = { path = "../fluxheim-load-balancer", optional = true }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-runtime = { path = "../fluxheim-runtime" }
 fluxheim-web = { path = "../fluxheim-web" }
