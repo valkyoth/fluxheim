@@ -50,6 +50,9 @@ behavior when the change improves security or project direction.
 - Move PHP X-Accel-Expires TTL parsing and restrictive origin cache-policy
   detection into `fluxheim-php-fpm`, so native PHP response handling can share
   the same cache safety rules.
+- Move PHP response-header stripping policy into `fluxheim-php-fpm`, including
+  hop-by-hop headers, `Connection` tokens, configured hidden headers, and
+  static-offload internal headers.
 - Cap and validate PHP `CONTENT_TYPE` values during accumulation, avoiding an
   oversized intermediate joined string before rejecting over-limit input.
 - Change pure local-static cache keys to use the explicit
@@ -98,6 +101,9 @@ behavior when the change improves security or project direction.
 - Add standalone `fluxheim-php-fpm` tests for X-Accel-Expires TTL parsing and
   restrictive origin cache-policy detection, plus existing root compatibility
   coverage for absolute-epoch parsing.
+- Add standalone `fluxheim-php-fpm` tests for PHP response-header strip lists
+  and internal static-offload header names, plus existing root compatibility
+  coverage for hidden response headers.
 - Add PHP-FPM tests proving `CONTENT_TYPE` rejects control bytes and over-limit
   joined values without retaining the oversized joined result.
 - Update standalone `fluxheim-cache` tests to assert local-static keys use the

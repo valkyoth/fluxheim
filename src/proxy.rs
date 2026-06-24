@@ -9026,25 +9026,16 @@ fn effective_cache_phase(session: &Session, ctx: &RequestContext) -> CachePhase 
 
 #[cfg(feature = "php-fpm")]
 fn strip_php_response_headers(response: &mut ResponseHeader, php: &crate::config::PhpConfig) {
-    let connection_header_tokens = response
+    let connection_values = response
         .headers
         .get_all("connection")
         .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-
-    for header in PHP_HOP_BY_HOP_RESPONSE_HEADERS {
-        response.remove_header(*header);
-    }
-    for header in connection_header_tokens {
-        response.remove_header(header.as_str());
-    }
-    for header in &php.hide_response_headers {
-        response.remove_header(header.as_str());
+        .filter_map(|value| value.to_str().ok());
+    for header in fluxheim_php_fpm::php_response_headers_to_strip(
+        connection_values,
+        &php.hide_response_headers,
+    ) {
+        response.remove_header(&header);
     }
 }
 
@@ -9091,8 +9082,9 @@ fn php_internal_response_header(response: &ResponseHeader, name: &str) -> Option
 
 #[cfg(feature = "php-fpm")]
 fn strip_php_static_offload_headers(response: &mut ResponseHeader) {
-    response.remove_header("x-accel-redirect");
-    response.remove_header("x-sendfile");
+    for header in fluxheim_php_fpm::PHP_STATIC_OFFLOAD_RESPONSE_HEADERS {
+        response.remove_header(*header);
+    }
 }
 
 #[cfg(feature = "php-fpm")]
@@ -9241,18 +9233,6 @@ fn php_should_intercept_error_status(status: StatusCode, php: &RuntimePhp) -> bo
             .iter()
             .any(|intercept_status| *intercept_status == status.as_u16())
 }
-
-#[cfg(feature = "php-fpm")]
-const PHP_HOP_BY_HOP_RESPONSE_HEADERS: &[&str] = &[
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-];
 
 #[cfg(feature = "cache")]
 fn cache_min_uses_counter() -> &'static moka::sync::Cache<String, u32> {

@@ -13,6 +13,17 @@ use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
 
 static MANAGED_PHP_FPM_INSTANCE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 pub const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
+pub const PHP_HOP_BY_HOP_RESPONSE_HEADERS: &[&str] = &[
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
+pub const PHP_STATIC_OFFLOAD_RESPONSE_HEADERS: &[&str] = &["x-accel-redirect", "x-sendfile"];
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum PhpFpmEndpoint {
@@ -565,6 +576,29 @@ where
             .into_iter()
             .flat_map(|value| value.split(','))
             .any(|directive| directive.trim().eq_ignore_ascii_case("no-cache"))
+}
+
+pub fn php_response_headers_to_strip<'a, I>(
+    connection_values: I,
+    hide_response_headers: &[String],
+) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut headers = PHP_HOP_BY_HOP_RESPONSE_HEADERS
+        .iter()
+        .map(|header| (*header).to_owned())
+        .collect::<Vec<_>>();
+    headers.extend(
+        connection_values
+            .into_iter()
+            .flat_map(|value| value.split(','))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+    );
+    headers.extend(hide_response_headers.iter().cloned());
+    headers
 }
 
 pub fn php_segment_has_allowed_extension(segment: &str, allowed_extensions: &[String]) -> bool {
@@ -1497,6 +1531,26 @@ mod tests {
             ["public, max-age=60"],
             []
         ));
+    }
+
+    #[test]
+    fn php_response_header_strip_policy_includes_connection_tokens_and_hidden_names() {
+        let hidden = vec!["x-powered-by".to_owned()];
+        let headers = super::php_response_headers_to_strip(["x-hop, keep-alive"], &hidden);
+
+        assert!(headers.iter().any(|header| header == "connection"));
+        assert!(headers.iter().any(|header| header == "transfer-encoding"));
+        assert!(headers.iter().any(|header| header == "x-hop"));
+        assert!(headers.iter().any(|header| header == "keep-alive"));
+        assert!(headers.iter().any(|header| header == "x-powered-by"));
+    }
+
+    #[test]
+    fn php_static_offload_header_names_are_shared_policy() {
+        assert_eq!(
+            super::PHP_STATIC_OFFLOAD_RESPONSE_HEADERS,
+            &["x-accel-redirect", "x-sendfile"]
+        );
     }
 
     #[test]
