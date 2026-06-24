@@ -42,6 +42,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native runtime cutover evidence now renders the service/listener/background
   task manifest from the `fluxheim-server` manifest contract itself, avoiding a
   second TSV formatter in the config tester.
+- Native runtime cutover evidence now separates the active runtime adapter from
+  the target adapter, so blocker-free plans report `NativeRuntime` readiness
+  without changing production startup away from the compatibility adapter yet.
 
 ## Security Notes
 

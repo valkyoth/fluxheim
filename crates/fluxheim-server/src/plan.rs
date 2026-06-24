@@ -13,6 +13,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeAdapterKind {
     PingoraCompatibility,
+    NativeRuntime,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -231,6 +232,14 @@ impl ServerPlan {
 
     pub const fn runtime_adapter(&self) -> RuntimeAdapterKind {
         self.runtime_adapter
+    }
+
+    pub fn native_runtime_target_adapter(&self) -> RuntimeAdapterKind {
+        if self.native_runtime_cutover_summary().is_ready() {
+            RuntimeAdapterKind::NativeRuntime
+        } else {
+            RuntimeAdapterKind::PingoraCompatibility
+        }
     }
 
     pub fn proxy_protocol(&self) -> &ProxyProtocolPolicy {

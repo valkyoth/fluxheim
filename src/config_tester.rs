@@ -140,6 +140,10 @@ fn runtime_cutover_report(config: &Config) -> Result<String, Box<dyn Error + Sen
     let plan = fluxheim_server::ServerPlan::from_config(config)?;
     let summary = plan.native_runtime_cutover_summary();
     let mut report = format!("native-runtime-adapter: {:?}\n", plan.runtime_adapter());
+    report.push_str(&format!(
+        "native-runtime-target-adapter: {:?}\n",
+        plan.native_runtime_target_adapter()
+    ));
     report.push_str(&summary.to_tsv());
     report.push_str("native-http1-proxy-candidate\tscope\tstatus\treason\n");
     for candidate in plan.native_http1_proxy_candidates() {
@@ -776,6 +780,7 @@ mod tests {
         let report = runtime_cutover_report(&config).unwrap();
 
         assert!(report.contains("native-runtime-adapter: PingoraCompatibility\n"));
+        assert!(report.contains("native-runtime-target-adapter: NativeRuntime\n"));
         assert!(!report.contains("native-http2\tnative HTTP/2 downstream parity\t1.6.24\n"));
         assert!(!report.contains("admin-control-plane\tnative admin control plane\t1.6.22\n"));
         assert!(!report.contains("metrics-http\tnative metrics HTTP service\t1.6.22\n"));

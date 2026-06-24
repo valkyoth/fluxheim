@@ -104,7 +104,7 @@ awk -F '\t' '
         target[$1] = $2 "\t" $3
         next
     }
-    /^native-runtime-adapter:/ { next }
+    /^native-runtime-adapter:/ || /^native-runtime-target-adapter:/ { next }
     /^config tester: ok$/ { next }
     $1 == "native-http1-proxy-candidate" {
         if (NF != 4) {
@@ -151,7 +151,7 @@ awk -F '\t' '
         expected[$1] = $2 "\t" $3
         next
     }
-    /^native-runtime-adapter:/ { next }
+    /^native-runtime-adapter:/ || /^native-runtime-target-adapter:/ { next }
     /^config tester: ok$/ { next }
     $1 == "native-http1-proxy-candidate" {
         if (NF != 4) {
@@ -194,7 +194,7 @@ awk -F '\t' '
     >"$out_dir/representative-runtime-cutover-expected-check.txt"
 
 awk -F '\t' '
-    /^native-runtime-adapter:/ { next }
+    /^native-runtime-adapter:/ || /^native-runtime-target-adapter:/ { next }
     /^config tester: ok$/ { next }
     $1 == "native-http1-proxy-candidate" {
         if (NF != 4) {

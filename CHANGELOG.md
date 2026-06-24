@@ -206,6 +206,9 @@ behavior when the change improves security or project direction.
 - Move native runtime manifest TSV rendering into `fluxheim-server`, so the
   config tester reports the same service/listener/background-task graph format
   that the final native runner contract owns.
+- Add a native runtime target-adapter line to the cutover evidence report:
+  production still starts through the Pingora compatibility adapter, while
+  blocker-free plans now explicitly report `NativeRuntime` as the target.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

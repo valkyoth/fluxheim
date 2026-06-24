@@ -89,6 +89,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     let server_plan = fluxheim_server::ServerPlan::from_config(&config)?;
     match server_plan.runtime_adapter() {
         fluxheim_server::RuntimeAdapterKind::PingoraCompatibility => {}
+        fluxheim_server::RuntimeAdapterKind::NativeRuntime => {
+            return Err("native runtime adapter is not enabled for production startup yet".into());
+        }
     }
     log_native_runtime_cutover_summary(&server_plan);
     log_native_runtime_manifest_preview(&server_plan);

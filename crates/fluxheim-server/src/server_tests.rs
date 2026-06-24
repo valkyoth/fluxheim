@@ -172,6 +172,10 @@ fn native_runtime_manifest_rejects_blocked_plans() {
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
+    assert_eq!(
+        plan.native_runtime_target_adapter(),
+        RuntimeAdapterKind::PingoraCompatibility
+    );
     assert!(matches!(
         plan.native_runtime_manifest(),
         Err(NativeRuntimeManifestError::Blocked { blockers })
@@ -218,6 +222,14 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
     let manifest = plan.native_runtime_manifest().expect("native manifest");
 
+    assert_eq!(
+        plan.runtime_adapter(),
+        RuntimeAdapterKind::PingoraCompatibility
+    );
+    assert_eq!(
+        plan.native_runtime_target_adapter(),
+        RuntimeAdapterKind::NativeRuntime
+    );
     assert_eq!(manifest.services().len(), 6);
     assert_eq!(
         manifest
