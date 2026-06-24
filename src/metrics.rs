@@ -2288,6 +2288,54 @@ mod tests {
     }
 
     #[test]
+    fn native_metrics_app_serves_prometheus_response_through_listener() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let response = runtime.block_on(async {
+            record_admin_auth_event("failure", "source");
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+            tokio::spawn(async move {
+                fluxheim_server::serve_native_http1_listener(
+                    listener,
+                    fluxheim_server::DownstreamHttp1Policy::default(),
+                    std::sync::Arc::new(NativeMetricsApp::new()),
+                    async {
+                        let _ = shutdown_rx.await;
+                    },
+                )
+                .await
+                .unwrap();
+            });
+
+            let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+            tokio::io::AsyncWriteExt::write_all(
+                &mut client,
+                b"GET /metrics HTTP/1.1\r\nHost: metrics.test\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+            let mut response = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut client, &mut response)
+                .await
+                .unwrap();
+            let _ = shutdown_tx.send(());
+            String::from_utf8(response).unwrap()
+        });
+
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(response.contains("content-type: text/plain"));
+        assert!(response.contains("fluxheim_admin_auth_events_total"));
+        assert!(response.contains(r#"event="failure",scope="source""#));
+    }
+
+    #[test]
     fn records_acme_event_counter_with_bounded_labels() {
         let _guard = metrics_test_lock();
         init().unwrap();

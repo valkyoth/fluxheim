@@ -187,8 +187,9 @@ exit work.
 - Added native runtime manifest tests proving blocked plans return explicit
   blockers and blocker-free multi-service plans expose proxy, admin, metrics,
   stream, UDP, ops-socket, and listener bindings.
-- Added a native metrics-handler test proving the Prometheus text response is
-  served through the `NativeHttp1Handler` boundary.
+- Added native metrics-handler tests proving the Prometheus text response is
+  served through the `NativeHttp1Handler` boundary and a live native HTTP/1
+  listener.
 - The native runtime cutover evidence report now includes manifest service and
   background-task rows, so CI archives the exact native service graph that the
   final runner will consume.
