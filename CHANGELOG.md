@@ -17,6 +17,9 @@ behavior when the change improves security or project direction.
 - Make direct native route-proxy construction fail closed for vhost/route cache
   and PHP-FPM policies until those adapters are implemented, preventing API
   callers from accidentally dropping those policies outside the planner.
+- Move image/static cache request eligibility and cache-key construction into
+  the Pingora-independent `fluxheim-cache` crate, leaving the root crate with
+  only the Pingora key wrapper for compatibility runtime use.
 - Move the remaining normal-profile Pingora dependency exception target to
   `1.6.32`, matching the revised plan where 1.6.31 handles cache/PHP native
   integration and 1.6.32 is the final Pingora-free proof release.
@@ -28,6 +31,8 @@ behavior when the change improves security or project direction.
   report PHP-specific native blockers.
 - Add native route-proxy builder tests proving vhost/route cache and PHP-FPM
   policies are rejected directly until native adapters own those paths.
+- Add `fluxheim-cache` tests for image/static cache-key construction,
+  namespace/query/host normalization, and local-static file identity.
 - Re-run the native runtime cutover and Pingora dependency policy evidence for
   the 1.6.31 planning state.
 

@@ -61,9 +61,10 @@ pub use request::{
     CacheClientRange, CacheContentRange, CacheKey, CacheRangeRequest, CacheRequest,
     CacheSliceBounds, CacheSliceRangeRequest, FluxCacheKeyParts, StaticCacheRequest,
     append_cache_key_component, cache_key_with_component, cache_method_temporarily_bypassed,
-    parse_bounded_single_range, parse_cache_client_ranges, parse_cache_content_range,
-    required_slice_bounds, resolve_client_slice_ranges, response_content_length_matches_range,
-    response_content_range_matches, slice_request_within_policy,
+    eligible_image_request, eligible_static_request, image_cache_key, parse_bounded_single_range,
+    parse_cache_client_ranges, parse_cache_content_range, required_slice_bounds,
+    resolve_client_slice_ranges, response_content_length_matches_range,
+    response_content_range_matches, slice_request_within_policy, static_cache_key,
 };
 pub use storage::{
     FluxCacheHitHandler, FluxCacheMissHandler, FluxCacheStorage, FluxCacheTrace, FluxHandleHit,

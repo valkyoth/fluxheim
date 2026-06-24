@@ -33,7 +33,7 @@ use zeroize::Zeroizing;
 
 #[cfg(feature = "proxy")]
 use crate::config::CacheDiskEncryptionProvider;
-use crate::config::{ByteSize, CacheConfig, CacheKeyPart, normalize_host};
+use crate::config::{ByteSize, CacheConfig};
 #[cfg(feature = "proxy")]
 use crate::config::{CacheDiskBackend, CacheDiskEncryptionConfig};
 
@@ -67,8 +67,9 @@ pub use fluxheim_cache::{
     cache_should_serve_stale, cache_stale_status_allows, cache_stale_would_purge,
     cache_storage_tiers, cache_vary_policy, cache_warm_counts_summary, cache_warm_increment_count,
     cache_warm_safe_label, cookie_headers_match_cache_bypass,
-    default_cache_tag_headers_for_storage, first_header_value, parse_bounded_single_range,
-    parse_cache_client_ranges, parse_cache_content_range, query_matches_cache_bypass,
+    default_cache_tag_headers_for_storage, eligible_image_request, eligible_static_request,
+    first_header_value, image_cache_key, parse_bounded_single_range, parse_cache_client_ranges,
+    parse_cache_content_range, query_matches_cache_bypass,
     range_response_cache_admission_rejection, remaining_fresh_ttl_secs,
     request_cache_bypass_reason, request_cache_revalidation_requested, required_slice_bounds,
     resolve_client_slice_ranges, response_age_secs, response_cache_admission_rejection,
@@ -76,8 +77,8 @@ pub use fluxheim_cache::{
     response_content_length_matches_range, response_content_range_matches,
     response_content_type_is_cacheable, response_range_cache_admission_rejection,
     sanitize_multipart_content_type, selected_cache_range_request,
-    selected_cache_slice_range_request, slice_request_within_policy, vary_cache_policy,
-    vary_request_hash_material,
+    selected_cache_slice_range_request, slice_request_within_policy, static_cache_key,
+    vary_cache_policy, vary_request_hash_material,
 };
 #[cfg(feature = "proxy")]
 use fluxheim_cache::{
@@ -8382,111 +8383,6 @@ pub fn pingora_static_cache_key(
 ) -> Option<pingora::cache::CacheKey> {
     static_cache_key(config, request)
         .map(|key| pingora::cache::CacheKey::new(namespace, key.as_str(), user_tag))
-}
-
-pub fn eligible_image_request(config: &CacheConfig, request: &CacheRequest<'_>) -> bool {
-    config.enabled
-        && config.has_enabled_tier()
-        && method_allowed(config, request.method)
-        && image_extension(request.path).is_some_and(|extension| {
-            config
-                .image_extensions
-                .iter()
-                .any(|candidate| candidate.eq_ignore_ascii_case(extension))
-        })
-}
-
-pub fn image_cache_key(config: &CacheConfig, request: &CacheRequest<'_>) -> Option<CacheKey> {
-    if !eligible_image_request(config, request) {
-        return None;
-    }
-
-    let mut key = String::from("fluxheim-image-v1;");
-    if let Some(namespace) = config.key_namespace.as_deref() {
-        append_component(&mut key, "namespace", namespace);
-    }
-    for part in &config.key_parts {
-        match part {
-            CacheKeyPart::Method => append_component(&mut key, "method", request.method),
-            CacheKeyPart::Host => append_component(
-                &mut key,
-                "host",
-                &request.host.and_then(normalize_host).unwrap_or_default(),
-            ),
-            CacheKeyPart::Path => append_component(&mut key, "path", request.path),
-            CacheKeyPart::Query if config.include_query => {
-                append_component(&mut key, "query", request.query.unwrap_or_default());
-            }
-            CacheKeyPart::Query => {}
-        }
-    }
-    Some(CacheKey::new(key))
-}
-
-pub fn eligible_static_request(config: &CacheConfig, request: &StaticCacheRequest<'_>) -> bool {
-    config.enabled
-        && config.local_static
-        && config.has_enabled_tier()
-        && request.method == "GET"
-        && image_extension(request.path).is_some_and(|extension| {
-            config
-                .image_extensions
-                .iter()
-                .any(|candidate| candidate.eq_ignore_ascii_case(extension))
-        })
-}
-
-pub fn static_cache_key(
-    config: &CacheConfig,
-    request: &StaticCacheRequest<'_>,
-) -> Option<CacheKey> {
-    if !eligible_static_request(config, request) {
-        return None;
-    }
-
-    let mut key = String::from("fluxheim-image-v1;");
-    if let Some(namespace) = config.key_namespace.as_deref() {
-        append_component(&mut key, "namespace", namespace);
-    }
-    for part in &config.key_parts {
-        match part {
-            CacheKeyPart::Method => append_component(&mut key, "method", request.method),
-            CacheKeyPart::Host => append_component(
-                &mut key,
-                "host",
-                &request.host.and_then(normalize_host).unwrap_or_default(),
-            ),
-            CacheKeyPart::Path => append_component(&mut key, "path", request.path),
-            CacheKeyPart::Query if config.include_query => {
-                append_component(&mut key, "query", request.query.unwrap_or_default());
-            }
-            CacheKeyPart::Query => {}
-        }
-    }
-    append_component(&mut key, "file", request.file_identity);
-    Some(CacheKey::new(key))
-}
-
-fn method_allowed(config: &CacheConfig, method: &str) -> bool {
-    config.methods.iter().any(|candidate| candidate == method)
-}
-
-fn image_extension(path: &str) -> Option<&str> {
-    let file_name = path.rsplit('/').next()?;
-    if file_name.is_empty() || file_name == "." || file_name == ".." {
-        return None;
-    }
-
-    let (stem, extension) = file_name.rsplit_once('.')?;
-    if stem.is_empty() || extension.is_empty() {
-        return None;
-    }
-
-    Some(extension)
-}
-
-fn append_component(key: &mut String, label: &str, value: &str) {
-    let _ = write!(key, "{label}:{}:{value};", value.len());
 }
 
 #[cfg(test)]

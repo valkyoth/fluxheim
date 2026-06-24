@@ -1,3 +1,5 @@
+use fluxheim_config::{CacheConfig, CacheKeyPart, normalize_host};
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheRequest<'a> {
     pub method: &'a str,
@@ -150,6 +152,107 @@ pub fn cache_key_with_component(primary: &str, label: &str, value: &str) -> Stri
 
 pub fn cache_method_temporarily_bypassed(method: &str) -> bool {
     method == "HEAD"
+}
+
+pub fn eligible_image_request(config: &CacheConfig, request: &CacheRequest<'_>) -> bool {
+    config.enabled
+        && config.has_enabled_tier()
+        && method_allowed(config, request.method)
+        && image_extension(request.path).is_some_and(|extension| {
+            config
+                .image_extensions
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+        })
+}
+
+pub fn image_cache_key(config: &CacheConfig, request: &CacheRequest<'_>) -> Option<CacheKey> {
+    if !eligible_image_request(config, request) {
+        return None;
+    }
+
+    let mut key = String::from("fluxheim-image-v1;");
+    if let Some(namespace) = config.key_namespace.as_deref() {
+        append_cache_key_component(&mut key, "namespace", namespace);
+    }
+    for part in &config.key_parts {
+        match part {
+            CacheKeyPart::Method => append_cache_key_component(&mut key, "method", request.method),
+            CacheKeyPart::Host => append_cache_key_component(
+                &mut key,
+                "host",
+                &request.host.and_then(normalize_host).unwrap_or_default(),
+            ),
+            CacheKeyPart::Path => append_cache_key_component(&mut key, "path", request.path),
+            CacheKeyPart::Query if config.include_query => {
+                append_cache_key_component(&mut key, "query", request.query.unwrap_or_default());
+            }
+            CacheKeyPart::Query => {}
+        }
+    }
+    Some(CacheKey::new(key))
+}
+
+pub fn eligible_static_request(config: &CacheConfig, request: &StaticCacheRequest<'_>) -> bool {
+    config.enabled
+        && config.local_static
+        && config.has_enabled_tier()
+        && request.method == "GET"
+        && image_extension(request.path).is_some_and(|extension| {
+            config
+                .image_extensions
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+        })
+}
+
+pub fn static_cache_key(
+    config: &CacheConfig,
+    request: &StaticCacheRequest<'_>,
+) -> Option<CacheKey> {
+    if !eligible_static_request(config, request) {
+        return None;
+    }
+
+    let mut key = String::from("fluxheim-image-v1;");
+    if let Some(namespace) = config.key_namespace.as_deref() {
+        append_cache_key_component(&mut key, "namespace", namespace);
+    }
+    for part in &config.key_parts {
+        match part {
+            CacheKeyPart::Method => append_cache_key_component(&mut key, "method", request.method),
+            CacheKeyPart::Host => append_cache_key_component(
+                &mut key,
+                "host",
+                &request.host.and_then(normalize_host).unwrap_or_default(),
+            ),
+            CacheKeyPart::Path => append_cache_key_component(&mut key, "path", request.path),
+            CacheKeyPart::Query if config.include_query => {
+                append_cache_key_component(&mut key, "query", request.query.unwrap_or_default());
+            }
+            CacheKeyPart::Query => {}
+        }
+    }
+    append_cache_key_component(&mut key, "file", request.file_identity);
+    Some(CacheKey::new(key))
+}
+
+fn method_allowed(config: &CacheConfig, method: &str) -> bool {
+    config.methods.iter().any(|candidate| candidate == method)
+}
+
+fn image_extension(path: &str) -> Option<&str> {
+    let file_name = path.rsplit('/').next()?;
+    if file_name.is_empty() || file_name == "." || file_name == ".." {
+        return None;
+    }
+
+    let (stem, extension) = file_name.rsplit_once('.')?;
+    if stem.is_empty() || extension.is_empty() {
+        return None;
+    }
+
+    Some(extension)
 }
 
 pub fn parse_bounded_single_range(range: &str) -> Option<CacheRangeRequest> {
@@ -357,12 +460,14 @@ pub fn slice_request_within_policy(
 #[cfg(test)]
 mod tests {
     use super::{
-        CacheClientRange, CacheContentRange, CacheSliceBounds, FluxCacheKeyParts,
-        append_cache_key_component, cache_method_temporarily_bypassed, parse_bounded_single_range,
+        CacheClientRange, CacheContentRange, CacheRequest, CacheSliceBounds, FluxCacheKeyParts,
+        StaticCacheRequest, append_cache_key_component, cache_method_temporarily_bypassed,
+        eligible_image_request, image_cache_key, parse_bounded_single_range,
         parse_cache_client_ranges, parse_cache_content_range, required_slice_bounds,
         resolve_client_slice_ranges, response_content_length_matches_range,
-        response_content_range_matches, slice_request_within_policy,
+        response_content_range_matches, slice_request_within_policy, static_cache_key,
     };
+    use fluxheim_config::{CacheConfig, CacheKeyPart, CacheMemoryConfig};
 
     #[test]
     fn appends_length_delimited_cache_key_component() {
@@ -380,6 +485,88 @@ mod tests {
         assert!(cache_method_temporarily_bypassed("HEAD"));
         assert!(!cache_method_temporarily_bypassed("GET"));
         assert!(!cache_method_temporarily_bypassed("head"));
+    }
+
+    #[test]
+    fn builds_image_cache_key_from_cache_policy() {
+        let config = CacheConfig {
+            key_namespace: Some("cache-vhost-v1".to_owned()),
+            key_parts: vec![
+                CacheKeyPart::Method,
+                CacheKeyPart::Host,
+                CacheKeyPart::Path,
+                CacheKeyPart::Query,
+            ],
+            ..enabled_cache()
+        };
+        let request = CacheRequest {
+            method: "GET",
+            host: Some("Example.COM:443"),
+            path: "/assets/logo.png",
+            query: Some("v=1"),
+        };
+
+        let key = image_cache_key(&config, &request).expect("eligible key");
+
+        assert!(eligible_image_request(&config, &request));
+        assert_eq!(
+            key.as_str(),
+            "fluxheim-image-v1;namespace:14:cache-vhost-v1;method:3:GET;host:11:example.com;path:16:/assets/logo.png;query:3:v=1;"
+        );
+    }
+
+    #[test]
+    fn image_cache_key_rejects_disabled_or_unmatched_requests() {
+        let request = CacheRequest {
+            method: "POST",
+            host: Some("example.com"),
+            path: "/assets/logo.png",
+            query: None,
+        };
+        assert_eq!(image_cache_key(&enabled_cache(), &request), None);
+
+        let request = CacheRequest {
+            method: "GET",
+            host: Some("example.com"),
+            path: "/assets/logo.txt",
+            query: None,
+        };
+        assert_eq!(image_cache_key(&enabled_cache(), &request), None);
+        assert_eq!(image_cache_key(&CacheConfig::default(), &request), None);
+    }
+
+    #[test]
+    fn static_cache_key_requires_local_static_and_file_identity() {
+        let config = CacheConfig {
+            local_static: true,
+            key_parts: vec![
+                CacheKeyPart::Method,
+                CacheKeyPart::Host,
+                CacheKeyPart::Path,
+                CacheKeyPart::Query,
+            ],
+            ..enabled_cache()
+        };
+        let request = StaticCacheRequest {
+            method: "GET",
+            host: Some("static.example"),
+            path: "/img/photo.webp",
+            query: Some("w=640"),
+            file_identity: "dev:inode:mtime",
+        };
+
+        let key = static_cache_key(&config, &request).expect("eligible static key");
+
+        assert_eq!(
+            key.as_str(),
+            "fluxheim-image-v1;method:3:GET;host:14:static.example;path:15:/img/photo.webp;query:5:w=640;file:15:dev:inode:mtime;"
+        );
+
+        let no_static = CacheConfig {
+            local_static: false,
+            ..config
+        };
+        assert_eq!(static_cache_key(&no_static, &request), None);
     }
 
     #[test]
@@ -541,5 +728,16 @@ mod tests {
         assert_eq!(key.primary(), "primary");
         assert_eq!(key.combined(), "combined");
         assert_eq!(key.user_tag(), "tag");
+    }
+
+    fn enabled_cache() -> CacheConfig {
+        CacheConfig {
+            enabled: true,
+            memory: CacheMemoryConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
     }
 }
