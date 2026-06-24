@@ -685,7 +685,9 @@ rootless container secrets or a local file readable only by the Fluxheim user.
 ## Metrics
 
 `[metrics]` is disabled by default and should remain loopback-only unless it is
-fronted by a trusted local monitoring agent.
+fronted by a trusted local monitoring agent. The native metrics handler only
+serves `GET`/`HEAD /metrics`; it relies on the metrics listener binding and
+network ACLs for access control.
 
 ```toml
 [metrics]
@@ -1253,7 +1255,9 @@ HAProxy PROXY protocol header to the origin immediately after the upstream TCP/U
 connection is established and before any upstream TLS handshake. The source
 address is trusted-proxy-aware: if the direct peer is trusted and
 `X-Forwarded-For` restores a client IP, that restored IP is used with source
-port `0`; otherwise the direct downstream socket address is used. If Fluxheim
+port `0`, the PROXY protocol unknown-port value, because forwarded headers do
+not carry the original source port; otherwise the direct downstream socket
+address is used. If Fluxheim
 cannot produce a same-family TCP4/TCP6 source and destination pair, it sends
 `PROXY UNKNOWN` for v1 or an empty v2 PROXY/UNSPEC frame for v2.
 `upstream_http_version` defaults to `http1`. Set it to `http2` for origins

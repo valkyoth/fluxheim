@@ -730,25 +730,31 @@ fn prune_static_cache(state: &mut NativeStaticMemoryCacheState, max_bytes: u64) 
     });
     state.bytes = state.bytes.saturating_sub(expired_bytes);
 
-    while state.bytes > max_bytes {
-        let Some(key) = oldest_static_cache_key(state) else {
+    if state.bytes > max_bytes {
+        let mut by_age = state
+            .objects
+            .iter()
+            .map(|(key, entry)| (entry.stored_at, key.clone()))
+            .collect::<Vec<_>>();
+        by_age.sort_unstable_by_key(|(stored_at, _)| *stored_at);
+        for (_, key) in by_age {
+            if state.bytes <= max_bytes {
+                break;
+            }
+            if let Some(entry) = state.objects.remove(&key) {
+                state.bytes = state.bytes.saturating_sub(entry.weight);
+            }
+        }
+        if state.objects.is_empty() && state.bytes > max_bytes {
             state.bytes = 0;
-            break;
-        };
-        if let Some(entry) = state.objects.remove(&key) {
-            state.bytes = state.bytes.saturating_sub(entry.weight);
         } else {
-            break;
+            let actual_bytes = state
+                .objects
+                .values()
+                .fold(0_u64, |total, entry| total.saturating_add(entry.weight));
+            state.bytes = state.bytes.min(actual_bytes);
         }
     }
-}
-
-fn oldest_static_cache_key(state: &NativeStaticMemoryCacheState) -> Option<String> {
-    state
-        .objects
-        .iter()
-        .min_by_key(|(_, entry)| entry.stored_at)
-        .map(|(key, _)| key.clone())
 }
 
 fn native_response_header_map(response: &NativeHttp1Response) -> http::HeaderMap {

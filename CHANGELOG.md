@@ -98,6 +98,9 @@ behavior when the change improves security or project direction.
 - Thread native listener local addresses and trusted-forwarded effective
   client addresses through `NativeHttp1Request`, so upstream PROXY protocol
   frames use the same client identity as native ACL/rate-limit/header policy.
+- Document that native upstream PROXY protocol uses source port `0` when the
+  effective client IP came from forwarded headers, because that path does not
+  carry the original client source port.
 - Add a native HTTP/1 host router that builds one native route proxy per vhost
   and dispatches exact and wildcard Host matches to the same default-vhost
   fallback behavior used by the compatibility runtime.
@@ -127,6 +130,9 @@ behavior when the change improves security or project direction.
 - Add a concrete native metrics HTTP handler around the existing Prometheus
   response generator, giving the future native runner a direct handler for the
   metrics service.
+- Restrict the native metrics handler to `GET`/`HEAD /metrics`, with HEAD
+  returning the Prometheus content length without a body, while listener
+  loopback/network ACLs remain the metrics access-control boundary.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to

@@ -182,7 +182,6 @@ fn route_proxy_from_config(
     }
     #[cfg(not(feature = "acme"))]
     {
-        let _ = config;
         NativeHttp1RouteProxy::from_vhost_config_with_trusted_sources(
             vhost,
             base_headers,

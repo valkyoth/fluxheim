@@ -94,6 +94,9 @@ exit work.
 - Native requests now carry both the direct listener peer/local address and the
   trusted-forwarded effective client address, so upstream PROXY protocol uses
   the same client identity as native ACL/rate-limit/header policy.
+- When that native effective client identity comes from forwarded headers,
+  upstream PROXY protocol sends source port `0`, the documented unknown-port
+  value, because forwarded headers do not include the original client port.
 - Native HTTP/1 now has a host router that builds one native route proxy per
   configured vhost and dispatches exact and wildcard Host matches with the same
   default-vhost fallback behavior as the compatibility runtime.
@@ -209,6 +212,8 @@ exit work.
 - Added native metrics-handler tests proving the Prometheus text response is
   served through the `NativeHttp1Handler` boundary and a live native HTTP/1
   listener.
+- Added native metrics-handler tests proving only `GET`/`HEAD /metrics` is
+  served, with HEAD returning the Prometheus content length without a body.
 - Added a live native admin listener test proving the authenticated health
   endpoint is served correctly through the native HTTP/1 listener.
 - Startup now logs a native runtime manifest preview for blocker-free plans,

@@ -923,6 +923,9 @@ impl NativeHttp1Upstream {
         stream: &mut TcpStream,
         request: &NativeHttp1Request,
     ) -> Result<(), NativeHttp1Error> {
+        // If the effective client IP came from forwarded headers instead of
+        // the direct peer socket, Fluxheim does not know the original client
+        // port. PROXY protocol uses port 0 for that intentional unknown value.
         let header = match self.proxy_protocol {
             UpstreamProxyProtocol::Off => return Ok(()),
             UpstreamProxyProtocol::V1 => {

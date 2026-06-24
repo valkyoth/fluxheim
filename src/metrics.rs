@@ -82,6 +82,28 @@ pub fn native_prometheus_response() -> Result<NativeHttp1Response, prometheus::E
         .with_header("content-type", prometheus::TextEncoder::new().format_type()))
 }
 
+fn native_prometheus_head_response() -> Result<NativeHttp1Response, prometheus::Error> {
+    let body = prometheus_text()?;
+    Ok(NativeHttp1Response::new(200, "OK", Vec::new())
+        .with_content_length(body.len() as u64)
+        .with_header("content-type", prometheus::TextEncoder::new().format_type()))
+}
+
+fn native_metrics_target_allowed(target: &str) -> bool {
+    let path = native_metrics_target_path(target);
+    path.split_once('?').map_or(path, |(path, _)| path) == "/metrics"
+}
+
+fn native_metrics_target_path(target: &str) -> &str {
+    if let Some(rest) = target
+        .strip_prefix("http://")
+        .or_else(|| target.strip_prefix("https://"))
+    {
+        return rest.find('/').map_or("/", |index| &rest[index..]);
+    }
+    target
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct NativeMetricsApp;
 
@@ -94,12 +116,29 @@ impl NativeMetricsApp {
 impl fluxheim_server::NativeHttp1Handler for NativeMetricsApp {
     fn handle<'a>(
         &'a self,
-        _request: fluxheim_server::NativeHttp1Request,
+        request: fluxheim_server::NativeHttp1Request,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = fluxheim_server::NativeHttp1Response> + Send + 'a>,
     > {
         Box::pin(async move {
-            native_prometheus_response().unwrap_or_else(|error| {
+            if !native_metrics_target_allowed(&request.target) {
+                return fluxheim_server::NativeHttp1Response::new(404, "Not Found", b"not found\n")
+                    .close_connection();
+            }
+            let response = match request.method.as_str() {
+                "GET" => native_prometheus_response(),
+                "HEAD" => native_prometheus_head_response(),
+                _ => {
+                    return fluxheim_server::NativeHttp1Response::new(
+                        405,
+                        "Method Not Allowed",
+                        b"method not allowed\n",
+                    )
+                    .with_header("allow", "GET, HEAD")
+                    .close_connection();
+                }
+            };
+            response.unwrap_or_else(|error| {
                 log::debug!("native metrics response unavailable: {error}");
                 fluxheim_server::NativeHttp1Response::new(
                     500,
@@ -2288,6 +2327,50 @@ mod tests {
     }
 
     #[test]
+    fn native_metrics_app_restricts_method_and_target() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let app = NativeMetricsApp::new();
+
+        let head = runtime.block_on(fluxheim_server::NativeHttp1Handler::handle(
+            &app,
+            native_metrics_request("HEAD", "/metrics"),
+        ));
+        assert_eq!(head.status(), 200);
+        assert_eq!(head.body(), b"");
+        assert!(head.content_length().is_some_and(|length| length > 0));
+
+        let absolute = runtime.block_on(fluxheim_server::NativeHttp1Handler::handle(
+            &app,
+            native_metrics_request("GET", "http://metrics.test/metrics?format=prometheus"),
+        ));
+        assert_eq!(absolute.status(), 200);
+
+        let wrong_path = runtime.block_on(fluxheim_server::NativeHttp1Handler::handle(
+            &app,
+            native_metrics_request("GET", "/"),
+        ));
+        assert_eq!(wrong_path.status(), 404);
+
+        let wrong_method = runtime.block_on(fluxheim_server::NativeHttp1Handler::handle(
+            &app,
+            native_metrics_request("POST", "/metrics"),
+        ));
+        assert_eq!(wrong_method.status(), 405);
+        assert!(
+            wrong_method
+                .headers()
+                .iter()
+                .any(|(name, value)| name == "allow" && value == "GET, HEAD")
+        );
+    }
+
+    #[test]
     fn native_metrics_app_serves_prometheus_response_through_listener() {
         let _guard = metrics_test_lock();
         init().unwrap();
@@ -2333,6 +2416,22 @@ mod tests {
         assert!(response.contains("content-type: text/plain"));
         assert!(response.contains("fluxheim_admin_auth_events_total"));
         assert!(response.contains(r#"event="failure",scope="source""#));
+    }
+
+    fn native_metrics_request(method: &str, target: &str) -> fluxheim_server::NativeHttp1Request {
+        fluxheim_server::NativeHttp1Request {
+            method: method.to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: false,
+            tls_identity: None,
+            geo_context: None,
+            target: target.to_owned(),
+            version: fluxheim_protocol::Http1Version::Http11,
+            headers: vec![("host".to_owned(), "metrics.test".to_owned())],
+            body: Vec::new(),
+        }
     }
 
     #[test]
