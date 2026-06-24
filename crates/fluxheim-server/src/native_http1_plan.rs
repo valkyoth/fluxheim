@@ -1,6 +1,8 @@
 use fluxheim_config::{AccessPolicyConfig, Config, ProxyConfig, RouteConfig, VhostConfig};
 
-use crate::{DownstreamHttp1Policy, NativeHttp1Proxy, NativeHttp1ProxyConfigError};
+use crate::{
+    DownstreamHttp1Policy, NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1StaticWeb,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1ProxyCandidate {
@@ -218,7 +220,7 @@ fn route_policy_support(route: &RouteConfig) -> Result<(), NativeHttp1ProxyConfi
     {
         return Err(NativeHttp1ProxyConfigError::HttpPolicy);
     }
-    if route.cache.as_ref().is_some_and(cache_enabled) {
+    if route_cache_policy_blocked(route) {
         return Err(NativeHttp1ProxyConfigError::CachePolicy);
     }
     if route.php.as_ref().is_some_and(|php| php.enabled) {
@@ -262,6 +264,16 @@ fn access_policy_native_supported(_access: &AccessPolicyConfig) -> bool {
 
 fn cache_enabled(cache: &fluxheim_config::CacheConfig) -> bool {
     cache.enabled || cache.local_static
+}
+
+fn route_cache_policy_blocked(route: &RouteConfig) -> bool {
+    route.cache.as_ref().is_some_and(|cache| {
+        if !cache_enabled(cache) {
+            return false;
+        }
+        let has_static_web = route.web.as_ref().is_some_and(|web| web.enabled());
+        !has_static_web || !NativeHttp1StaticWeb::cache_supported(cache)
+    })
 }
 
 fn compression_supported(compression: &fluxheim_config::CompressionConfig) -> bool {

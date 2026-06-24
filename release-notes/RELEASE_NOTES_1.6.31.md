@@ -66,6 +66,9 @@ exit work.
 - Unsupported native cache shapes still fail closed with explicit cache-policy
   blockers: vhost cache, proxy/image cache, disk cache, and non-static route
   cache remain compatibility-runtime work until their adapters are implemented.
+- Native HTTP/1 cutover planning now recognizes the supported static-web
+  memory local-static cache adapter, so those routes no longer make an
+  otherwise native-ready vhost fallback proxy look unsupported.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -125,6 +128,8 @@ exit work.
   request through the native listener.
 - Added route-config tests proving static-web routes accept the supported
   memory local-static cache adapter.
+- Added native planning coverage proving static-web memory local-static cache
+  routes do not block native HTTP/1 proxy cutover candidates.
 - Re-ran targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

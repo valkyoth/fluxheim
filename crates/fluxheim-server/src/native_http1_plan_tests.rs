@@ -1,5 +1,6 @@
 use crate::{NativeHttp1ProxyConfigError, NativeHttp1ProxyCutoverStatus, ServerPlan};
 use fluxheim_config::{CacheConfig, Config, RouteConfig, VhostConfig};
+use tempfile::TempDir;
 
 #[test]
 fn server_plan_collects_native_http1_proxy_candidates() {
@@ -363,6 +364,60 @@ fn server_plan_reports_route_php_native_http1_proxy_blocker() {
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
         Some(NativeHttp1ProxyConfigError::PhpFpm)
     );
+}
+
+#[test]
+fn server_plan_accepts_static_web_route_with_memory_local_static_cache() {
+    let root = TempDir::new().expect("temp web root");
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    vhost.routes = vec![RouteConfig {
+        name: "static-cache".to_owned(),
+        path_exact: None,
+        path_prefix: Some("/static/".to_owned()),
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: Some("/static/".to_owned()),
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: None,
+        proxy: None,
+        web: Some(fluxheim_config::WebConfig {
+            root: Some(root.path().to_path_buf()),
+            ..Default::default()
+        }),
+        php: None,
+        cache: Some(CacheConfig {
+            enabled: true,
+            local_static: true,
+            memory: fluxheim_config::CacheMemoryConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+        compression: None,
+        headers: Default::default(),
+    }];
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        None
+    );
+
+    root.close().expect("close temp web root");
 }
 
 #[test]
