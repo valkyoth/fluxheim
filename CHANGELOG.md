@@ -29,6 +29,8 @@ behavior when the change improves security or project direction.
 - Move PHP FastCGI parameter value validation and request-header-to-param-name
   mapping into `fluxheim-php-fpm`, giving native and compatibility paths one
   shared policy for bounded, control-free PHP params.
+- Move PHP `SERVER_NAME` fallback selection into `fluxheim-php-fpm`, keeping
+  host/fallback sanitization shared by native and compatibility paths.
 - Move the remaining normal-profile Pingora dependency exception target to
   `1.6.32`, matching the revised plan where 1.6.31 handles cache/PHP native
   integration and 1.6.32 is the final Pingora-free proof release.
@@ -50,6 +52,8 @@ behavior when the change improves security or project direction.
   compatibility tests with `php-fpm` enabled.
 - Add standalone `fluxheim-php-fpm` tests for FastCGI param value bounds,
   control-byte rejection, and deterministic HTTP header param-name mapping.
+- Add standalone and compatibility tests for PHP `SERVER_NAME` fallback
+  behavior when the request host is unsafe.
 - Re-run the native runtime cutover and Pingora dependency policy evidence for
   the 1.6.31 planning state.
 

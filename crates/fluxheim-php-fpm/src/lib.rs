@@ -232,6 +232,16 @@ pub fn php_header_param_name(name: &str) -> Option<String> {
     Some(param)
 }
 
+pub fn php_server_name_param(host: &str, fallback: &str) -> String {
+    if safe_php_param_value(host) && !host.is_empty() {
+        return host.to_owned();
+    }
+    if safe_php_param_value(fallback) && !fallback.is_empty() {
+        return fallback.to_owned();
+    }
+    "localhost".to_owned()
+}
+
 pub fn split_php_response(stdout: &[u8]) -> io::Result<(&[u8], &[u8])> {
     if let Some(index) = stdout.windows(4).position(|window| window == b"\r\n\r\n") {
         return Ok((&stdout[..index], &stdout[index + 4..]));
@@ -619,8 +629,8 @@ mod tests {
         php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
         php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
         php_fpm_retryable_status, php_fpm_timeout_error, php_header_param_name,
-        safe_php_header_name, safe_php_header_value, safe_php_param_value, split_first_colon,
-        split_php_response, trim_ascii, trim_ascii_cr,
+        php_server_name_param, safe_php_header_name, safe_php_header_value, safe_php_param_value,
+        split_first_colon, split_php_response, trim_ascii, trim_ascii_cr,
     };
     use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
 
@@ -804,6 +814,22 @@ mod tests {
         assert_eq!(php_header_param_name("content-length"), None);
         assert_eq!(php_header_param_name("bad name"), None);
         assert_eq!(php_header_param_name("bad_name"), None);
+    }
+
+    #[test]
+    fn php_server_name_prefers_safe_host_then_safe_fallback() {
+        assert_eq!(
+            php_server_name_param("example.test", "fallback.test"),
+            "example.test"
+        );
+        assert_eq!(
+            php_server_name_param("bad\nhost", "fallback.test"),
+            "fallback.test"
+        );
+        assert_eq!(
+            php_server_name_param("bad\nhost", "bad\rfallback"),
+            "localhost"
+        );
     }
 
     #[test]

@@ -33,7 +33,9 @@ use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use bytes::Bytes;
 #[cfg(feature = "php-fpm")]
-use fluxheim_php_fpm::{MAX_PHP_PARAM_VALUE_BYTES, php_header_param_name, safe_php_param_value};
+use fluxheim_php_fpm::{
+    MAX_PHP_PARAM_VALUE_BYTES, php_header_param_name, php_server_name_param, safe_php_param_value,
+};
 #[cfg(feature = "cache")]
 use pingora::ErrorSource;
 #[cfg(feature = "cache")]
@@ -7830,17 +7832,6 @@ fn add_php_host_param(params: &mut fastcgi_client::Params<'_>, host: &str) {
 }
 
 #[cfg(feature = "php-fpm")]
-fn php_server_name_param(host: &str, fallback: &str) -> String {
-    if safe_php_param_value(host) && !host.is_empty() {
-        return host.to_owned();
-    }
-    if safe_php_param_value(fallback) && !fallback.is_empty() {
-        return fallback.to_owned();
-    }
-    "localhost".to_owned()
-}
-
-#[cfg(feature = "php-fpm")]
 fn php_content_type_param(request: &RequestHeader) -> String {
     request_header_values_joined(request, "content-type")
         .filter(|value| safe_php_param_value(value))
@@ -10504,10 +10495,9 @@ mod tests {
         directory_slash_redirect_location, explicit_authority_port,
         ignore_php_origin_cache_headers, parse_php_fpm_output, php_content_type_param,
         php_fpm_path_translated, php_fpm_script_filename, php_script_name_denied,
-        php_script_name_for_request, php_server_name_param, php_should_intercept_error_status,
-        php_static_offload_file, php_stderr_matches_failure_pattern, php_stderr_metric_state,
-        php_x_accel_expires_ttl_secs, resolve_php_script, sanitized_php_stderr,
-        strip_php_response_headers,
+        php_script_name_for_request, php_should_intercept_error_status, php_static_offload_file,
+        php_stderr_matches_failure_pattern, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
+        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
     };
     #[cfg(any(
         feature = "compression-brotli",
@@ -10563,7 +10553,9 @@ mod tests {
         traffic_mirror_sample_selected, traffic_mirror_url,
     };
     #[cfg(feature = "php-fpm")]
-    use fluxheim_php_fpm::{MAX_PHP_PARAM_VALUE_BYTES, php_header_param_name};
+    use fluxheim_php_fpm::{
+        MAX_PHP_PARAM_VALUE_BYTES, php_header_param_name, php_server_name_param,
+    };
 
     #[test]
     fn normalizes_split_cookie_headers_for_upstream_http1() {
