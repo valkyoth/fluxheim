@@ -137,7 +137,13 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
             .chain(vhost.routes.iter().cloned())
             .chain(vhost.redirect.route_config())
         {
-            if route.redirect.is_some() || route.web.as_ref().is_some_and(|web| web.enabled()) {
+            push_route_http_candidate(
+                format!("vhost {:?} route {:?}", vhost.name, route.name),
+                &route,
+                vhost_policy_support(vhost).and_then(|()| route_policy_support(&route)),
+                &mut candidates,
+            );
+            if route.redirect.is_some() {
                 continue;
             }
             if let Some(proxy) = &route.proxy {
@@ -166,6 +172,34 @@ fn push_vhost_http_candidate(
         return;
     }
     if !vhost.web.enabled() && !cache_enabled(&vhost.cache) && !vhost.php.enabled {
+        return;
+    }
+    match policy_support {
+        Ok(()) => candidates.push(NativeHttp1ProxyCandidate::eligible(scope)),
+        Err(error) => candidates.push(NativeHttp1ProxyCandidate::unsupported(scope, error)),
+    }
+}
+
+fn push_route_http_candidate(
+    scope: String,
+    route: &RouteConfig,
+    policy_support: Result<(), NativeHttp1ProxyConfigError>,
+    candidates: &mut Vec<NativeHttp1ProxyCandidate>,
+) {
+    if route
+        .proxy
+        .as_ref()
+        .is_some_and(ProxyConfig::has_configured_upstream)
+    {
+        return;
+    }
+    if route.redirect.is_some() {
+        return;
+    }
+    let route_has_web = route.web.as_ref().is_some_and(|web| web.enabled());
+    let route_has_cache = route.cache.as_ref().is_some_and(cache_enabled);
+    let route_has_php = route.php.as_ref().is_some_and(|php| php.enabled);
+    if !route_has_web && !route_has_cache && !route_has_php {
         return;
     }
     match policy_support {

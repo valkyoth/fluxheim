@@ -138,6 +138,10 @@ exit work.
 - The native cutover planner now reports vhost fallback-only static-web, cache,
   and PHP-FPM blockers even when the vhost has no configured upstream proxy,
   matching the native host-router construction path.
+- The native cutover planner now also reports route fallback-only static-web,
+  cache, and PHP-FPM candidates when a route has no upstream proxy, making
+  route-level native blockers visible instead of folding them into the parent
+  vhost or fallback proxy summary.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now

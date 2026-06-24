@@ -594,6 +594,100 @@ fn server_plan_reports_route_php_native_http1_proxy_blocker() {
 }
 
 #[test]
+fn server_plan_accepts_route_static_web_without_proxy_candidate() {
+    let root = TempDir::new().expect("temp web root");
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    let mut route = native_proxy_route();
+    route.proxy = None;
+    route.web = Some(fluxheim_config::WebConfig {
+        root: Some(root.path().to_path_buf()),
+        ..Default::default()
+    });
+    vhost.routes = vec![route];
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 2);
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[1].scope(),
+        "vhost \"native.test\" route \"api\""
+    );
+    assert!(plan.native_http1_proxy_candidates()[1].is_eligible());
+
+    root.close().expect("close temp web root");
+}
+
+#[test]
+fn server_plan_reports_route_static_web_disk_cache_without_proxy_candidate() {
+    let root = TempDir::new().expect("temp web root");
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    let mut route = native_proxy_route();
+    route.proxy = None;
+    route.web = Some(fluxheim_config::WebConfig {
+        root: Some(root.path().to_path_buf()),
+        ..Default::default()
+    });
+    route.cache = Some(CacheConfig {
+        enabled: true,
+        local_static: true,
+        memory: fluxheim_config::CacheMemoryConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        disk: fluxheim_config::CacheDiskConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    vhost.routes = vec![route];
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 2);
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[1].scope(),
+        "vhost \"native.test\" route \"api\""
+    );
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[1].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::CachePolicy)
+    );
+
+    root.close().expect("close temp web root");
+}
+
+#[test]
+fn server_plan_reports_route_php_without_proxy_candidate() {
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    let mut route = native_proxy_route();
+    route.proxy = None;
+    route.php = Some(fluxheim_config::PhpConfig {
+        enabled: true,
+        ..Default::default()
+    });
+    vhost.routes = vec![route];
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 2);
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[1].scope(),
+        "vhost \"native.test\" route \"api\""
+    );
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[1].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::PhpFpm)
+    );
+}
+
+#[test]
 fn server_plan_accepts_static_web_route_with_memory_local_static_cache() {
     let root = TempDir::new().expect("temp web root");
     let mut config = Config::default();
@@ -637,10 +731,14 @@ fn server_plan_accepts_static_web_route_with_memory_local_static_cache() {
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
-    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
-    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 2);
     assert_eq!(
-        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        plan.native_http1_proxy_candidates()[1].scope(),
+        "vhost \"native.test\" route \"static-cache\""
+    );
+    assert!(plan.native_http1_proxy_candidates()[1].is_eligible());
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[1].unsupported_reason(),
         None
     );
 
