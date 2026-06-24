@@ -28,6 +28,11 @@ behavior when the change improves security or project direction.
 - Add live native proxy tests proving native HTTP/2 upstreams reconnect after an
   origin closes a pooled H2 connection and round-robin across multiple static
   H2 upstreams.
+- Add explicit, disabled-by-default plaintext h2c Upgrade compatibility for
+  `proxy.upstream_http_version = "http1-and-http2"` origins that implement
+  HTTP/1.1 Upgrade to `h2c`.
+- Update `base64-ng` to 1.2.2 and use its fixed-input infallible encoder for
+  native h2c `HTTP2-Settings` header construction.
 
 ### Security
 
@@ -65,6 +70,13 @@ behavior when the change improves security or project direction.
   them.
 - Share one Fluxheim-owned upstream-header stripping predicate between the
   native H1 and H2 upstream request writers.
+- Keep explicit h2c Upgrade fallback limited to refused/closed probe
+  connections, and do not downgrade/replay a request after an upstream H2
+  stream has already been opened.
+- Treat h2c probe timeouts as ambiguous and non-replayable while still allowing
+  clean HTTP/1.1 fallback for closed/reset upgrade probes.
+- Validate h2c Upgrade responses with a bounded response-head reader that
+  preserves post-upgrade H2 frames without an O(n²) terminator scan.
 
 ## 1.6.29 - 2026-06-23
 

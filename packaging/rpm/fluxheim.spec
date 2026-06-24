@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.29
+Version:        1.6.30
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,14 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue Jun 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.30-1
+- Move plaintext native upstream HTTP/2, TLS ALPN H2 origins, and explicit
+  opt-in h2c Upgrade compatibility into the native HTTP/1 proxy path.
+- Add native upstream H2 pooling, keepalive pings, bounded stream-slot waits,
+  failover tests, and live H2 origin coverage.
+- Harden h2c fallback retry boundaries and switch h2c HTTP2-Settings encoding
+  to base64-ng 1.2.2's fixed-input infallible encoder.
+
 * Tue Jun 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.29-1
 - Move inherited compression, header-policy behavior, forwarded-header
   ownership, access policy, concurrency, rate limiting, gRPC validation,
