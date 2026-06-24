@@ -561,28 +561,36 @@ impl NativeStaticMemoryCache {
             return Err("ttl-zero");
         }
 
-        let weight = static_cache_entry_weight(response, body_len);
+        let weight = static_cache_entry_weight(key, response, body_len);
         if weight > self.max_bytes {
             return Err("object-too-large");
         }
         let body: Arc<[u8]> = Arc::from(response.body().to_vec());
+        let key = key.to_owned();
+        let now = Instant::now();
         let entry = NativeStaticCacheEntry {
             status: response.status(),
             reason: response.reason().to_owned(),
             headers: response.headers().to_vec(),
             content_length: response.content_length(),
             body,
-            expires_at: Instant::now() + ttl,
-            stored_at: Instant::now(),
+            expires_at: now + ttl,
+            stored_at: now,
             weight,
         };
-        let mut state = lock_static_cache(&self.state);
-        if let Some(previous) = state.objects.remove(key) {
-            state.bytes = state.bytes.saturating_sub(previous.weight);
+        let needs_prune = {
+            let mut state = lock_static_cache(&self.state);
+            if let Some(previous) = state.objects.remove(&key) {
+                state.bytes = state.bytes.saturating_sub(previous.weight);
+            }
+            state.bytes = state.bytes.saturating_add(weight);
+            state.objects.insert(key, entry);
+            state.bytes > self.max_bytes
+        };
+        if needs_prune {
+            let mut state = lock_static_cache(&self.state);
+            prune_static_cache(&mut state, self.max_bytes);
         }
-        state.bytes = state.bytes.saturating_add(weight);
-        state.objects.insert(key.to_owned(), entry);
-        prune_static_cache(&mut state, self.max_bytes);
         Ok(())
     }
 }
@@ -672,49 +680,54 @@ fn static_cache_ttl(
         .map(Duration::from_secs)
 }
 
-fn static_cache_entry_weight(response: &NativeHttp1Response, body_len: u64) -> u64 {
-    response
-        .headers()
-        .iter()
-        .fold(body_len, |weight, (name, value)| {
+fn static_cache_entry_weight(key: &str, response: &NativeHttp1Response, body_len: u64) -> u64 {
+    const ENTRY_OVERHEAD: u64 = 256;
+
+    response.headers().iter().fold(
+        body_len
+            .saturating_add(ENTRY_OVERHEAD)
+            .saturating_add(key.len() as u64)
+            .saturating_add(response.reason().len() as u64),
+        |weight, (name, value)| {
             weight
                 .saturating_add(name.len() as u64)
                 .saturating_add(value.len() as u64)
                 .saturating_add(4)
-        })
+        },
+    )
 }
 
 fn prune_static_cache(state: &mut NativeStaticMemoryCacheState, max_bytes: u64) {
     let now = Instant::now();
-    let expired: Vec<String> = state
-        .objects
-        .iter()
-        .filter(|(_, entry)| entry.expires_at <= now)
-        .map(|(key, _)| key.clone())
-        .collect();
-    for key in expired {
+    let mut expired_bytes = 0_u64;
+    state.objects.retain(|_, entry| {
+        let keep = entry.expires_at > now;
+        if !keep {
+            expired_bytes = expired_bytes.saturating_add(entry.weight);
+        }
+        keep
+    });
+    state.bytes = state.bytes.saturating_sub(expired_bytes);
+
+    while state.bytes > max_bytes {
+        let Some(key) = oldest_static_cache_key(state) else {
+            state.bytes = 0;
+            break;
+        };
         if let Some(entry) = state.objects.remove(&key) {
             state.bytes = state.bytes.saturating_sub(entry.weight);
-        }
-    }
-    if state.bytes <= max_bytes {
-        return;
-    }
-
-    let mut oldest: Vec<(String, Instant)> = state
-        .objects
-        .iter()
-        .map(|(key, entry)| (key.clone(), entry.stored_at))
-        .collect();
-    oldest.sort_by_key(|(_, stored_at)| *stored_at);
-    for (key, _) in oldest {
-        if state.bytes <= max_bytes {
+        } else {
             break;
         }
-        if let Some(entry) = state.objects.remove(&key) {
-            state.bytes = state.bytes.saturating_sub(entry.weight);
-        }
     }
+}
+
+fn oldest_static_cache_key(state: &NativeStaticMemoryCacheState) -> Option<String> {
+    state
+        .objects
+        .iter()
+        .min_by_key(|(_, entry)| entry.stored_at)
+        .map(|(key, _)| key.clone())
 }
 
 fn native_response_header_map(response: &NativeHttp1Response) -> http::HeaderMap {
@@ -937,11 +950,78 @@ fn content_type_for_path(path: &Path) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant, SystemTime};
 
     use tempfile::TempDir;
 
-    use super::{NativeStaticFile, open_static_body_file};
+    use super::{
+        NativeStaticCacheEntry, NativeStaticFile, NativeStaticMemoryCacheState,
+        open_static_body_file, prune_static_cache, static_cache_entry_weight,
+    };
+    use crate::NativeHttp1Response;
+
+    #[test]
+    fn static_cache_entry_weight_includes_entry_overhead() {
+        let response = NativeHttp1Response::new(200, "OK", b"hello")
+            .with_header("cache-control", "max-age=60");
+        let raw_bytes = 5_u64 + "cache-control".len() as u64 + "max-age=60".len() as u64 + 4;
+
+        let weight = static_cache_entry_weight("cache-key", &response, 5);
+
+        assert!(weight >= raw_bytes + 256 + "cache-key".len() as u64 + "OK".len() as u64);
+    }
+
+    #[test]
+    fn prune_static_cache_removes_expired_and_oldest_entries() {
+        let now = Instant::now();
+        let mut state = NativeStaticMemoryCacheState::default();
+        state.objects.insert(
+            "expired".to_owned(),
+            cache_entry(
+                now - Duration::from_secs(30),
+                now - Duration::from_secs(1),
+                100,
+            ),
+        );
+        state.objects.insert(
+            "old".to_owned(),
+            cache_entry(
+                now - Duration::from_secs(20),
+                now + Duration::from_secs(60),
+                100,
+            ),
+        );
+        state.objects.insert(
+            "new".to_owned(),
+            cache_entry(
+                now - Duration::from_secs(10),
+                now + Duration::from_secs(60),
+                100,
+            ),
+        );
+        state.bytes = 300;
+
+        prune_static_cache(&mut state, 150);
+
+        assert!(!state.objects.contains_key("expired"));
+        assert!(!state.objects.contains_key("old"));
+        assert!(state.objects.contains_key("new"));
+        assert_eq!(state.bytes, 100);
+    }
+
+    fn cache_entry(stored_at: Instant, expires_at: Instant, weight: u64) -> NativeStaticCacheEntry {
+        NativeStaticCacheEntry {
+            status: 200,
+            reason: "OK".to_owned(),
+            headers: Vec::new(),
+            content_length: Some(1),
+            body: Arc::from([b'x']),
+            expires_at,
+            stored_at,
+            weight,
+        }
+    }
 
     #[cfg(unix)]
     #[test]

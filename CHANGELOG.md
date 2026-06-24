@@ -68,6 +68,12 @@ behavior when the change improves security or project direction.
 - Add the first native cache adapter: route-level static web can now use the
   supported memory-only `cache.local_static` path with shared cache admission,
   bypass, revalidation, TTL, status-header, and file-identity key policy.
+- Harden native static-web memory cache accounting with conservative per-entry,
+  key, reason, and response-header overhead before admission, and reduce store
+  lock work by moving pruning out of the initial insert critical section.
+- Use a single stored/expiry `Instant` sample for native static-web memory
+  cache entries and prune expired/oldest entries without full-table vector
+  allocation and sorting.
 - Keep unsupported native cache shapes fail-closed: vhost cache, proxy/image
   cache, disk cache, and non-static route cache still report explicit native
   cache blockers until their adapters are implemented.
@@ -138,6 +144,8 @@ behavior when the change improves security or project direction.
 - Add live native route static-web tests proving a memory local-static cache
   returns `MISS` on first request and `HIT` on the second request through the
   native listener.
+- Add native static-web memory-cache tests for conservative entry weight
+  accounting and expired/oldest-entry pruning behavior.
 - Add route-config coverage proving static-web routes accept the supported
   memory local-static cache adapter.
 - Add native planning coverage proving static-web memory local-static cache
