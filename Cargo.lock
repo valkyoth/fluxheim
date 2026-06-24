@@ -1191,6 +1191,7 @@ version = "1.6.30"
 dependencies = [
  "fluxheim-config",
  "getrandom 0.4.3",
+ "percent-encoding",
 ]
 
 [[package]]

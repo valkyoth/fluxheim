@@ -7712,64 +7712,23 @@ fn php_script_name_for_request(
     php: &RuntimePhp,
     request_path: &str,
 ) -> Option<(String, String, bool)> {
-    let decoded = percent_encoding::percent_decode_str(request_path)
-        .decode_utf8()
-        .ok()?;
-    if !decoded.starts_with('/') || decoded.chars().any(char::is_control) {
-        return None;
-    }
-
-    let mut segments = Vec::new();
-    for segment in decoded.split('/') {
-        if segment.is_empty() || segment == "." {
-            continue;
-        }
-        if segment == ".." || segment.contains('\\') || segment.starts_with('.') {
-            return None;
-        }
-        segments.push(segment.to_owned());
-    }
-
-    if let Some((index, _)) = segments
-        .iter()
-        .enumerate()
-        .find(|(_, segment)| php_segment_has_allowed_extension(segment, php))
-    {
-        let script_name = format!("/{}", segments[..=index].join("/"));
-        let trailing = &segments[index + 1..];
-        if !trailing.is_empty() && php.config.path_info == crate::config::PhpPathInfoMode::Disabled
-        {
-            return None;
-        }
-        let path_info = if trailing.is_empty() {
-            String::new()
-        } else {
-            format!("/{}", trailing.join("/"))
-        };
-        return Some((script_name, path_info, true));
-    }
-
-    Some((format!("/{}", php.config.index), String::new(), false))
+    fluxheim_php_fpm::php_script_name_for_request(
+        request_path,
+        &php.config.index,
+        php.config.path_info,
+        &php.config.allowed_extensions,
+    )
+    .map(|parsed| (parsed.script_name, parsed.path_info, parsed.explicit_php))
 }
 
 #[cfg(feature = "php-fpm")]
 fn php_script_name_denied(php: &RuntimePhp, script_name: &str) -> bool {
-    php.config.deny_path_prefixes.iter().any(|prefix| {
-        script_name == prefix
-            || script_name
-                .strip_prefix(prefix)
-                .is_some_and(|rest| prefix.ends_with('/') || rest.starts_with('/'))
-    })
+    fluxheim_php_fpm::php_script_name_denied(&php.config.deny_path_prefixes, script_name)
 }
 
 #[cfg(feature = "php-fpm")]
 fn php_segment_has_allowed_extension(segment: &str, php: &RuntimePhp) -> bool {
-    segment.rsplit_once('.').is_some_and(|(_, extension)| {
-        php.config
-            .allowed_extensions
-            .iter()
-            .any(|allowed| extension.eq_ignore_ascii_case(allowed))
-    })
+    fluxheim_php_fpm::php_segment_has_allowed_extension(segment, &php.config.allowed_extensions)
 }
 
 #[cfg(feature = "php-fpm")]

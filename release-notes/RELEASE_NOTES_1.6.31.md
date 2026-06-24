@@ -33,6 +33,9 @@ exit work.
 - PHP split-container path mapping for `SCRIPT_FILENAME` and safe
   `PATH_TRANSLATED` generation now lives in `fluxheim-php-fpm`, keeping dot
   segment, hidden path, backslash, and control-byte rejection shared.
+- PHP request-path to `SCRIPT_NAME`/`PATH_INFO` parsing, allowed-extension
+  matching, and deny-prefix checks now live in `fluxheim-php-fpm`; the proxy
+  still owns static-file lookup and final execution decisions.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -63,6 +66,9 @@ exit work.
 - Added standalone `fluxheim-php-fpm` tests for split-container script
   filename mapping and unsafe `PATH_INFO` rejection, plus the existing root
   compatibility test for PHP `fpm_root` mapping.
+- Added standalone `fluxheim-php-fpm` tests for direct script detection,
+  front-controller fallback, PATH_INFO split mode, unsafe segment rejection,
+  allowed-extension matching, and deny-prefix matching.
 - Re-ran targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

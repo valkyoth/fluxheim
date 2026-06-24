@@ -358,6 +358,83 @@ pub struct ParsedPhpResponse {
     pub body: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PhpScriptName {
+    pub script_name: String,
+    pub path_info: String,
+    pub explicit_php: bool,
+}
+
+pub fn php_script_name_for_request(
+    request_path: &str,
+    index: &str,
+    path_info: fluxheim_config::PhpPathInfoMode,
+    allowed_extensions: &[String],
+) -> Option<PhpScriptName> {
+    let decoded = percent_encoding::percent_decode_str(request_path)
+        .decode_utf8()
+        .ok()?;
+    if !decoded.starts_with('/') || decoded.chars().any(char::is_control) {
+        return None;
+    }
+
+    let mut segments = Vec::new();
+    for segment in decoded.split('/') {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        if segment == ".." || segment.contains('\\') || segment.starts_with('.') {
+            return None;
+        }
+        segments.push(segment.to_owned());
+    }
+
+    if let Some((index, _)) = segments
+        .iter()
+        .enumerate()
+        .find(|(_, segment)| php_segment_has_allowed_extension(segment, allowed_extensions))
+    {
+        let script_name = format!("/{}", segments[..=index].join("/"));
+        let trailing = &segments[index + 1..];
+        if !trailing.is_empty() && path_info == fluxheim_config::PhpPathInfoMode::Disabled {
+            return None;
+        }
+        let path_info = if trailing.is_empty() {
+            String::new()
+        } else {
+            format!("/{}", trailing.join("/"))
+        };
+        return Some(PhpScriptName {
+            script_name,
+            path_info,
+            explicit_php: true,
+        });
+    }
+
+    Some(PhpScriptName {
+        script_name: format!("/{index}"),
+        path_info: String::new(),
+        explicit_php: false,
+    })
+}
+
+pub fn php_script_name_denied(deny_path_prefixes: &[String], script_name: &str) -> bool {
+    deny_path_prefixes.iter().any(|prefix| {
+        script_name == prefix
+            || script_name
+                .strip_prefix(prefix)
+                .is_some_and(|rest| prefix.ends_with('/') || rest.starts_with('/'))
+    })
+}
+
+pub fn php_segment_has_allowed_extension(segment: &str, allowed_extensions: &[String]) -> bool {
+    segment.rsplit_once('.').is_some_and(|(_, extension)| {
+        allowed_extensions
+            .iter()
+            .any(|allowed| extension.eq_ignore_ascii_case(allowed))
+    })
+}
+
 pub fn parse_php_response(
     stdout: &[u8],
     max_response_bytes: u64,
@@ -721,11 +798,12 @@ mod tests {
         php_fpm_endpoints_from_config, php_fpm_error_outcome, php_fpm_path_translated,
         php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
         php_fpm_retryable_status, php_fpm_script_filename, php_fpm_timeout_error,
-        php_header_param_name, php_host_param, php_request_header_params, php_server_name_param,
+        php_header_param_name, php_host_param, php_request_header_params, php_script_name_denied,
+        php_script_name_for_request, php_segment_has_allowed_extension, php_server_name_param,
         safe_php_header_name, safe_php_header_value, safe_php_param_value, split_first_colon,
         split_php_response, trim_ascii, trim_ascii_cr,
     };
-    use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
+    use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager, PhpPathInfoMode};
 
     #[test]
     fn php_fpm_error_outcomes_are_bounded() {
@@ -1017,6 +1095,112 @@ mod tests {
         assert!(php_fpm_path_translated(fpm_root, "/uploads/.secret").is_none());
         assert!(php_fpm_path_translated(fpm_root, "/uploads\\wp-config.php").is_none());
         assert!(php_fpm_path_translated(fpm_root, "/uploads/file\x01.txt").is_none());
+    }
+
+    #[test]
+    fn php_script_name_parser_accepts_direct_script_and_front_controller() {
+        let allowed = vec!["php".to_owned()];
+
+        let direct = php_script_name_for_request(
+            "/app.php",
+            "index.php",
+            PhpPathInfoMode::Disabled,
+            &allowed,
+        )
+        .expect("direct PHP script should parse");
+        assert_eq!(direct.script_name, "/app.php");
+        assert_eq!(direct.path_info, "");
+        assert!(direct.explicit_php);
+
+        let front = php_script_name_for_request(
+            "/missing/page",
+            "index.php",
+            PhpPathInfoMode::Disabled,
+            &allowed,
+        )
+        .expect("front controller fallback should parse");
+        assert_eq!(front.script_name, "/index.php");
+        assert_eq!(front.path_info, "");
+        assert!(!front.explicit_php);
+    }
+
+    #[test]
+    fn php_script_name_parser_rejects_unsafe_segments_and_controls() {
+        let allowed = vec!["php".to_owned()];
+
+        assert!(
+            php_script_name_for_request(
+                "/../app.php",
+                "index.php",
+                PhpPathInfoMode::Disabled,
+                &allowed
+            )
+            .is_none()
+        );
+        assert!(
+            php_script_name_for_request(
+                "/app.php/.hidden",
+                "index.php",
+                PhpPathInfoMode::Split,
+                &allowed
+            )
+            .is_none()
+        );
+        assert!(
+            php_script_name_for_request(
+                "/app.php/user%01admin",
+                "index.php",
+                PhpPathInfoMode::Split,
+                &allowed
+            )
+            .is_none()
+        );
+        assert!(
+            php_script_name_for_request(
+                "/app.php/user%7Fadmin",
+                "index.php",
+                PhpPathInfoMode::Split,
+                &allowed
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn php_script_name_parser_respects_path_info_and_deny_prefixes() {
+        let allowed = vec!["php".to_owned()];
+
+        assert!(
+            php_script_name_for_request(
+                "/app.php/user/1",
+                "index.php",
+                PhpPathInfoMode::Disabled,
+                &allowed
+            )
+            .is_none()
+        );
+        let split = php_script_name_for_request(
+            "/app.php/user/1",
+            "index.php",
+            PhpPathInfoMode::Split,
+            &allowed,
+        )
+        .expect("split PATH_INFO should parse");
+        assert_eq!(split.script_name, "/app.php");
+        assert_eq!(split.path_info, "/user/1");
+        assert!(split.explicit_php);
+
+        let deny = vec!["/wp-content/uploads/".to_owned()];
+        assert!(php_script_name_denied(
+            &deny,
+            "/wp-content/uploads/shell.php"
+        ));
+        assert!(!php_script_name_denied(
+            &deny,
+            "/wp-content/uploads2/app.php"
+        ));
+        assert!(php_segment_has_allowed_extension("index.PHP", &allowed));
+        assert!(!php_segment_has_allowed_extension("style.css", &allowed));
     }
 
     #[test]
