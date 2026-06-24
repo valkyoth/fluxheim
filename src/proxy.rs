@@ -32,6 +32,8 @@ use crate::http_types::{
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use bytes::Bytes;
+#[cfg(feature = "php-fpm")]
+use fluxheim_php_fpm::{MAX_PHP_PARAM_VALUE_BYTES, php_header_param_name, safe_php_param_value};
 #[cfg(feature = "cache")]
 use pingora::ErrorSource;
 #[cfg(feature = "cache")]
@@ -7139,8 +7141,6 @@ async fn respond_text_error(session: &mut Session, status: u16, body: Bytes) -> 
 }
 
 #[cfg(feature = "php-fpm")]
-const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
-#[cfg(feature = "php-fpm")]
 const DEFAULT_PHP_REQUEST_BODY_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 
 #[cfg(feature = "php-fpm")]
@@ -7859,40 +7859,6 @@ fn add_php_custom_params(
         }
         params.insert(name.clone().into(), value.clone().into());
     }
-}
-
-#[cfg(feature = "php-fpm")]
-fn php_header_param_name(name: &str) -> Option<String> {
-    if name.eq_ignore_ascii_case("proxy")
-        || name.eq_ignore_ascii_case("content-type")
-        || name.eq_ignore_ascii_case("content-length")
-    {
-        return None;
-    }
-    if name.is_empty()
-        || !name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-    {
-        return None;
-    }
-
-    let mut param = String::with_capacity("HTTP_".len() + name.len());
-    param.push_str("HTTP_");
-    for byte in name.bytes() {
-        if byte == b'-' {
-            param.push('_');
-        } else {
-            param.push((byte as char).to_ascii_uppercase());
-        }
-    }
-    Some(param)
-}
-
-#[cfg(feature = "php-fpm")]
-fn safe_php_param_value(value: &str) -> bool {
-    value.len() <= MAX_PHP_PARAM_VALUE_BYTES
-        && value.bytes().all(|byte| !matches!(byte, 0..=31 | 127))
 }
 
 #[cfg(feature = "php-fpm")]
@@ -10524,24 +10490,24 @@ mod tests {
     };
     #[cfg(feature = "load-balancer")]
     use super::{LoadBalancerMemberStateRequest, LoadBalancerRuntimeBackendState};
-    #[cfg(feature = "php-fpm")]
-    use super::{
-        MAX_PHP_PARAM_VALUE_BYTES, PendingPhpRequestBodySpool, PhpResolveOutcome, RuntimePhp,
-        add_php_custom_params, add_php_host_param, add_php_request_header_params,
-        apply_php_x_accel_expires, directory_slash_redirect_location, explicit_authority_port,
-        ignore_php_origin_cache_headers, parse_php_fpm_output, php_content_type_param,
-        php_fpm_path_translated, php_fpm_script_filename, php_header_param_name,
-        php_script_name_denied, php_script_name_for_request, php_server_name_param,
-        php_should_intercept_error_status, php_static_offload_file,
-        php_stderr_matches_failure_pattern, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
-        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
-    };
     #[cfg(feature = "cache")]
     use super::{
         PeerFillResponse, acquire_origin_fill_budget_permit, acquire_peer_fill_concurrency_permit,
         cache_origin_fill_budget_key, origin_slice_request_from_header, origin_slice_url,
         peer_fill_concurrency_key, peer_fill_request_from_header, peer_fill_url,
         prune_inactive_cache_fill_concurrency_counters, request_is_peer_fill,
+    };
+    #[cfg(feature = "php-fpm")]
+    use super::{
+        PendingPhpRequestBodySpool, PhpResolveOutcome, RuntimePhp, add_php_custom_params,
+        add_php_host_param, add_php_request_header_params, apply_php_x_accel_expires,
+        directory_slash_redirect_location, explicit_authority_port,
+        ignore_php_origin_cache_headers, parse_php_fpm_output, php_content_type_param,
+        php_fpm_path_translated, php_fpm_script_filename, php_script_name_denied,
+        php_script_name_for_request, php_server_name_param, php_should_intercept_error_status,
+        php_static_offload_file, php_stderr_matches_failure_pattern, php_stderr_metric_state,
+        php_x_accel_expires_ttl_secs, resolve_php_script, sanitized_php_stderr,
+        strip_php_response_headers,
     };
     #[cfg(any(
         feature = "compression-brotli",
@@ -10596,6 +10562,8 @@ mod tests {
         acquire_traffic_mirror_slot, traffic_mirror_forwarded_headers,
         traffic_mirror_sample_selected, traffic_mirror_url,
     };
+    #[cfg(feature = "php-fpm")]
+    use fluxheim_php_fpm::{MAX_PHP_PARAM_VALUE_BYTES, php_header_param_name};
 
     #[test]
     fn normalizes_split_cookie_headers_for_upstream_http1() {

@@ -21,6 +21,9 @@ exit work.
 - PHP-FPM response parsing now lives in the Pingora-independent
   `fluxheim-php-fpm` crate and returns plain status/header/body parts. The root
   proxy path only converts those parts into the current runtime response type.
+- PHP FastCGI parameter value validation and request-header-to-param-name
+  mapping now live in `fluxheim-php-fpm`, giving the native and compatibility
+  paths one shared policy for bounded, control-free PHP params.
 - The remaining normal-profile Pingora dependency exception target is now
   aligned with the roadmap: 1.6.31 is the cache/PHP adapter release, and 1.6.32
   remains the final Pingora-free proof release.
@@ -39,5 +42,7 @@ exit work.
 - Added standalone `fluxheim-php-fpm` tests for plain PHP response parsing,
   unsafe header rejection, and response/header size limits, then re-ran the
   existing root parser compatibility tests with `php-fpm` enabled.
+- Added standalone `fluxheim-php-fpm` tests for FastCGI param value bounds,
+  control-byte rejection, and deterministic HTTP header param-name mapping.
 - Re-ran the native runtime cutover evidence gate and the Pingora dependency
   policy gate against the 1.6.31 planning state.

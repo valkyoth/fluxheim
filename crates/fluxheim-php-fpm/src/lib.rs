@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
 
 static MANAGED_PHP_FPM_INSTANCE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+pub const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum PhpFpmEndpoint {
@@ -197,6 +198,38 @@ pub fn safe_php_header_value(value: &[u8]) -> bool {
     value
         .iter()
         .all(|byte| matches!(byte, b' ' | b'\t' | 0x21..=0x7E))
+}
+
+pub fn safe_php_param_value(value: &str) -> bool {
+    value.len() <= MAX_PHP_PARAM_VALUE_BYTES
+        && value.bytes().all(|byte| !matches!(byte, 0..=31 | 127))
+}
+
+pub fn php_header_param_name(name: &str) -> Option<String> {
+    if name.eq_ignore_ascii_case("proxy")
+        || name.eq_ignore_ascii_case("content-type")
+        || name.eq_ignore_ascii_case("content-length")
+    {
+        return None;
+    }
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        return None;
+    }
+
+    let mut param = String::with_capacity("HTTP_".len() + name.len());
+    param.push_str("HTTP_");
+    for byte in name.bytes() {
+        if byte == b'-' {
+            param.push('_');
+        } else {
+            param.push((byte as char).to_ascii_uppercase());
+        }
+    }
+    Some(param)
 }
 
 pub fn split_php_response(stdout: &[u8]) -> io::Result<(&[u8], &[u8])> {
@@ -580,13 +613,14 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        PhpFpmEndpoint, PhpFpmTimeoutKind, managed_php_fpm_config,
+        MAX_PHP_PARAM_VALUE_BYTES, PhpFpmEndpoint, PhpFpmTimeoutKind, managed_php_fpm_config,
         managed_php_fpm_instance_name_from_parts, managed_php_fpm_path_env_from,
         managed_php_fpm_restart_backoff_secs, parse_php_status, php_fpm_effective_connect_timeout,
         php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
         php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
-        php_fpm_retryable_status, php_fpm_timeout_error, safe_php_header_name,
-        safe_php_header_value, split_first_colon, split_php_response, trim_ascii, trim_ascii_cr,
+        php_fpm_retryable_status, php_fpm_timeout_error, php_header_param_name,
+        safe_php_header_name, safe_php_header_value, safe_php_param_value, split_first_colon,
+        split_php_response, trim_ascii, trim_ascii_cr,
     };
     use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
 
@@ -746,6 +780,30 @@ mod tests {
         assert!(!safe_php_header_value(b"bad\x7fdelete"));
         assert!(!safe_php_header_value(b"bad\r\ninject"));
         assert!(!safe_php_header_value("bad-é".as_bytes()));
+    }
+
+    #[test]
+    fn php_param_values_are_bounded_and_control_free() {
+        assert!(safe_php_param_value("content-type-value"));
+        assert!(safe_php_param_value(&"a".repeat(MAX_PHP_PARAM_VALUE_BYTES)));
+        assert!(!safe_php_param_value(
+            &"a".repeat(MAX_PHP_PARAM_VALUE_BYTES + 1)
+        ));
+        assert!(!safe_php_param_value("bad\nvalue"));
+        assert!(!safe_php_param_value("bad\x7fvalue"));
+    }
+
+    #[test]
+    fn php_header_param_names_are_bounded_and_predictable() {
+        assert_eq!(
+            php_header_param_name("x-request-id").as_deref(),
+            Some("HTTP_X_REQUEST_ID")
+        );
+        assert_eq!(php_header_param_name("proxy"), None);
+        assert_eq!(php_header_param_name("content-type"), None);
+        assert_eq!(php_header_param_name("content-length"), None);
+        assert_eq!(php_header_param_name("bad name"), None);
+        assert_eq!(php_header_param_name("bad_name"), None);
     }
 
     #[test]
