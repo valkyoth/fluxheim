@@ -475,6 +475,57 @@ pub fn php_static_file_script_name(
     Some(script_name)
 }
 
+pub fn php_static_offload_uri_target(target: &str) -> io::Result<&str> {
+    if target.chars().any(char::is_control) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "php X-Accel-Redirect target contains control characters",
+        ));
+    }
+    Ok(target)
+}
+
+pub fn php_static_offload_x_sendfile_local_path(
+    root: &Path,
+    fpm_root: &Path,
+    target: &str,
+) -> io::Result<PathBuf> {
+    if target.chars().any(char::is_control) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "php X-Sendfile target contains control characters",
+        ));
+    }
+    let target_path = Path::new(target);
+    let relative = target_path.strip_prefix(fpm_root).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "php X-Sendfile target is outside php.fpm_root",
+        )
+    })?;
+    if relative
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "php X-Sendfile target escapes php root",
+        ));
+    }
+    Ok(root.join(relative))
+}
+
+pub fn php_static_offload_file_allowed(local_path: &Path, allowed_extensions: &[String]) -> bool {
+    !local_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            allowed_extensions
+                .iter()
+                .any(|allowed| extension.eq_ignore_ascii_case(allowed))
+        })
+}
+
 pub fn php_segment_has_allowed_extension(segment: &str, allowed_extensions: &[String]) -> bool {
     segment.rsplit_once('.').is_some_and(|(_, extension)| {
         allowed_extensions
@@ -1307,6 +1358,67 @@ mod tests {
             "/blog/admin.php",
             "index.php"
         ));
+    }
+
+    #[test]
+    fn php_static_offload_policy_rejects_controls_and_script_targets() {
+        let allowed = vec!["php".to_owned()];
+
+        assert_eq!(
+            super::php_static_offload_uri_target("/style.css").unwrap(),
+            "/style.css"
+        );
+        assert!(super::php_static_offload_uri_target("/style.css\nbad").is_err());
+        assert!(super::php_static_offload_file_allowed(
+            Path::new("/srv/www/style.css"),
+            &allowed
+        ));
+        assert!(!super::php_static_offload_file_allowed(
+            Path::new("/srv/www/app.PHP"),
+            &allowed
+        ));
+    }
+
+    #[test]
+    fn php_x_sendfile_targets_map_from_fpm_root_to_local_root() {
+        let root = Path::new("/srv/www");
+        let fpm_root = Path::new("/app/public");
+
+        assert_eq!(
+            super::php_static_offload_x_sendfile_local_path(
+                root,
+                fpm_root,
+                "/app/public/assets/style.css"
+            )
+            .unwrap(),
+            Path::new("/srv/www/assets/style.css")
+        );
+        assert_eq!(
+            super::php_static_offload_x_sendfile_local_path(
+                root,
+                fpm_root,
+                "/app/public/../secret.txt"
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(
+            super::php_static_offload_x_sendfile_local_path(root, fpm_root, "/other/style.css")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(
+            super::php_static_offload_x_sendfile_local_path(
+                root,
+                fpm_root,
+                "/app/public/style.css\nbad"
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::InvalidInput
+        );
     }
 
     #[test]

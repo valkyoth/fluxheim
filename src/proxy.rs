@@ -9100,12 +9100,7 @@ fn php_static_offload_uri(
     php: &RuntimePhp,
     target: &str,
 ) -> io::Result<Option<crate::web::StaticFile>> {
-    if target.chars().any(char::is_control) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "php X-Accel-Redirect target contains control characters",
-        ));
-    }
+    let target = fluxheim_php_fpm::php_static_offload_uri_target(target)?;
     match php.files.resolve(target)? {
         ResolveResult::Found(file) if php_static_offload_file_allowed(php, &file) => Ok(Some(file)),
         ResolveResult::Found(_) | ResolveResult::Forbidden => Err(io::Error::new(
@@ -9128,29 +9123,11 @@ fn php_static_offload_rooted_path(
     php: &RuntimePhp,
     target: &str,
 ) -> io::Result<Option<crate::web::StaticFile>> {
-    if target.chars().any(char::is_control) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "php X-Sendfile target contains control characters",
-        ));
-    }
-    let target_path = std::path::Path::new(target);
-    let relative = target_path.strip_prefix(&php.fpm_root).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "php X-Sendfile target is outside php.fpm_root",
-        )
-    })?;
-    if relative
-        .components()
-        .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "php X-Sendfile target escapes php root",
-        ));
-    }
-    let local_path = php.root.join(relative);
+    let local_path = fluxheim_php_fpm::php_static_offload_x_sendfile_local_path(
+        &php.root,
+        &php.fpm_root,
+        target,
+    )?;
     match php.files.resolve_rooted_file(&local_path)? {
         ResolveResult::Found(file) if php_static_offload_file_allowed(php, &file) => Ok(Some(file)),
         ResolveResult::Found(_) | ResolveResult::Forbidden => Err(io::Error::new(
@@ -9170,16 +9147,7 @@ fn php_static_offload_rooted_path(
 
 #[cfg(feature = "php-fpm")]
 fn php_static_offload_file_allowed(php: &RuntimePhp, file: &crate::web::StaticFile) -> bool {
-    !file
-        .path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            php.config
-                .allowed_extensions
-                .iter()
-                .any(|allowed| extension.eq_ignore_ascii_case(allowed))
-        })
+    fluxheim_php_fpm::php_static_offload_file_allowed(&file.path, &php.config.allowed_extensions)
 }
 
 #[cfg(feature = "php-fpm")]
