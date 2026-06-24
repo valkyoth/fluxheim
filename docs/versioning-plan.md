@@ -2813,7 +2813,9 @@ available for the stabilization/security-only follow-up.
   cache adapter owns the full request/response/cache-key path. This line also
   moves HTTP/1 upstream PROXY protocol v1/v2 send onto the native path with
   pooling disabled for connection-scoped identity and HTTP/2 combinations
-  rejected until they can be represented safely.
+  rejected until they can be represented safely, and adds native Host/vhost
+  routing for exact and wildcard host patterns with compatibility default-vhost
+  fallback behavior.
 - `v1.6.32`: finish native load-balancer compatibility and remove the final
   Pingora runtime/listener/TLS adapter crates from normal builds. This release
   must close the remaining proxy gates that need runtime/load-balancer state:

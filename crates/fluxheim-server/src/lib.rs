@@ -16,6 +16,7 @@ mod native_http1;
 mod native_http1_acme;
 mod native_http1_client;
 mod native_http1_forwarded;
+mod native_http1_host_router;
 mod native_http1_plan;
 mod native_http1_proxy;
 mod native_http1_route_proxy;
@@ -49,6 +50,7 @@ pub use native_http1::{
 #[cfg(feature = "acme")]
 pub use native_http1_acme::NativeHttp1AcmeHttp01Store;
 pub use native_http1_client::{NativeHttp1Upstream, NativeTcpKeepalivePolicy};
+pub use native_http1_host_router::{NativeHttp1HostRouter, NativeHttp1HostRouterConfigError};
 pub use native_http1_plan::{
     NativeHttp1ProxyCandidate, NativeHttp1ProxyCutoverStatus, NativeHttp1ProxyCutoverSummary,
 };
@@ -123,6 +125,10 @@ mod native_http1_tests;
 #[cfg(test)]
 #[path = "native_http1_client_tests.rs"]
 mod native_http1_client_tests;
+
+#[cfg(test)]
+#[path = "native_http1_host_router_tests.rs"]
+mod native_http1_host_router_tests;
 
 #[cfg(test)]
 #[path = "native_http1_proxy_tests.rs"]

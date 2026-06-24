@@ -98,6 +98,9 @@ behavior when the change improves security or project direction.
 - Thread native listener local addresses and trusted-forwarded effective
   client addresses through `NativeHttp1Request`, so upstream PROXY protocol
   frames use the same client identity as native ACL/rate-limit/header policy.
+- Add a native HTTP/1 host router that builds one native route proxy per vhost
+  and dispatches exact and wildcard Host matches to the same default-vhost
+  fallback behavior used by the compatibility runtime.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to
@@ -176,6 +179,9 @@ behavior when the change improves security or project direction.
 - Add native proxy config tests proving HTTP/1 upstream PROXY protocol is
   accepted, origin pooling is disabled for it, and HTTP/2 combinations fail
   closed.
+- Add live native host-router tests proving exact Host dispatch, wildcard
+  longest-suffix matching, unknown/missing Host fallback, and default-vhost
+  config validation.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

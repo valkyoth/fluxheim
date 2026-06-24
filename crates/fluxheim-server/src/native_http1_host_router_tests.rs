@@ -1,0 +1,210 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+
+use crate::{
+    DownstreamHttp1Policy, NativeHttp1HostRouter, NativeHttp1HostRouterConfigError,
+    serve_native_http1_listener,
+};
+
+async fn upstream_response(body: &'static str) -> std::net::SocketAddr {
+    upstream_response_count(body, 1).await
+}
+
+async fn upstream_response_count(body: &'static str, count: usize) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        for _ in 0..count {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        }
+    });
+    addr
+}
+
+async fn router_listener(router: NativeHttp1HostRouter) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        serve_native_http1_listener(
+            listener,
+            DownstreamHttp1Policy::default(),
+            Arc::new(router),
+            async {
+                let _ = shutdown_rx.await;
+            },
+        )
+        .await
+        .unwrap();
+    });
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let _ = shutdown_tx.send(());
+    });
+    addr
+}
+
+async fn downstream_get(proxy: std::net::SocketAddr, host: Option<&str>) -> String {
+    let host_header = host
+        .map(|host| format!("Host: {host}\r\n"))
+        .unwrap_or_default();
+    let request = format!("GET / HTTP/1.1\r\n{host_header}Connection: close\r\n\r\n");
+    downstream_request(proxy, &request).await
+}
+
+async fn downstream_get_http10(proxy: std::net::SocketAddr) -> String {
+    downstream_request(proxy, "GET / HTTP/1.0\r\nConnection: close\r\n\r\n").await
+}
+
+async fn downstream_request(proxy: std::net::SocketAddr, request: &str) -> String {
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+    client.write_all(request.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.unwrap();
+    String::from_utf8(response).unwrap()
+}
+
+fn vhost(
+    name: &str,
+    hosts: &[&str],
+    upstream: std::net::SocketAddr,
+) -> fluxheim_config::VhostConfig {
+    let mut proxy = fluxheim_config::ProxyConfig::disabled();
+    proxy.upstream = Some(upstream.to_string());
+    fluxheim_config::VhostConfig {
+        name: name.to_owned(),
+        hosts: hosts.iter().map(|host| (*host).to_owned()).collect(),
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: Default::default(),
+        proxy,
+        cache: Default::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: Default::default(),
+        routes: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn native_host_router_routes_exact_hosts_and_default_fallback() {
+    let primary = upstream_response("primary").await;
+    let secondary = upstream_response("secondary").await;
+    let fallback = upstream_response("fallback").await;
+    let mut config = fluxheim_config::Config::default();
+    config.server.default_vhost = Some("fallback".to_owned());
+    config.vhosts = vec![
+        vhost("primary", &["primary.test"], primary),
+        vhost("secondary", &["secondary.test"], secondary),
+        vhost("fallback", &["fallback.test"], fallback),
+    ];
+
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let primary_response = downstream_get(proxy, Some("primary.test")).await;
+    let secondary_response = downstream_get(proxy, Some("secondary.test:80")).await;
+    let fallback_response = downstream_get(proxy, Some("unknown.test")).await;
+
+    assert!(primary_response.ends_with("primary"));
+    assert!(secondary_response.ends_with("secondary"));
+    assert!(fallback_response.ends_with("fallback"));
+}
+
+#[tokio::test]
+async fn native_host_router_falls_back_for_missing_and_invalid_host() {
+    let first = upstream_response("first").await;
+    let fallback = upstream_response_count("fallback", 2).await;
+    let mut config = fluxheim_config::Config::default();
+    config.server.default_vhost = Some("fallback".to_owned());
+    config.vhosts = vec![
+        vhost("first", &["first.test"], first),
+        vhost("fallback", &["fallback.test"], fallback),
+    ];
+
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let missing = downstream_get_http10(proxy).await;
+    let unknown = downstream_get(proxy, Some("unknown.test")).await;
+
+    assert!(missing.ends_with("fallback"));
+    assert!(unknown.ends_with("fallback"));
+}
+
+#[tokio::test]
+async fn native_host_router_routes_wildcards_by_longest_suffix() {
+    let wildcard = upstream_response("wildcard").await;
+    let specific = upstream_response("specific").await;
+    let default = upstream_response("default").await;
+    let mut config = fluxheim_config::Config::default();
+    config.server.default_vhost = Some("default".to_owned());
+    config.vhosts = vec![
+        vhost("wildcard", &["*.example.test"], wildcard),
+        vhost("specific", &["*.api.example.test"], specific),
+        vhost("default", &["default.test"], default),
+    ];
+
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let wildcard_response = downstream_get(proxy, Some("www.example.test")).await;
+    let specific_response = downstream_get(proxy, Some("v1.api.example.test")).await;
+    let apex_response = downstream_get(proxy, Some("example.test")).await;
+
+    assert!(wildcard_response.ends_with("wildcard"));
+    assert!(specific_response.ends_with("specific"));
+    assert!(apex_response.ends_with("default"));
+}
+
+#[test]
+fn native_host_router_rejects_unknown_default_vhost() {
+    let mut config = fluxheim_config::Config::default();
+    config.server.default_vhost = Some("missing".to_owned());
+    config.vhosts = vec![vhost(
+        "first",
+        &["first.test"],
+        "127.0.0.1:3000".parse().unwrap(),
+    )];
+
+    assert!(matches!(
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0),
+        Err(NativeHttp1HostRouterConfigError::MissingDefaultVhost { name })
+            if name == "missing"
+    ));
+}

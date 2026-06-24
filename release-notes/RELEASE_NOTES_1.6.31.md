@@ -94,6 +94,9 @@ exit work.
 - Native requests now carry both the direct listener peer/local address and the
   trusted-forwarded effective client address, so upstream PROXY protocol uses
   the same client identity as native ACL/rate-limit/header policy.
+- Native HTTP/1 now has a host router that builds one native route proxy per
+  configured vhost and dispatches exact and wildcard Host matches with the same
+  default-vhost fallback behavior as the compatibility runtime.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -171,6 +174,9 @@ exit work.
 - Added native proxy config tests proving HTTP/1 upstream PROXY protocol is
   accepted, origin pooling is disabled for it, and HTTP/2 upstream
   combinations fail closed.
+- Added live native host-router tests proving exact Host dispatch, wildcard
+  longest-suffix matching, unknown/missing Host fallback, and default-vhost
+  config validation.
 - Re-ran targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.
