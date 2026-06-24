@@ -160,6 +160,9 @@ behavior when the change improves security or project direction.
   concentration for forwarded-client identities.
 - Use saturating `Instant` arithmetic for native rate-limit refill and prune
   decisions so future-dated bucket samples cannot panic the request path.
+- Reject residual percent-encoding in native static-web filesystem path
+  segments after the initial decode pass, avoiding ambiguous double-encoded
+  traversal forms on fallback static serving.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to
@@ -175,6 +178,8 @@ behavior when the change improves security or project direction.
   policies are rejected directly until native adapters own those paths.
 - Add a live native HTTP/1 proxy test proving safe-method failover skips
   duplicate weighted upstream slots before trying the next unique backend.
+- Add live native static-web route and fallback tests for double-encoded
+  traversal rejection.
 - Add `fluxheim-cache` tests for image/static cache-key construction,
   namespace/query/host normalization, and local-static file identity.
 - Add native HTTP/1 tests proving `NativeHttp1Request` feeds cache request

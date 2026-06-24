@@ -258,6 +258,7 @@ impl NativeHttp1StaticWeb {
                 continue;
             }
             if segment == ".."
+                || segment.contains('%')
                 || segment.contains('\\')
                 || (self.deny_dotfiles && segment.starts_with('.'))
             {

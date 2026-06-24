@@ -154,6 +154,9 @@ exit work.
 - Native rate-limit token refill and expiry pruning now use saturating
   `Instant` arithmetic, avoiding panic surfaces if a bucket timestamp is ever
   observed ahead of the current sample.
+- Native static-web filesystem path resolution now rejects residual
+  percent-encoding after the initial decode pass, avoiding ambiguous
+  double-encoded traversal forms on fallback static serving.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -168,6 +171,8 @@ exit work.
   policies are rejected directly until native adapters own those paths.
 - Added a live native HTTP/1 proxy test proving safe-method failover skips
   duplicate weighted upstream slots before trying the next unique backend.
+- Added live native static-web route and fallback tests for double-encoded
+  traversal rejection.
 - Added standalone `fluxheim-cache` tests for cache-key construction,
   namespace/query/host normalization, and local-static file identity.
 - Added native HTTP/1 tests proving cache request policy helpers work through

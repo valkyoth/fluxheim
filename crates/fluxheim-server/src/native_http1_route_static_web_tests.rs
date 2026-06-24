@@ -226,6 +226,48 @@ async fn native_route_proxy_caches_vhost_static_web_file_in_memory() {
 }
 
 #[tokio::test]
+async fn native_route_proxy_fallback_static_web_rejects_double_encoded_traversal() {
+    let root = TempDir::new().unwrap();
+    let vhost = fluxheim_config::VhostConfig {
+        name: "route.test".to_owned(),
+        hosts: vec!["route.test".to_owned()],
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: Default::default(),
+        proxy: fluxheim_config::ProxyConfig::disabled(),
+        cache: Default::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: fluxheim_config::WebConfig {
+            root: Some(root.path().to_path_buf()),
+            ..Default::default()
+        },
+        routes: Vec::new(),
+    };
+    let route_proxy = NativeHttp1RouteProxy::from_vhost_config(
+        &vhost,
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        None,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(route_proxy).await;
+
+    let response = downstream_get(proxy, "/%252e%252e/secret.txt").await;
+
+    assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(response.ends_with("forbidden\n"));
+
+    root.close().unwrap();
+}
+
+#[tokio::test]
 async fn native_route_proxy_serves_static_web_range() {
     let root = TempDir::new().unwrap();
     fs::write(root.path().join("asset.txt"), b"abcdef").unwrap();
@@ -289,6 +331,25 @@ async fn native_route_proxy_static_web_rejects_traversal() {
     let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
 
     let response = downstream_get(proxy, "/files/%2e%2e/secret.txt").await;
+
+    assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    assert!(response.ends_with("bad request\n"));
+
+    root.close().unwrap();
+}
+
+#[tokio::test]
+async fn native_route_proxy_static_web_rejects_double_encoded_traversal() {
+    let root = TempDir::new().unwrap();
+    let route = NativeHttp1RouteProxyRoute::prefix_static_web(
+        "/files/",
+        Vec::new(),
+        native_static_web(root.path()),
+    )
+    .with_strip_prefix("/files/");
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/files/%252e%252e/secret.txt").await;
 
     assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     assert!(response.ends_with("bad request\n"));
