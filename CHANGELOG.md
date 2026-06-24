@@ -31,6 +31,8 @@ behavior when the change improves security or project direction.
   shared policy for bounded, control-free PHP params.
 - Move PHP `SERVER_NAME` fallback selection into `fluxheim-php-fpm`, keeping
   host/fallback sanitization shared by native and compatibility paths.
+- Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
+  server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to
   `1.6.32`, matching the revised plan where 1.6.31 handles cache/PHP native
   integration and 1.6.32 is the final Pingora-free proof release.
@@ -54,6 +56,9 @@ behavior when the change improves security or project direction.
   control-byte rejection, and deterministic HTTP header param-name mapping.
 - Add standalone and compatibility tests for PHP `SERVER_NAME` fallback
   behavior when the request host is unsafe.
+- Re-run targeted tests for native HTTP/1 client encoding, load-balancer
+  persistence constant-time comparisons, and TLS secret handling after the
+  dependency refresh.
 - Re-run the native runtime cutover and Pingora dependency policy evidence for
   the 1.6.31 planning state.
 

@@ -42,13 +42,13 @@ h2 = { version = "0.4.15", features = ["unstable"] }
 http = "1.4.2"
 httpdate = "1.0.3"
 log = "0.4.33"
-base64-ng = "1.2.2"
+base64-ng = "1.2.3"
 openssl = { version = "0.10.81", optional = true }
 percent-encoding = "2.3.2"
 regex = "1.12.4"
 rustls = { version = "0.23.41", optional = true }
 rustls-native-certs = { version = "0.8.4", optional = true }
-sanitization = { version = "1.2.1", optional = true }
+sanitization = { version = "1.2.2", optional = true }
 sha2 = { version = "0.11.0", optional = true }
 socket2 = { version = "0.6.3", features = ["all"] }
 tokio = { version = "1.52.3", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }

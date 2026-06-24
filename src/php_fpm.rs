@@ -456,8 +456,6 @@ pub(crate) fn parse_php_response(
         max_response_header_bytes,
     )?;
     let mut response = php_response_header(parsed.status).map_err(FluxError::into_io)?;
-    response.status = StatusCode::from_u16(parsed.status)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     for (name, value) in parsed.headers {
         response
             .append_header(name, value)

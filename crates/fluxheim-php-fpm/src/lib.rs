@@ -301,17 +301,7 @@ pub fn parse_php_response(
             status = parse_php_status(value)?;
             continue;
         }
-        let name = std::str::from_utf8(name).map_err(|error| {
-            php_response_parse_error(format!(
-                "PHP response header name is not valid UTF-8: {error}"
-            ))
-        })?;
-        let value = std::str::from_utf8(value).map_err(|error| {
-            php_response_parse_error(format!(
-                "PHP response header value is not valid UTF-8: {error}"
-            ))
-        })?;
-        headers.push((name.to_owned(), value.to_owned()));
+        headers.push((ascii_bytes_to_string(name), ascii_bytes_to_string(value)));
     }
 
     Ok(ParsedPhpResponse {
@@ -319,6 +309,10 @@ pub fn parse_php_response(
         headers,
         body: body.to_vec(),
     })
+}
+
+fn ascii_bytes_to_string(value: &[u8]) -> String {
+    value.iter().map(|byte| char::from(*byte)).collect()
 }
 
 pub fn parse_php_status(value: &[u8]) -> io::Result<u16> {
