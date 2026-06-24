@@ -114,6 +114,9 @@ exit work.
   behind the `fluxheim-server/load-balancer` feature, preparing native
   persistence and hash selection to consume native request metadata without a
   Pingora request adapter.
+- `SelectedUpstream` now exposes stable address and authority accessors, giving
+  native callers a public bridge from Fluxheim-owned load-balancer selection to
+  upstream connection setup without reaching into backend internals.
 - The metrics service now has a concrete native HTTP handler around the
   existing Prometheus response generator, giving the future native runner a
   direct handler for metrics HTTP.
@@ -220,6 +223,9 @@ exit work.
   hardening values.
 - Added feature-gated native request-view tests proving URI keys, repeated
   header values, and Cookie headers are exposed to `fluxheim-load-balancer`.
+- Added a feature-gated native server test proving `NativeHttp1Request` drives
+  real load-balancer header-hash selection through the shared request-view
+  boundary.
 - Re-ran targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

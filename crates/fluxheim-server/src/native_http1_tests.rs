@@ -168,6 +168,44 @@ fn native_http1_request_implements_load_balancer_request_view() {
     );
 }
 
+#[cfg(feature = "load-balancer")]
+#[test]
+fn native_http1_request_drives_load_balancer_header_hash_selection() {
+    let balancer = fluxheim_load_balancer::UpstreamLoadBalancer::from_proxy_config(
+        &fluxheim_config::ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: fluxheim_config::LoadBalanceConfig {
+                selection: fluxheim_config::LoadBalanceSelection::HeaderHash,
+                hash_header: Some("x-shard".to_owned()),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .expect("load balancer config")
+    .expect("load balancer");
+    let first_request = native_http1_cache_view_request(
+        "GET",
+        "/api/items",
+        vec![("x-shard".to_owned(), "tenant-a".to_owned())],
+    );
+    let second_request = native_http1_cache_view_request(
+        "GET",
+        "/api/items",
+        vec![("X-Shard".to_owned(), "tenant-a".to_owned())],
+    );
+
+    let first = balancer
+        .select(&first_request, None)
+        .expect("first selection");
+    let second = balancer
+        .select(&second_request, None)
+        .expect("second selection");
+
+    assert_eq!(first.address(), second.address());
+    assert!(first.authority() == "127.0.0.1:3000" || first.authority() == "127.0.0.1:3001");
+}
+
 #[test]
 fn native_http1_request_cache_view_handles_absolute_targets_and_duplicate_headers() {
     let request = native_http1_cache_view_request(

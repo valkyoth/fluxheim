@@ -118,6 +118,9 @@ behavior when the change improves security or project direction.
   `LoadBalancerRequestView` for `NativeHttp1Request`, preparing native
   load-balancer persistence/hash selection to consume native request metadata
   without a Pingora request adapter.
+- Add stable address/authority accessors on `SelectedUpstream`, giving native
+  callers a public bridge from Fluxheim-owned load-balancer selection to
+  upstream connection setup without reaching into backend internals.
 - Add a concrete native metrics HTTP handler around the existing Prometheus
   response generator, giving the future native runner a direct handler for the
   metrics service.
@@ -242,6 +245,9 @@ behavior when the change improves security or project direction.
   hardening values.
 - Add feature-gated native request-view tests proving URI keys, repeated header
   values, and Cookie headers are exposed to `fluxheim-load-balancer`.
+- Add a feature-gated native server test proving `NativeHttp1Request` drives
+  real load-balancer header-hash selection through the shared request-view
+  boundary.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

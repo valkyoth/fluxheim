@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -60,6 +61,14 @@ impl SelectedUpstream {
             persistence_outcome: None,
             managed_affinity_cookie: None,
         }
+    }
+
+    pub fn address(&self) -> SocketAddr {
+        self.backend.addr
+    }
+
+    pub fn authority(&self) -> String {
+        self.backend.addr.to_string()
     }
 }
 
