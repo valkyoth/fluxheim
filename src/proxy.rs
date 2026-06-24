@@ -9168,7 +9168,7 @@ fn apply_php_x_accel_expires(response: &mut ResponseHeader) -> FluxResult<()> {
         return Ok(());
     }
 
-    let Some(ttl_secs) = php_x_accel_expires_ttl_secs(&raw_value) else {
+    let Some(ttl_secs) = fluxheim_php_fpm::php_x_accel_expires_ttl_secs(&raw_value) else {
         return Ok(());
     };
 
@@ -9211,30 +9211,17 @@ fn apply_php_x_accel_expires(response: &mut ResponseHeader) -> FluxResult<()> {
 
 #[cfg(feature = "php-fpm")]
 fn php_origin_cache_policy_is_restrictive(response: &ResponseHeader) -> bool {
-    response
+    let cache_control = response
         .headers
         .get_all("cache-control")
         .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .map(|directive| {
-            directive
-                .trim()
-                .split_once('=')
-                .map_or_else(|| directive.trim(), |(name, _)| name.trim())
-        })
-        .any(|directive| {
-            directive.eq_ignore_ascii_case("private")
-                || directive.eq_ignore_ascii_case("no-store")
-                || directive.eq_ignore_ascii_case("no-cache")
-        })
-        || response
-            .headers
-            .get_all("pragma")
-            .iter()
-            .filter_map(|value| value.to_str().ok())
-            .flat_map(|value| value.split(','))
-            .any(|directive| directive.trim().eq_ignore_ascii_case("no-cache"))
+        .filter_map(|value| value.to_str().ok());
+    let pragma = response
+        .headers
+        .get_all("pragma")
+        .iter()
+        .filter_map(|value| value.to_str().ok());
+    fluxheim_php_fpm::php_origin_cache_policy_is_restrictive(cache_control, pragma)
 }
 
 #[cfg(feature = "php-fpm")]
@@ -9243,20 +9230,6 @@ fn php_x_accel_header_error(error: impl std::fmt::Display) -> FluxError {
         "apply PHP X-Accel-Expires response headers",
         io::Error::other(error.to_string()),
     )
-}
-
-#[cfg(feature = "php-fpm")]
-fn php_x_accel_expires_ttl_secs(value: &str) -> Option<u64> {
-    if let Some(epoch) = value.strip_prefix('@') {
-        let epoch = epoch.parse::<u64>().ok()?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .ok()?
-            .as_secs();
-        return Some(epoch.saturating_sub(now));
-    }
-    let ttl = value.parse::<i64>().ok()?;
-    Some(u64::try_from(ttl).unwrap_or(0))
 }
 
 #[cfg(feature = "php-fpm")]
@@ -10367,8 +10340,8 @@ mod tests {
         ignore_php_origin_cache_headers, parse_php_fpm_output, php_content_type_param,
         php_fpm_path_translated, php_fpm_script_filename, php_script_name_denied,
         php_script_name_for_request, php_should_intercept_error_status, php_static_offload_file,
-        php_stderr_matches_failure_pattern, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
-        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
+        php_stderr_matches_failure_pattern, php_stderr_metric_state, resolve_php_script,
+        sanitized_php_stderr, strip_php_response_headers,
     };
     #[cfg(any(
         feature = "compression-brotli",
@@ -12438,12 +12411,15 @@ mod tests {
             .unwrap()
             .as_secs()
             + 60;
-        let ttl = php_x_accel_expires_ttl_secs(&format!("@{}", future)).unwrap();
+        let ttl = fluxheim_php_fpm::php_x_accel_expires_ttl_secs(&format!("@{}", future)).unwrap();
 
         assert!(ttl <= 60);
         assert!(ttl > 0);
-        assert_eq!(php_x_accel_expires_ttl_secs("-1"), Some(0));
-        assert_eq!(php_x_accel_expires_ttl_secs("bad"), None);
+        assert_eq!(
+            fluxheim_php_fpm::php_x_accel_expires_ttl_secs("-1"),
+            Some(0)
+        );
+        assert_eq!(fluxheim_php_fpm::php_x_accel_expires_ttl_secs("bad"), None);
     }
 
     #[cfg(feature = "php-fpm")]

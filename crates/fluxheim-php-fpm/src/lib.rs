@@ -526,6 +526,47 @@ pub fn php_static_offload_file_allowed(local_path: &Path, allowed_extensions: &[
         })
 }
 
+pub fn php_x_accel_expires_ttl_secs(value: &str) -> Option<u64> {
+    if let Some(epoch) = value.strip_prefix('@') {
+        let epoch = epoch.parse::<u64>().ok()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        return Some(epoch.saturating_sub(now));
+    }
+    let ttl = value.parse::<i64>().ok()?;
+    Some(u64::try_from(ttl).unwrap_or(0))
+}
+
+pub fn php_origin_cache_policy_is_restrictive<'a, C, P>(
+    cache_control_values: C,
+    pragma_values: P,
+) -> bool
+where
+    C: IntoIterator<Item = &'a str>,
+    P: IntoIterator<Item = &'a str>,
+{
+    cache_control_values
+        .into_iter()
+        .flat_map(|value| value.split(','))
+        .map(|directive| {
+            directive
+                .trim()
+                .split_once('=')
+                .map_or_else(|| directive.trim(), |(name, _)| name.trim())
+        })
+        .any(|directive| {
+            directive.eq_ignore_ascii_case("private")
+                || directive.eq_ignore_ascii_case("no-store")
+                || directive.eq_ignore_ascii_case("no-cache")
+        })
+        || pragma_values
+            .into_iter()
+            .flat_map(|value| value.split(','))
+            .any(|directive| directive.trim().eq_ignore_ascii_case("no-cache"))
+}
+
 pub fn php_segment_has_allowed_extension(segment: &str, allowed_extensions: &[String]) -> bool {
     segment.rsplit_once('.').is_some_and(|(_, extension)| {
         allowed_extensions
@@ -1419,6 +1460,43 @@ mod tests {
             .kind(),
             io::ErrorKind::InvalidInput
         );
+    }
+
+    #[test]
+    fn php_x_accel_expires_ttl_parser_is_bounded() {
+        let future = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 60;
+        let ttl = super::php_x_accel_expires_ttl_secs(&format!("@{future}")).unwrap();
+
+        assert!(ttl <= 60);
+        assert!(ttl > 0);
+        assert_eq!(super::php_x_accel_expires_ttl_secs("120"), Some(120));
+        assert_eq!(super::php_x_accel_expires_ttl_secs("0"), Some(0));
+        assert_eq!(super::php_x_accel_expires_ttl_secs("-1"), Some(0));
+        assert_eq!(super::php_x_accel_expires_ttl_secs("bad"), None);
+    }
+
+    #[test]
+    fn php_origin_cache_policy_detects_restrictive_directives() {
+        assert!(super::php_origin_cache_policy_is_restrictive(
+            ["public, private=max-age=1"],
+            []
+        ));
+        assert!(super::php_origin_cache_policy_is_restrictive(
+            ["public, no-store"],
+            []
+        ));
+        assert!(super::php_origin_cache_policy_is_restrictive(
+            ["public"],
+            ["no-cache"]
+        ));
+        assert!(!super::php_origin_cache_policy_is_restrictive(
+            ["public, max-age=60"],
+            []
+        ));
     }
 
     #[test]

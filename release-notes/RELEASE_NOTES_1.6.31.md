@@ -42,6 +42,9 @@ exit work.
 - PHP static-offload target validation now lives in `fluxheim-php-fpm`,
   including X-Accel-Redirect control-byte rejection, X-Sendfile `fpm_root`
   mapping, and PHP-script offload blocking.
+- PHP X-Accel-Expires TTL parsing and restrictive origin cache-policy detection
+  now live in `fluxheim-php-fpm`, giving native PHP response handling the same
+  cache safety rules as the compatibility path.
 - PHP `CONTENT_TYPE` joining now caps and validates during accumulation instead
   of building an oversized intermediate string before rejecting it.
 - Pure local-static cache keys now use the explicit `fluxheim-static-v1;`
@@ -86,6 +89,9 @@ exit work.
 - Added standalone `fluxheim-php-fpm` tests for PHP static-offload path policy,
   plus root compatibility coverage for X-Accel-Redirect and X-Sendfile
   handling.
+- Added standalone `fluxheim-php-fpm` tests for X-Accel-Expires TTL parsing and
+  restrictive origin cache-policy detection, plus existing root compatibility
+  coverage for absolute-epoch parsing.
 - Added PHP-FPM tests proving `CONTENT_TYPE` rejects control bytes and
   over-limit joined values without retaining the oversized joined result.
 - Updated standalone `fluxheim-cache` tests to assert the local-static key
