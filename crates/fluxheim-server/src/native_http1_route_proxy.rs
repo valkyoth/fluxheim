@@ -607,7 +607,9 @@ impl NativeRateLimit {
             );
             std::process::abort();
         });
-        let elapsed = now.duration_since(bucket.updated_at).as_secs_f64();
+        let elapsed = now
+            .saturating_duration_since(bucket.updated_at)
+            .as_secs_f64();
         bucket.tokens = self
             .burst
             .min(bucket.tokens + elapsed * self.requests_per_second);
@@ -663,7 +665,7 @@ fn prune_native_rate_limit_entries(
         let Some(bucket) = buckets.entries.get(&key) else {
             continue;
         };
-        if now.duration_since(bucket.last_seen) > ttl {
+        if now.saturating_duration_since(bucket.last_seen) > ttl {
             buckets.entries.remove(&key);
         } else {
             buckets.prune_queue.push_back(key);
@@ -2926,6 +2928,68 @@ mod tests {
         assert!(!buckets.entries.contains_key(&second));
         assert!(buckets.entries.contains_key(&third));
         assert_eq!(buckets.prune_queue, VecDeque::from([third]));
+    }
+
+    #[test]
+    fn native_rate_limit_prune_tolerates_future_bucket_times() {
+        let now = Instant::now();
+        let future = now + Duration::from_secs(5);
+        let key = NativeRateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)));
+        let mut buckets = NativeRateLimitBuckets {
+            entries: HashMap::from([(
+                key,
+                NativeRateLimitBucket {
+                    tokens: 1.0,
+                    updated_at: future,
+                    last_seen: future,
+                },
+            )]),
+            prune_queue: VecDeque::from([key]),
+            last_pruned_at: None,
+        };
+
+        prune_native_rate_limit_entries(&mut buckets, now, Duration::from_secs(1), 1);
+
+        assert!(buckets.entries.contains_key(&key));
+        assert_eq!(buckets.prune_queue, VecDeque::from([key]));
+    }
+
+    #[test]
+    fn native_rate_limit_check_tolerates_future_bucket_update_time() {
+        let limiter = NativeRateLimit {
+            enabled: true,
+            requests_per_second: 1.0,
+            burst: 1.0,
+            status: 429,
+            table_max_entries: 16,
+            entry_ttl: Duration::from_secs(60),
+            mode: RateLimitMode::Nodelay,
+            max_delay: Duration::from_millis(100),
+            reject_indeterminate: false,
+            state: Arc::new(NativeRateLimitState {
+                shards: native_rate_limit_shards(),
+            }),
+        };
+        let key = NativeRateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11)));
+        let shard = native_rate_limit_shard(key);
+        let future = Instant::now() + Duration::from_secs(5);
+        {
+            let mut buckets = limiter.state.shards[shard].lock().unwrap();
+            buckets.prune_queue.push_back(key);
+            buckets.entries.insert(
+                key,
+                NativeRateLimitBucket {
+                    tokens: 0.0,
+                    updated_at: future,
+                    last_seen: future,
+                },
+            );
+        }
+
+        assert_eq!(
+            limiter.check(Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11)))),
+            NativeRateLimitDecision::Reject(429)
+        );
     }
 
     #[test]

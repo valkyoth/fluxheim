@@ -151,6 +151,9 @@ exit work.
 - Native rate-limit sharding now hashes the full IPv4/IPv6 client address
   instead of using only the final address byte, reducing attacker-controlled
   hot-shard concentration when many trusted forwarded identities are present.
+- Native rate-limit token refill and expiry pruning now use saturating
+  `Instant` arithmetic, avoiding panic surfaces if a bucket timestamp is ever
+  observed ahead of the current sample.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now

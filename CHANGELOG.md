@@ -158,6 +158,8 @@ behavior when the change improves security or project direction.
 - Hash the full IPv4/IPv6 client address for native rate-limit shard selection
   instead of using only the final byte, reducing predictable hot-shard
   concentration for forwarded-client identities.
+- Use saturating `Instant` arithmetic for native rate-limit refill and prune
+  decisions so future-dated bucket samples cannot panic the request path.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to
