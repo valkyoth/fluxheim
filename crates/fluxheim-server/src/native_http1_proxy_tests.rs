@@ -991,6 +991,63 @@ async fn native_proxy_applies_header_policy() {
     assert!(response.ends_with("ok"));
 }
 
+#[tokio::test]
+async fn native_proxy_root_config_applies_response_header_policy() {
+    let upstream = upstream(|request, mut stream| async move {
+        let request = String::from_utf8(request).unwrap();
+        assert!(request.starts_with("GET /root-policy HTTP/1.1\r\n"));
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\n\
+                  content-length: 4\r\n\
+                  x-powered-by: php\r\n\
+                  x-root-remove: old\r\n\r\nroot",
+            )
+            .await
+            .unwrap();
+    })
+    .await;
+
+    let mut config = fluxheim_config::Config::default();
+    config.proxy.upstreams = vec![upstream.to_string()];
+    config
+        .headers
+        .response
+        .unset
+        .push("x-root-remove".to_owned());
+    config
+        .headers
+        .response
+        .set
+        .insert("x-root-response".to_owned(), "native".to_owned());
+    config.headers.response.append.insert(
+        "x-root-append".to_owned(),
+        fluxheim_config::HeaderValues::Many(vec!["one".to_owned()]),
+    );
+
+    let proxy = NativeHttp1Proxy::from_root_config(&config, DownstreamHttp1Policy::default(), 0)
+        .unwrap()
+        .unwrap();
+    let proxy = proxy_listener_for(proxy).await;
+
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+    client
+        .write_all(b"GET /root-policy HTTP/1.1\r\nHost: proxy.test\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains("x-root-response: native\r\n"));
+    assert!(response.contains("x-root-append: one\r\n"));
+    assert!(response.contains("x-content-type-options: nosniff\r\n"));
+    assert!(!response.to_ascii_lowercase().contains("x-powered-by:"));
+    assert!(!response.to_ascii_lowercase().contains("x-root-remove:"));
+    assert!(response.ends_with("root"));
+}
+
 #[cfg(not(feature = "privacy-mode"))]
 #[tokio::test]
 async fn native_proxy_applies_default_forwarded_header_policy() {

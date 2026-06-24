@@ -126,6 +126,9 @@ exit work.
 - The metrics service now has a concrete native HTTP handler around the
   existing Prometheus response generator, giving the future native runner a
   direct handler for metrics HTTP.
+- Root native HTTP/1 proxy construction now applies root response-header policy
+  and root compression config before cutover planning marks a root proxy as
+  native-ready.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -214,6 +217,9 @@ exit work.
   listener.
 - Added native metrics-handler tests proving only `GET`/`HEAD /metrics` is
   served, with HEAD returning the Prometheus content length without a body.
+- Added native root-proxy tests proving root response headers are stripped,
+  set, and appended through the root config constructor, plus planner coverage
+  for non-default root response headers.
 - Added a live native admin listener test proving the authenticated health
   endpoint is served correctly through the native HTTP/1 listener.
 - Startup now logs a native runtime manifest preview for blocker-free plans,

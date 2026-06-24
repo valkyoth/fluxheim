@@ -348,6 +348,28 @@ impl NativeHttp1Proxy {
         Self::from_proxy_config_with_pool_size(proxy, policy, 0)
     }
 
+    pub fn from_root_config(
+        config: &fluxheim_config::Config,
+        policy: crate::DownstreamHttp1Policy,
+        pool_max_idle: usize,
+    ) -> Result<Option<Self>, NativeHttp1ProxyConfigError> {
+        let native = Self::from_proxy_config_with_pool_size(&config.proxy, policy, pool_max_idle)?
+            .map(|proxy| proxy.with_header_policy(&config.headers));
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        let native = native.map(|proxy| {
+            if config.compression.enabled {
+                proxy.with_compression_config(config.compression.clone())
+            } else {
+                proxy
+            }
+        });
+        Ok(native)
+    }
+
     pub fn from_proxy_config_with_pool_size(
         proxy: &fluxheim_config::ProxyConfig,
         policy: crate::DownstreamHttp1Policy,

@@ -104,9 +104,9 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
     let mut candidates = Vec::new();
 
     if config.vhosts.is_empty() {
-        push_proxy_candidate(
+        push_root_proxy_candidate(
             "proxy".to_owned(),
-            &config.proxy,
+            config,
             root_policy_support(config),
             policy,
             pool_max_idle,
@@ -174,6 +174,30 @@ fn push_proxy_candidate(
     }
 }
 
+fn push_root_proxy_candidate(
+    scope: String,
+    config: &Config,
+    policy_support: Result<(), NativeHttp1ProxyConfigError>,
+    policy: DownstreamHttp1Policy,
+    pool_max_idle: usize,
+    candidates: &mut Vec<NativeHttp1ProxyCandidate>,
+) {
+    if !config.proxy.has_configured_upstream() {
+        return;
+    }
+
+    if let Err(error) = policy_support {
+        candidates.push(NativeHttp1ProxyCandidate::unsupported(scope, error));
+        return;
+    }
+
+    match NativeHttp1Proxy::from_root_config(config, policy, pool_max_idle) {
+        Ok(Some(_)) => candidates.push(NativeHttp1ProxyCandidate::eligible(scope)),
+        Ok(None) => {}
+        Err(error) => candidates.push(NativeHttp1ProxyCandidate::unsupported(scope, error)),
+    }
+}
+
 fn root_policy_support(config: &Config) -> Result<(), NativeHttp1ProxyConfigError> {
     if !header_policy_supported(&config.headers) || !compression_supported(&config.compression) {
         return Err(NativeHttp1ProxyConfigError::HttpPolicy);
@@ -228,6 +252,17 @@ fn route_policy_support(route: &RouteConfig) -> Result<(), NativeHttp1ProxyConfi
 
 fn header_policy_supported(headers: &fluxheim_config::HeaderPolicyConfig) -> bool {
     request_header_policy_supported(&headers.request)
+        && root_response_header_policy_supported(&headers.response)
+}
+
+fn root_response_header_policy_supported(
+    _response: &fluxheim_config::ResponseHeaderPolicyConfig,
+) -> bool {
+    // All current root response policy fields are implemented by
+    // NativeRouteResponseHeaderPolicy::from_policy(). Keep this helper explicit
+    // so future root response-policy fields get a fail-closed review point
+    // before native cutover marks them supported.
+    true
 }
 
 fn request_header_policy_supported(request: &fluxheim_config::RequestHeaderPolicyConfig) -> bool {

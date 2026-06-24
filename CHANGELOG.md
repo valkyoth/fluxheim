@@ -133,6 +133,10 @@ behavior when the change improves security or project direction.
 - Restrict the native metrics handler to `GET`/`HEAD /metrics`, with HEAD
   returning the Prometheus content length without a body, while listener
   loopback/network ACLs remain the metrics access-control boundary.
+- Add a root-config native HTTP/1 proxy constructor and move root cutover
+  planning to it, so root response headers and root compression are carried
+  into native proxy parity instead of being validated separately from runtime
+  construction.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to
