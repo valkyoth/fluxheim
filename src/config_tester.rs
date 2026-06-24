@@ -785,6 +785,9 @@ mod tests {
         assert!(report.contains("native-runtime-adapter: PingoraCompatibility\n"));
         assert!(report.contains("native-runtime-target-adapter: NativeRuntime\n"));
         assert!(report.contains("native-runtime-launch-plan\tready\t3\t3\t0\toff\n"));
+        assert!(report.contains(
+            "native-runtime-launch-listener\tProxyHttp\tFluxheim HTTP Proxy\tHttp\t127.0.0.1:8080\tfalse\n"
+        ));
         assert!(!report.contains("native-http2\tnative HTTP/2 downstream parity\t1.6.24\n"));
         assert!(!report.contains("admin-control-plane\tnative admin control plane\t1.6.22\n"));
         assert!(!report.contains("metrics-http\tnative metrics HTTP service\t1.6.22\n"));

@@ -127,6 +127,13 @@ awk -F '\t' '
         }
         next
     }
+    $1 == "native-runtime-launch-listener" {
+        if (NF != 6) {
+            print "native runtime cutover evidence: malformed native runtime launch-listener row: " $0 > "/dev/stderr"
+            exit 2
+        }
+        next
+    }
     $1 == "blocker" { next }
     NF == 0 { next }
     NF != 3 {
@@ -181,6 +188,13 @@ awk -F '\t' '
         }
         next
     }
+    $1 == "native-runtime-launch-listener" {
+        if (NF != 6) {
+            print "native runtime cutover evidence: malformed native runtime launch-listener row: " $0 > "/dev/stderr"
+            exit 2
+        }
+        next
+    }
     $1 == "blocker" { next }
     NF == 0 { next }
     NF != 3 {
@@ -227,6 +241,13 @@ awk -F '\t' '
     $1 == "native-runtime-launch-plan" {
         if (NF != 6) {
             print "native runtime cutover evidence: malformed native runtime launch-plan row: " $0 > "/dev/stderr"
+            exit 2
+        }
+        next
+    }
+    $1 == "native-runtime-launch-listener" {
+        if (NF != 6) {
+            print "native runtime cutover evidence: malformed native runtime launch-listener row: " $0 > "/dev/stderr"
             exit 2
         }
         next

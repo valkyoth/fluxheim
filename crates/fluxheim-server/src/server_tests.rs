@@ -243,6 +243,26 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
     assert_eq!(launch_plan.downstream_http1(), *plan.downstream_http1());
     assert_eq!(launch_plan.downstream_http2(), *plan.downstream_http2());
     assert_eq!(launch_plan.proxy_protocol(), plan.proxy_protocol());
+    assert_eq!(launch_plan.listeners().len(), 5);
+    assert!(
+        launch_plan
+            .listeners()
+            .iter()
+            .any(|listener| listener.service_kind() == ServiceKind::ProxyHttp
+                && listener.listener_protocol() == ListenerProtocol::Http
+                && listener.listener_addr().to_string() == "127.0.0.1:8080"
+                && !listener.proxy_protocol_enabled())
+    );
+    assert!(
+        launch_plan
+            .listeners()
+            .iter()
+            .any(
+                |listener| listener.service_kind() == ServiceKind::MetricsHttp
+                    && listener.listener_protocol() == ListenerProtocol::MetricsHttp
+                    && listener.listener_addr().to_string() == "127.0.0.1:9091"
+            )
+    );
     assert_eq!(
         manifest
             .service(ServiceKind::ProxyHttp)
@@ -315,6 +335,9 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
             .to_tsv()
             .contains("native-runtime-launch-plan\tready\t6\t5\t0\toff\n")
     );
+    assert!(launch_plan.to_tsv().contains(
+        "native-runtime-launch-listener\tProxyHttp\tFluxheim HTTP Proxy\tHttp\t127.0.0.1:8080\tfalse\n"
+    ));
 }
 
 #[test]

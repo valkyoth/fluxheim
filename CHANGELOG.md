@@ -214,6 +214,9 @@ behavior when the change improves security or project direction.
   final native runner will consume. Blocked plans reject launch-plan creation,
   and the cutover report now emits a ready launch-plan row for blocker-free
   configs.
+- Extend the native runtime launch plan with concrete listener launch intents:
+  service kind, service name, listener protocol, bind address, and downstream
+  PROXY-protocol expectation now appear in the cutover evidence.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

@@ -49,6 +49,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
   refuses blocked plans and carries the exact process, PROXY-protocol,
   downstream HTTP policy, and service manifest inputs the final native runner
   will consume.
+- The launch-plan evidence now includes exact native listener intents for each
+  service: protocol, bind address, and whether server-level downstream PROXY
+  protocol is expected.
 
 ## Security Notes
 

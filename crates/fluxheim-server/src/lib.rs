@@ -74,7 +74,9 @@ pub use native_http2_stack::{
     native_http2_stack_probe, native_http2_stack_probe_with_response,
     serve_native_http2_connection,
 };
-pub use native_runtime_launch_plan::{NativeRuntimeLaunchPlan, NativeRuntimeLaunchPlanError};
+pub use native_runtime_launch_plan::{
+    NativeRuntimeLaunchListener, NativeRuntimeLaunchPlan, NativeRuntimeLaunchPlanError,
+};
 pub use native_runtime_manifest::{
     NativeRuntimeManifest, NativeRuntimeManifestError, NativeRuntimeServiceManifest,
 };
