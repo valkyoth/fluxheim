@@ -3,6 +3,7 @@ use crate::{
     NativeRuntimeManifest, NativeRuntimeManifestError, ProcessSpec, ProxyProtocolPolicy,
     ServerPlan, ServiceKind, ServiceSpec,
 };
+use fluxheim_runtime::{BackgroundTaskKind, BackgroundTaskSpec};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeRuntimeLaunchPlan {
@@ -12,12 +13,18 @@ pub struct NativeRuntimeLaunchPlan {
     downstream_http2: DownstreamHttp2Policy,
     manifest: NativeRuntimeManifest,
     listeners: Vec<NativeRuntimeLaunchListener>,
+    background_tasks: Vec<NativeRuntimeLaunchBackgroundTask>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeRuntimeLaunchListener {
     service: ServiceSpec,
     listener: crate::ListenerSpec,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeRuntimeLaunchBackgroundTask {
+    task: BackgroundTaskSpec,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -60,6 +67,12 @@ impl NativeRuntimeLaunchPlan {
                 })
             })
             .collect();
+        let background_tasks = manifest
+            .background_tasks()
+            .iter()
+            .copied()
+            .map(|task| NativeRuntimeLaunchBackgroundTask { task })
+            .collect();
         Ok(Self {
             process: plan.process().clone(),
             proxy_protocol: plan.proxy_protocol().clone(),
@@ -67,6 +80,7 @@ impl NativeRuntimeLaunchPlan {
             downstream_http2: *plan.downstream_http2(),
             manifest,
             listeners,
+            background_tasks,
         })
     }
 
@@ -94,13 +108,17 @@ impl NativeRuntimeLaunchPlan {
         &self.listeners
     }
 
+    pub fn background_tasks(&self) -> &[NativeRuntimeLaunchBackgroundTask] {
+        &self.background_tasks
+    }
+
     pub fn to_tsv(&self) -> String {
         let mut report = format!(
             "native-runtime-launch-plan\tstatus\tservices\tlisteners\tbackground_tasks\tproxy_protocol\n\
              native-runtime-launch-plan\tready\t{}\t{}\t{}\t{}\n",
             self.manifest.services().len(),
             self.listeners.len(),
-            self.manifest.background_tasks().len(),
+            self.background_tasks.len(),
             proxy_protocol_label(&self.proxy_protocol),
         );
         report.push_str(
@@ -121,6 +139,16 @@ impl NativeRuntimeLaunchPlan {
             } else {
                 "false"
             });
+            report.push('\n');
+        }
+        report.push_str("native-runtime-launch-background-task\tkind\tname\tcritical\n");
+        for task in &self.background_tasks {
+            report.push_str("native-runtime-launch-background-task\t");
+            report.push_str(&format!("{:?}", task.kind()));
+            report.push('\t');
+            report.push_str(&launch_tsv_field(task.name()));
+            report.push('\t');
+            report.push_str(if task.is_critical() { "true" } else { "false" });
             report.push('\n');
         }
         report
@@ -154,6 +182,24 @@ impl NativeRuntimeLaunchListener {
 
     pub const fn proxy_protocol_enabled(&self) -> bool {
         self.listener.proxy_protocol_enabled()
+    }
+}
+
+impl NativeRuntimeLaunchBackgroundTask {
+    pub const fn spec(&self) -> BackgroundTaskSpec {
+        self.task
+    }
+
+    pub const fn kind(&self) -> BackgroundTaskKind {
+        self.task.kind()
+    }
+
+    pub const fn name(&self) -> &'static str {
+        self.task.name()
+    }
+
+    pub const fn is_critical(&self) -> bool {
+        self.task.is_critical()
     }
 }
 

@@ -52,6 +52,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - The launch-plan evidence now includes exact native listener intents for each
   service: protocol, bind address, and whether server-level downstream PROXY
   protocol is expected.
+- The native launch-plan contract now also includes background-task intents, so
+  the final runner can consume the same inventory for cache purging, metrics
+  export, ACME renewal, certificate reload, and watchdog tasks.
 
 ## Security Notes
 

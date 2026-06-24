@@ -5,6 +5,7 @@ use fluxheim_runtime::{BackgroundTaskKind, BackgroundTaskSpec};
 #[test]
 fn server_plan_from_config_collects_background_task_inventory() {
     let mut config = Config::default();
+    config.server.listen = Vec::new();
     config.cache_purger.enabled = true;
     config.cache.enabled = true;
     config.metrics.enabled = true;
@@ -46,6 +47,50 @@ fn server_plan_from_config_collects_background_task_inventory() {
             .map(BackgroundTaskSpec::name),
         Some("Fluxheim Self-Healing Watchdog")
     );
+
+    let launch_plan = plan
+        .native_runtime_launch_plan()
+        .expect("background-task launch plan");
+    let launch_tasks = launch_plan
+        .background_tasks()
+        .iter()
+        .map(|task| (task.kind(), task.name(), task.is_critical()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        launch_tasks,
+        vec![
+            (
+                BackgroundTaskKind::CacheStalePurge,
+                "Cache stale disk purger",
+                false,
+            ),
+            (
+                BackgroundTaskKind::CacheMetrics,
+                "Cache runtime metrics",
+                false,
+            ),
+            (
+                BackgroundTaskKind::MetricsExport,
+                "OTLP metrics export",
+                false,
+            ),
+            (BackgroundTaskKind::AcmeRenewal, "ACME renewal", false),
+            (
+                BackgroundTaskKind::CertificateReload,
+                "Certificate reload control socket",
+                false,
+            ),
+            (
+                BackgroundTaskKind::RuntimeWatchdog,
+                "Fluxheim Self-Healing Watchdog",
+                false,
+            ),
+        ]
+    );
+    assert!(launch_plan.to_tsv().contains(
+        "native-runtime-launch-background-task\tMetricsExport\tOTLP metrics export\tfalse\n"
+    ));
 }
 
 #[test]

@@ -217,6 +217,9 @@ behavior when the change improves security or project direction.
 - Extend the native runtime launch plan with concrete listener launch intents:
   service kind, service name, listener protocol, bind address, and downstream
   PROXY-protocol expectation now appear in the cutover evidence.
+- Extend the native runtime launch plan with background-task launch intents, so
+  cache purging, metrics export, ACME renewal, certificate reload, and watchdog
+  tasks are represented by the same native runner contract as listeners.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

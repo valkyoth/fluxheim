@@ -338,6 +338,11 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
     assert!(launch_plan.to_tsv().contains(
         "native-runtime-launch-listener\tProxyHttp\tFluxheim HTTP Proxy\tHttp\t127.0.0.1:8080\tfalse\n"
     ));
+    assert!(
+        launch_plan
+            .to_tsv()
+            .contains("native-runtime-launch-background-task\tkind\tname\tcritical\n")
+    );
 }
 
 #[test]
