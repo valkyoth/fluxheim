@@ -9226,12 +9226,11 @@ fn php_x_accel_header_error(error: impl std::fmt::Display) -> FluxError {
 
 #[cfg(feature = "php-fpm")]
 fn php_should_intercept_error_status(status: StatusCode, php: &RuntimePhp) -> bool {
-    php.error_page(status.as_u16()).is_some()
-        || php
-            .config
-            .intercept_error_statuses
-            .iter()
-            .any(|intercept_status| *intercept_status == status.as_u16())
+    fluxheim_php_fpm::php_should_intercept_error_status(
+        status.as_u16(),
+        php.error_pages.iter().map(|page| page.status),
+        &php.config.intercept_error_statuses,
+    )
 }
 
 #[cfg(feature = "cache")]

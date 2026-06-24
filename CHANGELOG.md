@@ -53,6 +53,9 @@ behavior when the change improves security or project direction.
 - Move PHP response-header stripping policy into `fluxheim-php-fpm`, including
   hop-by-hop headers, `Connection` tokens, configured hidden headers, and
   static-offload internal headers.
+- Move PHP custom error-page/status interception decisions into
+  `fluxheim-php-fpm`, keeping native and compatibility response handling on one
+  status policy.
 - Cap and validate PHP `CONTENT_TYPE` values during accumulation, avoiding an
   oversized intermediate joined string before rejecting over-limit input.
 - Change pure local-static cache keys to use the explicit
@@ -104,6 +107,9 @@ behavior when the change improves security or project direction.
 - Add standalone `fluxheim-php-fpm` tests for PHP response-header strip lists
   and internal static-offload header names, plus existing root compatibility
   coverage for hidden response headers.
+- Add standalone `fluxheim-php-fpm` tests for PHP error-page/status
+  interception decisions, plus existing root compatibility coverage for PHP
+  custom error pages.
 - Add PHP-FPM tests proving `CONTENT_TYPE` rejects control bytes and over-limit
   joined values without retaining the oversized joined result.
 - Update standalone `fluxheim-cache` tests to assert local-static keys use the

@@ -601,6 +601,18 @@ where
     headers
 }
 
+pub fn php_should_intercept_error_status<I>(
+    status: u16,
+    error_page_statuses: I,
+    intercept_error_statuses: &[u16],
+) -> bool
+where
+    I: IntoIterator<Item = u16>,
+{
+    error_page_statuses.into_iter().any(|page| page == status)
+        || intercept_error_statuses.contains(&status)
+}
+
 pub fn php_segment_has_allowed_extension(segment: &str, allowed_extensions: &[String]) -> bool {
     segment.rsplit_once('.').is_some_and(|(_, extension)| {
         allowed_extensions
@@ -1551,6 +1563,17 @@ mod tests {
             super::PHP_STATIC_OFFLOAD_RESPONSE_HEADERS,
             &["x-accel-redirect", "x-sendfile"]
         );
+    }
+
+    #[test]
+    fn php_error_page_or_intercept_status_enables_interception() {
+        assert!(super::php_should_intercept_error_status(502, [502], &[]));
+        assert!(super::php_should_intercept_error_status(503, [], &[503]));
+        assert!(!super::php_should_intercept_error_status(
+            404,
+            [502],
+            &[503]
+        ));
     }
 
     #[test]
