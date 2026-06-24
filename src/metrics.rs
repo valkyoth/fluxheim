@@ -5,6 +5,7 @@ use fluxheim_server::NativeHttp1Response;
 use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
 };
+use sanitization::ct::ConstantTimeEq;
 
 static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -104,13 +105,38 @@ fn native_metrics_target_path(target: &str) -> &str {
     target
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct NativeMetricsApp;
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NativeMetricsApp {
+    bearer_token: Option<String>,
+}
 
 impl NativeMetricsApp {
     pub const fn new() -> Self {
-        Self
+        Self { bearer_token: None }
     }
+
+    pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
+        self.bearer_token = Some(token.into());
+        self
+    }
+}
+
+fn native_metrics_authorized(request: &fluxheim_server::NativeHttp1Request, token: &str) -> bool {
+    request.headers.iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("authorization")
+            && native_metrics_bearer_token_matches(value, token)
+    })
+}
+
+fn native_metrics_bearer_token_matches(value: &str, token: &str) -> bool {
+    let Some(candidate) = value.trim().strip_prefix("Bearer ") else {
+        return false;
+    };
+    candidate.len() == token.len()
+        && candidate
+            .as_bytes()
+            .ct_eq(token.as_bytes())
+            .declassify("native metrics bearer-token comparison result is public")
 }
 
 impl fluxheim_server::NativeHttp1Handler for NativeMetricsApp {
@@ -124,6 +150,17 @@ impl fluxheim_server::NativeHttp1Handler for NativeMetricsApp {
             if !native_metrics_target_allowed(&request.target) {
                 return fluxheim_server::NativeHttp1Response::new(404, "Not Found", b"not found\n")
                     .close_connection();
+            }
+            if let Some(token) = &self.bearer_token
+                && !native_metrics_authorized(&request, token)
+            {
+                return fluxheim_server::NativeHttp1Response::new(
+                    401,
+                    "Unauthorized",
+                    b"unauthorized\n",
+                )
+                .with_header("www-authenticate", "Bearer realm=\"metrics\"")
+                .close_connection();
             }
             let response = match request.method.as_str() {
                 "GET" => native_prometheus_response(),
@@ -2368,6 +2405,48 @@ mod tests {
                 .iter()
                 .any(|(name, value)| name == "allow" && value == "GET, HEAD")
         );
+    }
+
+    #[test]
+    fn native_metrics_app_can_require_bearer_token() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let app = NativeMetricsApp::new().with_bearer_token("metrics-secret");
+
+        let missing = runtime.block_on(fluxheim_server::NativeHttp1Handler::handle(
+            &app,
+            native_metrics_request("GET", "/metrics"),
+        ));
+        assert_eq!(missing.status(), 401);
+        assert!(
+            missing
+                .headers()
+                .iter()
+                .any(|(name, value)| name == "www-authenticate"
+                    && value == "Bearer realm=\"metrics\"")
+        );
+
+        let mut wrong = native_metrics_request("GET", "/metrics");
+        wrong
+            .headers
+            .push(("authorization".to_owned(), "Bearer wrong".to_owned()));
+        let wrong = runtime.block_on(fluxheim_server::NativeHttp1Handler::handle(&app, wrong));
+        assert_eq!(wrong.status(), 401);
+
+        let mut authorized = native_metrics_request("GET", "/metrics");
+        authorized.headers.push((
+            "authorization".to_owned(),
+            "Bearer metrics-secret".to_owned(),
+        ));
+        let authorized = runtime.block_on(fluxheim_server::NativeHttp1Handler::handle(
+            &app, authorized,
+        ));
+        assert_eq!(authorized.status(), 200);
     }
 
     #[test]

@@ -128,7 +128,7 @@ acme-client = [
     "dep:tokio",
     "instant-acme/hyper-rustls",
 ]
-metrics = ["dep:prometheus", "fluxheim-load-balancer?/metrics"]
+metrics = ["dep:prometheus", "dep:sanitization", "fluxheim-load-balancer?/metrics"]
 metrics-otlp = [
     "metrics",
     "dep:ureq",

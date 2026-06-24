@@ -3,7 +3,7 @@ use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 #[cfg(any(
@@ -58,6 +58,7 @@ const NATIVE_RATE_LIMIT_PRUNE_SCAN_LIMIT: usize = 128;
 const NATIVE_RATE_LIMIT_SHARDS: usize = 16;
 const NATIVE_RATE_LIMIT_SHARD_HASH_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const NATIVE_RATE_LIMIT_SHARD_HASH_PRIME: u64 = 0x0000_0100_0000_01b3;
+static NATIVE_RATE_LIMIT_SHARD_SEED: OnceLock<u64> = OnceLock::new();
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1RouteProxy {
@@ -681,17 +682,33 @@ fn native_rate_limit_shard(key: NativeRateLimitKey) -> usize {
         NativeRateLimitKey::Ip(IpAddr::V6(address)) => {
             native_rate_limit_shard_hash(&address.octets()) & (NATIVE_RATE_LIMIT_SHARDS - 1)
         }
-        NativeRateLimitKey::Indeterminate => 0,
+        NativeRateLimitKey::Indeterminate => {
+            native_rate_limit_shard_hash(b"indeterminate") & (NATIVE_RATE_LIMIT_SHARDS - 1)
+        }
     }
 }
 
 fn native_rate_limit_shard_hash(bytes: &[u8]) -> usize {
-    let mut hash = NATIVE_RATE_LIMIT_SHARD_HASH_OFFSET;
+    let mut hash = native_rate_limit_shard_seed();
     for byte in bytes {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(NATIVE_RATE_LIMIT_SHARD_HASH_PRIME);
     }
     hash as usize
+}
+
+fn native_rate_limit_shard_seed() -> u64 {
+    *NATIVE_RATE_LIMIT_SHARD_SEED.get_or_init(|| {
+        let mut bytes = [0_u8; 8];
+        if let Err(error) = getrandom::fill(&mut bytes) {
+            log::error!(
+                target: "fluxheim::security",
+                "native rate-limit shard seed generation failed: {error}; aborting"
+            );
+            std::process::abort();
+        }
+        u64::from_le_bytes(bytes) ^ NATIVE_RATE_LIMIT_SHARD_HASH_OFFSET
+    })
 }
 
 impl Default for NativeConcurrencyLimit {
@@ -1511,6 +1528,9 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .close_connection();
             }
             let concurrency_route = decoded_policy_route.or(selected_route);
+            // Delay-mode rate limiting sleeps are still live downstream work.
+            // Count them against concurrency so an attacker cannot park
+            // unlimited delayed tasks outside the configured vhost/route cap.
             let _concurrency_permits =
                 match self.acquire_concurrency_permits(concurrency_route).await {
                     Ok(permits) => permits,
@@ -2995,12 +3015,13 @@ mod tests {
     #[test]
     fn native_rate_limit_shard_uses_full_ipv4_address() {
         let first = NativeRateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 42)));
-        let second = NativeRateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 42)));
+        let first_shard = native_rate_limit_shard(first);
+        let differs = (1..=254).any(|octet| {
+            let candidate = NativeRateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(octet, 51, 100, 42)));
+            native_rate_limit_shard(candidate) != first_shard
+        });
 
-        assert_ne!(
-            native_rate_limit_shard(first),
-            native_rate_limit_shard(second)
-        );
+        assert!(differs);
     }
 
     #[test]
@@ -3008,13 +3029,21 @@ mod tests {
         let first = NativeRateLimitKey::Ip(IpAddr::V6(Ipv6Addr::from([
             0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,
         ])));
-        let second = NativeRateLimitKey::Ip(IpAddr::V6(Ipv6Addr::from([
-            0x20, 0x01, 0x0d, 0xb9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,
-        ])));
+        let first_shard = native_rate_limit_shard(first);
+        let differs = (0..=255).any(|byte| {
+            let candidate = NativeRateLimitKey::Ip(IpAddr::V6(Ipv6Addr::from([
+                0x20, 0x01, 0x0d, byte, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,
+            ])));
+            native_rate_limit_shard(candidate) != first_shard
+        });
 
-        assert_ne!(
-            native_rate_limit_shard(first),
-            native_rate_limit_shard(second)
+        assert!(differs);
+    }
+
+    #[test]
+    fn native_rate_limit_indeterminate_key_is_seeded() {
+        assert!(
+            native_rate_limit_shard(NativeRateLimitKey::Indeterminate) < NATIVE_RATE_LIMIT_SHARDS
         );
     }
 }

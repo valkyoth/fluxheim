@@ -686,8 +686,10 @@ rootless container secrets or a local file readable only by the Fluxheim user.
 
 `[metrics]` is disabled by default and should remain loopback-only unless it is
 fronted by a trusted local monitoring agent. The native metrics handler only
-serves `GET`/`HEAD /metrics`; it relies on the metrics listener binding and
-network ACLs for access control.
+serves `GET`/`HEAD /metrics` and can enforce a bearer token when the native
+runner provides one. The current compatibility metrics listener still relies on
+the metrics listener binding and network ACLs for access control until the
+final native runner cutover wires the token source into service construction.
 
 ```toml
 [metrics]
@@ -2963,6 +2965,10 @@ protection for sensitive internal paths. Set `reject_indeterminate = true` to
 reject those requests instead of placing them in the shared bucket.
 With metrics enabled, delayed and rejected rate-limit decisions are counted by
 `fluxheim_edge_policy_events_total` with bounded labels.
+In delay mode, delayed native requests are intentionally counted against
+vhost/route concurrency limits while they sleep. This prevents unbounded delayed
+tasks from parking outside the configured concurrency budget; use a conservative
+`max_delay_ms` and `max_in_flight` together for public routes.
 
 `[vhosts.concurrency]` and `[vhosts.routes.concurrency]` cap active in-flight
 requests. They are local process limits, not distributed cluster limits.

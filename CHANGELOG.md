@@ -158,11 +158,20 @@ behavior when the change improves security or project direction.
 - Hash the full IPv4/IPv6 client address for native rate-limit shard selection
   instead of using only the final byte, reducing predictable hot-shard
   concentration for forwarded-client identities.
+- Add a per-process random FNV seed to native rate-limit shard selection and
+  route indeterminate-client buckets through that seeded hash instead of
+  pinning them to shard zero.
 - Use saturating `Instant` arithmetic for native rate-limit refill and prune
   decisions so future-dated bucket samples cannot panic the request path.
 - Reject residual percent-encoding in native static-web filesystem path
   segments after the initial decode pass, avoiding ambiguous double-encoded
   traversal forms on fallback static serving.
+- Let the native metrics handler require a bearer token with `sanitization`
+  constant-time comparison; the compatibility metrics listener still relies on
+  listener binding and network ACLs until final native-runner service wiring.
+- Document that native rate-limit delay mode intentionally holds vhost/route
+  concurrency permits while sleeping, so delayed tasks stay inside the
+  configured concurrency budget.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to
@@ -180,6 +189,7 @@ behavior when the change improves security or project direction.
   duplicate weighted upstream slots before trying the next unique backend.
 - Add live native static-web route and fallback tests for double-encoded
   traversal rejection.
+- Add native metrics handler tests for bearer-token rejection and acceptance.
 - Add `fluxheim-cache` tests for image/static cache-key construction,
   namespace/query/host normalization, and local-static file identity.
 - Add native HTTP/1 tests proving `NativeHttp1Request` feeds cache request
