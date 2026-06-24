@@ -156,32 +156,7 @@ fn runtime_cutover_report(config: &Config) -> Result<String, Box<dyn Error + Sen
         report.push('\n');
     }
     if let Ok(manifest) = plan.native_runtime_manifest() {
-        report.push_str("native-runtime-manifest-service\tkind\tname\tlisteners\n");
-        for service in manifest.services() {
-            report.push_str("native-runtime-manifest-service\t");
-            report.push_str(&format!("{:?}", service.kind()));
-            report.push('\t');
-            report.push_str(&runtime_cutover_field(service.name()));
-            report.push('\t');
-            let listeners = service
-                .listeners()
-                .iter()
-                .map(|listener| format!("{:?}@{}", listener.protocol(), listener.addr()))
-                .collect::<Vec<_>>()
-                .join(",");
-            report.push_str(&runtime_cutover_field(&listeners));
-            report.push('\n');
-        }
-        report.push_str("native-runtime-manifest-background-task\tkind\tname\tcritical\n");
-        for task in manifest.background_tasks() {
-            report.push_str("native-runtime-manifest-background-task\t");
-            report.push_str(&format!("{:?}", task.kind()));
-            report.push('\t');
-            report.push_str(&runtime_cutover_field(task.name()));
-            report.push('\t');
-            report.push_str(if task.is_critical() { "true" } else { "false" });
-            report.push('\n');
-        }
+        report.push_str(&manifest.to_tsv());
     }
     Ok(report)
 }

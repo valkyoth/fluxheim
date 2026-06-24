@@ -39,6 +39,9 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native upstream client tests now prove explicit plaintext h2c Upgrade reaches
   a real in-process HTTP/2 origin, and that origins refusing Upgrade fall back
   to HTTP/1.1 without replaying the downstream request during the probe.
+- Native runtime cutover evidence now renders the service/listener/background
+  task manifest from the `fluxheim-server` manifest contract itself, avoiding a
+  second TSV formatter in the config tester.
 
 ## Security Notes
 

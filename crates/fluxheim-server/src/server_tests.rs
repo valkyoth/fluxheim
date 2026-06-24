@@ -276,6 +276,16 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
             .collect::<Vec<_>>(),
         vec![ListenerProtocol::Udp]
     );
+
+    let tsv = manifest.to_tsv();
+    assert!(tsv.contains("native-runtime-manifest-service\tkind\tname\tlisteners\n"));
+    assert!(tsv.contains(
+        "native-runtime-manifest-service\tProxyHttp\tFluxheim HTTP Proxy\tHttp@127.0.0.1:8080\n"
+    ));
+    assert!(tsv.contains(
+        "native-runtime-manifest-service\tAdminControlPlane\tFluxheim Admin Control Plane\tAdminHttp@127.0.0.1:9090\n"
+    ));
+    assert!(tsv.contains("native-runtime-manifest-background-task\tkind\tname\tcritical\n"));
 }
 
 #[test]

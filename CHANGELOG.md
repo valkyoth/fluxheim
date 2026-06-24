@@ -203,6 +203,9 @@ behavior when the change improves security or project direction.
 - Extend the native runtime cutover evidence report with manifest service and
   background-task rows, so CI archives the exact native service graph that the
   final runner will consume.
+- Move native runtime manifest TSV rendering into `fluxheim-server`, so the
+  config tester reports the same service/listener/background-task graph format
+  that the final native runner contract owns.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

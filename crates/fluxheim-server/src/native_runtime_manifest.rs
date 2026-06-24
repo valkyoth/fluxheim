@@ -69,6 +69,36 @@ impl NativeRuntimeManifest {
     pub fn service(&self, kind: ServiceKind) -> Option<&NativeRuntimeServiceManifest> {
         self.services.iter().find(|service| service.kind() == kind)
     }
+
+    pub fn to_tsv(&self) -> String {
+        let mut report = String::from("native-runtime-manifest-service\tkind\tname\tlisteners\n");
+        for service in &self.services {
+            report.push_str("native-runtime-manifest-service\t");
+            report.push_str(&format!("{:?}", service.kind()));
+            report.push('\t');
+            report.push_str(&manifest_tsv_field(service.name()));
+            report.push('\t');
+            let listeners = service
+                .listeners()
+                .iter()
+                .map(|listener| format!("{:?}@{}", listener.protocol(), listener.addr()))
+                .collect::<Vec<_>>()
+                .join(",");
+            report.push_str(&manifest_tsv_field(&listeners));
+            report.push('\n');
+        }
+        report.push_str("native-runtime-manifest-background-task\tkind\tname\tcritical\n");
+        for task in &self.background_tasks {
+            report.push_str("native-runtime-manifest-background-task\t");
+            report.push_str(&format!("{:?}", task.kind()));
+            report.push('\t');
+            report.push_str(&manifest_tsv_field(task.name()));
+            report.push('\t');
+            report.push_str(if task.is_critical() { "true" } else { "false" });
+            report.push('\n');
+        }
+        report
+    }
 }
 
 impl NativeRuntimeServiceManifest {
@@ -87,4 +117,14 @@ impl NativeRuntimeServiceManifest {
     pub fn listeners(&self) -> &[ListenerSpec] {
         &self.listeners
     }
+}
+
+fn manifest_tsv_field(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\t' | '\n' | '\r' => ' ',
+            character => character,
+        })
+        .collect()
 }
