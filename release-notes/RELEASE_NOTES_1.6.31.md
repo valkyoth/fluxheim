@@ -192,6 +192,9 @@ exit work.
   listener.
 - Added a live native admin listener test proving the authenticated health
   endpoint is served correctly through the native HTTP/1 listener.
+- Startup now logs a native runtime manifest preview for blocker-free plans,
+  showing the Fluxheim-owned service/listener/background-task graph while the
+  compatibility runtime remains active.
 - The native runtime cutover evidence report now includes manifest service and
   background-task rows, so CI archives the exact native service graph that the
   final runner will consume.

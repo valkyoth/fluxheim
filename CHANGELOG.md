@@ -197,6 +197,9 @@ behavior when the change improves security or project direction.
   listener.
 - Add a live native admin listener test proving the authenticated health
   endpoint is served correctly through the native HTTP/1 listener.
+- Log a native runtime manifest preview at startup for blocker-free plans,
+  showing the Fluxheim-owned service/listener/background-task graph while the
+  compatibility runtime remains active.
 - Extend the native runtime cutover evidence report with manifest service and
   background-task rows, so CI archives the exact native service graph that the
   final runner will consume.

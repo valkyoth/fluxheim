@@ -91,6 +91,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         fluxheim_server::RuntimeAdapterKind::PingoraCompatibility => {}
     }
     log_native_runtime_cutover_summary(&server_plan);
+    log_native_runtime_manifest_preview(&server_plan);
     log_native_http1_proxy_cutover_summary(&server_plan);
     let pingora_conf = pingora_server_conf(&server_plan);
     let mut server = pingora::server::Server::new_with_opt_and_conf(None, pingora_conf);
@@ -307,6 +308,42 @@ fn log_native_runtime_cutover_summary(server_plan: &fluxheim_server::ServerPlan)
     log::info!(
         "native runtime cutover preview: compatibility adapter retained; blockers={blockers}"
     );
+}
+
+#[cfg(feature = "proxy")]
+fn log_native_runtime_manifest_preview(server_plan: &fluxheim_server::ServerPlan) {
+    if let Some(summary) = native_runtime_manifest_preview(server_plan) {
+        log::info!("native runtime manifest preview: {summary}");
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn native_runtime_manifest_preview(server_plan: &fluxheim_server::ServerPlan) -> Option<String> {
+    let manifest = server_plan.native_runtime_manifest().ok()?;
+    let service_count = manifest.services().len();
+    let listener_count: usize = manifest
+        .services()
+        .iter()
+        .map(|service| service.listeners().len())
+        .sum();
+    let background_task_count = manifest.background_tasks().len();
+    let services = manifest
+        .services()
+        .iter()
+        .map(|service| {
+            let listeners = service
+                .listeners()
+                .iter()
+                .map(|listener| format!("{:?}@{}", listener.protocol(), listener.addr()))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{:?}=[{}]", service.kind(), listeners)
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    Some(format!(
+        "services={service_count} listeners={listener_count} background_tasks={background_task_count} graph={services}"
+    ))
 }
 
 #[cfg(feature = "proxy")]
@@ -1120,6 +1157,63 @@ mod tests {
                 .and_then(|app| app.h2_options.as_ref())
                 .is_some()
         );
+    }
+
+    #[test]
+    fn native_runtime_manifest_preview_reports_ready_service_graph() {
+        let mut config = crate::config::Config::default();
+        config.server.listen = vec!["127.0.0.1:18080".to_owned()];
+        config.admin.enabled = true;
+        config.admin.listen = "127.0.0.1:19090".to_owned();
+        config.metrics.enabled = true;
+        config.metrics.listen = "127.0.0.1:19091".to_owned();
+        config.stream.enabled = true;
+        config.stream.routes = vec![crate::config::StreamRouteConfig {
+            name: "tcp".to_owned(),
+            listen: vec!["127.0.0.1:15432".to_owned()],
+            upstream: Some("127.0.0.1:5432".to_owned()),
+            ..crate::config::StreamRouteConfig::default()
+        }];
+        config.udp.enabled = true;
+        config.udp.routes = vec![crate::config::UdpRouteConfig {
+            name: "dns".to_owned(),
+            mode: crate::config::UdpRouteMode::DnsLoadBalance,
+            listen: vec!["127.0.0.1:15353".to_owned()],
+            upstream: Some("127.0.0.1:5353".to_owned()),
+            upstreams: Vec::new(),
+            upstream_weights: Vec::new(),
+            upstream_aliases: Vec::new(),
+            idle_timeout_secs: 30,
+            response_timeout_secs: 3,
+            max_datagram_bytes: 1232,
+            max_sessions: 4096,
+            max_sessions_per_source: 64,
+            max_responses_per_source_per_second: 256,
+            passive_health_enabled: true,
+            passive_health_failures: 3,
+            passive_health_ejection_secs: 10,
+        }];
+        let plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
+
+        let preview = super::native_runtime_manifest_preview(&plan).expect("ready manifest");
+
+        assert!(preview.contains("services=5"));
+        assert!(preview.contains("listeners=5"));
+        assert!(preview.contains("ProxyHttp=[Http@127.0.0.1:18080]"));
+        assert!(preview.contains("AdminControlPlane=[AdminHttp@127.0.0.1:19090]"));
+        assert!(preview.contains("MetricsHttp=[MetricsHttp@127.0.0.1:19091]"));
+        assert!(preview.contains("StreamProxy=[StreamTcp@127.0.0.1:15432]"));
+        assert!(preview.contains("UdpProxy=[Udp@127.0.0.1:15353]"));
+    }
+
+    #[test]
+    fn native_runtime_manifest_preview_stays_empty_when_blocked() {
+        let mut config = crate::config::Config::default();
+        config.server.listen = vec!["127.0.0.1:18080".to_owned()];
+        config.cache.enabled = true;
+        let plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
+
+        assert!(super::native_runtime_manifest_preview(&plan).is_none());
     }
 
     #[cfg(feature = "acme-client")]
