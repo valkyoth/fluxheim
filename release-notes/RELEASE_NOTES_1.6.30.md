@@ -45,6 +45,10 @@ HTTP/2 forwarding into the native HTTP/1 proxy path.
 - Native runtime cutover evidence now separates the active runtime adapter from
   the target adapter, so blocker-free plans report `NativeRuntime` readiness
   without changing production startup away from the compatibility adapter yet.
+- `fluxheim-server` now exposes a native runtime launch-plan contract that
+  refuses blocked plans and carries the exact process, PROXY-protocol,
+  downstream HTTP policy, and service manifest inputs the final native runner
+  will consume.
 
 ## Security Notes
 

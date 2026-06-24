@@ -162,6 +162,9 @@ fn runtime_cutover_report(config: &Config) -> Result<String, Box<dyn Error + Sen
     if let Ok(manifest) = plan.native_runtime_manifest() {
         report.push_str(&manifest.to_tsv());
     }
+    if let Ok(launch_plan) = plan.native_runtime_launch_plan() {
+        report.push_str(&launch_plan.to_tsv());
+    }
     Ok(report)
 }
 
@@ -781,6 +784,7 @@ mod tests {
 
         assert!(report.contains("native-runtime-adapter: PingoraCompatibility\n"));
         assert!(report.contains("native-runtime-target-adapter: NativeRuntime\n"));
+        assert!(report.contains("native-runtime-launch-plan\tready\t3\t3\t0\toff\n"));
         assert!(!report.contains("native-http2\tnative HTTP/2 downstream parity\t1.6.24\n"));
         assert!(!report.contains("admin-control-plane\tnative admin control plane\t1.6.22\n"));
         assert!(!report.contains("metrics-http\tnative metrics HTTP service\t1.6.22\n"));

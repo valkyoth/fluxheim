@@ -27,6 +27,7 @@ mod native_http1_upstream_response;
 mod native_http2;
 mod native_http2_client;
 mod native_http2_stack;
+mod native_runtime_launch_plan;
 mod native_runtime_manifest;
 mod plan;
 mod process;
@@ -73,6 +74,7 @@ pub use native_http2_stack::{
     native_http2_stack_probe, native_http2_stack_probe_with_response,
     serve_native_http2_connection,
 };
+pub use native_runtime_launch_plan::{NativeRuntimeLaunchPlan, NativeRuntimeLaunchPlanError};
 pub use native_runtime_manifest::{
     NativeRuntimeManifest, NativeRuntimeManifestError, NativeRuntimeServiceManifest,
 };

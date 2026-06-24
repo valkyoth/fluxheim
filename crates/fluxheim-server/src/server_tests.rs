@@ -181,6 +181,11 @@ fn native_runtime_manifest_rejects_blocked_plans() {
         Err(NativeRuntimeManifestError::Blocked { blockers })
             if blockers == vec![NativeRuntimeCutoverBlocker::NativeHttp1Proxy]
     ));
+    assert!(matches!(
+        plan.native_runtime_launch_plan(),
+        Err(NativeRuntimeLaunchPlanError::Blocked { blockers })
+            if blockers == vec![NativeRuntimeCutoverBlocker::NativeHttp1Proxy]
+    ));
 }
 
 #[test]
@@ -221,6 +226,9 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
     let manifest = plan.native_runtime_manifest().expect("native manifest");
+    let launch_plan = plan
+        .native_runtime_launch_plan()
+        .expect("native launch plan");
 
     assert_eq!(
         plan.runtime_adapter(),
@@ -231,6 +239,10 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
         RuntimeAdapterKind::NativeRuntime
     );
     assert_eq!(manifest.services().len(), 6);
+    assert_eq!(launch_plan.manifest(), &manifest);
+    assert_eq!(launch_plan.downstream_http1(), *plan.downstream_http1());
+    assert_eq!(launch_plan.downstream_http2(), *plan.downstream_http2());
+    assert_eq!(launch_plan.proxy_protocol(), plan.proxy_protocol());
     assert_eq!(
         manifest
             .service(ServiceKind::ProxyHttp)
@@ -298,6 +310,11 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
         "native-runtime-manifest-service\tAdminControlPlane\tFluxheim Admin Control Plane\tAdminHttp@127.0.0.1:9090\n"
     ));
     assert!(tsv.contains("native-runtime-manifest-background-task\tkind\tname\tcritical\n"));
+    assert!(
+        launch_plan
+            .to_tsv()
+            .contains("native-runtime-launch-plan\tready\t6\t5\t0\toff\n")
+    );
 }
 
 #[test]

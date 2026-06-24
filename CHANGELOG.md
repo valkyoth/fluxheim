@@ -209,6 +209,11 @@ behavior when the change improves security or project direction.
 - Add a native runtime target-adapter line to the cutover evidence report:
   production still starts through the Pingora compatibility adapter, while
   blocker-free plans now explicitly report `NativeRuntime` as the target.
+- Add a native runtime launch-plan contract that bundles the process,
+  PROXY-protocol, downstream HTTP/1 and HTTP/2 policy, and service manifest the
+  final native runner will consume. Blocked plans reject launch-plan creation,
+  and the cutover report now emits a ready launch-plan row for blocker-free
+  configs.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.
