@@ -1,12 +1,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
     DownstreamHttp1Policy, NativeHttp1HostRouter, NativeHttp1HostRouterConfigError,
-    serve_native_http1_listener,
+    NativeHttp1ProxyConfigError, NativeHttp1RouteProxyConfigError, serve_native_http1_listener,
 };
 
 async fn upstream_response(body: &'static str) -> std::net::SocketAddr {
@@ -72,10 +73,18 @@ async fn router_listener(router: NativeHttp1HostRouter) -> std::net::SocketAddr 
 }
 
 async fn downstream_get(proxy: std::net::SocketAddr, host: Option<&str>) -> String {
+    downstream_get_path(proxy, host, "/").await
+}
+
+async fn downstream_get_path(
+    proxy: std::net::SocketAddr,
+    host: Option<&str>,
+    path: &str,
+) -> String {
     let host_header = host
         .map(|host| format!("Host: {host}\r\n"))
         .unwrap_or_default();
-    let request = format!("GET / HTTP/1.1\r\n{host_header}Connection: close\r\n\r\n");
+    let request = format!("GET {path} HTTP/1.1\r\n{host_header}Connection: close\r\n\r\n");
     downstream_request(proxy, &request).await
 }
 
@@ -186,6 +195,64 @@ fn native_host_router_rejects_empty_config_without_root_proxy() {
     assert!(matches!(
         NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0),
         Err(NativeHttp1HostRouterConfigError::MissingVhost)
+    ));
+}
+
+#[tokio::test]
+async fn native_host_router_serves_root_static_web_without_vhosts() {
+    let root = TempDir::new().unwrap();
+    std::fs::write(root.path().join("asset.txt"), b"root static").unwrap();
+    let config = fluxheim_config::Config {
+        proxy: fluxheim_config::ProxyConfig::disabled(),
+        web: fluxheim_config::WebConfig {
+            root: Some(root.path().to_path_buf()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get_path(proxy, Some("anything.test"), "/asset.txt").await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains("content-type: text/plain; charset=utf-8\r\n"));
+    assert!(response.ends_with("root static"));
+}
+
+#[test]
+fn native_host_router_rejects_root_static_web_unsupported_cache() {
+    let root = TempDir::new().unwrap();
+    std::fs::write(root.path().join("asset.txt"), b"root static").unwrap();
+    let config = fluxheim_config::Config {
+        proxy: fluxheim_config::ProxyConfig::disabled(),
+        web: fluxheim_config::WebConfig {
+            root: Some(root.path().to_path_buf()),
+            ..Default::default()
+        },
+        cache: fluxheim_config::CacheConfig {
+            enabled: true,
+            local_static: true,
+            memory: fluxheim_config::CacheMemoryConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            disk: fluxheim_config::CacheDiskConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert!(matches!(
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0),
+        Err(NativeHttp1HostRouterConfigError::RouteProxy(
+            NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::CachePolicy)
+        ))
     ));
 }
 

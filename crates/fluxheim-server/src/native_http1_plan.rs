@@ -104,7 +104,7 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
     let mut candidates = Vec::new();
 
     if config.vhosts.is_empty() {
-        push_root_proxy_candidate(
+        push_root_http_candidate(
             "proxy".to_owned(),
             config,
             root_policy_support(config),
@@ -174,7 +174,7 @@ fn push_proxy_candidate(
     }
 }
 
-fn push_root_proxy_candidate(
+fn push_root_http_candidate(
     scope: String,
     config: &Config,
     policy_support: Result<(), NativeHttp1ProxyConfigError>,
@@ -182,7 +182,7 @@ fn push_root_proxy_candidate(
     pool_max_idle: usize,
     candidates: &mut Vec<NativeHttp1ProxyCandidate>,
 ) {
-    if !config.proxy.has_configured_upstream() {
+    if !config.proxy.has_configured_upstream() && !config.web.enabled() {
         return;
     }
 
@@ -192,6 +192,9 @@ fn push_root_proxy_candidate(
     }
 
     match NativeHttp1Proxy::from_root_config(config, policy, pool_max_idle) {
+        Ok(Some(_)) | Ok(None) if config.web.enabled() => {
+            candidates.push(NativeHttp1ProxyCandidate::eligible(scope));
+        }
         Ok(Some(_)) => candidates.push(NativeHttp1ProxyCandidate::eligible(scope)),
         Ok(None) => {}
         Err(error) => candidates.push(NativeHttp1ProxyCandidate::unsupported(scope, error)),
@@ -202,11 +205,10 @@ fn root_policy_support(config: &Config) -> Result<(), NativeHttp1ProxyConfigErro
     if !header_policy_supported(&config.headers) || !compression_supported(&config.compression) {
         return Err(NativeHttp1ProxyConfigError::HttpPolicy);
     }
-    if cache_enabled(&config.cache) {
+    if cache_enabled(&config.cache)
+        && (!config.web.enabled() || !NativeHttp1StaticWeb::cache_supported(&config.cache))
+    {
         return Err(NativeHttp1ProxyConfigError::CachePolicy);
-    }
-    if config.web.enabled() {
-        return Err(NativeHttp1ProxyConfigError::HttpPolicy);
     }
     Ok(())
 }

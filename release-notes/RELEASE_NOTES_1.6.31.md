@@ -132,6 +132,9 @@ exit work.
 - The native host router can now serve root-only proxy configs without
   `[[vhosts]]`, so the future native runner can instantiate the same root
   proxy shape that the planner reports as native-ready.
+- Root static web can now be instantiated by the native host router without
+  `[[vhosts]]`, including the supported local-static memory cache mode. Root
+  disk/rich cache modes remain explicit native cache blockers.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -225,6 +228,9 @@ exit work.
   for non-default root response headers.
 - Added native host-router tests proving root-only proxy configs are served
   without vhosts and truly empty configs still fail closed.
+- Added root static-web native host-router coverage plus planner tests proving
+  supported root local-static memory cache is native-ready and unsupported root
+  disk cache still fails closed as a cache blocker.
 - Added a live native admin listener test proving the authenticated health
   endpoint is served correctly through the native HTTP/1 listener.
 - Startup now logs a native runtime manifest preview for blocker-free plans,

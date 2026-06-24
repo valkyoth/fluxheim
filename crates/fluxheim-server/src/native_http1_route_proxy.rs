@@ -758,6 +758,46 @@ impl NativeHttp1RouteProxy {
         }
     }
 
+    pub fn from_root_config(
+        config: &fluxheim_config::Config,
+        policy: DownstreamHttp1Policy,
+        pool_max_idle: usize,
+    ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        if native_cache_policy_enabled(&config.cache)
+            && (!config.web.enabled() || !NativeHttp1StaticWeb::cache_supported(&config.cache))
+        {
+            return Err(NativeHttp1RouteProxyConfigError::Proxy(
+                NativeHttp1ProxyConfigError::CachePolicy,
+            ));
+        }
+        let fallback_web = if config.web.enabled() {
+            let cache =
+                NativeHttp1StaticWeb::cache_supported(&config.cache).then_some(&config.cache);
+            NativeHttp1StaticWeb::from_config_with_cache(&config.web, cache)
+                .map_err(|_| NativeHttp1RouteProxyConfigError::StaticWeb)?
+        } else {
+            None
+        };
+        let fallback = NativeHttp1Proxy::from_root_config(config, policy, pool_max_idle)
+            .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
+        if fallback_web.is_none() && fallback.is_none() {
+            return Err(NativeHttp1RouteProxyConfigError::MissingRouteAction);
+        }
+        let mut proxy = Self::new(Vec::new(), fallback);
+        proxy.fallback_web = fallback_web;
+        proxy.fallback_response_headers =
+            NativeRouteResponseHeaderPolicy::from_policy(&config.headers.response);
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        if config.compression.enabled {
+            proxy.fallback_compression = Some(config.compression.clone());
+        }
+        Ok(proxy)
+    }
+
     pub fn routes(&self) -> &[NativeHttp1RouteProxyRoute] {
         &self.routes
     }

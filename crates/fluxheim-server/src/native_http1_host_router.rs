@@ -9,9 +9,8 @@ use fluxheim_config::config_net::{normalize_host, normalize_host_pattern};
 use fluxheim_config::{Config, HeaderPolicyConfig, VhostConfig};
 
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1Request,
-    NativeHttp1Response, NativeHttp1RouteProxy, NativeHttp1RouteProxyConfigError,
-    ProxyProtocolTrustedSource,
+    DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
+    NativeHttp1RouteProxy, NativeHttp1RouteProxyConfigError, ProxyProtocolTrustedSource,
 };
 
 #[derive(Clone, Debug)]
@@ -128,10 +127,14 @@ impl NativeHttp1HostRouter {
         policy: DownstreamHttp1Policy,
         pool_max_idle: usize,
     ) -> Result<Self, NativeHttp1HostRouterConfigError> {
-        let proxy = NativeHttp1Proxy::from_root_config(config, policy, pool_max_idle)
-            .map_err(NativeHttp1RouteProxyConfigError::Proxy)?
-            .ok_or(NativeHttp1HostRouterConfigError::MissingVhost)?;
-        let default_proxy = Arc::new(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy)));
+        let default_proxy =
+            match NativeHttp1RouteProxy::from_root_config(config, policy, pool_max_idle) {
+                Ok(proxy) => Arc::new(proxy),
+                Err(NativeHttp1RouteProxyConfigError::MissingRouteAction) => {
+                    return Err(NativeHttp1HostRouterConfigError::MissingVhost);
+                }
+                Err(error) => return Err(NativeHttp1HostRouterConfigError::from(error)),
+            };
         Ok(Self {
             exact_hosts: HashMap::new(),
             wildcard_hosts: Vec::new(),

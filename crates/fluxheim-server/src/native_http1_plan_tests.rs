@@ -342,6 +342,81 @@ fn server_plan_reports_root_cache_native_http1_proxy_blocker() {
 }
 
 #[test]
+fn server_plan_accepts_root_static_web_memory_local_static_cache() {
+    let root = TempDir::new().expect("temp web root");
+    std::fs::write(root.path().join("asset.png"), b"asset").unwrap();
+    let config = Config {
+        proxy: fluxheim_config::ProxyConfig::disabled(),
+        web: fluxheim_config::WebConfig {
+            root: Some(root.path().to_path_buf()),
+            ..Default::default()
+        },
+        cache: CacheConfig {
+            enabled: true,
+            local_static: true,
+            memory: fluxheim_config::CacheMemoryConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
+    assert_eq!(plan.native_http1_proxy_candidates()[0].scope(), "proxy");
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        None
+    );
+    assert_eq!(
+        plan.native_http1_proxy_cutover_summary().status(),
+        NativeHttp1ProxyCutoverStatus::NativeReady
+    );
+
+    root.close().unwrap();
+}
+
+#[test]
+fn server_plan_reports_root_static_web_disk_cache_blocker() {
+    let root = TempDir::new().expect("temp web root");
+    std::fs::write(root.path().join("asset.png"), b"asset").unwrap();
+    let config = Config {
+        proxy: fluxheim_config::ProxyConfig::disabled(),
+        web: fluxheim_config::WebConfig {
+            root: Some(root.path().to_path_buf()),
+            ..Default::default()
+        },
+        cache: CacheConfig {
+            enabled: true,
+            local_static: true,
+            memory: fluxheim_config::CacheMemoryConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            disk: fluxheim_config::CacheDiskConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::CachePolicy)
+    );
+
+    root.close().unwrap();
+}
+
+#[test]
 fn server_plan_reports_vhost_cache_native_http1_proxy_blocker() {
     let mut config = Config::default();
     let mut vhost = native_proxy_vhost();
