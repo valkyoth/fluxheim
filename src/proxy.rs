@@ -7699,26 +7699,12 @@ fn php_static_file_script_name(php: &RuntimePhp, file: &crate::web::StaticFile) 
 
 #[cfg(feature = "php-fpm")]
 fn php_fpm_script_filename(php: &RuntimePhp, local_path: &std::path::Path) -> Option<String> {
-    let relative = local_path.strip_prefix(&php.root).ok()?;
-    php.fpm_root.join(relative).to_str().map(str::to_owned)
+    fluxheim_php_fpm::php_fpm_script_filename(&php.root, &php.fpm_root, local_path)
 }
 
 #[cfg(feature = "php-fpm")]
 fn php_fpm_path_translated(php: &RuntimePhp, path_info: &str) -> Option<String> {
-    let mut translated = php.fpm_root.clone();
-    for segment in path_info.trim_start_matches('/').split('/') {
-        if segment.is_empty()
-            || segment == "."
-            || segment == ".."
-            || segment.starts_with('.')
-            || segment.contains('\\')
-            || segment.chars().any(char::is_control)
-        {
-            return None;
-        }
-        translated.push(segment);
-    }
-    translated.to_str().map(str::to_owned)
+    fluxheim_php_fpm::php_fpm_path_translated(&php.fpm_root, path_info)
 }
 
 #[cfg(feature = "php-fpm")]

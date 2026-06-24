@@ -30,6 +30,9 @@ exit work.
   `CONTENT_TYPE` value selection, and runtime custom-param filtering now live
   in `fluxheim-php-fpm`; the current proxy path only applies those generated
   pairs to `fastcgi_client::Params`.
+- PHP split-container path mapping for `SCRIPT_FILENAME` and safe
+  `PATH_TRANSLATED` generation now lives in `fluxheim-php-fpm`, keeping dot
+  segment, hidden path, backslash, and control-byte rejection shared.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -57,6 +60,9 @@ exit work.
 - Added standalone `fluxheim-php-fpm` tests for duplicate request-header
   joining, `Proxy` header blocking, joined-value caps, safe `HTTP_HOST`
   insertion, content-type selection, and runtime custom-param filtering.
+- Added standalone `fluxheim-php-fpm` tests for split-container script
+  filename mapping and unsafe `PATH_INFO` rejection, plus the existing root
+  compatibility test for PHP `fpm_root` mapping.
 - Re-ran targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

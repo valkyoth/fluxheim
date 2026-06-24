@@ -317,6 +317,28 @@ where
     (accepted, dropped)
 }
 
+pub fn php_fpm_script_filename(root: &Path, fpm_root: &Path, local_path: &Path) -> Option<String> {
+    let relative = local_path.strip_prefix(root).ok()?;
+    fpm_root.join(relative).to_str().map(str::to_owned)
+}
+
+pub fn php_fpm_path_translated(fpm_root: &Path, path_info: &str) -> Option<String> {
+    let mut translated = fpm_root.to_path_buf();
+    for segment in path_info.trim_start_matches('/').split('/') {
+        if segment.is_empty()
+            || segment == "."
+            || segment == ".."
+            || segment.starts_with('.')
+            || segment.contains('\\')
+            || segment.chars().any(char::is_control)
+        {
+            return None;
+        }
+        translated.push(segment);
+    }
+    translated.to_str().map(str::to_owned)
+}
+
 pub fn split_php_response(stdout: &[u8]) -> io::Result<(&[u8], &[u8])> {
     if let Some(index) = stdout.windows(4).position(|window| window == b"\r\n\r\n") {
         return Ok((&stdout[..index], &stdout[index + 4..]));
@@ -696,12 +718,12 @@ mod tests {
         managed_php_fpm_instance_name_from_parts, managed_php_fpm_path_env_from,
         managed_php_fpm_restart_backoff_secs, parse_php_status, php_content_type_param_value,
         php_custom_params, php_fpm_effective_connect_timeout, php_fpm_effective_request_timeout,
-        php_fpm_endpoints_from_config, php_fpm_error_outcome, php_fpm_retry_attempts,
-        php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
-        php_fpm_retryable_status, php_fpm_timeout_error, php_header_param_name, php_host_param,
-        php_request_header_params, php_server_name_param, safe_php_header_name,
-        safe_php_header_value, safe_php_param_value, split_first_colon, split_php_response,
-        trim_ascii, trim_ascii_cr,
+        php_fpm_endpoints_from_config, php_fpm_error_outcome, php_fpm_path_translated,
+        php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
+        php_fpm_retryable_status, php_fpm_script_filename, php_fpm_timeout_error,
+        php_header_param_name, php_host_param, php_request_header_params, php_server_name_param,
+        safe_php_header_name, safe_php_header_value, safe_php_param_value, split_first_colon,
+        split_php_response, trim_ascii, trim_ascii_cr,
     };
     use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
 
@@ -971,6 +993,30 @@ mod tests {
                 "BAD_VALUE".to_owned()
             ]
         );
+    }
+
+    #[test]
+    fn php_fpm_path_mapping_supports_split_container_roots_and_rejects_unsafe_path_info() {
+        let root = Path::new("site/root");
+        let fpm_root = Path::new("container/root");
+        let local_script = Path::new("site/root/public/index.php");
+
+        assert_eq!(
+            php_fpm_script_filename(root, fpm_root, local_script).as_deref(),
+            Some("container/root/public/index.php")
+        );
+        assert_eq!(
+            php_fpm_script_filename(Path::new("other/root"), fpm_root, local_script),
+            None
+        );
+        assert_eq!(
+            php_fpm_path_translated(fpm_root, "/uploads/file.txt").as_deref(),
+            Some("container/root/uploads/file.txt")
+        );
+        assert!(php_fpm_path_translated(fpm_root, "/uploads/../wp-config.php").is_none());
+        assert!(php_fpm_path_translated(fpm_root, "/uploads/.secret").is_none());
+        assert!(php_fpm_path_translated(fpm_root, "/uploads\\wp-config.php").is_none());
+        assert!(php_fpm_path_translated(fpm_root, "/uploads/file\x01.txt").is_none());
     }
 
     #[test]
