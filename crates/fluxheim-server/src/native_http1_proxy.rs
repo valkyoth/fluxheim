@@ -118,6 +118,7 @@ struct NativeAuthRequestInput {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeHttp1ProxyConfigError {
+    CachePolicy,
     DynamicUpstreamDiscovery,
     ErrorPages,
     HttpPolicy,
@@ -126,6 +127,7 @@ pub enum NativeHttp1ProxyConfigError {
     RecvBufferTooLarge,
     TrafficMirror,
     AuthRequest,
+    PhpFpm,
     UpstreamHttp2,
     UpstreamProxyProtocol,
     UpstreamTls,
@@ -137,6 +139,9 @@ pub enum NativeHttp1ProxyConfigError {
 impl std::fmt::Display for NativeHttp1ProxyConfigError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::CachePolicy => {
+                formatter.write_str("native HTTP/1 proxy does not yet support cache policy")
+            }
             Self::DynamicUpstreamDiscovery => formatter
                 .write_str("native HTTP/1 proxy does not yet support dynamic upstream discovery"),
             Self::ErrorPages => {
@@ -162,6 +167,9 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
                 formatter.write_str(
                     "native HTTP/1 proxy auth subrequests require the auth-request feature",
                 )
+            }
+            Self::PhpFpm => {
+                formatter.write_str("native HTTP/1 proxy does not yet support PHP-FPM")
             }
             Self::UpstreamHttp2 => formatter.write_str(
                 "native HTTP/1 proxy rejected unsupported upstream HTTP/2 mode",

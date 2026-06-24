@@ -7,6 +7,25 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.31 - 2026-06-24
+
+### Changed
+
+- Split native HTTP/1 proxy cutover diagnostics for cache policy and PHP-FPM
+  into explicit `CachePolicy` and `PhpFpm` blockers instead of reporting both
+  as a generic HTTP policy gap.
+- Move the remaining normal-profile Pingora dependency exception target to
+  `1.6.32`, matching the revised plan where 1.6.31 handles cache/PHP native
+  integration and 1.6.32 is the final Pingora-free proof release.
+
+### Tests
+
+- Add native server-plan tests proving root, vhost, and route cache policies
+  report cache-specific native blockers, and vhost/route PHP-FPM policies
+  report PHP-specific native blockers.
+- Re-run the native runtime cutover and Pingora dependency policy evidence for
+  the 1.6.31 planning state.
+
 ## 1.6.30 - 2026-06-23
 
 ### Changed

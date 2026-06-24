@@ -105,7 +105,7 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
         push_proxy_candidate(
             "proxy".to_owned(),
             &config.proxy,
-            root_policy_supported(config),
+            root_policy_support(config),
             policy,
             pool_max_idle,
             &mut candidates,
@@ -117,7 +117,7 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
         push_proxy_candidate(
             format!("vhost {:?} proxy", vhost.name),
             &vhost.proxy,
-            vhost_policy_supported(vhost),
+            vhost_policy_support(vhost),
             policy,
             pool_max_idle,
             &mut candidates,
@@ -136,7 +136,7 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
                 push_proxy_candidate(
                     format!("vhost {:?} route {:?} proxy", vhost.name, route.name),
                     proxy,
-                    vhost_policy_supported(vhost) && route_policy_supported(&route),
+                    vhost_policy_support(vhost).and_then(|()| route_policy_support(&route)),
                     policy,
                     pool_max_idle,
                     &mut candidates,
@@ -151,7 +151,7 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
 fn push_proxy_candidate(
     scope: String,
     proxy: &ProxyConfig,
-    policy_supported: bool,
+    policy_support: Result<(), NativeHttp1ProxyConfigError>,
     policy: DownstreamHttp1Policy,
     pool_max_idle: usize,
     candidates: &mut Vec<NativeHttp1ProxyCandidate>,
@@ -160,11 +160,8 @@ fn push_proxy_candidate(
         return;
     }
 
-    if !policy_supported {
-        candidates.push(NativeHttp1ProxyCandidate::unsupported(
-            scope,
-            NativeHttp1ProxyConfigError::HttpPolicy,
-        ));
+    if let Err(error) = policy_support {
+        candidates.push(NativeHttp1ProxyCandidate::unsupported(scope, error));
         return;
     }
 
@@ -175,42 +172,59 @@ fn push_proxy_candidate(
     }
 }
 
-fn root_policy_supported(config: &Config) -> bool {
-    header_policy_supported(&config.headers)
-        && compression_supported(&config.compression)
-        && !cache_enabled(&config.cache)
-        && !config.web.enabled()
+fn root_policy_support(config: &Config) -> Result<(), NativeHttp1ProxyConfigError> {
+    if !header_policy_supported(&config.headers) || !compression_supported(&config.compression) {
+        return Err(NativeHttp1ProxyConfigError::HttpPolicy);
+    }
+    if cache_enabled(&config.cache) {
+        return Err(NativeHttp1ProxyConfigError::CachePolicy);
+    }
+    if config.web.enabled() {
+        return Err(NativeHttp1ProxyConfigError::HttpPolicy);
+    }
+    Ok(())
 }
 
-fn vhost_policy_supported(vhost: &VhostConfig) -> bool {
-    access_policy_native_supported(&vhost.access)
-        && vhost_header_overlay_supported(&vhost.headers)
-        && !cache_enabled(&vhost.cache)
-        && vhost.compression.as_ref().is_none_or(compression_supported)
-        && !vhost.php.enabled
-        && !vhost.web.enabled()
-        && vhost
-            .acme_challenge
-            .route_config()
-            .as_ref()
-            .is_none_or(route_policy_supported)
-        && vhost
-            .redirect
-            .route_config()
-            .as_ref()
-            .is_none_or(route_policy_supported)
+fn vhost_policy_support(vhost: &VhostConfig) -> Result<(), NativeHttp1ProxyConfigError> {
+    if !access_policy_native_supported(&vhost.access)
+        || !vhost_header_overlay_supported(&vhost.headers)
+        || !vhost.compression.as_ref().is_none_or(compression_supported)
+    {
+        return Err(NativeHttp1ProxyConfigError::HttpPolicy);
+    }
+    if cache_enabled(&vhost.cache) {
+        return Err(NativeHttp1ProxyConfigError::CachePolicy);
+    }
+    if vhost.php.enabled {
+        return Err(NativeHttp1ProxyConfigError::PhpFpm);
+    }
+    if vhost.web.enabled() {
+        return Err(NativeHttp1ProxyConfigError::HttpPolicy);
+    }
+    if let Some(route) = vhost.acme_challenge.route_config() {
+        route_policy_support(&route)?;
+    }
+    if let Some(route) = vhost.redirect.route_config() {
+        route_policy_support(&route)?;
+    }
+    Ok(())
 }
 
-fn route_policy_supported(route: &RouteConfig) -> bool {
-    access_policy_native_supported(&route.access)
-        && route_request_header_policy_supported(&route.headers.request)
-        && route_response_header_policy_supported(&route.headers.response)
-        && route
-            .cache
-            .as_ref()
-            .is_none_or(|cache| !cache_enabled(cache))
-        && route.compression.as_ref().is_none_or(compression_supported)
-        && route.php.as_ref().is_none_or(|php| !php.enabled)
+fn route_policy_support(route: &RouteConfig) -> Result<(), NativeHttp1ProxyConfigError> {
+    if !access_policy_native_supported(&route.access)
+        || !route_request_header_policy_supported(&route.headers.request)
+        || !route_response_header_policy_supported(&route.headers.response)
+        || !route.compression.as_ref().is_none_or(compression_supported)
+    {
+        return Err(NativeHttp1ProxyConfigError::HttpPolicy);
+    }
+    if route.cache.as_ref().is_some_and(cache_enabled) {
+        return Err(NativeHttp1ProxyConfigError::CachePolicy);
+    }
+    if route.php.as_ref().is_some_and(|php| php.enabled) {
+        return Err(NativeHttp1ProxyConfigError::PhpFpm);
+    }
+    Ok(())
 }
 
 fn header_policy_supported(headers: &fluxheim_config::HeaderPolicyConfig) -> bool {

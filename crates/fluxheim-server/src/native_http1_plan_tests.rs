@@ -296,7 +296,72 @@ fn server_plan_rejects_native_http1_route_proxy_candidate_with_route_policy() {
 
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::HttpPolicy)
+        Some(NativeHttp1ProxyConfigError::CachePolicy)
+    );
+}
+
+#[test]
+fn server_plan_reports_root_cache_native_http1_proxy_blocker() {
+    let mut config = Config::default();
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
+    config.cache.enabled = true;
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::CachePolicy)
+    );
+}
+
+#[test]
+fn server_plan_reports_vhost_cache_native_http1_proxy_blocker() {
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    vhost.cache.enabled = true;
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::CachePolicy)
+    );
+}
+
+#[test]
+fn server_plan_reports_vhost_php_native_http1_proxy_blocker() {
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    vhost.php.enabled = true;
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::PhpFpm)
+    );
+}
+
+#[test]
+fn server_plan_reports_route_php_native_http1_proxy_blocker() {
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    vhost.proxy = fluxheim_config::ProxyConfig::disabled();
+    let mut route = native_proxy_route();
+    route.php = Some(fluxheim_config::PhpConfig {
+        enabled: true,
+        ..Default::default()
+    });
+    vhost.routes = vec![route];
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::PhpFpm)
     );
 }
 
@@ -1344,6 +1409,10 @@ fn server_plan_reports_mixed_native_http1_proxy_cutover_summary() {
     assert_eq!(summary.total(), 2);
     assert_eq!(summary.eligible(), 1);
     assert_eq!(summary.unsupported(), 1);
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[1].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::CachePolicy)
+    );
 }
 
 #[test]
@@ -1551,5 +1620,59 @@ fn route_compression_config() -> Config {
             }],
         }],
         ..Default::default()
+    }
+}
+
+fn native_proxy_vhost() -> VhostConfig {
+    VhostConfig {
+        name: "native.test".to_owned(),
+        hosts: vec!["native.test".to_owned()],
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: Default::default(),
+        proxy: fluxheim_config::ProxyConfig {
+            upstreams: vec!["127.0.0.1:3001".to_owned()],
+            ..Default::default()
+        },
+        cache: CacheConfig::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: Default::default(),
+        routes: Vec::new(),
+    }
+}
+
+fn native_proxy_route() -> RouteConfig {
+    RouteConfig {
+        name: "api".to_owned(),
+        path_exact: None,
+        path_prefix: Some("/api/".to_owned()),
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: None,
+        proxy: Some(fluxheim_config::ProxyConfig {
+            upstreams: vec!["127.0.0.1:3002".to_owned()],
+            ..Default::default()
+        }),
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
     }
 }
