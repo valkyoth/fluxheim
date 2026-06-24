@@ -235,7 +235,9 @@ impl ServerPlan {
     }
 
     pub fn native_runtime_target_adapter(&self) -> RuntimeAdapterKind {
-        if self.native_runtime_cutover_summary().is_ready() {
+        if self.native_runtime_cutover_summary().is_ready()
+            && self.native_runtime_launch_plan().is_ok()
+        {
             RuntimeAdapterKind::NativeRuntime
         } else {
             RuntimeAdapterKind::PingoraCompatibility

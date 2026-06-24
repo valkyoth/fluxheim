@@ -346,6 +346,93 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
 }
 
 #[test]
+fn native_runtime_launch_plan_rejects_duplicate_tcp_listener_bindings() {
+    let mut config = Config::default();
+    config.server.listen = vec!["127.0.0.1:8080".to_owned()];
+    config.proxy.upstreams = vec!["127.0.0.1:3000".to_owned()];
+    config.admin.enabled = true;
+    config.admin.listen = "127.0.0.1:8080".to_owned();
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert!(plan.native_runtime_cutover_summary().is_ready());
+    assert_eq!(
+        plan.native_runtime_target_adapter(),
+        RuntimeAdapterKind::PingoraCompatibility
+    );
+    assert!(matches!(
+        plan.native_runtime_launch_plan(),
+        Err(NativeRuntimeLaunchPlanError::DuplicateListener {
+            transport: NativeRuntimeListenerTransport::Tcp,
+            address,
+            first_service: ServiceKind::ProxyHttp,
+            second_service: ServiceKind::AdminControlPlane,
+        }) if address.to_string() == "127.0.0.1:8080"
+    ));
+}
+
+#[test]
+fn native_runtime_launch_plan_allows_tcp_and_udp_on_same_address() {
+    let mut config = Config::default();
+    config.server.listen = Vec::new();
+    config.stream.enabled = true;
+    config.stream.routes = vec![StreamRouteConfig {
+        name: "tcp".to_owned(),
+        listen: vec!["127.0.0.1:15353".to_owned()],
+        upstream: Some("127.0.0.1:5432".to_owned()),
+        ..StreamRouteConfig::default()
+    }];
+    config.udp.enabled = true;
+    config.udp.routes = vec![UdpRouteConfig {
+        name: "dns".to_owned(),
+        mode: fluxheim_config::UdpRouteMode::DnsLoadBalance,
+        listen: vec!["127.0.0.1:15353".to_owned()],
+        upstream: Some("127.0.0.1:5353".to_owned()),
+        upstreams: Vec::new(),
+        upstream_weights: Vec::new(),
+        upstream_aliases: Vec::new(),
+        idle_timeout_secs: 30,
+        response_timeout_secs: 3,
+        max_datagram_bytes: 1232,
+        max_sessions: 4096,
+        max_sessions_per_source: 64,
+        max_responses_per_source_per_second: 256,
+        passive_health_enabled: true,
+        passive_health_failures: 3,
+        passive_health_ejection_secs: 10,
+    }];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let launch_plan = plan
+        .native_runtime_launch_plan()
+        .expect("native launch plan");
+
+    assert_eq!(
+        plan.native_runtime_target_adapter(),
+        RuntimeAdapterKind::NativeRuntime
+    );
+    assert_eq!(launch_plan.listeners().len(), 2);
+    assert!(
+        launch_plan
+            .listeners()
+            .iter()
+            .any(
+                |listener| listener.transport() == NativeRuntimeListenerTransport::Tcp
+                    && listener.listener_addr().to_string() == "127.0.0.1:15353"
+            )
+    );
+    assert!(
+        launch_plan
+            .listeners()
+            .iter()
+            .any(
+                |listener| listener.transport() == NativeRuntimeListenerTransport::Udp
+                    && listener.listener_addr().to_string() == "127.0.0.1:15353"
+            )
+    );
+}
+
+#[test]
 fn native_runtime_cutover_summary_exports_stable_tsv() {
     let plan = ServerPlan::with_process(
         ProcessSpec::default(),

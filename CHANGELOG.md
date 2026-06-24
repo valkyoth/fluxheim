@@ -105,6 +105,9 @@ behavior when the change improves security or project direction.
   the Fluxheim-owned service/listener/background-task graph for blocker-free
   plans, preparing the final runner replacement without changing production
   execution yet.
+- Validate native runtime launch-plan listener binds before reporting the
+  native adapter as the target: duplicate TCP or duplicate UDP bind intents now
+  fail closed, while TCP and UDP listeners may still share the same address.
 - Add a concrete native metrics HTTP handler around the existing Prometheus
   response generator, giving the future native runner a direct handler for the
   metrics service.
@@ -220,6 +223,9 @@ behavior when the change improves security or project direction.
 - Extend the native runtime launch plan with background-task launch intents, so
   cache purging, metrics export, ACME renewal, certificate reload, and watchdog
   tasks are represented by the same native runner contract as listeners.
+- Add launch-plan validation tests proving duplicate TCP listener binds keep
+  the native target adapter disabled, while TCP and UDP listeners on the same
+  address remain valid because they use distinct kernel transports.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

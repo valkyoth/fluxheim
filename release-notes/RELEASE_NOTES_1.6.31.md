@@ -101,6 +101,9 @@ exit work.
   Fluxheim-owned service/listener/background-task graph for blocker-free plans,
   giving the final runner replacement a tested orchestration contract without
   changing production execution yet.
+- Native runtime launch-plan validation now rejects duplicate TCP or duplicate
+  UDP listener bind intents before reporting the native adapter as the target,
+  while still allowing TCP and UDP listeners to share the same address.
 - The metrics service now has a concrete native HTTP handler around the
   existing Prometheus response generator, giving the future native runner a
   direct handler for metrics HTTP.
@@ -198,6 +201,9 @@ exit work.
 - The native runtime cutover evidence report now includes manifest service and
   background-task rows, so CI archives the exact native service graph that the
   final runner will consume.
+- Added launch-plan validation tests proving duplicate TCP listener binds keep
+  the native target adapter disabled, while TCP and UDP listeners on the same
+  address remain valid because they use distinct kernel transports.
 - Re-ran targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

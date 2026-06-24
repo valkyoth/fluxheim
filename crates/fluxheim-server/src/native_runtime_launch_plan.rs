@@ -1,9 +1,10 @@
 use crate::{
-    DownstreamHttp1Policy, DownstreamHttp2Policy, NativeRuntimeCutoverBlocker,
+    DownstreamHttp1Policy, DownstreamHttp2Policy, ListenerProtocol, NativeRuntimeCutoverBlocker,
     NativeRuntimeManifest, NativeRuntimeManifestError, ProcessSpec, ProxyProtocolPolicy,
     ServerPlan, ServiceKind, ServiceSpec,
 };
 use fluxheim_runtime::{BackgroundTaskKind, BackgroundTaskSpec};
+use std::{collections::BTreeMap, net::SocketAddr};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeRuntimeLaunchPlan {
@@ -27,10 +28,22 @@ pub struct NativeRuntimeLaunchBackgroundTask {
     task: BackgroundTaskSpec,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum NativeRuntimeListenerTransport {
+    Tcp,
+    Udp,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NativeRuntimeLaunchPlanError {
     Blocked {
         blockers: Vec<NativeRuntimeCutoverBlocker>,
+    },
+    DuplicateListener {
+        transport: NativeRuntimeListenerTransport,
+        address: SocketAddr,
+        first_service: ServiceKind,
+        second_service: ServiceKind,
     },
 }
 
@@ -44,6 +57,17 @@ impl std::fmt::Display for NativeRuntimeLaunchPlanError {
                     blockers.len()
                 )
             }
+            Self::DuplicateListener {
+                transport,
+                address,
+                first_service,
+                second_service,
+            } => {
+                write!(
+                    formatter,
+                    "native runtime launch plan has duplicate {transport} listener {address} for {first_service:?} and {second_service:?}"
+                )
+            }
         }
     }
 }
@@ -55,7 +79,7 @@ impl NativeRuntimeLaunchPlan {
         let manifest = plan
             .native_runtime_manifest()
             .map_err(NativeRuntimeLaunchPlanError::from)?;
-        let listeners = manifest
+        let listeners: Vec<_> = manifest
             .services()
             .iter()
             .flat_map(|service| {
@@ -67,6 +91,7 @@ impl NativeRuntimeLaunchPlan {
                 })
             })
             .collect();
+        validate_listener_bindings(&listeners)?;
         let background_tasks = manifest
             .background_tasks()
             .iter()
@@ -183,6 +208,10 @@ impl NativeRuntimeLaunchListener {
     pub const fn proxy_protocol_enabled(&self) -> bool {
         self.listener.proxy_protocol_enabled()
     }
+
+    pub const fn transport(&self) -> NativeRuntimeListenerTransport {
+        NativeRuntimeListenerTransport::from_protocol(self.listener_protocol())
+    }
 }
 
 impl NativeRuntimeLaunchBackgroundTask {
@@ -209,6 +238,46 @@ impl From<NativeRuntimeManifestError> for NativeRuntimeLaunchPlanError {
             NativeRuntimeManifestError::Blocked { blockers } => Self::Blocked { blockers },
         }
     }
+}
+
+impl NativeRuntimeListenerTransport {
+    pub const fn from_protocol(protocol: ListenerProtocol) -> Self {
+        match protocol {
+            ListenerProtocol::Udp => Self::Udp,
+            ListenerProtocol::AdminHttp
+            | ListenerProtocol::Http
+            | ListenerProtocol::Https
+            | ListenerProtocol::MetricsHttp
+            | ListenerProtocol::StreamTcp => Self::Tcp,
+        }
+    }
+}
+
+impl std::fmt::Display for NativeRuntimeListenerTransport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tcp => formatter.write_str("TCP"),
+            Self::Udp => formatter.write_str("UDP"),
+        }
+    }
+}
+
+fn validate_listener_bindings(
+    listeners: &[NativeRuntimeLaunchListener],
+) -> Result<(), NativeRuntimeLaunchPlanError> {
+    let mut seen = BTreeMap::new();
+    for listener in listeners {
+        let key = (listener.transport(), listener.listener_addr());
+        if let Some(first_service) = seen.insert(key, listener.service_kind()) {
+            return Err(NativeRuntimeLaunchPlanError::DuplicateListener {
+                transport: listener.transport(),
+                address: listener.listener_addr(),
+                first_service,
+                second_service: listener.service_kind(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn proxy_protocol_label(proxy_protocol: &ProxyProtocolPolicy) -> &'static str {
