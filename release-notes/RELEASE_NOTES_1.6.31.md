@@ -166,6 +166,8 @@ exit work.
   PHP-FPM, and route PHP-FPM native cutover blockers.
 - Added route-proxy builder tests proving vhost/route cache and PHP-FPM
   policies are rejected directly until native adapters own those paths.
+- Added a live native HTTP/1 proxy test proving safe-method failover skips
+  duplicate weighted upstream slots before trying the next unique backend.
 - Added standalone `fluxheim-cache` tests for cache-key construction,
   namespace/query/host normalization, and local-static file identity.
 - Added native HTTP/1 tests proving cache request policy helpers work through

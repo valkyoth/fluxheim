@@ -173,6 +173,8 @@ behavior when the change improves security or project direction.
   report PHP-specific native blockers.
 - Add native route-proxy builder tests proving vhost/route cache and PHP-FPM
   policies are rejected directly until native adapters own those paths.
+- Add a live native HTTP/1 proxy test proving safe-method failover skips
+  duplicate weighted upstream slots before trying the next unique backend.
 - Add `fluxheim-cache` tests for image/static cache-key construction,
   namespace/query/host normalization, and local-static file identity.
 - Add native HTTP/1 tests proving `NativeHttp1Request` feeds cache request

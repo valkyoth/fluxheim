@@ -1408,6 +1408,32 @@ async fn native_proxy_weighted_round_robins_static_upstreams() {
 }
 
 #[tokio::test]
+async fn native_proxy_weighted_failover_skips_duplicate_slots() {
+    let first = unused_local_address().await;
+    let (second, second_count) = counting_upstream("second", 1).await;
+    let proxy = NativeHttp1Proxy::from_weighted_upstreams(
+        vec![
+            NativeHttp1Upstream::new(first.to_string())
+                .with_connect_timeout(Duration::from_millis(25)),
+            NativeHttp1Upstream::new(second.to_string())
+                .with_connect_timeout(Duration::from_millis(25)),
+        ],
+        &[2, 1],
+    )
+    .unwrap();
+    let proxy = proxy_listener_for(proxy).await;
+
+    let response = downstream_get(proxy, "/weighted-failover").await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert!(response.ends_with("second"));
+    assert_eq!(second_count.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
 async fn native_proxy_does_not_fail_over_unsafe_method() {
     let first = unused_local_address().await;
     let second = upstream(|_, mut stream| async move {
