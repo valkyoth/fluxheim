@@ -82,6 +82,36 @@ pub fn native_prometheus_response() -> Result<NativeHttp1Response, prometheus::E
         .with_header("content-type", prometheus::TextEncoder::new().format_type()))
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct NativeMetricsApp;
+
+impl NativeMetricsApp {
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl fluxheim_server::NativeHttp1Handler for NativeMetricsApp {
+    fn handle<'a>(
+        &'a self,
+        _request: fluxheim_server::NativeHttp1Request,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = fluxheim_server::NativeHttp1Response> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            native_prometheus_response().unwrap_or_else(|error| {
+                log::debug!("native metrics response unavailable: {error}");
+                fluxheim_server::NativeHttp1Response::new(
+                    500,
+                    "Internal Server Error",
+                    b"metrics unavailable\n",
+                )
+                .close_connection()
+            })
+        })
+    }
+}
+
 pub fn init() -> Result<(), prometheus::Error> {
     proxy_requests_total()?;
     host_routing_rejections_total()?;
@@ -1718,7 +1748,7 @@ mod tests {
     #[cfg(all(feature = "proxy", feature = "cache"))]
     use super::record_cache_runtime_totals;
     use super::{
-        init, method_bucket, native_prometheus_response, record_acme_event,
+        NativeMetricsApp, init, method_bucket, native_prometheus_response, record_acme_event,
         record_admin_auth_event, record_cache_activity, record_cache_activity_scope,
         record_cache_operation_duration, record_cache_purge, record_cache_purger_duration,
         record_cache_purger_entries, record_cache_purger_run, record_config,
@@ -2204,6 +2234,46 @@ mod tests {
 
         record_admin_auth_event("failure", "source");
         let response = native_prometheus_response().unwrap();
+        let output = String::from_utf8(response.body().to_vec()).unwrap();
+
+        assert_eq!(response.status(), 200);
+        assert!(
+            response
+                .headers()
+                .iter()
+                .any(|(name, value)| name == "content-type" && value.starts_with("text/plain"))
+        );
+        assert!(output.contains("fluxheim_admin_auth_events_total"));
+        assert!(output.contains(r#"event="failure",scope="source""#));
+    }
+
+    #[test]
+    fn native_metrics_app_serves_prometheus_response() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_admin_auth_event("failure", "source");
+        let request = fluxheim_server::NativeHttp1Request {
+            method: "GET".to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: false,
+            tls_identity: None,
+            geo_context: None,
+            target: "/metrics".to_owned(),
+            version: fluxheim_protocol::Http1Version::Http11,
+            headers: vec![("host".to_owned(), "metrics.test".to_owned())],
+            body: Vec::new(),
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let response = runtime.block_on(fluxheim_server::NativeHttp1Handler::handle(
+            &NativeMetricsApp::new(),
+            request,
+        ));
         let output = String::from_utf8(response.body().to_vec()).unwrap();
 
         assert_eq!(response.status(), 200);

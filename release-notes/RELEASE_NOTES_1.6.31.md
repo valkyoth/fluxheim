@@ -101,6 +101,9 @@ exit work.
   Fluxheim-owned service/listener/background-task graph for blocker-free plans,
   giving the final runner replacement a tested orchestration contract without
   changing production execution yet.
+- The metrics service now has a concrete native HTTP handler around the
+  existing Prometheus response generator, giving the future native runner a
+  direct handler for metrics HTTP.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -184,6 +187,8 @@ exit work.
 - Added native runtime manifest tests proving blocked plans return explicit
   blockers and blocker-free multi-service plans expose proxy, admin, metrics,
   stream, UDP, ops-socket, and listener bindings.
+- Added a native metrics-handler test proving the Prometheus text response is
+  served through the `NativeHttp1Handler` boundary.
 - The native runtime cutover evidence report now includes manifest service and
   background-task rows, so CI archives the exact native service graph that the
   final runner will consume.
