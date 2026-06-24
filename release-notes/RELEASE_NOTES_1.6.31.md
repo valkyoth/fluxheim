@@ -142,6 +142,9 @@ exit work.
   cache, and PHP-FPM candidates when a route has no upstream proxy, making
   route-level native blockers visible instead of folding them into the parent
   vhost or fallback proxy summary.
+- Native rate-limit delay mode now acquires vhost/route concurrency permits
+  before sleeping, so delayed requests still count against configured
+  concurrency budgets instead of occupying listener tasks outside those limits.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now

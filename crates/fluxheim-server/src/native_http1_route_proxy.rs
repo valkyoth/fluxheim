@@ -1457,6 +1457,18 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .close_connection();
             }
             let concurrency_route = decoded_policy_route.or(selected_route);
+            let _concurrency_permits =
+                match self.acquire_concurrency_permits(concurrency_route).await {
+                    Ok(permits) => permits,
+                    Err(status) => {
+                        return NativeHttp1Response::new(
+                            status,
+                            "Too Many Requests",
+                            b"too many requests\n",
+                        )
+                        .close_connection();
+                    }
+                };
             match self.check_rate_limits(concurrency_route, client_ip) {
                 NativeRateLimitDecision::Allow => {}
                 NativeRateLimitDecision::Delay(delay) => {
@@ -1471,18 +1483,6 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .close_connection();
                 }
             }
-            let _concurrency_permits =
-                match self.acquire_concurrency_permits(concurrency_route).await {
-                    Ok(permits) => permits,
-                    Err(status) => {
-                        return NativeHttp1Response::new(
-                            status,
-                            "Too Many Requests",
-                            b"too many requests\n",
-                        )
-                        .close_connection();
-                    }
-                };
             if let Some(route) = selected_route {
                 if let Some(response) = native_grpc_rejection_response(&route.grpc, &request) {
                     return response;
