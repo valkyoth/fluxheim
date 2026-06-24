@@ -119,6 +119,77 @@ fn vhost(
 }
 
 #[tokio::test]
+async fn native_host_router_serves_root_proxy_without_vhosts() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(request).unwrap();
+        assert!(request.starts_with("GET / HTTP/1.1\r\n"));
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\n\
+                  content-length: 4\r\n\
+                  x-powered-by: php\r\n\
+                  x-root-remove: old\r\n\r\nroot",
+            )
+            .await
+            .unwrap();
+    });
+
+    let mut config = fluxheim_config::Config::default();
+    config.proxy.upstreams = vec![upstream.to_string()];
+    config
+        .headers
+        .response
+        .unset
+        .push("x-root-remove".to_owned());
+    config
+        .headers
+        .response
+        .set
+        .insert("x-root-response".to_owned(), "native".to_owned());
+
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, Some("anything.test")).await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains("x-root-response: native\r\n"));
+    assert!(response.contains("x-content-type-options: nosniff\r\n"));
+    assert!(!response.to_ascii_lowercase().contains("x-powered-by:"));
+    assert!(!response.to_ascii_lowercase().contains("x-root-remove:"));
+    assert!(response.ends_with("root"));
+}
+
+#[test]
+fn native_host_router_rejects_empty_config_without_root_proxy() {
+    let config = fluxheim_config::Config {
+        proxy: fluxheim_config::ProxyConfig::disabled(),
+        ..Default::default()
+    };
+
+    assert!(matches!(
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0),
+        Err(NativeHttp1HostRouterConfigError::MissingVhost)
+    ));
+}
+
+#[tokio::test]
 async fn native_host_router_routes_exact_hosts_and_default_fallback() {
     let primary = upstream_response("primary").await;
     let secondary = upstream_response("secondary").await;

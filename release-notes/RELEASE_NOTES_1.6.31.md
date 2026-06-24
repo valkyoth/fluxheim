@@ -129,6 +129,9 @@ exit work.
 - Root native HTTP/1 proxy construction now applies root response-header policy
   and root compression config before cutover planning marks a root proxy as
   native-ready.
+- The native host router can now serve root-only proxy configs without
+  `[[vhosts]]`, so the future native runner can instantiate the same root
+  proxy shape that the planner reports as native-ready.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -220,6 +223,8 @@ exit work.
 - Added native root-proxy tests proving root response headers are stripped,
   set, and appended through the root config constructor, plus planner coverage
   for non-default root response headers.
+- Added native host-router tests proving root-only proxy configs are served
+  without vhosts and truly empty configs still fail closed.
 - Added a live native admin listener test proving the authenticated health
   endpoint is served correctly through the native HTTP/1 listener.
 - Startup now logs a native runtime manifest preview for blocker-free plans,

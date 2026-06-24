@@ -137,6 +137,9 @@ behavior when the change improves security or project direction.
   planning to it, so root response headers and root compression are carried
   into native proxy parity instead of being validated separately from runtime
   construction.
+- Teach the native host router to instantiate root-only proxy configs without
+  `[[vhosts]]`, matching the root proxy candidate that the native cutover
+  planner already marks ready.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to
