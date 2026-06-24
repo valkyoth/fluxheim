@@ -97,6 +97,10 @@ exit work.
 - Native HTTP/1 now has a host router that builds one native route proxy per
   configured vhost and dispatches exact and wildcard Host matches with the same
   default-vhost fallback behavior as the compatibility runtime.
+- A native runtime manifest now refuses blocked plans and exports the
+  Fluxheim-owned service/listener/background-task graph for blocker-free plans,
+  giving the final runner replacement a tested orchestration contract without
+  changing production execution yet.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -177,6 +181,9 @@ exit work.
 - Added live native host-router tests proving exact Host dispatch, wildcard
   longest-suffix matching, unknown/missing Host fallback, and default-vhost
   config validation.
+- Added native runtime manifest tests proving blocked plans return explicit
+  blockers and blocker-free multi-service plans expose proxy, admin, metrics,
+  stream, UDP, ops-socket, and listener bindings.
 - Re-ran targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

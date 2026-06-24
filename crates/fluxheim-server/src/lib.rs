@@ -27,6 +27,7 @@ mod native_http1_upstream_response;
 mod native_http2;
 mod native_http2_client;
 mod native_http2_stack;
+mod native_runtime_manifest;
 mod plan;
 mod process;
 mod proxy_protocol;
@@ -71,6 +72,9 @@ pub use native_http2_stack::{
     NativeHttp2Handler, NativeHttp2Request, NativeHttp2Response, NativeHttp2StackError,
     native_http2_stack_probe, native_http2_stack_probe_with_response,
     serve_native_http2_connection,
+};
+pub use native_runtime_manifest::{
+    NativeRuntimeManifest, NativeRuntimeManifestError, NativeRuntimeServiceManifest,
 };
 pub use plan::{
     NativeRuntimeCutoverBlocker, NativeRuntimeCutoverSummary, RuntimeAdapterKind, ServerPlan,

@@ -164,6 +164,121 @@ fn native_runtime_cutover_summary_reports_service_blockers() {
 }
 
 #[test]
+fn native_runtime_manifest_rejects_blocked_plans() {
+    let mut config = Config::default();
+    config.server.listen = vec!["127.0.0.1:8080".to_owned()];
+    config.proxy.upstreams = vec!["127.0.0.1:3000".to_owned()];
+    config.cache.enabled = true;
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert!(matches!(
+        plan.native_runtime_manifest(),
+        Err(NativeRuntimeManifestError::Blocked { blockers })
+            if blockers == vec![NativeRuntimeCutoverBlocker::NativeHttp1Proxy]
+    ));
+}
+
+#[test]
+fn native_runtime_manifest_exports_service_listener_bindings() {
+    let mut config = Config::default();
+    config.server.listen = vec!["127.0.0.1:8080".to_owned()];
+    config.admin.enabled = true;
+    config.admin.listen = "127.0.0.1:9090".to_owned();
+    config.admin.ops_socket.enabled = true;
+    config.metrics.enabled = true;
+    config.metrics.listen = "127.0.0.1:9091".to_owned();
+    config.stream.enabled = true;
+    config.stream.routes = vec![StreamRouteConfig {
+        name: "tcp".to_owned(),
+        listen: vec!["127.0.0.1:15432".to_owned()],
+        upstream: Some("127.0.0.1:5432".to_owned()),
+        ..StreamRouteConfig::default()
+    }];
+    config.udp.enabled = true;
+    config.udp.routes = vec![UdpRouteConfig {
+        name: "dns".to_owned(),
+        mode: fluxheim_config::UdpRouteMode::DnsLoadBalance,
+        listen: vec!["127.0.0.1:15353".to_owned()],
+        upstream: Some("127.0.0.1:5353".to_owned()),
+        upstreams: Vec::new(),
+        upstream_weights: Vec::new(),
+        upstream_aliases: Vec::new(),
+        idle_timeout_secs: 30,
+        response_timeout_secs: 3,
+        max_datagram_bytes: 1232,
+        max_sessions: 4096,
+        max_sessions_per_source: 64,
+        max_responses_per_source_per_second: 256,
+        passive_health_enabled: true,
+        passive_health_failures: 3,
+        passive_health_ejection_secs: 10,
+    }];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let manifest = plan.native_runtime_manifest().expect("native manifest");
+
+    assert_eq!(manifest.services().len(), 6);
+    assert_eq!(
+        manifest
+            .service(ServiceKind::ProxyHttp)
+            .expect("proxy service")
+            .listeners()
+            .iter()
+            .map(|listener| listener.protocol())
+            .collect::<Vec<_>>(),
+        vec![ListenerProtocol::Http]
+    );
+    assert_eq!(
+        manifest
+            .service(ServiceKind::AdminControlPlane)
+            .expect("admin service")
+            .listeners()
+            .iter()
+            .map(|listener| listener.protocol())
+            .collect::<Vec<_>>(),
+        vec![ListenerProtocol::AdminHttp]
+    );
+    assert!(
+        manifest
+            .service(ServiceKind::AdminOpsSocket)
+            .expect("ops service")
+            .listeners()
+            .is_empty()
+    );
+    assert_eq!(
+        manifest
+            .service(ServiceKind::MetricsHttp)
+            .expect("metrics service")
+            .listeners()
+            .iter()
+            .map(|listener| listener.protocol())
+            .collect::<Vec<_>>(),
+        vec![ListenerProtocol::MetricsHttp]
+    );
+    assert_eq!(
+        manifest
+            .service(ServiceKind::StreamProxy)
+            .expect("stream service")
+            .listeners()
+            .iter()
+            .map(|listener| listener.protocol())
+            .collect::<Vec<_>>(),
+        vec![ListenerProtocol::StreamTcp]
+    );
+    assert_eq!(
+        manifest
+            .service(ServiceKind::UdpProxy)
+            .expect("udp service")
+            .listeners()
+            .iter()
+            .map(|listener| listener.protocol())
+            .collect::<Vec<_>>(),
+        vec![ListenerProtocol::Udp]
+    );
+}
+
+#[test]
 fn native_runtime_cutover_summary_exports_stable_tsv() {
     let plan = ServerPlan::with_process(
         ProcessSpec::default(),
