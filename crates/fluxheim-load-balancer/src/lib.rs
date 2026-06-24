@@ -1689,9 +1689,10 @@ mod tests {
 
         let first = balancer.select(&request(), None).unwrap();
         let cookie = first
-            .managed_affinity_cookie
+            .managed_affinity_cookie()
             .expect("fresh selection emits managed cookie")
-            .header_value;
+            .header_value
+            .as_str();
         assert!(cookie.starts_with("fluxheim_lb="));
         assert!(cookie.contains("; Path=/app"));
         assert!(cookie.contains("; HttpOnly"));
@@ -1711,19 +1712,19 @@ mod tests {
         let second = balancer.select(&persisted_request, None).unwrap();
         assert_eq!(backend_key(&second.backend), first_backend);
         assert_eq!(
-            second.persistence_outcome,
+            second.persistence_outcome(),
             Some(LoadBalancerPersistenceOutcome::Hit)
         );
-        assert!(second.managed_affinity_cookie.is_none());
+        assert!(second.managed_affinity_cookie().is_none());
         assert_eq!(balancer.runtime_stats().persistence.entry_count, 1);
 
         let third = balancer.select(&persisted_request, None).unwrap();
         assert_eq!(backend_key(&third.backend), first_backend);
         assert_eq!(
-            third.persistence_outcome,
+            third.persistence_outcome(),
             Some(LoadBalancerPersistenceOutcome::Hit)
         );
-        assert!(third.managed_affinity_cookie.is_none());
+        assert!(third.managed_affinity_cookie().is_none());
     }
 
     #[test]
@@ -1811,11 +1812,10 @@ mod tests {
         assert_eq!(balancer.backend_count(), 2);
         assert_eq!(balancer.backend_weights(), [1, 4]);
         let selected = balancer.select(&request(), None).unwrap();
+        assert!(selected.has_connection_permit());
+        assert_eq!(selected.address().to_string(), selected.authority());
         assert!(
-            matches!(
-                selected.alias.as_deref(),
-                Some("origin-a") | Some("origin-b")
-            ),
+            matches!(selected.alias(), Some("origin-a") | Some("origin-b")),
             "selected alias should come from configured upstream_aliases"
         );
     }
@@ -2662,7 +2662,7 @@ mod tests {
             .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 20))))
             .unwrap();
         assert_eq!(first.backend.addr.to_string(), "127.0.0.1:3000");
-        first.reporter.as_ref().unwrap().record_failure();
+        first.reporter().unwrap().record_failure();
         drop(first);
 
         let fallback = balancer
@@ -2670,7 +2670,7 @@ mod tests {
             .unwrap();
         assert_eq!(fallback.backend.addr.to_string(), "127.0.0.1:3001");
         assert_eq!(
-            fallback.persistence_outcome,
+            fallback.persistence_outcome(),
             Some(LoadBalancerPersistenceOutcome::Fallback)
         );
     }

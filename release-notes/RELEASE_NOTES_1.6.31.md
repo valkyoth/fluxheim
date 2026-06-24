@@ -117,6 +117,9 @@ exit work.
 - `SelectedUpstream` now exposes stable address and authority accessors, giving
   native callers a public bridge from Fluxheim-owned load-balancer selection to
   upstream connection setup without reaching into backend internals.
+- Selected-upstream metadata now also has public accessors for aliases,
+  persistence outcomes, managed affinity cookies, reporters, and permit
+  presence, completing the native routing metadata bridge.
 - The metrics service now has a concrete native HTTP handler around the
   existing Prometheus response generator, giving the future native runner a
   direct handler for metrics HTTP.
@@ -226,6 +229,8 @@ exit work.
 - Added a feature-gated native server test proving `NativeHttp1Request` drives
   real load-balancer header-hash selection through the shared request-view
   boundary.
+- Updated load-balancer selection tests to exercise the new public
+  selected-upstream metadata accessors.
 - Re-ran targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

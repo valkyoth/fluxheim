@@ -70,6 +70,26 @@ impl SelectedUpstream {
     pub fn authority(&self) -> String {
         self.backend.addr.to_string()
     }
+
+    pub fn alias(&self) -> Option<&str> {
+        self.alias.as_deref()
+    }
+
+    pub fn persistence_outcome(&self) -> Option<LoadBalancerPersistenceOutcome> {
+        self.persistence_outcome
+    }
+
+    pub fn managed_affinity_cookie(&self) -> Option<&ManagedAffinityCookie> {
+        self.managed_affinity_cookie.as_ref()
+    }
+
+    pub fn reporter(&self) -> Option<&LoadBalancedUpstreamReporter> {
+        self.reporter.as_ref()
+    }
+
+    pub fn has_connection_permit(&self) -> bool {
+        self.permit.is_some()
+    }
 }
 
 pub struct LoadBalancerSelectionResult {
