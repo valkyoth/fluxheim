@@ -111,6 +111,9 @@ behavior when the change improves security or project direction.
 - Emit native runtime launch-plan errors in the cutover evidence report, so
   concrete runner-contract failures are visible even when the high-level
   blocker summary is otherwise ready.
+- Include downstream HTTP/1 and HTTP/2 launch-policy rows in the native runtime
+  cutover evidence report, giving the final runner hardening values a stable
+  diffable contract.
 - Add a concrete native metrics HTTP handler around the existing Prometheus
   response generator, giving the future native runner a direct handler for the
   metrics service.
@@ -231,6 +234,8 @@ behavior when the change improves security or project direction.
   address remain valid because they use distinct kernel transports.
 - Add cutover-report coverage for native launch-plan error rows, including
   duplicate listener binds.
+- Add native launch-policy TSV coverage for representative HTTP/1 and HTTP/2
+  hardening values.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

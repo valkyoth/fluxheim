@@ -335,6 +335,21 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
             .to_tsv()
             .contains("native-runtime-launch-plan\tready\t6\t5\t0\toff\n")
     );
+    assert!(
+        launch_plan
+            .to_tsv()
+            .contains("native-runtime-launch-policy\tprotocol\tfield\tvalue\n")
+    );
+    assert!(
+        launch_plan
+            .to_tsv()
+            .contains("native-runtime-launch-policy\thttp1\tmax_header_count\t100\n")
+    );
+    assert!(
+        launch_plan
+            .to_tsv()
+            .contains("native-runtime-launch-policy\thttp2\tmax_concurrent_streams\t32\n")
+    );
     assert!(launch_plan.to_tsv().contains(
         "native-runtime-launch-listener\tProxyHttp\tFluxheim HTTP Proxy\tHttp\t127.0.0.1:8080\tfalse\n"
     ));
