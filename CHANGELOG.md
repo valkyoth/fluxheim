@@ -195,6 +195,8 @@ behavior when the change improves security or project direction.
 - Add native metrics-handler tests proving the Prometheus text response is
   served through the `NativeHttp1Handler` boundary and a live native HTTP/1
   listener.
+- Add a live native admin listener test proving the authenticated health
+  endpoint is served correctly through the native HTTP/1 listener.
 - Extend the native runtime cutover evidence report with manifest service and
   background-task rows, so CI archives the exact native service graph that the
   final runner will consume.

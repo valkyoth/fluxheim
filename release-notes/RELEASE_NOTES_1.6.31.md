@@ -190,6 +190,8 @@ exit work.
 - Added native metrics-handler tests proving the Prometheus text response is
   served through the `NativeHttp1Handler` boundary and a live native HTTP/1
   listener.
+- Added a live native admin listener test proving the authenticated health
+  endpoint is served correctly through the native HTTP/1 listener.
 - The native runtime cutover evidence report now includes manifest service and
   background-task rows, so CI archives the exact native service graph that the
   final runner will consume.

@@ -4459,6 +4459,55 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn native_admin_http1_serves_health_through_listener() {
+        let app = app();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            fluxheim_server::serve_native_http1_listener(
+                listener,
+                fluxheim_server::DownstreamHttp1Policy::default(),
+                Arc::new(app),
+                async {
+                    let _ = shutdown_rx.await;
+                },
+            )
+            .await
+            .unwrap();
+        });
+
+        let authorized = native_admin_listener_request(
+            addr,
+            concat!(
+                "GET /_fluxheim/health HTTP/1.1\r\n",
+                "Host: admin.test\r\n",
+                "Authorization: Bearer secret-token\r\n",
+                "Connection: close\r\n",
+                "\r\n"
+            ),
+        )
+        .await;
+        let _ = shutdown_tx.send(());
+
+        assert!(authorized.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(authorized.contains("cache-control: no-store"));
+        assert!(authorized.ends_with(r#"{"status":"ok"}"#));
+    }
+
+    async fn native_admin_listener_request(addr: std::net::SocketAddr, request: &str) -> String {
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        tokio::io::AsyncWriteExt::write_all(&mut client, request.as_bytes())
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut client, &mut response)
+            .await
+            .unwrap();
+        String::from_utf8(response).unwrap()
+    }
+
     #[test]
     fn health_endpoint_can_be_explicitly_unauthenticated() {
         let mut config = Config::default();
