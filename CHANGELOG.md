@@ -143,6 +143,9 @@ behavior when the change improves security or project direction.
 - Add root static-web fallback construction to the native host router and make
   root local-static memory cache visible in the native cutover planner while
   keeping unsupported root cache backends as explicit cache blockers.
+- Teach the native cutover planner to report vhost fallback-only static-web,
+  cache, and PHP-FPM blockers even when the vhost has no configured upstream
+  proxy candidate.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to

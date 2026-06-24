@@ -135,6 +135,9 @@ exit work.
 - Root static web can now be instantiated by the native host router without
   `[[vhosts]]`, including the supported local-static memory cache mode. Root
   disk/rich cache modes remain explicit native cache blockers.
+- The native cutover planner now reports vhost fallback-only static-web, cache,
+  and PHP-FPM blockers even when the vhost has no configured upstream proxy,
+  matching the native host-router construction path.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
@@ -233,6 +236,9 @@ exit work.
   disk cache still fails closed as a cache blocker. The root static-web
   host-router test also proves the native memory cache returns `MISS` then
   `HIT` through a live listener.
+- Added native cutover planner tests for vhost fallback-only static web,
+  unsupported static-web disk cache, and PHP-FPM so policy blockers remain
+  visible without an upstream proxy candidate.
 - Added a live native admin listener test proving the authenticated health
   endpoint is served correctly through the native HTTP/1 listener.
 - Startup now logs a native runtime manifest preview for blocker-free plans,

@@ -116,6 +116,12 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
     }
 
     for vhost in &config.vhosts {
+        push_vhost_http_candidate(
+            format!("vhost {:?}", vhost.name),
+            vhost,
+            vhost_policy_support(vhost),
+            &mut candidates,
+        );
         push_proxy_candidate(
             format!("vhost {:?} proxy", vhost.name),
             &vhost.proxy,
@@ -148,6 +154,24 @@ pub(crate) fn native_http1_proxy_candidates_from_config(
     }
 
     candidates
+}
+
+fn push_vhost_http_candidate(
+    scope: String,
+    vhost: &VhostConfig,
+    policy_support: Result<(), NativeHttp1ProxyConfigError>,
+    candidates: &mut Vec<NativeHttp1ProxyCandidate>,
+) {
+    if vhost.proxy.has_configured_upstream() || vhost_has_proxy_route(vhost) {
+        return;
+    }
+    if !vhost.web.enabled() && !cache_enabled(&vhost.cache) && !vhost.php.enabled {
+        return;
+    }
+    match policy_support {
+        Ok(()) => candidates.push(NativeHttp1ProxyCandidate::eligible(scope)),
+        Err(error) => candidates.push(NativeHttp1ProxyCandidate::unsupported(scope, error)),
+    }
 }
 
 fn push_proxy_candidate(
@@ -298,6 +322,15 @@ fn access_policy_native_supported(_access: &AccessPolicyConfig) -> bool {
 
 fn cache_enabled(cache: &fluxheim_config::CacheConfig) -> bool {
     cache.enabled || cache.local_static
+}
+
+fn vhost_has_proxy_route(vhost: &VhostConfig) -> bool {
+    vhost.routes.iter().any(|route| {
+        route
+            .proxy
+            .as_ref()
+            .is_some_and(ProxyConfig::has_configured_upstream)
+    })
 }
 
 fn vhost_cache_policy_blocked(vhost: &VhostConfig) -> bool {

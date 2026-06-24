@@ -467,6 +467,76 @@ fn server_plan_accepts_vhost_static_web_memory_local_static_cache() {
 }
 
 #[test]
+fn server_plan_accepts_vhost_static_web_without_proxy_candidate() {
+    let root = TempDir::new().unwrap();
+    std::fs::write(root.path().join("asset.png"), b"asset").unwrap();
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    vhost.proxy = fluxheim_config::ProxyConfig::disabled();
+    vhost.web = fluxheim_config::WebConfig {
+        root: Some(root.path().to_path_buf()),
+        ..Default::default()
+    };
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].scope(),
+        "vhost \"native.test\""
+    );
+    assert!(plan.native_http1_proxy_candidates()[0].is_eligible());
+    assert_eq!(
+        plan.native_http1_proxy_cutover_summary().status(),
+        NativeHttp1ProxyCutoverStatus::NativeReady
+    );
+
+    root.close().unwrap();
+}
+
+#[test]
+fn server_plan_reports_vhost_static_web_disk_cache_without_proxy_candidate() {
+    let root = TempDir::new().unwrap();
+    std::fs::write(root.path().join("asset.png"), b"asset").unwrap();
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    vhost.proxy = fluxheim_config::ProxyConfig::disabled();
+    vhost.web = fluxheim_config::WebConfig {
+        root: Some(root.path().to_path_buf()),
+        ..Default::default()
+    };
+    vhost.cache = CacheConfig {
+        enabled: true,
+        local_static: true,
+        memory: fluxheim_config::CacheMemoryConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        disk: fluxheim_config::CacheDiskConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].scope(),
+        "vhost \"native.test\""
+    );
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::CachePolicy)
+    );
+
+    root.close().unwrap();
+}
+
+#[test]
 fn server_plan_reports_vhost_php_native_http1_proxy_blocker() {
     let mut config = Config::default();
     let mut vhost = native_proxy_vhost();
@@ -475,6 +545,27 @@ fn server_plan_reports_vhost_php_native_http1_proxy_blocker() {
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::PhpFpm)
+    );
+}
+
+#[test]
+fn server_plan_reports_vhost_php_without_proxy_candidate() {
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    vhost.proxy = fluxheim_config::ProxyConfig::disabled();
+    vhost.php.enabled = true;
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].scope(),
+        "vhost \"native.test\""
+    );
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
         Some(NativeHttp1ProxyConfigError::PhpFpm)
