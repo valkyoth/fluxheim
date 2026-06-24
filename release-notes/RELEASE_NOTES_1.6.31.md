@@ -145,6 +145,9 @@ exit work.
 - Native rate-limit delay mode now acquires vhost/route concurrency permits
   before sleeping, so delayed requests still count against configured
   concurrency budgets instead of occupying listener tasks outside those limits.
+- Native rate-limit table pruning is now bounded and incremental per shard,
+  replacing whole-shard `HashMap::retain` sweeps in the request hot path with a
+  small prune queue scan when a shard is full.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now

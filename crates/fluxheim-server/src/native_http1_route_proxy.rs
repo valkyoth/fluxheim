@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
@@ -54,6 +54,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
 const MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES: usize = 256;
 const NATIVE_RATE_LIMIT_MIN_PRUNE_INTERVAL: Duration = Duration::from_secs(1);
+const NATIVE_RATE_LIMIT_PRUNE_SCAN_LIMIT: usize = 128;
 const NATIVE_RATE_LIMIT_SHARDS: usize = 16;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -231,6 +232,7 @@ struct NativeRateLimitState {
 #[derive(Debug)]
 struct NativeRateLimitBuckets {
     entries: HashMap<NativeRateLimitKey, NativeRateLimitBucket>,
+    prune_queue: VecDeque<NativeRateLimitKey>,
     last_pruned_at: Option<Instant>,
 }
 
@@ -572,9 +574,12 @@ impl NativeRateLimit {
                     >= NATIVE_RATE_LIMIT_MIN_PRUNE_INTERVAL
             });
             if should_prune {
-                buckets
-                    .entries
-                    .retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.entry_ttl);
+                prune_native_rate_limit_entries(
+                    &mut buckets,
+                    now,
+                    self.entry_ttl,
+                    NATIVE_RATE_LIMIT_PRUNE_SCAN_LIMIT,
+                );
                 buckets.last_pruned_at = Some(now);
             }
             if buckets.entries.len() >= max_entries {
@@ -582,10 +587,23 @@ impl NativeRateLimit {
             }
         }
 
-        let bucket = buckets.entries.entry(key).or_insert(NativeRateLimitBucket {
-            tokens: self.burst,
-            updated_at: now,
-            last_seen: now,
+        if !buckets.entries.contains_key(&key) {
+            buckets.prune_queue.push_back(key);
+            buckets.entries.insert(
+                key,
+                NativeRateLimitBucket {
+                    tokens: self.burst,
+                    updated_at: now,
+                    last_seen: now,
+                },
+            );
+        }
+        let bucket = buckets.entries.get_mut(&key).unwrap_or_else(|| {
+            log::error!(
+                target: "fluxheim::security",
+                "native rate-limit bucket vanished during locked update; aborting to avoid inconsistent edge limits"
+            );
+            std::process::abort();
         });
         let elapsed = now.duration_since(bucket.updated_at).as_secs_f64();
         bucket.tokens = self
@@ -621,11 +639,34 @@ fn native_rate_limit_shards() -> Box<[Mutex<NativeRateLimitBuckets>]> {
         .map(|_| {
             Mutex::new(NativeRateLimitBuckets {
                 entries: HashMap::new(),
+                prune_queue: VecDeque::new(),
                 last_pruned_at: None,
             })
         })
         .collect::<Vec<_>>()
         .into_boxed_slice()
+}
+
+fn prune_native_rate_limit_entries(
+    buckets: &mut NativeRateLimitBuckets,
+    now: Instant,
+    ttl: Duration,
+    scan_limit: usize,
+) {
+    let scans = scan_limit.min(buckets.prune_queue.len());
+    for _ in 0..scans {
+        let Some(key) = buckets.prune_queue.pop_front() else {
+            return;
+        };
+        let Some(bucket) = buckets.entries.get(&key) else {
+            continue;
+        };
+        if now.duration_since(bucket.last_seen) > ttl {
+            buckets.entries.remove(&key);
+        } else {
+            buckets.prune_queue.push_back(key);
+        }
+    }
 }
 
 fn native_rate_limit_shard(key: NativeRateLimitKey) -> usize {
@@ -2819,4 +2860,60 @@ fn flatten_append_headers(
         }
     }
     flattened
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    #[test]
+    fn native_rate_limit_prune_is_bounded_and_incremental() {
+        let now = Instant::now();
+        let expired_at = now - Duration::from_secs(10);
+        let fresh_at = now - Duration::from_secs(1);
+        let first = NativeRateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)));
+        let second = NativeRateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)));
+        let third = NativeRateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 3)));
+        let mut buckets = NativeRateLimitBuckets {
+            entries: HashMap::from([
+                (
+                    first,
+                    NativeRateLimitBucket {
+                        tokens: 1.0,
+                        updated_at: expired_at,
+                        last_seen: expired_at,
+                    },
+                ),
+                (
+                    second,
+                    NativeRateLimitBucket {
+                        tokens: 1.0,
+                        updated_at: expired_at,
+                        last_seen: expired_at,
+                    },
+                ),
+                (
+                    third,
+                    NativeRateLimitBucket {
+                        tokens: 1.0,
+                        updated_at: fresh_at,
+                        last_seen: fresh_at,
+                    },
+                ),
+            ]),
+            prune_queue: VecDeque::from([first, second, third]),
+            last_pruned_at: None,
+        };
+
+        prune_native_rate_limit_entries(&mut buckets, now, Duration::from_secs(5), 1);
+        assert!(!buckets.entries.contains_key(&first));
+        assert!(buckets.entries.contains_key(&second));
+        assert!(buckets.entries.contains_key(&third));
+
+        prune_native_rate_limit_entries(&mut buckets, now, Duration::from_secs(5), 2);
+        assert!(!buckets.entries.contains_key(&second));
+        assert!(buckets.entries.contains_key(&third));
+        assert_eq!(buckets.prune_queue, VecDeque::from([third]));
+    }
 }
