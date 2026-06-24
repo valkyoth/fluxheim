@@ -1190,6 +1190,7 @@ name = "fluxheim-php-fpm"
 version = "1.6.30"
 dependencies = [
  "fluxheim-config",
+ "fluxheim-protocol",
  "getrandom 0.4.3",
  "percent-encoding",
 ]

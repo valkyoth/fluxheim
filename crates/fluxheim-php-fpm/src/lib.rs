@@ -312,6 +312,9 @@ where
         if next_len > MAX_PHP_PARAM_VALUE_BYTES {
             return String::new();
         }
+        if result.capacity() < next_len {
+            result.reserve(next_len.saturating_sub(result.len()));
+        }
         if !result.is_empty() {
             result.push_str(", ");
         }
@@ -527,11 +530,12 @@ pub fn php_static_offload_x_sendfile_local_path(
 }
 
 pub fn php_static_offload_file_allowed(local_path: &Path, allowed_extensions: &[String]) -> bool {
-    !local_path
+    local_path
         .extension()
         .and_then(|extension| extension.to_str())
+        .filter(|extension| !extension.is_empty())
         .is_some_and(|extension| {
-            allowed_extensions
+            !allowed_extensions
                 .iter()
                 .any(|allowed| extension.eq_ignore_ascii_case(allowed))
         })
@@ -594,7 +598,7 @@ where
             .into_iter()
             .flat_map(|value| value.split(','))
             .map(str::trim)
-            .filter(|value| !value.is_empty())
+            .filter(|value| fluxheim_protocol::http_token_valid(value))
             .map(str::to_owned),
     );
     headers.extend(hide_response_headers.iter().cloned());
@@ -672,6 +676,10 @@ pub fn parse_php_response(
 }
 
 fn ascii_bytes_to_string(value: &[u8]) -> String {
+    debug_assert!(
+        value.iter().all(u8::is_ascii),
+        "ascii_bytes_to_string called with non-ASCII bytes"
+    );
     value.iter().map(|byte| char::from(*byte)).collect()
 }
 
@@ -1464,6 +1472,14 @@ mod tests {
             Path::new("/srv/www/app.PHP"),
             &allowed
         ));
+        assert!(!super::php_static_offload_file_allowed(
+            Path::new("/srv/www/wp-config"),
+            &allowed
+        ));
+        assert!(!super::php_static_offload_file_allowed(
+            Path::new("/srv/www/file."),
+            &allowed
+        ));
     }
 
     #[test]
@@ -1548,12 +1564,14 @@ mod tests {
     #[test]
     fn php_response_header_strip_policy_includes_connection_tokens_and_hidden_names() {
         let hidden = vec!["x-powered-by".to_owned()];
-        let headers = super::php_response_headers_to_strip(["x-hop, keep-alive"], &hidden);
+        let headers =
+            super::php_response_headers_to_strip(["x-hop, keep-alive, bad token"], &hidden);
 
         assert!(headers.iter().any(|header| header == "connection"));
         assert!(headers.iter().any(|header| header == "transfer-encoding"));
         assert!(headers.iter().any(|header| header == "x-hop"));
         assert!(headers.iter().any(|header| header == "keep-alive"));
+        assert!(!headers.iter().any(|header| header == "bad token"));
         assert!(headers.iter().any(|header| header == "x-powered-by"));
     }
 

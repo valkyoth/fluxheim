@@ -9,5 +9,6 @@ description = "Internal Fluxheim PHP-FPM protocol and runtime boundary."
 
 [dependencies]
 fluxheim-config = { path = "../fluxheim-config", features = ["php-fpm"] }
+fluxheim-protocol = { path = "../fluxheim-protocol" }
 getrandom = "0.4.3"
 percent-encoding = "2.3.2"

@@ -51,6 +51,10 @@ exit work.
 - PHP custom error-page/status interception decisions now live in
   `fluxheim-php-fpm`, keeping native and compatibility response handling on one
   status policy.
+- Shared PHP response/request policy now pre-reserves bounded `CONTENT_TYPE`
+  joins, rejects extensionless static-offload files, ignores invalid
+  `Connection` header tokens before response stripping, and asserts ASCII-only
+  parser invariants.
 - PHP `CONTENT_TYPE` joining now caps and validates during accumulation instead
   of building an oversized intermediate string before rejecting it.
 - Pure local-static cache keys now use the explicit `fluxheim-static-v1;`
@@ -104,6 +108,8 @@ exit work.
 - Added standalone `fluxheim-php-fpm` tests for PHP error-page/status
   interception decisions, plus existing root compatibility coverage for PHP
   custom error pages.
+- Extended PHP-FPM tests for extensionless static-offload rejection and invalid
+  `Connection` token filtering.
 - Added PHP-FPM tests proving `CONTENT_TYPE` rejects control bytes and
   over-limit joined values without retaining the oversized joined result.
 - Updated standalone `fluxheim-cache` tests to assert the local-static key

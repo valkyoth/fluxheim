@@ -56,6 +56,10 @@ behavior when the change improves security or project direction.
 - Move PHP custom error-page/status interception decisions into
   `fluxheim-php-fpm`, keeping native and compatibility response handling on one
   status policy.
+- Harden shared PHP response/request policy by pre-reserving bounded
+  `CONTENT_TYPE` joins, rejecting extensionless static-offload files, ignoring
+  invalid `Connection` header tokens before response stripping, and asserting
+  ASCII-only parser invariants.
 - Cap and validate PHP `CONTENT_TYPE` values during accumulation, avoiding an
   oversized intermediate joined string before rejecting over-limit input.
 - Change pure local-static cache keys to use the explicit
@@ -110,6 +114,8 @@ behavior when the change improves security or project direction.
 - Add standalone `fluxheim-php-fpm` tests for PHP error-page/status
   interception decisions, plus existing root compatibility coverage for PHP
   custom error pages.
+- Extend PHP-FPM tests for extensionless static-offload rejection and invalid
+  `Connection` token filtering.
 - Add PHP-FPM tests proving `CONTENT_TYPE` rejects control bytes and over-limit
   joined values without retaining the oversized joined result.
 - Update standalone `fluxheim-cache` tests to assert local-static keys use the
