@@ -34,7 +34,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 #[cfg(feature = "php-fpm")]
 use fluxheim_php_fpm::{
-    MAX_PHP_PARAM_VALUE_BYTES, php_header_param_name, php_server_name_param, safe_php_param_value,
+    php_content_type_param_value, php_custom_params, php_host_param, php_request_header_params,
+    php_server_name_param,
 };
 #[cfg(feature = "cache")]
 use pingora::ErrorSource;
@@ -7787,38 +7788,12 @@ fn php_segment_has_allowed_extension(segment: &str, php: &RuntimePhp) -> bool {
 
 #[cfg(feature = "php-fpm")]
 fn add_php_request_header_params(params: &mut fastcgi_client::Params<'_>, request: &RequestHeader) {
-    let mut translated = std::collections::BTreeMap::<String, String>::new();
-    for (name, value) in &request.headers {
-        let Some(param_name) = php_header_param_name(name.as_str()) else {
-            continue;
-        };
-        let Ok(value) = value.to_str() else {
-            continue;
-        };
-        if !safe_php_param_value(value) {
-            continue;
-        }
-        translated
-            .entry(param_name)
-            .and_modify(|existing| {
-                let separator = if name.as_str().eq_ignore_ascii_case("cookie") {
-                    "; "
-                } else {
-                    ", "
-                };
-                if existing
-                    .len()
-                    .saturating_add(separator.len())
-                    .saturating_add(value.len())
-                    <= MAX_PHP_PARAM_VALUE_BYTES
-                {
-                    existing.push_str(separator);
-                    existing.push_str(value);
-                }
-            })
-            .or_insert_with(|| value.to_owned());
-    }
-
+    let translated = php_request_header_params(
+        request
+            .headers
+            .iter()
+            .filter_map(|(name, value)| Some((name.as_str(), value.to_str().ok()?))),
+    );
     for (name, value) in translated {
         params.insert(name.into(), value.into());
     }
@@ -7826,16 +7801,14 @@ fn add_php_request_header_params(params: &mut fastcgi_client::Params<'_>, reques
 
 #[cfg(feature = "php-fpm")]
 fn add_php_host_param(params: &mut fastcgi_client::Params<'_>, host: &str) {
-    if safe_php_param_value(host) {
-        params.insert("HTTP_HOST".into(), host.to_owned().into());
+    if let Some((name, value)) = php_host_param(host) {
+        params.insert(name.into(), value.into());
     }
 }
 
 #[cfg(feature = "php-fpm")]
 fn php_content_type_param(request: &RequestHeader) -> String {
-    request_header_values_joined(request, "content-type")
-        .filter(|value| safe_php_param_value(value))
-        .unwrap_or_default()
+    php_content_type_param_value(request_header_values(request, "content-type"))
 }
 
 #[cfg(feature = "php-fpm")]
@@ -7843,12 +7816,16 @@ fn add_php_custom_params(
     params: &mut fastcgi_client::Params<'_>,
     custom: &std::collections::BTreeMap<String, String>,
 ) {
-    for (name, value) in custom {
-        if crate::config::protected_php_param_name(name) || !safe_php_param_value(value) {
-            log::warn!("dropping invalid custom FastCGI param: {name}");
-            continue;
-        }
-        params.insert(name.clone().into(), value.clone().into());
+    let (accepted, dropped) = php_custom_params(
+        custom
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    );
+    for name in dropped {
+        log::warn!("dropping invalid custom FastCGI param: {name}");
+    }
+    for (name, value) in accepted {
+        params.insert(name.into(), value.into());
     }
 }
 

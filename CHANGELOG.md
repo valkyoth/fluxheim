@@ -31,6 +31,10 @@ behavior when the change improves security or project direction.
   shared policy for bounded, control-free PHP params.
 - Move PHP `SERVER_NAME` fallback selection into `fluxheim-php-fpm`, keeping
   host/fallback sanitization shared by native and compatibility paths.
+- Move PHP FastCGI request-header param translation, resolved `HTTP_HOST`
+  insertion, `CONTENT_TYPE` value selection, and runtime custom-param filtering
+  into `fluxheim-php-fpm`, leaving the current proxy path as a thin adapter to
+  `fastcgi_client::Params`.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to
@@ -56,6 +60,9 @@ behavior when the change improves security or project direction.
   control-byte rejection, and deterministic HTTP header param-name mapping.
 - Add standalone and compatibility tests for PHP `SERVER_NAME` fallback
   behavior when the request host is unsafe.
+- Add standalone `fluxheim-php-fpm` tests for duplicate request-header joining,
+  `Proxy` header blocking, joined-value caps, safe `HTTP_HOST` insertion,
+  content-type selection, and runtime custom-param filtering.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

@@ -242,6 +242,81 @@ pub fn php_server_name_param(host: &str, fallback: &str) -> String {
     "localhost".to_owned()
 }
 
+pub fn php_request_header_params<'a, I>(headers: I) -> Vec<(String, String)>
+where
+    I: IntoIterator<Item = (&'a str, &'a str)>,
+{
+    let mut translated = std::collections::BTreeMap::<String, String>::new();
+    for (name, value) in headers {
+        let Some(param_name) = php_header_param_name(name) else {
+            continue;
+        };
+        if !safe_php_param_value(value) {
+            continue;
+        }
+        translated
+            .entry(param_name)
+            .and_modify(|existing| {
+                let separator = if name.eq_ignore_ascii_case("cookie") {
+                    "; "
+                } else {
+                    ", "
+                };
+                if existing
+                    .len()
+                    .saturating_add(separator.len())
+                    .saturating_add(value.len())
+                    <= MAX_PHP_PARAM_VALUE_BYTES
+                {
+                    existing.push_str(separator);
+                    existing.push_str(value);
+                }
+            })
+            .or_insert_with(|| value.to_owned());
+    }
+    translated.into_iter().collect()
+}
+
+pub fn php_host_param(host: &str) -> Option<(String, String)> {
+    safe_php_param_value(host).then(|| ("HTTP_HOST".to_owned(), host.to_owned()))
+}
+
+pub fn php_content_type_param_value<'a, I>(values: I) -> String
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut values = values.into_iter();
+    let Some(first) = values.next() else {
+        return String::new();
+    };
+    let joined = values.fold(first.to_owned(), |mut joined, value| {
+        joined.push_str(", ");
+        joined.push_str(value);
+        joined
+    });
+    if safe_php_param_value(&joined) {
+        joined
+    } else {
+        String::new()
+    }
+}
+
+pub fn php_custom_params<'a, I>(custom: I) -> (Vec<(String, String)>, Vec<String>)
+where
+    I: IntoIterator<Item = (&'a str, &'a str)>,
+{
+    let mut accepted = Vec::new();
+    let mut dropped = Vec::new();
+    for (name, value) in custom {
+        if fluxheim_config::protected_php_param_name(name) || !safe_php_param_value(value) {
+            dropped.push(name.to_owned());
+            continue;
+        }
+        accepted.push((name.to_owned(), value.to_owned()));
+    }
+    (accepted, dropped)
+}
+
 pub fn split_php_response(stdout: &[u8]) -> io::Result<(&[u8], &[u8])> {
     if let Some(index) = stdout.windows(4).position(|window| window == b"\r\n\r\n") {
         return Ok((&stdout[..index], &stdout[index + 4..]));
@@ -619,12 +694,14 @@ mod tests {
     use super::{
         MAX_PHP_PARAM_VALUE_BYTES, PhpFpmEndpoint, PhpFpmTimeoutKind, managed_php_fpm_config,
         managed_php_fpm_instance_name_from_parts, managed_php_fpm_path_env_from,
-        managed_php_fpm_restart_backoff_secs, parse_php_status, php_fpm_effective_connect_timeout,
-        php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
-        php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
-        php_fpm_retryable_status, php_fpm_timeout_error, php_header_param_name,
-        php_server_name_param, safe_php_header_name, safe_php_header_value, safe_php_param_value,
-        split_first_colon, split_php_response, trim_ascii, trim_ascii_cr,
+        managed_php_fpm_restart_backoff_secs, parse_php_status, php_content_type_param_value,
+        php_custom_params, php_fpm_effective_connect_timeout, php_fpm_effective_request_timeout,
+        php_fpm_endpoints_from_config, php_fpm_error_outcome, php_fpm_retry_attempts,
+        php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
+        php_fpm_retryable_status, php_fpm_timeout_error, php_header_param_name, php_host_param,
+        php_request_header_params, php_server_name_param, safe_php_header_name,
+        safe_php_header_value, safe_php_param_value, split_first_colon, split_php_response,
+        trim_ascii, trim_ascii_cr,
     };
     use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager};
 
@@ -823,6 +900,76 @@ mod tests {
         assert_eq!(
             php_server_name_param("bad\nhost", "bad\rfallback"),
             "localhost"
+        );
+    }
+
+    #[test]
+    fn php_request_header_params_join_duplicate_headers_and_block_proxy() {
+        let params = php_request_header_params([
+            ("cookie", "wordpress_logged_in=abc"),
+            ("cookie", "wordpress_sec=def"),
+            ("proxy", "http://attacker.invalid"),
+            ("x-request-id", "req-1"),
+            ("x-request-id", "req-2"),
+        ]);
+
+        assert_eq!(
+            params,
+            vec![
+                (
+                    "HTTP_COOKIE".to_owned(),
+                    "wordpress_logged_in=abc; wordpress_sec=def".to_owned()
+                ),
+                ("HTTP_X_REQUEST_ID".to_owned(), "req-1, req-2".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn php_request_header_params_cap_joined_values() {
+        let cookie = "a".repeat(MAX_PHP_PARAM_VALUE_BYTES / 2);
+        let params = php_request_header_params([
+            ("cookie", cookie.as_str()),
+            ("cookie", cookie.as_str()),
+            ("cookie", cookie.as_str()),
+        ]);
+        let (_, value) = params
+            .iter()
+            .find(|(name, _)| name == "HTTP_COOKIE")
+            .expect("cookie param should be present");
+        assert!(value.len() <= MAX_PHP_PARAM_VALUE_BYTES);
+    }
+
+    #[test]
+    fn php_host_content_type_and_custom_params_share_runtime_policy() {
+        assert_eq!(
+            php_host_param("example.test"),
+            Some(("HTTP_HOST".to_owned(), "example.test".to_owned()))
+        );
+        assert_eq!(php_host_param("bad\nhost"), None);
+        assert_eq!(
+            php_content_type_param_value(["text/plain", "charset=utf-8"]),
+            "text/plain, charset=utf-8"
+        );
+        assert_eq!(
+            php_content_type_param_value(["a".repeat(MAX_PHP_PARAM_VALUE_BYTES + 1).as_str()]),
+            ""
+        );
+
+        let (accepted, dropped) = php_custom_params([
+            ("SAFE_PARAM", "ok"),
+            ("SCRIPT_FILENAME", "/tmp/bypass.php"),
+            ("PHP_VALUE", "memory_limit=256M"),
+            ("BAD_VALUE", "bad\nvalue"),
+        ]);
+        assert_eq!(accepted, vec![("SAFE_PARAM".to_owned(), "ok".to_owned())]);
+        assert_eq!(
+            dropped,
+            vec![
+                "SCRIPT_FILENAME".to_owned(),
+                "PHP_VALUE".to_owned(),
+                "BAD_VALUE".to_owned()
+            ]
         );
     }
 
