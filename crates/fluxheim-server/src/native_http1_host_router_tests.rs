@@ -100,6 +100,15 @@ async fn downstream_request(proxy: std::net::SocketAddr, request: &str) -> Strin
     String::from_utf8(response).unwrap()
 }
 
+fn response_header(response: &str, name: &str) -> Option<String> {
+    response.lines().find_map(|line| {
+        let (header_name, value) = line.split_once(':')?;
+        header_name
+            .eq_ignore_ascii_case(name)
+            .then(|| value.trim().to_owned())
+    })
+}
+
 fn vhost(
     name: &str,
     hosts: &[&str],
@@ -220,6 +229,51 @@ async fn native_host_router_serves_root_static_web_without_vhosts() {
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.contains("content-type: text/plain; charset=utf-8\r\n"));
     assert!(response.ends_with("root static"));
+}
+
+#[tokio::test]
+async fn native_host_router_caches_root_static_web_without_vhosts() {
+    let root = TempDir::new().unwrap();
+    std::fs::write(root.path().join("asset.png"), b"root cached").unwrap();
+    let config = fluxheim_config::Config {
+        proxy: fluxheim_config::ProxyConfig::disabled(),
+        web: fluxheim_config::WebConfig {
+            root: Some(root.path().to_path_buf()),
+            cache_control: "public, max-age=120".to_owned(),
+            ..Default::default()
+        },
+        cache: fluxheim_config::CacheConfig {
+            enabled: true,
+            local_static: true,
+            status_header: Some("x-fluxheim-cache".to_owned()),
+            memory: fluxheim_config::CacheMemoryConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let first = downstream_get_path(proxy, Some("anything.test"), "/asset.png").await;
+    let second = downstream_get_path(proxy, Some("anything.test"), "/asset.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(
+        response_header(&first, "x-fluxheim-cache").as_deref(),
+        Some("MISS")
+    );
+    assert!(first.ends_with("root cached"));
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(
+        response_header(&second, "x-fluxheim-cache").as_deref(),
+        Some("HIT")
+    );
+    assert!(second.ends_with("root cached"));
 }
 
 #[test]

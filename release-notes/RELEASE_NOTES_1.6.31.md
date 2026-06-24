@@ -230,7 +230,9 @@ exit work.
   without vhosts and truly empty configs still fail closed.
 - Added root static-web native host-router coverage plus planner tests proving
   supported root local-static memory cache is native-ready and unsupported root
-  disk cache still fails closed as a cache blocker.
+  disk cache still fails closed as a cache blocker. The root static-web
+  host-router test also proves the native memory cache returns `MISS` then
+  `HIT` through a live listener.
 - Added a live native admin listener test proving the authenticated health
   endpoint is served correctly through the native HTTP/1 listener.
 - Startup now logs a native runtime manifest preview for blocker-free plans,
