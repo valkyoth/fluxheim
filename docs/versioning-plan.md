@@ -2817,7 +2817,8 @@ available for the stabilization/security-only follow-up.
   routing for exact and wildcard host patterns with compatibility default-vhost
   fallback behavior. It also adds the native runtime manifest contract that
   converts blocker-free server plans into Fluxheim-owned service/listener and
-  background-task bindings before the production runner is switched.
+  background-task bindings before the production runner is switched, and emits
+  those bindings in the native cutover evidence report.
 - `v1.6.32`: finish native load-balancer compatibility and remove the final
   Pingora runtime/listener/TLS adapter crates from normal builds. This release
   must close the remaining proxy gates that need runtime/load-balancer state:

@@ -189,6 +189,9 @@ behavior when the change improves security or project direction.
 - Add native runtime manifest tests proving blocked plans return explicit
   blockers and blocker-free multi-service plans expose proxy, admin, metrics,
   stream, UDP, ops-socket, and listener bindings.
+- Extend the native runtime cutover evidence report with manifest service and
+  background-task rows, so CI archives the exact native service graph that the
+  final runner will consume.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.
