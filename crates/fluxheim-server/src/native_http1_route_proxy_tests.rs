@@ -1061,6 +1061,15 @@ async fn native_route_proxy_vhost_access_uses_trusted_forwarded_chain() {
          Connection: close\r\n\r\n",
     )
     .await;
+    let duplicate_header_allowed = downstream_request(
+        proxy,
+        "GET /trusted HTTP/1.1\r\n\
+         Host: route.test\r\n\
+         X-Forwarded-For: 203.0.113.6\r\n\
+         X-Forwarded-For: 203.0.113.5\r\n\
+         Connection: close\r\n\r\n",
+    )
+    .await;
 
     assert!(allowed.starts_with("HTTP/1.1 308 Permanent Redirect\r\n"));
     assert_eq!(
@@ -1069,6 +1078,7 @@ async fn native_route_proxy_vhost_access_uses_trusted_forwarded_chain() {
     );
     assert!(denied.starts_with("HTTP/1.1 403 Forbidden\r\n"));
     assert!(duplicate_header_denied.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(duplicate_header_allowed.starts_with("HTTP/1.1 308 Permanent Redirect\r\n"));
 }
 
 #[tokio::test]
