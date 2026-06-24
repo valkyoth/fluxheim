@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 
 use fluxheim_protocol::{
     Http1BodyFraming, Http1ConnectionDirective, Http1HeadLimits, Http1Header, Http1ParseError,
-    Http1Version, decode_http1_chunked_body, http_token_valid, parse_http1_request_head,
+    Http1RequestTarget, Http1Version, decode_http1_chunked_body, http_token_valid,
+    http1_request_target, parse_http1_request_head,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -200,6 +201,52 @@ impl From<std::io::Error> for NativeHttp1Error {
 impl From<Http1ParseError> for NativeHttp1Error {
     fn from(error: Http1ParseError) -> Self {
         Self::Parse(error)
+    }
+}
+
+impl fluxheim_cache::CacheRequestView for NativeHttp1Request {
+    fn method(&self) -> &str {
+        &self.method
+    }
+
+    fn path(&self) -> &str {
+        native_http1_cache_request_path(&self.method, &self.target)
+    }
+
+    fn query(&self) -> Option<&str> {
+        native_http1_cache_request_query(&self.method, &self.target)
+    }
+
+    fn contains_header(&self, name: &str) -> bool {
+        self.headers
+            .iter()
+            .any(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+    }
+
+    fn visit_header_values(&self, name: &str, visitor: &mut dyn FnMut(&str)) {
+        for (_, value) in self
+            .headers
+            .iter()
+            .filter(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+        {
+            visitor(value);
+        }
+    }
+}
+
+fn native_http1_cache_request_path<'a>(method: &str, target: &'a str) -> &'a str {
+    match http1_request_target(method, target) {
+        Ok(Http1RequestTarget::Origin { path, .. }) => path,
+        Ok(Http1RequestTarget::AbsoluteUri { path, .. }) => path.unwrap_or("/"),
+        Ok(Http1RequestTarget::Authority { .. } | Http1RequestTarget::Asterisk) | Err(_) => "/",
+    }
+}
+
+fn native_http1_cache_request_query<'a>(method: &str, target: &'a str) -> Option<&'a str> {
+    match http1_request_target(method, target) {
+        Ok(Http1RequestTarget::Origin { query, .. })
+        | Ok(Http1RequestTarget::AbsoluteUri { query, .. }) => query,
+        Ok(Http1RequestTarget::Authority { .. } | Http1RequestTarget::Asterisk) | Err(_) => None,
     }
 }
 

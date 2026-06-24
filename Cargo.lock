@@ -1212,6 +1212,7 @@ dependencies = [
  "base64-ng",
  "bytes",
  "flate2",
+ "fluxheim-cache",
  "fluxheim-common",
  "fluxheim-compression",
  "fluxheim-config",

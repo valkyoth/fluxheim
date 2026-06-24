@@ -20,6 +20,9 @@ behavior when the change improves security or project direction.
 - Move image/static cache request eligibility and cache-key construction into
   the Pingora-independent `fluxheim-cache` crate, leaving the root crate with
   only the Pingora key wrapper for compatibility runtime use.
+- Implement `fluxheim-cache::CacheRequestView` for `NativeHttp1Request`, giving
+  the native proxy a Pingora-free request adapter for cache bypass,
+  revalidation, range, and slice policy helpers.
 - Move the remaining normal-profile Pingora dependency exception target to
   `1.6.32`, matching the revised plan where 1.6.31 handles cache/PHP native
   integration and 1.6.32 is the final Pingora-free proof release.
@@ -33,6 +36,9 @@ behavior when the change improves security or project direction.
   policies are rejected directly until native adapters own those paths.
 - Add `fluxheim-cache` tests for image/static cache-key construction,
   namespace/query/host normalization, and local-static file identity.
+- Add native HTTP/1 tests proving `NativeHttp1Request` feeds cache request
+  policy helpers for origin-form and absolute-form targets, duplicate header
+  visits, and range-policy rejection.
 - Re-run the native runtime cutover and Pingora dependency policy evidence for
   the 1.6.31 planning state.
 

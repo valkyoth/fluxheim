@@ -5,6 +5,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
+use fluxheim_cache::{CacheRequestView, request_cache_bypass_reason, selected_cache_range_request};
+use fluxheim_config::CacheConfig;
 use fluxheim_protocol::Http1Version;
 
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
@@ -86,6 +88,77 @@ async fn read_response_head(stream: &mut TcpStream) -> String {
             return String::from_utf8(response[..head_len].to_vec()).unwrap();
         }
     }
+}
+
+fn native_http1_cache_view_request(
+    method: &str,
+    target: &str,
+    headers: Vec<(String, String)>,
+) -> NativeHttp1Request {
+    NativeHttp1Request {
+        method: method.to_owned(),
+        peer_addr: None,
+        downstream_tls: false,
+        tls_identity: None,
+        geo_context: None,
+        target: target.to_owned(),
+        version: Http1Version::Http11,
+        headers,
+        body: Vec::new(),
+    }
+}
+
+#[test]
+fn native_http1_request_implements_cache_request_view_for_origin_targets() {
+    let request = native_http1_cache_view_request(
+        "GET",
+        "/assets/logo.png?v=1",
+        vec![
+            ("cache-control".to_owned(), "no-store".to_owned()),
+            ("x-cache-bypass".to_owned(), "1".to_owned()),
+        ],
+    );
+    let cache = CacheConfig {
+        bypass_request_headers: vec!["x-cache-bypass".to_owned()],
+        ..Default::default()
+    };
+
+    assert_eq!(CacheRequestView::method(&request), "GET");
+    assert_eq!(CacheRequestView::path(&request), "/assets/logo.png");
+    assert_eq!(CacheRequestView::query(&request), Some("v=1"));
+    assert!(CacheRequestView::contains_header(&request, "Cache-Control"));
+    assert_eq!(
+        request_cache_bypass_reason(&request, &cache),
+        Some("request-header")
+    );
+}
+
+#[test]
+fn native_http1_request_cache_view_handles_absolute_targets_and_duplicate_headers() {
+    let request = native_http1_cache_view_request(
+        "GET",
+        "http://example.test/images/a.webp?size=1",
+        vec![
+            ("range".to_owned(), "bytes=0-9".to_owned()),
+            ("Range".to_owned(), "bytes=10-19".to_owned()),
+        ],
+    );
+    let cache = CacheConfig {
+        range: fluxheim_config::CacheRangeConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut ranges = Vec::new();
+    CacheRequestView::visit_header_values(&request, "range", &mut |value| {
+        ranges.push(value.to_owned());
+    });
+
+    assert_eq!(CacheRequestView::path(&request), "/images/a.webp");
+    assert_eq!(CacheRequestView::query(&request), Some("size=1"));
+    assert_eq!(ranges, ["bytes=0-9", "bytes=10-19"]);
+    assert_eq!(selected_cache_range_request(&request, &cache), None);
 }
 
 #[cfg(feature = "tls-rustls-backend")]

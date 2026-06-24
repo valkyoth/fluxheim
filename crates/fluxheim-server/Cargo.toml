@@ -27,6 +27,7 @@ traffic-mirror = ["dep:getrandom", "dep:sanitization", "dep:sha2", "dep:ureq"]
 [dependencies]
 bytes = "1.11.1"
 fluxheim-common = { path = "../fluxheim-common" }
+fluxheim-cache = { path = "../fluxheim-cache" }
 fluxheim-compression = { path = "../fluxheim-compression", optional = true }
 fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-headers = { path = "../fluxheim-headers" }
