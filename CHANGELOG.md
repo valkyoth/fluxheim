@@ -23,6 +23,9 @@ behavior when the change improves security or project direction.
 - Implement `fluxheim-cache::CacheRequestView` for `NativeHttp1Request`, giving
   the native proxy a Pingora-free request adapter for cache bypass,
   revalidation, range, and slice policy helpers.
+- Move PHP-FPM response parsing into the Pingora-independent
+  `fluxheim-php-fpm` crate, returning plain status/header/body parts while the
+  root proxy path keeps only the current runtime response-header conversion.
 - Move the remaining normal-profile Pingora dependency exception target to
   `1.6.32`, matching the revised plan where 1.6.31 handles cache/PHP native
   integration and 1.6.32 is the final Pingora-free proof release.
@@ -39,6 +42,9 @@ behavior when the change improves security or project direction.
 - Add native HTTP/1 tests proving `NativeHttp1Request` feeds cache request
   policy helpers for origin-form and absolute-form targets, duplicate header
   visits, and range-policy rejection.
+- Add standalone `fluxheim-php-fpm` tests for plain PHP response parsing,
+  unsafe header rejection, and response/header size limits, plus root parser
+  compatibility tests with `php-fpm` enabled.
 - Re-run the native runtime cutover and Pingora dependency policy evidence for
   the 1.6.31 planning state.
 

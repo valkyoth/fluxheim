@@ -211,6 +211,73 @@ pub fn split_php_response(stdout: &[u8]) -> io::Result<(&[u8], &[u8])> {
     ))
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ParsedPhpResponse {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+pub fn parse_php_response(
+    stdout: &[u8],
+    max_response_bytes: u64,
+    max_response_header_bytes: u64,
+) -> io::Result<ParsedPhpResponse> {
+    if stdout.len() as u64 > max_response_bytes {
+        return Err(php_response_parse_error(
+            "php-fpm response exceeds maximum buffered size",
+        ));
+    }
+    let (header_bytes, body) = split_php_response(stdout)?;
+    if header_bytes.len() as u64 > max_response_header_bytes {
+        return Err(php_response_parse_error(
+            "php-fpm response headers exceed maximum size",
+        ));
+    }
+
+    let mut status = 200;
+    let mut headers = Vec::new();
+    for line in header_bytes.split(|byte| *byte == b'\n') {
+        let line = trim_ascii_cr(line);
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = split_first_colon(line) else {
+            return Err(php_response_parse_error(
+                "php-fpm response header is malformed",
+            ));
+        };
+        let name = trim_ascii(name);
+        let value = trim_ascii(value);
+        if !safe_php_header_name(name) || !safe_php_header_value(value) {
+            return Err(php_response_parse_error(
+                "php-fpm response header contains unsafe bytes",
+            ));
+        }
+        if name.eq_ignore_ascii_case(b"status") {
+            status = parse_php_status(value)?;
+            continue;
+        }
+        let name = std::str::from_utf8(name).map_err(|error| {
+            php_response_parse_error(format!(
+                "PHP response header name is not valid UTF-8: {error}"
+            ))
+        })?;
+        let value = std::str::from_utf8(value).map_err(|error| {
+            php_response_parse_error(format!(
+                "PHP response header value is not valid UTF-8: {error}"
+            ))
+        })?;
+        headers.push((name.to_owned(), value.to_owned()));
+    }
+
+    Ok(ParsedPhpResponse {
+        status,
+        headers,
+        body: body.to_vec(),
+    })
+}
+
 pub fn parse_php_status(value: &[u8]) -> io::Result<u16> {
     let text = std::str::from_utf8(value).map_err(|error| {
         php_response_parse_error(format!("PHP Status header is not valid UTF-8: {error}"))
@@ -703,6 +770,46 @@ mod tests {
         assert!(parse_php_status(b"600").is_err());
         assert!(parse_php_status(b"not-a-status").is_err());
         assert!(parse_php_status(&[0xff]).is_err());
+    }
+
+    #[test]
+    fn php_response_parser_returns_plain_status_headers_and_body() {
+        let response = super::parse_php_response(
+            b"X-Before: yes\r\nStatus: 201 Created\r\nX-After: ok\r\n\r\nbody",
+            64 * 1024,
+            64 * 1024,
+        )
+        .expect("PHP response should parse");
+
+        assert_eq!(response.status, 201);
+        assert_eq!(response.body, b"body");
+        assert_eq!(
+            response.headers,
+            vec![
+                ("X-Before".to_owned(), "yes".to_owned()),
+                ("X-After".to_owned(), "ok".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn php_response_parser_rejects_unsafe_headers_and_size_overflow() {
+        let error = super::parse_php_response(b"X-Test: ok\rbad\r\n\r\nbody", 64 * 1024, 64 * 1024)
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+
+        let error =
+            super::parse_php_response(b"Content-Type: text/plain\r\n\r\nbody", 8, 64 * 1024)
+                .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+
+        let error = super::parse_php_response(
+            b"X-Very-Long-Header: abc\r\n\r\nbody",
+            64 * 1024,
+            "X-Very-Long-Header: abc".len() as u64 - 1,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]

@@ -10,6 +10,8 @@ use crate::config::{PhpConfig, PhpFpmConfig, PhpFpmMode};
 use crate::flux_error::{FluxError, FluxResult};
 #[cfg(test)]
 pub(crate) use fluxheim_php_fpm::php_fpm_retry_attempts;
+#[cfg(test)]
+pub(crate) use fluxheim_php_fpm::safe_php_header_value;
 pub(crate) use fluxheim_php_fpm::{
     PhpFpmEndpoint, PhpFpmTimeoutKind, managed_php_fpm_config, managed_php_fpm_instance_name,
     managed_php_fpm_path_env_from, managed_php_fpm_restart_backoff_secs,
@@ -17,8 +19,7 @@ pub(crate) use fluxheim_php_fpm::{
     php_fpm_endpoints_from_config, php_fpm_error_outcome,
     php_fpm_retry_attempts_for_endpoint_count, php_fpm_retry_deadline,
     php_fpm_retry_deadline_allows, php_fpm_retryable_error, php_fpm_retryable_status,
-    php_fpm_timeout_error, safe_php_header_name, safe_php_header_value, split_first_colon,
-    split_php_response, trim_ascii, trim_ascii_cr,
+    php_fpm_timeout_error,
 };
 
 const MANAGED_PHP_FPM_STABLE_RESTART_SECS: u64 = 30;
@@ -449,57 +450,21 @@ pub(crate) fn parse_php_response(
     max_response_bytes: u64,
     max_response_header_bytes: u64,
 ) -> io::Result<(ResponseHeader, Vec<u8>)> {
-    if stdout.len() as u64 > max_response_bytes {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "php-fpm response exceeds maximum buffered size",
-        ));
-    }
-    let (header_bytes, body) = split_php_response(stdout)?;
-    if header_bytes.len() as u64 > max_response_header_bytes {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "php-fpm response headers exceed maximum size",
-        ));
-    }
-
-    let mut status = 200;
-    let mut response = php_response_header(status).map_err(FluxError::into_io)?;
-    for line in header_bytes.split(|byte| *byte == b'\n') {
-        let line = trim_ascii_cr(line);
-        if line.is_empty() {
-            continue;
-        }
-        let Some((name, value)) = split_first_colon(line) else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "php-fpm response header is malformed",
-            ));
-        };
-        let name = trim_ascii(name);
-        let value = trim_ascii(value);
-        if !safe_php_header_name(name) || !safe_php_header_value(value) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "php-fpm response header contains unsafe bytes",
-            ));
-        }
-        if name.eq_ignore_ascii_case(b"status") {
-            status = fluxheim_php_fpm::parse_php_status(value)?;
-            response.status = StatusCode::from_u16(status)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-            continue;
-        }
-        let name = std::str::from_utf8(name)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let value = std::str::from_utf8(value)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let parsed = fluxheim_php_fpm::parse_php_response(
+        stdout,
+        max_response_bytes,
+        max_response_header_bytes,
+    )?;
+    let mut response = php_response_header(parsed.status).map_err(FluxError::into_io)?;
+    response.status = StatusCode::from_u16(parsed.status)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    for (name, value) in parsed.headers {
         response
-            .append_header(name.to_owned(), value.to_owned())
+            .append_header(name, value)
             .map_err(|error| io::Error::other(error.to_string()))?;
     }
 
-    Ok((response, body.to_vec()))
+    Ok((response, parsed.body))
 }
 
 pub fn fuzz_parse_php_response(stdout: &[u8]) -> io::Result<()> {
