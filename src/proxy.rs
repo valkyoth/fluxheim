@@ -7667,34 +7667,20 @@ fn php_should_redirect_directory_index(
     script_name: &str,
     php: &RuntimePhp,
 ) -> bool {
-    if request_path.ends_with('/') || request_path.contains('\\') {
-        return false;
-    }
-    let Some(parent) = script_name.strip_suffix(&format!("/{}", php.config.index)) else {
-        return false;
-    };
-    !parent.is_empty() && parent == request_path
+    fluxheim_php_fpm::php_should_redirect_directory_index(
+        request_path,
+        script_name,
+        &php.config.index,
+    )
 }
 
 #[cfg(feature = "php-fpm")]
 fn php_static_file_script_name(php: &RuntimePhp, file: &crate::web::StaticFile) -> Option<String> {
-    let relative = file.path.strip_prefix(&php.root).ok()?;
-    let mut script_name = String::new();
-    for component in relative.components() {
-        let std::path::Component::Normal(segment) = component else {
-            return None;
-        };
-        let segment = segment.to_str()?;
-        if segment.is_empty() || segment == "." || segment == ".." || segment.starts_with('.') {
-            return None;
-        }
-        script_name.push('/');
-        script_name.push_str(segment);
-    }
-    if script_name.is_empty() || !php_segment_has_allowed_extension(&script_name, php) {
-        return None;
-    }
-    Some(script_name)
+    fluxheim_php_fpm::php_static_file_script_name(
+        &php.root,
+        &file.path,
+        &php.config.allowed_extensions,
+    )
 }
 
 #[cfg(feature = "php-fpm")]
@@ -7724,11 +7710,6 @@ fn php_script_name_for_request(
 #[cfg(feature = "php-fpm")]
 fn php_script_name_denied(php: &RuntimePhp, script_name: &str) -> bool {
     fluxheim_php_fpm::php_script_name_denied(&php.config.deny_path_prefixes, script_name)
-}
-
-#[cfg(feature = "php-fpm")]
-fn php_segment_has_allowed_extension(segment: &str, php: &RuntimePhp) -> bool {
-    fluxheim_php_fpm::php_segment_has_allowed_extension(segment, &php.config.allowed_extensions)
 }
 
 #[cfg(feature = "php-fpm")]

@@ -435,6 +435,46 @@ pub fn php_script_name_denied(deny_path_prefixes: &[String], script_name: &str) 
     })
 }
 
+pub fn php_should_redirect_directory_index(
+    request_path: &str,
+    script_name: &str,
+    index: &str,
+) -> bool {
+    if request_path.ends_with('/') || request_path.contains('\\') {
+        return false;
+    }
+    let Some(parent) = script_name.strip_suffix(&format!("/{index}")) else {
+        return false;
+    };
+    !parent.is_empty() && parent == request_path
+}
+
+pub fn php_static_file_script_name(
+    root: &Path,
+    local_path: &Path,
+    allowed_extensions: &[String],
+) -> Option<String> {
+    let relative = local_path.strip_prefix(root).ok()?;
+    let mut script_name = String::new();
+    for component in relative.components() {
+        let std::path::Component::Normal(segment) = component else {
+            return None;
+        };
+        let segment = segment.to_str()?;
+        if segment.is_empty() || segment == "." || segment == ".." || segment.starts_with('.') {
+            return None;
+        }
+        script_name.push('/');
+        script_name.push_str(segment);
+    }
+    if script_name.is_empty()
+        || !php_segment_has_allowed_extension(&script_name, allowed_extensions)
+    {
+        return None;
+    }
+    Some(script_name)
+}
+
 pub fn php_segment_has_allowed_extension(segment: &str, allowed_extensions: &[String]) -> bool {
     segment.rsplit_once('.').is_some_and(|(_, extension)| {
         allowed_extensions
@@ -808,8 +848,9 @@ mod tests {
         php_fpm_retryable_status, php_fpm_script_filename, php_fpm_timeout_error,
         php_header_param_name, php_host_param, php_request_header_params, php_script_name_denied,
         php_script_name_for_request, php_segment_has_allowed_extension, php_server_name_param,
-        safe_php_header_name, safe_php_header_value, safe_php_param_value, split_first_colon,
-        split_php_response, trim_ascii, trim_ascii_cr,
+        php_should_redirect_directory_index, php_static_file_script_name, safe_php_header_name,
+        safe_php_header_value, safe_php_param_value, split_first_colon, split_php_response,
+        trim_ascii, trim_ascii_cr,
     };
     use fluxheim_config::{PhpFpmConfig, PhpFpmProcessManager, PhpPathInfoMode};
 
@@ -1215,6 +1256,57 @@ mod tests {
         ));
         assert!(php_segment_has_allowed_extension("index.PHP", &allowed));
         assert!(!php_segment_has_allowed_extension("style.css", &allowed));
+    }
+
+    #[test]
+    fn php_static_file_script_names_are_rooted_and_hidden_safe() {
+        let allowed = vec!["php".to_owned()];
+        let root = Path::new("/srv/www");
+
+        assert_eq!(
+            php_static_file_script_name(root, Path::new("/srv/www/blog/index.php"), &allowed),
+            Some("/blog/index.php".to_owned())
+        );
+        assert_eq!(
+            php_static_file_script_name(root, Path::new("/srv/www/admin.PHP"), &allowed),
+            Some("/admin.PHP".to_owned())
+        );
+        assert!(
+            php_static_file_script_name(root, Path::new("/srv/www/assets/style.css"), &allowed)
+                .is_none()
+        );
+        assert!(
+            php_static_file_script_name(root, Path::new("/srv/www/.hidden/index.php"), &allowed)
+                .is_none()
+        );
+        assert!(
+            php_static_file_script_name(root, Path::new("/srv/other/index.php"), &allowed)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn php_directory_index_redirect_policy_matches_runtime() {
+        assert!(php_should_redirect_directory_index(
+            "/blog",
+            "/blog/index.php",
+            "index.php"
+        ));
+        assert!(!php_should_redirect_directory_index(
+            "/blog/",
+            "/blog/index.php",
+            "index.php"
+        ));
+        assert!(!php_should_redirect_directory_index(
+            "/blog\\",
+            "/blog/index.php",
+            "index.php"
+        ));
+        assert!(!php_should_redirect_directory_index(
+            "/blog",
+            "/blog/admin.php",
+            "index.php"
+        ));
     }
 
     #[test]

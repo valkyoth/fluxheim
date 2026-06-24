@@ -41,6 +41,9 @@ behavior when the change improves security or project direction.
 - Move PHP request-path to `SCRIPT_NAME`/`PATH_INFO` parsing,
   allowed-extension matching, and deny-prefix checks into `fluxheim-php-fpm`,
   while the proxy keeps static-file lookup and final execution decisions.
+- Move PHP static-file to script-name mapping and slashless directory-index
+  redirect decisions into `fluxheim-php-fpm`, so native and compatibility paths
+  share root confinement, hidden path rejection, and extension checks.
 - Cap and validate PHP `CONTENT_TYPE` values during accumulation, avoiding an
   oversized intermediate joined string before rejecting over-limit input.
 - Change pure local-static cache keys to use the explicit
@@ -80,6 +83,9 @@ behavior when the change improves security or project direction.
 - Add standalone `fluxheim-php-fpm` tests for direct script detection,
   front-controller fallback, PATH_INFO split mode, unsafe segment rejection,
   allowed-extension matching, and deny-prefix matching.
+- Add standalone `fluxheim-php-fpm` tests for static file script-name mapping
+  and directory-index redirect decisions, plus existing root compatibility
+  coverage for slashless PHP directory indexes.
 - Add PHP-FPM tests proving `CONTENT_TYPE` rejects control bytes and over-limit
   joined values without retaining the oversized joined result.
 - Update standalone `fluxheim-cache` tests to assert local-static keys use the
