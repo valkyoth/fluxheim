@@ -60,6 +60,14 @@ const NATIVE_RATE_LIMIT_SHARDS: usize = 16;
 pub struct NativeHttp1RouteProxy {
     routes: Vec<NativeHttp1RouteProxyRoute>,
     fallback: Option<NativeHttp1Proxy>,
+    fallback_web: Option<NativeHttp1StaticWeb>,
+    fallback_response_headers: NativeRouteResponseHeaderPolicy,
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    fallback_compression: Option<fluxheim_config::CompressionConfig>,
     access: NativeIpAccessPolicy,
     rate_limit: NativeRateLimit,
     concurrency: NativeConcurrencyLimit,
@@ -734,6 +742,14 @@ impl NativeHttp1RouteProxy {
         Self {
             routes,
             fallback,
+            fallback_web: None,
+            fallback_response_headers: NativeRouteResponseHeaderPolicy::default(),
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            fallback_compression: None,
             access: NativeIpAccessPolicy::default(),
             rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
@@ -821,7 +837,7 @@ impl NativeHttp1RouteProxy {
         #[cfg_attr(feature = "privacy-mode", allow(unused_variables))]
         trusted_sources: &[ProxyProtocolTrustedSource],
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
-        if native_cache_policy_enabled(&vhost.cache) {
+        if native_vhost_cache_policy_blocked(vhost) {
             return Err(NativeHttp1RouteProxyConfigError::Proxy(
                 NativeHttp1ProxyConfigError::CachePolicy,
             ));
@@ -833,6 +849,13 @@ impl NativeHttp1RouteProxy {
         }
         let headers = base_headers.with_vhost_overlay(&vhost.headers);
         let inherited_compression = vhost.compression.as_ref().or(inherited_compression);
+        let fallback_web = if vhost.web.enabled() {
+            let cache = NativeHttp1StaticWeb::cache_supported(&vhost.cache).then_some(&vhost.cache);
+            NativeHttp1StaticWeb::from_config_with_cache(&vhost.web, cache)
+                .map_err(|_| NativeHttp1RouteProxyConfigError::StaticWeb)?
+        } else {
+            None
+        };
         let access = NativeIpAccessPolicy::from_config(&vhost.access)?;
         let rate_limit = NativeRateLimit::from_config(&vhost.rate_limit);
         let concurrency = NativeConcurrencyLimit::from_config(&vhost.concurrency);
@@ -890,6 +913,16 @@ impl NativeHttp1RouteProxy {
         Ok(Self {
             routes,
             fallback,
+            fallback_web,
+            fallback_response_headers: NativeRouteResponseHeaderPolicy::from_policy(
+                &headers.response,
+            ),
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            fallback_compression: inherited_compression.cloned(),
             access,
             rate_limit,
             concurrency,
@@ -1338,6 +1371,13 @@ fn native_cache_policy_enabled(cache: &fluxheim_config::CacheConfig) -> bool {
     cache.enabled || cache.local_static
 }
 
+fn native_vhost_cache_policy_blocked(vhost: &fluxheim_config::VhostConfig) -> bool {
+    if !native_cache_policy_enabled(&vhost.cache) {
+        return false;
+    }
+    !vhost.web.enabled() || !NativeHttp1StaticWeb::cache_supported(&vhost.cache)
+}
+
 fn native_route_cache_policy_blocked(route: &fluxheim_config::RouteConfig) -> bool {
     route.cache.as_ref().is_some_and(|cache| {
         if !native_cache_policy_enabled(cache) {
@@ -1360,18 +1400,16 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             };
             let selected_route = self.select_route(&request.method, &path);
             let decoded_policy_route = self.select_decoded_policy_route(&request.method, &path);
-            let Some(route_or_fallback) = selected_route
-                .map(RouteOrFallback::Route)
-                .or_else(|| self.fallback.as_ref().map(RouteOrFallback::Fallback))
-            else {
+            if selected_route.is_none() && self.fallback_web.is_none() && self.fallback.is_none() {
                 return NativeHttp1Response::new(404, "Not Found", b"not found\n")
                     .close_connection();
-            };
+            }
             let client_ip = self.access_client_ip(&request);
             let tls_identity = request.tls_identity.as_ref();
             let geo_context = request.geo_context.as_ref();
             if !self.access.allows(client_ip, tls_identity, geo_context)
-                || !route_or_fallback.access_allows(client_ip, tls_identity, geo_context)
+                || selected_route
+                    .is_some_and(|route| !route.access.allows(client_ip, tls_identity, geo_context))
                 || decoded_policy_route
                     .is_some_and(|route| !route.access.allows(client_ip, tls_identity, geo_context))
             {
@@ -1405,26 +1443,39 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                         .close_connection();
                     }
                 };
-            if let Some(response) = route_or_fallback.grpc_rejection_response(&request) {
+            if let Some(route) = selected_route {
+                if let Some(response) = native_grpc_rejection_response(&route.grpc, &request) {
+                    return response;
+                }
+                let mut request =
+                    match rewrite_route_request(request, route, &path, query.as_deref()) {
+                        Some(request) => request,
+                        None => {
+                            return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
+                                .close_connection();
+                        }
+                    };
+                if route
+                    .max_request_body_bytes
+                    .is_some_and(|limit| (request.body.len() as u64) > limit)
+                {
+                    return NativeHttp1Response::new(
+                        413,
+                        "Payload Too Large",
+                        b"payload too large\n",
+                    )
+                    .close_connection();
+                }
+                route.request_headers.apply(&mut request);
+                return route.handle(request).await;
+            }
+            if let Some(response) = self.fallback_web_response(&request, &path) {
                 return response;
             }
-            let mut request =
-                match route_or_fallback.rewrite_request(request, &path, query.as_deref()) {
-                    Some(request) => request,
-                    None => {
-                        return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
-                            .close_connection();
-                    }
-                };
-            if route_or_fallback.request_body_too_large(&request) {
-                return NativeHttp1Response::new(413, "Payload Too Large", b"payload too large\n")
-                    .close_connection();
+            if let Some(proxy) = &self.fallback {
+                return proxy.handle(request).await;
             }
-            route_or_fallback.apply_request_headers(&mut request);
-            match route_or_fallback {
-                RouteOrFallback::Route(route) => route.handle(request).await,
-                RouteOrFallback::Fallback(proxy) => proxy.handle(request).await,
-            }
+            NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection()
         })
     }
 
@@ -1439,57 +1490,24 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
     }
 }
 
-#[derive(Clone, Copy)]
-enum RouteOrFallback<'a> {
-    Route(&'a NativeHttp1RouteProxyRoute),
-    Fallback(&'a NativeHttp1Proxy),
-}
-
-impl<'a> RouteOrFallback<'a> {
-    fn rewrite_request(
-        self,
-        request: NativeHttp1Request,
+impl NativeHttp1RouteProxy {
+    fn fallback_web_response(
+        &self,
+        request: &NativeHttp1Request,
         path: &str,
-        query: Option<&str>,
-    ) -> Option<NativeHttp1Request> {
-        match self {
-            Self::Route(route) => rewrite_route_request(request, route, path, query),
-            Self::Fallback(_) => Some(request),
+    ) -> Option<NativeHttp1Response> {
+        let web = self.fallback_web.as_ref()?;
+        let mut response = web.handle_optional(request, path)?;
+        self.fallback_response_headers.apply(&mut response);
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        if let Some(compression) = &self.fallback_compression {
+            apply_native_response_compression(request, &mut response, compression);
         }
-    }
-
-    fn request_body_too_large(self, request: &NativeHttp1Request) -> bool {
-        match self {
-            Self::Route(route) => route
-                .max_request_body_bytes
-                .is_some_and(|limit| (request.body.len() as u64) > limit),
-            Self::Fallback(_) => false,
-        }
-    }
-
-    fn apply_request_headers(self, request: &mut NativeHttp1Request) {
-        if let Self::Route(route) = self {
-            route.request_headers.apply(request);
-        }
-    }
-
-    fn access_allows(
-        self,
-        client_ip: Option<IpAddr>,
-        tls_identity: Option<&crate::NativeHttp1TlsClientIdentity>,
-        geo_context: Option<&crate::NativeHttp1GeoContext>,
-    ) -> bool {
-        match self {
-            Self::Route(route) => route.access.allows(client_ip, tls_identity, geo_context),
-            Self::Fallback(_) => true,
-        }
-    }
-
-    fn grpc_rejection_response(self, request: &NativeHttp1Request) -> Option<NativeHttp1Response> {
-        match self {
-            Self::Route(route) => native_grpc_rejection_response(&route.grpc, request),
-            Self::Fallback(_) => None,
-        }
+        Some(response)
     }
 }
 

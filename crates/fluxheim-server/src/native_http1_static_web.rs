@@ -152,22 +152,43 @@ impl NativeHttp1StaticWeb {
                 .with_header("allow", "GET, HEAD")
                 .close_connection();
         }
-
-        match self.resolve(request_path) {
-            Ok(NativeStaticResolve::Found(file)) => self.cached_file_response(request, &file),
-            Ok(NativeStaticResolve::DirectoryListing(listing)) => {
-                directory_listing_response(request, &listing)
-            }
-            Ok(NativeStaticResolve::NotFound) => {
+        self.handle_static_request(request, request_path)
+            .unwrap_or_else(|| {
                 NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection()
+            })
+    }
+
+    pub fn handle_optional(
+        &self,
+        request: &NativeHttp1Request,
+        request_path: &str,
+    ) -> Option<NativeHttp1Response> {
+        if !static_web_method_allowed(&request.method) {
+            return None;
+        }
+        self.handle_static_request(request, request_path)
+    }
+
+    fn handle_static_request(
+        &self,
+        request: &NativeHttp1Request,
+        request_path: &str,
+    ) -> Option<NativeHttp1Response> {
+        match self.resolve(request_path) {
+            Ok(NativeStaticResolve::Found(file)) => Some(self.cached_file_response(request, &file)),
+            Ok(NativeStaticResolve::DirectoryListing(listing)) => {
+                Some(directory_listing_response(request, &listing))
             }
+            Ok(NativeStaticResolve::NotFound) => None,
             Ok(NativeStaticResolve::Forbidden) => {
-                NativeHttp1Response::new(403, "Forbidden", b"forbidden\n").close_connection()
+                Some(NativeHttp1Response::new(403, "Forbidden", b"forbidden\n").close_connection())
             }
             Err(error) => {
                 log::warn!(target: "fluxheim::native_http1", "static web response failed: {error}");
-                NativeHttp1Response::new(500, "Internal Server Error", b"internal error\n")
-                    .close_connection()
+                Some(
+                    NativeHttp1Response::new(500, "Internal Server Error", b"internal error\n")
+                        .close_connection(),
+                )
             }
         }
     }

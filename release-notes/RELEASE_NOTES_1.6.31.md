@@ -63,6 +63,9 @@ exit work.
 - Native route-level static web now supports the memory-only
   `cache.local_static` adapter, reusing shared cache admission, bypass,
   revalidation, TTL, status-header, and file-identity key policy.
+- Native vhost-level static web now supports the same memory-only
+  `cache.local_static` adapter and still falls through to the vhost proxy
+  fallback when a static file is not found.
 - Native static-web memory cache accounting now includes conservative per-entry
   overhead, cache-key bytes, reason bytes, and response-header bytes before
   admission, preventing small cached objects from undercounting memory use.
@@ -138,6 +141,9 @@ exit work.
 - Added live native route static-web tests proving the supported memory
   local-static cache returns `MISS` on the first request and `HIT` on a second
   request through the native listener.
+- Added live native vhost static-web tests proving memory local-static cache
+  returns `MISS`/`HIT` through the native listener, plus cutover-plan coverage
+  for the supported vhost static-cache shape.
 - Added native static-web memory-cache tests for conservative cache-entry
   weight accounting and expired/oldest-entry pruning behavior.
 - Added route-config tests proving static-web routes accept the supported

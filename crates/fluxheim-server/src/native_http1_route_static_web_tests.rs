@@ -161,6 +161,71 @@ async fn native_route_proxy_caches_static_web_file_in_memory() {
 }
 
 #[tokio::test]
+async fn native_route_proxy_caches_vhost_static_web_file_in_memory() {
+    let root = TempDir::new().unwrap();
+    fs::write(root.path().join("asset.png"), b"native-vhost-static-png\n").unwrap();
+    let vhost = fluxheim_config::VhostConfig {
+        name: "route.test".to_owned(),
+        hosts: vec!["route.test".to_owned()],
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: Default::default(),
+        proxy: fluxheim_config::ProxyConfig::disabled(),
+        cache: fluxheim_config::CacheConfig {
+            enabled: true,
+            local_static: true,
+            status_header: Some("x-fluxheim-cache".to_owned()),
+            status_reason_header: Some("x-fluxheim-cache-reason".to_owned()),
+            memory: fluxheim_config::CacheMemoryConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: fluxheim_config::WebConfig {
+            root: Some(root.path().to_path_buf()),
+            cache_control: "public, max-age=120".to_owned(),
+            ..Default::default()
+        },
+        routes: Vec::new(),
+    };
+    let route_proxy = NativeHttp1RouteProxy::from_vhost_config(
+        &vhost,
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        None,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(route_proxy).await;
+
+    let first = downstream_get(proxy, "/asset.png").await;
+    let second = downstream_get(proxy, "/asset.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(
+        response_header(&first, "x-fluxheim-cache").as_deref(),
+        Some("MISS")
+    );
+    assert!(first.ends_with("native-vhost-static-png\n"));
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(
+        response_header(&second, "x-fluxheim-cache").as_deref(),
+        Some("HIT")
+    );
+    assert!(second.ends_with("native-vhost-static-png\n"));
+
+    root.close().unwrap();
+}
+
+#[tokio::test]
 async fn native_route_proxy_serves_static_web_range() {
     let root = TempDir::new().unwrap();
     fs::write(root.path().join("asset.txt"), b"abcdef").unwrap();
