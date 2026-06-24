@@ -214,7 +214,7 @@ pub fn static_cache_key(
         return None;
     }
 
-    let mut key = String::from("fluxheim-image-v1;");
+    let mut key = String::from("fluxheim-static-v1;");
     if let Some(namespace) = config.key_namespace.as_deref() {
         append_cache_key_component(&mut key, "namespace", namespace);
     }
@@ -559,7 +559,7 @@ mod tests {
 
         assert_eq!(
             key.as_str(),
-            "fluxheim-image-v1;method:3:GET;host:14:static.example;path:15:/img/photo.webp;query:5:w=640;file:15:dev:inode:mtime;"
+            "fluxheim-static-v1;method:3:GET;host:14:static.example;path:15:/img/photo.webp;query:5:w=640;file:15:dev:inode:mtime;"
         );
 
         let no_static = CacheConfig {

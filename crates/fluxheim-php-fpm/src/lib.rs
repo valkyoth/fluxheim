@@ -285,20 +285,28 @@ pub fn php_content_type_param_value<'a, I>(values: I) -> String
 where
     I: IntoIterator<Item = &'a str>,
 {
-    let mut values = values.into_iter();
-    let Some(first) = values.next() else {
-        return String::new();
-    };
-    let joined = values.fold(first.to_owned(), |mut joined, value| {
-        joined.push_str(", ");
-        joined.push_str(value);
-        joined
-    });
-    if safe_php_param_value(&joined) {
-        joined
-    } else {
-        String::new()
+    let mut result = String::new();
+    for value in values {
+        if !safe_php_param_value(value) {
+            return String::new();
+        }
+        let next_len = if result.is_empty() {
+            value.len()
+        } else {
+            result
+                .len()
+                .saturating_add(", ".len())
+                .saturating_add(value.len())
+        };
+        if next_len > MAX_PHP_PARAM_VALUE_BYTES {
+            return String::new();
+        }
+        if !result.is_empty() {
+            result.push_str(", ");
+        }
+        result.push_str(value);
     }
+    result
 }
 
 pub fn php_custom_params<'a, I>(custom: I) -> (Vec<(String, String)>, Vec<String>)
@@ -1051,8 +1059,14 @@ mod tests {
             php_content_type_param_value(["text/plain", "charset=utf-8"]),
             "text/plain, charset=utf-8"
         );
+        assert_eq!(php_content_type_param_value(["text/plain\nbad"]), "");
         assert_eq!(
             php_content_type_param_value(["a".repeat(MAX_PHP_PARAM_VALUE_BYTES + 1).as_str()]),
+            ""
+        );
+        let half = "a".repeat(MAX_PHP_PARAM_VALUE_BYTES / 2);
+        assert_eq!(
+            php_content_type_param_value([half.as_str(), half.as_str(), half.as_str()]),
             ""
         );
 

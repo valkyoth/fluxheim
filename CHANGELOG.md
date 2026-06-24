@@ -41,6 +41,11 @@ behavior when the change improves security or project direction.
 - Move PHP request-path to `SCRIPT_NAME`/`PATH_INFO` parsing,
   allowed-extension matching, and deny-prefix checks into `fluxheim-php-fpm`,
   while the proxy keeps static-file lookup and final execution decisions.
+- Cap and validate PHP `CONTENT_TYPE` values during accumulation, avoiding an
+  oversized intermediate joined string before rejecting over-limit input.
+- Change pure local-static cache keys to use the explicit
+  `fluxheim-static-v1;` prefix, matching the compatibility static-cache
+  namespace and improving raw key inspection clarity.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to
@@ -75,6 +80,10 @@ behavior when the change improves security or project direction.
 - Add standalone `fluxheim-php-fpm` tests for direct script detection,
   front-controller fallback, PATH_INFO split mode, unsafe segment rejection,
   allowed-extension matching, and deny-prefix matching.
+- Add PHP-FPM tests proving `CONTENT_TYPE` rejects control bytes and over-limit
+  joined values without retaining the oversized joined result.
+- Update standalone `fluxheim-cache` tests to assert local-static keys use the
+  `fluxheim-static-v1;` prefix.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.
