@@ -162,10 +162,29 @@ fn runtime_cutover_report(config: &Config) -> Result<String, Box<dyn Error + Sen
     if let Ok(manifest) = plan.native_runtime_manifest() {
         report.push_str(&manifest.to_tsv());
     }
-    if let Ok(launch_plan) = plan.native_runtime_launch_plan() {
-        report.push_str(&launch_plan.to_tsv());
+    match plan.native_runtime_launch_plan() {
+        Ok(launch_plan) => report.push_str(&launch_plan.to_tsv()),
+        Err(error) => {
+            report.push_str("native-runtime-launch-plan-error\tkind\tdetail\n");
+            report.push_str("native-runtime-launch-plan-error\t");
+            report.push_str(native_runtime_launch_plan_error_kind(&error));
+            report.push('\t');
+            report.push_str(&runtime_cutover_field(&error.to_string()));
+            report.push('\n');
+        }
     }
     Ok(report)
+}
+
+fn native_runtime_launch_plan_error_kind(
+    error: &fluxheim_server::NativeRuntimeLaunchPlanError,
+) -> &'static str {
+    match error {
+        fluxheim_server::NativeRuntimeLaunchPlanError::Blocked { .. } => "blocked",
+        fluxheim_server::NativeRuntimeLaunchPlanError::DuplicateListener { .. } => {
+            "duplicate-listener"
+        }
+    }
 }
 
 fn runtime_cutover_field(value: &str) -> String {
@@ -793,6 +812,33 @@ mod tests {
         assert!(!report.contains("metrics-http\tnative metrics HTTP service\t1.6.22\n"));
         assert!(report.contains("native-http1-proxy-candidate\tscope\tstatus\treason\n"));
         assert!(report.contains("native-http1-proxy-candidate\tproxy\tnative-ready\t-\n"));
+    }
+
+    #[test]
+    fn runtime_cutover_report_lists_launch_plan_errors() {
+        let config = config_from_toml(
+            r#"
+            [server]
+            listen = ["127.0.0.1:8080"]
+
+            [admin]
+            enabled = true
+            listen = "127.0.0.1:8080"
+            token_env = "FLUXHEIM_ADMIN_TOKEN"
+            snapshot_store = "/tmp/fluxheim-test-snapshots"
+
+            [proxy]
+            upstreams = ["127.0.0.1:3000"]
+            upstream_tls = false
+            "#,
+        );
+
+        let report = runtime_cutover_report(&config).unwrap();
+
+        assert!(report.contains("native-runtime-target-adapter: PingoraCompatibility\n"));
+        assert!(report.contains(
+            "native-runtime-launch-plan-error\tduplicate-listener\tnative runtime launch plan has duplicate TCP listener 127.0.0.1:8080 for ProxyHttp and AdminControlPlane\n"
+        ));
     }
 
     #[test]

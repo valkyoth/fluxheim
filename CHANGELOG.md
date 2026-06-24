@@ -108,6 +108,9 @@ behavior when the change improves security or project direction.
 - Validate native runtime launch-plan listener binds before reporting the
   native adapter as the target: duplicate TCP or duplicate UDP bind intents now
   fail closed, while TCP and UDP listeners may still share the same address.
+- Emit native runtime launch-plan errors in the cutover evidence report, so
+  concrete runner-contract failures are visible even when the high-level
+  blocker summary is otherwise ready.
 - Add a concrete native metrics HTTP handler around the existing Prometheus
   response generator, giving the future native runner a direct handler for the
   metrics service.
@@ -226,6 +229,8 @@ behavior when the change improves security or project direction.
 - Add launch-plan validation tests proving duplicate TCP listener binds keep
   the native target adapter disabled, while TCP and UDP listeners on the same
   address remain valid because they use distinct kernel transports.
+- Add cutover-report coverage for native launch-plan error rows, including
+  duplicate listener binds.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.
