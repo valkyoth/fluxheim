@@ -14,6 +14,9 @@ behavior when the change improves security or project direction.
 - Split native HTTP/1 proxy cutover diagnostics for cache policy and PHP-FPM
   into explicit `CachePolicy` and `PhpFpm` blockers instead of reporting both
   as a generic HTTP policy gap.
+- Make direct native route-proxy construction fail closed for vhost/route cache
+  and PHP-FPM policies until those adapters are implemented, preventing API
+  callers from accidentally dropping those policies outside the planner.
 - Move the remaining normal-profile Pingora dependency exception target to
   `1.6.32`, matching the revised plan where 1.6.31 handles cache/PHP native
   integration and 1.6.32 is the final Pingora-free proof release.
@@ -23,6 +26,8 @@ behavior when the change improves security or project direction.
 - Add native server-plan tests proving root, vhost, and route cache policies
   report cache-specific native blockers, and vhost/route PHP-FPM policies
   report PHP-specific native blockers.
+- Add native route-proxy builder tests proving vhost/route cache and PHP-FPM
+  policies are rejected directly until native adapters own those paths.
 - Re-run the native runtime cutover and Pingora dependency policy evidence for
   the 1.6.31 planning state.
 

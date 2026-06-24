@@ -16,8 +16,9 @@ use crate::NativeHttp1AcmeHttp01Store;
 use crate::ProxyProtocolTrustedSource;
 use crate::{
     DownstreamHttp1Policy, NativeHttp1GeoContext, NativeHttp1Handler, NativeHttp1Proxy,
-    NativeHttp1Request, NativeHttp1RouteProxy, NativeHttp1RouteProxyRoute,
-    NativeHttp1TlsClientIdentity, NativeHttp1Upstream, serve_native_http1_listener,
+    NativeHttp1ProxyConfigError, NativeHttp1Request, NativeHttp1RouteProxy,
+    NativeHttp1RouteProxyConfigError, NativeHttp1RouteProxyRoute, NativeHttp1TlsClientIdentity,
+    NativeHttp1Upstream, serve_native_http1_listener,
 };
 
 async fn upstream_expect_path(
@@ -2286,4 +2287,127 @@ fn native_route_proxy_builds_redirect_route_from_config_without_proxy() {
 
     assert!(route.is_redirect());
     assert!(route.proxy().is_none());
+}
+
+#[test]
+fn native_route_proxy_rejects_vhost_cache_policy_until_native_adapter_exists() {
+    let mut vhost = native_route_proxy_test_vhost();
+    vhost.cache.enabled = true;
+
+    let error = NativeHttp1RouteProxy::from_vhost_config(
+        &vhost,
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        None,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::CachePolicy)
+    );
+}
+
+#[test]
+fn native_route_proxy_rejects_vhost_php_policy_until_native_adapter_exists() {
+    let mut vhost = native_route_proxy_test_vhost();
+    vhost.php.enabled = true;
+
+    let error = NativeHttp1RouteProxy::from_vhost_config(
+        &vhost,
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        None,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::PhpFpm)
+    );
+}
+
+#[test]
+fn native_route_proxy_rejects_route_cache_policy_until_native_adapter_exists() {
+    let mut route = native_route_proxy_test_route();
+    route.cache = Some(fluxheim_config::CacheConfig {
+        enabled: true,
+        ..Default::default()
+    });
+
+    let error = NativeHttp1RouteProxyRoute::from_config(&route, None).unwrap_err();
+
+    assert_eq!(
+        error,
+        NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::CachePolicy)
+    );
+}
+
+#[test]
+fn native_route_proxy_rejects_route_php_policy_until_native_adapter_exists() {
+    let mut route = native_route_proxy_test_route();
+    route.php = Some(fluxheim_config::PhpConfig {
+        enabled: true,
+        ..Default::default()
+    });
+
+    let error = NativeHttp1RouteProxyRoute::from_config(&route, None).unwrap_err();
+
+    assert_eq!(
+        error,
+        NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::PhpFpm)
+    );
+}
+
+fn native_route_proxy_test_vhost() -> fluxheim_config::VhostConfig {
+    fluxheim_config::VhostConfig {
+        name: "route.test".to_owned(),
+        hosts: vec!["route.test".to_owned()],
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        tls: Default::default(),
+        acme_challenge: Default::default(),
+        redirect: Default::default(),
+        proxy: fluxheim_config::ProxyConfig::disabled(),
+        cache: Default::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: Default::default(),
+        routes: Vec::new(),
+    }
+}
+
+fn native_route_proxy_test_route() -> fluxheim_config::RouteConfig {
+    fluxheim_config::RouteConfig {
+        name: "route".to_owned(),
+        path_exact: Some("/route".to_owned()),
+        path_prefix: None,
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: Some(fluxheim_config::RouteRedirectConfig {
+            to: "https://target.example{uri}".to_owned(),
+            status: 302,
+        }),
+        proxy: None,
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
+    }
 }

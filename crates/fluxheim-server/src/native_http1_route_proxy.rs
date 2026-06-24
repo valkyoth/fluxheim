@@ -821,6 +821,16 @@ impl NativeHttp1RouteProxy {
         #[cfg_attr(feature = "privacy-mode", allow(unused_variables))]
         trusted_sources: &[ProxyProtocolTrustedSource],
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        if native_cache_policy_enabled(&vhost.cache) {
+            return Err(NativeHttp1RouteProxyConfigError::Proxy(
+                NativeHttp1ProxyConfigError::CachePolicy,
+            ));
+        }
+        if vhost.php.enabled {
+            return Err(NativeHttp1RouteProxyConfigError::Proxy(
+                NativeHttp1ProxyConfigError::PhpFpm,
+            ));
+        }
         let headers = base_headers.with_vhost_overlay(&vhost.headers);
         let inherited_compression = vhost.compression.as_ref().or(inherited_compression);
         let access = NativeIpAccessPolicy::from_config(&vhost.access)?;
@@ -1168,6 +1178,20 @@ impl NativeHttp1RouteProxyRoute {
         base_headers: &HeaderPolicyConfig,
         inherited_compression: Option<&fluxheim_config::CompressionConfig>,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        if route
+            .cache
+            .as_ref()
+            .is_some_and(native_cache_policy_enabled)
+        {
+            return Err(NativeHttp1RouteProxyConfigError::Proxy(
+                NativeHttp1ProxyConfigError::CachePolicy,
+            ));
+        }
+        if route.php.as_ref().is_some_and(|php| php.enabled) {
+            return Err(NativeHttp1RouteProxyConfigError::Proxy(
+                NativeHttp1ProxyConfigError::PhpFpm,
+            ));
+        }
         #[cfg(not(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -1312,6 +1336,10 @@ impl NativeHttp1RouteProxyRoute {
     pub fn is_static_web(&self) -> bool {
         matches!(self.action, NativeHttp1RouteAction::StaticWeb(_))
     }
+}
+
+fn native_cache_policy_enabled(cache: &fluxheim_config::CacheConfig) -> bool {
+    cache.enabled || cache.local_static
 }
 
 impl NativeHttp1Handler for NativeHttp1RouteProxy {
