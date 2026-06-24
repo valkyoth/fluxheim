@@ -56,6 +56,8 @@ const MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES: usize = 256;
 const NATIVE_RATE_LIMIT_MIN_PRUNE_INTERVAL: Duration = Duration::from_secs(1);
 const NATIVE_RATE_LIMIT_PRUNE_SCAN_LIMIT: usize = 128;
 const NATIVE_RATE_LIMIT_SHARDS: usize = 16;
+const NATIVE_RATE_LIMIT_SHARD_HASH_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const NATIVE_RATE_LIMIT_SHARD_HASH_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1RouteProxy {
@@ -672,13 +674,22 @@ fn prune_native_rate_limit_entries(
 fn native_rate_limit_shard(key: NativeRateLimitKey) -> usize {
     match key {
         NativeRateLimitKey::Ip(IpAddr::V4(address)) => {
-            usize::from(address.octets()[3]) & (NATIVE_RATE_LIMIT_SHARDS - 1)
+            native_rate_limit_shard_hash(&address.octets()) & (NATIVE_RATE_LIMIT_SHARDS - 1)
         }
         NativeRateLimitKey::Ip(IpAddr::V6(address)) => {
-            usize::from(address.octets()[15]) & (NATIVE_RATE_LIMIT_SHARDS - 1)
+            native_rate_limit_shard_hash(&address.octets()) & (NATIVE_RATE_LIMIT_SHARDS - 1)
         }
         NativeRateLimitKey::Indeterminate => 0,
     }
+}
+
+fn native_rate_limit_shard_hash(bytes: &[u8]) -> usize {
+    let mut hash = NATIVE_RATE_LIMIT_SHARD_HASH_OFFSET;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(NATIVE_RATE_LIMIT_SHARD_HASH_PRIME);
+    }
+    hash as usize
 }
 
 impl Default for NativeConcurrencyLimit {
@@ -2865,7 +2876,7 @@ fn flatten_append_headers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{IpAddr, Ipv4Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[test]
     fn native_rate_limit_prune_is_bounded_and_incremental() {
@@ -2915,5 +2926,31 @@ mod tests {
         assert!(!buckets.entries.contains_key(&second));
         assert!(buckets.entries.contains_key(&third));
         assert_eq!(buckets.prune_queue, VecDeque::from([third]));
+    }
+
+    #[test]
+    fn native_rate_limit_shard_uses_full_ipv4_address() {
+        let first = NativeRateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 42)));
+        let second = NativeRateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 42)));
+
+        assert_ne!(
+            native_rate_limit_shard(first),
+            native_rate_limit_shard(second)
+        );
+    }
+
+    #[test]
+    fn native_rate_limit_shard_uses_full_ipv6_address() {
+        let first = NativeRateLimitKey::Ip(IpAddr::V6(Ipv6Addr::from([
+            0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,
+        ])));
+        let second = NativeRateLimitKey::Ip(IpAddr::V6(Ipv6Addr::from([
+            0x20, 0x01, 0x0d, 0xb9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,
+        ])));
+
+        assert_ne!(
+            native_rate_limit_shard(first),
+            native_rate_limit_shard(second)
+        );
     }
 }

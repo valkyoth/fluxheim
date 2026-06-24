@@ -155,6 +155,9 @@ behavior when the change improves security or project direction.
 - Replace native rate-limit whole-shard expiry sweeps with bounded,
   incremental per-shard prune queues so table-full handling no longer scans
   every bucket while holding the request-path lock.
+- Hash the full IPv4/IPv6 client address for native rate-limit shard selection
+  instead of using only the final byte, reducing predictable hot-shard
+  concentration for forwarded-client identities.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to

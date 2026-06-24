@@ -148,6 +148,9 @@ exit work.
 - Native rate-limit table pruning is now bounded and incremental per shard,
   replacing whole-shard `HashMap::retain` sweeps in the request hot path with a
   small prune queue scan when a shard is full.
+- Native rate-limit sharding now hashes the full IPv4/IPv6 client address
+  instead of using only the final address byte, reducing attacker-controlled
+  hot-shard concentration when many trusted forwarded identities are present.
 - Updated `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - The remaining normal-profile Pingora dependency exception target is now
