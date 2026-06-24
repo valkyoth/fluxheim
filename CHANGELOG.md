@@ -74,6 +74,9 @@ behavior when the change improves security or project direction.
 - Align native HTTP/1 cutover planning with the new static cache adapter, so
   static-web routes using the supported memory local-static cache no longer
   make an otherwise native-ready vhost fallback proxy look unsupported.
+- Move PHP request-body replay/spooling and bounded FastCGI stdout/stderr
+  response collection into `fluxheim-php-fpm`, leaving the root crate as a thin
+  compatibility adapter for the current PHP runtime.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to
@@ -136,6 +139,9 @@ behavior when the change improves security or project direction.
   memory local-static cache adapter.
 - Add native planning coverage proving static-web memory local-static cache
   routes do not block native HTTP/1 proxy cutover candidates.
+- Add standalone `fluxheim-php-fpm` tests for in-memory request-body replay,
+  secure spool-file replay/cleanup, and combined FastCGI stdout/stderr response
+  size accounting, while keeping root PHP compatibility tests green.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.

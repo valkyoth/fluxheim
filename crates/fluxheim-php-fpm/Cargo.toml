@@ -8,7 +8,13 @@ publish = false
 description = "Internal Fluxheim PHP-FPM protocol and runtime boundary."
 
 [dependencies]
+fastcgi-client = { version = "0.11.1", default-features = false, features = ["runtime-tokio"] }
 fluxheim-config = { path = "../fluxheim-config", features = ["php-fpm"] }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 getrandom = "0.4.3"
 percent-encoding = "2.3.2"
+rustix = { version = "1.1.4", features = ["fs"] }
+tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-util", "net", "rt", "time"] }
+
+[dev-dependencies]
+tempfile = "3.24.0"
