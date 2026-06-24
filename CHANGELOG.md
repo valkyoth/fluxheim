@@ -77,6 +77,9 @@ behavior when the change improves security or project direction.
 - Move PHP request-body replay/spooling and bounded FastCGI stdout/stderr
   response collection into `fluxheim-php-fpm`, leaving the root crate as a thin
   compatibility adapter for the current PHP runtime.
+- Move PHP-FPM keep-alive pool ownership into `fluxheim-php-fpm` with a small
+  metrics callback boundary, so connection reuse, stale idle pruning, pool
+  labels, and bounded response collection are owned by the PHP crate.
 - Update `sanitization` to 1.2.2 and `base64-ng` to 1.2.3 across the root,
   server, TLS, and load-balancer crates.
 - Move the remaining normal-profile Pingora dependency exception target to
@@ -142,6 +145,8 @@ behavior when the change improves security or project direction.
 - Add standalone `fluxheim-php-fpm` tests for in-memory request-body replay,
   secure spool-file replay/cleanup, and combined FastCGI stdout/stderr response
   size accounting, while keeping root PHP compatibility tests green.
+- Add standalone and root compatibility tests proving PHP-FPM keep-alive pool
+  labels remain stable after the pool move.
 - Re-run targeted tests for native HTTP/1 client encoding, load-balancer
   persistence constant-time comparisons, and TLS secret handling after the
   dependency refresh.
