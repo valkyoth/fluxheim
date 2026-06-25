@@ -2803,50 +2803,45 @@ available for the stabilization/security-only follow-up.
   Upgrade. Keep advanced health-aware/dynamic load-balancer state on the
   `v1.6.32` native load-balancer cutover instead of mixing it into this
   upstream transport slice.
-- `v1.6.31`: move cache and PHP-FPM rich proxy integrations onto native
-  adapters. Cache work must cover lookup/fill/stale, Vary/Range/conditional
-  semantics, peer-fill guardrails, and purge visibility. PHP-FPM work must
-  cover SCRIPT_NAME/PATH_INFO safety, deny prefixes, spool limits, TCP/Unix
-  upstream policies, and custom PHP error pages. Keep the compatibility path
-  until fixture and smoke tests prove parity. Also make sure root/vhost cache
-  policy and route cache policy all report native-ready only after the native
-  cache adapter owns the full request/response/cache-key path. This line also
-  moves HTTP/1 upstream PROXY protocol v1/v2 send onto the native path with
-  pooling disabled for connection-scoped identity and HTTP/2 combinations
-  rejected until they can be represented safely, and adds native Host/vhost
-  routing for exact and wildcard host patterns with compatibility default-vhost
-  fallback behavior. It also adds the native runtime manifest contract that
-  converts blocker-free server plans into Fluxheim-owned service/listener and
-  background-task bindings before the production runner is switched, and emits
-  those bindings in the native cutover evidence report. It also gives the
-  metrics service a concrete native HTTP handler around the existing Prometheus
-  response generator.
-- `v1.6.32`: finish native load-balancer compatibility and remove the final
-  Pingora runtime/listener/TLS adapter crates from normal builds. This release
-  must close the remaining proxy gates that need runtime/load-balancer state:
-  dynamic discovery, health-aware selection, persistence, priority groups,
-  locality, backup/drain/disabled policy, max-in-flight, aliases/tags, static
-  weight parity, websocket upgrade, native rustls/OpenSSL TLS listener
-  selection, native service supervision, admin/metrics/stream/UDP
-  service registration, and remaining Pingora HTTP/error/cache
-  boundary adapters. Add a Fluxheim-owned nginx/Ketama-compatible consistent
+- `v1.6.31`: move the native runtime dispatch, HTTP/1 upstream transport, host
+  routing, admin/metrics/stream/UDP service registration, and proxy listener
+  TLS/PROXY-protocol paths far enough that a representative full runtime can
+  run under the Fluxheim-owned supervisor. Keep rich proxy cache, PHP-FPM, and
+  WebSocket/upgrade gates explicit until their native adapters can prove full
+  request/response parity.
+- `v1.6.32`: finish native load-balancer compatibility and keep the native
+  runtime launch evidence honest. This release must close the proxy gates that
+  need shared runtime/load-balancer state: dynamic discovery, health-aware
+  selection, persistence, priority groups, locality, backup/drain/disabled
+  policy, max-in-flight, aliases/tags, static weight parity, and native
+  service supervision for load-balancer refresh tasks. It also keeps native
+  static load-balancer eligibility honest: static ordered/weighted upstream
+  pools, active health checks, static advanced load-balancer policy, and
+  dynamic discovery may run natively only when the native proxy and refresh task
+  share the same `UpstreamLoadBalancer` state. File/HTTP/DNS discovery must
+  clone vetted upstream transport policy onto selected dynamic authorities
+  instead of trusting unbounded per-request transport configuration.
+- `v1.6.33`: close the final rich-proxy parity gates and remove the final
+  Pingora runtime/listener/TLS adapter crates from normal builds. Cache work
+  must cover lookup/fill/stale, Vary/Range/conditional semantics, peer-fill
+  guardrails, purge visibility, and root/vhost/route cache policy readiness
+  only after the native adapter owns the full request/response/cache-key path.
+  PHP-FPM work must cover SCRIPT_NAME/PATH_INFO safety, deny prefixes, spool
+  limits, TCP/Unix upstream policies, retry/failover, custom PHP error pages,
+  and managed/external FPM process boundaries. WebSocket/HTTP upgrade work must
+  add an explicit native downstream hijack/tunnel shape with bounded timeouts
+  before `proxy.websocket = true` can report native-ready. Add a
+  Fluxheim-owned nginx/Ketama-compatible consistent
   hash selection mode for operators migrating from nginx or Pingora Ketama
   behavior. Keep the existing rendezvous consistent-hash and bounded-load
   consistent modes as the default Fluxheim algorithms, but document that the
   compatibility mode is for matching nginx-style request-to-backend mapping.
   Do not depend on `pingora-ketama`; implement and test the ring behavior in
-  Fluxheim with golden vectors and membership-change remapping tests. This is
-  also where native static load-balancer eligibility must stay honest: static
-  ordered/weighted upstream pools, active health checks, and static advanced
-  load-balancer policy, and dynamic discovery may run natively only when the
-  native proxy and refresh task share the same `UpstreamLoadBalancer` state.
-  File/HTTP/DNS discovery must clone vetted upstream transport policy onto
-  selected dynamic authorities instead of trusting unbounded per-request
-  transport configuration. This release is the final Pingora-free proof
-  release: `cargo tree`, release containers, RPM builds, source builds, and
-  focused artifacts must all prove no normal Fluxheim build compiles vendored
-  Pingora code.
-- `v1.6.33`: stabilization/security-only release for the Pingora-free runtime
+  Fluxheim with golden vectors and membership-change remapping tests. This
+  release is the final Pingora-free proof release: `cargo tree`, release
+  containers, RPM builds, source builds, and focused artifacts must all prove no
+  normal Fluxheim build compiles vendored Pingora code.
+- `v1.6.34`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
   checks, long-running soak tests, runtime-baseline comparisons, and

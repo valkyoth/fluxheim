@@ -3,6 +3,11 @@
 Fluxheim 1.6.32 continues the final native-runtime cutover work after the
 cache/PHP adapter slice.
 
+This checkpoint focuses on native runtime dispatch and native load-balancer
+state sharing. Rich proxy cache, PHP-FPM, and WebSocket/HTTP upgrade parity
+remain explicit compatibility gates until their native adapters prove full
+request/response behavior in a later `1.6.x` stop.
+
 ## Highlights
 
 - Metrics configuration now supports optional `metrics.token_env` and
@@ -102,6 +107,24 @@ cache/PHP adapter slice.
   selection through OpenSSL's callback API, and exposes the certificate store to
   the root native runtime so ACME renewal and local certificate reloads no
   longer require the Pingora listener adapter.
+- Native HTTP/1 proxy routing now shares Fluxheim-owned
+  `UpstreamLoadBalancer` state with the native load-balancer refresh service.
+  Static advanced pool policy, active health, dynamic file/HTTP/DNS discovery,
+  persistence, passive health, backup/drain/disabled state, priority groups,
+  locality preference, per-upstream in-flight caps, aliases/tags, and runtime
+  weight handling are selected through the same native load-balancer state the
+  background service updates.
+- Dynamic native load-balancer selections now clone the already-vetted
+  upstream transport policy onto selected discovery authorities. This preserves
+  the configured TLS, HTTP version, timeout, socket, PROXY-protocol, and
+  forwarding-header policy without accepting per-request transport changes from
+  discovery data.
+- The remaining rich-proxy native gates are now documented as intentional
+  parity blockers rather than hidden launch blockers: proxy cache still needs
+  native lookup/fill/stale/purge behavior, PHP-FPM still needs full
+  SCRIPT_NAME/PATH_INFO/spool/retry/error-page parity, and WebSocket still
+  needs a native downstream hijack/tunnel response shape before
+  `proxy.websocket = true` can leave the compatibility path.
 
 ## Tests
 
@@ -164,3 +187,6 @@ cache/PHP adapter slice.
 - Re-ran the admin listener smoke against the native startup path, proving the
   production binary serves the admin TCP listener and Unix ops socket under the
   native runtime dispatcher.
+- Added native proxy coverage for shared load-balancer selection and refresh
+  service state, including active-health/static advanced policy and dynamic DNS
+  discovery construction.
