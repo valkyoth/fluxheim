@@ -2838,11 +2838,11 @@ available for the stabilization/security-only follow-up.
   and managed/external FPM process boundaries. The native WebSocket baseline
   now covers strict `Upgrade: websocket` requests on forced HTTP/1 static
   upstream routes with shared 101 validation, prebuffer preservation, and a
-  bounded bidirectional tunnel. Remaining upgrade work should cover generic
-  token-based HTTP/1 upgrades only if there is a real operator need, HTTP/2
-  WebSocket semantics separately from hop-by-hop HTTP/1 upgrades, and
-  load-balanced WebSocket stickiness before enabling WebSocket with native
-  load-balancer selection. This release is the final Pingora-free proof
+  bounded bidirectional tunnel; native load-balanced WebSocket pools select one
+  upstream at upgrade time and pin the tunnel to that backend. Remaining
+  upgrade work should cover generic token-based HTTP/1 upgrades only if there
+  is a real operator need and HTTP/2 WebSocket semantics separately from
+  hop-by-hop HTTP/1 upgrades. This release is the final Pingora-free proof
   release: `cargo tree`, release containers, RPM builds, source builds, and
   focused artifacts must all prove no normal Fluxheim build compiles vendored
   Pingora code.

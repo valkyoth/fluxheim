@@ -136,9 +136,12 @@ prove full request/response behavior in a later `1.6.x` stop.
   canonical upstream `Connection: Upgrade` / `Upgrade: websocket` request,
   validates the upstream `101 Switching Protocols` response with the shared
   HTTP/1 parser, forwards prebuffered bytes in both directions, and runs the
-  bidirectional tunnel under the configured upstream read timeout. WebSocket
-  over HTTP/2 upstream mode and WebSocket with native load-balancer selection
-  still fail closed until those combinations get separate parity tests.
+  bidirectional tunnel under the configured upstream read timeout.
+- Native WebSocket proxying now also works with native load-balanced upstream
+  pools. The proxy performs one normal load-balancer selection at upgrade time,
+  then pins the tunnel to that selected upstream for the lifetime of the
+  connection; HTTP/2 WebSocket upstream mode remains fail-closed because it
+  does not use the HTTP/1 hop-by-hop upgrade mechanism.
 - The remaining rich-proxy native gates are now documented as intentional
   parity blockers rather than hidden launch blockers: proxy cache still needs
   native lookup/fill/stale/purge behavior, and PHP-FPM still needs full
@@ -221,6 +224,9 @@ prove full request/response behavior in a later `1.6.x` stop.
   perform a real downstream `101 Switching Protocols` upgrade through a local
   upstream listener and prove bytes sent immediately after the downstream
   request head are preserved and tunneled.
+- Added live native load-balanced WebSocket coverage proving a configured
+  `proxy.load_balance` pool can select an upstream once and tunnel WebSocket
+  bytes through that pinned backend.
 - Added focused native connection-takeover coverage proving handlers receive
   prebuffered downstream bytes when taking ownership of a parsed HTTP/1
   connection.
