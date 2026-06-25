@@ -81,6 +81,14 @@ cache/PHP adapter slice.
   v1 and v2 from the native launch plan. The parsed source address is carried
   through access policy, rate-limit identity, and generated forwarding headers,
   while untrusted direct peers still fail closed before request parsing.
+- Root startup now enters the Fluxheim-native runtime dispatcher when the
+  server plan is blocker-free and targets `NativeRuntime`. The dispatcher
+  starts the native HTTP proxy runtime plus native admin, metrics, stream, UDP,
+  and load-balancer refresh tasks under `NativeBackgroundSupervisor` instead of
+  the Pingora server loop.
+- Native production startup fails closed for ACME renewal and certificate
+  reload background tasks until the native TLS reload handoff is wired, avoiding
+  a partial native process that would silently miss certificate updates.
 
 ## Tests
 
@@ -129,3 +137,9 @@ cache/PHP adapter slice.
 - Added live native runtime tests for trusted downstream PROXY protocol v1 and
   v2 listeners, proving the native listener parses the PROXY header and forwards
   the restored client IP to the upstream as `X-Real-IP`.
+- Added root runtime coverage proving blocker-free plans select the native
+  runtime target and that unsupported native certificate background tasks are
+  rejected explicitly.
+- Re-ran the admin listener smoke against the native startup path, proving the
+  production binary serves the admin TCP listener and Unix ops socket under the
+  native runtime dispatcher.

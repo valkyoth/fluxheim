@@ -13,6 +13,8 @@ use fluxheim_protocol::{
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
+#[cfg(unix)]
+use tokio::net::UnixListener;
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
@@ -530,6 +532,49 @@ where
                             "HTTP/1 PROXY-protocol connection failed; peer={peer_addr}; error={error}"
                         );
                     }
+                    drop(permit);
+                });
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+pub async fn serve_native_http1_unix_listener<H, F>(
+    listener: UnixListener,
+    policy: DownstreamHttp1Policy,
+    handler: Arc<H>,
+    shutdown: F,
+) -> Result<(), NativeHttp1Error>
+where
+    H: NativeHttp1Handler,
+    F: Future<Output = ()> + Send,
+{
+    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    tokio::pin!(shutdown);
+    loop {
+        tokio::select! {
+            () = &mut shutdown => return Ok(()),
+            accepted = listener.accept() => {
+                let (stream, _) = accepted?;
+                let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                    log::warn!(
+                        target: "fluxheim::native_http1",
+                        "HTTP/1 Unix listener connection rejected: listener at capacity; limit={}",
+                        policy.max_connections());
+                    continue;
+                };
+                let handler = handler.clone();
+                tokio::spawn(async move {
+                    let request_context = NativeHttp1RequestContext::default();
+                    let _ = serve_native_http1_connection_with_context(
+                        stream,
+                        None,
+                        request_context,
+                        policy,
+                        handler,
+                    )
+                    .await;
                     drop(permit);
                 });
             }

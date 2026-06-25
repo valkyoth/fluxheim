@@ -369,6 +369,61 @@ pub(crate) struct AdminServices {
     pub(crate) watchdog: Option<crate::background::FluxBackgroundService<AdminApp>>,
 }
 
+pub(crate) struct NativeAdminServices {
+    pub(crate) control_plane: AdminApp,
+    #[cfg(unix)]
+    pub(crate) ops_socket: Option<AdminOpsApp>,
+    pub(crate) watchdog: Option<crate::background::FluxBackgroundService<AdminApp>>,
+}
+
+pub(crate) fn native_admin_services_from_config(
+    config: &Config,
+    proxy: FluxProxy,
+    server_plan: &fluxheim_server::ServerPlan,
+) -> Result<Option<NativeAdminServices>, Box<dyn Error + Send + Sync>> {
+    if !config.admin.enabled {
+        return Ok(None);
+    }
+    if server_plan
+        .service(fluxheim_server::ServiceKind::AdminControlPlane)
+        .is_none()
+    {
+        return Err("admin.enabled requires an admin service in the server plan".into());
+    }
+
+    let app = AdminApp::from_config(config, proxy)?;
+    let watchdog = if app.self_healing_enabled {
+        let Some(task) =
+            server_plan.background_task(crate::background::BackgroundTaskKind::RuntimeWatchdog)
+        else {
+            return Err(
+                "admin.self_healing.enabled requires a watchdog task in the server plan".into(),
+            );
+        };
+        Some(crate::background::background_service_for_spec(
+            task,
+            app.clone(),
+        ))
+    } else {
+        None
+    };
+    #[cfg(unix)]
+    let ops_socket = if config.admin.ops_socket.enabled {
+        Some(AdminOpsApp {
+            app: app.clone(),
+            require_bearer_token: config.admin.ops_socket.require_bearer_token,
+        })
+    } else {
+        None
+    };
+    Ok(Some(NativeAdminServices {
+        control_plane: app,
+        #[cfg(unix)]
+        ops_socket,
+        watchdog,
+    }))
+}
+
 pub(crate) fn admin_services_from_config(
     config: &Config,
     proxy: FluxProxy,

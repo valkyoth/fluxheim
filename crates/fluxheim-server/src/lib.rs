@@ -45,6 +45,8 @@ pub use listener::{ListenerProtocol, ListenerSpec};
 pub use native_http1::serve_native_http1_openssl_listener;
 #[cfg(feature = "tls-rustls-backend")]
 pub use native_http1::serve_native_http1_rustls_listener;
+#[cfg(unix)]
+pub use native_http1::serve_native_http1_unix_listener;
 pub use native_http1::{
     NativeHttp1Error, NativeHttp1GeoContext, NativeHttp1Handler, NativeHttp1Request,
     NativeHttp1RequestContext, NativeHttp1Response, NativeHttp1ResponseWritePolicy,

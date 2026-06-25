@@ -7,6 +7,8 @@ use std::io::Read;
 use std::io::Write;
 #[cfg(feature = "proxy")]
 use std::path::Path;
+#[cfg(feature = "proxy")]
+use std::sync::Arc;
 
 #[cfg(all(
     feature = "acme",
@@ -87,11 +89,11 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     fluxheim_tls::set_pending_managed_certificate_recorder(record_pending_managed_certificate);
 
     let server_plan = fluxheim_server::ServerPlan::from_config(&config)?;
-    match server_plan.runtime_adapter() {
-        fluxheim_server::RuntimeAdapterKind::PingoraCompatibility => {}
-        fluxheim_server::RuntimeAdapterKind::NativeRuntime => {
-            return Err("native runtime adapter is not enabled for production startup yet".into());
-        }
+    if matches!(
+        server_plan.native_runtime_target_adapter(),
+        fluxheim_server::RuntimeAdapterKind::NativeRuntime
+    ) {
+        return run_native_runtime(config, server_plan);
     }
     log_native_runtime_cutover_summary(&server_plan);
     log_native_runtime_manifest_preview(&server_plan);
@@ -305,6 +307,311 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     server.add_service(proxy_service);
     server.run_forever();
+}
+
+#[cfg(feature = "proxy")]
+fn run_native_runtime(
+    config: Config,
+    server_plan: fluxheim_server::ServerPlan,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    log_native_runtime_cutover_summary(&server_plan);
+    log_native_runtime_manifest_preview(&server_plan);
+    log_native_http1_proxy_cutover_summary(&server_plan);
+    validate_native_http1_router_factory(&config, &server_plan)?;
+
+    let threads = server_plan.process().threads().max(1);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(threads)
+        .enable_all()
+        .build()?;
+    runtime.block_on(run_native_runtime_async(config, server_plan))
+}
+
+#[cfg(feature = "proxy")]
+async fn run_native_runtime_async(
+    config: Config,
+    server_plan: fluxheim_server::ServerPlan,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let launch_plan = server_plan.native_runtime_launch_plan()?;
+    reject_unsupported_native_background_tasks(&launch_plan)?;
+
+    #[cfg(feature = "load-balancer")]
+    let (proxy, load_balancer_services) =
+        crate::proxy::FluxProxy::from_config_with_background_services(&config)?;
+
+    #[cfg(not(feature = "load-balancer"))]
+    let proxy = crate::proxy::FluxProxy::from_config(&config)?;
+
+    #[cfg(feature = "metrics")]
+    {
+        crate::metrics::init()?;
+        crate::metrics::record_config(&config);
+    }
+
+    let supervisor = fluxheim_runtime::NativeBackgroundSupervisor::new();
+    let mut background_handles = Vec::new();
+
+    #[cfg(feature = "load-balancer")]
+    if let Some(load_balancer_service_spec) =
+        server_plan.service(fluxheim_server::ServiceKind::LoadBalancerHealthChecks)
+    {
+        for service in load_balancer_services {
+            log::info!("{} enabled", load_balancer_service_spec.name());
+            background_handles.push(supervisor.spawn_service(service.into_native_service()));
+        }
+    }
+
+    #[cfg(feature = "stream-proxy")]
+    if let Some(stream_service_spec) =
+        server_plan.service(fluxheim_server::ServiceKind::StreamProxy)
+    {
+        for service in crate::stream_proxy::stream_background_services_from_config(&config)? {
+            log::info!("{} enabled", stream_service_spec.name());
+            background_handles.push(supervisor.spawn_service(service.into_native()));
+        }
+    }
+
+    #[cfg(feature = "udp-proxy")]
+    if let Some(udp_service_spec) = server_plan.service(fluxheim_server::ServiceKind::UdpProxy) {
+        for service in crate::udp_proxy::udp_background_services_from_config(&config)? {
+            log::info!("{} enabled", udp_service_spec.name());
+            background_handles.push(supervisor.spawn_service(service.into_native()));
+        }
+    }
+
+    #[cfg(feature = "metrics")]
+    if let Some(metrics_service_spec) =
+        server_plan.service(fluxheim_server::ServiceKind::MetricsHttp)
+    {
+        if let Some(metrics_service) =
+            crate::metrics::metrics_background_service_from_config(&config.metrics)?
+        {
+            log::info!("{} enabled", metrics_service_spec.name());
+            background_handles.push(supervisor.spawn_service(metrics_service.into_native()));
+        }
+
+        #[cfg(feature = "cache")]
+        if let Some(task) =
+            server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::CacheMetrics)
+        {
+            record_cache_runtime_metrics(&proxy);
+            background_handles.push(
+                supervisor.spawn_service(
+                    crate::background::background_service_for_spec(
+                        task,
+                        CacheRuntimeMetricsBackgroundService {
+                            proxy: proxy.clone(),
+                        },
+                    )
+                    .into_native(),
+                ),
+            );
+        }
+
+        #[cfg(feature = "metrics-otlp")]
+        if let Some(task) =
+            server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::MetricsExport)
+        {
+            if let Some(exporter) =
+                crate::metrics_otlp::MetricsOtlpExporter::from_config(&config.metrics.otlp)?
+            {
+                background_handles.push(
+                    supervisor.spawn_service(
+                        crate::background::background_service_for_spec(
+                            task,
+                            MetricsOtlpBackgroundService { exporter },
+                        )
+                        .into_native(),
+                    ),
+                );
+            }
+            log::info!(
+                "OTLP metrics export enabled to {}",
+                config.metrics.otlp.endpoint
+            );
+        }
+    }
+
+    #[cfg(feature = "cache")]
+    if let Some(task) =
+        server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::CacheStalePurge)
+    {
+        log::info!(
+            "cache stale disk purger enabled; interval={}s limit={} batches={}",
+            config.cache_purger.interval_secs,
+            config.cache_purger.limit,
+            config.cache_purger.batches
+        );
+        background_handles.push(
+            supervisor.spawn_service(
+                crate::background::background_service_for_spec(
+                    task,
+                    CacheStalePurgerBackgroundService {
+                        config: config.cache_purger.clone(),
+                        proxy: proxy.clone(),
+                    },
+                )
+                .into_native(),
+            ),
+        );
+    }
+
+    let mut listener_handles: Vec<
+        tokio::task::JoinHandle<Result<(), fluxheim_server::NativeHttp1Error>>,
+    > = Vec::new();
+    let proxy_runtime = if server_plan
+        .service(fluxheim_server::ServiceKind::ProxyHttp)
+        .is_some()
+    {
+        let runtime =
+            fluxheim_server::NativeHttp1ProxyRuntime::bind_from_config(&config, &server_plan)
+                .await?;
+        Some(runtime.start(&supervisor))
+    } else {
+        None
+    };
+
+    if let Some(admin_service_spec) =
+        server_plan.service(fluxheim_server::ServiceKind::AdminControlPlane)
+        && let Some(admin_services) =
+            crate::admin::native_admin_services_from_config(&config, proxy.clone(), &server_plan)?
+    {
+        let app = Arc::new(admin_services.control_plane);
+        for listener in
+            server_plan.service_listeners(fluxheim_server::ServiceKind::AdminControlPlane)
+        {
+            let tcp = tokio::net::TcpListener::bind(listener.addr()).await?;
+            let local_addr = tcp.local_addr()?;
+            log::info!("{} enabled on {}", admin_service_spec.name(), local_addr);
+            let policy = *server_plan.downstream_http1();
+            let app = app.clone();
+            let shutdown = supervisor.shutdown_view();
+            listener_handles.push(tokio::spawn(async move {
+                fluxheim_server::serve_native_http1_listener(
+                    tcp,
+                    policy,
+                    app,
+                    native_shutdown_wait(shutdown),
+                )
+                .await
+            }));
+        }
+
+        #[cfg(unix)]
+        if let Some(ops_socket) = admin_services.ops_socket {
+            let Some(ops_socket_plan) = server_plan.admin_ops_socket() else {
+                return Err("admin ops socket service missing from native launch plan".into());
+            };
+            let listener = fluxheim_server::replace_private_unix_listener(ops_socket_plan.path())?;
+            listener.set_nonblocking(true)?;
+            let listener = tokio::net::UnixListener::from_std(listener)?;
+            log::info!(
+                "Fluxheim Local Ops Socket enabled on {}",
+                ops_socket_plan.path().display()
+            );
+            let policy = *server_plan.downstream_http1();
+            let app = Arc::new(ops_socket);
+            let shutdown = supervisor.shutdown_view();
+            listener_handles.push(tokio::spawn(async move {
+                fluxheim_server::serve_native_http1_unix_listener(
+                    listener,
+                    policy,
+                    app,
+                    native_shutdown_wait(shutdown),
+                )
+                .await
+            }));
+        }
+
+        if let Some(watchdog) = admin_services.watchdog {
+            log::info!("admin self-healing watchdog enabled");
+            background_handles.push(supervisor.spawn_service(watchdog.into_native()));
+        }
+    }
+
+    let (critical_handles, background_handles): (Vec<_>, Vec<_>) = background_handles
+        .into_iter()
+        .partition(fluxheim_runtime::NativeBackgroundJoinHandle::is_critical);
+    let watchdog = supervisor.spawn_critical_watchdog(critical_handles);
+    log::info!("native runtime started");
+    wait_native_runtime_shutdown_signal().await;
+    let _ = supervisor.shutdown();
+
+    if let Some(proxy_runtime) = proxy_runtime {
+        for result in proxy_runtime.join().await {
+            result?;
+        }
+    }
+    for handle in listener_handles {
+        match handle.await {
+            Ok(result) => result?,
+            Err(error) if error.is_cancelled() => {}
+            Err(error) => return Err(Box::new(error)),
+        }
+    }
+    for handle in background_handles {
+        handle.join().await?;
+    }
+    watchdog.abort();
+    let _ = watchdog.join().await;
+    Ok(())
+}
+
+#[cfg(feature = "proxy")]
+fn reject_unsupported_native_background_tasks(
+    launch_plan: &fluxheim_server::NativeRuntimeLaunchPlan,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    for task in launch_plan.background_tasks() {
+        match task.kind() {
+            fluxheim_runtime::BackgroundTaskKind::AcmeRenewal
+            | fluxheim_runtime::BackgroundTaskKind::CertificateReload => {
+                return Err(format!(
+                    "native runtime does not yet support {} background task",
+                    task.name()
+                )
+                .into());
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "proxy")]
+async fn native_shutdown_wait(mut shutdown: fluxheim_runtime::FluxShutdown) {
+    let _ = shutdown.wait_for_shutdown().await;
+}
+
+#[cfg(feature = "proxy")]
+async fn wait_native_runtime_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        let mut terminate = signal(SignalKind::terminate()).ok();
+        let mut quit = signal(SignalKind::quit()).ok();
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = async {
+                if let Some(signal) = &mut terminate {
+                    let _ = signal.recv().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {}
+            _ = async {
+                if let Some(signal) = &mut quit {
+                    let _ = signal.recv().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 #[cfg(all(
@@ -1282,6 +1589,39 @@ mod tests {
             fluxheim_server::NativeHttp1ProxyCutoverStatus::NativeReady
         );
         super::validate_native_http1_router_factory(&config, &plan).unwrap();
+    }
+
+    #[test]
+    fn native_runtime_target_adapter_selects_native_for_ready_plan() {
+        let mut config = crate::config::Config::default();
+        config.server.listen = vec!["127.0.0.1:18080".to_owned()];
+        config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
+        let plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
+
+        assert_eq!(
+            plan.native_runtime_target_adapter(),
+            fluxheim_server::RuntimeAdapterKind::NativeRuntime
+        );
+    }
+
+    #[test]
+    fn native_runtime_rejects_unsupported_certificate_background_tasks() {
+        let plan = fluxheim_server::ServerPlan::with_process(
+            fluxheim_server::ProcessSpec::default(),
+            Vec::new(),
+            Vec::new(),
+            vec![fluxheim_runtime::BackgroundTaskSpec::new(
+                "ACME renewal",
+                fluxheim_runtime::BackgroundTaskKind::AcmeRenewal,
+            )],
+        );
+        let launch_plan = plan.native_runtime_launch_plan().unwrap();
+
+        let error = super::reject_unsupported_native_background_tasks(&launch_plan)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("native runtime does not yet support ACME renewal"));
     }
 
     #[cfg(feature = "acme-client")]
