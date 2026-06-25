@@ -4,12 +4,13 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use fluxheim_config::UpstreamProxyProtocol;
 use fluxheim_protocol::{
-    Http1ParseError, http1_request_target, proxy_protocol_v1_header, proxy_protocol_v2_header,
+    Http1HeadLimits, Http1Header, Http1ParseError, http1_request_target, proxy_protocol_v1_header,
+    proxy_protocol_v2_header,
 };
 use h2::client::SendRequest;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Uri};
 use socket2::{SockRef, TcpKeepalive};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant as TokioInstant, timeout, timeout_at};
@@ -21,7 +22,8 @@ use crate::native_http1_forwarded::{
     valid_upstream_header_value, valid_upstream_request_header, write_owned_proxy_headers,
 };
 use crate::native_http1_upstream_response::{
-    read_upstream_response, read_upstream_response_for_pool,
+    parsed_upstream_response_head, read_upstream_response, read_upstream_response_for_pool,
+    read_upstream_response_head,
 };
 use crate::native_http2_client::{
     NativeHttp2ConnectionDriver, native_http2_upstream_client_on_h2c_upgraded_io,
@@ -995,77 +997,70 @@ impl NativeHttp1Upstream {
             .map_err(NativeHttp1Error::Io)?;
         let response_head = timeout(
             self.read_timeout,
-            read_h2c_upgrade_response_head(&mut stream),
+            read_upstream_response_head(&mut stream, h2c_upgrade_response_head_limits()),
         )
         .await
         .map_err(|_| timeout_error("native h2c upgrade response timeout"))??;
-        validate_h2c_upgrade_response(&response_head)?;
+        validate_h2c_upgrade_response(&response_head, h2c_upgrade_response_head_limits())?;
         Ok(stream)
     }
 }
 
 const MAX_H2C_UPGRADE_RESPONSE_HEAD_BYTES: usize = 8192;
 
-async fn read_h2c_upgrade_response_head(
-    stream: &mut NativeHttp1Stream,
-) -> Result<Vec<u8>, NativeHttp1Error> {
-    let mut head = Vec::new();
-    loop {
-        let byte = stream.read_u8().await.map_err(NativeHttp1Error::Io)?;
-        head.push(byte);
-        if head.len() > MAX_H2C_UPGRADE_RESPONSE_HEAD_BYTES {
-            return Err(NativeHttp1Error::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "native h2c upgrade response headers are too large",
-            )));
-        }
-        if head.len() >= 4 && head[head.len() - 4..] == *b"\r\n\r\n" {
-            return Ok(head);
-        }
+fn h2c_upgrade_response_head_limits() -> Http1HeadLimits {
+    Http1HeadLimits {
+        max_head_bytes: MAX_H2C_UPGRADE_RESPONSE_HEAD_BYTES,
+        ..Http1HeadLimits::default()
     }
 }
 
-fn validate_h2c_upgrade_response(head: &[u8]) -> Result<(), NativeHttp1Error> {
-    let head = std::str::from_utf8(head).map_err(|_| {
-        NativeHttp1Error::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "native h2c upgrade response headers are not valid UTF-8",
-        ))
-    })?;
-    let mut lines = head.split("\r\n");
-    let status = lines.next().unwrap_or_default();
-    if !status.starts_with("HTTP/1.1 101 ") && status != "HTTP/1.1 101" {
+fn validate_h2c_upgrade_response(
+    head: &[u8],
+    limits: Http1HeadLimits,
+) -> Result<(), NativeHttp1Error> {
+    validate_switching_protocols_response(
+        head,
+        limits,
+        "h2c",
+        "native h2c upgrade was not accepted",
+        "native h2c upgrade response did not confirm h2c",
+    )
+}
+
+fn validate_switching_protocols_response(
+    head: &[u8],
+    limits: Http1HeadLimits,
+    upgrade_token: &str,
+    rejected_message: &'static str,
+    missing_upgrade_message: &'static str,
+) -> Result<(), NativeHttp1Error> {
+    let head = parsed_upstream_response_head(head, limits)?;
+    if head.status != 101 {
         return Err(NativeHttp1Error::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "native h2c upgrade was not accepted",
+            rejected_message,
         )));
     }
-    let mut saw_upgrade_h2c = false;
-    for line in lines {
-        if line.is_empty() {
-            break;
-        }
-        let Some((name, value)) = line.split_once(':') else {
-            return Err(NativeHttp1Error::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "native h2c upgrade response has malformed header",
-            )));
-        };
-        if name.eq_ignore_ascii_case("upgrade")
-            && value
-                .split(',')
-                .any(|token| token.trim().eq_ignore_ascii_case("h2c"))
-        {
-            saw_upgrade_h2c = true;
-        }
-    }
-    if !saw_upgrade_h2c {
+    if !http1_headers_contain_token(&head.headers, "upgrade", upgrade_token) {
         return Err(NativeHttp1Error::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "native h2c upgrade response did not confirm h2c",
+            missing_upgrade_message,
         )));
     }
     Ok(())
+}
+
+fn http1_headers_contain_token(headers: &[Http1Header<'_>], name: &str, token: &str) -> bool {
+    headers
+        .iter()
+        .filter(|header| header.name.eq_ignore_ascii_case(name))
+        .any(|header| {
+            header
+                .value
+                .split(',')
+                .any(|candidate| candidate.trim().eq_ignore_ascii_case(token))
+        })
 }
 
 fn h2c_upgrade_settings_header(policy: DownstreamHttp2Policy) -> String {
@@ -1545,7 +1540,7 @@ fn timeout_error(message: &'static str) -> NativeHttp1Error {
 mod tests {
     use super::{
         h2c_upgrade_error_can_fallback, h2c_upgrade_settings_header, native_http2_error,
-        native_http2_response_to_http1,
+        native_http2_response_to_http1, validate_switching_protocols_response,
     };
     use crate::{
         DownstreamHttp2Policy, NativeHttp1Error, NativeHttp2StackError, NativeHttp2UpstreamResponse,
@@ -1573,6 +1568,46 @@ mod tests {
             NativeHttp1Error::Io(error) => assert_eq!(error.kind(), std::io::ErrorKind::Other),
             other => panic!("expected native HTTP/2 error to map to IO error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn switching_protocols_validator_accepts_expected_upgrade_token() {
+        validate_switching_protocols_response(
+            b"HTTP/1.1 101 Switching Protocols\r\nConnection: upgrade\r\nUpgrade: h2c, websocket\r\n\r\n",
+            fluxheim_protocol::Http1HeadLimits::default(),
+            "websocket",
+            "upgrade rejected",
+            "missing upgrade",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn switching_protocols_validator_rejects_missing_upgrade_token() {
+        let error = validate_switching_protocols_response(
+            b"HTTP/1.1 101 Switching Protocols\r\nConnection: upgrade\r\nUpgrade: h2c\r\n\r\n",
+            fluxheim_protocol::Http1HeadLimits::default(),
+            "websocket",
+            "upgrade rejected",
+            "missing upgrade",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("missing upgrade"));
+    }
+
+    #[test]
+    fn switching_protocols_validator_rejects_non_101_status() {
+        let error = validate_switching_protocols_response(
+            b"HTTP/1.1 200 OK\r\nUpgrade: websocket\r\n\r\n",
+            fluxheim_protocol::Http1HeadLimits::default(),
+            "websocket",
+            "upgrade rejected",
+            "missing upgrade",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("upgrade rejected"));
     }
 
     #[test]

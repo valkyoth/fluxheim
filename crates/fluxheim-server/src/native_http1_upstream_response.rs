@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use fluxheim_protocol::{
     Http1ChunkLimits, Http1ConnectionDirective, Http1HeadLimits, Http1ParseError,
-    decode_http1_chunked_body, http1_connection_directive, parse_http1_response_head,
+    Http1ResponseHead, decode_http1_chunked_body, http1_connection_directive,
+    parse_http1_response_head,
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::time::timeout;
@@ -76,7 +77,7 @@ where
         max_head_bytes,
         ..Http1HeadLimits::default()
     };
-    let mut buffer = read_until_response_head(stream, limits).await?;
+    let mut buffer = read_upstream_response_head(stream, limits).await?;
     let head =
         parse_http1_response_head(&buffer, limits)?.ok_or(Http1ParseError::InvalidResponseLine)?;
     let head_len = head.head_len;
@@ -108,7 +109,7 @@ where
     Ok((response, reusable))
 }
 
-async fn read_until_response_head<S>(
+pub(crate) async fn read_upstream_response_head<S>(
     stream: &mut S,
     limits: Http1HeadLimits,
 ) -> Result<Vec<u8>, NativeHttp1Error>
@@ -138,6 +139,15 @@ where
         }
         buffer.extend_from_slice(&chunk[..read]);
     }
+}
+
+pub(crate) fn parsed_upstream_response_head<'a>(
+    buffer: &'a [u8],
+    limits: Http1HeadLimits,
+) -> Result<Http1ResponseHead<'a>, NativeHttp1Error> {
+    parse_http1_response_head(buffer, limits)?.ok_or(NativeHttp1Error::Parse(
+        Http1ParseError::InvalidResponseLine,
+    ))
 }
 
 fn response_body_framing(
