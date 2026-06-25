@@ -211,11 +211,12 @@ impl FluxBackgroundTask for NativeMetricsTask {
         )
         .await
         {
-            log::warn!(
+            log::error!(
                 target: "fluxheim::metrics",
-                "native metrics listener {} stopped with error: {error}",
+                "native metrics listener {} stopped unexpectedly: {error}",
                 self.listen
             );
+            process::exit(1);
         }
     }
 }
@@ -365,6 +366,22 @@ fn open_regular_metrics_secret_file(path: &Path) -> Result<fs::File, Box<dyn Err
 
 #[cfg(not(unix))]
 fn open_regular_metrics_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
+    if fs::symlink_metadata(path)
+        .map_err(|error| {
+            format!(
+                "failed to inspect metrics token file {}: {error}",
+                path.display()
+            )
+        })?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(format!(
+            "metrics token file {} must not be a symlink",
+            path.display()
+        )
+        .into());
+    }
     fs::File::open(path).map_err(|error| {
         format!(
             "failed to open metrics token file {}: {error}",

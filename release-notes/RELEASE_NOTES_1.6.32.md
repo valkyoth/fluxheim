@@ -14,6 +14,12 @@ cache/PHP adapter slice.
   with constant-time comparison for `GET`/`HEAD /metrics`. It also exposes a
   Fluxheim-native background service factory that binds the native HTTP/1
   metrics listener under the native supervisor.
+- Native metrics listener startup and runtime failures are fail-fast: bind
+  failures and unexpected accept-loop failures now log at error level and exit
+  instead of leaving a silent metrics blind spot after native cutover.
+- Non-Unix metrics token-file loading now rejects a symlink leaf before opening
+  the file, matching the Unix `O_NOFOLLOW` hardening as closely as the portable
+  filesystem API allows.
 - The Pingora compatibility metrics listener still relies on listener binding
   and network ACLs for access control until the final native runtime owns that
   listener, but Fluxheim now validates the native metrics token source at
