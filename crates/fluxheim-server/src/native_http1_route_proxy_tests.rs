@@ -69,6 +69,75 @@ async fn upstream_expect_method_path(
     addr
 }
 
+#[cfg(feature = "php-fpm")]
+async fn fastcgi_responder(stdout: &'static [u8]) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request_id = 1_u16;
+        let mut params_done = false;
+        let mut stdin_done = false;
+        while !(params_done && stdin_done) {
+            let (record_type, id, content) = read_fastcgi_record(&mut stream).await;
+            request_id = id;
+            match record_type {
+                4 if content.is_empty() => params_done = true,
+                5 if content.is_empty() => stdin_done = true,
+                _ => {}
+            }
+        }
+        write_fastcgi_record(&mut stream, 6, request_id, stdout)
+            .await
+            .unwrap();
+        write_fastcgi_record(&mut stream, 6, request_id, b"")
+            .await
+            .unwrap();
+        write_fastcgi_record(&mut stream, 3, request_id, &[0, 0, 0, 0, 0, 0, 0, 0])
+            .await
+            .unwrap();
+        stream.shutdown().await.unwrap();
+    });
+    addr
+}
+
+#[cfg(feature = "php-fpm")]
+async fn read_fastcgi_record(stream: &mut TcpStream) -> (u8, u16, Vec<u8>) {
+    let mut header = [0_u8; 8];
+    stream.read_exact(&mut header).await.unwrap();
+    assert_eq!(header[0], 1, "unexpected FastCGI version");
+    let record_type = header[1];
+    let request_id = u16::from_be_bytes([header[2], header[3]]);
+    let content_len = u16::from_be_bytes([header[4], header[5]]) as usize;
+    let padding_len = header[6] as usize;
+    let mut content = vec![0_u8; content_len];
+    if content_len > 0 {
+        stream.read_exact(&mut content).await.unwrap();
+    }
+    if padding_len > 0 {
+        let mut padding = vec![0_u8; padding_len];
+        stream.read_exact(&mut padding).await.unwrap();
+    }
+    (record_type, request_id, content)
+}
+
+#[cfg(feature = "php-fpm")]
+async fn write_fastcgi_record(
+    stream: &mut TcpStream,
+    record_type: u8,
+    request_id: u16,
+    content: &[u8],
+) -> std::io::Result<()> {
+    let len = u16::try_from(content.len()).unwrap();
+    let mut header = [0_u8; 8];
+    header[0] = 1;
+    header[1] = record_type;
+    header[2..4].copy_from_slice(&request_id.to_be_bytes());
+    header[4..6].copy_from_slice(&len.to_be_bytes());
+    stream.write_all(&header).await?;
+    stream.write_all(content).await
+}
+
 async fn upstream_expect_header(
     expected_path: &'static str,
     expected_header: &'static str,
@@ -2484,6 +2553,46 @@ async fn native_route_proxy_php_route_fails_closed_when_fpm_unavailable() {
 
     assert!(response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"));
     assert!(response.ends_with("php-fpm failed\n"));
+}
+
+#[cfg(feature = "php-fpm")]
+#[tokio::test]
+async fn native_route_proxy_php_route_executes_fastcgi_responder() {
+    let fpm = fastcgi_responder(
+        b"Status: 201 Created\r\nContent-Type: text/plain\r\nX-Powered-By: php\r\n\r\nphp-ok",
+    )
+    .await;
+    let root = tempfile::TempDir::new().unwrap();
+    std::fs::write(root.path().join("index.php"), b"<?php echo 'ok';").unwrap();
+    let mut route = native_route_proxy_test_route();
+    route.path_exact = Some("/index.php".to_owned());
+    route.redirect = None;
+    route.php = Some(fluxheim_config::PhpConfig {
+        enabled: true,
+        root: Some(root.path().to_path_buf()),
+        hide_response_headers: vec!["x-powered-by".to_owned()],
+        fpm: fluxheim_config::PhpFpmConfig {
+            tcp: Some(fpm.to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, None).unwrap();
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/index.php").await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 201 Created\r\n"),
+        "unexpected response: {response:?}"
+    );
+    assert_eq!(
+        response_header(&response, "content-type").as_deref(),
+        Some("text/plain")
+    );
+    assert_eq!(response_header(&response, "x-powered-by"), None);
+    assert!(response.ends_with("php-ok"));
 }
 
 fn native_route_proxy_test_vhost() -> fluxheim_config::VhostConfig {

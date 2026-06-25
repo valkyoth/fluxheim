@@ -287,3 +287,6 @@ prove full request/response behavior in a later `1.6.x` stop.
 - Added native route-proxy PHP-FPM tests proving PHP routes reject missing
   roots and fail closed with `502 Bad Gateway` when a configured external
   php-fpm endpoint is unavailable.
+- Added a live native route-proxy PHP-FPM test with a minimal in-test FastCGI
+  responder, proving the native route sends FastCGI records, parses PHP stdout,
+  strips configured PHP response headers, and returns the parsed HTTP response.
