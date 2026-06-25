@@ -277,6 +277,23 @@ awk -F '\t' '
 ' "$expected_blockers" "$out_dir/representative-runtime-cutover.tsv" \
     >"$out_dir/representative-runtime-cutover-expected-check.txt"
 
+target_adapter="$(sed -n 's/^native-runtime-target-adapter: //p' "$out_dir/representative-runtime-cutover.tsv")"
+if [ "$target_adapter" != "NativeRuntime" ]; then
+    echo "native runtime cutover evidence: representative config targets $target_adapter instead of NativeRuntime" >&2
+    exit 1
+fi
+
+launch_status="$(awk -F '\t' '$1 == "native-runtime-launch-plan" && $2 != "status" { print $2; exit }' "$out_dir/representative-runtime-cutover.tsv")"
+if [ "$launch_status" != "ready" ]; then
+    echo "native runtime cutover evidence: representative launch plan status is $launch_status instead of ready" >&2
+    exit 1
+fi
+
+if grep -q '^native-runtime-launch-plan-error	' "$out_dir/representative-runtime-cutover.tsv"; then
+    echo "native runtime cutover evidence: representative config emitted a launch-plan error" >&2
+    exit 1
+fi
+
 awk -F '\t' '
     /^native-runtime-adapter:/ || /^native-runtime-target-adapter:/ { next }
     /^config tester: ok$/ { next }

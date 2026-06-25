@@ -63,6 +63,9 @@ cache/PHP adapter slice.
   that explicitly disable active load-balancer health checks, matching the
   native proxy's current static-upstream capability while still rejecting
   advanced load-balancer policies.
+- The native runtime cutover evidence gate now fails if the representative
+  blocker-free config does not target `NativeRuntime`, if the launch plan is not
+  `ready`, or if a launch-plan error is emitted.
 
 ## Tests
 
@@ -97,3 +100,6 @@ cache/PHP adapter slice.
   with `load_balance.health_check.enabled = false`, plus rejection coverage for
   custom disabled-health-check policies that would otherwise be silently
   ignored by the native static proxy.
+- Extended `scripts/validate-native-runtime-cutover.sh` so release validation
+  proves the representative native runtime config is not only blocker-free but
+  also selects the native target adapter and a ready launch plan.
