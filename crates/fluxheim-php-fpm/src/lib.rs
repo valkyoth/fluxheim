@@ -482,6 +482,38 @@ impl PhpFpmPool {
     }
 }
 
+pub async fn execute_php_fpm_once(
+    pool: Option<&PhpFpmPool>,
+    endpoint: &PhpFpmEndpoint,
+    params: fastcgi_client::Params<'_>,
+    body: &PhpRequestBody,
+    connect_timeout: Duration,
+    timeout: Duration,
+    max_response_bytes: u64,
+) -> io::Result<fastcgi_client::Response> {
+    if let Some(pool) = pool {
+        return pool.execute(params, body, connect_timeout, timeout).await;
+    }
+
+    match endpoint {
+        PhpFpmEndpoint::Tcp(address) => {
+            let stream =
+                tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(address))
+                    .await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Connect))??;
+            execute_php_fpm_stream(stream, params, body, timeout, max_response_bytes).await
+        }
+        #[cfg(unix)]
+        PhpFpmEndpoint::Unix(socket) => {
+            let stream =
+                tokio::time::timeout(connect_timeout, tokio::net::UnixStream::connect(socket))
+                    .await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Connect))??;
+            execute_php_fpm_stream(stream, params, body, timeout, max_response_bytes).await
+        }
+    }
+}
+
 impl PhpFpmPoolEntry {
     async fn execute(
         &mut self,
@@ -494,6 +526,25 @@ impl PhpFpmPoolEntry {
             .execute(params, body, timeout, max_response_bytes)
             .await
     }
+}
+
+async fn execute_php_fpm_stream<S>(
+    stream: S,
+    params: fastcgi_client::Params<'_>,
+    body: &PhpRequestBody,
+    timeout: Duration,
+    max_response_bytes: u64,
+) -> io::Result<fastcgi_client::Response>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let client = fastcgi_client::Client::new_tokio(stream);
+    let request = fastcgi_client::Request::new(params, body.reader().await?);
+    let stream = tokio::time::timeout(timeout, client.execute_once_stream(request))
+        .await
+        .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Request))?
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    collect_php_fpm_response_stream(stream, max_response_bytes).await
 }
 
 impl PhpFpmPooledClient {

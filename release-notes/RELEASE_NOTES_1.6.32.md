@@ -165,11 +165,17 @@ prove full request/response behavior in a later `1.6.x` stop.
   small bodies in memory, and uses Fluxheim's existing private PHP spool-file
   creator/cleanup path when `php.request_body_spool_threshold_bytes` and
   `php.request_body_spool_dir` require a spooled body.
+- The staged native PHP-FPM adapter now has a FastCGI execution wrapper that
+  uses Fluxheim-owned endpoint selection, pooled or one-shot Unix/TCP
+  connections, bounded connect/request timeouts, configured response-size
+  limits, retryable error/status handling, STDERR failure-pattern handling, and
+  the staged native response planner. Live route wiring remains disabled until
+  the final native PHP route/error-page adapter lands.
 - The remaining rich-proxy native gates are now documented as intentional
   parity blockers rather than hidden launch blockers: proxy cache still needs
-  native lookup/fill/stale/purge behavior, and PHP-FPM still needs live
-  FastCGI execution, response translation, spool/retry/error-page parity, and
-  managed/external process boundary wiring.
+  native lookup/fill/stale/purge behavior, and PHP-FPM still needs live route
+  wiring, custom error-page handling, and managed/external process boundary
+  wiring.
 
 ## Tests
 
@@ -268,3 +274,5 @@ prove full request/response behavior in a later `1.6.x` stop.
 - Added PHP-FPM feature tests for native request-body planning, including
   memory bodies, configured body-limit rejection, spool-file creation, and
   cleanup on request-body drop.
+- Added PHP-FPM feature tests for the staged native FastCGI execution boundary,
+  including fail-closed rejection when no PHP-FPM endpoint is configured.

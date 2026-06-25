@@ -6,8 +6,12 @@
 use std::io;
 use std::net::IpAddr;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use fluxheim_config::PhpConfig;
+use fluxheim_php_fpm::{PhpFpmPool, PhpRequestBody};
 use fluxheim_protocol::{Http1RequestTarget, Http1Version, http1_request_target};
 
 use crate::{NativeHttp1Request, NativeHttp1Response};
@@ -80,6 +84,138 @@ pub(crate) async fn native_php_request_body(
         path,
         request.body.len(),
     ))
+}
+
+pub(crate) async fn native_php_execute_fpm(
+    php: &PhpConfig,
+    plan: &NativePhpRequestPlan,
+    body: PhpRequestBody,
+    pools: &[Arc<PhpFpmPool>],
+    next_endpoint: &AtomicUsize,
+) -> io::Result<NativePhpResponsePlan> {
+    let endpoints = fluxheim_php_fpm::php_fpm_endpoints_from_config(&php.fpm);
+    if endpoints.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "php-fpm socket, tcp, or tcp_upstreams is required",
+        ));
+    }
+
+    let timeout = Duration::from_secs(php.request_timeout_secs);
+    let connect_timeout = fluxheim_php_fpm::php_fpm_effective_connect_timeout(&php.fpm, timeout);
+    let request_timeout = fluxheim_php_fpm::php_fpm_effective_request_timeout(&php.fpm, timeout);
+    let max_retries = fluxheim_php_fpm::php_fpm_retry_attempts_for_endpoint_count(
+        &php.fpm,
+        native_php_request_method(plan).unwrap_or("GET"),
+        endpoints.len(),
+    );
+    let retry_deadline = fluxheim_php_fpm::php_fpm_retry_deadline(php.fpm.retry_timeout_secs);
+    let start_index = native_php_select_endpoint_index(next_endpoint, endpoints.len());
+    let mut attempts = 0_u8;
+    loop {
+        let endpoint_index = (start_index + usize::from(attempts)) % endpoints.len();
+        let result = fluxheim_php_fpm::execute_php_fpm_once(
+            pools.get(endpoint_index).map(Arc::as_ref),
+            &endpoints[endpoint_index],
+            native_php_fastcgi_params(plan),
+            &body,
+            connect_timeout,
+            request_timeout,
+            php.max_response_bytes.as_u64(),
+        )
+        .await;
+        match result {
+            Ok(output) => match native_php_fpm_output_plan(php, output, plan) {
+                Ok(response)
+                    if native_php_response_retryable(php, &response)
+                        && attempts < max_retries
+                        && fluxheim_php_fpm::php_fpm_retry_deadline_allows(retry_deadline) =>
+                {
+                    attempts += 1;
+                    continue;
+                }
+                Ok(response) => return Ok(response),
+                Err(error)
+                    if php.fpm.retry_invalid_response
+                        && attempts < max_retries
+                        && fluxheim_php_fpm::php_fpm_retry_deadline_allows(retry_deadline) =>
+                {
+                    attempts += 1;
+                    log::debug!(
+                        target: "fluxheim::native_http1",
+                        "retrying native php-fpm request after invalid response: {error}"
+                    );
+                }
+                Err(error) => return Err(error),
+            },
+            Err(error)
+                if attempts < max_retries
+                    && fluxheim_php_fpm::php_fpm_retryable_error(&error)
+                    && fluxheim_php_fpm::php_fpm_retry_deadline_allows(retry_deadline) =>
+            {
+                attempts += 1;
+                log::debug!(
+                    target: "fluxheim::native_http1",
+                    "retrying native php-fpm request after {error}"
+                );
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn native_php_fpm_output_plan(
+    php: &PhpConfig,
+    output: fastcgi_client::Response,
+    plan: &NativePhpRequestPlan,
+) -> io::Result<NativePhpResponsePlan> {
+    let stdout = output.stdout.unwrap_or_default();
+    if let Some(stderr) = output.stderr.as_deref()
+        && native_php_stderr_matches_failure_pattern(stderr, php)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "php-fpm stderr matched configured failure pattern",
+        ));
+    }
+    native_php_response_plan(
+        &stdout,
+        php,
+        native_php_request_method(plan).unwrap_or("GET"),
+    )
+}
+
+fn native_php_fastcgi_params(plan: &NativePhpRequestPlan) -> fastcgi_client::Params<'static> {
+    let mut params = fastcgi_client::Params::default();
+    for (name, value) in &plan.params {
+        params.insert(name.clone().into(), value.clone().into());
+    }
+    params
+}
+
+fn native_php_select_endpoint_index(next_endpoint: &AtomicUsize, endpoint_count: usize) -> usize {
+    if endpoint_count <= 1 {
+        return 0;
+    }
+    next_endpoint.fetch_add(1, Ordering::Relaxed) % endpoint_count
+}
+
+fn native_php_request_method(plan: &NativePhpRequestPlan) -> Option<&str> {
+    plan.params
+        .iter()
+        .find(|(name, _)| name == "REQUEST_METHOD")
+        .map(|(_, value)| value.as_str())
+}
+
+fn native_php_response_retryable(php: &PhpConfig, response: &NativePhpResponsePlan) -> bool {
+    fluxheim_php_fpm::php_fpm_retryable_status(&php.fpm, response.response.status())
+}
+
+fn native_php_stderr_matches_failure_pattern(stderr: &[u8], php: &PhpConfig) -> bool {
+    let stderr = String::from_utf8_lossy(stderr);
+    php.stderr_failure_patterns
+        .iter()
+        .any(|pattern| !pattern.is_empty() && stderr.contains(pattern))
 }
 
 impl NativePhpRequestPlan {
@@ -379,12 +515,13 @@ mod tests {
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
     use std::path::Path;
+    use std::sync::atomic::AtomicUsize;
 
     use fluxheim_protocol::Http1Version;
 
     use super::{
-        NativeHttp1Request, native_php_request_body, native_php_request_plan,
-        native_php_response_plan,
+        NativeHttp1Request, native_php_execute_fpm, native_php_request_body,
+        native_php_request_plan, native_php_response_plan,
     };
 
     fn request(target: &str) -> NativeHttp1Request {
@@ -578,6 +715,34 @@ mod tests {
         };
 
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn native_php_execute_fpm_rejects_missing_endpoint() {
+        let php = php_config();
+        let plan = native_php_request_plan(
+            &request("/index.php"),
+            &php,
+            Path::new("/srv/www"),
+            Path::new("/var/www/html"),
+            Path::new("/srv/www/index.php"),
+            "fallback.example",
+            "443",
+        )
+        .unwrap();
+        let result = native_php_execute_fpm(
+            &php,
+            &plan,
+            fluxheim_php_fpm::PhpRequestBody::memory(Vec::new()),
+            &[],
+            &AtomicUsize::new(0),
+        )
+        .await;
+        let Err(error) = result else {
+            panic!("expected missing PHP-FPM endpoint error");
+        };
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }
 
     #[test]
