@@ -142,10 +142,18 @@ prove full request/response behavior in a later `1.6.x` stop.
   then pins the tunnel to that selected upstream for the lifetime of the
   connection; HTTP/2 WebSocket upstream mode remains fail-closed because it
   does not use the HTTP/1 hop-by-hop upgrade mechanism.
+- The native server crate now has an internal PHP-FPM request-planning adapter
+  under the `php-fpm` feature. It maps native HTTP/1 requests into the FastCGI
+  parameter set using Fluxheim's existing PHP path-safety helpers:
+  `SCRIPT_NAME`/`PATH_INFO`, deny prefixes, split `PATH_INFO`, UTF-8
+  `DOCUMENT_ROOT`/`SCRIPT_FILENAME`, request headers, protected custom params,
+  TLS scheme, and restored client address are all covered before the live
+  FastCGI execution path is enabled.
 - The remaining rich-proxy native gates are now documented as intentional
   parity blockers rather than hidden launch blockers: proxy cache still needs
-  native lookup/fill/stale/purge behavior, and PHP-FPM still needs full
-  SCRIPT_NAME/PATH_INFO/spool/retry/error-page parity.
+  native lookup/fill/stale/purge behavior, and PHP-FPM still needs live
+  FastCGI execution, response translation, spool/retry/error-page parity, and
+  managed/external process boundary wiring.
 
 ## Tests
 
@@ -230,3 +238,7 @@ prove full request/response behavior in a later `1.6.x` stop.
 - Added focused native connection-takeover coverage proving handlers receive
   prebuffered downstream bytes when taking ownership of a parsed HTTP/1
   connection.
+- Added PHP-FPM feature tests for the native FastCGI request planner, including
+  core CGI parameter mapping, duplicate request-header joining, protected
+  custom-param rejection, denied script-prefix rejection, and unsafe
+  `PATH_INFO` rejection.

@@ -152,6 +152,7 @@ php-fpm = [
     "dep:tokio",
     "fastcgi-client/runtime-tokio",
     "fluxheim-config/php-fpm",
+    "fluxheim-server/php-fpm",
 ]
 privacy-mode = [
     "proxy",

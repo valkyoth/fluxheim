@@ -2827,15 +2827,21 @@ available for the stabilization/security-only follow-up.
   Fluxheim algorithms, but document that the compatibility mode is for matching
   nginx-style request-to-backend mapping. Do not depend on `pingora-ketama`;
   implement and test the ring behavior in Fluxheim with parser, static-ring
-  rejection, and runtime mutation tests.
+  rejection, and runtime mutation tests. Start the final PHP-FPM cutover by
+  moving native HTTP/1 request-to-FastCGI parameter planning into
+  `fluxheim-server` under the `php-fpm` feature, with tests for
+  `SCRIPT_NAME`/`PATH_INFO`, deny prefixes, header param joining, protected
+  custom params, and restored client/TLS metadata. Keep live FastCGI execution
+  fail-closed until the response/spool/retry/error-page adapter lands.
 - `v1.6.33`: close the final rich-proxy parity gates and remove the final
   Pingora runtime/listener/TLS adapter crates from normal builds. Cache work
   must cover lookup/fill/stale, Vary/Range/conditional semantics, peer-fill
   guardrails, purge visibility, and root/vhost/route cache policy readiness
   only after the native adapter owns the full request/response/cache-key path.
-  PHP-FPM work must cover SCRIPT_NAME/PATH_INFO safety, deny prefixes, spool
-  limits, TCP/Unix upstream policies, retry/failover, custom PHP error pages,
-  and managed/external FPM process boundaries. The native WebSocket baseline
+  PHP-FPM work must wire the staged request planner into live FastCGI
+  execution and cover response translation, request-body spool limits,
+  TCP/Unix upstream policies, retry/failover, custom PHP error pages, and
+  managed/external FPM process boundaries. The native WebSocket baseline
   now covers strict `Upgrade: websocket` requests on forced HTTP/1 static
   upstream routes with shared 101 validation, prebuffer preservation, and a
   bounded bidirectional tunnel; native load-balanced WebSocket pools select one

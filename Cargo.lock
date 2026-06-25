@@ -1225,6 +1225,7 @@ dependencies = [
  "fluxheim-config",
  "fluxheim-headers",
  "fluxheim-load-balancer",
+ "fluxheim-php-fpm",
  "fluxheim-protocol",
  "fluxheim-runtime",
  "fluxheim-tls",

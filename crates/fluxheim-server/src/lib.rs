@@ -17,6 +17,8 @@ mod native_http1_acme;
 mod native_http1_client;
 mod native_http1_forwarded;
 mod native_http1_host_router;
+#[cfg(feature = "php-fpm")]
+mod native_http1_php;
 mod native_http1_plan;
 mod native_http1_proxy;
 mod native_http1_route_proxy;
