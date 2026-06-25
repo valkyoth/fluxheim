@@ -22,7 +22,7 @@ use fluxheim_config::ProxyConfig;
 use super::backend::{FluxBackend, FluxBackendDiscovery, FluxBackendSet, FluxLoadBalancerRuntime};
 use super::health::configured_health_check;
 use super::policy::BackendSelectionPolicy;
-use super::selection::MaglevTable;
+use super::selection::{MaglevTable, NginxKetamaTable};
 use super::{
     LoadBalancerMetricLabels, UpstreamLoadBalancer, UpstreamLoadBalancerInner,
     UpstreamLoadBalancerService,
@@ -601,6 +601,11 @@ fn configured_backends(config: &ProxyConfig) -> FluxResult<FluxBackendSet> {
 pub(super) fn configured_maglev_table(config: &ProxyConfig) -> io::Result<MaglevTable> {
     let backends = configured_backends(config).map_err(FluxError::into_io)?;
     MaglevTable::from_backend_identities(backends.iter()).map_err(FluxError::into_io)
+}
+
+pub(super) fn configured_nginx_ketama_table(config: &ProxyConfig) -> io::Result<NginxKetamaTable> {
+    let backends = configured_backends(config).map_err(FluxError::into_io)?;
+    NginxKetamaTable::from_backend_identities(backends.iter()).map_err(FluxError::into_io)
 }
 
 fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Box<dyn FluxBackendDiscovery>> {

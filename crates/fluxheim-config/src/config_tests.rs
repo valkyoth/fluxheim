@@ -3317,6 +3317,46 @@ fn validates_load_balance_hash_selection() {
     .unwrap();
     maglev_header.validate().unwrap();
 
+    let nginx_consistent_alias: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "ketama"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        nginx_consistent_alias.proxy.load_balance.selection,
+        LoadBalanceSelection::NginxConsistentSourceHash
+    );
+    nginx_consistent_alias.validate().unwrap();
+
+    let nginx_consistent_uri: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "nginx-consistent-uri-hash"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        nginx_consistent_uri.proxy.load_balance.selection,
+        LoadBalanceSelection::NginxConsistentUriHash
+    );
+    nginx_consistent_uri.validate().unwrap();
+
+    let nginx_consistent_header: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "ketama-header-hash"
+            hash_header = "x-session"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        nginx_consistent_header.proxy.load_balance.selection,
+        LoadBalanceSelection::NginxConsistentHeaderHash
+    );
+    nginx_consistent_header.validate().unwrap();
+
     let least_sessions: Config = toml::from_str(
         r#"
             [proxy.load_balance]
@@ -3351,8 +3391,8 @@ fn validates_load_balance_hash_selection() {
 }
 
 #[test]
-fn rejects_maglev_for_dynamic_upstream_discovery() {
-    let root = crate::test_support::unique_temp_path("maglev-dynamic");
+fn rejects_static_ring_selection_for_dynamic_upstream_discovery() {
+    let root = crate::test_support::unique_temp_path("static-ring-dynamic");
     fs::create_dir_all(&root).unwrap();
     let upstreams_file = root.join("upstreams.txt");
     fs::write(&upstreams_file, "127.0.0.1:3001\n127.0.0.1:3002\n").unwrap();
@@ -3363,12 +3403,12 @@ fn rejects_maglev_for_dynamic_upstream_discovery() {
             upstreams_file = "{}"
 
             [proxy.load_balance]
-            selection = "maglev-uri-hash"
+            selection = "nginx-consistent-uri-hash"
             "#,
         upstreams_file.display()
     ))
     .unwrap();
-    let file_error = file_config.validate().expect_err("file Maglev config");
+    let file_error = file_config.validate().expect_err("file static-ring config");
     #[cfg(feature = "load-balancer")]
     assert!(matches!(
         file_error,
@@ -3394,7 +3434,7 @@ fn rejects_maglev_for_dynamic_upstream_discovery() {
             "#,
     )
     .unwrap();
-    let dns_error = dns_config.validate().expect_err("DNS Maglev config");
+    let dns_error = dns_config.validate().expect_err("DNS static-ring config");
     #[cfg(feature = "load-balancer")]
     assert!(matches!(
         dns_error,

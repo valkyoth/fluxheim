@@ -2820,7 +2820,14 @@ available for the stabilization/security-only follow-up.
   dynamic discovery may run natively only when the native proxy and refresh task
   share the same `UpstreamLoadBalancer` state. File/HTTP/DNS discovery must
   clone vetted upstream transport policy onto selected dynamic authorities
-  instead of trusting unbounded per-request transport configuration.
+  instead of trusting unbounded per-request transport configuration. Add a
+  Fluxheim-owned nginx/Ketama-compatible consistent hash selection mode for
+  operators migrating from nginx or Pingora Ketama behavior. Keep the existing
+  rendezvous consistent-hash and bounded-load consistent modes as the default
+  Fluxheim algorithms, but document that the compatibility mode is for matching
+  nginx-style request-to-backend mapping. Do not depend on `pingora-ketama`;
+  implement and test the ring behavior in Fluxheim with parser, static-ring
+  rejection, and runtime mutation tests.
 - `v1.6.33`: close the final rich-proxy parity gates and remove the final
   Pingora runtime/listener/TLS adapter crates from normal builds. Cache work
   must cover lookup/fill/stale, Vary/Range/conditional semantics, peer-fill
@@ -2830,17 +2837,10 @@ available for the stabilization/security-only follow-up.
   limits, TCP/Unix upstream policies, retry/failover, custom PHP error pages,
   and managed/external FPM process boundaries. WebSocket/HTTP upgrade work must
   add an explicit native downstream hijack/tunnel shape with bounded timeouts
-  before `proxy.websocket = true` can report native-ready. Add a
-  Fluxheim-owned nginx/Ketama-compatible consistent
-  hash selection mode for operators migrating from nginx or Pingora Ketama
-  behavior. Keep the existing rendezvous consistent-hash and bounded-load
-  consistent modes as the default Fluxheim algorithms, but document that the
-  compatibility mode is for matching nginx-style request-to-backend mapping.
-  Do not depend on `pingora-ketama`; implement and test the ring behavior in
-  Fluxheim with golden vectors and membership-change remapping tests. This
-  release is the final Pingora-free proof release: `cargo tree`, release
-  containers, RPM builds, source builds, and focused artifacts must all prove no
-  normal Fluxheim build compiles vendored Pingora code.
+  before `proxy.websocket = true` can report native-ready. This release is the
+  final Pingora-free proof release: `cargo tree`, release containers, RPM
+  builds, source builds, and focused artifacts must all prove no normal
+  Fluxheim build compiles vendored Pingora code.
 - `v1.6.34`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak

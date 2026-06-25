@@ -371,14 +371,17 @@ impl LoadBalanceKeySource {
             LoadBalanceSelection::SourceHash
             | LoadBalanceSelection::ConsistentSourceHash
             | LoadBalanceSelection::BoundedLoadConsistentSourceHash
+            | LoadBalanceSelection::NginxConsistentSourceHash
             | LoadBalanceSelection::MaglevSourceHash => Self::SourceIp,
             LoadBalanceSelection::UriHash
             | LoadBalanceSelection::ConsistentUriHash
             | LoadBalanceSelection::BoundedLoadConsistentUriHash
+            | LoadBalanceSelection::NginxConsistentUriHash
             | LoadBalanceSelection::MaglevUriHash => Self::Uri,
             LoadBalanceSelection::HeaderHash
             | LoadBalanceSelection::ConsistentHeaderHash
             | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
+            | LoadBalanceSelection::NginxConsistentHeaderHash
             | LoadBalanceSelection::MaglevHeaderHash => config
                 .load_balance
                 .hash_header
@@ -388,6 +391,7 @@ impl LoadBalanceKeySource {
             LoadBalanceSelection::CookieHash
             | LoadBalanceSelection::ConsistentCookieHash
             | LoadBalanceSelection::BoundedLoadConsistentCookieHash
+            | LoadBalanceSelection::NginxConsistentCookieHash
             | LoadBalanceSelection::MaglevCookieHash => config
                 .load_balance
                 .hash_cookie

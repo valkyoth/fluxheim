@@ -1370,7 +1370,11 @@ and at least one upstream must remain a normal primary.
 `bounded-load-consistent-header-hash`, and
 `bounded-load-consistent-cookie-hash`, plus static-pool Maglev modes
 `maglev` / `maglev-source-hash`, `maglev-uri-hash`,
-`maglev-header-hash`, and `maglev-cookie-hash`. Header-hash modes require
+`maglev-header-hash`, and `maglev-cookie-hash`, plus static-pool
+nginx-compatible Ketama modes `nginx-consistent-source-hash` /
+`nginx-consistent-hash` / `ketama`, `nginx-consistent-uri-hash`,
+`nginx-consistent-header-hash`, and `nginx-consistent-cookie-hash`.
+Header-hash modes require
 `proxy.load_balance.hash_header = "x-session"` or another valid HTTP header
 name. Cookie-hash modes require `proxy.load_balance.hash_cookie = "session"` or
 another valid cookie name. Hash modes use weighted FNV selection seeded with a
@@ -1386,7 +1390,11 @@ fall back to normal consistent selection if no bounded candidate is found.
 current weighted average load, and is valid only with bounded-load consistent
 selectors. Maglev modes use a fixed 65,537-slot bounded lookup table for static
 `proxy.upstreams` pools only; file-refreshed and DNS-refreshed pools reject
-Maglev until dynamic table rebuild semantics are promoted later.
+Maglev until dynamic table rebuild semantics are promoted later. The
+nginx-compatible Ketama modes build a static CRC32 continuum with 160 points per
+weight unit and are intended for migration cases that need nginx/Pingora
+Ketama-style request-to-backend mapping; they are also static `proxy.upstreams`
+only and reject file, HTTP, and DNS discovery pools in this release.
 `max_iterations` bounds how many ready candidates Pingora or Fluxheim may
 inspect while applying health, drain, slow-start, backup, priority, and
 in-flight policies. `all_down_status` defaults to `502` and may be set to
@@ -1405,7 +1413,7 @@ healthy backends are allowed to receive traffic so new or recovered pool
 members can establish a latency baseline. Runtime weight overrides through the
 admin API are honored by `round-robin`, `least-connections`, `least-sessions`,
 and `least-time` in the current release. Hash, consistent hash, bounded-load
-consistent hash, Maglev, and power-of-two selections reject runtime weight
+consistent hash, nginx-compatible Ketama, Maglev, and power-of-two selections reject runtime weight
 changes until ring/table rebuild and sampling semantics are specified.
 `power-of-two`
 also accepts `power-of-two-choices`, `two-choice`, `weighted-two-choice`, and

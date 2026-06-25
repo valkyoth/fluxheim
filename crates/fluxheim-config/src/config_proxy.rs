@@ -1209,13 +1209,13 @@ impl ProxyConfig {
         }
 
         self.load_balance.validate()?;
-        if self.load_balance.selection.uses_maglev()
+        if self.load_balance.selection.uses_static_ring()
             && (self.upstreams_file.is_some()
                 || self.upstreams_http_url.is_some()
                 || self.upstream_dns_refresh_secs.is_some())
         {
             return Err(ConfigError::InvalidLoadBalanceSelection {
-                reason: "maglev selections require a static proxy.upstreams pool; file, HTTP, and DNS discovery pools rebuild membership dynamically",
+                reason: "static-ring selections require a static proxy.upstreams pool; file, HTTP, and DNS discovery pools rebuild membership dynamically",
             });
         }
         Ok(())

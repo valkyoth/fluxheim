@@ -274,6 +274,18 @@ pub enum LoadBalanceSelection {
     ConsistentUriHash,
     ConsistentHeaderHash,
     ConsistentCookieHash,
+    #[serde(
+        alias = "ketama",
+        alias = "ketama-source-hash",
+        alias = "nginx-consistent-hash"
+    )]
+    NginxConsistentSourceHash,
+    #[serde(alias = "ketama-uri-hash")]
+    NginxConsistentUriHash,
+    #[serde(alias = "ketama-header-hash")]
+    NginxConsistentHeaderHash,
+    #[serde(alias = "ketama-cookie-hash")]
+    NginxConsistentCookieHash,
     BoundedLoadConsistentSourceHash,
     BoundedLoadConsistentUriHash,
     BoundedLoadConsistentHeaderHash,
@@ -291,6 +303,7 @@ impl LoadBalanceSelection {
             self,
             Self::HeaderHash
                 | Self::ConsistentHeaderHash
+                | Self::NginxConsistentHeaderHash
                 | Self::BoundedLoadConsistentHeaderHash
                 | Self::MaglevHeaderHash
         )
@@ -301,6 +314,7 @@ impl LoadBalanceSelection {
             self,
             Self::CookieHash
                 | Self::ConsistentCookieHash
+                | Self::NginxConsistentCookieHash
                 | Self::BoundedLoadConsistentCookieHash
                 | Self::MaglevCookieHash
         )
@@ -326,6 +340,20 @@ impl LoadBalanceSelection {
         )
     }
 
+    pub fn uses_static_ring(self) -> bool {
+        matches!(
+            self,
+            Self::NginxConsistentSourceHash
+                | Self::NginxConsistentUriHash
+                | Self::NginxConsistentHeaderHash
+                | Self::NginxConsistentCookieHash
+                | Self::MaglevSourceHash
+                | Self::MaglevUriHash
+                | Self::MaglevHeaderHash
+                | Self::MaglevCookieHash
+        )
+    }
+
     pub fn metric_label(self) -> &'static str {
         match self {
             Self::RoundRobin => "round_robin",
@@ -341,6 +369,10 @@ impl LoadBalanceSelection {
             Self::ConsistentUriHash => "consistent_uri_hash",
             Self::ConsistentHeaderHash => "consistent_header_hash",
             Self::ConsistentCookieHash => "consistent_cookie_hash",
+            Self::NginxConsistentSourceHash => "nginx_consistent_source_hash",
+            Self::NginxConsistentUriHash => "nginx_consistent_uri_hash",
+            Self::NginxConsistentHeaderHash => "nginx_consistent_header_hash",
+            Self::NginxConsistentCookieHash => "nginx_consistent_cookie_hash",
             Self::BoundedLoadConsistentSourceHash => "bounded_load_consistent_source_hash",
             Self::BoundedLoadConsistentUriHash => "bounded_load_consistent_uri_hash",
             Self::BoundedLoadConsistentHeaderHash => "bounded_load_consistent_header_hash",
@@ -1775,6 +1807,22 @@ mod tests {
         assert_eq!(
             LoadBalanceSelection::BoundedLoadConsistentCookieHash.metric_label(),
             "bounded_load_consistent_cookie_hash"
+        );
+        assert_eq!(
+            LoadBalanceSelection::NginxConsistentSourceHash.metric_label(),
+            "nginx_consistent_source_hash"
+        );
+        assert_eq!(
+            LoadBalanceSelection::NginxConsistentUriHash.metric_label(),
+            "nginx_consistent_uri_hash"
+        );
+        assert_eq!(
+            LoadBalanceSelection::NginxConsistentHeaderHash.metric_label(),
+            "nginx_consistent_header_hash"
+        );
+        assert_eq!(
+            LoadBalanceSelection::NginxConsistentCookieHash.metric_label(),
+            "nginx_consistent_cookie_hash"
         );
         assert_eq!(
             LoadBalanceSelection::MaglevSourceHash.metric_label(),

@@ -59,7 +59,7 @@ use self::backend::RuntimeBackend as Backend;
 use self::backend::backend_container_snapshot;
 use self::discovery::{
     background_maglev_service_for, background_service_for, configured_load_balancer,
-    configured_maglev_table,
+    configured_maglev_table, configured_nginx_ketama_table,
 };
 pub(crate) use self::key::backend_key;
 use self::persistence::{LoadBalanceKeySource, LoadBalancerPersistenceState};
@@ -67,9 +67,10 @@ use self::policy::{
     BackendSelectionPolicy, BackendStatsInputs, backend_aliases, load_balancer_backend_stats,
 };
 use self::selection::{
-    LoadBalancerSelectInputs, MaglevTable, SelectionPass, select_bounded_load_consistent,
-    select_consistent_hash, select_fnv_hash, select_least_connections, select_least_sessions,
-    select_least_time, select_maglev, select_power_of_two, select_weighted_round_robin,
+    LoadBalancerSelectInputs, MaglevTable, NginxKetamaTable, SelectionPass,
+    select_bounded_load_consistent, select_consistent_hash, select_fnv_hash,
+    select_least_connections, select_least_sessions, select_least_time, select_maglev,
+    select_nginx_consistent_hash, select_power_of_two, select_weighted_round_robin,
 };
 use self::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
@@ -272,6 +273,23 @@ impl UpstreamLoadBalancer {
                     backend_policy,
                 )))
             }
+            LoadBalanceSelection::NginxConsistentSourceHash
+            | LoadBalanceSelection::NginxConsistentUriHash
+            | LoadBalanceSelection::NginxConsistentHeaderHash
+            | LoadBalanceSelection::NginxConsistentCookieHash => {
+                let Some(inner) = configured_load_balancer(config, &backend_policy)? else {
+                    return Ok(None);
+                };
+                let table = Arc::new(configured_nginx_ketama_table(config)?);
+                Ok(Some(Self::from_inner(
+                    UpstreamLoadBalancerInner::NginxConsistentHash {
+                        inner: Arc::new(inner),
+                        table,
+                    },
+                    config,
+                    backend_policy,
+                )))
+            }
             LoadBalanceSelection::BoundedLoadConsistentSourceHash
             | LoadBalanceSelection::BoundedLoadConsistentUriHash
             | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
@@ -366,6 +384,18 @@ impl UpstreamLoadBalancer {
                 config,
                 UpstreamLoadBalancerInner::ConsistentHash,
             ),
+            LoadBalanceSelection::NginxConsistentSourceHash
+            | LoadBalanceSelection::NginxConsistentUriHash
+            | LoadBalanceSelection::NginxConsistentHeaderHash
+            | LoadBalanceSelection::NginxConsistentCookieHash => {
+                let table = Arc::new(configured_nginx_ketama_table(config)?);
+                background_service_for(name, metric_labels, config, move |inner| {
+                    UpstreamLoadBalancerInner::NginxConsistentHash {
+                        inner,
+                        table: Arc::clone(&table),
+                    }
+                })
+            }
             LoadBalanceSelection::BoundedLoadConsistentSourceHash
             | LoadBalanceSelection::BoundedLoadConsistentUriHash
             | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
@@ -1152,7 +1182,7 @@ impl UpstreamLoadBalancer {
         if !self.inner.supports_runtime_backend_set_mutation() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "runtime backend-set mutation is not available for Maglev selections in this release",
+                "runtime backend-set mutation is not available for static-ring selections in this release",
             ));
         }
         if !self.inner.runtime_backend_set_mutable() {
@@ -1265,6 +1295,10 @@ enum UpstreamLoadBalancerInner {
     PowerOfTwo(Arc<FluxLoadBalancerRuntime>),
     FnvHash(Arc<FluxLoadBalancerRuntime>),
     ConsistentHash(Arc<FluxLoadBalancerRuntime>),
+    NginxConsistentHash {
+        inner: Arc<FluxLoadBalancerRuntime>,
+        table: Arc<NginxKetamaTable>,
+    },
     BoundedLoadConsistentHash {
         inner: Arc<FluxLoadBalancerRuntime>,
         factor_per_mille: u16,
@@ -1285,6 +1319,7 @@ impl UpstreamLoadBalancerInner {
             | Self::FnvHash(inner)
             | Self::ConsistentHash(inner) => inner,
             Self::LeastTime { inner, .. }
+            | Self::NginxConsistentHash { inner, .. }
             | Self::BoundedLoadConsistentHash { inner, .. }
             | Self::MaglevHash { inner, .. } => inner,
         }
@@ -1326,6 +1361,9 @@ impl UpstreamLoadBalancerInner {
             ),
             Self::FnvHash(inner) => select_fnv_hash(inner, inputs),
             Self::ConsistentHash(inner) => select_consistent_hash(inner, inputs),
+            Self::NginxConsistentHash { inner, table } => {
+                select_nginx_consistent_hash(inner, table, inputs)
+            }
             Self::BoundedLoadConsistentHash {
                 inner,
                 factor_per_mille,
@@ -1384,7 +1422,10 @@ impl UpstreamLoadBalancerInner {
     }
 
     fn supports_runtime_backend_set_mutation(&self) -> bool {
-        !matches!(self, Self::MaglevHash { .. })
+        !matches!(
+            self,
+            Self::NginxConsistentHash { .. } | Self::MaglevHash { .. }
+        )
     }
 
     fn add_runtime_backend(&self, backend: Backend) -> io::Result<usize> {
@@ -1412,6 +1453,7 @@ impl UpstreamLoadBalancerInner {
             | Self::PowerOfTwo(_)
             | Self::FnvHash(_)
             | Self::ConsistentHash(_)
+            | Self::NginxConsistentHash { .. }
             | Self::BoundedLoadConsistentHash { .. }
             | Self::MaglevHash { .. } => None,
         }
@@ -2141,7 +2183,29 @@ mod tests {
             .add_runtime_backend_member("127.0.0.1:3002", 1)
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-        assert!(error.to_string().contains("Maglev"));
+        assert!(error.to_string().contains("static-ring"));
+    }
+
+    #[test]
+    fn runtime_backend_set_mutation_rejects_nginx_consistent_selection() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::NginxConsistentUriHash,
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let error = balancer
+            .add_runtime_backend_member("127.0.0.1:3002", 1)
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("static-ring"));
     }
 
     #[test]
@@ -2780,6 +2844,31 @@ mod tests {
         let first = balancer.select(&request(), Some(client_ip)).unwrap();
         let second = balancer.select(&request(), Some(client_ip)).unwrap();
         assert_eq!(first.backend.addr, second.backend.addr);
+    }
+
+    #[test]
+    fn builds_nginx_consistent_uri_hash_selection_from_static_proxy_upstreams() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_weights: vec![1, 2],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::NginxConsistentUriHash,
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let first = balancer.select(&request(), None).unwrap();
+        let second = balancer.select(&request(), None).unwrap();
+        assert_eq!(first.backend.addr, second.backend.addr);
+        assert_eq!(
+            balancer.runtime_stats().selection,
+            LoadBalanceSelection::NginxConsistentUriHash
+        );
     }
 
     #[test]

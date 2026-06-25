@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::process;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,10 +11,12 @@ use super::policy::BackendSelectionPolicy;
 use super::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
 };
+use crc32fast::Hasher as Crc32Hasher;
 use fluxheim_common::{FluxError, FluxResult};
 
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const MAGLEV_TABLE_SIZE: usize = 65_537;
+const NGINX_KETAMA_POINT_MULTIPLE: usize = 160;
 
 pub(super) fn fnv1a64(bytes: &[u8]) -> u64 {
     fnv1a64_with_seed(bytes, FNV_OFFSET_BASIS)
@@ -724,6 +727,40 @@ pub(super) fn select_consistent_hash(
     None
 }
 
+pub(super) fn select_nginx_consistent_hash(
+    inner: &impl BackendContainer,
+    table: &NginxKetamaTable,
+    inputs: LoadBalancerSelectInputs<'_>,
+) -> Option<SelectedUpstream> {
+    let snapshot = backend_container_snapshot(inner);
+    let context = SelectionContext {
+        passive_health: inputs.passive_health,
+        slow_start: inputs.slow_start,
+        counters: inputs.counters,
+        backend_policy: inputs.backend_policy,
+    };
+    for pass in selection_passes(inputs.backend_policy) {
+        if !priority_activation_satisfied(&snapshot, context, pass) {
+            continue;
+        }
+        for selected_key in
+            table.backend_keys(inputs.key.unwrap_or_default(), inputs.max_iterations)
+        {
+            let Some(backend) = snapshot
+                .backends()
+                .iter()
+                .find(|backend| backend_key(backend) == selected_key)
+            else {
+                continue;
+            };
+            if backend_candidate_allowed(&snapshot, backend, context, pass) {
+                return Some(SelectedUpstream::new(backend.clone()));
+            }
+        }
+    }
+    None
+}
+
 pub(super) fn select_bounded_load_consistent(
     inner: &impl BackendContainer,
     factor_per_mille: u16,
@@ -892,6 +929,92 @@ fn consistent_backend_score(key: &[u8], backend_key: u64, weight: usize) -> u64 
         best = best.max(hash);
     }
     best
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct NginxKetamaPoint {
+    hash: u32,
+    backend_key: u64,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct NginxKetamaTable {
+    points: Vec<NginxKetamaPoint>,
+}
+
+impl NginxKetamaTable {
+    pub(super) fn from_backend_identities<'a, I, B>(backends: I) -> FluxResult<Self>
+    where
+        I: IntoIterator<Item = &'a B>,
+        B: BackendIdentity + 'a,
+    {
+        let mut points = Vec::new();
+        for backend in backends {
+            let authority = backend.authority();
+            let address = authority.parse::<SocketAddr>().map_err(|error| {
+                FluxError::io(
+                    "nginx-compatible consistent hash backend is not a socket address",
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, error),
+                )
+            })?;
+            push_nginx_ketama_points(&mut points, address, backend.key(), backend.weight());
+        }
+        if points.is_empty() {
+            return Err(FluxError::InvalidInput(
+                "nginx-compatible consistent hash requires at least one backend",
+            ));
+        }
+        points.sort_unstable_by_key(|point| point.hash);
+        points.dedup_by(|left, right| left.hash == right.hash);
+        Ok(Self { points })
+    }
+
+    fn backend_keys(&self, key: &[u8], max_iterations: usize) -> Vec<u64> {
+        if self.points.is_empty() {
+            return Vec::new();
+        }
+        let hash = crc32fast::hash(key);
+        let start = match self.points.binary_search_by(|point| point.hash.cmp(&hash)) {
+            Ok(index) => index,
+            Err(index) if index == self.points.len() => 0,
+            Err(index) => index,
+        };
+        let limit = max_iterations.max(1).min(self.points.len());
+        let mut keys = Vec::new();
+        for offset in 0..self.points.len() {
+            if keys.len() >= limit {
+                break;
+            }
+            let key = self.points[(start + offset) % self.points.len()].backend_key;
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+        keys
+    }
+}
+
+fn push_nginx_ketama_points(
+    points: &mut Vec<NginxKetamaPoint>,
+    address: SocketAddr,
+    backend_key: u64,
+    weight: usize,
+) {
+    let mut base = Vec::new();
+    base.extend_from_slice(address.ip().to_string().as_bytes());
+    base.push(0);
+    base.extend_from_slice(address.port().to_string().as_bytes());
+
+    let mut previous_hash = 0u32;
+    let point_count = weight.max(1).saturating_mul(NGINX_KETAMA_POINT_MULTIPLE);
+    for _ in 0..point_count {
+        let mut hasher = Crc32Hasher::new();
+        hasher.update(&base);
+        hasher.update(&previous_hash.to_le_bytes());
+        let hash = hasher.finalize();
+        points.push(NginxKetamaPoint { hash, backend_key });
+        previous_hash = hash;
+    }
 }
 
 #[derive(Clone, Debug)]

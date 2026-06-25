@@ -100,6 +100,7 @@ Fluxheim maps those pieces as follows:
 | Member metadata / labels | `proxy.upstream_tags` |
 | Ratio / weight | `proxy.upstream_weights` |
 | Maglev hash persistence | `proxy.load_balance.selection = "maglev"` for static pools |
+| nginx/Pingora Ketama hash persistence | `proxy.load_balance.selection = "nginx-consistent-source-hash"` or `selection = "ketama"` for static pools |
 | Bounded-load consistent hash | `proxy.load_balance.selection = "bounded-load-consistent-uri-hash"` plus optional `bounded_load_factor_per_mille` |
 | Priority group activation | `proxy.upstream_priority_groups` plus `upstream_priority_group_min_active` |
 | Member connection limit | `proxy.upstream_max_in_flight` |
@@ -157,7 +158,8 @@ curl -X POST \
 ```
 
 Use `weight=default`, `reset`, `clear`, or `configured` to clear the override.
-Hash, consistent-hash, bounded-load consistent, Maglev, and power-of-two
+Hash, consistent-hash, bounded-load consistent, nginx-compatible Ketama,
+Maglev, and power-of-two
 selectors reject runtime weights in the current release because their
 ring/table or weighted-sampling semantics need a separate design.
 
@@ -180,8 +182,8 @@ gate; Fluxheim warns if a narrow race leaves a request completing against a
 removed or retargeted address. Runtime-added or retargeted members carry
 address and configured weight only; aliases, tags, backup membership, priority
 groups, locality metadata, and per-upstream caps remain static-config fields.
-DNS/file-discovery pools and Maglev selectors reject runtime backend-set
-mutation.
+DNS/file/HTTP-discovery pools and static-ring selectors such as Maglev and
+nginx-compatible Ketama reject runtime backend-set mutation.
 
 The load-balancer-only status view is available without parsing the full admin
 status body:
@@ -244,6 +246,12 @@ tracked for future module lines.
 - Maglev hashing is available for static `proxy.upstreams` pools. File-refreshed
   DNS-refreshed, and HTTP-discovered pools reject Maglev until dynamic table
   rebuild behavior is specified and observable.
+- nginx-compatible Ketama hashing is available for static `proxy.upstreams`
+  pools as `nginx-consistent-source-hash`, `nginx-consistent-uri-hash`,
+  `nginx-consistent-header-hash`, and `nginx-consistent-cookie-hash`, with
+  `ketama` as a source-hash alias. It exists for migration cases that need an
+  nginx/Pingora-style CRC32 continuum; the default Fluxheim consistent-hash
+  modes remain the project-owned rendezvous and bounded-load algorithms.
 - Bounded-load consistent hashing is local to one Fluxheim process. It avoids
   selecting an over-bound hash target when another eligible ring candidate is
   available, but it does not coordinate load across multiple Fluxheim nodes.

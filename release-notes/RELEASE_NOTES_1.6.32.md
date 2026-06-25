@@ -119,6 +119,14 @@ request/response behavior in a later `1.6.x` stop.
   the configured TLS, HTTP version, timeout, socket, PROXY-protocol, and
   forwarding-header policy without accepting per-request transport changes from
   discovery data.
+- Added Fluxheim-owned nginx/Pingora Ketama-compatible static-ring hash modes
+  for operators migrating cache-stateful upstream pools that need nginx-style
+  request-to-backend mapping. The new selections are
+  `nginx-consistent-source-hash` (`nginx-consistent-hash` / `ketama` aliases),
+  `nginx-consistent-uri-hash`, `nginx-consistent-header-hash`, and
+  `nginx-consistent-cookie-hash`; they build a static CRC32 continuum from the
+  configured `proxy.upstreams` pool and intentionally reject dynamic discovery
+  pools and runtime backend-set mutations in this release.
 - The remaining rich-proxy native gates are now documented as intentional
   parity blockers rather than hidden launch blockers: proxy cache still needs
   native lookup/fill/stale/purge behavior, PHP-FPM still needs full
@@ -190,3 +198,7 @@ request/response behavior in a later `1.6.x` stop.
 - Added native proxy coverage for shared load-balancer selection and refresh
   service state, including active-health/static advanced policy and dynamic DNS
   discovery construction.
+- Added configuration and load-balancer tests for the nginx-compatible Ketama
+  selectors, including alias parsing, header-hash requirements, dynamic
+  discovery rejection for static-ring selections, native selection
+  construction, and runtime backend-set mutation rejection.

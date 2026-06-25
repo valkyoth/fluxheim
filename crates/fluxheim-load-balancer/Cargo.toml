@@ -19,6 +19,7 @@ arc-swap = "1.9.1"
 async-trait = "0.1.89"
 base64-ng = "1.2.3"
 bytes = "1.11.1"
+crc32fast = "1.5.0"
 fluxheim-common = { path = "../fluxheim-common" }
 fluxheim-config = { path = "../fluxheim-config", features = ["load-balancer", "proxy"] }
 fluxheim-runtime = { path = "../fluxheim-runtime" }

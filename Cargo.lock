@@ -1142,6 +1142,7 @@ dependencies = [
  "async-trait",
  "base64-ng",
  "bytes",
+ "crc32fast",
  "fluxheim-common",
  "fluxheim-config",
  "fluxheim-runtime",
