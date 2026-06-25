@@ -96,6 +96,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     log_native_runtime_cutover_summary(&server_plan);
     log_native_runtime_manifest_preview(&server_plan);
     log_native_http1_proxy_cutover_summary(&server_plan);
+    validate_native_http1_router_factory(&config, &server_plan)?;
     let pingora_conf = pingora_server_conf(&server_plan);
     let mut server = pingora::server::Server::new_with_opt_and_conf(None, pingora_conf);
     server.bootstrap();
@@ -172,6 +173,12 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(stream_service_spec) =
         server_plan.service(fluxheim_server::ServiceKind::StreamProxy)
     {
+        let native_stream_services =
+            crate::stream_proxy::stream_background_services_from_config(&config)?;
+        log::debug!(
+            "native stream service task factories validated; count={}",
+            native_stream_services.len()
+        );
         for stream_service in crate::stream_proxy::stream_services_from_config(&config)? {
             log::info!("{} enabled", stream_service_spec.name());
             server.add_service(stream_service);
@@ -180,6 +187,11 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     #[cfg(feature = "udp-proxy")]
     if let Some(udp_service_spec) = server_plan.service(fluxheim_server::ServiceKind::UdpProxy) {
+        let native_udp_services = crate::udp_proxy::udp_background_services_from_config(&config)?;
+        log::debug!(
+            "native UDP service task factories validated; count={}",
+            native_udp_services.len()
+        );
         for udp_service in crate::udp_proxy::udp_services_from_config(&config)? {
             log::info!("{} enabled", udp_service_spec.name());
             server.add_service(udp_service);
@@ -219,6 +231,19 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     {
         crate::metrics::init()?;
         crate::metrics::record_config(&config);
+        let native_metrics_service =
+            crate::metrics::metrics_background_service_from_config(&config.metrics)?;
+        if let Some(native_metrics_service) = &native_metrics_service {
+            log::debug!(
+                "native metrics service task factory validated; name={}",
+                native_metrics_service.name()
+            );
+        }
+        if config.metrics.token_env.is_some() || config.metrics.token_file.is_some() {
+            log::info!(
+                "native metrics bearer-token source validated; compatibility metrics listener still relies on listener binding and network ACLs until native runtime startup owns this service"
+            );
+        }
         #[cfg(feature = "cache")]
         if let Some(task) =
             server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::CacheMetrics)
@@ -384,6 +409,32 @@ fn log_native_http1_proxy_cutover_summary(server_plan: &fluxheim_server::ServerP
             );
         }
     }
+}
+
+#[cfg(feature = "proxy")]
+fn validate_native_http1_router_factory(
+    config: &Config,
+    server_plan: &fluxheim_server::ServerPlan,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !server_plan.has_service(fluxheim_server::ServiceKind::ProxyHttp) {
+        return Ok(());
+    }
+    match server_plan.native_http1_proxy_cutover_summary().status() {
+        fluxheim_server::NativeHttp1ProxyCutoverStatus::NoProxy
+        | fluxheim_server::NativeHttp1ProxyCutoverStatus::NativeReady => {}
+        fluxheim_server::NativeHttp1ProxyCutoverStatus::Mixed
+        | fluxheim_server::NativeHttp1ProxyCutoverStatus::CompatibilityRequired => {
+            return Ok(());
+        }
+    }
+
+    let _router = fluxheim_server::NativeHttp1HostRouter::from_config(
+        config,
+        *server_plan.downstream_http1(),
+        server_plan.process().upstream_keepalive_pool_size(),
+    )?;
+    log::debug!("native HTTP/1 host-router factory validated for proxy service");
+    Ok(())
 }
 
 #[cfg(feature = "proxy")]
@@ -1217,6 +1268,20 @@ mod tests {
         let plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
 
         assert!(super::native_runtime_manifest_preview(&plan).is_none());
+    }
+
+    #[test]
+    fn native_http1_router_factory_validates_when_cutover_ready() {
+        let mut config = crate::config::Config::default();
+        config.server.listen = vec!["127.0.0.1:18080".to_owned()];
+        config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
+        let plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
+
+        assert_eq!(
+            plan.native_http1_proxy_cutover_summary().status(),
+            fluxheim_server::NativeHttp1ProxyCutoverStatus::NativeReady
+        );
+        super::validate_native_http1_router_factory(&config, &plan).unwrap();
     }
 
     #[cfg(feature = "acme-client")]

@@ -8,6 +8,7 @@ use crate::config::ConfigError;
 use crate::config_http::{
     valid_http_otlp_endpoint, valid_service_name, validate_otlp_ca_cert_path,
 };
+use crate::config_path::{validate_non_world_writable_parent, validate_path};
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -19,6 +20,10 @@ pub struct MetricsConfig {
     #[serde(default = "default_metrics_require_loopback")]
     pub require_loopback: bool,
     #[serde(default)]
+    pub token_env: Option<String>,
+    #[serde(default)]
+    pub token_file: Option<PathBuf>,
+    #[serde(default)]
     pub otlp: MetricsOtlpExportConfig,
 }
 
@@ -28,6 +33,8 @@ impl Default for MetricsConfig {
             enabled: false,
             listen: default_metrics_listen(),
             require_loopback: default_metrics_require_loopback(),
+            token_env: None,
+            token_file: None,
             otlp: MetricsOtlpExportConfig::default(),
         }
     }
@@ -35,6 +42,11 @@ impl Default for MetricsConfig {
 
 impl MetricsConfig {
     pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(token_file) = &mut self.token_file
+            && token_file.is_relative()
+        {
+            *token_file = base_dir.join(&token_file);
+        }
         self.otlp.resolve_relative_paths(base_dir);
     }
 
@@ -56,6 +68,34 @@ impl MetricsConfig {
                 reason: "OTLP metrics export requires metrics.enabled = true",
             });
         }
+        if self
+            .token_env
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(ConfigError::InvalidMetricsPolicy {
+                field: "metrics.token_env",
+                reason: "token environment variable name cannot be empty",
+            });
+        }
+        if self
+            .token_file
+            .as_deref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err(ConfigError::InvalidMetricsPolicy {
+                field: "metrics.token_file",
+                reason: "token file path cannot be empty",
+            });
+        }
+        if self.token_env.is_some() && self.token_file.is_some() {
+            return Err(ConfigError::InvalidMetricsPolicy {
+                field: "metrics.token_env",
+                reason: "metrics.token_env and metrics.token_file cannot both be configured",
+            });
+        }
+        validate_path("metrics.token_file", self.token_file.as_deref())?;
+        validate_non_world_writable_parent("metrics.token_file", self.token_file.as_deref())?;
         self.otlp.validate()?;
 
         Ok(())

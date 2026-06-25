@@ -19,10 +19,27 @@ impl<T> FluxBackgroundService<T>
 where
     T: FluxBackgroundTask,
 {
+    #[cfg(any(feature = "metrics", feature = "stream-proxy", feature = "udp-proxy"))]
+    pub(crate) fn new(name: impl Into<String>, task: T) -> Self {
+        Self {
+            inner: fluxheim_runtime::background_service(name, task),
+        }
+    }
+
     pub(crate) fn with_kind(name: impl Into<String>, kind: BackgroundTaskKind, task: T) -> Self {
         Self {
             inner: fluxheim_runtime::background_service_with_kind(name, kind, task),
         }
+    }
+
+    #[cfg(feature = "metrics")]
+    pub(crate) fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    #[cfg(all(test, feature = "metrics"))]
+    pub(crate) fn into_native(self) -> fluxheim_runtime::FluxBackgroundService<T> {
+        self.inner
     }
 }
 

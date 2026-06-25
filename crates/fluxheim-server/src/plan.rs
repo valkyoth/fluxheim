@@ -164,6 +164,7 @@ pub struct ServerPlan {
     native_admin_control_plane_ready: bool,
     native_admin_ops_socket_ready: bool,
     native_metrics_http_ready: bool,
+    native_metrics_http_auth_required: bool,
     native_stream_proxy_ready: bool,
     native_udp_proxy_ready: bool,
     native_http1_proxy_candidates: Vec<NativeHttp1ProxyCandidate>,
@@ -188,6 +189,7 @@ impl ServerPlan {
             native_admin_control_plane_ready: false,
             native_admin_ops_socket_ready: false,
             native_metrics_http_ready: false,
+            native_metrics_http_auth_required: false,
             native_stream_proxy_ready: false,
             native_udp_proxy_ready: false,
             native_http1_proxy_candidates: Vec::new(),
@@ -217,6 +219,7 @@ impl ServerPlan {
             native_admin_control_plane_ready: false,
             native_admin_ops_socket_ready: false,
             native_metrics_http_ready: false,
+            native_metrics_http_auth_required: false,
             native_stream_proxy_ready: false,
             native_udp_proxy_ready: false,
             native_http1_proxy_candidates: Vec::new(),
@@ -278,6 +281,10 @@ impl ServerPlan {
 
     pub const fn native_metrics_http_ready(&self) -> bool {
         self.native_metrics_http_ready
+    }
+
+    pub const fn native_metrics_http_auth_required(&self) -> bool {
+        self.native_metrics_http_auth_required
     }
 
     pub const fn native_stream_proxy_ready(&self) -> bool {
@@ -435,6 +442,8 @@ impl ServerPlan {
             native_admin_control_plane_ready: config.admin.enabled,
             native_admin_ops_socket_ready: native_admin_ops_socket_ready(config),
             native_metrics_http_ready: config.metrics.enabled,
+            native_metrics_http_auth_required: config.metrics.token_env.is_some()
+                || config.metrics.token_file.is_some(),
             native_stream_proxy_ready: config.stream.enabled,
             native_udp_proxy_ready: config.udp.enabled,
             native_http1_proxy_candidates:

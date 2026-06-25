@@ -47,8 +47,31 @@ pub(crate) fn stream_services_from_config(config: &Config) -> io::Result<Vec<Str
         .collect()
 }
 
+pub(crate) fn stream_background_services_from_config(
+    config: &Config,
+) -> io::Result<Vec<crate::background::FluxBackgroundService<StreamProxyTask>>> {
+    if !config.stream.enabled {
+        return Ok(Vec::new());
+    }
+
+    config
+        .stream
+        .routes
+        .iter()
+        .map(stream_background_service_from_route)
+        .collect()
+}
+
 fn stream_service_from_route(route: &StreamRouteConfig) -> io::Result<StreamProxyService> {
     StreamProxyService::from_config(route).map_err(FluxError::into_io)
+}
+
+fn stream_background_service_from_route(
+    route: &StreamRouteConfig,
+) -> io::Result<crate::background::FluxBackgroundService<StreamProxyTask>> {
+    StreamProxyService::from_config(route)
+        .map(StreamProxyService::into_background_service)
+        .map_err(FluxError::into_io)
 }
 
 pub(crate) struct StreamProxyService {
@@ -77,6 +100,18 @@ impl StreamProxyService {
             downstream_proxy_protocol: route.downstream_proxy_protocol,
             trusted_sources: trusted_sources.into(),
         })
+    }
+
+    fn into_background_service(self) -> crate::background::FluxBackgroundService<StreamProxyTask> {
+        crate::background::FluxBackgroundService::new(
+            self.name,
+            StreamProxyTask {
+                listen: self.listen,
+                app: self.app,
+                downstream_proxy_protocol: self.downstream_proxy_protocol,
+                trusted_sources: self.trusted_sources,
+            },
+        )
     }
 }
 

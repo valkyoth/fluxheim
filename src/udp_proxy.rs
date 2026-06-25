@@ -38,6 +38,27 @@ pub(crate) fn udp_services_from_config(config: &Config) -> io::Result<Vec<UdpPro
         .collect()
 }
 
+pub(crate) fn udp_background_services_from_config(
+    config: &Config,
+) -> io::Result<Vec<crate::background::FluxBackgroundService<UdpProxyTask>>> {
+    if !config.udp.enabled {
+        return Ok(Vec::new());
+    }
+
+    config
+        .udp
+        .routes
+        .iter()
+        .map(udp_background_service_from_route)
+        .collect()
+}
+
+fn udp_background_service_from_route(
+    route: &UdpRouteConfig,
+) -> io::Result<crate::background::FluxBackgroundService<UdpProxyTask>> {
+    UdpProxyService::from_config(route).map(UdpProxyService::into_background_service)
+}
+
 pub(crate) struct UdpProxyService {
     name: String,
     listen: Arc<[String]>,
@@ -52,6 +73,16 @@ impl UdpProxyService {
             listen: route.listen.clone().into(),
             app: Arc::new(app),
         })
+    }
+
+    fn into_background_service(self) -> crate::background::FluxBackgroundService<UdpProxyTask> {
+        crate::background::FluxBackgroundService::new(
+            self.name,
+            UdpProxyTask {
+                listen: self.listen,
+                app: self.app,
+            },
+        )
     }
 }
 

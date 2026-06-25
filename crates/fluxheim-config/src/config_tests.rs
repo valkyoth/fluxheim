@@ -10299,6 +10299,7 @@ fn parses_metrics_config() {
             [metrics]
             enabled = true
             listen = "127.0.0.1:9091"
+            token_env = "FLUXHEIM_METRICS_TOKEN"
             "#,
     )
     .unwrap();
@@ -10306,6 +10307,51 @@ fn parses_metrics_config() {
     config.validate().unwrap();
     assert!(config.metrics.enabled);
     assert_eq!(config.metrics.listen, "127.0.0.1:9091");
+    assert_eq!(
+        config.metrics.token_env.as_deref(),
+        Some("FLUXHEIM_METRICS_TOKEN")
+    );
+}
+
+#[test]
+fn rejects_conflicting_metrics_token_sources() {
+    let config: Config = toml::from_str(
+        r#"
+            [metrics]
+            enabled = true
+            token_env = "FLUXHEIM_METRICS_TOKEN"
+            token_file = "/run/secrets/fluxheim-metrics-token"
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidMetricsPolicy {
+            field: "metrics.token_env",
+            reason: "metrics.token_env and metrics.token_file cannot both be configured"
+        })
+    );
+}
+
+#[test]
+fn rejects_empty_metrics_token_env() {
+    let config: Config = toml::from_str(
+        r#"
+            [metrics]
+            enabled = true
+            token_env = " "
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidMetricsPolicy {
+            field: "metrics.token_env",
+            reason: "token environment variable name cannot be empty"
+        })
+    );
 }
 
 #[cfg(feature = "metrics-otlp")]

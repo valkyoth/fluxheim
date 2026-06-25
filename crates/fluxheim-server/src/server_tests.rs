@@ -197,6 +197,7 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
     config.admin.ops_socket.enabled = true;
     config.metrics.enabled = true;
     config.metrics.listen = "127.0.0.1:9091".to_owned();
+    config.metrics.token_env = Some("FLUXHEIM_METRICS_TOKEN".to_owned());
     config.stream.enabled = true;
     config.stream.routes = vec![StreamRouteConfig {
         name: "tcp".to_owned(),
@@ -243,6 +244,8 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
     assert_eq!(launch_plan.downstream_http1(), *plan.downstream_http1());
     assert_eq!(launch_plan.downstream_http2(), *plan.downstream_http2());
     assert_eq!(launch_plan.proxy_protocol(), plan.proxy_protocol());
+    assert!(plan.native_metrics_http_auth_required());
+    assert!(launch_plan.metrics_bearer_token_required());
     assert_eq!(launch_plan.listeners().len(), 5);
     assert!(
         launch_plan
@@ -350,6 +353,9 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
             .to_tsv()
             .contains("native-runtime-launch-policy\thttp2\tmax_concurrent_streams\t32\n")
     );
+    assert!(launch_plan.to_tsv().contains(
+        "native-runtime-launch-service-policy\tMetricsHttp\tbearer_token_required\ttrue\n"
+    ));
     assert!(launch_plan.to_tsv().contains(
         "native-runtime-launch-listener\tProxyHttp\tFluxheim HTTP Proxy\tHttp\t127.0.0.1:8080\tfalse\n"
     ));

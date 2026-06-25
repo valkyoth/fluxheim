@@ -686,16 +686,21 @@ rootless container secrets or a local file readable only by the Fluxheim user.
 
 `[metrics]` is disabled by default and should remain loopback-only unless it is
 fronted by a trusted local monitoring agent. The native metrics handler only
-serves `GET`/`HEAD /metrics` and can enforce a bearer token when the native
-runner provides one. The current compatibility metrics listener still relies on
-the metrics listener binding and network ACLs for access control until the
-final native runner cutover wires the token source into service construction.
+serves `GET`/`HEAD /metrics` and can enforce a bearer token from
+`metrics.token_env` or `metrics.token_file`. During the Pingora compatibility
+runtime, Fluxheim validates the configured token source at startup, but the
+compatibility metrics listener still relies on the metrics listener binding and
+network ACLs for access control until the final native runner cutover owns this
+service.
 
 ```toml
 [metrics]
 enabled = false
 listen = "127.0.0.1:9091"
 require_loopback = true
+# Optional native metrics bearer-token source. Configure at most one.
+# token_env = "FLUXHEIM_METRICS_TOKEN"
+# token_file = "/run/secrets/fluxheim-metrics-token"
 
 [metrics.otlp]
 enabled = false

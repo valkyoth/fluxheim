@@ -12,6 +12,7 @@ pub struct NativeRuntimeLaunchPlan {
     proxy_protocol: ProxyProtocolPolicy,
     downstream_http1: DownstreamHttp1Policy,
     downstream_http2: DownstreamHttp2Policy,
+    metrics_bearer_token_required: bool,
     manifest: NativeRuntimeManifest,
     listeners: Vec<NativeRuntimeLaunchListener>,
     background_tasks: Vec<NativeRuntimeLaunchBackgroundTask>,
@@ -103,6 +104,7 @@ impl NativeRuntimeLaunchPlan {
             proxy_protocol: plan.proxy_protocol().clone(),
             downstream_http1: *plan.downstream_http1(),
             downstream_http2: *plan.downstream_http2(),
+            metrics_bearer_token_required: plan.native_metrics_http_auth_required(),
             manifest,
             listeners,
             background_tasks,
@@ -123,6 +125,10 @@ impl NativeRuntimeLaunchPlan {
 
     pub const fn downstream_http2(&self) -> DownstreamHttp2Policy {
         self.downstream_http2
+    }
+
+    pub const fn metrics_bearer_token_required(&self) -> bool {
+        self.metrics_bearer_token_required
     }
 
     pub const fn manifest(&self) -> &NativeRuntimeManifest {
@@ -302,6 +308,15 @@ impl NativeRuntimeLaunchPlan {
                 .max_pending_accept_reset_streams()
                 .to_string(),
         );
+        report.push_str("native-runtime-launch-service-policy\tkind\tfield\tvalue\n");
+        if self.manifest.service(ServiceKind::MetricsHttp).is_some() {
+            push_launch_service_policy_row(
+                &mut report,
+                "MetricsHttp",
+                "bearer_token_required",
+                self.metrics_bearer_token_required.to_string(),
+            );
+        }
         report.push_str(
             "native-runtime-launch-listener\tkind\tname\tprotocol\taddress\tproxy_protocol\n",
         );
@@ -439,6 +454,16 @@ fn validate_listener_bindings(
 fn push_launch_policy_row(report: &mut String, protocol: &str, field: &str, value: String) {
     report.push_str("native-runtime-launch-policy\t");
     report.push_str(protocol);
+    report.push('\t');
+    report.push_str(field);
+    report.push('\t');
+    report.push_str(&value);
+    report.push('\n');
+}
+
+fn push_launch_service_policy_row(report: &mut String, kind: &str, field: &str, value: String) {
+    report.push_str("native-runtime-launch-service-policy\t");
+    report.push_str(kind);
     report.push('\t');
     report.push_str(field);
     report.push('\t');

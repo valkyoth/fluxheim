@@ -1,11 +1,26 @@
+use std::env;
+use std::error::Error;
+use std::fmt;
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+#[cfg(feature = "proxy")]
+use std::process;
+#[cfg(feature = "proxy")]
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+#[cfg(feature = "proxy")]
+use crate::background::{FluxBackgroundReady, FluxBackgroundTask, FluxShutdown};
 use fluxheim_server::NativeHttp1Response;
 use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
 };
 use sanitization::ct::ConstantTimeEq;
+#[cfg(feature = "proxy")]
+use tokio::net::TcpListener;
+use zeroize::Zeroizing;
 
 static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -67,6 +82,9 @@ static CACHE_PURGER_ENTRIES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_PURGER_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
 static METRICS_OTLP_EXPORTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 
+const MAX_METRICS_TOKEN_BYTES: usize = 8 * 1024;
+const MAX_METRICS_TOKEN_FILE_BYTES: u64 = MAX_METRICS_TOKEN_BYTES as u64;
+
 pub fn enabled() -> bool {
     true
 }
@@ -105,9 +123,18 @@ fn native_metrics_target_path(target: &str) -> &str {
     target
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct NativeMetricsApp {
-    bearer_token: Option<String>,
+    bearer_token: Option<Zeroizing<String>>,
+}
+
+impl fmt::Debug for NativeMetricsApp {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NativeMetricsApp")
+            .field("bearer_token_configured", &self.bearer_token.is_some())
+            .finish()
+    }
 }
 
 impl NativeMetricsApp {
@@ -116,9 +143,240 @@ impl NativeMetricsApp {
     }
 
     pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
-        self.bearer_token = Some(token.into());
+        self.bearer_token = Some(Zeroizing::new(token.into()));
         self
     }
+}
+
+pub(crate) fn native_metrics_app_from_config(
+    config: &crate::config::MetricsConfig,
+) -> Result<NativeMetricsApp, Box<dyn Error + Send + Sync>> {
+    let Some(token) = load_native_metrics_token(config)? else {
+        return Ok(NativeMetricsApp::new());
+    };
+    Ok(NativeMetricsApp {
+        bearer_token: Some(token),
+    })
+}
+
+#[cfg(feature = "proxy")]
+pub(crate) fn metrics_background_service_from_config(
+    config: &crate::config::MetricsConfig,
+) -> Result<
+    Option<crate::background::FluxBackgroundService<NativeMetricsTask>>,
+    Box<dyn Error + Send + Sync>,
+> {
+    if !config.enabled {
+        return Ok(None);
+    }
+    let app = native_metrics_app_from_config(config)?;
+    Ok(Some(crate::background::FluxBackgroundService::new(
+        "Fluxheim metrics HTTP",
+        NativeMetricsTask {
+            listen: config.listen.clone(),
+            app: Arc::new(app),
+        },
+    )))
+}
+
+#[cfg(feature = "proxy")]
+pub(crate) struct NativeMetricsTask {
+    listen: String,
+    app: Arc<NativeMetricsApp>,
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait::async_trait]
+impl FluxBackgroundTask for NativeMetricsTask {
+    async fn start(&self, mut shutdown: FluxShutdown, mut ready: FluxBackgroundReady) {
+        let listener = match TcpListener::bind(&self.listen).await {
+            Ok(listener) => listener,
+            Err(error) => {
+                log::error!(
+                    target: "fluxheim::metrics",
+                    "failed to bind native metrics listener {}: {error}",
+                    self.listen
+                );
+                process::exit(1);
+            }
+        };
+        ready.notify_ready();
+        if let Err(error) = fluxheim_server::serve_native_http1_listener(
+            listener,
+            fluxheim_server::DownstreamHttp1Policy::default(),
+            self.app.clone(),
+            async move {
+                let _ = shutdown.wait_for_shutdown().await;
+            },
+        )
+        .await
+        {
+            log::warn!(
+                target: "fluxheim::metrics",
+                "native metrics listener {} stopped with error: {error}",
+                self.listen
+            );
+        }
+    }
+}
+
+fn load_native_metrics_token(
+    config: &crate::config::MetricsConfig,
+) -> Result<Option<Zeroizing<String>>, Box<dyn Error + Send + Sync>> {
+    let raw = match (&config.token_env, &config.token_file) {
+        (Some(env_name), None) => {
+            Some(Zeroizing::new(env::var(env_name).map_err(|error| {
+                format!("failed to read metrics token env {env_name:?}: {error}")
+            })?))
+        }
+        (None, Some(path)) => Some(read_metrics_secret_file(path)?),
+        (None, None) => None,
+        (Some(_), Some(_)) => return Err("metrics token source is invalid".into()),
+    };
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let token = Zeroizing::new(raw.trim().to_owned());
+    if token.is_empty() {
+        Err("metrics token cannot be empty".into())
+    } else if token.len() > MAX_METRICS_TOKEN_BYTES {
+        Err(format!("metrics token cannot exceed {MAX_METRICS_TOKEN_BYTES} bytes").into())
+    } else {
+        Ok(Some(token))
+    }
+}
+
+fn read_metrics_secret_file(
+    path: &Path,
+) -> Result<Zeroizing<String>, Box<dyn Error + Send + Sync>> {
+    if metrics_secret_parent_path_contains_symlink(path).map_err(|error| {
+        format!(
+            "failed to inspect metrics token parent path {}: {error}",
+            path.display()
+        )
+    })? {
+        return Err(format!(
+            "metrics token file {} must not be below a symlinked directory",
+            path.display()
+        )
+        .into());
+    }
+
+    #[cfg(unix)]
+    if crate::fs_trust::existing_parent_has_insecure_write_permissions(path).map_err(|error| {
+        format!(
+            "failed to inspect metrics token parent path {}: {error}",
+            path.display()
+        )
+    })? {
+        return Err(format!(
+            "metrics token file {} must not be below a group- or world-writable directory",
+            path.display()
+        )
+        .into());
+    }
+
+    let file = open_regular_metrics_secret_file(path)?;
+    let metadata = file.metadata().map_err(|error| {
+        format!(
+            "failed to inspect metrics token file {}: {error}",
+            path.display()
+        )
+    })?;
+    if !metadata.file_type().is_file() {
+        return Err(format!(
+            "metrics token file {} must be a regular file",
+            path.display()
+        )
+        .into());
+    }
+    if metadata.len() > MAX_METRICS_TOKEN_FILE_BYTES {
+        return Err(format!(
+            "metrics token file {} is too large; limit is {MAX_METRICS_TOKEN_FILE_BYTES} bytes",
+            path.display()
+        )
+        .into());
+    }
+
+    read_bounded_metrics_secret_file(file, path, MAX_METRICS_TOKEN_FILE_BYTES)
+}
+
+fn read_bounded_metrics_secret_file(
+    file: fs::File,
+    path: &Path,
+    max_bytes: u64,
+) -> Result<Zeroizing<String>, Box<dyn Error + Send + Sync>> {
+    let mut token = Zeroizing::new(String::new());
+    let mut limited = file.take(max_bytes.saturating_add(1));
+    limited.read_to_string(&mut token).map_err(|error| {
+        format!(
+            "failed to read metrics token file {}: {error}",
+            path.display()
+        )
+    })?;
+    if token.len() as u64 > max_bytes {
+        return Err(format!(
+            "metrics token file {} changed while reading and exceeded {max_bytes} bytes",
+            path.display(),
+        )
+        .into());
+    }
+    Ok(token)
+}
+
+fn metrics_secret_parent_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
+    let Some(parent) = path.parent() else {
+        return Ok(false);
+    };
+    if parent.as_os_str().is_empty() {
+        return Ok(false);
+    }
+
+    let mut current = PathBuf::new();
+    for component in parent.components() {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(false)
+}
+
+#[cfg(unix)]
+fn open_regular_metrics_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(rustix_to_io_error)
+    .map_err(|error| {
+        format!(
+            "failed to open metrics token file {} without following symlinks: {error}",
+            path.display()
+        )
+    })?;
+    Ok(fd.into())
+}
+
+#[cfg(not(unix))]
+fn open_regular_metrics_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
+    fs::File::open(path).map_err(|error| {
+        format!(
+            "failed to open metrics token file {}: {error}",
+            path.display()
+        )
+        .into()
+    })
+}
+
+#[cfg(unix)]
+fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
+    std::io::Error::from_raw_os_error(error.raw_os_error())
 }
 
 fn native_metrics_authorized(request: &fluxheim_server::NativeHttp1Request, token: &str) -> bool {
@@ -1824,7 +2082,8 @@ mod tests {
     #[cfg(all(feature = "proxy", feature = "cache"))]
     use super::record_cache_runtime_totals;
     use super::{
-        NativeMetricsApp, init, method_bucket, native_prometheus_response, record_acme_event,
+        NativeMetricsApp, init, method_bucket, metrics_background_service_from_config,
+        native_metrics_app_from_config, native_prometheus_response, record_acme_event,
         record_admin_auth_event, record_cache_activity, record_cache_activity_scope,
         record_cache_operation_duration, record_cache_purge, record_cache_purger_duration,
         record_cache_purger_entries, record_cache_purger_run, record_config,
@@ -2450,6 +2709,76 @@ mod tests {
     }
 
     #[test]
+    fn native_metrics_app_loads_bearer_token_from_config_file() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        let token_file = unique_metrics_temp_path("native-metrics-token-file");
+        std::fs::write(&token_file, "metrics-file-secret\n").unwrap();
+        let config = crate::config::MetricsConfig {
+            token_file: Some(token_file.clone()),
+            ..crate::config::MetricsConfig::default()
+        };
+        let app = native_metrics_app_from_config(&config).unwrap();
+        let _ = std::fs::remove_file(&token_file);
+        let debug = format!("{app:?}");
+        assert!(debug.contains("bearer_token_configured: true"));
+        assert!(!debug.contains("metrics-file-secret"));
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let missing = runtime.block_on(fluxheim_server::NativeHttp1Handler::handle(
+            &app,
+            native_metrics_request("GET", "/metrics"),
+        ));
+        assert_eq!(missing.status(), 401);
+
+        let mut authorized = native_metrics_request("GET", "/metrics");
+        authorized.headers.push((
+            "authorization".to_owned(),
+            "Bearer metrics-file-secret".to_owned(),
+        ));
+        let authorized = runtime.block_on(fluxheim_server::NativeHttp1Handler::handle(
+            &app, authorized,
+        ));
+        assert_eq!(authorized.status(), 200);
+    }
+
+    #[test]
+    fn native_metrics_background_service_binds_and_stops() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        let config = crate::config::MetricsConfig {
+            enabled: true,
+            listen: "127.0.0.1:0".to_owned(),
+            ..crate::config::MetricsConfig::default()
+        };
+        let service = metrics_background_service_from_config(&config)
+            .unwrap()
+            .expect("metrics service");
+        assert_eq!(service.name(), "Fluxheim metrics HTTP");
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let supervisor = fluxheim_runtime::NativeBackgroundSupervisor::new();
+            let (ready_tx, mut ready_rx) = tokio::sync::watch::channel(false);
+            let handle = supervisor.spawn_service_with_ready(service.into_native(), move || {
+                let _ = ready_tx.send(true);
+            });
+            ready_rx.changed().await.unwrap();
+            assert!(*ready_rx.borrow());
+            assert!(supervisor.shutdown());
+            handle.join().await.unwrap();
+        });
+    }
+
+    #[test]
     fn native_metrics_app_serves_prometheus_response_through_listener() {
         let _guard = metrics_test_lock();
         init().unwrap();
@@ -2497,6 +2826,54 @@ mod tests {
         assert!(response.contains(r#"event="failure",scope="source""#));
     }
 
+    #[test]
+    fn native_metrics_listener_enforces_bearer_token() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (missing, authorized) = runtime.block_on(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+            tokio::spawn(async move {
+                fluxheim_server::serve_native_http1_listener(
+                    listener,
+                    fluxheim_server::DownstreamHttp1Policy::default(),
+                    std::sync::Arc::new(
+                        NativeMetricsApp::new().with_bearer_token("listener-secret"),
+                    ),
+                    async {
+                        let _ = shutdown_rx.await;
+                    },
+                )
+                .await
+                .unwrap();
+            });
+
+            let missing = native_metrics_listener_request(
+                addr,
+                b"GET /metrics HTTP/1.1\r\nHost: metrics.test\r\nConnection: close\r\n\r\n",
+            )
+            .await;
+            let authorized = native_metrics_listener_request(
+                addr,
+                b"GET /metrics HTTP/1.1\r\nHost: metrics.test\r\nAuthorization: Bearer listener-secret\r\nConnection: close\r\n\r\n",
+            )
+            .await;
+            let _ = shutdown_tx.send(());
+            (missing, authorized)
+        });
+
+        assert!(missing.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
+        assert!(missing.contains("www-authenticate: Bearer realm=\"metrics\""));
+        assert!(authorized.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(authorized.contains("content-type: text/plain"));
+    }
+
     fn native_metrics_request(method: &str, target: &str) -> fluxheim_server::NativeHttp1Request {
         fluxheim_server::NativeHttp1Request {
             method: method.to_owned(),
@@ -2511,6 +2888,18 @@ mod tests {
             headers: vec![("host".to_owned(), "metrics.test".to_owned())],
             body: Vec::new(),
         }
+    }
+
+    async fn native_metrics_listener_request(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        tokio::io::AsyncWriteExt::write_all(&mut client, request)
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut client, &mut response)
+            .await
+            .unwrap();
+        String::from_utf8(response).unwrap()
     }
 
     #[test]
@@ -3089,5 +3478,18 @@ mod tests {
     fn metrics_test_lock() -> MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn unique_metrics_temp_path(label: &str) -> std::path::PathBuf {
+        static COUNTER: OnceLock<std::sync::atomic::AtomicU64> = OnceLock::new();
+        let id = COUNTER
+            .get_or_init(|| std::sync::atomic::AtomicU64::new(0))
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("fluxheim-test-secrets");
+        std::fs::create_dir_all(&root).unwrap();
+        root.join(format!("fluxheim-{label}-{}-{id}", std::process::id()))
     }
 }
