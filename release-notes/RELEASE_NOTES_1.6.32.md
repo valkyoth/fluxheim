@@ -33,6 +33,10 @@ cache/PHP adapter slice.
   runtime validates those native factories at startup whenever stream or UDP
   services are enabled, so final native service registration exercises the same
   route parsing and listener task construction before the cutover.
+- Load-balancer refresh services now expose a native-supervisor handoff while
+  retaining the Pingora compatibility wrapper. This lets the final native
+  runtime spawn the existing Fluxheim-owned discovery/health refresh loop
+  directly instead of routing it through Pingora's service adapter.
 - The compatibility runtime now also validates the native HTTP/1 host-router
   factory when the server plan reports the proxy surface as native-ready. This
   proves exact/wildcard host routing, default-vhost selection, trusted-proxy
@@ -50,6 +54,10 @@ cache/PHP adapter slice.
   over an actual local TCP scrape request and that the background service task
   binds and stops under the native supervisor, not only through the in-memory
   handler.
+- Added a native-supervisor load-balancer test that spawns the refresh service,
+  observes readiness after the initial discovery update, checks the
+  `LoadBalancerRefresh` task kind, and shuts it down through the Fluxheim
+  supervisor path.
 - Extended native runtime launch-plan tests and cutover evidence validation to
   cover metrics bearer-token service policy.
 - Added a runtime test proving a native-ready HTTP/1 proxy config builds the

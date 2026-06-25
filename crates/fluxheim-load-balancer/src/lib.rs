@@ -104,6 +104,15 @@ impl UpstreamLoadBalancerService {
         self.inner.task().run(shutdown, ready).await;
     }
 
+    pub fn into_native_service(self) -> fluxheim_runtime::FluxBackgroundService<Self> {
+        let name = self.name().to_owned();
+        fluxheim_runtime::FluxBackgroundService::with_kind(
+            name,
+            fluxheim_runtime::BackgroundTaskKind::LoadBalancerRefresh,
+            self,
+        )
+    }
+
     pub fn name(&self) -> &str {
         self.inner.name()
     }
@@ -111,6 +120,17 @@ impl UpstreamLoadBalancerService {
     #[allow(deprecated)]
     pub fn threads(&self) -> Option<usize> {
         self.inner.threads()
+    }
+}
+
+#[async_trait::async_trait]
+impl fluxheim_runtime::FluxBackgroundTask for UpstreamLoadBalancerService {
+    async fn start(
+        &self,
+        shutdown: background::FluxShutdown,
+        ready: background::FluxBackgroundReady,
+    ) {
+        self.inner.task().run(shutdown, ready).await;
     }
 }
 
@@ -3996,6 +4016,44 @@ mod tests {
 
         shutdown_sender.send(true).unwrap();
         service_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_balancer_background_service_runs_under_native_supervisor() {
+        install_test_crypto_provider();
+        let (_balancer, service) = UpstreamLoadBalancer::background_service_from_proxy_config(
+            "test",
+            "test",
+            None,
+            &ProxyConfig {
+                upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+                ..ProxyConfig::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+        let supervisor = fluxheim_runtime::NativeBackgroundSupervisor::new();
+        let (ready_sender, mut ready_receiver) = watch::channel(false);
+        let handle =
+            supervisor.spawn_service_with_ready(service.into_native_service(), move || {
+                ready_sender.send_replace(true);
+            });
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !*ready_receiver.borrow_and_update() {
+                ready_receiver.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            handle.kind(),
+            Some(fluxheim_runtime::BackgroundTaskKind::LoadBalancerRefresh)
+        );
+        assert!(supervisor.shutdown());
+        handle.join().await.unwrap();
     }
 
     #[test]
