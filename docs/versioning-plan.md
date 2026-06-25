@@ -2846,15 +2846,16 @@ available for the stabilization/security-only follow-up.
   response planning. Wire native route/vhost PHP-FPM configs to an external
   php-fpm route action that resolves scripts, enforces in-flight/body limits,
   builds FastCGI params, executes Unix/TCP endpoints, and returns parsed native
-  PHP responses. Keep managed php-fpm supervision and custom PHP error-page
-  rendering fail-closed until their final native adapters land.
+  PHP responses. Add native PHP custom error-page rendering for intercepted
+  statuses through the native static-file responder. Keep managed php-fpm
+  supervision fail-closed until its final native adapter lands.
 - `v1.6.33`: close the final rich-proxy parity gates and remove the final
   Pingora runtime/listener/TLS adapter crates from normal builds. Cache work
   must cover lookup/fill/stale, Vary/Range/conditional semantics, peer-fill
   guardrails, purge visibility, and root/vhost/route cache policy readiness
   only after the native adapter owns the full request/response/cache-key path.
-  PHP-FPM work must finish custom PHP error pages plus managed php-fpm process
-  boundaries on top of the native external-FPM route action. The
+  PHP-FPM work must finish managed php-fpm process boundaries on top of the
+  native external-FPM route action. The
   native WebSocket baseline
   now covers strict `Upgrade: websocket` requests on forced HTTP/1 static
   upstream routes with shared 101 validation, prebuffer preservation, and a

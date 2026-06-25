@@ -176,12 +176,14 @@ prove full request/response behavior in a later `1.6.x` stop.
   through the native static resolver, enforces PHP in-flight/request-body
   limits, builds the shared FastCGI parameter plan, executes the staged
   FastCGI wrapper, and returns parsed native PHP responses. Managed php-fpm
-  process supervision and custom PHP error pages remain explicit native cutover
-  gates.
+  process supervision remains an explicit native cutover gate.
+- Native PHP-FPM routes now honor configured PHP custom error pages for
+  intercepted statuses by rendering the configured static error page through
+  the native static-file responder.
 - The remaining rich-proxy native gates are now documented as intentional
   parity blockers rather than hidden launch blockers: proxy cache still needs
-  native lookup/fill/stale/purge behavior, and PHP-FPM still needs custom
-  error-page handling and managed process-boundary wiring.
+  native lookup/fill/stale/purge behavior, and PHP-FPM still needs managed
+  process-boundary wiring.
 
 ## Tests
 

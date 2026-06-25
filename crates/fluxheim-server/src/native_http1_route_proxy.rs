@@ -180,6 +180,7 @@ struct NativePhpFpmRoute {
     root: PathBuf,
     fpm_root: PathBuf,
     files: NativeHttp1StaticWeb,
+    error_pages: Vec<NativePhpErrorPage>,
     vhost_name: String,
     pools: Vec<Arc<fluxheim_php_fpm::PhpFpmPool>>,
     next_endpoint: Arc<AtomicUsize>,
@@ -193,12 +194,21 @@ impl PartialEq for NativePhpFpmRoute {
             && self.root == other.root
             && self.fpm_root == other.fpm_root
             && self.files == other.files
+            && self.error_pages == other.error_pages
             && self.vhost_name == other.vhost_name
     }
 }
 
 #[cfg(feature = "php-fpm")]
 impl Eq for NativePhpFpmRoute {}
+
+#[cfg(feature = "php-fpm")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NativePhpErrorPage {
+    status: u16,
+    path: String,
+    web: NativeHttp1StaticWeb,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct NativeHttp1RouteRedirect {
@@ -1709,11 +1719,6 @@ impl NativePhpFpmRoute {
                 NativeHttp1ProxyConfigError::PhpFpm,
             ));
         }
-        if !config.error_pages.is_empty() {
-            return Err(NativeHttp1RouteProxyConfigError::Proxy(
-                NativeHttp1ProxyConfigError::PhpFpm,
-            ));
-        }
         let scope = scope.to_string();
         let root = native_php_root(&scope, config).map_err(|_| {
             NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::PhpFpm)
@@ -1731,6 +1736,9 @@ impl NativePhpFpmRoute {
         })
         .map_err(|_| NativeHttp1RouteProxyConfigError::StaticWeb)?
         .ok_or(NativeHttp1RouteProxyConfigError::StaticWeb)?;
+        let error_pages = native_php_error_pages_from_config(config).map_err(|_| {
+            NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::PhpFpm)
+        })?;
         let mut runtime_config = config.clone();
         let pools = fluxheim_php_fpm::php_fpm_keepalive_pools_from_config(
             &runtime_config,
@@ -1744,6 +1752,7 @@ impl NativePhpFpmRoute {
             root,
             fpm_root,
             files,
+            error_pages,
             vhost_name: vhost_name.to_owned(),
             pools,
             next_endpoint: Arc::new(AtomicUsize::new(0)),
@@ -1840,14 +1849,46 @@ impl NativePhpFpmRoute {
             }) => response,
             Ok(NativePhpResponsePlan {
                 response,
-                intercept_status: Some(_),
-            }) => response,
+                intercept_status: Some(status),
+            }) => self
+                .error_page_response(&request, status)
+                .unwrap_or(response),
             Err(error) => {
                 log::warn!(target: "fluxheim::native_http1", "native php-fpm request failed: {error}");
                 NativeHttp1Response::new(502, "Bad Gateway", b"php-fpm failed\n").close_connection()
             }
         }
     }
+
+    fn error_page_response(
+        &self,
+        request: &NativeHttp1Request,
+        status: u16,
+    ) -> Option<NativeHttp1Response> {
+        self.error_pages
+            .iter()
+            .find(|page| page.status == status)
+            .and_then(|page| page.web.handle_error_page(request, &page.path, status))
+            .map(NativeHttp1Response::close_connection)
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn native_php_error_pages_from_config(
+    config: &fluxheim_config::PhpConfig,
+) -> Result<Vec<NativePhpErrorPage>, NativeHttp1ProxyConfigError> {
+    let mut pages = Vec::with_capacity(config.error_pages.len());
+    for page in &config.error_pages {
+        let web = NativeHttp1StaticWeb::from_config(&page.web)
+            .map_err(|_| NativeHttp1ProxyConfigError::ErrorPages)?
+            .ok_or(NativeHttp1ProxyConfigError::ErrorPages)?;
+        pages.push(NativePhpErrorPage {
+            status: page.status,
+            path: page.path.clone(),
+            web,
+        });
+    }
+    Ok(pages)
 }
 
 #[cfg(feature = "php-fpm")]
