@@ -114,6 +114,10 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   `"http1-and-http2"`. Pure HTTP/1 native proxy configs remain eligible, while
   the HTTP/2 preview report explicitly records production listener dispatch as
   blocking until the multi-stream downstream proxy adapter is wired.
+- The machine-readable native cutover target table now points the downstream
+  HTTP/2 blocker at the final rich-proxy parity release instead of the earlier
+  preview milestone, keeping `fluxheim-config-tester --runtime-cutover` output
+  consistent with the current Pingora-exit plan.
 - Native PHP-FPM routes now support Fluxheim-managed php-fpm process ownership
   through `fluxheim-php-fpm`, not the root crate. Managed routes create the
   private php-fpm config, validate the php-fpm binary path against symlink and

@@ -139,6 +139,11 @@ fn native_runtime_cutover_summary_blocks_tls_http2_alpn_until_downstream_dispatc
 
     assert!(plan.downstream_http2_required());
     assert!(blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp2));
+    assert!(
+        plan.native_runtime_cutover_summary()
+            .to_tsv()
+            .contains("native-http2\tnative HTTP/2 downstream parity\t1.6.33\n")
+    );
 }
 
 #[test]
