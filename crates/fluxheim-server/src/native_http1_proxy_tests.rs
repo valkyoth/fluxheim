@@ -1686,6 +1686,40 @@ fn native_proxy_config_accepts_static_upstreams_with_disabled_health_check() {
     assert_eq!(native.upstream_slots(), &[0, 1]);
 }
 
+#[cfg(feature = "load-balancer")]
+#[test]
+fn native_proxy_config_accepts_scoped_advanced_static_load_balance_policy() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+        upstream_priority_groups: vec![100, 50],
+        upstream_max_in_flight: vec![1, 2],
+        upstream_aliases: vec!["primary-a".to_owned(), "primary-b".to_owned()],
+        backup_upstreams: vec!["127.0.0.1:3001".to_owned()],
+        load_balance: fluxheim_config::LoadBalanceConfig {
+            health_check: fluxheim_config::LoadBalanceHealthCheckConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let (native, service) = NativeHttp1Proxy::from_proxy_config_with_native_load_balancer(
+        "advanced-static",
+        "advanced.test",
+        None,
+        &proxy,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap()
+    .expect("native proxy");
+
+    assert_eq!(native.upstreams().len(), 2);
+    assert!(service.is_none());
+}
+
 #[test]
 fn native_proxy_config_rejects_custom_disabled_health_check_policy() {
     let proxy = fluxheim_config::ProxyConfig {

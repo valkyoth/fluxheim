@@ -1543,6 +1543,9 @@ fn proxy_requires_advanced_load_balancer(
     if !native_load_balancer_pool_configured(proxy) {
         return false;
     }
+    if native_load_balancer_enabled {
+        return false;
+    }
     if !native_load_balancer_enabled
         && !native_static_load_balance_config_supported(&proxy.load_balance)
     {

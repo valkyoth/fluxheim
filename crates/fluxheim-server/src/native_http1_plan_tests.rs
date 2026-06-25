@@ -1708,13 +1708,25 @@ fn server_plan_accepts_native_http1_proxy_candidate_with_vhost_redirect() {
 }
 
 #[test]
-fn server_plan_rejects_native_http1_proxy_candidate_with_advanced_load_balance_policy() {
+fn server_plan_tracks_native_http1_proxy_candidate_with_advanced_load_balance_policy() {
     let mut config = Config::default();
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];
     config.proxy.upstream_priority_groups = vec![0, 1];
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
 
+    #[cfg(feature = "load-balancer")]
+    {
+        assert_eq!(
+            plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+            None
+        );
+        assert_eq!(
+            plan.native_http1_proxy_cutover_summary().status(),
+            NativeHttp1ProxyCutoverStatus::NativeReady
+        );
+    }
+    #[cfg(not(feature = "load-balancer"))]
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
         Some(NativeHttp1ProxyConfigError::LoadBalancing)

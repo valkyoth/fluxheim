@@ -215,6 +215,9 @@ tracked for future module lines.
 - During the `1.6.32` native runtime cutover, static native HTTP proxy pools
   with active load-balancer health checks share one `UpstreamLoadBalancer`
   instance between request selection and the native background health service.
+  Static advanced pool policy, including priority groups, locality preference,
+  per-upstream in-flight caps, aliases/tags, backup, drain, disabled members,
+  persistence, and passive health, is evaluated by that same native selector.
   Dynamic discovery pools remain on the compatibility path until their refresh
   state is wired into the native request path with the same shared-state
   guarantee.
