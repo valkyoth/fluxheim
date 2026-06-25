@@ -2226,6 +2226,96 @@ async fn native_route_proxy_inherits_base_request_and_response_headers_from_conf
     );
 }
 
+#[tokio::test]
+async fn native_route_proxy_disabled_request_headers_suppress_inherited_policy() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(request).unwrap();
+        assert!(
+            !request
+                .lines()
+                .any(|line| line.eq_ignore_ascii_case("x-root-request: native")),
+            "disabled route request policy forwarded inherited header: {request:?}"
+        );
+        assert!(
+            !request
+                .lines()
+                .any(|line| line.to_ascii_lowercase().starts_with("x-forwarded-for:")),
+            "disabled route request policy forwarded client IP header: {request:?}"
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 8\r\n\r\ndisabled")
+            .await
+            .unwrap();
+    });
+    let mut base_headers = fluxheim_config::HeaderPolicyConfig::default();
+    base_headers
+        .request
+        .set
+        .insert("x-root-request".to_owned(), "native".to_owned());
+    let mut route_headers = fluxheim_config::VhostHeaderPolicyConfig::default();
+    route_headers.request.enabled = Some(false);
+    let route_config = fluxheim_config::RouteConfig {
+        name: "api".to_owned(),
+        path_exact: None,
+        path_prefix: Some("/api/".to_owned()),
+        path_regex: None,
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: None,
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: None,
+        proxy: Some(fluxheim_config::ProxyConfig {
+            upstreams: vec![upstream.to_string()],
+            ..Default::default()
+        }),
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: route_headers,
+    };
+    let route = NativeHttp1RouteProxyRoute::from_config_with_inherited(
+        &route_config,
+        Some(proxy_for(upstream)),
+        &base_headers,
+        None,
+        "route.test",
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_request(
+        proxy,
+        "GET /api/item HTTP/1.1\r\nHost: route.test\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("disabled"));
+}
+
 #[cfg(feature = "compression-gzip")]
 #[tokio::test]
 async fn native_route_proxy_applies_gzip_route_compression() {

@@ -907,7 +907,7 @@ fn server_plan_accepts_static_web_route_with_memory_local_static_cache() {
 }
 
 #[test]
-fn server_plan_rejects_native_http1_route_proxy_candidate_with_disabled_request_headers() {
+fn server_plan_accepts_native_http1_route_proxy_candidate_with_disabled_request_headers() {
     let mut config = Config::default();
     let mut route_headers = fluxheim_config::VhostHeaderPolicyConfig::default();
     route_headers.request.enabled = Some(false);
@@ -960,7 +960,11 @@ fn server_plan_rejects_native_http1_route_proxy_candidate_with_disabled_request_
 
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::HttpPolicy)
+        None
+    );
+    assert_eq!(
+        plan.native_http1_proxy_cutover_summary().status(),
+        NativeHttp1ProxyCutoverStatus::NativeReady
     );
 }
 

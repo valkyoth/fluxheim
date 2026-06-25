@@ -85,6 +85,9 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   as native-ready, matching the native request-header policy implementation
   instead of keeping that supported configuration behind the compatibility
   adapter.
+- Native HTTP/1 route and vhost planning now also treats disabled request
+  header overlays as native-ready. Runtime coverage proves a disabled route
+  overlay suppresses inherited request-header mutations before proxying.
 - The server crate now has a Fluxheim-owned native HTTP/1 proxy runtime boundary
   that binds proxy HTTP listeners from the native launch plan, builds the native
   host router once, serves requests through `serve_native_http1_listener`, and

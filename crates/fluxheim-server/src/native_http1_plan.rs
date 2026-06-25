@@ -372,9 +372,9 @@ fn vhost_header_overlay_supported(headers: &fluxheim_config::VhostHeaderPolicyCo
 }
 
 fn route_request_header_policy_supported(
-    request: &fluxheim_config::RequestHeaderPolicyOverlayConfig,
+    _request: &fluxheim_config::RequestHeaderPolicyOverlayConfig,
 ) -> bool {
-    request.enabled != Some(false)
+    true
 }
 
 fn route_response_header_policy_supported(
