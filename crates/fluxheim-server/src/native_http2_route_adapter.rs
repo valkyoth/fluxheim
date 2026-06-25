@@ -40,13 +40,6 @@ where
         request: NativeHttp2Request,
     ) -> Pin<Box<dyn Future<Output = NativeHttp2Response> + Send + 'a>> {
         Box::pin(async move {
-            if request.trailers.is_some() {
-                return native_http1_response_to_http2(NativeHttp1Response::new(
-                    501,
-                    "Not Implemented",
-                    b"HTTP/2 request trailers are not wired into native proxy context\n",
-                ));
-            }
             let Some(mut request) =
                 native_http2_request_to_http1(request, self.peer_addr, &self.context)
             else {
@@ -79,7 +72,7 @@ fn native_http2_request_to_http1(
         uri,
         headers,
         body,
-        trailers: _,
+        trailers,
     } = request;
     let mut owned_headers = Vec::with_capacity(headers.len().saturating_add(1));
     for (name, value) in &headers {
@@ -109,7 +102,21 @@ fn native_http2_request_to_http1(
         version: fluxheim_protocol::Http1Version::Http11,
         headers: owned_headers,
         body: body.to_vec(),
+        trailers: native_http2_headers_to_native(trailers.as_ref())?,
     })
+}
+
+fn native_http2_headers_to_native(
+    headers: Option<&http::HeaderMap>,
+) -> Option<Vec<(String, String)>> {
+    let Some(headers) = headers else {
+        return Some(Vec::new());
+    };
+    let mut owned = Vec::with_capacity(headers.len());
+    for (name, value) in headers {
+        owned.push((name.as_str().to_owned(), value.to_str().ok()?.to_owned()));
+    }
+    Some(owned)
 }
 
 fn native_http1_response_to_http2(response: NativeHttp1Response) -> NativeHttp2Response {
@@ -146,7 +153,11 @@ mod tests {
             uri: "https://native.test/upload?x=1".parse().unwrap(),
             headers,
             body: zeroize::Zeroizing::new(b"body".to_vec()),
-            trailers: None,
+            trailers: Some({
+                let mut trailers = http::HeaderMap::new();
+                trailers.insert("grpc-status", http::HeaderValue::from_static("0"));
+                trailers
+            }),
         };
 
         let converted = native_http2_request_to_http1(
@@ -162,6 +173,10 @@ mod tests {
         assert_eq!(converted.method, "POST");
         assert_eq!(converted.target, "/upload?x=1");
         assert_eq!(converted.body, b"body");
+        assert_eq!(
+            converted.trailers,
+            vec![("grpc-status".to_owned(), "0".to_owned())]
+        );
         assert!(converted.downstream_tls);
         assert!(
             converted

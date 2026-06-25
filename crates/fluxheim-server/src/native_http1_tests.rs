@@ -108,6 +108,7 @@ fn native_http1_cache_view_request(
         version: Http1Version::Http11,
         headers,
         body: Vec::new(),
+        trailers: Vec::new(),
     }
 }
 

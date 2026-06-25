@@ -40,6 +40,7 @@ pub struct NativeHttp1Request {
     pub version: Http1Version,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+    pub trailers: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -939,6 +940,7 @@ fn owned_request_from_head(
         version: head.version,
         headers: owned_headers(&head.headers),
         body: Vec::new(),
+        trailers: Vec::new(),
     }
 }
 

@@ -57,6 +57,7 @@ fn request() -> NativeHttp1Request {
             ("Accept".to_owned(), "text/plain".to_owned()),
         ],
         body: Vec::new(),
+        trailers: Vec::new(),
     }
 }
 

@@ -368,6 +368,7 @@ async fn native_http2_route_adapter_serves_native_http1_handler() {
                     .find(|(name, _)| name.eq_ignore_ascii_case("host"))
                     .map(|(_, value)| value.clone()),
                 request.body,
+                request.trailers,
             ));
             NativeHttp1Response::new(200, "OK", b"adapter-ok")
                 .with_header("set-cookie", "a=1")
@@ -400,8 +401,11 @@ async fn native_http2_route_adapter_serves_native_http1_handler() {
         .unwrap();
     let (response, mut send_stream) = client.send_request(request, false).unwrap();
     send_stream
-        .send_data(bytes::Bytes::from_static(b"body"), true)
+        .send_data(bytes::Bytes::from_static(b"body"), false)
         .unwrap();
+    let mut trailers = http::HeaderMap::new();
+    trailers.insert("grpc-status", http::HeaderValue::from_static("0"));
+    send_stream.send_trailers(trailers).unwrap();
     let response = response.await.unwrap();
     let cookies = response
         .headers()
@@ -421,7 +425,8 @@ async fn native_http2_route_adapter_serves_native_http1_handler() {
             "POST".to_owned(),
             "/upload?x=1".to_owned(),
             Some("native.test".to_owned()),
-            b"body".to_vec()
+            b"body".to_vec(),
+            vec![("grpc-status".to_owned(), "0".to_owned())]
         ))
     );
     drop(client);

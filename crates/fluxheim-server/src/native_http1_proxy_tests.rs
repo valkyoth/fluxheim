@@ -292,6 +292,7 @@ fn native_proxy_test_request() -> NativeHttp1Request {
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![("host".to_owned(), "proxy.test".to_owned())],
         body: Vec::new(),
+        trailers: Vec::new(),
     }
 }
 

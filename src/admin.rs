@@ -4414,6 +4414,7 @@ mod tests {
             version: fluxheim_protocol::Http1Version::Http11,
             headers,
             body: Vec::new(),
+            trailers: Vec::new(),
         }
     }
 

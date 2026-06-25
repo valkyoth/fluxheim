@@ -1508,13 +1508,37 @@ fn native_http2_upstream_request(
         HeaderValue::from_str(&fluxheim_protocol::append_fluxheim_via_value(&via))
             .map_err(|_| Http1ParseError::InvalidHeaderValue)?,
     );
+    let trailers = native_http2_upstream_trailers(request)?;
     Ok(NativeHttp2UpstreamRequest {
         method,
         uri,
         headers,
         body: Zeroizing::new(request.body.clone()),
-        trailers: None,
+        trailers,
     })
+}
+
+fn native_http2_upstream_trailers(
+    request: &NativeHttp1Request,
+) -> Result<Option<HeaderMap>, NativeHttp1Error> {
+    if request.trailers.is_empty() {
+        return Ok(None);
+    }
+    let mut trailers = HeaderMap::new();
+    for (name, value) in &request.trailers {
+        if upstream_hop_by_hop_header(name, &[]) || upstream_owned_header(name) {
+            continue;
+        }
+        if !valid_upstream_request_header(name, value) {
+            return Err(Http1ParseError::InvalidHeaderValue.into());
+        }
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|_| Http1ParseError::InvalidHeaderName)?;
+        let value =
+            HeaderValue::from_str(value).map_err(|_| Http1ParseError::InvalidHeaderValue)?;
+        trailers.append(name, value);
+    }
+    Ok((!trailers.is_empty()).then_some(trailers))
 }
 
 const fn upstream_h2_scheme(upstream_tls: bool) -> &'static str {
@@ -1665,10 +1689,12 @@ fn timeout_error(message: &'static str) -> NativeHttp1Error {
 mod tests {
     use super::{
         h2c_upgrade_error_can_fallback, h2c_upgrade_settings_header, native_http2_error,
-        native_http2_response_to_http1, validate_switching_protocols_response,
+        native_http2_response_to_http1, native_http2_upstream_request,
+        validate_switching_protocols_response,
     };
     use crate::{
-        DownstreamHttp2Policy, NativeHttp1Error, NativeHttp2StackError, NativeHttp2UpstreamResponse,
+        DownstreamHttp2Policy, NativeHttp1Error, NativeHttp1Request, NativeHttp2StackError,
+        NativeHttp2UpstreamResponse,
     };
 
     #[test]
@@ -1771,5 +1797,36 @@ mod tests {
         assert!(!header_names.contains(&"proxy-connection"));
         assert!(!header_names.contains(&"te"));
         assert!(!header_names.contains(&"trailer"));
+    }
+
+    #[test]
+    fn h2_upstream_request_preserves_native_request_trailers() {
+        let request = NativeHttp1Request {
+            method: "POST".to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: true,
+            tls_identity: None,
+            geo_context: None,
+            target: "/grpc.Service/Call".to_owned(),
+            version: fluxheim_protocol::Http1Version::Http11,
+            headers: vec![
+                ("host".to_owned(), "origin.test".to_owned()),
+                ("content-type".to_owned(), "application/grpc".to_owned()),
+            ],
+            body: b"request".to_vec(),
+            trailers: vec![("grpc-status".to_owned(), "0".to_owned())],
+        };
+
+        let request = native_http2_upstream_request(&request, "origin.test", "https").unwrap();
+        let trailers = request.trailers.as_ref().expect("trailers");
+
+        assert_eq!(
+            trailers
+                .get("grpc-status")
+                .and_then(|value| value.to_str().ok()),
+            Some("0")
+        );
     }
 }

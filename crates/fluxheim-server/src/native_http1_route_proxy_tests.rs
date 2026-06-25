@@ -359,6 +359,7 @@ fn route_test_request(path: &str) -> NativeHttp1Request {
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![("host".to_owned(), "route.test".to_owned())],
         body: Vec::new(),
+        trailers: Vec::new(),
     }
 }
 
