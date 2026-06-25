@@ -12,8 +12,9 @@ fastcgi-client = { version = "0.11.1", default-features = false, features = ["ru
 fluxheim-config = { path = "../fluxheim-config", features = ["php-fpm"] }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 getrandom = "0.4.3"
+log = "0.4.33"
 percent-encoding = "2.3.2"
-rustix = { version = "1.1.4", features = ["fs"] }
+rustix = { version = "1.1.4", features = ["fs", "process"] }
 tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-util", "net", "rt", "time"] }
 
 [dev-dependencies]

@@ -1194,6 +1194,7 @@ dependencies = [
  "fluxheim-config",
  "fluxheim-protocol",
  "getrandom 0.4.3",
+ "log",
  "percent-encoding",
  "rustix",
  "tempfile",

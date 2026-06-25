@@ -103,10 +103,18 @@ prove full request/response behavior in a later `1.6.x` stop.
 - Native OpenSSL proxy HTTPS startup now binds through the Fluxheim-owned
   OpenSSL listener path for OpenSSL-only/FIPS builds when `tls.alpn = "http1"`.
   It builds its downstream acceptor through `fluxheim-tls`, preserves the
-  configured TLS policy and client-auth settings, installs SNI certificate
-  selection through OpenSSL's callback API, and exposes the certificate store to
-  the root native runtime so ACME renewal and local certificate reloads no
-  longer require the Pingora listener adapter.
+  configured certificate and client-auth policy, and keeps HTTP/2 ALPN
+  fail-closed until the native HTTP/2 listener dispatch is enabled. The native
+  OpenSSL listener also preserves configured TLS policy and client-auth
+  settings, installs SNI certificate selection through OpenSSL's callback API,
+  and exposes the certificate store to the root native runtime so ACME renewal
+  and local certificate reloads no longer require the Pingora listener adapter.
+- Native PHP-FPM routes now support Fluxheim-managed php-fpm process ownership
+  through `fluxheim-php-fpm`, not the root crate. Managed routes create the
+  private php-fpm config, validate the php-fpm binary path against symlink and
+  insecure-parent traversal, start php-fpm on a private Unix socket, keep the
+  process owner alive for the native route lifetime, and retain the bounded
+  watchdog/restart behavior used by the legacy runtime.
 - Native HTTP/1 proxy routing now shares Fluxheim-owned
   `UpstreamLoadBalancer` state with the native load-balancer refresh service.
   Static advanced pool policy, active health, dynamic file/HTTP/DNS discovery,

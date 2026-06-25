@@ -182,6 +182,7 @@ struct NativePhpFpmRoute {
     files: NativeHttp1StaticWeb,
     error_pages: Vec<NativePhpErrorPage>,
     vhost_name: String,
+    _managed_fpm: Option<Arc<fluxheim_php_fpm::ManagedPhpFpmProcess>>,
     pools: Vec<Arc<fluxheim_php_fpm::PhpFpmPool>>,
     next_endpoint: Arc<AtomicUsize>,
     in_flight: Arc<Semaphore>,
@@ -1714,11 +1715,6 @@ impl NativePhpFpmRoute {
         if !config.enabled {
             return Ok(None);
         }
-        if !matches!(config.fpm.mode, fluxheim_config::PhpFpmMode::External) {
-            return Err(NativeHttp1RouteProxyConfigError::Proxy(
-                NativeHttp1ProxyConfigError::PhpFpm,
-            ));
-        }
         let scope = scope.to_string();
         let root = native_php_root(&scope, config).map_err(|_| {
             NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::PhpFpm)
@@ -1740,6 +1736,11 @@ impl NativePhpFpmRoute {
             NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::PhpFpm)
         })?;
         let mut runtime_config = config.clone();
+        let managed_fpm =
+            fluxheim_php_fpm::managed_php_fpm_from_config(&scope, metric_pool, &mut runtime_config)
+                .map_err(|_| {
+                    NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::PhpFpm)
+                })?;
         let pools = fluxheim_php_fpm::php_fpm_keepalive_pools_from_config(
             &runtime_config,
             vhost_name,
@@ -1754,6 +1755,7 @@ impl NativePhpFpmRoute {
             files,
             error_pages,
             vhost_name: vhost_name.to_owned(),
+            _managed_fpm: managed_fpm,
             pools,
             next_endpoint: Arc::new(AtomicUsize::new(0)),
             in_flight: Arc::new(Semaphore::new(config.max_in_flight)),

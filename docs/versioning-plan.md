@@ -2847,16 +2847,17 @@ available for the stabilization/security-only follow-up.
   php-fpm route action that resolves scripts, enforces in-flight/body limits,
   builds FastCGI params, executes Unix/TCP endpoints, and returns parsed native
   PHP responses. Add native PHP custom error-page rendering for intercepted
-  statuses through the native static-file responder. Keep managed php-fpm
-  supervision fail-closed until its final native adapter lands.
+  statuses through the native static-file responder. Move managed php-fpm
+  process ownership into `fluxheim-php-fpm`, wire managed route/vhost PHP-FPM
+  configs through the native route action, and keep the managed binary
+  path-safety, private config-file, socket, cleanup, and watchdog boundaries
+  tested inside the extracted crate.
 - `v1.6.33`: close the final rich-proxy parity gates and remove the final
   Pingora runtime/listener/TLS adapter crates from normal builds. Cache work
   must cover lookup/fill/stale, Vary/Range/conditional semantics, peer-fill
   guardrails, purge visibility, and root/vhost/route cache policy readiness
   only after the native adapter owns the full request/response/cache-key path.
-  PHP-FPM work must finish managed php-fpm process boundaries on top of the
-  native external-FPM route action. The
-  native WebSocket baseline
+  The native WebSocket baseline
   now covers strict `Upgrade: websocket` requests on forced HTTP/1 static
   upstream routes with shared 101 validation, prebuffer preservation, and a
   bounded bidirectional tunnel; native load-balanced WebSocket pools select one
