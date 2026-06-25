@@ -2836,11 +2836,13 @@ available for the stabilization/security-only follow-up.
   PHP-FPM work must cover SCRIPT_NAME/PATH_INFO safety, deny prefixes, spool
   limits, TCP/Unix upstream policies, retry/failover, custom PHP error pages,
   and managed/external FPM process boundaries. WebSocket/HTTP upgrade work must
-  add an explicit native downstream hijack/tunnel shape with bounded timeouts
-  before `proxy.websocket = true` can report native-ready. This release is the
-  final Pingora-free proof release: `cargo tree`, release containers, RPM
-  builds, source builds, and focused artifacts must all prove no normal
-  Fluxheim build compiles vendored Pingora code.
+  wire the native proxy adapter onto the `1.6.32` downstream
+  connection-takeover primitive, add upstream 101 validation, and enforce
+  bounded bidirectional tunnel timeouts before `proxy.websocket = true` can
+  report native-ready. This release is the final Pingora-free proof release:
+  `cargo tree`, release containers, RPM builds, source builds, and focused
+  artifacts must all prove no normal Fluxheim build compiles vendored Pingora
+  code.
 - `v1.6.34`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak

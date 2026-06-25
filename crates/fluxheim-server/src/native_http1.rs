@@ -284,11 +284,41 @@ fn native_http1_cache_request_query<'a>(method: &str, target: &'a str) -> Option
     }
 }
 
+pub trait NativeHttp1ConnectionIo: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T> NativeHttp1ConnectionIo for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+pub type NativeHttp1ConnectionStream = Box<dyn NativeHttp1ConnectionIo>;
+
 pub trait NativeHttp1Handler: Send + Sync + 'static {
     fn handle<'a>(
         &'a self,
         request: NativeHttp1Request,
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>>;
+
+    fn handles_connection_takeover(&self, _request: &NativeHttp1Request) -> bool {
+        false
+    }
+
+    fn handle_connection_takeover<'a>(
+        &'a self,
+        _request: NativeHttp1Request,
+        mut stream: NativeHttp1ConnectionStream,
+    ) -> Pin<Box<dyn Future<Output = Result<(), NativeHttp1Error>> + Send + 'a>> {
+        Box::pin(async move {
+            write_response(
+                &mut stream,
+                NativeHttp1Response::new(
+                    501,
+                    "Not Implemented",
+                    b"connection takeover unsupported\n",
+                )
+                .close_connection(),
+                true,
+            )
+            .await
+        })
+    }
 
     fn prepare_request_context(&self, _request: &mut NativeHttp1Request) {}
 
@@ -317,7 +347,7 @@ pub async fn serve_native_http1_connection<S, H>(
     handler: Arc<H>,
 ) -> Result<(), NativeHttp1Error>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: NativeHttp1ConnectionIo + 'static,
     H: NativeHttp1Handler,
 {
     serve_native_http1_connection_with_context(
@@ -338,7 +368,7 @@ async fn serve_native_http1_connection_with_context<S, H>(
     handler: Arc<H>,
 ) -> Result<(), NativeHttp1Error>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: NativeHttp1ConnectionIo + 'static,
     H: NativeHttp1Handler,
 {
     let limits = Http1HeadLimits::from(policy);
@@ -439,6 +469,10 @@ where
         let mut request = request;
         request.body = body;
         handler.prepare_request_context(&mut request);
+        if handler.handles_connection_takeover(&request) {
+            let stream = Box::new(stream);
+            return handler.handle_connection_takeover(request, stream).await;
+        }
 
         let response = handler.handle(request).await;
         let should_close = close_after_response || response.close;
@@ -650,7 +684,7 @@ async fn serve_native_http1_proxy_protocol_connection<S, H>(
     handler: Arc<H>,
 ) -> Result<(), NativeHttp1Error>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: NativeHttp1ConnectionIo + 'static,
     H: NativeHttp1Handler,
 {
     let source = timeout(

@@ -400,25 +400,20 @@ impl NativeHttp1Proxy {
         policy: crate::DownstreamHttp1Policy,
         pool_max_idle: usize,
     ) -> Result<Option<Self>, NativeHttp1ProxyConfigError> {
-        Self::from_proxy_config_with_pool_size_and_load_balancer(
-            proxy,
-            policy,
-            pool_max_idle,
-            #[cfg(feature = "load-balancer")]
-            None,
-        )
-        .map(|result| {
-            result.map(|build| {
-                #[cfg(feature = "load-balancer")]
-                {
-                    build.0
-                }
-                #[cfg(not(feature = "load-balancer"))]
-                {
-                    build
-                }
-            })
-        })
+        #[cfg(feature = "load-balancer")]
+        {
+            Self::from_proxy_config_with_pool_size_and_load_balancer(
+                proxy,
+                policy,
+                pool_max_idle,
+                None,
+            )
+            .map(|result| result.map(|build| build.0))
+        }
+        #[cfg(not(feature = "load-balancer"))]
+        {
+            Self::from_proxy_config_with_pool_size_and_load_balancer(proxy, policy, pool_max_idle)
+        }
     }
 
     #[cfg(feature = "load-balancer")]

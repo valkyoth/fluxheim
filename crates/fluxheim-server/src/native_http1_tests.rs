@@ -14,8 +14,9 @@ use crate::serve_native_http1_openssl_listener;
 #[cfg(feature = "tls-rustls-backend")]
 use crate::serve_native_http1_rustls_listener;
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1GeoContext, NativeHttp1Handler, NativeHttp1Request,
-    NativeHttp1Response, serve_native_http1_connection, serve_native_http1_listener,
+    DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1GeoContext,
+    NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, serve_native_http1_connection,
+    serve_native_http1_listener,
 };
 
 async fn spawn_server(
@@ -317,6 +318,58 @@ impl NativeHttp1Handler for GeoContextTestHandler {
     }
 }
 
+struct ConnectionTakeoverTestHandler;
+
+impl NativeHttp1Handler for ConnectionTakeoverTestHandler {
+    fn handle<'a>(
+        &'a self,
+        _request: NativeHttp1Request,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = NativeHttp1Response> + Send + 'a>> {
+        Box::pin(async move {
+            NativeHttp1Response::new(500, "Internal Server Error", "unexpected buffered response")
+        })
+    }
+
+    fn handles_connection_takeover(&self, request: &NativeHttp1Request) -> bool {
+        request
+            .headers
+            .iter()
+            .any(|(name, value)| name.eq_ignore_ascii_case("upgrade") && value == "test")
+    }
+
+    fn handle_connection_takeover<'a>(
+        &'a self,
+        request: NativeHttp1Request,
+        mut stream: NativeHttp1ConnectionStream,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), NativeHttp1Error>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            assert_eq!(request.target, "/takeover");
+            stream
+                .write_all(
+                    b"HTTP/1.1 101 Switching Protocols\r\n\
+                      Connection: Upgrade\r\n\
+                      Upgrade: test\r\n\r\n",
+                )
+                .await
+                .map_err(NativeHttp1Error::Io)?;
+            stream.flush().await.map_err(NativeHttp1Error::Io)?;
+
+            let mut payload = [0u8; 4];
+            stream
+                .read_exact(&mut payload)
+                .await
+                .map_err(NativeHttp1Error::Io)?;
+            stream
+                .write_all(&payload)
+                .await
+                .map_err(NativeHttp1Error::Io)?;
+            stream.flush().await.map_err(NativeHttp1Error::Io)
+        })
+    }
+}
+
 #[tokio::test]
 async fn native_http1_handler_can_populate_request_context_before_handling() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -342,6 +395,53 @@ async fn native_http1_handler_can_populate_request_context_before_handling() {
 
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.ends_with("geo-context"));
+}
+
+#[tokio::test]
+async fn native_http1_handler_can_take_over_connection() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (stream, peer_addr) = listener.accept().await.unwrap();
+        serve_native_http1_connection(
+            stream,
+            Some(peer_addr),
+            DownstreamHttp1Policy::default(),
+            Arc::new(ConnectionTakeoverTestHandler),
+        )
+        .await
+        .unwrap();
+    });
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+
+    stream
+        .write_all(
+            b"GET /takeover HTTP/1.1\r\n\
+              Host: local.test\r\n\
+              Connection: Upgrade\r\n\
+              Upgrade: test\r\n\r\n",
+        )
+        .await
+        .unwrap();
+
+    let mut response = Vec::new();
+    let mut chunk = [0u8; 64];
+    loop {
+        let read = stream.read(&mut chunk).await.unwrap();
+        assert_ne!(read, 0, "connection closed before takeover response");
+        response.extend_from_slice(&chunk[..read]);
+        if response.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    let response = String::from_utf8(response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
+    assert!(response.contains("Upgrade: test\r\n"));
+
+    stream.write_all(b"pong").await.unwrap();
+    let mut echoed = [0u8; 4];
+    stream.read_exact(&mut echoed).await.unwrap();
+    assert_eq!(&echoed, b"pong");
 }
 
 #[tokio::test]

@@ -208,3 +208,8 @@ request/response behavior in a later `1.6.x` stop.
   remains a compatibility-required blocker at root, vhost, and route scope
   until the native HTTP/1 runtime has an explicit downstream upgrade/tunnel
   response shape.
+- Added the native HTTP/1 connection-takeover primitive needed for WebSocket
+  and generic HTTP upgrade work. Handlers can now opt into owning the
+  downstream stream after request parsing; the proxy still keeps
+  `proxy.websocket = true` blocked until the upstream upgrade adapter and
+  tunnel timeouts are wired on top of this primitive.
