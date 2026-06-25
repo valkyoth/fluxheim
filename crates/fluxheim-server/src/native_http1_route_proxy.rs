@@ -44,11 +44,13 @@ use fluxheim_protocol::{
 };
 
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Proxy, NativeHttp1ProxyConfigError,
-    NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb, ProxyProtocolTrustedSource,
+    DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler,
+    NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1Request, NativeHttp1Response,
+    NativeHttp1StaticWeb, ProxyProtocolTrustedSource,
 };
 #[cfg(feature = "acme")]
 use crate::{NativeHttp1AcmeHttp01Store, native_http1_acme::http_01_token_from_path};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
@@ -1736,9 +1738,123 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             .as_ref()
             .and_then(NativeHttp1Proxy::request_body_timeout)
     }
+
+    fn handles_connection_takeover(&self, request: &NativeHttp1Request) -> bool {
+        let Some((path, _)) = request_path_and_query(request) else {
+            return false;
+        };
+        if let Some(route) = self.select_route(&request.method, &path) {
+            return route.handles_connection_takeover(request);
+        }
+        self.fallback
+            .as_ref()
+            .is_some_and(|proxy| proxy.handles_connection_takeover(request))
+    }
+
+    fn handle_connection_takeover<'a>(
+        &'a self,
+        request: NativeHttp1Request,
+        prebuffered: Vec<u8>,
+        stream: NativeHttp1ConnectionStream,
+    ) -> Pin<Box<dyn Future<Output = Result<(), NativeHttp1Error>> + Send + 'a>> {
+        Box::pin(async move {
+            self.handle_connection_takeover_inner(request, prebuffered, stream)
+                .await
+        })
+    }
 }
 
 impl NativeHttp1RouteProxy {
+    async fn handle_connection_takeover_inner(
+        &self,
+        request: NativeHttp1Request,
+        prebuffered: Vec<u8>,
+        mut stream: NativeHttp1ConnectionStream,
+    ) -> Result<(), NativeHttp1Error> {
+        let Some((path, query)) = request_path_and_query(&request) else {
+            return write_takeover_rejection(&mut stream, 400, "Bad Request", b"bad request\n")
+                .await;
+        };
+        let selected_route = self.select_route(&request.method, &path);
+        let decoded_policy_route = self.select_decoded_policy_route(&request.method, &path);
+        if selected_route.is_none() && self.fallback.is_none() {
+            return write_takeover_rejection(&mut stream, 404, "Not Found", b"not found\n").await;
+        }
+        let client_ip = self.access_client_ip(&request);
+        let tls_identity = request.tls_identity.as_ref();
+        let geo_context = request.geo_context.as_ref();
+        if !self.access.allows(client_ip, tls_identity, geo_context)
+            || selected_route
+                .is_some_and(|route| !route.access.allows(client_ip, tls_identity, geo_context))
+            || decoded_policy_route
+                .is_some_and(|route| !route.access.allows(client_ip, tls_identity, geo_context))
+        {
+            return write_takeover_rejection(&mut stream, 403, "Forbidden", b"forbidden\n").await;
+        }
+        let concurrency_route = decoded_policy_route.or(selected_route);
+        let _concurrency_permits = match self.acquire_concurrency_permits(concurrency_route).await {
+            Ok(permits) => permits,
+            Err(status) => {
+                return write_takeover_rejection(
+                    &mut stream,
+                    status,
+                    "Too Many Requests",
+                    b"too many requests\n",
+                )
+                .await;
+            }
+        };
+        match self.check_rate_limits(concurrency_route, client_ip) {
+            NativeRateLimitDecision::Allow => {}
+            NativeRateLimitDecision::Delay(delay) => tokio::time::sleep(delay).await,
+            NativeRateLimitDecision::Reject(status) => {
+                return write_takeover_rejection(
+                    &mut stream,
+                    status,
+                    "Too Many Requests",
+                    b"rate limited\n",
+                )
+                .await;
+            }
+        }
+        if let Some(route) = selected_route {
+            let mut request = match rewrite_route_request(request, route, &path, query.as_deref()) {
+                Some(request) => request,
+                None => {
+                    return write_takeover_rejection(
+                        &mut stream,
+                        400,
+                        "Bad Request",
+                        b"bad request\n",
+                    )
+                    .await;
+                }
+            };
+            if route
+                .max_request_body_bytes
+                .is_some_and(|limit| (request.body.len() as u64) > limit)
+            {
+                return write_takeover_rejection(
+                    &mut stream,
+                    413,
+                    "Payload Too Large",
+                    b"payload too large\n",
+                )
+                .await;
+            }
+            route.request_headers.apply(&mut request);
+            return route
+                .handle_connection_takeover(request, prebuffered, stream)
+                .await;
+        }
+        if let Some(proxy) = &self.fallback {
+            return proxy
+                .handle_connection_takeover(request, prebuffered, stream)
+                .await;
+        }
+        write_takeover_rejection(&mut stream, 404, "Not Found", b"not found\n").await
+    }
+
     fn fallback_web_response(
         &self,
         request: &NativeHttp1Request,
@@ -2016,6 +2132,83 @@ impl NativeHttp1RouteProxyRoute {
         }
         response
     }
+
+    fn handles_connection_takeover(&self, request: &NativeHttp1Request) -> bool {
+        match &self.action {
+            NativeHttp1RouteAction::Proxy(proxy) => proxy.handles_connection_takeover(request),
+            #[cfg(feature = "acme")]
+            NativeHttp1RouteAction::AcmeHttp01(_)
+            | NativeHttp1RouteAction::Redirect(_)
+            | NativeHttp1RouteAction::StaticWeb(_) => false,
+            #[cfg(not(feature = "acme"))]
+            NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => false,
+        }
+    }
+
+    async fn handle_connection_takeover(
+        &self,
+        request: NativeHttp1Request,
+        prebuffered: Vec<u8>,
+        stream: NativeHttp1ConnectionStream,
+    ) -> Result<(), NativeHttp1Error> {
+        match &self.action {
+            NativeHttp1RouteAction::Proxy(proxy) => {
+                proxy
+                    .handle_connection_takeover(request, prebuffered, stream)
+                    .await
+            }
+            #[cfg(feature = "acme")]
+            NativeHttp1RouteAction::AcmeHttp01(_)
+            | NativeHttp1RouteAction::Redirect(_)
+            | NativeHttp1RouteAction::StaticWeb(_) => {
+                let mut stream = stream;
+                write_takeover_rejection(
+                    &mut stream,
+                    400,
+                    "Bad Request",
+                    b"unsupported upgrade target\n",
+                )
+                .await
+            }
+            #[cfg(not(feature = "acme"))]
+            NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => {
+                let mut stream = stream;
+                write_takeover_rejection(
+                    &mut stream,
+                    400,
+                    "Bad Request",
+                    b"unsupported upgrade target\n",
+                )
+                .await
+            }
+        }
+    }
+}
+
+async fn write_takeover_rejection<S>(
+    stream: &mut S,
+    status: u16,
+    reason: &str,
+    body: &[u8],
+) -> Result<(), NativeHttp1Error>
+where
+    S: tokio::io::AsyncWrite + Unpin,
+{
+    stream
+        .write_all(
+            format!(
+                "HTTP/1.1 {status} {reason}\r\n\
+                 Connection: close\r\n\
+                 Content-Length: {}\r\n\
+                 Content-Type: text/plain\r\n\r\n",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .await?;
+    stream.write_all(body).await?;
+    stream.flush().await?;
+    Ok(())
 }
 
 #[cfg(feature = "acme")]

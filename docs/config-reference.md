@@ -1715,10 +1715,9 @@ timeout, and upstream request-body/write timeout. Optional and required
 second-based proxy/PHP/load-balancer health-check timeout fields reject `0` and
 values above `86400` seconds so a malformed config cannot pin connections or
 workers indefinitely.
-`websocket = true` enables HTTP/1.1 upgrade forwarding for websocket-style or
-other token-based upgrade requests on that proxy block. Fluxheim validates this
-with `upstream_http_version = "http1"` because HTTP/2 origins do not use the
-same hop-by-hop upgrade mechanism.
+`websocket = true` enables HTTP/1.1 WebSocket upgrade forwarding on that proxy
+block. Fluxheim validates this with `upstream_http_version = "http1"` because
+HTTP/2 origins do not use the same hop-by-hop upgrade mechanism.
 `downstream_read_timeout_secs`,
 `downstream_write_timeout_secs`,
 `downstream_total_response_timeout_secs`, and
@@ -1748,13 +1747,14 @@ that limit. These service-level caps are applied before vhost routing because
 HTTP/2 negotiation happens before a `Host`/`:authority` value can be trusted.
 
 When `websocket = true` and the downstream request contains a valid
-`Connection: Upgrade` token plus a valid `Upgrade` token, Fluxheim forwards the
-request upstream with `Connection: upgrade` and the downstream upgrade token.
-Upgrade requests bypass proxy cache policy and should normally use route-level
-read/send timeouts sized for long-lived connections. Leave `websocket = false`
-on normal HTTP routes; Fluxheim strips HTTP/1 `Connection` and `Upgrade`
-request headers in that mode so normal proxy routes cannot tunnel upgraded
-protocols accidentally.
+`Connection: Upgrade` token, `Upgrade: websocket`, one `Sec-WebSocket-Key`,
+and `Sec-WebSocket-Version: 13`, Fluxheim forwards the request upstream with a
+canonical `Connection: upgrade` and `Upgrade: websocket`. Upgrade requests
+bypass proxy cache policy and should normally use route-level read/send
+timeouts sized for long-lived connections. Leave `websocket = false` on normal
+HTTP routes; Fluxheim strips HTTP/1 `Connection` and `Upgrade` request headers
+in that mode so normal proxy routes cannot tunnel upgraded protocols
+accidentally.
 
 `[proxy.auth_request]` is Fluxheim's NGINX-style external authorization hook for
 proxy actions. When enabled, Fluxheim sends a bounded `GET` subrequest to `url`

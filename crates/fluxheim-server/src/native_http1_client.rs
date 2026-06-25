@@ -30,8 +30,8 @@ use crate::native_http2_client::{
     native_http2_upstream_client_on_io_with_keepalive, send_native_http2_upstream_request,
 };
 use crate::{
-    DownstreamHttp1Policy, DownstreamHttp2Policy, NativeHttp1Error, NativeHttp1Request,
-    NativeHttp1Response, NativeHttp2StackError, NativeHttp2UpstreamRequest,
+    DownstreamHttp1Policy, DownstreamHttp2Policy, NativeHttp1ConnectionStream, NativeHttp1Error,
+    NativeHttp1Request, NativeHttp1Response, NativeHttp2StackError, NativeHttp2UpstreamRequest,
     NativeHttp2UpstreamResponse,
 };
 
@@ -522,6 +522,55 @@ impl NativeHttp1Upstream {
             &request.method,
         )
         .await
+    }
+
+    pub(crate) async fn websocket_tunnel(
+        &self,
+        request: &NativeHttp1Request,
+        prebuffered: Vec<u8>,
+        mut downstream: NativeHttp1ConnectionStream,
+    ) -> Result<(), NativeHttp1Error> {
+        let mut upstream = self.connect_stream(request).await?;
+        timeout(
+            self.write_timeout,
+            write_websocket_upgrade_request(&mut upstream, &self.authority, request),
+        )
+        .await
+        .map_err(|_| timeout_error("native WebSocket upstream write timeout"))??;
+        let response_head = timeout(
+            self.read_timeout,
+            read_upstream_response_head(
+                &mut upstream,
+                websocket_upgrade_response_head_limits(self.max_head_bytes),
+            ),
+        )
+        .await
+        .map_err(|_| timeout_error("native WebSocket upstream upgrade response timeout"))??;
+        validate_websocket_upgrade_response(
+            &response_head,
+            websocket_upgrade_response_head_limits(self.max_head_bytes),
+        )?;
+        let parsed = parsed_upstream_response_head(
+            &response_head,
+            websocket_upgrade_response_head_limits(self.max_head_bytes),
+        )?;
+        let head_len = parsed.head_len;
+        downstream.write_all(&response_head[..head_len]).await?;
+        if response_head.len() > head_len {
+            downstream.write_all(&response_head[head_len..]).await?;
+        }
+        downstream.flush().await?;
+        if !prebuffered.is_empty() {
+            upstream.write_all(&prebuffered).await?;
+            upstream.flush().await?;
+        }
+        timeout(
+            self.read_timeout,
+            tokio::io::copy_bidirectional(&mut upstream, &mut downstream),
+        )
+        .await
+        .map_err(|_| timeout_error("native WebSocket tunnel timeout"))??;
+        Ok(())
     }
 
     async fn send_http2(
@@ -1028,6 +1077,34 @@ fn validate_h2c_upgrade_response(
     )
 }
 
+fn websocket_upgrade_response_head_limits(max_head_bytes: usize) -> Http1HeadLimits {
+    Http1HeadLimits {
+        max_head_bytes,
+        ..Http1HeadLimits::default()
+    }
+}
+
+fn validate_websocket_upgrade_response(
+    head: &[u8],
+    limits: Http1HeadLimits,
+) -> Result<(), NativeHttp1Error> {
+    validate_switching_protocols_response(
+        head,
+        limits,
+        "websocket",
+        "native WebSocket upgrade was not accepted",
+        "native WebSocket upgrade response did not confirm websocket",
+    )?;
+    let head = parsed_upstream_response_head(head, limits)?;
+    if !http1_headers_contain_token(&head.headers, "connection", "upgrade") {
+        return Err(NativeHttp1Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native WebSocket upgrade response did not confirm connection upgrade",
+        )));
+    }
+    Ok(())
+}
+
 fn validate_switching_protocols_response(
     head: &[u8],
     limits: Http1HeadLimits,
@@ -1334,6 +1411,46 @@ where
     Ok(())
 }
 
+async fn write_websocket_upgrade_request<S>(
+    stream: &mut S,
+    authority: &str,
+    request: &NativeHttp1Request,
+) -> Result<(), NativeHttp1Error>
+where
+    S: AsyncWrite + Unpin,
+{
+    if !request.body.is_empty() {
+        return Err(NativeHttp1Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native WebSocket upgrade request body is not supported",
+        )));
+    }
+    let target = upstream_origin_target(request)?;
+    stream
+        .write_all(format!("{} {target} HTTP/1.1\r\n", request.method).as_bytes())
+        .await?;
+    stream
+        .write_all(format!("host: {}\r\n", valid_request_host(request, authority)?).as_bytes())
+        .await?;
+    stream.write_all(b"connection: Upgrade\r\n").await?;
+    stream.write_all(b"upgrade: websocket\r\n").await?;
+    for (name, value) in &request.headers {
+        if upstream_websocket_owned_header(name) {
+            continue;
+        }
+        if !valid_upstream_request_header(name, value) {
+            return Err(Http1ParseError::InvalidHeaderValue.into());
+        }
+        stream
+            .write_all(format!("{name}: {value}\r\n").as_bytes())
+            .await?;
+    }
+    write_owned_proxy_headers(stream, request).await?;
+    stream.write_all(b"\r\n").await?;
+    stream.flush().await?;
+    Ok(())
+}
+
 fn upstream_origin_target(request: &NativeHttp1Request) -> Result<String, NativeHttp1Error> {
     match http1_request_target(&request.method, &request.target)? {
         fluxheim_protocol::Http1RequestTarget::Origin { .. } => Ok(request.target.clone()),
@@ -1482,6 +1599,13 @@ fn upstream_owned_header(name: &str) -> bool {
         || name.eq_ignore_ascii_case("content-length")
         || name.eq_ignore_ascii_case("transfer-encoding")
         || name.eq_ignore_ascii_case("via")
+}
+
+fn upstream_websocket_owned_header(name: &str) -> bool {
+    upstream_owned_header(name)
+        || name.eq_ignore_ascii_case("connection")
+        || name.eq_ignore_ascii_case("upgrade")
+        || name.eq_ignore_ascii_case("proxy-connection")
 }
 
 fn request_host(request: &NativeHttp1Request) -> Option<&str> {

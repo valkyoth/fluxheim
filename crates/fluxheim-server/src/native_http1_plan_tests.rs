@@ -110,7 +110,7 @@ fn server_plan_accepts_plain_upstream_http2_candidate() {
 }
 
 #[test]
-fn server_plan_reports_root_websocket_native_http1_proxy_blocker() {
+fn server_plan_accepts_root_websocket_native_http1_proxy() {
     let mut config = Config::default();
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
     config.proxy.websocket = true;
@@ -119,16 +119,16 @@ fn server_plan_reports_root_websocket_native_http1_proxy_blocker() {
 
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::WebSocket)
+        None
     );
     assert_eq!(
         plan.native_http1_proxy_cutover_summary().status(),
-        NativeHttp1ProxyCutoverStatus::CompatibilityRequired
+        NativeHttp1ProxyCutoverStatus::NativeReady
     );
 }
 
 #[test]
-fn server_plan_reports_vhost_websocket_native_http1_proxy_blocker() {
+fn server_plan_accepts_vhost_websocket_native_http1_proxy() {
     let mut config = Config::default();
     let mut vhost = native_proxy_vhost();
     vhost.proxy.websocket = true;
@@ -138,16 +138,16 @@ fn server_plan_reports_vhost_websocket_native_http1_proxy_blocker() {
 
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::WebSocket)
+        None
     );
     assert_eq!(
         plan.native_http1_proxy_cutover_summary().status(),
-        NativeHttp1ProxyCutoverStatus::CompatibilityRequired
+        NativeHttp1ProxyCutoverStatus::NativeReady
     );
 }
 
 #[test]
-fn server_plan_reports_route_websocket_native_http1_proxy_blocker() {
+fn server_plan_accepts_route_websocket_native_http1_proxy() {
     let mut config = Config::default();
     let mut vhost = native_proxy_vhost();
     vhost.proxy = fluxheim_config::ProxyConfig::disabled();
@@ -163,6 +163,25 @@ fn server_plan_reports_route_websocket_native_http1_proxy_blocker() {
         plan.native_http1_proxy_candidates()[0].scope(),
         "vhost \"native.test\" route \"api\" proxy"
     );
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        None
+    );
+    assert_eq!(
+        plan.native_http1_proxy_cutover_summary().status(),
+        NativeHttp1ProxyCutoverStatus::NativeReady
+    );
+}
+
+#[test]
+fn server_plan_rejects_websocket_http2_upstream_mode() {
+    let mut config = Config::default();
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
+    config.proxy.websocket = true;
+    config.proxy.upstream_http_version = fluxheim_config::UpstreamHttpVersion::Http2;
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
         Some(NativeHttp1ProxyConfigError::WebSocket)

@@ -9,8 +9,9 @@ use fluxheim_config::config_net::{normalize_host, normalize_host_pattern};
 use fluxheim_config::{Config, HeaderPolicyConfig, VhostConfig};
 
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
-    NativeHttp1RouteProxy, NativeHttp1RouteProxyConfigError, ProxyProtocolTrustedSource,
+    DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler,
+    NativeHttp1Request, NativeHttp1Response, NativeHttp1RouteProxy,
+    NativeHttp1RouteProxyConfigError, ProxyProtocolTrustedSource,
 };
 
 #[cfg(feature = "load-balancer")]
@@ -238,6 +239,25 @@ impl NativeHttp1Handler for NativeHttp1HostRouter {
 
     fn request_body_timeout(&self, request: &NativeHttp1Request) -> Option<Duration> {
         self.select_request(request).request_body_timeout(request)
+    }
+
+    fn handles_connection_takeover(&self, request: &NativeHttp1Request) -> bool {
+        self.select_request(request)
+            .handles_connection_takeover(request)
+    }
+
+    fn handle_connection_takeover<'a>(
+        &'a self,
+        request: NativeHttp1Request,
+        prebuffered: Vec<u8>,
+        stream: NativeHttp1ConnectionStream,
+    ) -> Pin<Box<dyn Future<Output = Result<(), NativeHttp1Error>> + Send + 'a>> {
+        let proxy = self.select_request(&request).clone();
+        Box::pin(async move {
+            proxy
+                .handle_connection_takeover(request, prebuffered, stream)
+                .await
+        })
     }
 }
 

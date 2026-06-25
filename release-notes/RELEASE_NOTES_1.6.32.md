@@ -3,10 +3,10 @@
 Fluxheim 1.6.32 continues the final native-runtime cutover work after the
 cache/PHP adapter slice.
 
-This checkpoint focuses on native runtime dispatch and native load-balancer
-state sharing. Rich proxy cache, PHP-FPM, and WebSocket/HTTP upgrade parity
-remain explicit compatibility gates until their native adapters prove full
-request/response behavior in a later `1.6.x` stop.
+This checkpoint focuses on native runtime dispatch, native load-balancer state
+sharing, and the first native WebSocket upgrade tunnel path. Rich proxy cache
+and PHP-FPM remain explicit compatibility gates until their native adapters
+prove full request/response behavior in a later `1.6.x` stop.
 
 ## Highlights
 
@@ -127,12 +127,22 @@ request/response behavior in a later `1.6.x` stop.
   `nginx-consistent-cookie-hash`; they build a static CRC32 continuum from the
   configured `proxy.upstreams` pool and intentionally reject dynamic discovery
   pools and runtime backend-set mutations in this release.
+- Native HTTP/1 now has a connection-takeover handoff that preserves any
+  bytes read after the request head. This prevents early WebSocket frames sent
+  in the same TCP packet as the upgrade request from being lost when a handler
+  takes ownership of the downstream stream.
+- Native WebSocket proxying is now available for strict WebSocket upgrade
+  requests on forced HTTP/1 static upstream routes. The native adapter writes a
+  canonical upstream `Connection: Upgrade` / `Upgrade: websocket` request,
+  validates the upstream `101 Switching Protocols` response with the shared
+  HTTP/1 parser, forwards prebuffered bytes in both directions, and runs the
+  bidirectional tunnel under the configured upstream read timeout. WebSocket
+  over HTTP/2 upstream mode and WebSocket with native load-balancer selection
+  still fail closed until those combinations get separate parity tests.
 - The remaining rich-proxy native gates are now documented as intentional
   parity blockers rather than hidden launch blockers: proxy cache still needs
-  native lookup/fill/stale/purge behavior, PHP-FPM still needs full
-  SCRIPT_NAME/PATH_INFO/spool/retry/error-page parity, and WebSocket still
-  needs a native downstream hijack/tunnel response shape before
-  `proxy.websocket = true` can leave the compatibility path.
+  native lookup/fill/stale/purge behavior, and PHP-FPM still needs full
+  SCRIPT_NAME/PATH_INFO/spool/retry/error-page parity.
 
 ## Tests
 
@@ -204,12 +214,13 @@ request/response behavior in a later `1.6.x` stop.
   construction, and runtime backend-set mutation rejection.
 - Added a live native HTTP/1 runtime test that binds a real listener and serves
   a downstream request through a nginx-compatible Ketama URI-hash upstream pool.
-- Added native runtime launch-plan tests proving `proxy.websocket = true`
-  remains a compatibility-required blocker at root, vhost, and route scope
-  until the native HTTP/1 runtime has an explicit downstream upgrade/tunnel
-  response shape.
-- Added the native HTTP/1 connection-takeover primitive needed for WebSocket
-  and generic HTTP upgrade work. Handlers can now opt into owning the
-  downstream stream after request parsing; the proxy still keeps
-  `proxy.websocket = true` blocked until the upstream upgrade adapter and
-  tunnel timeouts are wired on top of this primitive.
+- Added native runtime launch-plan tests proving `proxy.websocket = true` is
+  native-ready at root, vhost, and route scope when the upstream mode is forced
+  HTTP/1, plus rejection coverage for WebSocket with HTTP/2 upstream mode.
+- Added live native HTTP/1 proxy and route-proxy WebSocket tests. Both tests
+  perform a real downstream `101 Switching Protocols` upgrade through a local
+  upstream listener and prove bytes sent immediately after the downstream
+  request head are preserved and tunneled.
+- Added focused native connection-takeover coverage proving handlers receive
+  prebuffered downstream bytes when taking ownership of a parsed HTTP/1
+  connection.

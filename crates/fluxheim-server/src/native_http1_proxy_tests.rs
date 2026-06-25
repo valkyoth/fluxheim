@@ -567,6 +567,74 @@ async fn native_proxy_forwards_downstream_request_to_upstream() {
 }
 
 #[tokio::test]
+async fn native_proxy_websocket_upgrade_tunnels_prebuffered_bytes() {
+    let upstream = upstream(|request, mut stream| async move {
+        let request = String::from_utf8(request).unwrap();
+        assert!(request.starts_with("GET /ws HTTP/1.1\r\n"));
+        assert!(request.contains("connection: Upgrade\r\n"));
+        assert!(request.contains("upgrade: websocket\r\n"));
+        assert!(request.contains("Sec-WebSocket-Key: test-key\r\n"));
+        stream
+            .write_all(
+                b"HTTP/1.1 101 Switching Protocols\r\n\
+                  Connection: Upgrade\r\n\
+                  Upgrade: websocket\r\n\
+                  Sec-WebSocket-Accept: test-accept\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let mut payload = [0u8; 4];
+        stream.read_exact(&mut payload).await.unwrap();
+        assert_eq!(&payload, b"ping");
+        stream.write_all(b"pong").await.unwrap();
+        stream.flush().await.unwrap();
+    })
+    .await;
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new(upstream.to_string()))
+        .with_websocket_enabled(true);
+    let proxy = proxy_listener_for(proxy).await;
+
+    let mut client = TcpStream::connect(proxy).await.unwrap();
+    client
+        .write_all(
+            b"GET /ws HTTP/1.1\r\n\
+              Host: proxy.test\r\n\
+              Connection: keep-alive, Upgrade\r\n\
+              Upgrade: websocket\r\n\
+              Sec-WebSocket-Key: test-key\r\n\
+              Sec-WebSocket-Version: 13\r\n\r\nping",
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    let mut chunk = [0u8; 128];
+    loop {
+        let read = client.read(&mut chunk).await.unwrap();
+        assert_ne!(read, 0, "connection closed before websocket response");
+        response.extend_from_slice(&chunk[..read]);
+        if response.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    let response_head_len = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|position| position + 4)
+        .unwrap();
+    let mut tunneled = response[response_head_len..].to_vec();
+    let response_head = String::from_utf8(response[..response_head_len].to_vec()).unwrap();
+    assert!(response_head.starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
+    assert!(response_head.contains("Upgrade: websocket\r\n"));
+    assert!(response_head.contains("Sec-WebSocket-Accept: test-accept\r\n"));
+    while tunneled.len() < 4 {
+        let mut byte = [0u8; 1];
+        client.read_exact(&mut byte).await.unwrap();
+        tunneled.push(byte[0]);
+    }
+    assert_eq!(&tunneled[..4], b"pong");
+}
+
+#[tokio::test]
 async fn native_proxy_forwards_downstream_request_to_http2_upstream() {
     let (upstream, accepted_connections) = h2_upstream(2).await;
     let proxy_config = fluxheim_config::ProxyConfig {

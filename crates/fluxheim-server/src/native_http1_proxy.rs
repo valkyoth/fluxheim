@@ -23,8 +23,8 @@ use crate::native_http1_route_proxy::{
     default_native_request_header_policy,
 };
 use crate::{
-    DownstreamHttp2Policy, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
-    NativeHttp1ResponseWritePolicy, NativeHttp1StaticWeb, NativeHttp1Upstream,
+    DownstreamHttp2Policy, NativeHttp1ConnectionStream, NativeHttp1Handler, NativeHttp1Request,
+    NativeHttp1Response, NativeHttp1ResponseWritePolicy, NativeHttp1StaticWeb, NativeHttp1Upstream,
     NativeTcpKeepalivePolicy,
 };
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
@@ -56,6 +56,7 @@ pub struct NativeHttp1Proxy {
     response_headers: NativeRouteResponseHeaderPolicy,
     response_write_policy: NativeHttp1ResponseWritePolicy,
     request_body_timeout: Option<Duration>,
+    websocket: bool,
     #[cfg(any(
         feature = "compression-brotli",
         feature = "compression-gzip",
@@ -198,9 +199,9 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
             Self::UpstreamTransportPolicy => formatter.write_str(
                 "native HTTP/1 proxy does not yet support advanced upstream transport policy",
             ),
-            Self::WebSocket => {
-                formatter.write_str("native HTTP/1 proxy does not yet support websocket upgrade")
-            }
+            Self::WebSocket => formatter.write_str(
+                "native HTTP/1 proxy only supports websocket upgrade with forced HTTP/1 static upstreams",
+            ),
         }
     }
 }
@@ -221,6 +222,7 @@ impl NativeHttp1Proxy {
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             response_write_policy: NativeHttp1ResponseWritePolicy::default(),
             request_body_timeout: None,
+            websocket: false,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -254,6 +256,7 @@ impl NativeHttp1Proxy {
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             response_write_policy: NativeHttp1ResponseWritePolicy::default(),
             request_body_timeout: None,
+            websocket: false,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -295,6 +298,7 @@ impl NativeHttp1Proxy {
             response_headers: NativeRouteResponseHeaderPolicy::default(),
             response_write_policy: NativeHttp1ResponseWritePolicy::default(),
             request_body_timeout: None,
+            websocket: false,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -331,6 +335,11 @@ impl NativeHttp1Proxy {
 
     pub const fn with_request_body_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.request_body_timeout = timeout;
+        self
+    }
+
+    pub const fn with_websocket_enabled(mut self, enabled: bool) -> Self {
+        self.websocket = enabled;
         self
     }
 
@@ -465,7 +474,9 @@ impl NativeHttp1Proxy {
         if proxy.upstream_tls {
             return Err(NativeHttp1ProxyConfigError::UpstreamTls);
         }
-        if proxy.websocket {
+        if proxy.websocket
+            && proxy.upstream_http_version != fluxheim_config::UpstreamHttpVersion::Http1
+        {
             return Err(NativeHttp1ProxyConfigError::WebSocket);
         }
         match proxy.upstream_http_version {
@@ -505,6 +516,10 @@ impl NativeHttp1Proxy {
         let native_load_balancer_enabled = false;
         if proxy_uses_dynamic_upstream_discovery(proxy) && !native_load_balancer_enabled {
             return Err(NativeHttp1ProxyConfigError::DynamicUpstreamDiscovery);
+        }
+        #[cfg(feature = "load-balancer")]
+        if proxy.websocket && native_load_balancer_enabled {
+            return Err(NativeHttp1ProxyConfigError::WebSocket);
         }
         if proxy_requires_advanced_load_balancer(proxy, native_load_balancer_enabled) {
             return Err(NativeHttp1ProxyConfigError::LoadBalancing);
@@ -547,6 +562,7 @@ impl NativeHttp1Proxy {
                 response_headers: NativeRouteResponseHeaderPolicy::default(),
                 response_write_policy: NativeHttp1ResponseWritePolicy::default(),
                 request_body_timeout: None,
+                websocket: false,
                 #[cfg(any(
                     feature = "compression-brotli",
                     feature = "compression-gzip",
@@ -565,6 +581,7 @@ impl NativeHttp1Proxy {
         native.error_pages = native_error_pages_from_config(proxy)?;
         native.response_write_policy = native_response_write_policy_from_config(proxy);
         native.request_body_timeout = proxy.downstream_read_timeout_secs.map(Duration::from_secs);
+        native.websocket = proxy.websocket;
         #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
         {
             native.mirror = NativeTrafficMirror::from_config(&proxy.mirror);
@@ -597,7 +614,8 @@ impl PartialEq for NativeHttp1Proxy {
             && self.request_headers == other.request_headers
             && self.response_headers == other.response_headers
             && self.response_write_policy == other.response_write_policy
-            && self.request_body_timeout == other.request_body_timeout;
+            && self.request_body_timeout == other.request_body_timeout
+            && self.websocket == other.websocket;
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -803,6 +821,34 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
     fn request_body_timeout(&self, _request: &NativeHttp1Request) -> Option<Duration> {
         self.request_body_timeout
     }
+
+    fn handles_connection_takeover(&self, request: &NativeHttp1Request) -> bool {
+        self.websocket && native_request_is_websocket_upgrade(request)
+    }
+
+    fn handle_connection_takeover<'a>(
+        &'a self,
+        mut request: NativeHttp1Request,
+        prebuffered: Vec<u8>,
+        stream: NativeHttp1ConnectionStream,
+    ) -> Pin<Box<dyn Future<Output = Result<(), crate::NativeHttp1Error>> + Send + 'a>> {
+        Box::pin(async move {
+            self.request_headers.apply(&mut request);
+            let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
+            let total = self.upstream_slots.len();
+            if total == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "native WebSocket proxy has no upstream",
+                )
+                .into());
+            }
+            let index = self.upstream_slots[start % total];
+            self.upstreams[index]
+                .websocket_tunnel(&request, prebuffered, stream)
+                .await
+        })
+    }
 }
 
 impl NativeHttp1Proxy {
@@ -958,6 +1004,31 @@ fn native_response_write_policy_from_config(
             .map(Duration::from_secs),
         proxy.downstream_min_send_rate_bytes_per_sec,
     )
+}
+
+fn native_request_is_websocket_upgrade(request: &NativeHttp1Request) -> bool {
+    request.method == "GET"
+        && native_request_header_values(request, "upgrade")
+            .any(|value| value.trim().eq_ignore_ascii_case("websocket"))
+        && native_request_header_values(request, "connection").any(|value| {
+            value
+                .split(',')
+                .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
+        })
+        && native_request_header_values(request, "sec-websocket-key").count() == 1
+        && native_request_header_values(request, "sec-websocket-version")
+            .any(|value| value.trim() == "13")
+}
+
+fn native_request_header_values<'a>(
+    request: &'a NativeHttp1Request,
+    name: &'a str,
+) -> impl Iterator<Item = &'a str> {
+    request
+        .headers
+        .iter()
+        .filter(move |(header_name, _)| header_name.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
 }
 
 #[cfg(feature = "auth-request")]
