@@ -5,8 +5,8 @@ cache/PHP adapter slice.
 
 This checkpoint focuses on native runtime dispatch, native load-balancer state
 sharing, and the first native WebSocket upgrade tunnel path. Rich proxy cache
-and PHP-FPM remain explicit compatibility gates until their native adapters
-prove full request/response behavior in a later `1.6.x` stop.
+remains an explicit compatibility gate until its native adapter proves full
+lookup/fill/stale behavior in a later `1.6.x` stop.
 
 ## Highlights
 
@@ -183,15 +183,14 @@ prove full request/response behavior in a later `1.6.x` stop.
   action for external php-fpm endpoints. The route action resolves scripts
   through the native static resolver, enforces PHP in-flight/request-body
   limits, builds the shared FastCGI parameter plan, executes the staged
-  FastCGI wrapper, and returns parsed native PHP responses. Managed php-fpm
-  process supervision remains an explicit native cutover gate.
+  FastCGI wrapper, and returns parsed native PHP responses.
 - Native PHP-FPM routes now honor configured PHP custom error pages for
   intercepted statuses by rendering the configured static error page through
   the native static-file responder.
 - The remaining rich-proxy native gates are now documented as intentional
   parity blockers rather than hidden launch blockers: proxy cache still needs
-  native lookup/fill/stale/purge behavior, and PHP-FPM still needs managed
-  process-boundary wiring.
+  native lookup/fill/stale/purge behavior before cache-enabled proxy routes
+  can leave the compatibility path.
 
 ## Tests
 

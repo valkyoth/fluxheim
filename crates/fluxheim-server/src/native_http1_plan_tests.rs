@@ -646,6 +646,24 @@ fn server_plan_reports_vhost_php_native_http1_proxy_blocker() {
 }
 
 #[test]
+fn server_plan_accepts_vhost_php_with_root() {
+    let root = TempDir::new().expect("temp php root");
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    vhost.php.enabled = true;
+    vhost.php.root = Some(root.path().to_path_buf());
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        None
+    );
+}
+
+#[test]
 fn server_plan_reports_vhost_php_without_proxy_candidate() {
     let mut config = Config::default();
     let mut vhost = native_proxy_vhost();
@@ -684,6 +702,35 @@ fn server_plan_reports_route_php_native_http1_proxy_blocker() {
     assert_eq!(
         plan.native_http1_proxy_candidates()[0].unsupported_reason(),
         Some(NativeHttp1ProxyConfigError::PhpFpm)
+    );
+}
+
+#[test]
+fn server_plan_accepts_route_php_with_root_without_proxy_candidate() {
+    let root = TempDir::new().expect("temp php root");
+    let mut config = Config::default();
+    let mut vhost = native_proxy_vhost();
+    vhost.proxy = fluxheim_config::ProxyConfig::disabled();
+    let mut route = native_proxy_route();
+    route.proxy = None;
+    route.php = Some(fluxheim_config::PhpConfig {
+        enabled: true,
+        root: Some(root.path().to_path_buf()),
+        ..Default::default()
+    });
+    vhost.routes = vec![route];
+    config.vhosts = vec![vhost];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].scope(),
+        "vhost \"native.test\" route \"api\""
+    );
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        None
     );
 }
 

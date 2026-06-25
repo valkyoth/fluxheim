@@ -304,7 +304,7 @@ fn vhost_policy_support(vhost: &VhostConfig) -> Result<(), NativeHttp1ProxyConfi
     if vhost_cache_policy_blocked(vhost) {
         return Err(NativeHttp1ProxyConfigError::CachePolicy);
     }
-    if vhost.php.enabled {
+    if !php_policy_supported(&vhost.php) {
         return Err(NativeHttp1ProxyConfigError::PhpFpm);
     }
     if let Some(route) = vhost.acme_challenge.route_config() {
@@ -327,10 +327,18 @@ fn route_policy_support(route: &RouteConfig) -> Result<(), NativeHttp1ProxyConfi
     if route_cache_policy_blocked(route) {
         return Err(NativeHttp1ProxyConfigError::CachePolicy);
     }
-    if route.php.as_ref().is_some_and(|php| php.enabled) {
+    if route
+        .php
+        .as_ref()
+        .is_some_and(|php| !php_policy_supported(php))
+    {
         return Err(NativeHttp1ProxyConfigError::PhpFpm);
     }
     Ok(())
+}
+
+fn php_policy_supported(php: &fluxheim_config::PhpConfig) -> bool {
+    !php.enabled || php.root.is_some()
 }
 
 fn header_policy_supported(headers: &fluxheim_config::HeaderPolicyConfig) -> bool {

@@ -183,7 +183,7 @@ impl std::fmt::Display for NativeHttp1ProxyConfigError {
                 )
             }
             Self::PhpFpm => {
-                formatter.write_str("native HTTP/1 proxy does not yet support PHP-FPM")
+                formatter.write_str("native HTTP/1 proxy rejected PHP-FPM policy")
             }
             Self::UpstreamHttp2 => formatter.write_str(
                 "native HTTP/1 proxy rejected unsupported upstream HTTP/2 mode",
