@@ -1226,6 +1226,7 @@ dependencies = [
  "fluxheim-load-balancer",
  "fluxheim-protocol",
  "fluxheim-runtime",
+ "fluxheim-tls",
  "fluxheim-web",
  "getrandom 0.4.3",
  "h2",

@@ -17,9 +17,9 @@ compression-brotli = ["compression", "fluxheim-compression/brotli"]
 compression-gzip = ["compression", "fluxheim-compression/gzip"]
 compression-zstd = ["compression", "fluxheim-compression/zstd"]
 load-balancer = ["dep:fluxheim-load-balancer"]
-tls-rustls-backend = ["dep:rustls", "dep:rustls-native-certs", "dep:sha2", "dep:tokio-rustls", "rustls/ring"]
-tls-rustls = ["tls-rustls-backend", "rustls/ring"]
-tls-rustls-fips = ["tls-rustls-backend", "rustls/fips"]
+tls-rustls-backend = ["dep:fluxheim-tls", "dep:rustls", "dep:rustls-native-certs", "dep:sha2", "dep:tokio-rustls", "fluxheim-tls/tls-rustls-backend", "rustls/ring"]
+tls-rustls = ["tls-rustls-backend", "fluxheim-tls/tls-rustls", "rustls/ring"]
+tls-rustls-fips = ["tls-rustls-backend", "fluxheim-tls/tls-rustls-fips", "rustls/fips"]
 tls-openssl-backend = ["dep:openssl", "dep:sha2", "dep:tokio-openssl"]
 tls-openssl = ["tls-openssl-backend"]
 tls-openssl-fips = ["tls-openssl"]
@@ -35,6 +35,7 @@ fluxheim-headers = { path = "../fluxheim-headers" }
 fluxheim-load-balancer = { path = "../fluxheim-load-balancer", optional = true }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-runtime = { path = "../fluxheim-runtime" }
+fluxheim-tls = { path = "../fluxheim-tls", optional = true }
 fluxheim-web = { path = "../fluxheim-web" }
 getrandom = "0.4.3"
 # "unstable" is required for Builder::initial_stream_id(3): RFC 7540 h2c

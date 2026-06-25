@@ -4,24 +4,32 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use fluxheim_config::Config;
+use fluxheim_config::{Config, TlsAlpnPolicy};
 use fluxheim_runtime::{FluxShutdown, NativeBackgroundSupervisor};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
+#[cfg(feature = "tls-rustls-backend")]
+use crate::serve_native_http1_rustls_listener;
 use crate::{
     ListenerProtocol, NativeHttp1Error, NativeHttp1HostRouter, NativeHttp1HostRouterConfigError,
     NativeRuntimeLaunchPlan, NativeRuntimeLaunchPlanError, ServerPlan, ServiceKind,
     serve_native_http1_listener,
 };
 
+#[cfg(feature = "tls-rustls-backend")]
+const ACME_TLS_ALPN_PROTOCOL: &[u8] = b"acme-tls/1";
+
 pub struct NativeHttp1ProxyRuntime {
     policy: crate::DownstreamHttp1Policy,
     router: Arc<NativeHttp1HostRouter>,
     listeners: Vec<NativeHttp1ProxyRuntimeListener>,
+    #[cfg(feature = "tls-rustls-backend")]
+    rustls_config: Option<Arc<rustls::ServerConfig>>,
 }
 
 struct NativeHttp1ProxyRuntimeListener {
+    protocol: ListenerProtocol,
     planned_addr: SocketAddr,
     local_addr: SocketAddr,
     listener: TcpListener,
@@ -50,6 +58,15 @@ pub enum NativeHttp1ProxyRuntimeError {
         addr: SocketAddr,
     },
     Router(NativeHttp1HostRouterConfigError),
+    #[cfg(feature = "tls-rustls-backend")]
+    RustlsCertificate(fluxheim_tls::RustlsDownstreamCertificateError),
+    #[cfg(feature = "tls-rustls-backend")]
+    RustlsServerConfig(fluxheim_tls::RustlsDownstreamServerConfigError),
+    #[cfg(feature = "tls-rustls-backend")]
+    TlsPlan(fluxheim_tls::DownstreamTlsPlanError),
+    UnsupportedTlsAlpn {
+        policy: TlsAlpnPolicy,
+    },
     UnsupportedListener {
         protocol: ListenerProtocol,
         addr: SocketAddr,
@@ -76,6 +93,23 @@ impl fmt::Display for NativeHttp1ProxyRuntimeError {
                 "native HTTP/1 proxy listener {addr} requires downstream PROXY protocol support"
             ),
             Self::Router(error) => write!(formatter, "native HTTP/1 host router: {error}"),
+            #[cfg(feature = "tls-rustls-backend")]
+            Self::RustlsCertificate(error) => {
+                write!(
+                    formatter,
+                    "native HTTP/1 rustls certificate resolver: {error}"
+                )
+            }
+            #[cfg(feature = "tls-rustls-backend")]
+            Self::RustlsServerConfig(error) => {
+                write!(formatter, "native HTTP/1 rustls server config: {error}")
+            }
+            #[cfg(feature = "tls-rustls-backend")]
+            Self::TlsPlan(error) => write!(formatter, "native HTTP/1 TLS listener plan: {error}"),
+            Self::UnsupportedTlsAlpn { policy } => write!(
+                formatter,
+                "native HTTP/1 proxy HTTPS listener requires tls.alpn = \"http1\", got {policy:?}"
+            ),
             Self::UnsupportedListener { protocol, addr } => write!(
                 formatter,
                 "native HTTP/1 proxy listener {addr} uses unsupported protocol {protocol:?}"
@@ -90,8 +124,15 @@ impl Error for NativeHttp1ProxyRuntimeError {
             Self::Bind { source, .. } => Some(source),
             Self::LaunchPlan(error) => Some(error),
             Self::Router(error) => Some(error),
+            #[cfg(feature = "tls-rustls-backend")]
+            Self::RustlsCertificate(error) => Some(error),
+            #[cfg(feature = "tls-rustls-backend")]
+            Self::RustlsServerConfig(error) => Some(error),
+            #[cfg(feature = "tls-rustls-backend")]
+            Self::TlsPlan(error) => Some(error),
             Self::MissingProxyHttpListener
             | Self::ProxyProtocol { .. }
+            | Self::UnsupportedTlsAlpn { .. }
             | Self::UnsupportedListener { .. } => None,
         }
     }
@@ -120,6 +161,31 @@ impl NativeHttp1ProxyRuntime {
             )
             .map_err(NativeHttp1ProxyRuntimeError::Router)?,
         );
+        let has_https_listener = launch_plan.listeners().iter().any(|listener| {
+            listener.service_kind() == ServiceKind::ProxyHttp
+                && listener.listener_protocol() == ListenerProtocol::Https
+        });
+        #[cfg(feature = "tls-rustls-backend")]
+        let rustls_config = if has_https_listener {
+            Some(native_rustls_server_config(config)?)
+        } else {
+            None
+        };
+        #[cfg(not(feature = "tls-rustls-backend"))]
+        if has_https_listener {
+            let listener = launch_plan
+                .listeners()
+                .iter()
+                .find(|listener| {
+                    listener.service_kind() == ServiceKind::ProxyHttp
+                        && listener.listener_protocol() == ListenerProtocol::Https
+                })
+                .ok_or(NativeHttp1ProxyRuntimeError::MissingProxyHttpListener)?;
+            return Err(NativeHttp1ProxyRuntimeError::UnsupportedListener {
+                protocol: listener.listener_protocol(),
+                addr: listener.listener_addr(),
+            });
+        }
         let mut listeners = Vec::new();
         for planned in launch_plan
             .listeners()
@@ -131,7 +197,10 @@ impl NativeHttp1ProxyRuntime {
                     addr: planned.listener_addr(),
                 });
             }
-            if planned.listener_protocol() != ListenerProtocol::Http {
+            if !matches!(
+                planned.listener_protocol(),
+                ListenerProtocol::Http | ListenerProtocol::Https
+            ) {
                 return Err(NativeHttp1ProxyRuntimeError::UnsupportedListener {
                     protocol: planned.listener_protocol(),
                     addr: planned.listener_addr(),
@@ -151,6 +220,7 @@ impl NativeHttp1ProxyRuntime {
                         source,
                     })?;
             listeners.push(NativeHttp1ProxyRuntimeListener {
+                protocol: planned.listener_protocol(),
                 planned_addr: planned.listener_addr(),
                 local_addr,
                 listener,
@@ -163,6 +233,8 @@ impl NativeHttp1ProxyRuntime {
             policy: launch_plan.downstream_http1(),
             router,
             listeners,
+            #[cfg(feature = "tls-rustls-backend")]
+            rustls_config,
         })
     }
 
@@ -187,14 +259,46 @@ impl NativeHttp1ProxyRuntime {
             let policy = self.policy;
             let router = self.router.clone();
             let shutdown = supervisor.shutdown_view();
+            #[cfg(feature = "tls-rustls-backend")]
+            let rustls_config = self.rustls_config.clone();
             let handle = tokio::spawn(async move {
-                serve_native_http1_listener(
-                    listener.listener,
-                    policy,
-                    router,
-                    shutdown_wait(shutdown),
-                )
-                .await
+                match listener.protocol {
+                    ListenerProtocol::Http => {
+                        serve_native_http1_listener(
+                            listener.listener,
+                            policy,
+                            router,
+                            shutdown_wait(shutdown),
+                        )
+                        .await
+                    }
+                    #[cfg(feature = "tls-rustls-backend")]
+                    ListenerProtocol::Https => {
+                        let Some(rustls_config) = rustls_config else {
+                            return Err(NativeHttp1Error::Io(io::Error::other(
+                                "missing rustls config for native HTTPS listener",
+                            )));
+                        };
+                        serve_native_http1_rustls_listener(
+                            listener.listener,
+                            policy,
+                            rustls_config,
+                            router,
+                            shutdown_wait(shutdown),
+                        )
+                        .await
+                    }
+                    #[cfg(not(feature = "tls-rustls-backend"))]
+                    ListenerProtocol::Https => Err(NativeHttp1Error::Io(io::Error::other(
+                        "native HTTPS listener requires tls-rustls-backend",
+                    ))),
+                    ListenerProtocol::AdminHttp
+                    | ListenerProtocol::MetricsHttp
+                    | ListenerProtocol::StreamTcp
+                    | ListenerProtocol::Udp => Err(NativeHttp1Error::Io(io::Error::other(
+                        "unsupported native HTTP/1 proxy listener protocol",
+                    ))),
+                }
             });
             handles.push(NativeHttp1ProxyListenerHandle {
                 local_addr,
@@ -242,4 +346,32 @@ impl Drop for NativeHttp1ProxyRuntimeHandle {
 
 async fn shutdown_wait(mut shutdown: FluxShutdown) {
     let _ = shutdown.wait_for_shutdown().await;
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+fn native_rustls_server_config(
+    config: &Config,
+) -> Result<Arc<rustls::ServerConfig>, NativeHttp1ProxyRuntimeError> {
+    if config.tls.effective_alpn() != TlsAlpnPolicy::Http1 {
+        return Err(NativeHttp1ProxyRuntimeError::UnsupportedTlsAlpn {
+            policy: config.tls.effective_alpn(),
+        });
+    }
+    let plan = fluxheim_tls::DownstreamTlsListenerPlan::from_config(config)
+        .map_err(NativeHttp1ProxyRuntimeError::TlsPlan)?
+        .ok_or(NativeHttp1ProxyRuntimeError::MissingProxyHttpListener)?;
+    let resolver = Arc::new(
+        fluxheim_tls::RustlsDownstreamCertificateResolver::new(plan.selector())
+            .map_err(NativeHttp1ProxyRuntimeError::RustlsCertificate)?,
+    );
+    let acme_tls_alpn_protocol = plan
+        .acme_tls_alpn_enabled()
+        .then_some(ACME_TLS_ALPN_PROTOCOL);
+    fluxheim_tls::build_rustls_downstream_server_config(
+        &config.tls,
+        resolver,
+        acme_tls_alpn_protocol,
+    )
+    .map(Arc::new)
+    .map_err(NativeHttp1ProxyRuntimeError::RustlsServerConfig)
 }

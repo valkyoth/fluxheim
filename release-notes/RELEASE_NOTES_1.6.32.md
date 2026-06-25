@@ -72,6 +72,11 @@ cache/PHP adapter slice.
   shuts down through the native background supervisor. HTTPS and downstream
   PROXY protocol listeners still fail closed at this boundary until their
   native listener handling lands.
+- Rustls-backed native proxy HTTPS listeners can now bind from the native launch
+  plan when `tls.alpn = "http1"`. The runtime builds the downstream Rustls
+  server config through `fluxheim-tls`, preserving certificate resolver and
+  client-auth policy; HTTP/2 ALPN and downstream PROXY protocol remain
+  fail-closed until their native listener dispatch is added.
 
 ## Tests
 
@@ -113,3 +118,7 @@ cache/PHP adapter slice.
   an ephemeral address, proxies a real request to a local upstream through the
   native host router, and shuts the listener down through
   `NativeBackgroundSupervisor`.
+- Added a Rustls native runtime listener test that generates a temporary
+  certificate, binds a planned HTTPS listener, completes a real TLS handshake,
+  proxies a request to a local upstream, and shuts the native listener down
+  through the supervisor.
