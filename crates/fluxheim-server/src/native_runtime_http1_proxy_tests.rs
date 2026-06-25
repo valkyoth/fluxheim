@@ -292,6 +292,38 @@ async fn native_http1_proxy_runtime_collects_native_load_balancer_service() {
     assert!(runtime.take_load_balancer_services().is_empty());
 }
 
+#[cfg(feature = "load-balancer")]
+#[tokio::test]
+async fn native_http1_proxy_runtime_serves_nginx_consistent_hash_pool() {
+    let first = upstream_response("ketama-one").await;
+    let second = upstream_response("ketama-two").await;
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = vec!["127.0.0.1:0".to_owned()];
+    config.proxy.upstreams = vec![first.to_string(), second.to_string()];
+    config.proxy.load_balance.selection =
+        fluxheim_config::LoadBalanceSelection::NginxConsistentUriHash;
+    config.proxy.load_balance.max_iterations = 8;
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert!(plan.native_runtime_cutover_summary().is_ready());
+    let runtime = NativeHttp1ProxyRuntime::bind_from_config(&config, &plan)
+        .await
+        .expect("bind native proxy runtime");
+    let local_addr = runtime.local_addrs()[0];
+
+    let supervisor = NativeBackgroundSupervisor::new();
+    let handle = runtime.start(&supervisor);
+
+    let response = downstream_get(local_addr).await;
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("ketama-one") || response.ends_with("ketama-two"));
+
+    assert!(supervisor.shutdown());
+    for result in handle.join().await {
+        result.expect("native listener stopped cleanly");
+    }
+}
+
 #[tokio::test]
 async fn native_http1_proxy_runtime_accepts_trusted_proxy_protocol_v1_listener() {
     let upstream = upstream_assert_x_real_ip("203.0.113.10").await;
