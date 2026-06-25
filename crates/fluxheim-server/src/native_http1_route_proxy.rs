@@ -1522,7 +1522,7 @@ impl NativeHttp1RouteProxyRoute {
         proxy: Option<NativeHttp1Proxy>,
         base_headers: &HeaderPolicyConfig,
         inherited_compression: Option<&fluxheim_config::CompressionConfig>,
-        vhost_name: &str,
+        #[cfg_attr(not(feature = "php-fpm"), allow(unused_variables))] vhost_name: &str,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
         if native_route_cache_policy_blocked(route) {
             return Err(NativeHttp1RouteProxyConfigError::Proxy(
