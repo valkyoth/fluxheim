@@ -252,6 +252,56 @@ async fn downstream_tls_get(proxy: std::net::SocketAddr, certificate_pem: String
     read_http_response(&mut stream).await
 }
 
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+async fn downstream_tls_h2_get(proxy: std::net::SocketAddr, certificate_pem: String) -> String {
+    use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
+    use openssl::x509::{X509, store::X509StoreBuilder};
+    use tokio_openssl::SslStream;
+
+    let certs = X509::stack_from_pem(certificate_pem.as_bytes()).unwrap();
+    let mut store = X509StoreBuilder::new().unwrap();
+    store.add_cert(certs[0].clone()).unwrap();
+    let mut connector = SslConnector::builder(SslMethod::tls_client()).unwrap();
+    connector.set_cert_store(store.build());
+    connector.set_verify(SslVerifyMode::PEER);
+    connector.set_alpn_protos(b"\x02h2").unwrap();
+    let connector = connector.build();
+
+    let tcp = TcpStream::connect(proxy).await.unwrap();
+    let ssl = connector
+        .configure()
+        .unwrap()
+        .into_ssl("localhost")
+        .unwrap();
+    let mut stream = SslStream::new(ssl, tcp).unwrap();
+    std::pin::Pin::new(&mut stream).connect().await.unwrap();
+    assert_eq!(
+        stream.ssl().selected_alpn_protocol(),
+        Some(b"h2".as_slice())
+    );
+
+    let (mut client, connection) = h2::client::handshake(stream).await.unwrap();
+    let driver = tokio::spawn(connection);
+    let request = http::Request::builder()
+        .method("GET")
+        .uri("https://localhost/secure")
+        .header("host", "localhost")
+        .body(())
+        .unwrap();
+    let (response, _) = client.send_request(request, true).unwrap();
+    let response = response.await.unwrap();
+    assert_eq!(response.status(), http::StatusCode::OK);
+    let mut body = response.into_body();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = body.data().await {
+        bytes.extend_from_slice(&chunk.unwrap());
+    }
+    drop(client);
+    driver.abort();
+    let _ = driver.await;
+    String::from_utf8(bytes).unwrap()
+}
+
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 async fn read_http_response<S>(stream: &mut S) -> String
 where
@@ -556,6 +606,48 @@ async fn native_http1_proxy_runtime_binds_openssl_launch_plan_and_serves_https_l
     assert!(supervisor.shutdown());
     for result in handle.join().await {
         result.expect("native OpenSSL listener stopped cleanly");
+    }
+}
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+#[tokio::test]
+async fn native_http1_proxy_runtime_serves_openssl_http2_alpn_listener() {
+    use fluxheim_config::{StaticCertificateConfig, TlsAlpnPolicy, TlsConfig};
+
+    let certificate = temporary_localhost_certificate();
+
+    let upstream = upstream_response("runtime-openssl-h2-ok").await;
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = Vec::new();
+    config.server.tls_listen = vec!["127.0.0.1:0".to_owned()];
+    config.proxy.upstream = Some(upstream.to_string());
+    config.tls = TlsConfig {
+        enabled: true,
+        alpn: TlsAlpnPolicy::Http1AndHttp2,
+        certificates: vec![StaticCertificateConfig {
+            cert_path: certificate.cert_path.clone(),
+            key_path: certificate.key_path.clone(),
+        }],
+        ..TlsConfig::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert!(plan.downstream_http2_required());
+    assert!(plan.native_runtime_cutover_summary().is_ready());
+    let runtime = NativeHttp1ProxyRuntime::bind_from_config(&config, &plan)
+        .await
+        .expect("bind native OpenSSL proxy runtime");
+    let local_addr = runtime.local_addrs()[0];
+
+    let supervisor = NativeBackgroundSupervisor::new();
+    let handle = runtime.start(&supervisor);
+
+    let body = downstream_tls_h2_get(local_addr, certificate.cert_pem).await;
+    assert_eq!(body, "runtime-openssl-h2-ok");
+
+    assert!(supervisor.shutdown());
+    for result in handle.join().await {
+        result.expect("native OpenSSL H2 listener stopped cleanly");
     }
 }
 

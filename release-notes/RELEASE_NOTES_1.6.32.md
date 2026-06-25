@@ -116,9 +116,9 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
 - Native HTTPS listeners can now dispatch selected `h2` ALPN connections into
   the native multi-stream HTTP/2 route adapter, while `http/1.1` and no-ALPN
   connections continue through the native HTTP/1 route path when the configured
-  TLS ALPN policy permits HTTP/1. A live rustls runtime test proves
+  TLS ALPN policy permits HTTP/1. Live rustls and OpenSSL runtime tests prove
   `tls.alpn = "http1-and-http2"` negotiates HTTP/2 and reaches an ordinary
-  native proxy upstream.
+  native proxy upstream on both supported TLS backends.
 - The machine-readable native cutover target table now points the downstream
   HTTP/2 blocker at the final rich-proxy parity release instead of the earlier
   preview milestone, keeping `fluxheim-config-tester --runtime-cutover` output
