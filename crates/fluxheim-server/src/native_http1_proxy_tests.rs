@@ -523,6 +523,16 @@ fn proxy_config_with_error_page(root: std::path::PathBuf) -> fluxheim_config::Pr
     }
 }
 
+fn static_load_balance_without_health_check() -> fluxheim_config::LoadBalanceConfig {
+    fluxheim_config::LoadBalanceConfig {
+        health_check: fluxheim_config::LoadBalanceHealthCheckConfig {
+            enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 #[tokio::test]
 async fn native_proxy_forwards_downstream_request_to_upstream() {
     let upstream = upstream(|request, mut stream| async move {
@@ -737,6 +747,7 @@ async fn native_proxy_round_robins_successful_http2_static_upstreams() {
     let (second, second_connections) = h2_upstream_with_body("h2-two\n", 1).await;
     let proxy_config = fluxheim_config::ProxyConfig {
         upstreams: vec![first.to_string(), second.to_string()],
+        load_balance: static_load_balance_without_health_check(),
         upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
         upstream_h2_max_streams: Some(4),
         read_timeout_secs: Some(5),
@@ -774,6 +785,7 @@ async fn native_proxy_weighted_round_robins_successful_http2_static_upstreams() 
     let proxy_config = fluxheim_config::ProxyConfig {
         upstreams: vec![first.to_string(), second.to_string()],
         upstream_weights: vec![2, 1],
+        load_balance: static_load_balance_without_health_check(),
         upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
         upstream_h2_max_streams: Some(4),
         read_timeout_secs: Some(5),
@@ -813,6 +825,7 @@ async fn native_proxy_http2_safe_method_fails_over_to_second_static_upstream() {
     let (second, second_connections) = h2_upstream_with_body("h2 failover\n", 1).await;
     let proxy_config = fluxheim_config::ProxyConfig {
         upstreams: vec![first.to_string(), second.to_string()],
+        load_balance: static_load_balance_without_health_check(),
         upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
         upstream_h2_max_streams: Some(4),
         connect_timeout_secs: Some(1),
@@ -843,6 +856,7 @@ async fn native_proxy_http2_does_not_fail_over_unsafe_method() {
     let (second, second_connections) = h2_upstream_with_body("h2 unsafe replay\n", 1).await;
     let proxy_config = fluxheim_config::ProxyConfig {
         upstreams: vec![first.to_string(), second.to_string()],
+        load_balance: static_load_balance_without_health_check(),
         upstream_http_version: fluxheim_config::UpstreamHttpVersion::Http2,
         upstream_h2_max_streams: Some(4),
         connect_timeout_secs: Some(1),
@@ -1614,6 +1628,7 @@ fn native_proxy_config_accepts_plain_static_upstream() {
 fn native_proxy_config_accepts_ordered_static_upstreams() {
     let proxy = fluxheim_config::ProxyConfig {
         upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+        load_balance: static_load_balance_without_health_check(),
         connect_timeout_secs: Some(2),
         ..Default::default()
     };
@@ -1638,6 +1653,7 @@ fn native_proxy_config_accepts_weighted_static_upstreams() {
     let proxy = fluxheim_config::ProxyConfig {
         upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
         upstream_weights: vec![2, 1],
+        load_balance: static_load_balance_without_health_check(),
         ..Default::default()
     };
 

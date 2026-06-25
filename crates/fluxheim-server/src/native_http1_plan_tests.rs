@@ -1711,6 +1711,19 @@ fn server_plan_rejects_native_http1_proxy_candidate_with_advanced_load_balance_p
 }
 
 #[test]
+fn server_plan_rejects_native_http1_proxy_candidate_with_active_load_balance_health_check() {
+    let mut config = Config::default();
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        Some(NativeHttp1ProxyConfigError::LoadBalancing)
+    );
+}
+
+#[test]
 fn server_plan_accepts_native_http1_proxy_candidate_with_static_load_balance_health_disabled() {
     let mut config = Config::default();
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];

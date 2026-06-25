@@ -334,11 +334,6 @@ async fn run_native_runtime_async(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let launch_plan = server_plan.native_runtime_launch_plan()?;
 
-    #[cfg(feature = "load-balancer")]
-    let (proxy, load_balancer_services) =
-        crate::proxy::FluxProxy::from_config_with_background_services(&config)?;
-
-    #[cfg(not(feature = "load-balancer"))]
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
 
     #[cfg(feature = "metrics")]
@@ -380,16 +375,6 @@ async fn run_native_runtime_async(
 
     let supervisor = fluxheim_runtime::NativeBackgroundSupervisor::new();
     let mut background_handles = Vec::new();
-
-    #[cfg(feature = "load-balancer")]
-    if let Some(load_balancer_service_spec) =
-        server_plan.service(fluxheim_server::ServiceKind::LoadBalancerHealthChecks)
-    {
-        for service in load_balancer_services {
-            log::info!("{} enabled", load_balancer_service_spec.name());
-            background_handles.push(supervisor.spawn_service(service.into_native_service()));
-        }
-    }
 
     #[cfg(feature = "stream-proxy")]
     if let Some(stream_service_spec) =
@@ -618,6 +603,13 @@ fn reject_unsupported_native_background_tasks(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     for task in launch_plan.background_tasks() {
         match task.kind() {
+            fluxheim_runtime::BackgroundTaskKind::LoadBalancerRefresh => {
+                return Err(format!(
+                    "native runtime does not yet support {} background task",
+                    task.name()
+                )
+                .into());
+            }
             fluxheim_runtime::BackgroundTaskKind::AcmeRenewal
             | fluxheim_runtime::BackgroundTaskKind::CertificateReload
                 if !certificate_reloader_available =>

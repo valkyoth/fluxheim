@@ -42,9 +42,10 @@ cache/PHP adapter slice.
   keeping the compatibility path and final native supervisor path on the same
   task boundary.
 - Native runtime launch plans now include `LoadBalancerRefresh` background-task
-  inventory whenever a load-balanced pool is configured. This keeps the final
-  supervisor contract aligned with the service intent that already detects
-  static pools, file discovery, HTTP discovery, and DNS refresh.
+  inventory only for load-balanced pools that actually need a background loop:
+  active health checks, file discovery, HTTP discovery, or DNS refresh. Static
+  ordered/weighted pools with `load_balance.health_check.enabled = false` stay
+  native-ready without a detached refresh task.
 - That load-balancer service and background-task inventory is now gated by the
   `fluxheim-server/load-balancer` feature, so non-load-balancer builds do not
   advertise native supervisor work they cannot construct.
@@ -63,6 +64,11 @@ cache/PHP adapter slice.
   that explicitly disable active load-balancer health checks, matching the
   native proxy's current static-upstream capability while still rejecting
   advanced load-balancer policies.
+- Native HTTP/1 proxy planning now rejects active load-balancer health checks
+  until the final native load-balancer bridge shares health/discovery state
+  with the actual native upstream selector. This avoids a false native-ready
+  signal where a compatibility refresh task would run but native traffic would
+  not consume its state.
 - The native runtime cutover evidence gate now fails if the representative
   blocker-free config does not target `NativeRuntime`, if the launch plan is not
   `ready`, or if a launch-plan error is emitted.
@@ -114,8 +120,9 @@ cache/PHP adapter slice.
   supervisor path.
 - Added adapter coverage proving the Pingora compatibility wrapper preserves
   native `LoadBalancerRefresh` task metadata.
-- Added server-plan coverage proving load-balanced pools schedule the
-  `LoadBalancerRefresh` task in the native runtime launch TSV.
+- Added server-plan coverage proving active-health/dynamic load-balanced pools
+  schedule the `LoadBalancerRefresh` task in the native runtime launch TSV,
+  while static health-disabled pools do not.
 - Added paired default-build and load-balancer-feature tests for
   `LoadBalancerHealthChecks`/`LoadBalancerRefresh` inventory.
 - Added launch-plan coverage proving duplicate background-task kinds fail
@@ -130,6 +137,9 @@ cache/PHP adapter slice.
   with `load_balance.health_check.enabled = false`, plus rejection coverage for
   custom disabled-health-check policies that would otherwise be silently
   ignored by the native static proxy.
+- Added native proxy planning coverage proving default active-health
+  multi-upstream pools remain on the compatibility path until native
+  load-balancer refresh state is wired into the native request path.
 - Extended `scripts/validate-native-runtime-cutover.sh` so release validation
   proves the representative native runtime config is not only blocker-free but
   also selects the native target adapter and a ready launch plan.

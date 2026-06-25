@@ -1291,6 +1291,9 @@ fn configured_native_upstreams(proxy: &fluxheim_config::ProxyConfig) -> Option<V
 }
 
 fn proxy_requires_advanced_load_balancer(proxy: &fluxheim_config::ProxyConfig) -> bool {
+    if !native_load_balancer_pool_configured(proxy) {
+        return false;
+    }
     if !native_static_load_balance_config_supported(&proxy.load_balance) {
         return true;
     }
@@ -1305,13 +1308,16 @@ fn proxy_requires_advanced_load_balancer(proxy: &fluxheim_config::ProxyConfig) -
         || !proxy.disabled_upstreams.is_empty()
 }
 
+fn native_load_balancer_pool_configured(proxy: &fluxheim_config::ProxyConfig) -> bool {
+    proxy.upstreams.len() >= 2
+        || proxy.upstreams_file.is_some()
+        || proxy.upstreams_http_url.is_some()
+        || proxy.upstream_dns_refresh_secs.is_some()
+}
+
 fn native_static_load_balance_config_supported(
     load_balance: &fluxheim_config::LoadBalanceConfig,
 ) -> bool {
-    if load_balance == &fluxheim_config::LoadBalanceConfig::default() {
-        return true;
-    }
-
     let mut disabled_health = fluxheim_config::LoadBalanceConfig::default();
     disabled_health.health_check.enabled = false;
     load_balance == &disabled_health

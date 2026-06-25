@@ -925,7 +925,12 @@ fn server_plan_collects_load_balancer_service_intent() {
         Some("Fluxheim Load Balancer Health Checks")
     );
 
+    config.proxy.load_balance.health_check.enabled = false;
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert!(!plan.has_service(ServiceKind::LoadBalancerHealthChecks));
+
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
+    config.proxy.load_balance.health_check.enabled = true;
     config.vhosts = vec![VhostConfig {
         name: "route-lb.test".to_owned(),
         hosts: vec!["route-lb.test".to_owned()],

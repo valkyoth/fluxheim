@@ -2836,9 +2836,13 @@ available for the stabilization/security-only follow-up.
   compatibility mode is for matching nginx-style request-to-backend mapping.
   Do not depend on `pingora-ketama`; implement and test the ring behavior in
   Fluxheim with golden vectors and membership-change remapping tests. This is
-  the final Pingora-free proof release: `cargo tree`, release containers, RPM
-  builds, source builds, and focused artifacts must all prove no normal
-  Fluxheim build compiles vendored Pingora code.
+  also where native static load-balancer eligibility must stay honest: static
+  ordered/weighted upstream pools may run natively only when active health
+  checks are explicitly disabled, while active health checks and dynamic
+  discovery remain blocked until their refresh state is shared with the native
+  request path. This release is the final Pingora-free proof release: `cargo
+  tree`, release containers, RPM builds, source builds, and focused artifacts
+  must all prove no normal Fluxheim build compiles vendored Pingora code.
 - `v1.6.33`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak

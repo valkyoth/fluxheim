@@ -87,7 +87,7 @@ pub(crate) fn service_specs_from_config(config: &Config) -> Vec<ServiceSpec> {
             PROXY_HTTP_LISTENERS,
         ));
     }
-    if any_load_balancer_pool_configured(config) {
+    if any_load_balancer_background_task_configured(config) {
         services.push(ServiceSpec::new(
             "Fluxheim Load Balancer Health Checks",
             ServiceKind::LoadBalancerHealthChecks,
@@ -143,7 +143,7 @@ pub(crate) fn admin_ops_socket_plan_from_config(config: &Config) -> Option<Admin
     ))
 }
 
-pub(crate) fn any_load_balancer_pool_configured(config: &Config) -> bool {
+pub(crate) fn any_load_balancer_background_task_configured(config: &Config) -> bool {
     #[cfg(not(feature = "load-balancer"))]
     {
         let _ = config;
@@ -151,31 +151,31 @@ pub(crate) fn any_load_balancer_pool_configured(config: &Config) -> bool {
     }
     #[cfg(feature = "load-balancer")]
     {
-        any_load_balancer_pool_configured_with_feature(config)
+        any_load_balancer_background_task_configured_with_feature(config)
     }
 }
 
 #[cfg(feature = "load-balancer")]
-fn any_load_balancer_pool_configured_with_feature(config: &Config) -> bool {
+fn any_load_balancer_background_task_configured_with_feature(config: &Config) -> bool {
     if config.vhosts.is_empty() {
-        return load_balancer_pool_configured(&config.proxy);
+        return load_balancer_background_task_configured(&config.proxy);
     }
 
     config.vhosts.iter().any(|vhost| {
-        load_balancer_pool_configured(&vhost.proxy)
+        load_balancer_background_task_configured(&vhost.proxy)
             || vhost.routes.iter().any(|route| {
                 route
                     .proxy
                     .as_ref()
-                    .is_some_and(load_balancer_pool_configured)
+                    .is_some_and(load_balancer_background_task_configured)
             })
     })
 }
 
 #[cfg(feature = "load-balancer")]
-fn load_balancer_pool_configured(proxy: &ProxyConfig) -> bool {
-    proxy.upstreams.len() >= 2
-        || proxy.upstreams_file.is_some()
+fn load_balancer_background_task_configured(proxy: &ProxyConfig) -> bool {
+    proxy.upstreams_file.is_some()
         || proxy.upstreams_http_url.is_some()
         || proxy.upstream_dns_refresh_secs.is_some()
+        || (proxy.upstreams.len() >= 2 && proxy.load_balance.health_check.enabled)
 }
