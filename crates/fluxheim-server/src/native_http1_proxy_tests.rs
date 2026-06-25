@@ -2005,6 +2005,31 @@ fn native_proxy_config_rejects_unsupported_upstream_features() {
     );
 }
 
+#[cfg(feature = "load-balancer")]
+#[test]
+fn native_proxy_config_accepts_scoped_dynamic_dns_load_balance_policy() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstreams: vec!["localhost:3000".to_owned()],
+        upstream_dns_refresh_secs: Some(30),
+        upstream_dns_allow_private_backends: true,
+        ..Default::default()
+    };
+
+    let (native, service) = NativeHttp1Proxy::from_proxy_config_with_native_load_balancer(
+        "dynamic-dns",
+        "dynamic.test",
+        None,
+        &proxy,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap()
+    .expect("native dynamic proxy");
+
+    assert_eq!(native.upstreams().len(), 1);
+    assert!(service.is_some());
+}
+
 #[test]
 fn native_proxy_config_rejects_unsupported_proxy_policy_layers() {
     let proxy = fluxheim_config::ProxyConfig {

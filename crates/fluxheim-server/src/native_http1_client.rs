@@ -250,6 +250,19 @@ impl NativeHttp1Upstream {
         &self.authority
     }
 
+    pub fn with_authority(mut self, authority: impl Into<String>) -> Self {
+        self.authority = authority.into();
+        self.pool = Arc::new(NativeHttp1Pool {
+            max_idle: self.pool.max_idle,
+            idle_timeout: self.pool.idle_timeout,
+            idle: Mutex::new(Vec::new()),
+        });
+        self.http2_pool = Arc::new(NativeHttp2Pool::new(
+            self.http2_policy.max_concurrent_streams(),
+        ));
+        self
+    }
+
     pub fn new(authority: impl Into<String>) -> Self {
         let policy = DownstreamHttp1Policy::default();
         Self {

@@ -49,6 +49,8 @@ pub struct NativeHttp1Proxy {
     upstream_slots: Vec<usize>,
     #[cfg(feature = "load-balancer")]
     load_balancer: Option<fluxheim_load_balancer::UpstreamLoadBalancer>,
+    #[cfg(feature = "load-balancer")]
+    load_balancer_upstream_template: Option<NativeHttp1Upstream>,
     error_pages: Vec<NativeHttp1ProxyErrorPage>,
     request_headers: NativeRouteRequestHeaderPolicy,
     response_headers: NativeRouteResponseHeaderPolicy,
@@ -212,6 +214,8 @@ impl NativeHttp1Proxy {
             upstream_slots: vec![0],
             #[cfg(feature = "load-balancer")]
             load_balancer: None,
+            #[cfg(feature = "load-balancer")]
+            load_balancer_upstream_template: None,
             error_pages: Vec::new(),
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
@@ -243,6 +247,8 @@ impl NativeHttp1Proxy {
             upstream_slots,
             #[cfg(feature = "load-balancer")]
             load_balancer: None,
+            #[cfg(feature = "load-balancer")]
+            load_balancer_upstream_template: None,
             error_pages: Vec::new(),
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
@@ -282,6 +288,8 @@ impl NativeHttp1Proxy {
             upstream_slots,
             #[cfg(feature = "load-balancer")]
             load_balancer: None,
+            #[cfg(feature = "load-balancer")]
+            load_balancer_upstream_template: None,
             error_pages: Vec::new(),
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
@@ -483,12 +491,6 @@ impl NativeHttp1Proxy {
         {
             return Err(NativeHttp1ProxyConfigError::UpstreamProxyProtocol);
         }
-        if proxy.upstreams_file.is_some()
-            || proxy.upstreams_http_url.is_some()
-            || proxy.upstream_dns_refresh_secs.is_some()
-        {
-            return Err(NativeHttp1ProxyConfigError::DynamicUpstreamDiscovery);
-        }
         #[cfg(not(feature = "auth-request"))]
         if proxy_requires_auth_request(proxy) {
             return Err(NativeHttp1ProxyConfigError::AuthRequest);
@@ -506,82 +508,65 @@ impl NativeHttp1Proxy {
         let native_load_balancer_enabled = load_balancer.is_some();
         #[cfg(not(feature = "load-balancer"))]
         let native_load_balancer_enabled = false;
+        if proxy_uses_dynamic_upstream_discovery(proxy) && !native_load_balancer_enabled {
+            return Err(NativeHttp1ProxyConfigError::DynamicUpstreamDiscovery);
+        }
         if proxy_requires_advanced_load_balancer(proxy, native_load_balancer_enabled) {
             return Err(NativeHttp1ProxyConfigError::LoadBalancing);
         }
-        let upstreams = configured_native_upstreams(proxy)
-            .ok_or(NativeHttp1ProxyConfigError::MissingUpstream)?;
+        let upstreams = configured_native_upstreams(proxy).unwrap_or_default();
         let mut native_upstreams = Vec::with_capacity(upstreams.len());
-        #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
-        let tls = NativeHttp1UpstreamTls::from_proxy_config(proxy)?;
         for upstream in upstreams {
-            let mut native_upstream = NativeHttp1Upstream::from_policy(upstream, policy);
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
-            if let Some(tls) = tls.clone() {
-                native_upstream = native_upstream.with_tls(tls);
-            }
-            if let Some(timeout) = proxy.connect_timeout_secs {
-                native_upstream =
-                    native_upstream.with_connect_timeout(Duration::from_secs(timeout));
-            }
-            native_upstream = native_upstream.with_total_connection_timeout(
-                proxy
-                    .upstream_total_connection_timeout_secs
-                    .map(Duration::from_secs),
-            );
-            if let Some(timeout) = proxy.read_timeout_secs {
-                native_upstream = native_upstream.with_read_timeout(Duration::from_secs(timeout));
-            }
-            if let Some(timeout) = proxy.send_timeout_secs {
-                native_upstream = native_upstream.with_write_timeout(Duration::from_secs(timeout));
-            }
-            native_upstream = native_upstream.with_proxy_protocol(proxy.upstream_proxy_protocol);
-            if matches!(
-                proxy.upstream_http_version,
-                fluxheim_config::UpstreamHttpVersion::Http2
-                    | fluxheim_config::UpstreamHttpVersion::Http1AndHttp2
-            ) {
-                let http2_policy = native_http2_policy_from_config(proxy)?;
-                native_upstream =
-                    if proxy.upstream_http_version == fluxheim_config::UpstreamHttpVersion::Http2 {
-                        native_upstream.with_http2_policy(http2_policy)
-                    } else {
-                        native_upstream
-                            .with_http1_and_http2_policy(http2_policy)
-                            .with_h2c_upgrade(proxy.upstream_h2c_upgrade)
-                    };
-                native_upstream = native_upstream.with_http2_keepalive_interval(
-                    proxy
-                        .upstream_h2_ping_interval_secs
-                        .map(Duration::from_secs),
-                );
-            }
-            let recv_buffer_size = match proxy
-                .upstream_tcp_recv_buffer_bytes
-                .map(fluxheim_config::ByteSize::as_u64)
-                .map(u32::try_from)
-            {
-                Some(Ok(bytes)) => Some(bytes),
-                Some(Err(_)) => return Err(NativeHttp1ProxyConfigError::RecvBufferTooLarge),
-                None => None,
-            };
-            native_upstream = native_upstream.with_recv_buffer_size(recv_buffer_size);
-            native_upstream = native_upstream.with_dscp(proxy.upstream_dscp);
-            native_upstream = native_upstream.with_tcp_keepalive(native_tcp_keepalive(proxy)?);
-            native_upstream =
-                native_upstream.with_tcp_user_timeout(native_tcp_user_timeout(proxy)?);
-            native_upstream = native_upstream
-                .with_pool_idle_timeout(proxy.upstream_idle_timeout_secs.map(Duration::from_secs));
-            let pool_max_idle =
-                if proxy.upstream_proxy_protocol == fluxheim_config::UpstreamProxyProtocol::Off {
-                    pool_max_idle
-                } else {
-                    0
-                };
-            native_upstream = native_upstream.with_pool_max_idle(pool_max_idle);
-            native_upstreams.push(native_upstream);
+            native_upstreams.push(native_upstream_from_proxy_config(
+                upstream,
+                proxy,
+                policy,
+                pool_max_idle,
+            )?);
         }
-        let mut native = Self::from_weighted_upstreams(native_upstreams, &proxy.upstream_weights)?;
+        #[cfg(feature = "load-balancer")]
+        let template = native_load_balancer_enabled
+            .then(|| {
+                native_upstream_from_proxy_config(
+                    "127.0.0.1:0",
+                    proxy,
+                    policy,
+                    if proxy_uses_dynamic_upstream_discovery(proxy) {
+                        0
+                    } else {
+                        pool_max_idle
+                    },
+                )
+            })
+            .transpose()?;
+        let mut native = if native_upstreams.is_empty() {
+            Self {
+                upstreams: Vec::new(),
+                upstream_slots: Vec::new(),
+                #[cfg(feature = "load-balancer")]
+                load_balancer: None,
+                #[cfg(feature = "load-balancer")]
+                load_balancer_upstream_template: None,
+                error_pages: Vec::new(),
+                request_headers: default_native_request_header_policy(),
+                response_headers: NativeRouteResponseHeaderPolicy::default(),
+                response_write_policy: NativeHttp1ResponseWritePolicy::default(),
+                request_body_timeout: None,
+                #[cfg(any(
+                    feature = "compression-brotli",
+                    feature = "compression-gzip",
+                    feature = "compression-zstd"
+                ))]
+                compression: None,
+                #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+                mirror: None,
+                #[cfg(feature = "auth-request")]
+                auth_request: None,
+                next_upstream: Arc::new(AtomicUsize::new(0)),
+            }
+        } else {
+            Self::from_weighted_upstreams(native_upstreams, &proxy.upstream_weights)?
+        };
         native.error_pages = native_error_pages_from_config(proxy)?;
         native.response_write_policy = native_response_write_policy_from_config(proxy);
         native.request_body_timeout = proxy.downstream_read_timeout_secs.map(Duration::from_secs);
@@ -598,6 +583,7 @@ impl NativeHttp1Proxy {
             native.load_balancer = load_balancer
                 .as_ref()
                 .map(|(load_balancer, _)| load_balancer.clone());
+            native.load_balancer_upstream_template = template;
             let service = load_balancer.and_then(|(_, service)| service);
             Ok(Some((native, service)))
         }
@@ -622,9 +608,15 @@ impl PartialEq for NativeHttp1Proxy {
             feature = "compression-gzip",
             feature = "compression-zstd",
             feature = "auth-request",
+            feature = "load-balancer",
             all(feature = "traffic-mirror", not(feature = "privacy-mode"))
         ))]
         let mut equal = base_equal;
+        #[cfg(feature = "load-balancer")]
+        {
+            equal = equal
+                && self.load_balancer_upstream_template == other.load_balancer_upstream_template;
+        }
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -646,6 +638,7 @@ impl PartialEq for NativeHttp1Proxy {
             feature = "compression-gzip",
             feature = "compression-zstd",
             feature = "auth-request",
+            feature = "load-balancer",
             all(feature = "traffic-mirror", not(feature = "privacy-mode"))
         ))]
         {
@@ -656,6 +649,7 @@ impl PartialEq for NativeHttp1Proxy {
             feature = "compression-gzip",
             feature = "compression-zstd",
             feature = "auth-request",
+            feature = "load-balancer",
             all(feature = "traffic-mirror", not(feature = "privacy-mode"))
         )))]
         {
@@ -844,7 +838,15 @@ impl NativeHttp1Proxy {
                 break;
             };
             let authority = selected.authority();
-            let Some(upstream) = self.upstream_for_authority(&authority) else {
+            let dynamic_upstream = self
+                .upstream_for_authority(&authority)
+                .is_none()
+                .then(|| self.dynamic_upstream_for_authority(&authority))
+                .flatten();
+            let upstream = self
+                .upstream_for_authority(&authority)
+                .or(dynamic_upstream.as_ref());
+            let Some(upstream) = upstream else {
                 if let Some(reporter) = selected.reporter() {
                     reporter.record_failure();
                 }
@@ -928,6 +930,13 @@ impl NativeHttp1Proxy {
         self.upstreams
             .iter()
             .find(|upstream| upstream.authority() == authority)
+    }
+
+    #[cfg(feature = "load-balancer")]
+    fn dynamic_upstream_for_authority(&self, authority: &str) -> Option<NativeHttp1Upstream> {
+        self.load_balancer_upstream_template
+            .clone()
+            .map(|upstream| upstream.with_authority(authority.to_owned()))
     }
 
     fn error_page_response(
@@ -1492,6 +1501,76 @@ fn native_proxy_error_is_timeout(error: &crate::NativeHttp1Error) -> bool {
     )
 }
 
+fn native_upstream_from_proxy_config(
+    authority: impl Into<String>,
+    proxy: &fluxheim_config::ProxyConfig,
+    policy: crate::DownstreamHttp1Policy,
+    pool_max_idle: usize,
+) -> Result<NativeHttp1Upstream, NativeHttp1ProxyConfigError> {
+    let mut native_upstream = NativeHttp1Upstream::from_policy(authority, policy);
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+    if let Some(tls) = NativeHttp1UpstreamTls::from_proxy_config(proxy)? {
+        native_upstream = native_upstream.with_tls(tls);
+    }
+    if let Some(timeout) = proxy.connect_timeout_secs {
+        native_upstream = native_upstream.with_connect_timeout(Duration::from_secs(timeout));
+    }
+    native_upstream = native_upstream.with_total_connection_timeout(
+        proxy
+            .upstream_total_connection_timeout_secs
+            .map(Duration::from_secs),
+    );
+    if let Some(timeout) = proxy.read_timeout_secs {
+        native_upstream = native_upstream.with_read_timeout(Duration::from_secs(timeout));
+    }
+    if let Some(timeout) = proxy.send_timeout_secs {
+        native_upstream = native_upstream.with_write_timeout(Duration::from_secs(timeout));
+    }
+    native_upstream = native_upstream.with_proxy_protocol(proxy.upstream_proxy_protocol);
+    if matches!(
+        proxy.upstream_http_version,
+        fluxheim_config::UpstreamHttpVersion::Http2
+            | fluxheim_config::UpstreamHttpVersion::Http1AndHttp2
+    ) {
+        let http2_policy = native_http2_policy_from_config(proxy)?;
+        native_upstream =
+            if proxy.upstream_http_version == fluxheim_config::UpstreamHttpVersion::Http2 {
+                native_upstream.with_http2_policy(http2_policy)
+            } else {
+                native_upstream
+                    .with_http1_and_http2_policy(http2_policy)
+                    .with_h2c_upgrade(proxy.upstream_h2c_upgrade)
+            };
+        native_upstream = native_upstream.with_http2_keepalive_interval(
+            proxy
+                .upstream_h2_ping_interval_secs
+                .map(Duration::from_secs),
+        );
+    }
+    let recv_buffer_size = match proxy
+        .upstream_tcp_recv_buffer_bytes
+        .map(fluxheim_config::ByteSize::as_u64)
+        .map(u32::try_from)
+    {
+        Some(Ok(bytes)) => Some(bytes),
+        Some(Err(_)) => return Err(NativeHttp1ProxyConfigError::RecvBufferTooLarge),
+        None => None,
+    };
+    native_upstream = native_upstream.with_recv_buffer_size(recv_buffer_size);
+    native_upstream = native_upstream.with_dscp(proxy.upstream_dscp);
+    native_upstream = native_upstream.with_tcp_keepalive(native_tcp_keepalive(proxy)?);
+    native_upstream = native_upstream.with_tcp_user_timeout(native_tcp_user_timeout(proxy)?);
+    native_upstream = native_upstream
+        .with_pool_idle_timeout(proxy.upstream_idle_timeout_secs.map(Duration::from_secs));
+    let pool_max_idle =
+        if proxy.upstream_proxy_protocol == fluxheim_config::UpstreamProxyProtocol::Off {
+            pool_max_idle
+        } else {
+            0
+        };
+    Ok(native_upstream.with_pool_max_idle(pool_max_idle))
+}
+
 fn configured_native_upstreams(proxy: &fluxheim_config::ProxyConfig) -> Option<Vec<String>> {
     if !proxy.upstreams.is_empty() {
         return Some(proxy.upstreams.clone());
@@ -1518,13 +1597,7 @@ fn native_load_balancer_from_config(
     if !native_load_balancer_pool_configured(proxy) {
         return Ok(None);
     }
-    if proxy.upstreams_file.is_some()
-        || proxy.upstreams_http_url.is_some()
-        || proxy.upstream_dns_refresh_secs.is_some()
-    {
-        return Ok(None);
-    }
-    if proxy.load_balance.health_check.enabled {
+    if proxy.load_balance.health_check.enabled || proxy_uses_dynamic_upstream_discovery(proxy) {
         return fluxheim_load_balancer::UpstreamLoadBalancer::background_service_from_proxy_config(
             name, vhost, route, proxy,
         )
@@ -1565,6 +1638,12 @@ fn proxy_requires_advanced_load_balancer(
 fn native_load_balancer_pool_configured(proxy: &fluxheim_config::ProxyConfig) -> bool {
     proxy.upstreams.len() >= 2
         || proxy.upstreams_file.is_some()
+        || proxy.upstreams_http_url.is_some()
+        || proxy.upstream_dns_refresh_secs.is_some()
+}
+
+fn proxy_uses_dynamic_upstream_discovery(proxy: &fluxheim_config::ProxyConfig) -> bool {
+    proxy.upstreams_file.is_some()
         || proxy.upstreams_http_url.is_some()
         || proxy.upstream_dns_refresh_secs.is_some()
 }

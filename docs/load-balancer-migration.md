@@ -218,9 +218,10 @@ tracked for future module lines.
   Static advanced pool policy, including priority groups, locality preference,
   per-upstream in-flight caps, aliases/tags, backup, drain, disabled members,
   persistence, and passive health, is evaluated by that same native selector.
-  Dynamic discovery pools remain on the compatibility path until their refresh
-  state is wired into the native request path with the same shared-state
-  guarantee.
+  File, HTTP, and DNS discovery pools also use that shared state; the native
+  request path clones vetted upstream transport policy onto the selected
+  discovered authority instead of requiring every backend to be known at
+  startup.
 - Runtime weight changes are available for round-robin and least-* selectors.
   Hash/ring selectors need future table-rebuild semantics before runtime
   weights are accepted there.
