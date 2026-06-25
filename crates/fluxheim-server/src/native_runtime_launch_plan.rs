@@ -1,7 +1,7 @@
 use crate::{
     DownstreamHttp1Policy, DownstreamHttp2Policy, ListenerProtocol, NativeRuntimeCutoverBlocker,
-    NativeRuntimeManifest, NativeRuntimeManifestError, ProcessSpec, ProxyProtocolPolicy,
-    ServerPlan, ServiceKind, ServiceSpec,
+    NativeRuntimeManifest, NativeRuntimeManifestError, NativeRuntimeServiceManifest, ProcessSpec,
+    ProxyProtocolPolicy, ServerPlan, ServiceKind, ServiceSpec,
 };
 use fluxheim_runtime::{BackgroundTaskKind, BackgroundTaskSpec};
 use std::{collections::BTreeMap, net::SocketAddr};
@@ -40,6 +40,11 @@ pub enum NativeRuntimeLaunchPlanError {
     Blocked {
         blockers: Vec<NativeRuntimeCutoverBlocker>,
     },
+    DuplicateService {
+        kind: ServiceKind,
+        first_name: &'static str,
+        second_name: &'static str,
+    },
     DuplicateListener {
         transport: NativeRuntimeListenerTransport,
         address: SocketAddr,
@@ -61,6 +66,16 @@ impl std::fmt::Display for NativeRuntimeLaunchPlanError {
                     formatter,
                     "native runtime launch plan blocked by {} cutover blockers",
                     blockers.len()
+                )
+            }
+            Self::DuplicateService {
+                kind,
+                first_name,
+                second_name,
+            } => {
+                write!(
+                    formatter,
+                    "native runtime launch plan has duplicate {kind:?} service for {first_name:?} and {second_name:?}"
                 )
             }
             Self::DuplicateListener {
@@ -95,6 +110,7 @@ impl NativeRuntimeLaunchPlan {
         let manifest = plan
             .native_runtime_manifest()
             .map_err(NativeRuntimeLaunchPlanError::from)?;
+        validate_services(manifest.services())?;
         let listeners: Vec<_> = manifest
             .services()
             .iter()
@@ -463,6 +479,27 @@ fn validate_listener_bindings(
                 second_service: listener.service_kind(),
             });
         }
+    }
+    Ok(())
+}
+
+fn validate_services(
+    services: &[NativeRuntimeServiceManifest],
+) -> Result<(), NativeRuntimeLaunchPlanError> {
+    let mut seen = Vec::new();
+    for service in services {
+        if let Some((_, first_name)) = seen
+            .iter()
+            .find(|(kind, _)| *kind == service.kind())
+            .copied()
+        {
+            return Err(NativeRuntimeLaunchPlanError::DuplicateService {
+                kind: service.kind(),
+                first_name,
+                second_name: service.name(),
+            });
+        }
+        seen.push((service.kind(), service.name()));
     }
     Ok(())
 }

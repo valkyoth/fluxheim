@@ -51,6 +51,9 @@ cache/PHP adapter slice.
 - Native runtime launch planning now rejects duplicate background-task kinds
   before supervisor startup, matching the existing duplicate listener binding
   guard and preventing ambiguous task ownership in the final native runner.
+- Native runtime launch planning also rejects duplicate service kinds before
+  listener expansion, so a final native runner cannot accidentally register two
+  owners for the same service role.
 - The compatibility runtime now also validates the native HTTP/1 host-router
   factory when the server plan reports the proxy surface as native-ready. This
   proves exact/wildcard host routing, default-vhost selection, trusted-proxy
@@ -80,6 +83,8 @@ cache/PHP adapter slice.
   `LoadBalancerHealthChecks`/`LoadBalancerRefresh` inventory.
 - Added launch-plan coverage proving duplicate background-task kinds fail
   closed before task supervision begins.
+- Added launch-plan coverage proving duplicate service kinds fail closed before
+  listener registration begins.
 - Extended native runtime launch-plan tests and cutover evidence validation to
   cover metrics bearer-token service policy.
 - Added a runtime test proving a native-ready HTTP/1 proxy config builds the

@@ -393,6 +393,29 @@ fn native_runtime_launch_plan_rejects_duplicate_tcp_listener_bindings() {
 }
 
 #[test]
+fn native_runtime_launch_plan_rejects_duplicate_service_kinds() {
+    let plan = ServerPlan::with_process(
+        ProcessSpec::default(),
+        Vec::new(),
+        vec![
+            ServiceSpec::new("Proxy one", ServiceKind::ProxyHttp, &[]),
+            ServiceSpec::new("Proxy two", ServiceKind::ProxyHttp, &[]),
+        ],
+        Vec::new(),
+    );
+
+    assert!(plan.native_runtime_cutover_summary().is_ready());
+    assert!(matches!(
+        plan.native_runtime_launch_plan(),
+        Err(NativeRuntimeLaunchPlanError::DuplicateService {
+            kind: ServiceKind::ProxyHttp,
+            first_name: "Proxy one",
+            second_name: "Proxy two",
+        })
+    ));
+}
+
+#[test]
 fn native_runtime_launch_plan_rejects_duplicate_background_task_kinds() {
     let task = BackgroundTaskKind::CacheMetrics;
     let plan = ServerPlan::new(

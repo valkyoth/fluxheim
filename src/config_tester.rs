@@ -181,6 +181,9 @@ fn native_runtime_launch_plan_error_kind(
 ) -> &'static str {
     match error {
         fluxheim_server::NativeRuntimeLaunchPlanError::Blocked { .. } => "blocked",
+        fluxheim_server::NativeRuntimeLaunchPlanError::DuplicateService { .. } => {
+            "duplicate-service"
+        }
         fluxheim_server::NativeRuntimeLaunchPlanError::DuplicateListener { .. } => {
             "duplicate-listener"
         }
