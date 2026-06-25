@@ -149,6 +149,12 @@ prove full request/response behavior in a later `1.6.x` stop.
   `DOCUMENT_ROOT`/`SCRIPT_FILENAME`, request headers, protected custom params,
   TLS scheme, and restored client address are all covered before the live
   FastCGI execution path is enabled.
+- The same staged native PHP-FPM adapter now translates PHP stdout into a
+  native response plan. It uses the shared PHP response parser, strips
+  hop-by-hop headers, configured hidden headers, PHP internal offload headers,
+  and Fluxheim-owned `Content-Length`, preserves HEAD response length without a
+  body, and marks configured intercepted status codes before the live response
+  writer is enabled.
 - The remaining rich-proxy native gates are now documented as intentional
   parity blockers rather than hidden launch blockers: proxy cache still needs
   native lookup/fill/stale/purge behavior, and PHP-FPM still needs live
@@ -242,3 +248,6 @@ prove full request/response behavior in a later `1.6.x` stop.
   core CGI parameter mapping, duplicate request-header joining, protected
   custom-param rejection, denied script-prefix rejection, and unsafe
   `PATH_INFO` rejection.
+- Added PHP-FPM feature tests for the native response planner, including
+  hop-by-hop/configured/internal header stripping, HEAD content-length
+  preservation, and intercepted status classification.
