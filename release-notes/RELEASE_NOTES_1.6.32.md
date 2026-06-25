@@ -177,8 +177,7 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   uses Fluxheim-owned endpoint selection, pooled or one-shot Unix/TCP
   connections, bounded connect/request timeouts, configured response-size
   limits, retryable error/status handling, STDERR failure-pattern handling, and
-  the staged native response planner. Live route wiring remains disabled until
-  the final native PHP route/error-page adapter lands.
+  the staged native response planner.
 - Native HTTP/1 route/vhost PHP-FPM configs can now build a native PHP route
   action for external php-fpm endpoints. The route action resolves scripts
   through the native static resolver, enforces PHP in-flight/request-body

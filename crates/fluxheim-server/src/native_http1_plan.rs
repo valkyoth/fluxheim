@@ -338,7 +338,14 @@ fn route_policy_support(route: &RouteConfig) -> Result<(), NativeHttp1ProxyConfi
 }
 
 fn php_policy_supported(php: &fluxheim_config::PhpConfig) -> bool {
-    !php.enabled || php.root.is_some()
+    #[cfg(feature = "php-fpm")]
+    {
+        !php.enabled || php.root.is_some()
+    }
+    #[cfg(not(feature = "php-fpm"))]
+    {
+        !php.enabled
+    }
 }
 
 fn header_policy_supported(headers: &fluxheim_config::HeaderPolicyConfig) -> bool {

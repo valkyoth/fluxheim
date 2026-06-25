@@ -645,6 +645,7 @@ fn server_plan_reports_vhost_php_native_http1_proxy_blocker() {
     );
 }
 
+#[cfg(feature = "php-fpm")]
 #[test]
 fn server_plan_accepts_vhost_php_with_root() {
     let root = TempDir::new().expect("temp php root");
@@ -705,6 +706,7 @@ fn server_plan_reports_route_php_native_http1_proxy_blocker() {
     );
 }
 
+#[cfg(feature = "php-fpm")]
 #[test]
 fn server_plan_accepts_route_php_with_root_without_proxy_candidate() {
     let root = TempDir::new().expect("temp php root");
