@@ -1,4 +1,5 @@
 use super::*;
+use crate::native_http2_stack::serve_native_http2_connection_until_idle;
 use std::future::poll_fn;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -76,10 +77,11 @@ async fn native_http2_connection_passes_request_trailers_to_handler() {
             NativeHttp2Response::no_content()
         }
     });
-    let server = tokio::spawn(serve_native_http2_connection(
+    let server = tokio::spawn(serve_native_http2_connection_until_idle(
         server_io,
         DownstreamHttp2Policy::default(),
         handler,
+        Duration::from_millis(50),
     ));
     let (client, connection) = h2::client::handshake(client_io).await.unwrap();
     let client_connection = tokio::spawn(async move {
@@ -95,6 +97,7 @@ async fn native_http2_connection_passes_request_trailers_to_handler() {
     let response = response.await.unwrap();
 
     assert_eq!(response.status(), http::StatusCode::NO_CONTENT);
+    drop(client);
     server.await.unwrap().unwrap();
     client_connection.await.unwrap();
     assert_eq!(
@@ -201,6 +204,7 @@ async fn native_http2_stack_probe_accepts_bounded_request_body() {
     let response = response.await.unwrap();
 
     assert_eq!(response.status(), http::StatusCode::NO_CONTENT);
+    drop(client);
     server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }
@@ -223,6 +227,7 @@ async fn native_http2_stack_probe_releases_body_flow_control_window() {
     let response = response.await.unwrap();
 
     assert_eq!(response.status(), http::StatusCode::NO_CONTENT);
+    drop(client);
     server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }
@@ -314,6 +319,33 @@ async fn native_http2_stack_probe_serves_single_response() {
     let response = response.await.unwrap();
 
     assert_eq!(response.status(), http::StatusCode::NO_CONTENT);
+    drop(client);
+    server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_stack_probe_serves_multiple_streams_on_one_connection() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let server = tokio::spawn(native_http2_stack_probe(
+        server_io,
+        DownstreamHttp2Policy::default(),
+    ));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        connection.await.unwrap();
+    });
+    let first_request = http::Request::builder().uri("/one").body(()).unwrap();
+    let second_request = http::Request::builder().uri("/two").body(()).unwrap();
+
+    let (first_response, _first_send_stream) = client.send_request(first_request, true).unwrap();
+    let (second_response, _second_send_stream) = client.send_request(second_request, true).unwrap();
+    let first_response = first_response.await.unwrap();
+    let second_response = second_response.await.unwrap();
+
+    assert_eq!(first_response.status(), http::StatusCode::NO_CONTENT);
+    assert_eq!(second_response.status(), http::StatusCode::NO_CONTENT);
+    drop(client);
     server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }
@@ -345,6 +377,7 @@ async fn native_http2_stack_probe_sends_response_trailers() {
 
     assert_eq!(&data[..], b"ok");
     assert_eq!(trailers.get("grpc-status").unwrap(), "0");
+    drop(client);
     server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }
@@ -374,6 +407,7 @@ async fn native_http2_stack_probe_sends_empty_body_response_trailers() {
     let trailers = body.trailers().await.unwrap().unwrap();
 
     assert_eq!(trailers.get("grpc-status").unwrap(), "0");
+    drop(client);
     server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }

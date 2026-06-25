@@ -118,6 +118,11 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   HTTP/2 blocker at the final rich-proxy parity release instead of the earlier
   preview milestone, keeping `fluxheim-config-tester --runtime-cutover` output
   consistent with the current Pingora-exit plan.
+- The native HTTP/2 preview connection loop now accepts and serves multiple
+  streams on one connection instead of dropping every stream after the first
+  probe response. Tests cover same-connection multi-stream responses while the
+  production ALPN dispatch gate remains fail-closed until the full downstream
+  proxy adapter is wired.
 - Native PHP-FPM routes now support Fluxheim-managed php-fpm process ownership
   through `fluxheim-php-fpm`, not the root crate. Managed routes create the
   private php-fpm config, validate the php-fpm binary path against symlink and

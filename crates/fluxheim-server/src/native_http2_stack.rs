@@ -2,16 +2,18 @@ use std::future::{Future, poll_fn};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Duration;
 
 use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::oneshot;
+use tokio::task::JoinSet;
 use zeroize::Zeroizing;
 
 use crate::DownstreamHttp2Policy;
 
 const BODY_PREALLOC_HINT_BYTES: usize = 64 * 1024;
+const PROBE_IDLE_TIMEOUT: Duration = Duration::from_millis(50);
 
 #[derive(Debug)]
 pub enum NativeHttp2StackError {
@@ -33,6 +35,7 @@ pub enum NativeHttp2StackError {
     SendResponse(h2::Error),
     ResponseWriteTimeout,
     ResponseCapacityClosed,
+    StreamTaskJoin(tokio::task::JoinError),
 }
 
 impl std::fmt::Display for NativeHttp2StackError {
@@ -92,6 +95,9 @@ impl std::fmt::Display for NativeHttp2StackError {
             }
             Self::ResponseCapacityClosed => {
                 write!(formatter, "native HTTP/2 response capacity closed")
+            }
+            Self::StreamTaskJoin(error) => {
+                write!(formatter, "native HTTP/2 stream task join failed: {error}")
             }
         }
     }
@@ -185,13 +191,39 @@ where
         let response = response.clone();
         async move { response }
     });
-    serve_native_http2_connection(io, policy, handler).await
+    serve_native_http2_connection_until_idle(io, policy, handler, PROBE_IDLE_TIMEOUT).await
 }
 
 pub async fn serve_native_http2_connection<T, H>(
     io: T,
     policy: DownstreamHttp2Policy,
     handler: Arc<H>,
+) -> Result<(), NativeHttp2StackError>
+where
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    H: NativeHttp2Handler,
+{
+    serve_native_http2_connection_inner(io, policy, handler, None).await
+}
+
+pub(crate) async fn serve_native_http2_connection_until_idle<T, H>(
+    io: T,
+    policy: DownstreamHttp2Policy,
+    handler: Arc<H>,
+    idle_timeout: Duration,
+) -> Result<(), NativeHttp2StackError>
+where
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    H: NativeHttp2Handler,
+{
+    serve_native_http2_connection_inner(io, policy, handler, Some(idle_timeout)).await
+}
+
+async fn serve_native_http2_connection_inner<T, H>(
+    io: T,
+    policy: DownstreamHttp2Policy,
+    handler: Arc<H>,
+    idle_timeout: Option<Duration>,
 ) -> Result<(), NativeHttp2StackError>
 where
     T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -210,28 +242,79 @@ where
         .await
         .map_err(NativeHttp2StackError::Handshake)?;
 
-    let Some(stream) = connection.accept().await else {
-        return Ok(());
-    };
-    let (mut request, mut respond) = stream.map_err(NativeHttp2StackError::Stream)?;
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let connection_driver = tokio::spawn(drive_connection(connection, shutdown_rx));
-    let stream_result =
-        handle_native_http2_stream(&mut request, &mut respond, policy, handler).await;
-    if let Err(error) = stream_result {
-        let _ = shutdown_tx.send(());
-        connection_driver.abort();
-        let _ = connection_driver.await;
-        return Err(error);
+    let mut streams = JoinSet::new();
+    let mut accepted_any_stream = false;
+    loop {
+        if accepted_any_stream
+            && streams.is_empty()
+            && let Some(timeout) = idle_timeout
+        {
+            match tokio::time::timeout(timeout, connection.accept()).await {
+                Ok(Some(stream)) => {
+                    spawn_native_http2_stream(stream, policy, handler.clone(), &mut streams)?;
+                    accepted_any_stream = true;
+                    continue;
+                }
+                Ok(None) | Err(_) => break,
+            }
+        }
+
+        tokio::select! {
+            completed = streams.join_next(), if !streams.is_empty() => {
+                if let Some(completed) = completed {
+                    handle_completed_native_http2_stream(completed)?;
+                }
+            }
+            stream = connection.accept() => {
+                let Some(stream) = stream else {
+                    break;
+                };
+                spawn_native_http2_stream(stream, policy, handler.clone(), &mut streams)?;
+                accepted_any_stream = true;
+            }
+        }
     }
-    let _ = shutdown_tx.send(());
-    if let Err(error) = connection_driver.await {
-        log::debug!(
-            target: "fluxheim::native_http2",
-            "native HTTP/2 probe connection driver join failed: {error}"
-        );
+
+    while let Some(completed) = streams.join_next().await {
+        handle_completed_native_http2_stream(completed)?;
     }
     Ok(())
+}
+
+fn spawn_native_http2_stream<H>(
+    stream: Result<
+        (
+            http::Request<h2::RecvStream>,
+            h2::server::SendResponse<Bytes>,
+        ),
+        h2::Error,
+    >,
+    policy: DownstreamHttp2Policy,
+    handler: Arc<H>,
+    streams: &mut JoinSet<Result<(), NativeHttp2StackError>>,
+) -> Result<(), NativeHttp2StackError>
+where
+    H: NativeHttp2Handler,
+{
+    let (mut request, mut respond) = stream.map_err(NativeHttp2StackError::Stream)?;
+    streams.spawn(async move {
+        handle_native_http2_stream(&mut request, &mut respond, policy, handler).await
+    });
+    Ok(())
+}
+
+fn handle_completed_native_http2_stream(
+    completed: Result<Result<(), NativeHttp2StackError>, tokio::task::JoinError>,
+) -> Result<(), NativeHttp2StackError> {
+    completed
+        .map_err(NativeHttp2StackError::StreamTaskJoin)?
+        .map_err(|error| {
+            log::debug!(
+                target: "fluxheim::native_http2",
+                "native HTTP/2 stream failed: {error}"
+            );
+            error
+        })
 }
 
 async fn handle_native_http2_stream<H>(
@@ -300,41 +383,6 @@ fn validate_request(
         });
     }
     Ok(())
-}
-
-async fn drive_connection<T>(
-    mut connection: h2::server::Connection<T, Bytes>,
-    mut shutdown_rx: oneshot::Receiver<()>,
-) where
-    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
-{
-    let mut shutdown_requested = false;
-    loop {
-        let stream = tokio::select! {
-            _ = &mut shutdown_rx, if !shutdown_requested => {
-                shutdown_requested = true;
-                connection.graceful_shutdown();
-                continue;
-            }
-            stream = connection.accept() => stream,
-        };
-        match stream {
-            Some(Ok(_)) => {
-                log::debug!(
-                    target: "fluxheim::native_http2",
-                    "native HTTP/2 probe dropped post-shutdown stream"
-                );
-            }
-            Some(Err(error)) => {
-                log::debug!(
-                    target: "fluxheim::native_http2",
-                    "native HTTP/2 probe post-response drain ended: {error}"
-                );
-                break;
-            }
-            None => break,
-        }
-    }
 }
 
 async fn drain_request_body(

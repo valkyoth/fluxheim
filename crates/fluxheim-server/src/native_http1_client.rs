@@ -1570,7 +1570,8 @@ fn native_http2_error(error: NativeHttp2StackError) -> NativeHttp1Error {
         | NativeHttp2StackError::Stream(_)
         | NativeHttp2StackError::BodyData(_)
         | NativeHttp2StackError::BodyTrailers(_)
-        | NativeHttp2StackError::SendResponse(_) => std::io::ErrorKind::Other,
+        | NativeHttp2StackError::SendResponse(_)
+        | NativeHttp2StackError::StreamTaskJoin(_) => std::io::ErrorKind::Other,
     };
     NativeHttp1Error::Io(std::io::Error::new(kind, error.to_string()))
 }
