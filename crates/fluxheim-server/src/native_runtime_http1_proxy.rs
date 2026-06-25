@@ -27,6 +27,8 @@ pub struct NativeHttp1ProxyRuntime {
     listeners: Vec<NativeHttp1ProxyRuntimeListener>,
     #[cfg(feature = "tls-rustls-backend")]
     rustls_config: Option<Arc<rustls::ServerConfig>>,
+    #[cfg(feature = "tls-rustls-backend")]
+    rustls_certificate_resolver: Option<Arc<fluxheim_tls::RustlsDownstreamCertificateResolver>>,
 }
 
 struct NativeHttp1ProxyRuntimeListener {
@@ -160,10 +162,11 @@ impl NativeHttp1ProxyRuntime {
                 && listener.listener_protocol() == ListenerProtocol::Https
         });
         #[cfg(feature = "tls-rustls-backend")]
-        let rustls_config = if has_https_listener {
-            Some(native_rustls_server_config(config)?)
+        let (rustls_config, rustls_certificate_resolver) = if has_https_listener {
+            let (config, resolver) = native_rustls_server_config(config)?;
+            (Some(config), Some(resolver))
         } else {
-            None
+            (None, None)
         };
         #[cfg(not(feature = "tls-rustls-backend"))]
         if has_https_listener {
@@ -226,6 +229,8 @@ impl NativeHttp1ProxyRuntime {
             listeners,
             #[cfg(feature = "tls-rustls-backend")]
             rustls_config,
+            #[cfg(feature = "tls-rustls-backend")]
+            rustls_certificate_resolver,
         })
     }
 
@@ -241,6 +246,13 @@ impl NativeHttp1ProxyRuntime {
             .iter()
             .map(|listener| listener.planned_addr)
             .collect()
+    }
+
+    #[cfg(feature = "tls-rustls-backend")]
+    pub fn rustls_certificate_resolver(
+        &self,
+    ) -> Option<Arc<fluxheim_tls::RustlsDownstreamCertificateResolver>> {
+        self.rustls_certificate_resolver.clone()
     }
 
     pub fn start(self, supervisor: &NativeBackgroundSupervisor) -> NativeHttp1ProxyRuntimeHandle {
@@ -353,7 +365,13 @@ async fn shutdown_wait(mut shutdown: FluxShutdown) {
 #[cfg(feature = "tls-rustls-backend")]
 fn native_rustls_server_config(
     config: &Config,
-) -> Result<Arc<rustls::ServerConfig>, NativeHttp1ProxyRuntimeError> {
+) -> Result<
+    (
+        Arc<rustls::ServerConfig>,
+        Arc<fluxheim_tls::RustlsDownstreamCertificateResolver>,
+    ),
+    NativeHttp1ProxyRuntimeError,
+> {
     if config.tls.effective_alpn() != TlsAlpnPolicy::Http1 {
         return Err(NativeHttp1ProxyRuntimeError::UnsupportedTlsAlpn {
             policy: config.tls.effective_alpn(),
@@ -369,11 +387,12 @@ fn native_rustls_server_config(
     let acme_tls_alpn_protocol = plan
         .acme_tls_alpn_enabled()
         .then_some(ACME_TLS_ALPN_PROTOCOL);
-    fluxheim_tls::build_rustls_downstream_server_config(
+    let server_config = fluxheim_tls::build_rustls_downstream_server_config(
         &config.tls,
-        resolver,
+        resolver.clone(),
         acme_tls_alpn_protocol,
     )
     .map(Arc::new)
-    .map_err(NativeHttp1ProxyRuntimeError::RustlsServerConfig)
+    .map_err(NativeHttp1ProxyRuntimeError::RustlsServerConfig)?;
+    Ok((server_config, resolver))
 }

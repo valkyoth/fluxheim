@@ -86,9 +86,11 @@ cache/PHP adapter slice.
   starts the native HTTP proxy runtime plus native admin, metrics, stream, UDP,
   and load-balancer refresh tasks under `NativeBackgroundSupervisor` instead of
   the Pingora server loop.
-- Native production startup fails closed for ACME renewal and certificate
-  reload background tasks until the native TLS reload handoff is wired, avoiding
-  a partial native process that would silently miss certificate updates.
+- Native Rustls proxy HTTPS startup now exposes its certificate resolver to the
+  root native runtime, so ACME renewal and the local certificate-reload control
+  task can reload downstream certificates without the Pingora listener adapter.
+  Non-Rustls native TLS reload paths still fail closed until their native
+  backend handoff lands.
 
 ## Tests
 
@@ -138,8 +140,8 @@ cache/PHP adapter slice.
   v2 listeners, proving the native listener parses the PROXY header and forwards
   the restored client IP to the upstream as `X-Real-IP`.
 - Added root runtime coverage proving blocker-free plans select the native
-  runtime target and that unsupported native certificate background tasks are
-  rejected explicitly.
+  runtime target and that certificate background tasks are rejected unless a
+  native reloader is available.
 - Re-ran the admin listener smoke against the native startup path, proving the
   production binary serves the admin TCP listener and Unix ops socket under the
   native runtime dispatcher.

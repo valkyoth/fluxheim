@@ -333,7 +333,6 @@ async fn run_native_runtime_async(
     server_plan: fluxheim_server::ServerPlan,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let launch_plan = server_plan.native_runtime_launch_plan()?;
-    reject_unsupported_native_background_tasks(&launch_plan)?;
 
     #[cfg(feature = "load-balancer")]
     let (proxy, load_balancer_services) =
@@ -347,6 +346,29 @@ async fn run_native_runtime_async(
         crate::metrics::init()?;
         crate::metrics::record_config(&config);
     }
+
+    let native_proxy_runtime = if server_plan
+        .service(fluxheim_server::ServiceKind::ProxyHttp)
+        .is_some()
+    {
+        Some(
+            fluxheim_server::NativeHttp1ProxyRuntime::bind_from_config(&config, &server_plan)
+                .await?,
+        )
+    } else {
+        None
+    };
+    #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
+    let native_certificate_reloader = native_proxy_runtime
+        .as_ref()
+        .and_then(fluxheim_server::NativeHttp1ProxyRuntime::rustls_certificate_resolver)
+        .map(DownstreamCertificateReloader::Rustls);
+    #[cfg(not(all(feature = "tls-rustls-backend", not(feature = "tls-openssl"))))]
+    let native_certificate_reloader: Option<DownstreamCertificateReloader> = None;
+    reject_unsupported_native_background_tasks(
+        &launch_plan,
+        native_certificate_reloader.is_some(),
+    )?;
 
     let supervisor = fluxheim_runtime::NativeBackgroundSupervisor::new();
     let mut background_handles = Vec::new();
@@ -456,20 +478,44 @@ async fn run_native_runtime_async(
         );
     }
 
+    #[cfg(all(feature = "acme-client", unix))]
+    if let Some(task) =
+        server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::CertificateReload)
+        && let Some(service) = certificate_reload_control_service(
+            task,
+            server_plan.certificate_reload_control(),
+            native_certificate_reloader.clone(),
+        )?
+    {
+        background_handles.push(supervisor.spawn_service(service.into_native()));
+    }
+
+    #[cfg(feature = "acme-client")]
+    if let Some(task) =
+        server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::AcmeRenewal)
+    {
+        log::info!(
+            "ACME renewal service enabled; interval={}s",
+            config.tls.acme.renewal.check_interval_secs
+        );
+        background_handles.push(
+            supervisor.spawn_service(
+                crate::background::background_service_for_spec(
+                    task,
+                    AcmeRenewalBackgroundService {
+                        config: config.clone(),
+                        certificate_reloader: native_certificate_reloader.clone(),
+                    },
+                )
+                .into_native(),
+            ),
+        );
+    }
+
     let mut listener_handles: Vec<
         tokio::task::JoinHandle<Result<(), fluxheim_server::NativeHttp1Error>>,
     > = Vec::new();
-    let proxy_runtime = if server_plan
-        .service(fluxheim_server::ServiceKind::ProxyHttp)
-        .is_some()
-    {
-        let runtime =
-            fluxheim_server::NativeHttp1ProxyRuntime::bind_from_config(&config, &server_plan)
-                .await?;
-        Some(runtime.start(&supervisor))
-    } else {
-        None
-    };
+    let proxy_runtime = native_proxy_runtime.map(|runtime| runtime.start(&supervisor));
 
     if let Some(admin_service_spec) =
         server_plan.service(fluxheim_server::ServiceKind::AdminControlPlane)
@@ -560,11 +606,14 @@ async fn run_native_runtime_async(
 #[cfg(feature = "proxy")]
 fn reject_unsupported_native_background_tasks(
     launch_plan: &fluxheim_server::NativeRuntimeLaunchPlan,
+    certificate_reloader_available: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     for task in launch_plan.background_tasks() {
         match task.kind() {
             fluxheim_runtime::BackgroundTaskKind::AcmeRenewal
-            | fluxheim_runtime::BackgroundTaskKind::CertificateReload => {
+            | fluxheim_runtime::BackgroundTaskKind::CertificateReload
+                if !certificate_reloader_available =>
+            {
                 return Err(format!(
                     "native runtime does not yet support {} background task",
                     task.name()
@@ -1617,11 +1666,12 @@ mod tests {
         );
         let launch_plan = plan.native_runtime_launch_plan().unwrap();
 
-        let error = super::reject_unsupported_native_background_tasks(&launch_plan)
+        let error = super::reject_unsupported_native_background_tasks(&launch_plan, false)
             .unwrap_err()
             .to_string();
 
         assert!(error.contains("native runtime does not yet support ACME renewal"));
+        super::reject_unsupported_native_background_tasks(&launch_plan, true).unwrap();
     }
 
     #[cfg(feature = "acme-client")]
