@@ -27,6 +27,7 @@ mod native_http1_upstream_response;
 mod native_http2;
 mod native_http2_client;
 mod native_http2_stack;
+mod native_runtime_http1_proxy;
 mod native_runtime_launch_plan;
 mod native_runtime_manifest;
 mod plan;
@@ -73,6 +74,9 @@ pub use native_http2_stack::{
     NativeHttp2Handler, NativeHttp2Request, NativeHttp2Response, NativeHttp2StackError,
     native_http2_stack_probe, native_http2_stack_probe_with_response,
     serve_native_http2_connection,
+};
+pub use native_runtime_http1_proxy::{
+    NativeHttp1ProxyRuntime, NativeHttp1ProxyRuntimeError, NativeHttp1ProxyRuntimeHandle,
 };
 pub use native_runtime_launch_plan::{
     NativeRuntimeLaunchBackgroundTask, NativeRuntimeLaunchListener, NativeRuntimeLaunchPlan,
@@ -168,6 +172,10 @@ mod native_http1_proxy_tls_policy_tests;
 #[cfg(test)]
 #[path = "native_http1_plan_tests.rs"]
 mod native_http1_plan_tests;
+
+#[cfg(test)]
+#[path = "native_runtime_http1_proxy_tests.rs"]
+mod native_runtime_http1_proxy_tests;
 
 #[cfg(test)]
 #[path = "native_http2_tests.rs"]

@@ -66,6 +66,12 @@ cache/PHP adapter slice.
 - The native runtime cutover evidence gate now fails if the representative
   blocker-free config does not target `NativeRuntime`, if the launch plan is not
   `ready`, or if a launch-plan error is emitted.
+- The server crate now has a Fluxheim-owned native HTTP/1 proxy runtime boundary
+  that binds proxy HTTP listeners from the native launch plan, builds the native
+  host router once, serves requests through `serve_native_http1_listener`, and
+  shuts down through the native background supervisor. HTTPS and downstream
+  PROXY protocol listeners still fail closed at this boundary until their
+  native listener handling lands.
 
 ## Tests
 
@@ -103,3 +109,7 @@ cache/PHP adapter slice.
 - Extended `scripts/validate-native-runtime-cutover.sh` so release validation
   proves the representative native runtime config is not only blocker-free but
   also selects the native target adapter and a ready launch plan.
+- Added a live native runtime test that binds a planned HTTP proxy listener on
+  an ephemeral address, proxies a real request to a local upstream through the
+  native host router, and shuts the listener down through
+  `NativeBackgroundSupervisor`.
