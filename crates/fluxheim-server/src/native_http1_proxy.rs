@@ -1505,21 +1505,6 @@ fn native_traffic_mirror_marker_signature() -> &'static str {
     })
 }
 
-#[cfg(any(
-    feature = "auth-request",
-    all(feature = "traffic-mirror", not(feature = "privacy-mode"))
-))]
-fn native_request_header_values<'a>(
-    request: &'a NativeHttp1Request,
-    name: &'a str,
-) -> impl Iterator<Item = &'a str> {
-    request
-        .headers
-        .iter()
-        .filter(move |(header_name, _)| header_name.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_str())
-}
-
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 fn native_request_header_values_joined(request: &NativeHttp1Request, name: &str) -> Option<String> {
     fluxheim_headers::join_header_values(

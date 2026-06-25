@@ -849,7 +849,7 @@ impl NativeHttp1RouteProxy {
         config: &fluxheim_config::Config,
         policy: DownstreamHttp1Policy,
         pool_max_idle: usize,
-        #[cfg(feature = "load-balancer")] mut load_balancer_services: Option<
+        #[cfg(feature = "load-balancer")] load_balancer_services: Option<
             &mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
         >,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
@@ -876,9 +876,7 @@ impl NativeHttp1RouteProxy {
             policy,
             pool_max_idle,
             #[cfg(feature = "load-balancer")]
-            load_balancer_services
-                .as_mut()
-                .map(|services| &mut **services),
+            load_balancer_services,
         )?
         .map(|proxy| proxy.with_header_policy(&config.headers));
         if fallback_web.is_none() && fallback.is_none() {
@@ -1061,9 +1059,7 @@ impl NativeHttp1RouteProxy {
             policy,
             pool_max_idle,
             #[cfg(feature = "load-balancer")]
-            load_balancer_services
-                .as_mut()
-                .map(|services| &mut **services),
+            native_load_balancer_services_reborrow(&mut load_balancer_services),
         )?;
         let fallback = fallback.map(|proxy| proxy.with_header_policy(&headers));
         #[cfg(not(feature = "privacy-mode"))]
@@ -1098,9 +1094,7 @@ impl NativeHttp1RouteProxy {
                     policy,
                     pool_max_idle,
                     #[cfg(feature = "load-balancer")]
-                    load_balancer_services
-                        .as_mut()
-                        .map(|services| &mut **services),
+                    native_load_balancer_services_reborrow(&mut load_balancer_services),
                 )?;
                 #[cfg(not(feature = "privacy-mode"))]
                 let proxy = proxy.map(|proxy| proxy.with_trusted_sources(trusted_sources));
@@ -1177,6 +1171,14 @@ fn native_proxy_from_config_collecting_load_balancer(
         NativeHttp1Proxy::from_proxy_config_with_pool_size(proxy, policy, pool_max_idle)
             .map_err(NativeHttp1RouteProxyConfigError::Proxy)
     }
+}
+
+#[cfg(feature = "load-balancer")]
+#[allow(clippy::option_as_ref_deref)]
+fn native_load_balancer_services_reborrow<'a>(
+    services: &'a mut Option<&mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>>,
+) -> Option<&'a mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>> {
+    services.as_mut().map(|services| &mut **services)
 }
 
 #[cfg(feature = "acme")]
