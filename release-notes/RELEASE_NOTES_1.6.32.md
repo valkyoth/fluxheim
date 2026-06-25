@@ -202,3 +202,7 @@ request/response behavior in a later `1.6.x` stop.
   selectors, including alias parsing, header-hash requirements, dynamic
   discovery rejection for static-ring selections, native selection
   construction, and runtime backend-set mutation rejection.
+- Added native runtime launch-plan tests proving `proxy.websocket = true`
+  remains a compatibility-required blocker at root, vhost, and route scope
+  until the native HTTP/1 runtime has an explicit downstream upgrade/tunnel
+  response shape.
