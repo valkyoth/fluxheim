@@ -77,6 +77,10 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
 - The native runtime cutover evidence gate now fails if the representative
   blocker-free config does not target `NativeRuntime`, if the launch plan is not
   `ready`, or if a launch-plan error is emitted.
+- `fluxheim-config-tester --runtime-cutover` now labels the compatibility
+  adapter row as `native-runtime-compat-adapter`, so blocker-free reports do
+  not look like they will still start through Pingora when
+  `native-runtime-target-adapter` is already `NativeRuntime`.
 - The server crate now has a Fluxheim-owned native HTTP/1 proxy runtime boundary
   that binds proxy HTTP listeners from the native launch plan, builds the native
   host router once, serves requests through `serve_native_http1_listener`, and

@@ -139,7 +139,10 @@ fn print_runtime_cutover_report(config: &Config) -> Result<(), Box<dyn Error + S
 fn runtime_cutover_report(config: &Config) -> Result<String, Box<dyn Error + Send + Sync>> {
     let plan = fluxheim_server::ServerPlan::from_config(config)?;
     let summary = plan.native_runtime_cutover_summary();
-    let mut report = format!("native-runtime-adapter: {:?}\n", plan.runtime_adapter());
+    let mut report = format!(
+        "native-runtime-compat-adapter: {:?}\n",
+        plan.runtime_adapter()
+    );
     report.push_str(&format!(
         "native-runtime-target-adapter: {:?}\n",
         plan.native_runtime_target_adapter()
@@ -807,7 +810,7 @@ mod tests {
 
         let report = runtime_cutover_report(&config).unwrap();
 
-        assert!(report.contains("native-runtime-adapter: PingoraCompatibility\n"));
+        assert!(report.contains("native-runtime-compat-adapter: PingoraCompatibility\n"));
         assert!(report.contains("native-runtime-target-adapter: NativeRuntime\n"));
         assert!(report.contains("native-runtime-launch-plan\tready\t3\t3\t0\toff\n"));
         assert!(report.contains(

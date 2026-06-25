@@ -104,7 +104,7 @@ awk -F '\t' '
         target[$1] = $2 "\t" $3
         next
     }
-    /^native-runtime-adapter:/ || /^native-runtime-target-adapter:/ { next }
+    /^native-runtime-compat-adapter:/ || /^native-runtime-target-adapter:/ { next }
     /^config tester: ok$/ { next }
     $1 == "native-http1-proxy-candidate" {
         if (NF != 4) {
@@ -193,7 +193,7 @@ awk -F '\t' '
         expected[$1] = $2 "\t" $3
         next
     }
-    /^native-runtime-adapter:/ || /^native-runtime-target-adapter:/ { next }
+    /^native-runtime-compat-adapter:/ || /^native-runtime-target-adapter:/ { next }
     /^config tester: ok$/ { next }
     $1 == "native-http1-proxy-candidate" {
         if (NF != 4) {
@@ -295,7 +295,7 @@ if grep -q '^native-runtime-launch-plan-error	' "$out_dir/representative-runtime
 fi
 
 awk -F '\t' '
-    /^native-runtime-adapter:/ || /^native-runtime-target-adapter:/ { next }
+    /^native-runtime-compat-adapter:/ || /^native-runtime-target-adapter:/ { next }
     /^config tester: ok$/ { next }
     $1 == "native-http1-proxy-candidate" {
         if (NF != 4) {
