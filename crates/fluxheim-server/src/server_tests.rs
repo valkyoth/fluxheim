@@ -90,10 +90,10 @@ fn server_plan_exposes_native_http2_preview_gate() {
     let preview = plan.native_http2_preview();
 
     assert_eq!(preview.downstream_policy(), plan.downstream_http2());
-    assert!(!preview.is_cutover_ready());
-    assert!(preview.blocking_reports().any(|report| {
+    assert!(preview.is_cutover_ready());
+    assert!(preview.reports().iter().any(|report| {
         report.hook() == NativeHttp2SafetyHook::DownstreamListenerDispatch
-            && report.status() == NativeHttp2SafetyStatus::Blocking
+            && report.status() == NativeHttp2SafetyStatus::Satisfied
     }));
     assert!(preview.reports().iter().any(|report| {
         report.hook() == NativeHttp2SafetyHook::HeaderFieldCount
@@ -126,7 +126,7 @@ fn native_runtime_cutover_summary_reports_proxy_blockers() {
 }
 
 #[test]
-fn native_runtime_cutover_summary_blocks_tls_http2_alpn_until_downstream_dispatch_ready() {
+fn native_runtime_cutover_summary_accepts_tls_http2_alpn_when_proxy_is_native_ready() {
     let mut config = Config::default();
     config.server.listen.clear();
     config.server.tls_listen = vec!["127.0.0.1:8443".to_owned()];
@@ -138,12 +138,8 @@ fn native_runtime_cutover_summary_blocks_tls_http2_alpn_until_downstream_dispatc
     let blockers = plan.native_runtime_cutover_summary().blockers().to_vec();
 
     assert!(plan.downstream_http2_required());
-    assert!(blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp2));
-    assert!(
-        plan.native_runtime_cutover_summary()
-            .to_tsv()
-            .contains("native-http2\tnative HTTP/2 downstream parity\t1.6.33\n")
-    );
+    assert!(!blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp2));
+    assert!(plan.native_runtime_cutover_summary().is_ready());
 }
 
 #[test]

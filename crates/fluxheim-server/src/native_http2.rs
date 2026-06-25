@@ -66,14 +66,6 @@ impl NativeHttp2SafetyReport {
         }
     }
 
-    const fn blocking(hook: NativeHttp2SafetyHook, detail: &'static str) -> Self {
-        Self {
-            hook,
-            status: NativeHttp2SafetyStatus::Blocking,
-            detail,
-        }
-    }
-
     pub const fn hook(&self) -> NativeHttp2SafetyHook {
         self.hook
     }
@@ -134,9 +126,9 @@ impl NativeHttp2Preview {
                     NativeHttp2SafetyHook::TrailerAndGrpcPassThrough,
                     "native HTTP/2 request/response types preserve trailers, including gRPC status trailers.",
                 ),
-                NativeHttp2SafetyReport::blocking(
+                NativeHttp2SafetyReport::satisfied(
                     NativeHttp2SafetyHook::DownstreamListenerDispatch,
-                    "native HTTPS listener dispatch still rejects HTTP/2 ALPN until the production multi-stream proxy adapter is wired.",
+                    "native HTTPS listener dispatch routes selected h2 ALPN connections into the multi-stream native HTTP/2 route adapter.",
                 ),
             ],
         }

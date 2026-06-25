@@ -179,6 +179,50 @@ async fn downstream_tls_get(proxy: std::net::SocketAddr, certificate_pem: String
     read_http_response(&mut stream).await
 }
 
+#[cfg(feature = "tls-rustls-backend")]
+async fn downstream_tls_h2_get(proxy: std::net::SocketAddr, certificate_pem: String) -> String {
+    use rustls::pki_types::{CertificateDer, ServerName, pem::PemObject};
+    use rustls::{ClientConfig, RootCertStore};
+    use tokio_rustls::TlsConnector;
+
+    let certs = CertificateDer::pem_slice_iter(certificate_pem.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    let mut roots = RootCertStore::empty();
+    roots.add(certs[0].clone()).unwrap();
+    let mut client_config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    client_config.alpn_protocols = vec![b"h2".to_vec()];
+    let connector = TlsConnector::from(std::sync::Arc::new(client_config));
+
+    let tcp = TcpStream::connect(proxy).await.unwrap();
+    let server_name = ServerName::try_from("localhost".to_owned()).unwrap();
+    let stream = connector.connect(server_name, tcp).await.unwrap();
+    assert_eq!(stream.get_ref().1.alpn_protocol(), Some(b"h2".as_slice()));
+
+    let (mut client, connection) = h2::client::handshake(stream).await.unwrap();
+    let driver = tokio::spawn(connection);
+    let request = http::Request::builder()
+        .method("GET")
+        .uri("https://localhost/secure")
+        .header("host", "localhost")
+        .body(())
+        .unwrap();
+    let (response, _) = client.send_request(request, true).unwrap();
+    let response = response.await.unwrap();
+    assert_eq!(response.status(), http::StatusCode::OK);
+    let mut body = response.into_body();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = body.data().await {
+        bytes.extend_from_slice(&chunk.unwrap());
+    }
+    drop(client);
+    driver.abort();
+    let _ = driver.await;
+    String::from_utf8(bytes).unwrap()
+}
+
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
 async fn downstream_tls_get(proxy: std::net::SocketAddr, certificate_pem: String) -> String {
     use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
@@ -427,6 +471,49 @@ async fn native_http1_proxy_runtime_binds_rustls_launch_plan_and_serves_https_li
     assert!(supervisor.shutdown());
     for result in handle.join().await {
         result.expect("native rustls listener stopped cleanly");
+    }
+}
+
+#[cfg(feature = "tls-rustls-backend")]
+#[tokio::test]
+async fn native_http1_proxy_runtime_serves_rustls_http2_alpn_listener() {
+    use fluxheim_config::{StaticCertificateConfig, TlsAlpnPolicy, TlsConfig};
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let certificate = temporary_localhost_certificate();
+
+    let upstream = upstream_response("runtime-h2-ok").await;
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = Vec::new();
+    config.server.tls_listen = vec!["127.0.0.1:0".to_owned()];
+    config.proxy.upstream = Some(upstream.to_string());
+    config.tls = TlsConfig {
+        enabled: true,
+        alpn: TlsAlpnPolicy::Http1AndHttp2,
+        certificates: vec![StaticCertificateConfig {
+            cert_path: certificate.cert_path.clone(),
+            key_path: certificate.key_path.clone(),
+        }],
+        ..TlsConfig::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert!(plan.downstream_http2_required());
+    assert!(plan.native_runtime_cutover_summary().is_ready());
+    let runtime = NativeHttp1ProxyRuntime::bind_from_config(&config, &plan)
+        .await
+        .expect("bind native rustls proxy runtime");
+    let local_addr = runtime.local_addrs()[0];
+
+    let supervisor = NativeBackgroundSupervisor::new();
+    let handle = runtime.start(&supervisor);
+
+    let body = downstream_tls_h2_get(local_addr, certificate.cert_pem).await;
+    assert_eq!(body, "runtime-h2-ok");
+
+    assert!(supervisor.shutdown());
+    for result in handle.join().await {
+        result.expect("native rustls H2 listener stopped cleanly");
     }
 }
 

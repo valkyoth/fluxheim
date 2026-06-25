@@ -9,6 +9,15 @@ use fluxheim_runtime::{FluxShutdown, NativeBackgroundSupervisor};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
+))]
+use crate::DownstreamHttp2Policy;
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+use crate::native_http1::{NativeTlsHttp2Dispatch, serve_native_http1_and_http2_openssl_listener};
+#[cfg(feature = "tls-rustls-backend")]
+use crate::native_http1::{NativeTlsHttp2Dispatch, serve_native_http1_and_http2_rustls_listener};
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
 use crate::serve_native_http1_openssl_listener;
 #[cfg(feature = "tls-rustls-backend")]
@@ -24,6 +33,11 @@ const ACME_TLS_ALPN_PROTOCOL: &[u8] = b"acme-tls/1";
 
 pub struct NativeHttp1ProxyRuntime {
     policy: crate::DownstreamHttp1Policy,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
+    ))]
+    http2_policy: DownstreamHttp2Policy,
     proxy_protocol: crate::ProxyProtocolPolicy,
     router: Arc<NativeHttp1HostRouter>,
     listeners: Vec<NativeHttp1ProxyRuntimeListener>,
@@ -37,6 +51,11 @@ pub struct NativeHttp1ProxyRuntime {
     openssl_acceptor: Option<Arc<openssl::ssl::SslAcceptor>>,
     #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
     openssl_certificate_store: Option<Arc<fluxheim_tls::OpenSslDownstreamCertificateStore>>,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
+    ))]
+    tls_alpn_policy: TlsAlpnPolicy,
 }
 
 struct NativeHttp1ProxyRuntimeListener {
@@ -278,6 +297,11 @@ impl NativeHttp1ProxyRuntime {
         }
         Ok(Self {
             policy: launch_plan.downstream_http1(),
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
+            ))]
+            http2_policy: launch_plan.downstream_http2(),
             proxy_protocol: launch_plan.proxy_protocol().clone(),
             router,
             listeners,
@@ -291,6 +315,11 @@ impl NativeHttp1ProxyRuntime {
             openssl_acceptor,
             #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
             openssl_certificate_store,
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
+            ))]
+            tls_alpn_policy: config.tls.effective_alpn(),
         })
     }
 
@@ -334,9 +363,19 @@ impl NativeHttp1ProxyRuntime {
         for listener in self.listeners {
             let local_addr = listener.local_addr;
             let policy = self.policy;
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
+            ))]
+            let http2_policy = self.http2_policy;
             let proxy_protocol = self.proxy_protocol.clone();
             let router = self.router.clone();
             let shutdown = supervisor.shutdown_view();
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
+            ))]
+            let tls_alpn_policy = self.tls_alpn_policy;
             #[cfg(feature = "tls-rustls-backend")]
             let rustls_config = self.rustls_config.clone();
             #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
@@ -369,14 +408,33 @@ impl NativeHttp1ProxyRuntime {
                                 "missing rustls config for native HTTPS listener",
                             )));
                         };
-                        serve_native_http1_rustls_listener(
-                            listener.listener,
-                            policy,
-                            rustls_config,
-                            router,
-                            shutdown_wait(shutdown),
-                        )
-                        .await
+                        let (http1_allowed, http2_allowed) =
+                            native_tls_alpn_protocols(tls_alpn_policy);
+                        if http2_allowed {
+                            let h2_dispatch = NativeTlsHttp2Dispatch {
+                                policy: http2_policy,
+                                http1_allowed,
+                                http2_allowed,
+                            };
+                            serve_native_http1_and_http2_rustls_listener(
+                                listener.listener,
+                                policy,
+                                rustls_config,
+                                h2_dispatch,
+                                router,
+                                shutdown_wait(shutdown),
+                            )
+                            .await
+                        } else {
+                            serve_native_http1_rustls_listener(
+                                listener.listener,
+                                policy,
+                                rustls_config,
+                                router,
+                                shutdown_wait(shutdown),
+                            )
+                            .await
+                        }
                     }
                     #[cfg(all(
                         not(feature = "tls-rustls-backend"),
@@ -388,14 +446,33 @@ impl NativeHttp1ProxyRuntime {
                                 "missing OpenSSL acceptor for native HTTPS listener",
                             )));
                         };
-                        serve_native_http1_openssl_listener(
-                            listener.listener,
-                            policy,
-                            openssl_acceptor,
-                            router,
-                            shutdown_wait(shutdown),
-                        )
-                        .await
+                        let (http1_allowed, http2_allowed) =
+                            native_tls_alpn_protocols(tls_alpn_policy);
+                        if http2_allowed {
+                            let h2_dispatch = NativeTlsHttp2Dispatch {
+                                policy: http2_policy,
+                                http1_allowed,
+                                http2_allowed,
+                            };
+                            serve_native_http1_and_http2_openssl_listener(
+                                listener.listener,
+                                policy,
+                                openssl_acceptor,
+                                h2_dispatch,
+                                router,
+                                shutdown_wait(shutdown),
+                            )
+                            .await
+                        } else {
+                            serve_native_http1_openssl_listener(
+                                listener.listener,
+                                policy,
+                                openssl_acceptor,
+                                router,
+                                shutdown_wait(shutdown),
+                            )
+                            .await
+                        }
                     }
                     #[cfg(all(
                         not(feature = "tls-rustls-backend"),
@@ -470,11 +547,6 @@ fn native_rustls_server_config(
     ),
     NativeHttp1ProxyRuntimeError,
 > {
-    if config.tls.effective_alpn() != TlsAlpnPolicy::Http1 {
-        return Err(NativeHttp1ProxyRuntimeError::UnsupportedTlsAlpn {
-            policy: config.tls.effective_alpn(),
-        });
-    }
     let plan = fluxheim_tls::DownstreamTlsListenerPlan::from_config(config)
         .map_err(NativeHttp1ProxyRuntimeError::TlsPlan)?
         .ok_or(NativeHttp1ProxyRuntimeError::MissingProxyHttpListener)?;
@@ -505,11 +577,6 @@ fn native_openssl_acceptor(
     ),
     NativeHttp1ProxyRuntimeError,
 > {
-    if config.tls.effective_alpn() != TlsAlpnPolicy::Http1 {
-        return Err(NativeHttp1ProxyRuntimeError::UnsupportedTlsAlpn {
-            policy: config.tls.effective_alpn(),
-        });
-    }
     let plan = fluxheim_tls::DownstreamTlsListenerPlan::from_config(config)
         .map_err(NativeHttp1ProxyRuntimeError::TlsPlan)?
         .ok_or(NativeHttp1ProxyRuntimeError::MissingProxyHttpListener)?;
@@ -534,4 +601,16 @@ fn native_openssl_acceptor(
             .map(Arc::new)
             .map_err(NativeHttp1ProxyRuntimeError::OpenSslAcceptor)?;
     Ok((acceptor, None))
+}
+
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
+))]
+const fn native_tls_alpn_protocols(policy: TlsAlpnPolicy) -> (bool, bool) {
+    match policy {
+        TlsAlpnPolicy::Http1 => (true, false),
+        TlsAlpnPolicy::Http2 => (false, true),
+        TlsAlpnPolicy::Http1AndHttp2 => (true, true),
+    }
 }

@@ -6,13 +6,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[test]
-fn native_http2_preview_keeps_downstream_dispatch_blocking_until_production_wired() {
+fn native_http2_preview_marks_downstream_dispatch_ready_after_alpn_wiring() {
     let preview = NativeHttp2Preview::from_downstream_policy(DownstreamHttp2Policy::default());
 
-    assert!(!preview.is_cutover_ready());
-    assert!(preview.blocking_reports().any(|report| {
+    assert!(preview.is_cutover_ready());
+    assert!(preview.reports().iter().any(|report| {
         report.hook() == NativeHttp2SafetyHook::DownstreamListenerDispatch
-            && report.detail().contains("HTTP/2 ALPN")
+            && report.status() == NativeHttp2SafetyStatus::Satisfied
+            && report.detail().contains("h2 ALPN")
     }));
 }
 

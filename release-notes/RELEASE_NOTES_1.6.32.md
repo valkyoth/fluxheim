@@ -109,20 +109,24 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   settings, installs SNI certificate selection through OpenSSL's callback API,
   and exposes the certificate store to the root native runtime so ACME renewal
   and local certificate reloads no longer require the Pingora listener adapter.
-- Native runtime cutover evidence now treats downstream HTTP/2 as a real
-  blocker only when a TLS listener advertises `tls.alpn = "http2"` or
-  `"http1-and-http2"`. Pure HTTP/1 native proxy configs remain eligible, while
-  the HTTP/2 preview report explicitly records production listener dispatch as
-  blocking until the multi-stream downstream proxy adapter is wired.
+- Native runtime cutover evidence no longer treats downstream HTTP/2 listener
+  dispatch as a standalone blocker once the TLS ALPN route can enter the
+  native multi-stream H2 adapter. Remaining native proxy blockers are tied to
+  HTTP/1 proxy/cache feature parity rather than the H2 listener handoff itself.
+- Native HTTPS listeners can now dispatch selected `h2` ALPN connections into
+  the native multi-stream HTTP/2 route adapter, while `http/1.1` and no-ALPN
+  connections continue through the native HTTP/1 route path when the configured
+  TLS ALPN policy permits HTTP/1. A live rustls runtime test proves
+  `tls.alpn = "http1-and-http2"` negotiates HTTP/2 and reaches an ordinary
+  native proxy upstream.
 - The machine-readable native cutover target table now points the downstream
   HTTP/2 blocker at the final rich-proxy parity release instead of the earlier
   preview milestone, keeping `fluxheim-config-tester --runtime-cutover` output
   consistent with the current Pingora-exit plan.
 - The native HTTP/2 preview connection loop now accepts and serves multiple
   streams on one connection instead of dropping every stream after the first
-  probe response. Tests cover same-connection multi-stream responses while the
-  production ALPN dispatch gate remains fail-closed until the full downstream
-  proxy adapter is wired.
+  probe response. Tests cover same-connection multi-stream responses and the
+  native TLS runtime now routes selected downstream H2 traffic into that stack.
 - Added a native HTTP/2-to-native-route adapter that maps ordinary H2 requests
   into the existing native HTTP/1 route handler pipeline and converts native
   responses back to H2 without collapsing duplicate response headers such as
