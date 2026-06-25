@@ -2857,6 +2857,12 @@ available for the stabilization/security-only follow-up.
   must cover lookup/fill/stale, Vary/Range/conditional semantics, peer-fill
   guardrails, purge visibility, and root/vhost/route cache policy readiness
   only after the native adapter owns the full request/response/cache-key path.
+  Downstream HTTP/2 cutover must convert the current safety preview into
+  production listener dispatch: TLS ALPN `h2` selection, multi-stream
+  downstream proxy handling, request/response trailer preservation, and
+  fail-closed behavior for unsupported upgrade semantics need live listener
+  tests before `tls.alpn = "http2"` or `"http1-and-http2"` can target the
+  native runtime.
   The native WebSocket baseline
   now covers strict `Upgrade: websocket` requests on forced HTTP/1 static
   upstream routes with shared 101 validation, prebuffer preservation, and a

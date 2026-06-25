@@ -1,4 +1,4 @@
-use fluxheim_config::Config;
+use fluxheim_config::{Config, TlsAlpnPolicy};
 use fluxheim_runtime::BackgroundTaskSpec;
 
 use crate::{
@@ -90,9 +90,7 @@ impl NativeRuntimeCutoverSummary {
         {
             blockers.push(NativeRuntimeCutoverBlocker::NativeHttp1Proxy);
         }
-        if plan.has_service(ServiceKind::ProxyHttp)
-            && !plan.native_http2_preview().is_cutover_ready()
-        {
+        if plan.downstream_http2_required && !plan.native_http2_preview().is_cutover_ready() {
             blockers.push(NativeRuntimeCutoverBlocker::NativeHttp2);
         }
         for (kind, native_ready, blocker) in [
@@ -158,6 +156,7 @@ pub struct ServerPlan {
     proxy_protocol: ProxyProtocolPolicy,
     downstream_http1: DownstreamHttp1Policy,
     downstream_http2: DownstreamHttp2Policy,
+    downstream_http2_required: bool,
     native_http2_preview: NativeHttp2Preview,
     certificate_reload_control: Option<CertificateReloadControlPlan>,
     admin_ops_socket: Option<service::AdminOpsSocketPlan>,
@@ -181,6 +180,7 @@ impl ServerPlan {
             proxy_protocol: ProxyProtocolPolicy::Off,
             downstream_http1: DownstreamHttp1Policy::default(),
             downstream_http2: DownstreamHttp2Policy::default(),
+            downstream_http2_required: false,
             native_http2_preview: NativeHttp2Preview::from_downstream_policy(
                 DownstreamHttp2Policy::default(),
             ),
@@ -211,6 +211,7 @@ impl ServerPlan {
             proxy_protocol: ProxyProtocolPolicy::Off,
             downstream_http1: DownstreamHttp1Policy::default(),
             downstream_http2: DownstreamHttp2Policy::default(),
+            downstream_http2_required: false,
             native_http2_preview: NativeHttp2Preview::from_downstream_policy(
                 DownstreamHttp2Policy::default(),
             ),
@@ -257,6 +258,10 @@ impl ServerPlan {
 
     pub const fn downstream_http2(&self) -> &DownstreamHttp2Policy {
         &self.downstream_http2
+    }
+
+    pub const fn downstream_http2_required(&self) -> bool {
+        self.downstream_http2_required
     }
 
     pub const fn native_http2_preview(&self) -> &NativeHttp2Preview {
@@ -436,6 +441,7 @@ impl ServerPlan {
             proxy_protocol: proxy_protocol::proxy_protocol_policy_from_config(config)?,
             downstream_http1,
             downstream_http2,
+            downstream_http2_required: downstream_http2_required(config),
             native_http2_preview: NativeHttp2Preview::from_downstream_policy(downstream_http2),
             certificate_reload_control,
             admin_ops_socket: service::admin_ops_socket_plan_from_config(config),
@@ -457,6 +463,14 @@ impl ServerPlan {
             background_tasks: background::background_task_specs_from_config(config),
         })
     }
+}
+
+fn downstream_http2_required(config: &Config) -> bool {
+    !config.server.tls_listen.is_empty()
+        && matches!(
+            config.tls.effective_alpn(),
+            TlsAlpnPolicy::Http2 | TlsAlpnPolicy::Http1AndHttp2
+        )
 }
 
 #[cfg(unix)]

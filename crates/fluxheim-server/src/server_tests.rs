@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use fluxheim_config::{
     CacheConfig, Config, DownstreamProxyProtocol, RouteConfig, ServerLimitsConfig,
-    StreamRouteConfig, UdpRouteConfig, VhostConfig,
+    StreamRouteConfig, TlsAlpnPolicy, UdpRouteConfig, VhostConfig,
 };
 use fluxheim_runtime::{BackgroundTaskKind, BackgroundTaskSpec, ShutdownReason, ShutdownState};
 
@@ -90,8 +90,11 @@ fn server_plan_exposes_native_http2_preview_gate() {
     let preview = plan.native_http2_preview();
 
     assert_eq!(preview.downstream_policy(), plan.downstream_http2());
-    assert!(preview.is_cutover_ready());
-    assert!(preview.blocking_reports().next().is_none());
+    assert!(!preview.is_cutover_ready());
+    assert!(preview.blocking_reports().any(|report| {
+        report.hook() == NativeHttp2SafetyHook::DownstreamListenerDispatch
+            && report.status() == NativeHttp2SafetyStatus::Blocking
+    }));
     assert!(preview.reports().iter().any(|report| {
         report.hook() == NativeHttp2SafetyHook::HeaderFieldCount
             && report.status() == NativeHttp2SafetyStatus::Satisfied
@@ -120,6 +123,22 @@ fn native_runtime_cutover_summary_reports_proxy_blockers() {
 
     assert!(blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp1Proxy));
     assert!(!blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp2));
+}
+
+#[test]
+fn native_runtime_cutover_summary_blocks_tls_http2_alpn_until_downstream_dispatch_ready() {
+    let mut config = Config::default();
+    config.server.listen.clear();
+    config.server.tls_listen = vec!["127.0.0.1:8443".to_owned()];
+    config.tls.enabled = true;
+    config.tls.alpn = TlsAlpnPolicy::Http1AndHttp2;
+    config.proxy.upstreams = vec!["127.0.0.1:3000".to_owned()];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let blockers = plan.native_runtime_cutover_summary().blockers().to_vec();
+
+    assert!(plan.downstream_http2_required());
+    assert!(blockers.contains(&NativeRuntimeCutoverBlocker::NativeHttp2));
 }
 
 #[test]

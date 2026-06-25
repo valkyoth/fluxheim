@@ -109,6 +109,11 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   settings, installs SNI certificate selection through OpenSSL's callback API,
   and exposes the certificate store to the root native runtime so ACME renewal
   and local certificate reloads no longer require the Pingora listener adapter.
+- Native runtime cutover evidence now treats downstream HTTP/2 as a real
+  blocker only when a TLS listener advertises `tls.alpn = "http2"` or
+  `"http1-and-http2"`. Pure HTTP/1 native proxy configs remain eligible, while
+  the HTTP/2 preview report explicitly records production listener dispatch as
+  blocking until the multi-stream downstream proxy adapter is wired.
 - Native PHP-FPM routes now support Fluxheim-managed php-fpm process ownership
   through `fluxheim-php-fpm`, not the root crate. Managed routes create the
   private php-fpm config, validate the php-fpm binary path against symlink and

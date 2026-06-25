@@ -1,6 +1,6 @@
 use crate::DownstreamHttp2Policy;
 
-const REQUIRED_HOOKS: [NativeHttp2SafetyHook; 9] = [
+const REQUIRED_HOOKS: [NativeHttp2SafetyHook; 10] = [
     NativeHttp2SafetyHook::HeaderListSize,
     NativeHttp2SafetyHook::HeaderFieldCount,
     NativeHttp2SafetyHook::ConcurrentStreamLimit,
@@ -10,6 +10,7 @@ const REQUIRED_HOOKS: [NativeHttp2SafetyHook; 9] = [
     NativeHttp2SafetyHook::FlowControlWindowBounds,
     NativeHttp2SafetyHook::ResetFloodBound,
     NativeHttp2SafetyHook::TrailerAndGrpcPassThrough,
+    NativeHttp2SafetyHook::DownstreamListenerDispatch,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -23,6 +24,7 @@ pub enum NativeHttp2SafetyHook {
     FlowControlWindowBounds,
     ResetFloodBound,
     TrailerAndGrpcPassThrough,
+    DownstreamListenerDispatch,
 }
 
 impl NativeHttp2SafetyHook {
@@ -37,6 +39,7 @@ impl NativeHttp2SafetyHook {
             Self::FlowControlWindowBounds => "flow-control-window-bounds",
             Self::ResetFloodBound => "reset-flood-bound",
             Self::TrailerAndGrpcPassThrough => "trailer-and-grpc-pass-through",
+            Self::DownstreamListenerDispatch => "downstream-listener-dispatch",
         }
     }
 }
@@ -59,6 +62,14 @@ impl NativeHttp2SafetyReport {
         Self {
             hook,
             status: NativeHttp2SafetyStatus::Satisfied,
+            detail,
+        }
+    }
+
+    const fn blocking(hook: NativeHttp2SafetyHook, detail: &'static str) -> Self {
+        Self {
+            hook,
+            status: NativeHttp2SafetyStatus::Blocking,
             detail,
         }
     }
@@ -122,6 +133,10 @@ impl NativeHttp2Preview {
                 NativeHttp2SafetyReport::satisfied(
                     NativeHttp2SafetyHook::TrailerAndGrpcPassThrough,
                     "native HTTP/2 request/response types preserve trailers, including gRPC status trailers.",
+                ),
+                NativeHttp2SafetyReport::blocking(
+                    NativeHttp2SafetyHook::DownstreamListenerDispatch,
+                    "native HTTPS listener dispatch still rejects HTTP/2 ALPN until the production multi-stream proxy adapter is wired.",
                 ),
             ],
         }
