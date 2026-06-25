@@ -2837,17 +2837,19 @@ available for the stabilization/security-only follow-up.
   and intercepted-status classification. Add a PHP-specific native static-web
   resolver that reuses the canonical/symlink-safe file resolver for explicit
   scripts, front-controller fallback, deny prefixes, directory-index redirect,
-  and decline-existing-static behavior. Keep live FastCGI execution fail-closed
-  until the spool/retry/error-page adapter lands.
+  and decline-existing-static behavior. Add staged request-body planning that
+  enforces PHP body limits, keeps small bodies in memory, and uses the existing
+  private PHP spool-file creator/cleanup path for thresholded bodies. Keep live
+  FastCGI execution fail-closed until the retry/error-page adapter lands.
 - `v1.6.33`: close the final rich-proxy parity gates and remove the final
   Pingora runtime/listener/TLS adapter crates from normal builds. Cache work
   must cover lookup/fill/stale, Vary/Range/conditional semantics, peer-fill
   guardrails, purge visibility, and root/vhost/route cache policy readiness
   only after the native adapter owns the full request/response/cache-key path.
-  PHP-FPM work must wire the staged request/response planners into live
-  FastCGI execution and cover request-body spool limits, TCP/Unix upstream
-  policies, retry/failover, custom PHP error pages, and managed/external FPM
-  process boundaries. The native WebSocket baseline
+  PHP-FPM work must wire the staged request/response/body planners into live
+  FastCGI execution and cover TCP/Unix upstream policies, retry/failover,
+  custom PHP error pages, and managed/external FPM process boundaries. The
+  native WebSocket baseline
   now covers strict `Upgrade: websocket` requests on forced HTTP/1 static
   upstream routes with shared 101 validation, prebuffer preservation, and a
   bounded bidirectional tunnel; native load-balanced WebSocket pools select one

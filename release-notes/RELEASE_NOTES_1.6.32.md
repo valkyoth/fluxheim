@@ -160,6 +160,11 @@ prove full request/response behavior in a later `1.6.x` stop.
   canonical web-root/symlink-safe resolver as static serving while applying PHP
   `SCRIPT_NAME`, front-controller, deny-prefix, directory-index redirect, and
   decline-existing-static decisions.
+- The staged native PHP-FPM adapter now has request-body planning for the
+  upcoming live execution path. It enforces `php.max_request_body_bytes`, keeps
+  small bodies in memory, and uses Fluxheim's existing private PHP spool-file
+  creator/cleanup path when `php.request_body_spool_threshold_bytes` and
+  `php.request_body_spool_dir` require a spooled body.
 - The remaining rich-proxy native gates are now documented as intentional
   parity blockers rather than hidden launch blockers: proxy cache still needs
   native lookup/fill/stale/purge behavior, and PHP-FPM still needs live
@@ -260,3 +265,6 @@ prove full request/response behavior in a later `1.6.x` stop.
   resolve explicit PHP scripts, use the front controller for missing paths,
   decline existing non-PHP static files when configured, and reject denied
   script prefixes.
+- Added PHP-FPM feature tests for native request-body planning, including
+  memory bodies, configured body-limit rejection, spool-file creation, and
+  cleanup on request-body drop.

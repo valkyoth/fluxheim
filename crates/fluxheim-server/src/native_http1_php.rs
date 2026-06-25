@@ -44,6 +44,44 @@ pub(crate) enum NativePhpScriptResolve {
     Forbidden,
 }
 
+pub(crate) async fn native_php_request_body(
+    request: &NativeHttp1Request,
+    php: &PhpConfig,
+) -> io::Result<fluxheim_php_fpm::PhpRequestBody> {
+    if let Some(limit) = php.max_request_body_bytes
+        && request.body.len() as u64 > limit.as_u64()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "PHP request body exceeds configured limit",
+        ));
+    }
+    let Some(threshold) = php.request_body_spool_threshold_bytes else {
+        return Ok(fluxheim_php_fpm::PhpRequestBody::memory(
+            request.body.clone(),
+        ));
+    };
+    if request.body.len() as u64 <= threshold.as_u64() {
+        return Ok(fluxheim_php_fpm::PhpRequestBody::memory(
+            request.body.clone(),
+        ));
+    }
+    let Some(spool_dir) = php.request_body_spool_dir.as_deref() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "PHP request body spool directory is required",
+        ));
+    };
+    let (path, mut file) = fluxheim_php_fpm::create_php_request_body_spool_file(spool_dir).await?;
+    tokio::io::AsyncWriteExt::write_all(&mut file, &request.body).await?;
+    tokio::io::AsyncWriteExt::flush(&mut file).await?;
+    drop(file);
+    Ok(fluxheim_php_fpm::PhpRequestBody::spooled(
+        path,
+        request.body.len(),
+    ))
+}
+
 impl NativePhpRequestPlan {
     #[cfg(test)]
     fn param(&self, name: &str) -> Option<&str> {
@@ -344,7 +382,10 @@ mod tests {
 
     use fluxheim_protocol::Http1Version;
 
-    use super::{NativeHttp1Request, native_php_request_plan, native_php_response_plan};
+    use super::{
+        NativeHttp1Request, native_php_request_body, native_php_request_plan,
+        native_php_response_plan,
+    };
 
     fn request(target: &str) -> NativeHttp1Request {
         NativeHttp1Request {
@@ -469,6 +510,74 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn native_php_request_body_uses_memory_below_spool_threshold() {
+        let body = native_php_request_body(
+            &request("/index.php"),
+            &fluxheim_config::PhpConfig {
+                enabled: true,
+                request_body_spool_threshold_bytes: Some(fluxheim_config::ByteSize::from_bytes(
+                    1024,
+                )),
+                request_body_spool_dir: Some(std::path::PathBuf::from("/unused")),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(body.len(), b"name=fluxheim".len());
+    }
+
+    #[tokio::test]
+    async fn native_php_request_body_spools_and_cleans_up_large_body() {
+        let spool_dir = tempfile::TempDir::new().unwrap();
+        let body = native_php_request_body(
+            &request("/index.php"),
+            &fluxheim_config::PhpConfig {
+                enabled: true,
+                request_body_spool_threshold_bytes: Some(fluxheim_config::ByteSize::from_bytes(4)),
+                request_body_spool_dir: Some(spool_dir.path().to_path_buf()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(body.len(), b"name=fluxheim".len());
+        assert_eq!(
+            std::fs::read_dir(spool_dir.path()).unwrap().count(),
+            1,
+            "spool file should exist while the request body is alive"
+        );
+        drop(body);
+        assert_eq!(
+            std::fs::read_dir(spool_dir.path()).unwrap().count(),
+            0,
+            "spool file should be removed when the request body is dropped"
+        );
+
+        spool_dir.close().unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_php_request_body_rejects_configured_limit() {
+        let result = native_php_request_body(
+            &request("/index.php"),
+            &fluxheim_config::PhpConfig {
+                enabled: true,
+                max_request_body_bytes: Some(fluxheim_config::ByteSize::from_bytes(4)),
+                ..Default::default()
+            },
+        )
+        .await;
+        let Err(error) = result else {
+            panic!("expected PHP request body limit error");
+        };
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[test]
