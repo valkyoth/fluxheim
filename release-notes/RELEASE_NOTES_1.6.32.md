@@ -115,6 +115,10 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   insecure-parent traversal, start php-fpm on a private Unix socket, keep the
   process owner alive for the native route lifetime, and retain the bounded
   watchdog/restart behavior used by the legacy runtime.
+- The legacy root PHP-FPM module now re-exports the managed process owner from
+  `fluxheim-php-fpm` instead of carrying a second supervisor implementation.
+  This keeps the Pingora compatibility route stable while removing duplicate
+  process lifecycle code from the root crate.
 - Native HTTP/1 proxy routing now shares Fluxheim-owned
   `UpstreamLoadBalancer` state with the native load-balancer refresh service.
   Static advanced pool policy, active health, dynamic file/HTTP/DNS discovery,
