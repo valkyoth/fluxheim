@@ -2834,8 +2834,11 @@ available for the stabilization/security-only follow-up.
   custom params, and restored client/TLS metadata. Add the matching staged
   PHP stdout-to-native-response planner with shared parsing, hop-by-hop and
   hidden-header stripping, internal PHP offload-header stripping, HEAD framing,
-  and intercepted-status classification. Keep live FastCGI execution
-  fail-closed until the spool/retry/error-page adapter lands.
+  and intercepted-status classification. Add a PHP-specific native static-web
+  resolver that reuses the canonical/symlink-safe file resolver for explicit
+  scripts, front-controller fallback, deny prefixes, directory-index redirect,
+  and decline-existing-static behavior. Keep live FastCGI execution fail-closed
+  until the spool/retry/error-page adapter lands.
 - `v1.6.33`: close the final rich-proxy parity gates and remove the final
   Pingora runtime/listener/TLS adapter crates from normal builds. Cache work
   must cover lookup/fill/stale, Vary/Range/conditional semantics, peer-fill

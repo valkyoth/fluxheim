@@ -18,6 +18,8 @@ use fluxheim_web::{
 };
 use percent_encoding::percent_decode_str;
 
+#[cfg(feature = "php-fpm")]
+use crate::native_http1_php::{NativePhpScriptResolution, NativePhpScriptResolve};
 use crate::{NativeHttp1Request, NativeHttp1Response};
 
 const MAX_DIRECTORY_LISTING_ENTRIES: usize = 4096;
@@ -231,6 +233,96 @@ impl NativeHttp1StaticWeb {
             StaticResponseConditions::default(),
             Some(status),
         )
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[allow(
+        dead_code,
+        reason = "native PHP-FPM script resolution is staged before route runtime wiring"
+    )]
+    pub(crate) fn resolve_php_script(
+        &self,
+        php: &fluxheim_config::PhpConfig,
+        request_path: &str,
+        decline_existing_static: bool,
+    ) -> io::Result<NativePhpScriptResolve> {
+        let Some(parsed_script) = fluxheim_php_fpm::php_script_name_for_request(
+            request_path,
+            &php.index,
+            php.path_info,
+            &php.allowed_extensions,
+        ) else {
+            return Ok(NativePhpScriptResolve::Forbidden);
+        };
+        if fluxheim_php_fpm::php_script_name_denied(
+            &php.deny_path_prefixes,
+            &parsed_script.script_name,
+        ) {
+            return Ok(NativePhpScriptResolve::Forbidden);
+        }
+
+        if !parsed_script.explicit_php {
+            match self.resolve(request_path)? {
+                NativeStaticResolve::Found(file) => {
+                    if let Some(script_name) = fluxheim_php_fpm::php_static_file_script_name(
+                        &self.root,
+                        &file.path,
+                        &php.allowed_extensions,
+                    ) {
+                        if fluxheim_php_fpm::php_should_redirect_directory_index(
+                            request_path,
+                            &script_name,
+                            &php.index,
+                        ) {
+                            return Ok(NativePhpScriptResolve::RedirectDirectorySlash);
+                        }
+                        if fluxheim_php_fpm::php_script_name_denied(
+                            &php.deny_path_prefixes,
+                            &script_name,
+                        ) {
+                            return Ok(NativePhpScriptResolve::Forbidden);
+                        }
+                        return Ok(NativePhpScriptResolve::Execute(NativePhpScriptResolution {
+                            local_path: file.path,
+                            script_name,
+                            path_info: parsed_script.path_info,
+                        }));
+                    }
+                    if decline_existing_static {
+                        return Ok(NativePhpScriptResolve::Decline);
+                    }
+                }
+                NativeStaticResolve::Forbidden => return Ok(NativePhpScriptResolve::Forbidden),
+                NativeStaticResolve::NotFound | NativeStaticResolve::DirectoryListing(_) => {}
+            }
+            if php.try_files == fluxheim_config::PhpTryFilesMode::Strict {
+                return Ok(NativePhpScriptResolve::NotFound);
+            }
+        }
+
+        match self.resolve(&parsed_script.script_name)? {
+            NativeStaticResolve::Found(file) => {
+                let Some(script_name) = fluxheim_php_fpm::php_static_file_script_name(
+                    &self.root,
+                    &file.path,
+                    &php.allowed_extensions,
+                ) else {
+                    return Ok(NativePhpScriptResolve::Forbidden);
+                };
+                if fluxheim_php_fpm::php_script_name_denied(&php.deny_path_prefixes, &script_name) {
+                    return Ok(NativePhpScriptResolve::Forbidden);
+                }
+                Ok(NativePhpScriptResolve::Execute(NativePhpScriptResolution {
+                    local_path: file.path,
+                    script_name,
+                    path_info: parsed_script.path_info,
+                }))
+            }
+            NativeStaticResolve::Forbidden => Ok(NativePhpScriptResolve::Forbidden),
+            NativeStaticResolve::NotFound | NativeStaticResolve::DirectoryListing(_) => {
+                Ok(NativePhpScriptResolve::NotFound)
+            }
+        }
     }
 
     fn resolve(&self, request_path: &str) -> io::Result<NativeStaticResolve> {

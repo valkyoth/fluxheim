@@ -28,6 +28,22 @@ pub(crate) struct NativePhpResponsePlan {
     pub(crate) intercept_status: Option<u16>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct NativePhpScriptResolution {
+    pub(crate) local_path: std::path::PathBuf,
+    pub(crate) script_name: String,
+    pub(crate) path_info: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum NativePhpScriptResolve {
+    Execute(NativePhpScriptResolution),
+    RedirectDirectorySlash,
+    Decline,
+    NotFound,
+    Forbidden,
+}
+
 impl NativePhpRequestPlan {
     #[cfg(test)]
     fn param(&self, name: &str) -> Option<&str> {

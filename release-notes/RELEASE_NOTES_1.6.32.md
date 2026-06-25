@@ -155,6 +155,11 @@ prove full request/response behavior in a later `1.6.x` stop.
   and Fluxheim-owned `Content-Length`, preserves HEAD response length without a
   body, and marks configured intercepted status codes before the live response
   writer is enabled.
+- Native static-web resolution now exposes a PHP-specific, feature-gated
+  script resolver for the upcoming live PHP-FPM adapter. It reuses the same
+  canonical web-root/symlink-safe resolver as static serving while applying PHP
+  `SCRIPT_NAME`, front-controller, deny-prefix, directory-index redirect, and
+  decline-existing-static decisions.
 - The remaining rich-proxy native gates are now documented as intentional
   parity blockers rather than hidden launch blockers: proxy cache still needs
   native lookup/fill/stale/purge behavior, and PHP-FPM still needs live
@@ -251,3 +256,7 @@ prove full request/response behavior in a later `1.6.x` stop.
 - Added PHP-FPM feature tests for the native response planner, including
   hop-by-hop/configured/internal header stripping, HEAD content-length
   preservation, and intercepted status classification.
+- Added PHP-FPM feature tests proving the native static-web resolver can
+  resolve explicit PHP scripts, use the front controller for missing paths,
+  decline existing non-PHP static files when configured, and reject denied
+  script prefixes.
