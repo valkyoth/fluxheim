@@ -46,6 +46,11 @@ pub enum NativeRuntimeLaunchPlanError {
         first_service: ServiceKind,
         second_service: ServiceKind,
     },
+    DuplicateBackgroundTask {
+        kind: BackgroundTaskKind,
+        first_name: &'static str,
+        second_name: &'static str,
+    },
 }
 
 impl std::fmt::Display for NativeRuntimeLaunchPlanError {
@@ -67,6 +72,16 @@ impl std::fmt::Display for NativeRuntimeLaunchPlanError {
                 write!(
                     formatter,
                     "native runtime launch plan has duplicate {transport} listener {address} for {first_service:?} and {second_service:?}"
+                )
+            }
+            Self::DuplicateBackgroundTask {
+                kind,
+                first_name,
+                second_name,
+            } => {
+                write!(
+                    formatter,
+                    "native runtime launch plan has duplicate {kind:?} background task for {first_name:?} and {second_name:?}"
                 )
             }
         }
@@ -93,12 +108,13 @@ impl NativeRuntimeLaunchPlan {
             })
             .collect();
         validate_listener_bindings(&listeners)?;
-        let background_tasks = manifest
+        let background_tasks: Vec<_> = manifest
             .background_tasks()
             .iter()
             .copied()
             .map(|task| NativeRuntimeLaunchBackgroundTask { task })
             .collect();
+        validate_background_tasks(&background_tasks)?;
         Ok(Self {
             process: plan.process().clone(),
             proxy_protocol: plan.proxy_protocol().clone(),
@@ -447,6 +463,23 @@ fn validate_listener_bindings(
                 second_service: listener.service_kind(),
             });
         }
+    }
+    Ok(())
+}
+
+fn validate_background_tasks(
+    tasks: &[NativeRuntimeLaunchBackgroundTask],
+) -> Result<(), NativeRuntimeLaunchPlanError> {
+    let mut seen = Vec::new();
+    for task in tasks {
+        if let Some((_, first_name)) = seen.iter().find(|(kind, _)| *kind == task.kind()).copied() {
+            return Err(NativeRuntimeLaunchPlanError::DuplicateBackgroundTask {
+                kind: task.kind(),
+                first_name,
+                second_name: task.name(),
+            });
+        }
+        seen.push((task.kind(), task.name()));
     }
     Ok(())
 }

@@ -48,6 +48,9 @@ cache/PHP adapter slice.
 - That load-balancer service and background-task inventory is now gated by the
   `fluxheim-server/load-balancer` feature, so non-load-balancer builds do not
   advertise native supervisor work they cannot construct.
+- Native runtime launch planning now rejects duplicate background-task kinds
+  before supervisor startup, matching the existing duplicate listener binding
+  guard and preventing ambiguous task ownership in the final native runner.
 - The compatibility runtime now also validates the native HTTP/1 host-router
   factory when the server plan reports the proxy surface as native-ready. This
   proves exact/wildcard host routing, default-vhost selection, trusted-proxy
@@ -75,6 +78,8 @@ cache/PHP adapter slice.
   `LoadBalancerRefresh` task in the native runtime launch TSV.
 - Added paired default-build and load-balancer-feature tests for
   `LoadBalancerHealthChecks`/`LoadBalancerRefresh` inventory.
+- Added launch-plan coverage proving duplicate background-task kinds fail
+  closed before task supervision begins.
 - Extended native runtime launch-plan tests and cutover evidence validation to
   cover metrics bearer-token service policy.
 - Added a runtime test proving a native-ready HTTP/1 proxy config builds the

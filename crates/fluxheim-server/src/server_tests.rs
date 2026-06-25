@@ -393,6 +393,28 @@ fn native_runtime_launch_plan_rejects_duplicate_tcp_listener_bindings() {
 }
 
 #[test]
+fn native_runtime_launch_plan_rejects_duplicate_background_task_kinds() {
+    let task = BackgroundTaskKind::CacheMetrics;
+    let plan = ServerPlan::new(
+        Vec::new(),
+        vec![
+            BackgroundTaskSpec::new("Cache runtime metrics", task),
+            BackgroundTaskSpec::new("Duplicate cache metrics", task),
+        ],
+    );
+
+    assert!(plan.native_runtime_cutover_summary().is_ready());
+    assert!(matches!(
+        plan.native_runtime_launch_plan(),
+        Err(NativeRuntimeLaunchPlanError::DuplicateBackgroundTask {
+            kind: BackgroundTaskKind::CacheMetrics,
+            first_name: "Cache runtime metrics",
+            second_name: "Duplicate cache metrics",
+        })
+    ));
+}
+
+#[test]
 fn native_runtime_launch_plan_allows_tcp_and_udp_on_same_address() {
     let mut config = Config::default();
     config.server.listen = Vec::new();

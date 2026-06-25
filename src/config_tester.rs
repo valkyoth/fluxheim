@@ -184,6 +184,9 @@ fn native_runtime_launch_plan_error_kind(
         fluxheim_server::NativeRuntimeLaunchPlanError::DuplicateListener { .. } => {
             "duplicate-listener"
         }
+        fluxheim_server::NativeRuntimeLaunchPlanError::DuplicateBackgroundTask { .. } => {
+            "duplicate-background-task"
+        }
     }
 }
 
