@@ -141,11 +141,21 @@ impl NativeHttp2Response {
         self
     }
 
+    pub(crate) fn append_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
+        self.headers.append(name, value);
+        self
+    }
+
     pub fn with_trailer(mut self, name: HeaderName, value: HeaderValue) -> Self {
         self.trailers
             .get_or_insert_with(HeaderMap::new)
             .insert(name, value);
         self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn headers(&self) -> &HeaderMap {
+        &self.headers
     }
 }
 

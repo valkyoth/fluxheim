@@ -28,6 +28,7 @@ mod native_http1_tls;
 mod native_http1_upstream_response;
 mod native_http2;
 mod native_http2_client;
+mod native_http2_route_adapter;
 mod native_http2_stack;
 mod native_runtime_http1_proxy;
 mod native_runtime_launch_plan;
@@ -75,6 +76,7 @@ pub use native_http2::{
 pub use native_http2_client::{
     NativeHttp2UpstreamRequest, NativeHttp2UpstreamResponse, send_native_http2_upstream_on_io,
 };
+pub use native_http2_route_adapter::NativeHttp2RouteAdapter;
 pub use native_http2_stack::{
     NativeHttp2Handler, NativeHttp2Request, NativeHttp2Response, NativeHttp2StackError,
     native_http2_stack_probe, native_http2_stack_probe_with_response,

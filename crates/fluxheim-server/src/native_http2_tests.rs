@@ -1,4 +1,5 @@
 use super::*;
+use crate::native_http2_route_adapter::NativeHttp2RouteAdapter;
 use crate::native_http2_stack::serve_native_http2_connection_until_idle;
 use std::future::poll_fn;
 use std::sync::{Arc, Mutex};
@@ -345,6 +346,84 @@ async fn native_http2_stack_probe_serves_multiple_streams_on_one_connection() {
 
     assert_eq!(first_response.status(), http::StatusCode::NO_CONTENT);
     assert_eq!(second_response.status(), http::StatusCode::NO_CONTENT);
+    drop(client);
+    server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_route_adapter_serves_native_http1_handler() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let observed = Arc::new(Mutex::new(None));
+    let observed_for_handler = observed.clone();
+    let handler = Arc::new(move |request: NativeHttp1Request| {
+        let observed_for_handler = observed_for_handler.clone();
+        async move {
+            *observed_for_handler.lock().unwrap() = Some((
+                request.method,
+                request.target,
+                request
+                    .headers
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("host"))
+                    .map(|(_, value)| value.clone()),
+                request.body,
+            ));
+            NativeHttp1Response::new(200, "OK", b"adapter-ok")
+                .with_header("set-cookie", "a=1")
+                .with_header("set-cookie", "b=2")
+                .with_header("connection", "close")
+        }
+    });
+    let adapter = Arc::new(NativeHttp2RouteAdapter::new(
+        handler,
+        "127.0.0.1:12345".parse().ok(),
+        NativeHttp1RequestContext {
+            downstream_tls: true,
+            ..NativeHttp1RequestContext::default()
+        },
+    ));
+    let server = tokio::spawn(serve_native_http2_connection_until_idle(
+        server_io,
+        DownstreamHttp2Policy::default(),
+        adapter,
+        Duration::from_millis(50),
+    ));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        connection.await.unwrap();
+    });
+    let request = http::Request::builder()
+        .method("POST")
+        .uri("https://native.test/upload?x=1")
+        .body(())
+        .unwrap();
+    let (response, mut send_stream) = client.send_request(request, false).unwrap();
+    send_stream
+        .send_data(bytes::Bytes::from_static(b"body"), true)
+        .unwrap();
+    let response = response.await.unwrap();
+    let cookies = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    let mut body = response.into_body();
+    let data = body.data().await.unwrap().unwrap();
+
+    assert_eq!(&data[..], b"adapter-ok");
+    assert_eq!(cookies, vec!["a=1", "b=2"]);
+    assert!(body.trailers().await.unwrap().is_none());
+    assert_eq!(
+        observed.lock().unwrap().as_ref(),
+        Some(&(
+            "POST".to_owned(),
+            "/upload?x=1".to_owned(),
+            Some("native.test".to_owned()),
+            b"body".to_vec()
+        ))
+    );
     drop(client);
     server.await.unwrap().unwrap();
     client_connection.await.unwrap();

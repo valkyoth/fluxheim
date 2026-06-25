@@ -123,6 +123,12 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   probe response. Tests cover same-connection multi-stream responses while the
   production ALPN dispatch gate remains fail-closed until the full downstream
   proxy adapter is wired.
+- Added a native HTTP/2-to-native-route adapter that maps ordinary H2 requests
+  into the existing native HTTP/1 route handler pipeline and converts native
+  responses back to H2 without collapsing duplicate response headers such as
+  `Set-Cookie`. The adapter fails closed for request trailers and connection
+  takeover until the native request context can preserve those semantics for
+  production H2/gRPC dispatch.
 - Native PHP-FPM routes now support Fluxheim-managed php-fpm process ownership
   through `fluxheim-php-fpm`, not the root crate. Managed routes create the
   private php-fpm config, validate the php-fpm binary path against symlink and
