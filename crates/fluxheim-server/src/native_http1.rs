@@ -303,9 +303,11 @@ pub trait NativeHttp1Handler: Send + Sync + 'static {
     fn handle_connection_takeover<'a>(
         &'a self,
         _request: NativeHttp1Request,
+        prebuffered: Vec<u8>,
         mut stream: NativeHttp1ConnectionStream,
     ) -> Pin<Box<dyn Future<Output = Result<(), NativeHttp1Error>> + Send + 'a>> {
         Box::pin(async move {
+            drop(prebuffered);
             write_response(
                 &mut stream,
                 NativeHttp1Response::new(
@@ -470,8 +472,11 @@ where
         request.body = body;
         handler.prepare_request_context(&mut request);
         if handler.handles_connection_takeover(&request) {
+            let prebuffered = std::mem::take(&mut buffer);
             let stream = Box::new(stream);
-            return handler.handle_connection_takeover(request, stream).await;
+            return handler
+                .handle_connection_takeover(request, prebuffered, stream)
+                .await;
         }
 
         let response = handler.handle(request).await;

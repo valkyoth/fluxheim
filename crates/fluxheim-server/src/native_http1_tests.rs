@@ -340,6 +340,7 @@ impl NativeHttp1Handler for ConnectionTakeoverTestHandler {
     fn handle_connection_takeover<'a>(
         &'a self,
         request: NativeHttp1Request,
+        prebuffered: Vec<u8>,
         mut stream: NativeHttp1ConnectionStream,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<(), NativeHttp1Error>> + Send + 'a>,
@@ -356,13 +357,17 @@ impl NativeHttp1Handler for ConnectionTakeoverTestHandler {
                 .map_err(NativeHttp1Error::Io)?;
             stream.flush().await.map_err(NativeHttp1Error::Io)?;
 
-            let mut payload = [0u8; 4];
+            let mut payload = prebuffered;
+            while payload.len() < 4 {
+                let mut byte = [0u8; 1];
+                stream
+                    .read_exact(&mut byte)
+                    .await
+                    .map_err(NativeHttp1Error::Io)?;
+                payload.push(byte[0]);
+            }
             stream
-                .read_exact(&mut payload)
-                .await
-                .map_err(NativeHttp1Error::Io)?;
-            stream
-                .write_all(&payload)
+                .write_all(&payload[..4])
                 .await
                 .map_err(NativeHttp1Error::Io)?;
             stream.flush().await.map_err(NativeHttp1Error::Io)
@@ -419,7 +424,7 @@ async fn native_http1_handler_can_take_over_connection() {
             b"GET /takeover HTTP/1.1\r\n\
               Host: local.test\r\n\
               Connection: Upgrade\r\n\
-              Upgrade: test\r\n\r\n",
+              Upgrade: test\r\n\r\nping",
         )
         .await
         .unwrap();
@@ -434,14 +439,23 @@ async fn native_http1_handler_can_take_over_connection() {
             break;
         }
     }
-    let response = String::from_utf8(response).unwrap();
-    assert!(response.starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
-    assert!(response.contains("Upgrade: test\r\n"));
+    let response_head_len = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|position| position + 4)
+        .unwrap();
+    let echoed_prefix = response[response_head_len..].to_vec();
+    let response_head = String::from_utf8(response[..response_head_len].to_vec()).unwrap();
+    assert!(response_head.starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
+    assert!(response_head.contains("Upgrade: test\r\n"));
 
-    stream.write_all(b"pong").await.unwrap();
-    let mut echoed = [0u8; 4];
-    stream.read_exact(&mut echoed).await.unwrap();
-    assert_eq!(&echoed, b"pong");
+    let mut echoed = echoed_prefix;
+    while echoed.len() < 4 {
+        let mut byte = [0u8; 1];
+        stream.read_exact(&mut byte).await.unwrap();
+        echoed.push(byte[0]);
+    }
+    assert_eq!(&echoed[..4], b"ping");
 }
 
 #[tokio::test]
