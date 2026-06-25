@@ -1291,7 +1291,7 @@ fn configured_native_upstreams(proxy: &fluxheim_config::ProxyConfig) -> Option<V
 }
 
 fn proxy_requires_advanced_load_balancer(proxy: &fluxheim_config::ProxyConfig) -> bool {
-    if proxy.load_balance != fluxheim_config::LoadBalanceConfig::default() {
+    if !native_static_load_balance_config_supported(&proxy.load_balance) {
         return true;
     }
     !proxy.upstream_priority_groups.is_empty()
@@ -1303,6 +1303,18 @@ fn proxy_requires_advanced_load_balancer(proxy: &fluxheim_config::ProxyConfig) -
         || !proxy.backup_upstreams.is_empty()
         || !proxy.drain_upstreams.is_empty()
         || !proxy.disabled_upstreams.is_empty()
+}
+
+fn native_static_load_balance_config_supported(
+    load_balance: &fluxheim_config::LoadBalanceConfig,
+) -> bool {
+    if load_balance == &fluxheim_config::LoadBalanceConfig::default() {
+        return true;
+    }
+
+    let mut disabled_health = fluxheim_config::LoadBalanceConfig::default();
+    disabled_health.health_check.enabled = false;
+    load_balance == &disabled_health
 }
 
 #[cfg(not(feature = "auth-request"))]

@@ -1711,6 +1711,23 @@ fn server_plan_rejects_native_http1_proxy_candidate_with_advanced_load_balance_p
 }
 
 #[test]
+fn server_plan_accepts_native_http1_proxy_candidate_with_static_load_balance_health_disabled() {
+    let mut config = Config::default();
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];
+    config.proxy.load_balance.health_check.enabled = false;
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let summary = plan.native_http1_proxy_cutover_summary();
+
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        None
+    );
+    assert_eq!(summary.status(), NativeHttp1ProxyCutoverStatus::NativeReady);
+}
+
+#[test]
 fn server_plan_reports_no_native_http1_proxy_candidates_without_proxy() {
     let config = Config {
         proxy: fluxheim_config::ProxyConfig::disabled(),

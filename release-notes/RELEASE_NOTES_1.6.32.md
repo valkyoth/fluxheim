@@ -59,6 +59,10 @@ cache/PHP adapter slice.
   proves exact/wildcard host routing, default-vhost selection, trusted-proxy
   source parsing, and route proxy construction can be assembled as one native
   router before the production runner switches away from Pingora.
+- Native HTTP/1 proxy planning now accepts static round-robin upstream pools
+  that explicitly disable active load-balancer health checks, matching the
+  native proxy's current static-upstream capability while still rejecting
+  advanced load-balancer policies.
 
 ## Tests
 
@@ -89,3 +93,7 @@ cache/PHP adapter slice.
   cover metrics bearer-token service policy.
 - Added a runtime test proving a native-ready HTTP/1 proxy config builds the
   full native host-router factory, not only the individual proxy candidate.
+- Added native proxy and server-plan coverage for static load-balanced pools
+  with `load_balance.health_check.enabled = false`, plus rejection coverage for
+  custom disabled-health-check policies that would otherwise be silently
+  ignored by the native static proxy.

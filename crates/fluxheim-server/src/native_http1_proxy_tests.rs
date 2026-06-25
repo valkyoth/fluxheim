@@ -1649,6 +1649,49 @@ fn native_proxy_config_accepts_weighted_static_upstreams() {
 }
 
 #[test]
+fn native_proxy_config_accepts_static_upstreams_with_disabled_health_check() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+        load_balance: fluxheim_config::LoadBalanceConfig {
+            health_check: fluxheim_config::LoadBalanceHealthCheckConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let native = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
+        .unwrap()
+        .expect("native proxy");
+
+    assert_eq!(native.upstreams().len(), 2);
+    assert_eq!(native.upstream_slots(), &[0, 1]);
+}
+
+#[test]
+fn native_proxy_config_rejects_custom_disabled_health_check_policy() {
+    let proxy = fluxheim_config::ProxyConfig {
+        upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+        load_balance: fluxheim_config::LoadBalanceConfig {
+            health_check: fluxheim_config::LoadBalanceHealthCheckConfig {
+                enabled: false,
+                interval_secs: 7,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(
+        NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()).unwrap_err(),
+        NativeHttp1ProxyConfigError::LoadBalancing
+    );
+}
+
+#[test]
 fn native_proxy_config_applies_pool_capacity() {
     let proxy = fluxheim_config::ProxyConfig {
         upstream: Some("127.0.0.1:3000".to_owned()),
