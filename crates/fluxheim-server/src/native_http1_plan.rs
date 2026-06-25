@@ -363,9 +363,8 @@ fn root_response_header_policy_supported(
     true
 }
 
-fn request_header_policy_supported(request: &fluxheim_config::RequestHeaderPolicyConfig) -> bool {
-    let defaults = fluxheim_config::RequestHeaderPolicyConfig::default();
-    request.enabled == defaults.enabled
+fn request_header_policy_supported(_request: &fluxheim_config::RequestHeaderPolicyConfig) -> bool {
+    true
 }
 
 fn vhost_header_overlay_supported(headers: &fluxheim_config::VhostHeaderPolicyConfig) -> bool {

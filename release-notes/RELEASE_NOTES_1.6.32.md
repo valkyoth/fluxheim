@@ -81,6 +81,10 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   adapter row as `native-runtime-compat-adapter`, so blocker-free reports do
   not look like they will still start through Pingora when
   `native-runtime-target-adapter` is already `NativeRuntime`.
+- Native HTTP/1 proxy planning now treats disabled root request-header policy
+  as native-ready, matching the native request-header policy implementation
+  instead of keeping that supported configuration behind the compatibility
+  adapter.
 - The server crate now has a Fluxheim-owned native HTTP/1 proxy runtime boundary
   that binds proxy HTTP listeners from the native launch plan, builds the native
   host router once, serves requests through `serve_native_http1_listener`, and

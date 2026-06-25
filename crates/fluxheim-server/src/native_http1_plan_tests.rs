@@ -62,6 +62,24 @@ fn server_plan_accepts_root_response_header_policy_candidate() {
 }
 
 #[test]
+fn server_plan_accepts_disabled_root_request_header_policy_candidate() {
+    let mut config = Config::default();
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
+    config.headers.request.enabled = false;
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    assert_eq!(
+        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+        None
+    );
+    assert_eq!(
+        plan.native_http1_proxy_cutover_summary().status(),
+        NativeHttp1ProxyCutoverStatus::NativeReady
+    );
+}
+
+#[test]
 fn server_plan_accepts_plain_upstream_http2_candidate() {
     let mut config = Config::default();
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned()];
