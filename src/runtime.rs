@@ -363,7 +363,15 @@ async fn run_native_runtime_async(
         .as_ref()
         .and_then(fluxheim_server::NativeHttp1ProxyRuntime::rustls_certificate_resolver)
         .map(DownstreamCertificateReloader::Rustls);
-    #[cfg(not(all(feature = "tls-rustls-backend", not(feature = "tls-openssl"))))]
+    #[cfg(all(feature = "tls-openssl", not(feature = "tls-rustls-backend")))]
+    let native_certificate_reloader = native_proxy_runtime
+        .as_ref()
+        .and_then(fluxheim_server::NativeHttp1ProxyRuntime::openssl_certificate_store)
+        .map(DownstreamCertificateReloader::Openssl);
+    #[cfg(not(any(
+        all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
+        all(feature = "tls-openssl", not(feature = "tls-rustls-backend"))
+    )))]
     let native_certificate_reloader: Option<DownstreamCertificateReloader> = None;
     reject_unsupported_native_background_tasks(
         &launch_plan,

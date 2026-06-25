@@ -2826,8 +2826,8 @@ available for the stabilization/security-only follow-up.
   must close the remaining proxy gates that need runtime/load-balancer state:
   dynamic discovery, health-aware selection, persistence, priority groups,
   locality, backup/drain/disabled policy, max-in-flight, aliases/tags, static
-  weight parity, websocket upgrade, native TLS
-  listener selection, native service supervision, admin/metrics/stream/UDP
+  weight parity, websocket upgrade, native rustls/OpenSSL TLS listener
+  selection, native service supervision, admin/metrics/stream/UDP
   service registration, and remaining Pingora HTTP/error/cache
   boundary adapters. Add a Fluxheim-owned nginx/Ketama-compatible consistent
   hash selection mode for operators migrating from nginx or Pingora Ketama

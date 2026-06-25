@@ -89,8 +89,13 @@ cache/PHP adapter slice.
 - Native Rustls proxy HTTPS startup now exposes its certificate resolver to the
   root native runtime, so ACME renewal and the local certificate-reload control
   task can reload downstream certificates without the Pingora listener adapter.
-  Non-Rustls native TLS reload paths still fail closed until their native
-  backend handoff lands.
+- Native OpenSSL proxy HTTPS startup now binds through the Fluxheim-owned
+  OpenSSL listener path for OpenSSL-only/FIPS builds when `tls.alpn = "http1"`.
+  It builds its downstream acceptor through `fluxheim-tls`, preserves the
+  configured TLS policy and client-auth settings, installs SNI certificate
+  selection through OpenSSL's callback API, and exposes the certificate store to
+  the root native runtime so ACME renewal and local certificate reloads no
+  longer require the Pingora listener adapter.
 
 ## Tests
 
@@ -136,6 +141,10 @@ cache/PHP adapter slice.
   certificate, binds a planned HTTPS listener, completes a real TLS handshake,
   proxies a request to a local upstream, and shuts the native listener down
   through the supervisor.
+- Added an OpenSSL native runtime listener test that generates a temporary
+  certificate, binds a planned HTTPS listener under the OpenSSL-only server
+  feature, completes a real OpenSSL TLS handshake, proxies a request to a local
+  upstream, and shuts the native listener down through the supervisor.
 - Added live native runtime tests for trusted downstream PROXY protocol v1 and
   v2 listeners, proving the native listener parses the PROXY header and forwards
   the restored client IP to the upstream as `X-Real-IP`.

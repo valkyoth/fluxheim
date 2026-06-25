@@ -2655,12 +2655,13 @@ Fluxheim reloads downstream SNI certificate objects so new handshakes can use
 the renewed files without a restart when the selected TLS backend exposes a
 reloadable resolver or callback.
 
-For reloadable SNI TLS backends, including the default rustls backend, missing
-Fluxheim-managed ACME certificate files are a pending issuance state rather than
-a startup failure. This lets operators add a new `[vhosts.tls.acme]` vhost while
-keeping port `80` online for HTTP-01. Static certificates are different: if a
-vhost points at operator-owned `cert_path`/`key_path` files, those files must
-exist and pass storage checks before the listener starts.
+For reloadable SNI TLS backends, including the default rustls backend and
+OpenSSL builds, missing Fluxheim-managed ACME certificate files are a pending
+issuance state rather than a startup failure. This lets operators add a new
+`[vhosts.tls.acme]` vhost while keeping port `80` online for HTTP-01. Static
+certificates are different: if a vhost points at operator-owned
+`cert_path`/`key_path` files, those files must exist and pass storage checks
+before the listener starts.
 
 You can also invoke renewal explicitly. Production packages include
 `fluxheim-acme`, which can renew and then request live certificate activation

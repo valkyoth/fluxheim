@@ -7,7 +7,9 @@ use fluxheim_config::{
     StaticCertificateConfig, TlsAlpnPolicy, TlsClientAuthMode, TlsConfig, TlsProtocolVersion,
 };
 use openssl::pkey::{PKey, Private};
-use openssl::ssl::{AlpnError, SslAcceptor, SslMethod, SslVerifyMode, SslVersion};
+use openssl::ssl::{
+    AlpnError, NameType, SniError, SslAcceptor, SslMethod, SslVerifyMode, SslVersion,
+};
 use openssl::x509::{X509, X509Name};
 use sanitization::SecretVec;
 use thiserror::Error;
@@ -202,6 +204,30 @@ pub fn build_openssl_downstream_acceptor(
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls_server())
         .map_err(OpenSslDownstreamAcceptorError::BuildAcceptor)?;
     apply_certificate(&mut builder, certificate)?;
+    apply_tls_policy(&mut builder, tls)?;
+    Ok(builder.build())
+}
+
+pub fn build_openssl_downstream_acceptor_with_sni_store(
+    tls: &TlsConfig,
+    certificate: &StaticCertificateConfig,
+    store: Arc<OpenSslDownstreamCertificateStore>,
+) -> Result<SslAcceptor, OpenSslDownstreamAcceptorError> {
+    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls_server())
+        .map_err(OpenSslDownstreamAcceptorError::BuildAcceptor)?;
+    apply_certificate(&mut builder, certificate)?;
+    let store_for_callback = store.clone();
+    builder.set_servername_callback(move |ssl, _alert| {
+        let sni = ssl.servername(NameType::HOST_NAME).map(str::to_owned);
+        if let Err(error) = store_for_callback.apply_certificate_for_sni(sni.as_deref(), ssl) {
+            log::error!(
+                target: "fluxheim::tls",
+                "failed to apply OpenSSL downstream SNI certificate: {error}"
+            );
+            return Err(SniError::ALERT_FATAL);
+        }
+        Ok(())
+    });
     apply_tls_policy(&mut builder, tls)?;
     Ok(builder.build())
 }
