@@ -171,11 +171,17 @@ prove full request/response behavior in a later `1.6.x` stop.
   limits, retryable error/status handling, STDERR failure-pattern handling, and
   the staged native response planner. Live route wiring remains disabled until
   the final native PHP route/error-page adapter lands.
+- Native HTTP/1 route/vhost PHP-FPM configs can now build a native PHP route
+  action for external php-fpm endpoints. The route action resolves scripts
+  through the native static resolver, enforces PHP in-flight/request-body
+  limits, builds the shared FastCGI parameter plan, executes the staged
+  FastCGI wrapper, and returns parsed native PHP responses. Managed php-fpm
+  process supervision and custom PHP error pages remain explicit native cutover
+  gates.
 - The remaining rich-proxy native gates are now documented as intentional
   parity blockers rather than hidden launch blockers: proxy cache still needs
-  native lookup/fill/stale/purge behavior, and PHP-FPM still needs live route
-  wiring, custom error-page handling, and managed/external process boundary
-  wiring.
+  native lookup/fill/stale/purge behavior, and PHP-FPM still needs custom
+  error-page handling and managed process-boundary wiring.
 
 ## Tests
 
@@ -276,3 +282,6 @@ prove full request/response behavior in a later `1.6.x` stop.
   cleanup on request-body drop.
 - Added PHP-FPM feature tests for the staged native FastCGI execution boundary,
   including fail-closed rejection when no PHP-FPM endpoint is configured.
+- Added native route-proxy PHP-FPM tests proving PHP routes reject missing
+  roots and fail closed with `502 Bad Gateway` when a configured external
+  php-fpm endpoint is unavailable.

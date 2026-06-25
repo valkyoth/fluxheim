@@ -2843,16 +2843,18 @@ available for the stabilization/security-only follow-up.
   staged FastCGI execution wrapper with pooled or one-shot Unix/TCP endpoint
   handling, bounded connect/request timeouts, response-size limits,
   retryable-error/status handling, STDERR failure-pattern checks, and native
-  response planning. Keep live route wiring fail-closed until the final PHP
-  route/error-page adapter lands.
+  response planning. Wire native route/vhost PHP-FPM configs to an external
+  php-fpm route action that resolves scripts, enforces in-flight/body limits,
+  builds FastCGI params, executes Unix/TCP endpoints, and returns parsed native
+  PHP responses. Keep managed php-fpm supervision and custom PHP error-page
+  rendering fail-closed until their final native adapters land.
 - `v1.6.33`: close the final rich-proxy parity gates and remove the final
   Pingora runtime/listener/TLS adapter crates from normal builds. Cache work
   must cover lookup/fill/stale, Vary/Range/conditional semantics, peer-fill
   guardrails, purge visibility, and root/vhost/route cache policy readiness
   only after the native adapter owns the full request/response/cache-key path.
-  PHP-FPM work must wire the staged request/response/body/execution planners
-  into live route handling and cover custom PHP error pages plus
-  managed/external FPM process boundaries. The
+  PHP-FPM work must finish custom PHP error pages plus managed php-fpm process
+  boundaries on top of the native external-FPM route action. The
   native WebSocket baseline
   now covers strict `Upgrade: websocket` requests on forced HTTP/1 static
   upstream routes with shared 101 validation, prebuffer preservation, and a

@@ -2130,6 +2130,7 @@ async fn native_route_proxy_inherits_base_request_and_response_headers_from_conf
         Some(proxy_for(upstream)),
         &base_headers,
         None,
+        "route.test",
     )
     .unwrap();
     let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
@@ -2255,6 +2256,7 @@ async fn native_route_proxy_inherits_gzip_compression_config() {
         Some(proxy_for(upstream)),
         &fluxheim_config::HeaderPolicyConfig::default(),
         Some(&inherited),
+        "route.test",
     )
     .unwrap();
     let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
@@ -2406,7 +2408,7 @@ fn native_route_proxy_rejects_vhost_cache_policy_until_native_adapter_exists() {
 }
 
 #[test]
-fn native_route_proxy_rejects_vhost_php_policy_until_native_adapter_exists() {
+fn native_route_proxy_rejects_vhost_php_without_root() {
     let mut vhost = native_route_proxy_test_vhost();
     vhost.php.enabled = true;
 
@@ -2442,8 +2444,9 @@ fn native_route_proxy_rejects_route_cache_policy_until_native_adapter_exists() {
 }
 
 #[test]
-fn native_route_proxy_rejects_route_php_policy_until_native_adapter_exists() {
+fn native_route_proxy_rejects_route_php_without_root() {
     let mut route = native_route_proxy_test_route();
+    route.redirect = None;
     route.php = Some(fluxheim_config::PhpConfig {
         enabled: true,
         ..Default::default()
@@ -2455,6 +2458,32 @@ fn native_route_proxy_rejects_route_php_policy_until_native_adapter_exists() {
         error,
         NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::PhpFpm)
     );
+}
+
+#[tokio::test]
+async fn native_route_proxy_php_route_fails_closed_when_fpm_unavailable() {
+    let root = tempfile::TempDir::new().unwrap();
+    std::fs::write(root.path().join("index.php"), b"<?php echo 'ok';").unwrap();
+    let mut route = native_route_proxy_test_route();
+    route.path_exact = Some("/index.php".to_owned());
+    route.redirect = None;
+    route.php = Some(fluxheim_config::PhpConfig {
+        enabled: true,
+        root: Some(root.path().to_path_buf()),
+        fpm: fluxheim_config::PhpFpmConfig {
+            tcp: Some("127.0.0.1:9".to_owned()),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, None).unwrap();
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/index.php").await;
+
+    assert!(response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"));
+    assert!(response.ends_with("php-fpm failed\n"));
 }
 
 fn native_route_proxy_test_vhost() -> fluxheim_config::VhostConfig {

@@ -1,6 +1,10 @@
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
+#[cfg(feature = "php-fpm")]
+use std::io;
 use std::net::IpAddr;
+#[cfg(feature = "php-fpm")]
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -43,6 +47,11 @@ use fluxheim_protocol::{
     route_strip_prefix_suffix,
 };
 
+#[cfg(feature = "php-fpm")]
+use crate::native_http1_php::{
+    NativePhpResponsePlan, NativePhpScriptResolve, native_php_execute_fpm, native_php_request_body,
+    native_php_request_plan,
+};
 use crate::{
     DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler,
     NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1Request, NativeHttp1Response,
@@ -67,6 +76,8 @@ pub struct NativeHttp1RouteProxy {
     routes: Vec<NativeHttp1RouteProxyRoute>,
     fallback: Option<NativeHttp1Proxy>,
     fallback_web: Option<NativeHttp1StaticWeb>,
+    #[cfg(feature = "php-fpm")]
+    fallback_php: Option<NativePhpFpmRoute>,
     fallback_response_headers: NativeRouteResponseHeaderPolicy,
     #[cfg(any(
         feature = "compression-brotli",
@@ -155,10 +166,39 @@ impl NativeRegexRouteMatcher {
 enum NativeHttp1RouteAction {
     #[cfg(feature = "acme")]
     AcmeHttp01(NativeHttp1AcmeHttp01Store),
+    #[cfg(feature = "php-fpm")]
+    PhpFpm(Box<NativePhpFpmRoute>),
     Proxy(Box<NativeHttp1Proxy>),
     Redirect(NativeHttp1RouteRedirect),
     StaticWeb(Box<NativeHttp1StaticWeb>),
 }
+
+#[cfg(feature = "php-fpm")]
+#[derive(Clone, Debug)]
+struct NativePhpFpmRoute {
+    config: fluxheim_config::PhpConfig,
+    root: PathBuf,
+    fpm_root: PathBuf,
+    files: NativeHttp1StaticWeb,
+    vhost_name: String,
+    pools: Vec<Arc<fluxheim_php_fpm::PhpFpmPool>>,
+    next_endpoint: Arc<AtomicUsize>,
+    in_flight: Arc<Semaphore>,
+}
+
+#[cfg(feature = "php-fpm")]
+impl PartialEq for NativePhpFpmRoute {
+    fn eq(&self, other: &Self) -> bool {
+        self.config == other.config
+            && self.root == other.root
+            && self.fpm_root == other.fpm_root
+            && self.files == other.files
+            && self.vhost_name == other.vhost_name
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+impl Eq for NativePhpFpmRoute {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct NativeHttp1RouteRedirect {
@@ -816,6 +856,8 @@ impl NativeHttp1RouteProxy {
             routes,
             fallback,
             fallback_web: None,
+            #[cfg(feature = "php-fpm")]
+            fallback_php: None,
             fallback_response_headers: NativeRouteResponseHeaderPolicy::default(),
             #[cfg(any(
                 feature = "compression-brotli",
@@ -1034,11 +1076,6 @@ impl NativeHttp1RouteProxy {
                 NativeHttp1ProxyConfigError::CachePolicy,
             ));
         }
-        if vhost.php.enabled {
-            return Err(NativeHttp1RouteProxyConfigError::Proxy(
-                NativeHttp1ProxyConfigError::PhpFpm,
-            ));
-        }
         let headers = base_headers.with_vhost_overlay(&vhost.headers);
         let inherited_compression = vhost.compression.as_ref().or(inherited_compression);
         let fallback_web = if vhost.web.enabled() {
@@ -1048,6 +1085,19 @@ impl NativeHttp1RouteProxy {
         } else {
             None
         };
+        #[cfg(feature = "php-fpm")]
+        let fallback_php = NativePhpFpmRoute::from_config(
+            format!("vhost {}", vhost.name),
+            &vhost.name,
+            "default",
+            &vhost.php,
+        )?;
+        #[cfg(not(feature = "php-fpm"))]
+        if vhost.php.enabled {
+            return Err(NativeHttp1RouteProxyConfigError::Proxy(
+                NativeHttp1ProxyConfigError::PhpFpm,
+            ));
+        }
         let access = NativeIpAccessPolicy::from_config(&vhost.access)?;
         let rate_limit = NativeRateLimit::from_config(&vhost.rate_limit);
         let concurrency = NativeConcurrencyLimit::from_config(&vhost.concurrency);
@@ -1107,6 +1157,7 @@ impl NativeHttp1RouteProxy {
                 proxy,
                 &headers,
                 inherited_compression,
+                &vhost.name,
             )?;
             #[cfg(not(feature = "privacy-mode"))]
             let route = route.with_trusted_sources(trusted_sources);
@@ -1117,6 +1168,8 @@ impl NativeHttp1RouteProxy {
             routes,
             fallback,
             fallback_web,
+            #[cfg(feature = "php-fpm")]
+            fallback_php,
             fallback_response_headers: NativeRouteResponseHeaderPolicy::from_policy(
                 &headers.response,
             ),
@@ -1451,7 +1504,7 @@ impl NativeHttp1RouteProxyRoute {
         route: &fluxheim_config::RouteConfig,
         proxy: Option<NativeHttp1Proxy>,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
-        Self::from_config_with_inherited(route, proxy, &HeaderPolicyConfig::default(), None)
+        Self::from_config_with_inherited(route, proxy, &HeaderPolicyConfig::default(), None, "")
     }
 
     pub fn from_config_with_inherited(
@@ -1459,12 +1512,14 @@ impl NativeHttp1RouteProxyRoute {
         proxy: Option<NativeHttp1Proxy>,
         base_headers: &HeaderPolicyConfig,
         inherited_compression: Option<&fluxheim_config::CompressionConfig>,
+        vhost_name: &str,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
         if native_route_cache_policy_blocked(route) {
             return Err(NativeHttp1RouteProxyConfigError::Proxy(
                 NativeHttp1ProxyConfigError::CachePolicy,
             ));
         }
+        #[cfg(not(feature = "php-fpm"))]
         if route.php.as_ref().is_some_and(|php| php.enabled) {
             return Err(NativeHttp1RouteProxyConfigError::Proxy(
                 NativeHttp1ProxyConfigError::PhpFpm,
@@ -1495,6 +1550,26 @@ impl NativeHttp1RouteProxyRoute {
                 to: redirect.to.clone(),
                 status: redirect.status,
             })
+        } else if let Some(php) = route.php.as_ref().filter(|php| php.enabled) {
+            #[cfg(feature = "php-fpm")]
+            {
+                NativeHttp1RouteAction::PhpFpm(Box::new(
+                    NativePhpFpmRoute::from_config(
+                        format!("route {}", route.name),
+                        vhost_name,
+                        &route.name,
+                        php,
+                    )?
+                    .ok_or(NativeHttp1RouteProxyConfigError::MissingRouteAction)?,
+                ))
+            }
+            #[cfg(not(feature = "php-fpm"))]
+            {
+                let _ = php;
+                return Err(NativeHttp1RouteProxyConfigError::Proxy(
+                    NativeHttp1ProxyConfigError::PhpFpm,
+                ));
+            }
         } else if let Some(web) = route.web.as_ref().filter(|web| web.enabled()) {
             NativeHttp1RouteAction::StaticWeb(Box::new(
                 NativeHttp1StaticWeb::from_config_with_cache(web, route.cache.as_ref())
@@ -1603,6 +1678,8 @@ impl NativeHttp1RouteProxyRoute {
             NativeHttp1RouteAction::Proxy(proxy) => Some(proxy.as_ref()),
             #[cfg(feature = "acme")]
             NativeHttp1RouteAction::AcmeHttp01(_) => None,
+            #[cfg(feature = "php-fpm")]
+            NativeHttp1RouteAction::PhpFpm(_) => None,
             NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => None,
         }
     }
@@ -1614,6 +1691,277 @@ impl NativeHttp1RouteProxyRoute {
     pub fn is_static_web(&self) -> bool {
         matches!(self.action, NativeHttp1RouteAction::StaticWeb(_))
     }
+}
+
+#[cfg(feature = "php-fpm")]
+impl NativePhpFpmRoute {
+    fn from_config(
+        scope: impl std::fmt::Display,
+        vhost_name: &str,
+        metric_pool: &str,
+        config: &fluxheim_config::PhpConfig,
+    ) -> Result<Option<Self>, NativeHttp1RouteProxyConfigError> {
+        if !config.enabled {
+            return Ok(None);
+        }
+        if !matches!(config.fpm.mode, fluxheim_config::PhpFpmMode::External) {
+            return Err(NativeHttp1RouteProxyConfigError::Proxy(
+                NativeHttp1ProxyConfigError::PhpFpm,
+            ));
+        }
+        if !config.error_pages.is_empty() {
+            return Err(NativeHttp1RouteProxyConfigError::Proxy(
+                NativeHttp1ProxyConfigError::PhpFpm,
+            ));
+        }
+        let scope = scope.to_string();
+        let root = native_php_root(&scope, config).map_err(|_| {
+            NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::PhpFpm)
+        })?;
+        let fpm_root = native_php_fpm_root(&scope, config, &root).map_err(|_| {
+            NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::PhpFpm)
+        })?;
+        let files = NativeHttp1StaticWeb::from_config(&fluxheim_config::WebConfig {
+            root: Some(root.clone()),
+            index_files: vec![config.index.clone()],
+            deny_dotfiles: true,
+            directory_listing: fluxheim_config::DirectoryListingConfig::default(),
+            cache_control: "private, no-store".to_owned(),
+            expires: None,
+        })
+        .map_err(|_| NativeHttp1RouteProxyConfigError::StaticWeb)?
+        .ok_or(NativeHttp1RouteProxyConfigError::StaticWeb)?;
+        let mut runtime_config = config.clone();
+        let pools = fluxheim_php_fpm::php_fpm_keepalive_pools_from_config(
+            &runtime_config,
+            vhost_name,
+            metric_pool,
+            fluxheim_php_fpm::PhpFpmPoolMetrics::default(),
+        );
+        runtime_config.fpm.mode = fluxheim_config::PhpFpmMode::External;
+        Ok(Some(Self {
+            config: runtime_config,
+            root,
+            fpm_root,
+            files,
+            vhost_name: vhost_name.to_owned(),
+            pools,
+            next_endpoint: Arc::new(AtomicUsize::new(0)),
+            in_flight: Arc::new(Semaphore::new(config.max_in_flight)),
+        }))
+    }
+
+    async fn handle(&self, request: NativeHttp1Request) -> NativeHttp1Response {
+        if !native_php_method_allowed(&request.method) {
+            return NativeHttp1Response::new(405, "Method Not Allowed", b"method not allowed\n")
+                .with_header("allow", "GET, HEAD, POST")
+                .close_connection();
+        }
+        let Some((path, _)) = request_path_and_query(&request) else {
+            return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
+                .close_connection();
+        };
+        let script = match self.files.resolve_php_script(&self.config, &path, true) {
+            Ok(NativePhpScriptResolve::Execute(script)) => script,
+            Ok(NativePhpScriptResolve::RedirectDirectorySlash) => {
+                return NativeHttp1Response::new(308, "Permanent Redirect", Vec::new())
+                    .with_header("location", format!("{path}/"))
+                    .close_connection();
+            }
+            Ok(NativePhpScriptResolve::Decline | NativePhpScriptResolve::NotFound) => {
+                return NativeHttp1Response::new(404, "Not Found", b"not found\n")
+                    .close_connection();
+            }
+            Ok(NativePhpScriptResolve::Forbidden) => {
+                return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
+                    .close_connection();
+            }
+            Err(error) => {
+                log::warn!(
+                    target: "fluxheim::native_http1",
+                    "native php-fpm script resolution failed: {error}"
+                );
+                return NativeHttp1Response::new(500, "Internal Server Error", b"internal error\n")
+                    .close_connection();
+            }
+        };
+        let Ok(_permit) = Arc::clone(&self.in_flight).try_acquire_owned() else {
+            return NativeHttp1Response::new(503, "Service Unavailable", b"php busy\n")
+                .close_connection();
+        };
+        let body = match native_php_request_body(&request, &self.config).await {
+            Ok(body) if self.config.pass_request_body => body,
+            Ok(_) => fluxheim_php_fpm::PhpRequestBody::memory(Vec::new()),
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                return NativeHttp1Response::new(413, "Payload Too Large", b"payload too large\n")
+                    .close_connection();
+            }
+            Err(error) => {
+                log::warn!(
+                    target: "fluxheim::native_http1",
+                    "native php-fpm request body planning failed: {error}"
+                );
+                return NativeHttp1Response::new(502, "Bad Gateway", b"php-fpm failed\n")
+                    .close_connection();
+            }
+        };
+        let server_port = native_php_server_port(&self.config, &request);
+        let plan = match native_php_request_plan(
+            &request,
+            &self.config,
+            &self.root,
+            &self.fpm_root,
+            &script.local_path,
+            &self.vhost_name,
+            &server_port,
+        ) {
+            Ok(plan) => plan,
+            Err(error) => {
+                log::debug!(
+                    target: "fluxheim::native_http1",
+                    "native php-fpm request plan rejected request: {error}"
+                );
+                return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
+                    .close_connection();
+            }
+        };
+        match native_php_execute_fpm(
+            &self.config,
+            &plan,
+            body,
+            &self.pools,
+            self.next_endpoint.as_ref(),
+        )
+        .await
+        {
+            Ok(NativePhpResponsePlan {
+                response,
+                intercept_status: None,
+            }) => response,
+            Ok(NativePhpResponsePlan {
+                response,
+                intercept_status: Some(_),
+            }) => response,
+            Err(error) => {
+                log::warn!(target: "fluxheim::native_http1", "native php-fpm request failed: {error}");
+                NativeHttp1Response::new(502, "Bad Gateway", b"php-fpm failed\n").close_connection()
+            }
+        }
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn native_php_root(scope: &str, config: &fluxheim_config::PhpConfig) -> io::Result<PathBuf> {
+    let configured_root = config.root.as_ref().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{scope}: enabled PHP requires php.root"),
+        )
+    })?;
+    let root_metadata = std::fs::symlink_metadata(configured_root).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("{scope}: php root {}: {error}", configured_root.display()),
+        )
+    })?;
+    if root_metadata.file_type().is_symlink() && !config.resolve_root_symlink {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{scope}: php root is not a real directory: {}",
+                configured_root.display()
+            ),
+        ));
+    }
+    if !root_metadata.file_type().is_symlink() && !root_metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{scope}: php root is not a real directory: {}",
+                configured_root.display()
+            ),
+        ));
+    }
+    let root = configured_root.canonicalize().map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("{scope}: php root {}: {error}", configured_root.display()),
+        )
+    })?;
+    let resolved_metadata = std::fs::metadata(&root).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("{scope}: php root {}: {error}", root.display()),
+        )
+    })?;
+    if !resolved_metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{scope}: php root does not resolve to a directory: {}",
+                configured_root.display()
+            ),
+        ));
+    }
+    Ok(root)
+}
+
+#[cfg(feature = "php-fpm")]
+fn native_php_fpm_root(
+    scope: &str,
+    config: &fluxheim_config::PhpConfig,
+    root: &Path,
+) -> io::Result<PathBuf> {
+    let Some(configured_fpm_root) = &config.fpm_root else {
+        return Ok(root.to_path_buf());
+    };
+    match configured_fpm_root.canonicalize() {
+        Ok(resolved) => Ok(resolved),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(configured_fpm_root.clone()),
+        Err(error) => Err(io::Error::new(
+            error.kind(),
+            format!(
+                "{scope}: php fpm_root {}: {error}",
+                configured_fpm_root.display()
+            ),
+        )),
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn native_php_method_allowed(method: &str) -> bool {
+    matches!(method, "GET" | "HEAD" | "POST")
+}
+
+#[cfg(feature = "php-fpm")]
+fn native_php_server_port(
+    config: &fluxheim_config::PhpConfig,
+    request: &NativeHttp1Request,
+) -> String {
+    config
+        .server_port
+        .or_else(|| native_php_request_host(request).and_then(native_php_explicit_authority_port))
+        .unwrap_or(if request.downstream_tls { 443 } else { 80 })
+        .to_string()
+}
+
+#[cfg(feature = "php-fpm")]
+fn native_php_request_host(request: &NativeHttp1Request) -> Option<&str> {
+    request.headers.iter().find_map(|(name, value)| {
+        name.eq_ignore_ascii_case("host")
+            .then_some(value.trim())
+            .filter(|value| !value.is_empty())
+    })
+}
+
+#[cfg(feature = "php-fpm")]
+fn native_php_explicit_authority_port(authority: &str) -> Option<u16> {
+    if let Some(rest) = authority.strip_prefix('[') {
+        let (_, after_host) = rest.split_once(']')?;
+        return after_host.strip_prefix(':')?.parse().ok();
+    }
+    let (_, port) = authority.rsplit_once(':')?;
+    port.parse().ok()
 }
 
 fn native_cache_policy_enabled(cache: &fluxheim_config::CacheConfig) -> bool {
@@ -1649,7 +1997,20 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             };
             let selected_route = self.select_route(&request.method, &path);
             let decoded_policy_route = self.select_decoded_policy_route(&request.method, &path);
-            if selected_route.is_none() && self.fallback_web.is_none() && self.fallback.is_none() {
+            if selected_route.is_none()
+                && self.fallback_web.is_none()
+                && self.fallback.is_none()
+                && {
+                    #[cfg(feature = "php-fpm")]
+                    {
+                        self.fallback_php.is_none()
+                    }
+                    #[cfg(not(feature = "php-fpm"))]
+                    {
+                        true
+                    }
+                }
+            {
                 return NativeHttp1Response::new(404, "Not Found", b"not found\n")
                     .close_connection();
             }
@@ -1724,6 +2085,10 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             if let Some(response) = self.fallback_web_response(&request, &path) {
                 return response;
             }
+            #[cfg(feature = "php-fpm")]
+            if let Some(php) = &self.fallback_php {
+                return php.handle(request).await;
+            }
             if let Some(proxy) = &self.fallback {
                 return proxy.handle(request).await;
             }
@@ -1735,6 +2100,10 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
         let (path, _) = request_path_and_query(request)?;
         if let Some(route) = self.select_route(&request.method, &path) {
             return route.request_body_timeout();
+        }
+        #[cfg(feature = "php-fpm")]
+        if let Some(php) = &self.fallback_php {
+            return Some(Duration::from_secs(php.config.request_timeout_secs));
         }
         self.fallback
             .as_ref()
@@ -1779,7 +2148,16 @@ impl NativeHttp1RouteProxy {
         };
         let selected_route = self.select_route(&request.method, &path);
         let decoded_policy_route = self.select_decoded_policy_route(&request.method, &path);
-        if selected_route.is_none() && self.fallback.is_none() {
+        if selected_route.is_none() && self.fallback.is_none() && {
+            #[cfg(feature = "php-fpm")]
+            {
+                self.fallback_php.is_none()
+            }
+            #[cfg(not(feature = "php-fpm"))]
+            {
+                true
+            }
+        } {
             return write_takeover_rejection(&mut stream, 404, "Not Found", b"not found\n").await;
         }
         let client_ip = self.access_client_ip(&request);
@@ -1853,6 +2231,16 @@ impl NativeHttp1RouteProxy {
             return proxy
                 .handle_connection_takeover(request, prebuffered, stream)
                 .await;
+        }
+        #[cfg(feature = "php-fpm")]
+        if self.fallback_php.is_some() {
+            return write_takeover_rejection(
+                &mut stream,
+                400,
+                "Bad Request",
+                b"unsupported upgrade target\n",
+            )
+            .await;
         }
         write_takeover_rejection(&mut stream, 404, "Not Found", b"not found\n").await
     }
@@ -2088,6 +2476,10 @@ impl NativeHttp1RouteProxyRoute {
             #[cfg(feature = "acme")]
             NativeHttp1RouteAction::AcmeHttp01(_) => None,
             NativeHttp1RouteAction::Proxy(proxy) => proxy.request_body_timeout(),
+            #[cfg(feature = "php-fpm")]
+            NativeHttp1RouteAction::PhpFpm(php) => {
+                Some(Duration::from_secs(php.config.request_timeout_secs))
+            }
             NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => None,
         }
     }
@@ -2112,6 +2504,8 @@ impl NativeHttp1RouteProxyRoute {
                 native_acme_http_01_response(&request, store).await
             }
             NativeHttp1RouteAction::Proxy(proxy) => proxy.handle(request).await,
+            #[cfg(feature = "php-fpm")]
+            NativeHttp1RouteAction::PhpFpm(php) => php.handle(request).await,
             NativeHttp1RouteAction::Redirect(redirect) => redirect_response(&request, redirect),
             NativeHttp1RouteAction::StaticWeb(web) => {
                 let Some((path, _)) = request_path_and_query(&request) else {
@@ -2139,10 +2533,9 @@ impl NativeHttp1RouteProxyRoute {
         match &self.action {
             NativeHttp1RouteAction::Proxy(proxy) => proxy.handles_connection_takeover(request),
             #[cfg(feature = "acme")]
-            NativeHttp1RouteAction::AcmeHttp01(_)
-            | NativeHttp1RouteAction::Redirect(_)
-            | NativeHttp1RouteAction::StaticWeb(_) => false,
-            #[cfg(not(feature = "acme"))]
+            NativeHttp1RouteAction::AcmeHttp01(_) => false,
+            #[cfg(feature = "php-fpm")]
+            NativeHttp1RouteAction::PhpFpm(_) => false,
             NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => false,
         }
     }
@@ -2160,9 +2553,7 @@ impl NativeHttp1RouteProxyRoute {
                     .await
             }
             #[cfg(feature = "acme")]
-            NativeHttp1RouteAction::AcmeHttp01(_)
-            | NativeHttp1RouteAction::Redirect(_)
-            | NativeHttp1RouteAction::StaticWeb(_) => {
+            NativeHttp1RouteAction::AcmeHttp01(_) => {
                 let mut stream = stream;
                 write_takeover_rejection(
                     &mut stream,
@@ -2172,7 +2563,17 @@ impl NativeHttp1RouteProxyRoute {
                 )
                 .await
             }
-            #[cfg(not(feature = "acme"))]
+            #[cfg(feature = "php-fpm")]
+            NativeHttp1RouteAction::PhpFpm(_) => {
+                let mut stream = stream;
+                write_takeover_rejection(
+                    &mut stream,
+                    400,
+                    "Bad Request",
+                    b"unsupported upgrade target\n",
+                )
+                .await
+            }
             NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => {
                 let mut stream = stream;
                 write_takeover_rejection(
