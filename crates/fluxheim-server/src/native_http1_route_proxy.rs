@@ -1680,6 +1680,9 @@ impl NativeHttp1RouteProxy {
     }
 
     fn access_client_ip(&self, request: &NativeHttp1Request) -> Option<IpAddr> {
+        if let Some(addr) = request.effective_client_addr {
+            return Some(addr.ip());
+        }
         let direct_ip = request.peer_addr.map(|addr| addr.ip());
         #[cfg(not(feature = "privacy-mode"))]
         {
@@ -2618,23 +2621,31 @@ impl NativeRouteRequestHeaderPolicy {
         }
 
         let original_x_forwarded_for = joined_header_value(request, "x-forwarded-for");
+        let listener_effective_addr = request.effective_client_addr;
         let direct_ip = request.peer_addr.map(|addr| addr.ip());
         let trusted_direct_peer = direct_ip.is_some_and(|ip| self.trusted_source_contains(ip));
         let trusted_proxy_matcher = |ip| self.trusted_source_contains(ip);
-        let client_ip = direct_ip.map(|ip| {
-            effective_client_ip(
-                ip,
-                trusted_direct_peer,
-                original_x_forwarded_for.as_deref(),
-                Some(&trusted_proxy_matcher),
-            )
+        let client_ip = listener_effective_addr.map(|addr| addr.ip()).or_else(|| {
+            direct_ip.map(|ip| {
+                effective_client_ip(
+                    ip,
+                    trusted_direct_peer,
+                    original_x_forwarded_for.as_deref(),
+                    Some(&trusted_proxy_matcher),
+                )
+            })
         });
-        if let (Some(peer_addr), Some(client_ip)) = (request.peer_addr, client_ip) {
-            let port = if peer_addr.ip() == client_ip {
-                peer_addr.port()
-            } else {
-                0
-            };
+        if let Some(client_ip) = client_ip {
+            let port = listener_effective_addr
+                .filter(|addr| addr.ip() == client_ip)
+                .map(|addr| addr.port())
+                .or_else(|| {
+                    request
+                        .peer_addr
+                        .filter(|addr| addr.ip() == client_ip)
+                        .map(|addr| addr.port())
+                })
+                .unwrap_or(0);
             request.effective_client_addr = Some(std::net::SocketAddr::new(client_ip, port));
         }
         match (self.x_forwarded_for, client_ip) {

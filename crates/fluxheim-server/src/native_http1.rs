@@ -6,8 +6,10 @@ use std::time::{Duration, Instant};
 
 use fluxheim_protocol::{
     Http1BodyFraming, Http1ConnectionDirective, Http1HeadLimits, Http1Header, Http1ParseError,
-    Http1RequestTarget, Http1Version, decode_http1_chunked_body, http_token_valid,
-    http1_request_target, parse_http1_request_head,
+    Http1RequestTarget, Http1Version, PROXY_PROTOCOL_V1_MAX_LINE, PROXY_PROTOCOL_V2_HEADER_LEN,
+    PROXY_PROTOCOL_V2_MAX_PAYLOAD, decode_http1_chunked_body, http_token_valid,
+    http1_request_target, parse_downstream_proxy_protocol_v1, parse_downstream_proxy_protocol_v2,
+    parse_http1_request_head,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -18,7 +20,7 @@ use tokio_openssl::SslStream;
 #[cfg(feature = "tls-rustls-backend")]
 use tokio_rustls::TlsAcceptor;
 
-use crate::DownstreamHttp1Policy;
+use crate::{DownstreamHttp1Policy, ProxyProtocolPolicy};
 
 const READ_CHUNK_BYTES: usize = 8192;
 const WRITE_CHUNK_BYTES: usize = 8192;
@@ -56,6 +58,7 @@ pub struct NativeHttp1GeoContext {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NativeHttp1RequestContext {
     pub local_addr: Option<SocketAddr>,
+    pub effective_client_addr: Option<SocketAddr>,
     pub downstream_tls: bool,
     pub tls_identity: Option<NativeHttp1TlsClientIdentity>,
     pub geo_context: Option<NativeHttp1GeoContext>,
@@ -483,6 +486,57 @@ where
     }
 }
 
+pub async fn serve_native_http1_listener_with_proxy_protocol<H, F>(
+    listener: TcpListener,
+    policy: DownstreamHttp1Policy,
+    proxy_protocol: ProxyProtocolPolicy,
+    handler: Arc<H>,
+    shutdown: F,
+) -> Result<(), NativeHttp1Error>
+where
+    H: NativeHttp1Handler,
+    F: Future<Output = ()> + Send,
+{
+    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let local_addr = listener.local_addr().ok();
+    tokio::pin!(shutdown);
+    loop {
+        tokio::select! {
+            () = &mut shutdown => return Ok(()),
+            accepted = listener.accept() => {
+                let (stream, peer_addr) = accepted?;
+                let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                    log::warn!(
+                        target: "fluxheim::native_http1",
+                        "HTTP/1 PROXY-protocol connection rejected: listener at capacity; peer={peer_addr}; limit={}",
+                        policy.max_connections());
+                    continue;
+                };
+                let handler = handler.clone();
+                let proxy_protocol = proxy_protocol.clone();
+                tokio::spawn(async move {
+                    let result = serve_native_http1_proxy_protocol_connection(
+                        stream,
+                        peer_addr,
+                        local_addr,
+                        proxy_protocol,
+                        policy,
+                        handler,
+                    )
+                    .await;
+                    if let Err(error) = result {
+                        log::debug!(
+                            target: "fluxheim::native_http1",
+                            "HTTP/1 PROXY-protocol connection failed; peer={peer_addr}; error={error}"
+                        );
+                    }
+                    drop(permit);
+                });
+            }
+        }
+    }
+}
+
 #[cfg(feature = "tls-rustls-backend")]
 pub async fn serve_native_http1_rustls_listener<H, F>(
     listener: TcpListener,
@@ -540,6 +594,129 @@ where
             }
         }
     }
+}
+
+async fn serve_native_http1_proxy_protocol_connection<S, H>(
+    mut stream: S,
+    peer_addr: SocketAddr,
+    local_addr: Option<SocketAddr>,
+    proxy_protocol: ProxyProtocolPolicy,
+    policy: DownstreamHttp1Policy,
+    handler: Arc<H>,
+) -> Result<(), NativeHttp1Error>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+    H: NativeHttp1Handler,
+{
+    let source = timeout(
+        policy.request_head_timeout(),
+        read_proxy_protocol_source(&mut stream, &proxy_protocol, peer_addr),
+    )
+    .await
+    .map_err(|_| {
+        NativeHttp1Error::Io(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "PROXY protocol header timeout",
+        ))
+    })??;
+    let request_context = NativeHttp1RequestContext {
+        local_addr,
+        effective_client_addr: source,
+        ..NativeHttp1RequestContext::default()
+    };
+    serve_native_http1_connection_with_context(
+        stream,
+        Some(peer_addr),
+        request_context,
+        policy,
+        handler,
+    )
+    .await
+}
+
+async fn read_proxy_protocol_source<S>(
+    stream: &mut S,
+    proxy_protocol: &ProxyProtocolPolicy,
+    peer_addr: SocketAddr,
+) -> Result<Option<SocketAddr>, NativeHttp1Error>
+where
+    S: AsyncRead + Unpin,
+{
+    let trusted_sources = match proxy_protocol {
+        ProxyProtocolPolicy::Off => return Ok(None),
+        ProxyProtocolPolicy::V1 { trusted_sources }
+        | ProxyProtocolPolicy::V2 { trusted_sources } => trusted_sources,
+    };
+    if !trusted_sources
+        .iter()
+        .any(|source| source.contains(peer_addr.ip()))
+    {
+        return Err(NativeHttp1Error::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "untrusted PROXY protocol peer",
+        )));
+    }
+    match proxy_protocol {
+        ProxyProtocolPolicy::Off => Ok(None),
+        ProxyProtocolPolicy::V1 { .. } => read_proxy_protocol_v1_source(stream).await,
+        ProxyProtocolPolicy::V2 { .. } => read_proxy_protocol_v2_source(stream).await,
+    }
+}
+
+async fn read_proxy_protocol_v1_source<S>(
+    stream: &mut S,
+) -> Result<Option<SocketAddr>, NativeHttp1Error>
+where
+    S: AsyncRead + Unpin,
+{
+    let mut line = Vec::new();
+    while line.len() < PROXY_PROTOCOL_V1_MAX_LINE {
+        let mut byte = [0u8; 1];
+        if stream.read_exact(&mut byte).await.is_err() {
+            return Err(NativeHttp1Error::Io(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "truncated PROXY protocol v1 header",
+            )));
+        }
+        line.push(byte[0]);
+        if line.ends_with(b"\r\n") {
+            return parse_downstream_proxy_protocol_v1(&line).map_err(|error| {
+                NativeHttp1Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    error.to_string(),
+                ))
+            });
+        }
+    }
+    Err(NativeHttp1Error::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "PROXY protocol v1 header too large",
+    )))
+}
+
+async fn read_proxy_protocol_v2_source<S>(
+    stream: &mut S,
+) -> Result<Option<SocketAddr>, NativeHttp1Error>
+where
+    S: AsyncRead + Unpin,
+{
+    let mut header = [0u8; PROXY_PROTOCOL_V2_HEADER_LEN];
+    stream.read_exact(&mut header).await?;
+    let payload_len = u16::from_be_bytes([header[14], header[15]]) as usize;
+    if payload_len > PROXY_PROTOCOL_V2_MAX_PAYLOAD {
+        return Err(NativeHttp1Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "PROXY protocol v2 payload too large",
+        )));
+    }
+    let mut payload = vec![0u8; payload_len];
+    stream.read_exact(&mut payload).await?;
+    parse_downstream_proxy_protocol_v2(&header, &payload).map_err(|error| {
+        NativeHttp1Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            error.to_string(),
+        ))
+    })
 }
 
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
@@ -670,7 +847,7 @@ fn owned_request_from_head(
         method: head.method.to_owned(),
         peer_addr,
         local_addr: request_context.local_addr,
-        effective_client_addr: peer_addr,
+        effective_client_addr: request_context.effective_client_addr,
         downstream_tls: request_context.downstream_tls,
         tls_identity: request_context.tls_identity.clone(),
         geo_context: request_context.geo_context.clone(),
@@ -695,6 +872,7 @@ fn native_rustls_request_context<S>(
     let (_, connection) = stream.get_ref();
     NativeHttp1RequestContext {
         local_addr: None,
+        effective_client_addr: None,
         downstream_tls: true,
         tls_identity: Some(NativeHttp1TlsClientIdentity {
             cipher: connection
@@ -720,6 +898,7 @@ fn native_openssl_request_context<S>(stream: &SslStream<S>) -> NativeHttp1Reques
     let peer_certificate = ssl.peer_certificate();
     NativeHttp1RequestContext {
         local_addr: None,
+        effective_client_addr: None,
         downstream_tls: true,
         tls_identity: Some(NativeHttp1TlsClientIdentity {
             cipher: ssl.current_cipher().map(|cipher| cipher.name().to_owned()),

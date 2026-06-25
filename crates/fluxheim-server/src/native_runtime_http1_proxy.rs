@@ -14,7 +14,7 @@ use crate::serve_native_http1_rustls_listener;
 use crate::{
     ListenerProtocol, NativeHttp1Error, NativeHttp1HostRouter, NativeHttp1HostRouterConfigError,
     NativeRuntimeLaunchPlan, NativeRuntimeLaunchPlanError, ServerPlan, ServiceKind,
-    serve_native_http1_listener,
+    serve_native_http1_listener, serve_native_http1_listener_with_proxy_protocol,
 };
 
 #[cfg(feature = "tls-rustls-backend")]
@@ -22,6 +22,7 @@ const ACME_TLS_ALPN_PROTOCOL: &[u8] = b"acme-tls/1";
 
 pub struct NativeHttp1ProxyRuntime {
     policy: crate::DownstreamHttp1Policy,
+    proxy_protocol: crate::ProxyProtocolPolicy,
     router: Arc<NativeHttp1HostRouter>,
     listeners: Vec<NativeHttp1ProxyRuntimeListener>,
     #[cfg(feature = "tls-rustls-backend")]
@@ -30,6 +31,7 @@ pub struct NativeHttp1ProxyRuntime {
 
 struct NativeHttp1ProxyRuntimeListener {
     protocol: ListenerProtocol,
+    proxy_protocol_enabled: bool,
     planned_addr: SocketAddr,
     local_addr: SocketAddr,
     listener: TcpListener,
@@ -54,9 +56,6 @@ pub enum NativeHttp1ProxyRuntimeError {
     },
     LaunchPlan(NativeRuntimeLaunchPlanError),
     MissingProxyHttpListener,
-    ProxyProtocol {
-        addr: SocketAddr,
-    },
     Router(NativeHttp1HostRouterConfigError),
     #[cfg(feature = "tls-rustls-backend")]
     RustlsCertificate(fluxheim_tls::RustlsDownstreamCertificateError),
@@ -88,10 +87,6 @@ impl fmt::Display for NativeHttp1ProxyRuntimeError {
             Self::MissingProxyHttpListener => {
                 formatter.write_str("native HTTP/1 proxy runtime requires a proxy HTTP listener")
             }
-            Self::ProxyProtocol { addr } => write!(
-                formatter,
-                "native HTTP/1 proxy listener {addr} requires downstream PROXY protocol support"
-            ),
             Self::Router(error) => write!(formatter, "native HTTP/1 host router: {error}"),
             #[cfg(feature = "tls-rustls-backend")]
             Self::RustlsCertificate(error) => {
@@ -131,7 +126,6 @@ impl Error for NativeHttp1ProxyRuntimeError {
             #[cfg(feature = "tls-rustls-backend")]
             Self::TlsPlan(error) => Some(error),
             Self::MissingProxyHttpListener
-            | Self::ProxyProtocol { .. }
             | Self::UnsupportedTlsAlpn { .. }
             | Self::UnsupportedListener { .. } => None,
         }
@@ -192,11 +186,6 @@ impl NativeHttp1ProxyRuntime {
             .iter()
             .filter(|listener| listener.service_kind() == ServiceKind::ProxyHttp)
         {
-            if planned.proxy_protocol_enabled() {
-                return Err(NativeHttp1ProxyRuntimeError::ProxyProtocol {
-                    addr: planned.listener_addr(),
-                });
-            }
             if !matches!(
                 planned.listener_protocol(),
                 ListenerProtocol::Http | ListenerProtocol::Https
@@ -221,6 +210,7 @@ impl NativeHttp1ProxyRuntime {
                     })?;
             listeners.push(NativeHttp1ProxyRuntimeListener {
                 protocol: planned.listener_protocol(),
+                proxy_protocol_enabled: planned.proxy_protocol_enabled(),
                 planned_addr: planned.listener_addr(),
                 local_addr,
                 listener,
@@ -231,6 +221,7 @@ impl NativeHttp1ProxyRuntime {
         }
         Ok(Self {
             policy: launch_plan.downstream_http1(),
+            proxy_protocol: launch_plan.proxy_protocol().clone(),
             router,
             listeners,
             #[cfg(feature = "tls-rustls-backend")]
@@ -257,12 +248,23 @@ impl NativeHttp1ProxyRuntime {
         for listener in self.listeners {
             let local_addr = listener.local_addr;
             let policy = self.policy;
+            let proxy_protocol = self.proxy_protocol.clone();
             let router = self.router.clone();
             let shutdown = supervisor.shutdown_view();
             #[cfg(feature = "tls-rustls-backend")]
             let rustls_config = self.rustls_config.clone();
             let handle = tokio::spawn(async move {
                 match listener.protocol {
+                    ListenerProtocol::Http if listener.proxy_protocol_enabled => {
+                        serve_native_http1_listener_with_proxy_protocol(
+                            listener.listener,
+                            policy,
+                            proxy_protocol,
+                            router,
+                            shutdown_wait(shutdown),
+                        )
+                        .await
+                    }
                     ListenerProtocol::Http => {
                         serve_native_http1_listener(
                             listener.listener,

@@ -36,12 +36,70 @@ async fn upstream_response(body: &'static str) -> std::net::SocketAddr {
     addr
 }
 
+async fn upstream_assert_x_real_ip(expected: &'static str) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(request).unwrap();
+        assert!(
+            request
+                .lines()
+                .any(|line| line.eq_ignore_ascii_case(&format!("x-real-ip: {expected}"))),
+            "missing x-real-ip header in request:\n{request}"
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 8\r\n\r\nproxy-ok")
+            .await
+            .unwrap();
+    });
+    addr
+}
+
 async fn downstream_get(proxy: std::net::SocketAddr) -> String {
     let mut stream = TcpStream::connect(proxy).await.unwrap();
     stream
         .write_all(b"GET / HTTP/1.1\r\nHost: native.test\r\nConnection: close\r\n\r\n")
         .await
         .unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    String::from_utf8(response).unwrap()
+}
+
+async fn downstream_proxy_v1_get(proxy: std::net::SocketAddr, source: &str) -> String {
+    let mut stream = TcpStream::connect(proxy).await.unwrap();
+    let request = format!(
+        "PROXY TCP4 {source} 127.0.0.1 43210 8080\r\n\
+         GET / HTTP/1.1\r\nHost: native.test\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    String::from_utf8(response).unwrap()
+}
+
+async fn downstream_proxy_v2_get(
+    proxy: std::net::SocketAddr,
+    source: std::net::SocketAddr,
+    destination: std::net::SocketAddr,
+) -> String {
+    let mut stream = TcpStream::connect(proxy).await.unwrap();
+    let mut request = fluxheim_protocol::proxy_protocol_v2_header(Some(source), Some(destination));
+    request.extend_from_slice(b"GET / HTTP/1.1\r\nHost: native.test\r\nConnection: close\r\n\r\n");
+    stream.write_all(&request).await.unwrap();
     let mut response = Vec::new();
     stream.read_to_end(&mut response).await.unwrap();
     String::from_utf8(response).unwrap()
@@ -135,6 +193,69 @@ async fn native_http1_proxy_runtime_binds_launch_plan_and_serves_proxy_listener(
     assert!(supervisor.shutdown());
     for result in handle.join().await {
         result.expect("native listener stopped cleanly");
+    }
+}
+
+#[tokio::test]
+async fn native_http1_proxy_runtime_accepts_trusted_proxy_protocol_v1_listener() {
+    let upstream = upstream_assert_x_real_ip("203.0.113.10").await;
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = vec!["127.0.0.1:0".to_owned()];
+    config.server.proxy_protocol = fluxheim_config::DownstreamProxyProtocol::V1;
+    config.server.trusted_proxies = vec!["127.0.0.1".to_owned()];
+    config.proxy.upstream = Some(upstream.to_string());
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert!(plan.native_runtime_cutover_summary().is_ready());
+    let runtime = NativeHttp1ProxyRuntime::bind_from_config(&config, &plan)
+        .await
+        .expect("bind native proxy runtime");
+    let local_addr = runtime.local_addrs()[0];
+
+    let supervisor = NativeBackgroundSupervisor::new();
+    let handle = runtime.start(&supervisor);
+
+    let response = downstream_proxy_v1_get(local_addr, "203.0.113.10").await;
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("proxy-ok"));
+
+    assert!(supervisor.shutdown());
+    for result in handle.join().await {
+        result.expect("native PROXY listener stopped cleanly");
+    }
+}
+
+#[tokio::test]
+async fn native_http1_proxy_runtime_accepts_trusted_proxy_protocol_v2_listener() {
+    let upstream = upstream_assert_x_real_ip("203.0.113.20").await;
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = vec!["127.0.0.1:0".to_owned()];
+    config.server.proxy_protocol = fluxheim_config::DownstreamProxyProtocol::V2;
+    config.server.trusted_proxies = vec!["127.0.0.1".to_owned()];
+    config.proxy.upstream = Some(upstream.to_string());
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert!(plan.native_runtime_cutover_summary().is_ready());
+    let runtime = NativeHttp1ProxyRuntime::bind_from_config(&config, &plan)
+        .await
+        .expect("bind native proxy runtime");
+    let local_addr = runtime.local_addrs()[0];
+
+    let supervisor = NativeBackgroundSupervisor::new();
+    let handle = runtime.start(&supervisor);
+
+    let response = downstream_proxy_v2_get(
+        local_addr,
+        std::net::SocketAddr::from(([203, 0, 113, 20], 43210)),
+        std::net::SocketAddr::from(([127, 0, 0, 1], 8080)),
+    )
+    .await;
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("proxy-ok"));
+
+    assert!(supervisor.shutdown());
+    for result in handle.join().await {
+        result.expect("native PROXY listener stopped cleanly");
     }
 }
 

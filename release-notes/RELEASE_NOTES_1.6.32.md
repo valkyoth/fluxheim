@@ -77,6 +77,10 @@ cache/PHP adapter slice.
   server config through `fluxheim-tls`, preserving certificate resolver and
   client-auth policy; HTTP/2 ALPN and downstream PROXY protocol remain
   fail-closed until their native listener dispatch is added.
+- Plaintext native proxy listeners now accept trusted downstream PROXY protocol
+  v1 and v2 from the native launch plan. The parsed source address is carried
+  through access policy, rate-limit identity, and generated forwarding headers,
+  while untrusted direct peers still fail closed before request parsing.
 
 ## Tests
 
@@ -122,3 +126,6 @@ cache/PHP adapter slice.
   certificate, binds a planned HTTPS listener, completes a real TLS handshake,
   proxies a request to a local upstream, and shuts the native listener down
   through the supervisor.
+- Added live native runtime tests for trusted downstream PROXY protocol v1 and
+  v2 listeners, proving the native listener parses the PROXY header and forwards
+  the restored client IP to the upstream as `X-Real-IP`.

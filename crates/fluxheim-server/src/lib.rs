@@ -49,6 +49,7 @@ pub use native_http1::{
     NativeHttp1Error, NativeHttp1GeoContext, NativeHttp1Handler, NativeHttp1Request,
     NativeHttp1RequestContext, NativeHttp1Response, NativeHttp1ResponseWritePolicy,
     NativeHttp1TlsClientIdentity, serve_native_http1_connection, serve_native_http1_listener,
+    serve_native_http1_listener_with_proxy_protocol,
 };
 #[cfg(feature = "acme")]
 pub use native_http1_acme::NativeHttp1AcmeHttp01Store;
