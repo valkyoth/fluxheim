@@ -246,6 +246,10 @@ impl PartialEq for NativeHttp1Upstream {
 impl Eq for NativeHttp1Upstream {}
 
 impl NativeHttp1Upstream {
+    pub fn authority(&self) -> &str {
+        &self.authority
+    }
+
     pub fn new(authority: impl Into<String>) -> Self {
         let policy = DownstreamHttp1Policy::default();
         Self {

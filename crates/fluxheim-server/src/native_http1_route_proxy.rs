@@ -834,6 +834,23 @@ impl NativeHttp1RouteProxy {
         policy: DownstreamHttp1Policy,
         pool_max_idle: usize,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        Self::from_root_config_with_load_balancer_services(
+            config,
+            policy,
+            pool_max_idle,
+            #[cfg(feature = "load-balancer")]
+            None,
+        )
+    }
+
+    pub(crate) fn from_root_config_with_load_balancer_services(
+        config: &fluxheim_config::Config,
+        policy: DownstreamHttp1Policy,
+        pool_max_idle: usize,
+        #[cfg(feature = "load-balancer")] mut load_balancer_services: Option<
+            &mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
+        >,
+    ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
         if native_cache_policy_enabled(&config.cache)
             && (!config.web.enabled() || !NativeHttp1StaticWeb::cache_supported(&config.cache))
         {
@@ -849,8 +866,19 @@ impl NativeHttp1RouteProxy {
         } else {
             None
         };
-        let fallback = NativeHttp1Proxy::from_root_config(config, policy, pool_max_idle)
-            .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
+        let fallback = native_proxy_from_config_collecting_load_balancer(
+            "root proxy",
+            "root",
+            None,
+            &config.proxy,
+            policy,
+            pool_max_idle,
+            #[cfg(feature = "load-balancer")]
+            load_balancer_services
+                .as_mut()
+                .map(|services| &mut **services),
+        )?
+        .map(|proxy| proxy.with_header_policy(&config.headers));
         if fallback_web.is_none() && fallback.is_none() {
             return Err(NativeHttp1RouteProxyConfigError::MissingRouteAction);
         }
@@ -908,13 +936,42 @@ impl NativeHttp1RouteProxy {
         #[cfg_attr(feature = "privacy-mode", allow(unused_variables))]
         trusted_sources: &[ProxyProtocolTrustedSource],
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
-        let mut proxy = Self::from_vhost_config_with_trusted_sources(
+        Self::from_config_with_trusted_sources_and_load_balancer_services(
+            config,
             vhost,
             base_headers,
             inherited_compression,
             policy,
             pool_max_idle,
             trusted_sources,
+            #[cfg(feature = "load-balancer")]
+            None,
+        )
+    }
+
+    #[cfg(feature = "acme")]
+    pub fn from_config_with_trusted_sources_and_load_balancer_services(
+        config: &Config,
+        vhost: &fluxheim_config::VhostConfig,
+        base_headers: &HeaderPolicyConfig,
+        inherited_compression: Option<&fluxheim_config::CompressionConfig>,
+        policy: DownstreamHttp1Policy,
+        pool_max_idle: usize,
+        #[cfg_attr(feature = "privacy-mode", allow(unused_variables))]
+        trusted_sources: &[ProxyProtocolTrustedSource],
+        #[cfg(feature = "load-balancer")] load_balancer_services: Option<
+            &mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
+        >,
+    ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        let mut proxy = Self::from_vhost_config_with_trusted_sources_and_load_balancer_services(
+            vhost,
+            base_headers,
+            inherited_compression,
+            policy,
+            pool_max_idle,
+            trusted_sources,
+            #[cfg(feature = "load-balancer")]
+            load_balancer_services,
         )?;
         if let Some(route) = native_managed_http_01_route(config, vhost, base_headers)? {
             proxy.routes.insert(0, route);
@@ -948,6 +1005,30 @@ impl NativeHttp1RouteProxy {
         #[cfg_attr(feature = "privacy-mode", allow(unused_variables))]
         trusted_sources: &[ProxyProtocolTrustedSource],
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
+        Self::from_vhost_config_with_trusted_sources_and_load_balancer_services(
+            vhost,
+            base_headers,
+            inherited_compression,
+            policy,
+            pool_max_idle,
+            trusted_sources,
+            #[cfg(feature = "load-balancer")]
+            None,
+        )
+    }
+
+    pub fn from_vhost_config_with_trusted_sources_and_load_balancer_services(
+        vhost: &fluxheim_config::VhostConfig,
+        base_headers: &HeaderPolicyConfig,
+        inherited_compression: Option<&fluxheim_config::CompressionConfig>,
+        policy: DownstreamHttp1Policy,
+        pool_max_idle: usize,
+        #[cfg_attr(feature = "privacy-mode", allow(unused_variables))]
+        trusted_sources: &[ProxyProtocolTrustedSource],
+        #[cfg(feature = "load-balancer")] mut load_balancer_services: Option<
+            &mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
+        >,
+    ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
         if native_vhost_cache_policy_blocked(vhost) {
             return Err(NativeHttp1RouteProxyConfigError::Proxy(
                 NativeHttp1ProxyConfigError::CachePolicy,
@@ -970,9 +1051,18 @@ impl NativeHttp1RouteProxy {
         let access = NativeIpAccessPolicy::from_config(&vhost.access)?;
         let rate_limit = NativeRateLimit::from_config(&vhost.rate_limit);
         let concurrency = NativeConcurrencyLimit::from_config(&vhost.concurrency);
-        let fallback =
-            NativeHttp1Proxy::from_proxy_config_with_pool_size(&vhost.proxy, policy, pool_max_idle)
-                .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
+        let fallback = native_proxy_from_config_collecting_load_balancer(
+            &vhost.name,
+            &vhost.name,
+            None,
+            &vhost.proxy,
+            policy,
+            pool_max_idle,
+            #[cfg(feature = "load-balancer")]
+            load_balancer_services
+                .as_mut()
+                .map(|services| &mut **services),
+        )?;
         let fallback = fallback.map(|proxy| proxy.with_header_policy(&headers));
         #[cfg(not(feature = "privacy-mode"))]
         let fallback = fallback.map(|proxy| proxy.with_trusted_sources(trusted_sources));
@@ -998,12 +1088,18 @@ impl NativeHttp1RouteProxy {
             .chain(vhost.redirect.route_config())
         {
             let proxy = if let Some(proxy_config) = route.proxy.as_ref() {
-                let proxy = NativeHttp1Proxy::from_proxy_config_with_pool_size(
+                let proxy = native_proxy_from_config_collecting_load_balancer(
+                    &format!("{} route {}", vhost.name, route.name),
+                    &vhost.name,
+                    Some(&route.name),
                     proxy_config,
                     policy,
                     pool_max_idle,
-                )
-                .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
+                    #[cfg(feature = "load-balancer")]
+                    load_balancer_services
+                        .as_mut()
+                        .map(|services| &mut **services),
+                )?;
                 #[cfg(not(feature = "privacy-mode"))]
                 let proxy = proxy.map(|proxy| proxy.with_trusted_sources(trusted_sources));
                 proxy
@@ -1040,6 +1136,44 @@ impl NativeHttp1RouteProxy {
             #[cfg(not(feature = "privacy-mode"))]
             trusted_sources: trusted_sources.to_vec(),
         })
+    }
+}
+
+fn native_proxy_from_config_collecting_load_balancer(
+    name: &str,
+    vhost: &str,
+    route: Option<&str>,
+    proxy: &fluxheim_config::ProxyConfig,
+    policy: DownstreamHttp1Policy,
+    pool_max_idle: usize,
+    #[cfg(feature = "load-balancer")] load_balancer_services: Option<
+        &mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
+    >,
+) -> Result<Option<NativeHttp1Proxy>, NativeHttp1RouteProxyConfigError> {
+    #[cfg(feature = "load-balancer")]
+    {
+        let result = NativeHttp1Proxy::from_proxy_config_with_native_load_balancer(
+            name,
+            vhost,
+            route,
+            proxy,
+            policy,
+            pool_max_idle,
+        )
+        .map_err(NativeHttp1RouteProxyConfigError::Proxy)?;
+        let Some((proxy, service)) = result else {
+            return Ok(None);
+        };
+        if let (Some(services), Some(service)) = (load_balancer_services, service) {
+            services.push(service);
+        }
+        Ok(Some(proxy))
+    }
+    #[cfg(not(feature = "load-balancer"))]
+    {
+        let _ = (name, vhost, route);
+        NativeHttp1Proxy::from_proxy_config_with_pool_size(proxy, policy, pool_max_idle)
+            .map_err(NativeHttp1RouteProxyConfigError::Proxy)
     }
 }
 

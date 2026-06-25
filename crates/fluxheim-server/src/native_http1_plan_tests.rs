@@ -214,8 +214,19 @@ fn server_plan_collects_vhost_and_route_native_http1_proxy_candidates() {
         candidates[1].scope(),
         "vhost \"native.test\" route \"api\" proxy"
     );
-    assert!(candidates[1].is_eligible());
-    assert_eq!(candidates[1].unsupported_reason(), None);
+    #[cfg(feature = "load-balancer")]
+    {
+        assert!(candidates[1].is_eligible());
+        assert_eq!(candidates[1].unsupported_reason(), None);
+    }
+    #[cfg(not(feature = "load-balancer"))]
+    {
+        assert!(!candidates[1].is_eligible());
+        assert_eq!(
+            candidates[1].unsupported_reason(),
+            Some(NativeHttp1ProxyConfigError::LoadBalancing)
+        );
+    }
 }
 
 #[test]
@@ -1711,16 +1722,33 @@ fn server_plan_rejects_native_http1_proxy_candidate_with_advanced_load_balance_p
 }
 
 #[test]
-fn server_plan_rejects_native_http1_proxy_candidate_with_active_load_balance_health_check() {
+fn server_plan_accepts_native_http1_proxy_candidate_with_active_load_balance_health_check() {
     let mut config = Config::default();
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    let summary = plan.native_http1_proxy_cutover_summary();
 
-    assert_eq!(
-        plan.native_http1_proxy_candidates()[0].unsupported_reason(),
-        Some(NativeHttp1ProxyConfigError::LoadBalancing)
-    );
+    assert_eq!(plan.native_http1_proxy_candidates().len(), 1);
+    #[cfg(feature = "load-balancer")]
+    {
+        assert_eq!(
+            plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+            None
+        );
+        assert_eq!(summary.status(), NativeHttp1ProxyCutoverStatus::NativeReady);
+    }
+    #[cfg(not(feature = "load-balancer"))]
+    {
+        assert_eq!(
+            plan.native_http1_proxy_candidates()[0].unsupported_reason(),
+            Some(NativeHttp1ProxyConfigError::LoadBalancing)
+        );
+        assert_eq!(
+            summary.status(),
+            NativeHttp1ProxyCutoverStatus::CompatibilityRequired
+        );
+    }
 }
 
 #[test]

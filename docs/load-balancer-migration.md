@@ -212,6 +212,12 @@ tracked for future module lines.
   runtime mutation, health/discovery loops, and selection policy. Pingora still
   remains the HTTP proxy transport boundary until the `1.6.x` native HTTP
   runtime cutover completes.
+- During the `1.6.32` native runtime cutover, static native HTTP proxy pools
+  with active load-balancer health checks share one `UpstreamLoadBalancer`
+  instance between request selection and the native background health service.
+  Dynamic discovery pools remain on the compatibility path until their refresh
+  state is wired into the native request path with the same shared-state
+  guarantee.
 - Runtime weight changes are available for round-robin and least-* selectors.
   Hash/ring selectors need future table-rebuild semantics before runtime
   weights are accepted there.

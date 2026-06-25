@@ -34,10 +34,21 @@ use sanitization::ct::ConstantTimeEq;
 const NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
 const MAX_NATIVE_UPSTREAM_H2_STREAMS: usize = 1024;
 
+#[cfg(feature = "load-balancer")]
+type NativeProxyConfigBuild = (
+    NativeHttp1Proxy,
+    Option<fluxheim_load_balancer::UpstreamLoadBalancerService>,
+);
+
+#[cfg(not(feature = "load-balancer"))]
+type NativeProxyConfigBuild = NativeHttp1Proxy;
+
 #[derive(Clone, Debug)]
 pub struct NativeHttp1Proxy {
     upstreams: Vec<NativeHttp1Upstream>,
     upstream_slots: Vec<usize>,
+    #[cfg(feature = "load-balancer")]
+    load_balancer: Option<fluxheim_load_balancer::UpstreamLoadBalancer>,
     error_pages: Vec<NativeHttp1ProxyErrorPage>,
     request_headers: NativeRouteRequestHeaderPolicy,
     response_headers: NativeRouteResponseHeaderPolicy,
@@ -199,6 +210,8 @@ impl NativeHttp1Proxy {
         Self {
             upstreams: vec![upstream],
             upstream_slots: vec![0],
+            #[cfg(feature = "load-balancer")]
+            load_balancer: None,
             error_pages: Vec::new(),
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
@@ -228,6 +241,8 @@ impl NativeHttp1Proxy {
         Ok(Self {
             upstreams,
             upstream_slots,
+            #[cfg(feature = "load-balancer")]
+            load_balancer: None,
             error_pages: Vec::new(),
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
@@ -265,6 +280,8 @@ impl NativeHttp1Proxy {
         Ok(Self {
             upstreams,
             upstream_slots,
+            #[cfg(feature = "load-balancer")]
+            load_balancer: None,
             error_pages: Vec::new(),
             request_headers: default_native_request_header_policy(),
             response_headers: NativeRouteResponseHeaderPolicy::default(),
@@ -375,6 +392,56 @@ impl NativeHttp1Proxy {
         policy: crate::DownstreamHttp1Policy,
         pool_max_idle: usize,
     ) -> Result<Option<Self>, NativeHttp1ProxyConfigError> {
+        Self::from_proxy_config_with_pool_size_and_load_balancer(
+            proxy,
+            policy,
+            pool_max_idle,
+            #[cfg(feature = "load-balancer")]
+            None,
+        )
+        .map(|result| {
+            result.map(|build| {
+                #[cfg(feature = "load-balancer")]
+                {
+                    build.0
+                }
+                #[cfg(not(feature = "load-balancer"))]
+                {
+                    build
+                }
+            })
+        })
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn from_proxy_config_with_native_load_balancer(
+        name: &str,
+        vhost: &str,
+        route: Option<&str>,
+        proxy: &fluxheim_config::ProxyConfig,
+        policy: crate::DownstreamHttp1Policy,
+        pool_max_idle: usize,
+    ) -> Result<
+        Option<(
+            Self,
+            Option<fluxheim_load_balancer::UpstreamLoadBalancerService>,
+        )>,
+        NativeHttp1ProxyConfigError,
+    > {
+        Self::from_proxy_config_with_pool_size_and_load_balancer(
+            proxy,
+            policy,
+            pool_max_idle,
+            Some((name, vhost, route)),
+        )
+    }
+
+    fn from_proxy_config_with_pool_size_and_load_balancer(
+        proxy: &fluxheim_config::ProxyConfig,
+        policy: crate::DownstreamHttp1Policy,
+        pool_max_idle: usize,
+        #[cfg(feature = "load-balancer")] load_balancer_scope: Option<(&str, &str, Option<&str>)>,
+    ) -> Result<Option<NativeProxyConfigBuild>, NativeHttp1ProxyConfigError> {
         if !proxy.has_configured_upstream() {
             return Ok(None);
         }
@@ -433,7 +500,13 @@ impl NativeHttp1Proxy {
         if proxy_requires_advanced_upstream_transport(proxy) {
             return Err(NativeHttp1ProxyConfigError::UpstreamTransportPolicy);
         }
-        if proxy_requires_advanced_load_balancer(proxy) {
+        #[cfg(feature = "load-balancer")]
+        let load_balancer = native_load_balancer_from_config(proxy, load_balancer_scope)?;
+        #[cfg(feature = "load-balancer")]
+        let native_load_balancer_enabled = load_balancer.is_some();
+        #[cfg(not(feature = "load-balancer"))]
+        let native_load_balancer_enabled = false;
+        if proxy_requires_advanced_load_balancer(proxy, native_load_balancer_enabled) {
             return Err(NativeHttp1ProxyConfigError::LoadBalancing);
         }
         let upstreams = configured_native_upstreams(proxy)
@@ -520,7 +593,18 @@ impl NativeHttp1Proxy {
         {
             native.auth_request = NativeAuthRequest::from_config(&proxy.auth_request);
         }
-        Ok(Some(native))
+        #[cfg(feature = "load-balancer")]
+        {
+            native.load_balancer = load_balancer
+                .as_ref()
+                .map(|(load_balancer, _)| load_balancer.clone());
+            let service = load_balancer.and_then(|(_, service)| service);
+            Ok(Some((native, service)))
+        }
+        #[cfg(not(feature = "load-balancer"))]
+        {
+            Ok(Some(native))
+        }
     }
 }
 
@@ -633,6 +717,20 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
             ))]
             let compression_request = self.compression.as_ref().map(|_| request.clone());
             self.request_headers.apply(&mut request);
+            #[cfg(feature = "load-balancer")]
+            if self.load_balancer.is_some() {
+                return self
+                    .handle_load_balanced(
+                        request,
+                        #[cfg(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        ))]
+                        compression_request.as_ref(),
+                    )
+                    .await;
+            }
             let mut last_error = None;
             let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
             let total = self.upstream_slots.len();
@@ -719,6 +817,119 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
 }
 
 impl NativeHttp1Proxy {
+    #[cfg(feature = "load-balancer")]
+    async fn handle_load_balanced(
+        &self,
+        request: NativeHttp1Request,
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        compression_request: Option<&NativeHttp1Request>,
+    ) -> NativeHttp1Response {
+        let Some(load_balancer) = &self.load_balancer else {
+            return NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
+                .close_connection();
+        };
+        let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
+        let client_ip = request
+            .effective_client_addr
+            .or(request.peer_addr)
+            .map(|address| address.ip());
+        let mut last_error_timed_out = false;
+        let max_attempts = self.upstreams.len().max(1);
+        for attempt in 0..max_attempts {
+            let Some(selected) = load_balancer.select_or_wait(&request, client_ip).await else {
+                break;
+            };
+            let authority = selected.authority();
+            let Some(upstream) = self.upstream_for_authority(&authority) else {
+                if let Some(reporter) = selected.reporter() {
+                    reporter.record_failure();
+                }
+                log::debug!(
+                    target: "fluxheim::native_http1",
+                    "native load-balanced upstream {authority} has no configured transport"
+                );
+                continue;
+            };
+            let managed_affinity_cookie = selected
+                .managed_affinity_cookie()
+                .map(|cookie| cookie.header_value.clone());
+            match upstream.send(&request).await {
+                Ok(mut response) => {
+                    if let Some(reporter) = selected.reporter() {
+                        reporter.record_status(response.status(), None);
+                    }
+                    if (200..400).contains(&response.status())
+                        && let Some(cookie) = managed_affinity_cookie
+                    {
+                        response.push_header("set-cookie", cookie);
+                    }
+                    self.response_headers.apply(&mut response);
+                    response = response.with_write_policy(self.response_write_policy);
+                    #[cfg(any(
+                        feature = "compression-brotli",
+                        feature = "compression-gzip",
+                        feature = "compression-zstd"
+                    ))]
+                    {
+                        if let Some(compression) = &self.compression
+                            && let Some(compression_request) = compression_request
+                        {
+                            apply_native_response_compression(
+                                compression_request,
+                                &mut response,
+                                compression,
+                            );
+                        }
+                    }
+                    return response;
+                }
+                Err(error) if retry_allowed && attempt + 1 < max_attempts => {
+                    if let Some(reporter) = selected.reporter() {
+                        reporter.record_failure();
+                    }
+                    last_error_timed_out = native_proxy_error_is_timeout(&error);
+                    log::debug!(
+                        target: "fluxheim::native_http1",
+                        "native load-balanced upstream attempt failed before retry: {error:?}"
+                    );
+                }
+                Err(error) => {
+                    if let Some(reporter) = selected.reporter() {
+                        reporter.record_failure();
+                    }
+                    last_error_timed_out = native_proxy_error_is_timeout(&error);
+                    log::debug!(
+                        target: "fluxheim::native_http1",
+                        "native load-balanced upstream attempt failed: {error:?}"
+                    );
+                    break;
+                }
+            }
+        }
+        let status = if last_error_timed_out { 504 } else { 502 };
+        self.error_page_response(&request, status)
+            .unwrap_or_else(|| {
+                if status == 504 {
+                    NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
+                        .close_connection()
+                } else {
+                    NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
+                        .close_connection()
+                }
+            })
+    }
+
+    #[cfg(feature = "load-balancer")]
+    fn upstream_for_authority(&self, authority: &str) -> Option<&NativeHttp1Upstream> {
+        self.upstreams
+            .iter()
+            .find(|upstream| upstream.authority() == authority)
+    }
+
     fn error_page_response(
         &self,
         request: &NativeHttp1Request,
@@ -1290,11 +1501,51 @@ fn configured_native_upstreams(proxy: &fluxheim_config::ProxyConfig) -> Option<V
         .map(|upstream| vec![upstream.to_owned()])
 }
 
-fn proxy_requires_advanced_load_balancer(proxy: &fluxheim_config::ProxyConfig) -> bool {
+#[cfg(feature = "load-balancer")]
+fn native_load_balancer_from_config(
+    proxy: &fluxheim_config::ProxyConfig,
+    scope: Option<(&str, &str, Option<&str>)>,
+) -> Result<
+    Option<(
+        fluxheim_load_balancer::UpstreamLoadBalancer,
+        Option<fluxheim_load_balancer::UpstreamLoadBalancerService>,
+    )>,
+    NativeHttp1ProxyConfigError,
+> {
+    let Some((name, vhost, route)) = scope else {
+        return Ok(None);
+    };
+    if !native_load_balancer_pool_configured(proxy) {
+        return Ok(None);
+    }
+    if proxy.upstreams_file.is_some()
+        || proxy.upstreams_http_url.is_some()
+        || proxy.upstream_dns_refresh_secs.is_some()
+    {
+        return Ok(None);
+    }
+    if proxy.load_balance.health_check.enabled {
+        return fluxheim_load_balancer::UpstreamLoadBalancer::background_service_from_proxy_config(
+            name, vhost, route, proxy,
+        )
+        .map(|result| result.map(|(load_balancer, service)| (load_balancer, Some(service))))
+        .map_err(|_| NativeHttp1ProxyConfigError::LoadBalancing);
+    }
+    fluxheim_load_balancer::UpstreamLoadBalancer::from_proxy_config(proxy)
+        .map(|result| result.map(|load_balancer| (load_balancer, None)))
+        .map_err(|_| NativeHttp1ProxyConfigError::LoadBalancing)
+}
+
+fn proxy_requires_advanced_load_balancer(
+    proxy: &fluxheim_config::ProxyConfig,
+    native_load_balancer_enabled: bool,
+) -> bool {
     if !native_load_balancer_pool_configured(proxy) {
         return false;
     }
-    if !native_static_load_balance_config_supported(&proxy.load_balance) {
+    if !native_load_balancer_enabled
+        && !native_static_load_balance_config_supported(&proxy.load_balance)
+    {
         return true;
     }
     !proxy.upstream_priority_groups.is_empty()

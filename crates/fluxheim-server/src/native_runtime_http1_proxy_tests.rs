@@ -273,6 +273,25 @@ async fn native_http1_proxy_runtime_binds_launch_plan_and_serves_proxy_listener(
     }
 }
 
+#[cfg(feature = "load-balancer")]
+#[tokio::test]
+async fn native_http1_proxy_runtime_collects_native_load_balancer_service() {
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = vec!["127.0.0.1:0".to_owned()];
+    config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert!(plan.native_runtime_cutover_summary().is_ready());
+    let mut runtime = NativeHttp1ProxyRuntime::bind_from_config(&config, &plan)
+        .await
+        .expect("bind native proxy runtime");
+
+    let services = runtime.take_load_balancer_services();
+    assert_eq!(services.len(), 1);
+    assert!(services[0].name().contains("root"));
+    assert!(runtime.take_load_balancer_services().is_empty());
+}
+
 #[tokio::test]
 async fn native_http1_proxy_runtime_accepts_trusted_proxy_protocol_v1_listener() {
     let upstream = upstream_assert_x_real_ip("203.0.113.10").await;

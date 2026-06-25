@@ -225,7 +225,7 @@ fn push_proxy_candidate(
         return;
     }
 
-    match NativeHttp1Proxy::from_proxy_config_with_pool_size(proxy, policy, pool_max_idle) {
+    match native_proxy_candidate_from_config(proxy, policy, pool_max_idle) {
         Ok(Some(_)) => candidates.push(NativeHttp1ProxyCandidate::eligible(scope)),
         Ok(None) => {}
         Err(error) => candidates.push(NativeHttp1ProxyCandidate::unsupported(scope, error)),
@@ -249,13 +249,36 @@ fn push_root_http_candidate(
         return;
     }
 
-    match NativeHttp1Proxy::from_root_config(config, policy, pool_max_idle) {
+    match native_proxy_candidate_from_config(&config.proxy, policy, pool_max_idle) {
         Ok(Some(_)) | Ok(None) if config.web.enabled() => {
             candidates.push(NativeHttp1ProxyCandidate::eligible(scope));
         }
         Ok(Some(_)) => candidates.push(NativeHttp1ProxyCandidate::eligible(scope)),
         Ok(None) => {}
         Err(error) => candidates.push(NativeHttp1ProxyCandidate::unsupported(scope, error)),
+    }
+}
+
+fn native_proxy_candidate_from_config(
+    proxy: &ProxyConfig,
+    policy: DownstreamHttp1Policy,
+    pool_max_idle: usize,
+) -> Result<Option<NativeHttp1Proxy>, NativeHttp1ProxyConfigError> {
+    #[cfg(feature = "load-balancer")]
+    {
+        NativeHttp1Proxy::from_proxy_config_with_native_load_balancer(
+            "candidate",
+            "candidate",
+            None,
+            proxy,
+            policy,
+            pool_max_idle,
+        )
+        .map(|result| result.map(|(proxy, _)| proxy))
+    }
+    #[cfg(not(feature = "load-balancer"))]
+    {
+        NativeHttp1Proxy::from_proxy_config_with_pool_size(proxy, policy, pool_max_idle)
     }
 }
 

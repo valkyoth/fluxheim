@@ -27,6 +27,8 @@ pub struct NativeHttp1ProxyRuntime {
     proxy_protocol: crate::ProxyProtocolPolicy,
     router: Arc<NativeHttp1HostRouter>,
     listeners: Vec<NativeHttp1ProxyRuntimeListener>,
+    #[cfg(feature = "load-balancer")]
+    load_balancer_services: Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
     #[cfg(feature = "tls-rustls-backend")]
     rustls_config: Option<Arc<rustls::ServerConfig>>,
     #[cfg(feature = "tls-rustls-backend")]
@@ -183,14 +185,22 @@ impl NativeHttp1ProxyRuntime {
         config: &Config,
         launch_plan: &NativeRuntimeLaunchPlan,
     ) -> Result<Self, NativeHttp1ProxyRuntimeError> {
-        let router = Arc::new(
-            NativeHttp1HostRouter::from_config(
+        #[cfg(feature = "load-balancer")]
+        let (router, load_balancer_services) =
+            NativeHttp1HostRouter::from_config_with_native_load_balancer_services(
                 config,
                 launch_plan.downstream_http1(),
                 launch_plan.process().upstream_keepalive_pool_size(),
             )
-            .map_err(NativeHttp1ProxyRuntimeError::Router)?,
-        );
+            .map_err(NativeHttp1ProxyRuntimeError::Router)?;
+        #[cfg(not(feature = "load-balancer"))]
+        let router = NativeHttp1HostRouter::from_config(
+            config,
+            launch_plan.downstream_http1(),
+            launch_plan.process().upstream_keepalive_pool_size(),
+        )
+        .map_err(NativeHttp1ProxyRuntimeError::Router)?;
+        let router = Arc::new(router);
         let has_https_listener = launch_plan.listeners().iter().any(|listener| {
             listener.service_kind() == ServiceKind::ProxyHttp
                 && listener.listener_protocol() == ListenerProtocol::Https
@@ -271,6 +281,8 @@ impl NativeHttp1ProxyRuntime {
             proxy_protocol: launch_plan.proxy_protocol().clone(),
             router,
             listeners,
+            #[cfg(feature = "load-balancer")]
+            load_balancer_services,
             #[cfg(feature = "tls-rustls-backend")]
             rustls_config,
             #[cfg(feature = "tls-rustls-backend")]
@@ -294,6 +306,13 @@ impl NativeHttp1ProxyRuntime {
             .iter()
             .map(|listener| listener.planned_addr)
             .collect()
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn take_load_balancer_services(
+        &mut self,
+    ) -> Vec<fluxheim_load_balancer::UpstreamLoadBalancerService> {
+        std::mem::take(&mut self.load_balancer_services)
     }
 
     #[cfg(feature = "tls-rustls-backend")]

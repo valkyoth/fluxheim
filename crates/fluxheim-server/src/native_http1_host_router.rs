@@ -13,6 +13,11 @@ use crate::{
     NativeHttp1RouteProxy, NativeHttp1RouteProxyConfigError, ProxyProtocolTrustedSource,
 };
 
+#[cfg(feature = "load-balancer")]
+type NativeLoadBalancerServices = Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>;
+#[cfg(not(feature = "load-balancer"))]
+type NativeLoadBalancerServices = Vec<()>;
+
 #[derive(Clone, Debug)]
 pub struct NativeHttp1HostRouter {
     exact_hosts: HashMap<String, Arc<NativeHttp1RouteProxy>>,
@@ -76,8 +81,50 @@ impl NativeHttp1HostRouter {
         policy: DownstreamHttp1Policy,
         pool_max_idle: usize,
     ) -> Result<Self, NativeHttp1HostRouterConfigError> {
+        let (router, _) = Self::from_config_with_load_balancer_services(
+            config,
+            policy,
+            pool_max_idle,
+            #[cfg(feature = "load-balancer")]
+            false,
+        )?;
+        Ok(router)
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn from_config_with_native_load_balancer_services(
+        config: &Config,
+        policy: DownstreamHttp1Policy,
+        pool_max_idle: usize,
+    ) -> Result<(Self, NativeLoadBalancerServices), NativeHttp1HostRouterConfigError> {
+        Self::from_config_with_load_balancer_services(
+            config,
+            policy,
+            pool_max_idle,
+            #[cfg(feature = "load-balancer")]
+            true,
+        )
+    }
+
+    fn from_config_with_load_balancer_services(
+        config: &Config,
+        policy: DownstreamHttp1Policy,
+        pool_max_idle: usize,
+        #[cfg(feature = "load-balancer")] collect_load_balancer_services: bool,
+    ) -> Result<(Self, NativeLoadBalancerServices), NativeHttp1HostRouterConfigError> {
+        #[cfg(not(feature = "load-balancer"))]
+        let _ = config;
+        #[cfg_attr(not(feature = "load-balancer"), allow(unused_mut))]
+        let mut load_balancer_services = Vec::new();
         if config.vhosts.is_empty() {
-            return Self::from_root_config(config, policy, pool_max_idle);
+            return Self::from_root_config(
+                config,
+                policy,
+                pool_max_idle,
+                #[cfg(feature = "load-balancer")]
+                collect_load_balancer_services.then_some(&mut load_balancer_services),
+            )
+            .map(|router| (router, load_balancer_services));
         }
         let trusted_sources = trusted_sources_from_config(config)?;
         let mut proxies = Vec::with_capacity(config.vhosts.len());
@@ -92,6 +139,8 @@ impl NativeHttp1HostRouter {
                 policy,
                 pool_max_idle,
                 &trusted_sources,
+                #[cfg(feature = "load-balancer")]
+                collect_load_balancer_services.then_some(&mut load_balancer_services),
             )?);
             for host in &vhost.hosts {
                 let Some(normalized) = normalize_host_pattern(host) else {
@@ -115,20 +164,32 @@ impl NativeHttp1HostRouter {
         wildcard_hosts.sort_by_key(|wildcard| Reverse(wildcard.suffix.len()));
         let default_proxy = default_proxy(config, &proxies)?;
 
-        Ok(Self {
-            exact_hosts,
-            wildcard_hosts,
-            default_proxy,
-        })
+        Ok((
+            Self {
+                exact_hosts,
+                wildcard_hosts,
+                default_proxy,
+            },
+            load_balancer_services,
+        ))
     }
 
     fn from_root_config(
         config: &Config,
         policy: DownstreamHttp1Policy,
         pool_max_idle: usize,
+        #[cfg(feature = "load-balancer")] load_balancer_services: Option<
+            &mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
+        >,
     ) -> Result<Self, NativeHttp1HostRouterConfigError> {
         let default_proxy =
-            match NativeHttp1RouteProxy::from_root_config(config, policy, pool_max_idle) {
+            match NativeHttp1RouteProxy::from_root_config_with_load_balancer_services(
+                config,
+                policy,
+                pool_max_idle,
+                #[cfg(feature = "load-balancer")]
+                load_balancer_services,
+            ) {
                 Ok(proxy) => Arc::new(proxy),
                 Err(NativeHttp1RouteProxyConfigError::MissingRouteAction) => {
                     return Err(NativeHttp1HostRouterConfigError::MissingVhost);
@@ -187,10 +248,13 @@ fn route_proxy_from_config(
     policy: DownstreamHttp1Policy,
     pool_max_idle: usize,
     trusted_sources: &[ProxyProtocolTrustedSource],
+    #[cfg(feature = "load-balancer")] load_balancer_services: Option<
+        &mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
+    >,
 ) -> Result<NativeHttp1RouteProxy, NativeHttp1RouteProxyConfigError> {
     #[cfg(feature = "acme")]
     {
-        NativeHttp1RouteProxy::from_config_with_trusted_sources(
+        NativeHttp1RouteProxy::from_config_with_trusted_sources_and_load_balancer_services(
             config,
             vhost,
             base_headers,
@@ -198,17 +262,21 @@ fn route_proxy_from_config(
             policy,
             pool_max_idle,
             trusted_sources,
+            #[cfg(feature = "load-balancer")]
+            load_balancer_services,
         )
     }
     #[cfg(not(feature = "acme"))]
     {
-        NativeHttp1RouteProxy::from_vhost_config_with_trusted_sources(
+        NativeHttp1RouteProxy::from_vhost_config_with_trusted_sources_and_load_balancer_services(
             vhost,
             base_headers,
             Some(&config.compression),
             policy,
             pool_max_idle,
             trusted_sources,
+            #[cfg(feature = "load-balancer")]
+            load_balancer_services,
         )
     }
 }

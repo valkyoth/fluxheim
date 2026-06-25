@@ -2837,12 +2837,13 @@ available for the stabilization/security-only follow-up.
   Do not depend on `pingora-ketama`; implement and test the ring behavior in
   Fluxheim with golden vectors and membership-change remapping tests. This is
   also where native static load-balancer eligibility must stay honest: static
-  ordered/weighted upstream pools may run natively only when active health
-  checks are explicitly disabled, while active health checks and dynamic
-  discovery remain blocked until their refresh state is shared with the native
-  request path. This release is the final Pingora-free proof release: `cargo
-  tree`, release containers, RPM builds, source builds, and focused artifacts
-  must all prove no normal Fluxheim build compiles vendored Pingora code.
+  ordered/weighted upstream pools and active health checks may run natively
+  only when the native proxy and refresh task share the same
+  `UpstreamLoadBalancer` state; dynamic discovery remains blocked until its
+  refresh state has equivalent native request-path wiring. This release is the
+  final Pingora-free proof release: `cargo tree`, release containers, RPM
+  builds, source builds, and focused artifacts must all prove no normal
+  Fluxheim build compiles vendored Pingora code.
 - `v1.6.33`: stabilization/security-only release for the Pingora-free runtime
   before adding new extensibility or protocol surface. This release should
   prioritize pentest cleanup, performance regression checks, memory/FD leak
