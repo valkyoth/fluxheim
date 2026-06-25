@@ -4,6 +4,12 @@ use fluxheim_runtime::{BackgroundTaskKind, BackgroundTaskSpec};
 pub(crate) fn background_task_specs_from_config(config: &Config) -> Vec<BackgroundTaskSpec> {
     let mut tasks = Vec::new();
 
+    if crate::service::any_load_balancer_pool_configured(config) {
+        tasks.push(BackgroundTaskSpec::new(
+            "Load balancer refresh",
+            BackgroundTaskKind::LoadBalancerRefresh,
+        ));
+    }
     if config.cache_purger.enabled {
         tasks.push(BackgroundTaskSpec::new(
             "Cache stale disk purger",

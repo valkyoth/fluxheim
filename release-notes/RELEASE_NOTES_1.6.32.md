@@ -37,6 +37,17 @@ cache/PHP adapter slice.
   retaining the Pingora compatibility wrapper. This lets the final native
   runtime spawn the existing Fluxheim-owned discovery/health refresh loop
   directly instead of routing it through Pingora's service adapter.
+- The Pingora compatibility load-balancer adapter now stores that native
+  service handoff internally and dispatches through `FluxBackgroundTask`,
+  keeping the compatibility path and final native supervisor path on the same
+  task boundary.
+- Native runtime launch plans now include `LoadBalancerRefresh` background-task
+  inventory whenever a load-balanced pool is configured. This keeps the final
+  supervisor contract aligned with the service intent that already detects
+  static pools, file discovery, HTTP discovery, and DNS refresh.
+- That load-balancer service and background-task inventory is now gated by the
+  `fluxheim-server/load-balancer` feature, so non-load-balancer builds do not
+  advertise native supervisor work they cannot construct.
 - The compatibility runtime now also validates the native HTTP/1 host-router
   factory when the server plan reports the proxy surface as native-ready. This
   proves exact/wildcard host routing, default-vhost selection, trusted-proxy
@@ -58,6 +69,12 @@ cache/PHP adapter slice.
   observes readiness after the initial discovery update, checks the
   `LoadBalancerRefresh` task kind, and shuts it down through the Fluxheim
   supervisor path.
+- Added adapter coverage proving the Pingora compatibility wrapper preserves
+  native `LoadBalancerRefresh` task metadata.
+- Added server-plan coverage proving load-balanced pools schedule the
+  `LoadBalancerRefresh` task in the native runtime launch TSV.
+- Added paired default-build and load-balancer-feature tests for
+  `LoadBalancerHealthChecks`/`LoadBalancerRefresh` inventory.
 - Extended native runtime launch-plan tests and cutover evidence validation to
   cover metrics bearer-token service policy.
 - Added a runtime test proving a native-ready HTTP/1 proxy config builds the

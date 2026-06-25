@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use fluxheim_config::{Config, ProxyConfig};
+use fluxheim_config::Config;
+#[cfg(feature = "load-balancer")]
+use fluxheim_config::ProxyConfig;
 
 use crate::ListenerProtocol;
 
@@ -141,7 +143,20 @@ pub(crate) fn admin_ops_socket_plan_from_config(config: &Config) -> Option<Admin
     ))
 }
 
-fn any_load_balancer_pool_configured(config: &Config) -> bool {
+pub(crate) fn any_load_balancer_pool_configured(config: &Config) -> bool {
+    #[cfg(not(feature = "load-balancer"))]
+    {
+        let _ = config;
+        false
+    }
+    #[cfg(feature = "load-balancer")]
+    {
+        any_load_balancer_pool_configured_with_feature(config)
+    }
+}
+
+#[cfg(feature = "load-balancer")]
+fn any_load_balancer_pool_configured_with_feature(config: &Config) -> bool {
     if config.vhosts.is_empty() {
         return load_balancer_pool_configured(&config.proxy);
     }
@@ -157,6 +172,7 @@ fn any_load_balancer_pool_configured(config: &Config) -> bool {
     })
 }
 
+#[cfg(feature = "load-balancer")]
 fn load_balancer_pool_configured(proxy: &ProxyConfig) -> bool {
     proxy.upstreams.len() >= 2
         || proxy.upstreams_file.is_some()

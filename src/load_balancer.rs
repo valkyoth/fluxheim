@@ -41,13 +41,17 @@ impl fluxheim_load_balancer::LoadBalancerRequestView for PingoraRequestView<'_> 
 
 #[cfg(feature = "proxy")]
 pub(crate) struct PingoraLoadBalancerService {
-    inner: fluxheim_load_balancer::UpstreamLoadBalancerService,
+    inner: fluxheim_runtime::FluxBackgroundService<
+        fluxheim_load_balancer::UpstreamLoadBalancerService,
+    >,
 }
 
 #[cfg(feature = "proxy")]
 impl PingoraLoadBalancerService {
     pub(crate) fn new(inner: fluxheim_load_balancer::UpstreamLoadBalancerService) -> Self {
-        Self { inner }
+        Self {
+            inner: inner.into_native_service(),
+        }
     }
 }
 
@@ -61,14 +65,15 @@ impl pingora::services::ServiceWithDependents for PingoraLoadBalancerService {
         _listeners_per_fd: usize,
         ready: pingora::services::ServiceReadyNotifier,
     ) {
-        self.inner
-            .start(
-                fluxheim_load_balancer::FluxShutdown::new(shutdown),
-                fluxheim_load_balancer::FluxBackgroundReady::new(move || {
-                    ready.notify_ready();
-                }),
-            )
-            .await;
+        let task = self.inner.task();
+        fluxheim_runtime::FluxBackgroundTask::start(
+            task.as_ref(),
+            fluxheim_load_balancer::FluxShutdown::new(shutdown),
+            fluxheim_load_balancer::FluxBackgroundReady::new(move || {
+                ready.notify_ready();
+            }),
+        )
+        .await;
     }
 
     fn name(&self) -> &str {
@@ -78,5 +83,36 @@ impl pingora::services::ServiceWithDependents for PingoraLoadBalancerService {
     #[allow(deprecated)]
     fn threads(&self) -> Option<usize> {
         self.inner.threads()
+    }
+}
+
+#[cfg(all(test, feature = "proxy"))]
+mod tests {
+    use fluxheim_config::ProxyConfig;
+
+    use super::PingoraLoadBalancerService;
+
+    #[test]
+    fn pingora_load_balancer_adapter_uses_native_task_metadata() {
+        let (_balancer, service) =
+            fluxheim_load_balancer::UpstreamLoadBalancer::background_service_from_proxy_config(
+                "lb-test",
+                "lb-test",
+                None,
+                &ProxyConfig {
+                    upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+                    ..ProxyConfig::default()
+                },
+            )
+            .unwrap()
+            .unwrap();
+
+        let service = PingoraLoadBalancerService::new(service);
+
+        assert_eq!(
+            service.inner.kind(),
+            Some(fluxheim_runtime::BackgroundTaskKind::LoadBalancerRefresh)
+        );
+        assert_eq!(service.inner.name(), "LB lb-test");
     }
 }

@@ -871,6 +871,9 @@ fn server_plan_collects_load_balancer_service_intent() {
     config.proxy.upstreams = vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()];
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    #[cfg(not(feature = "load-balancer"))]
+    assert_eq!(plan.service(ServiceKind::LoadBalancerHealthChecks), None);
+    #[cfg(feature = "load-balancer")]
     assert_eq!(
         plan.service(ServiceKind::LoadBalancerHealthChecks)
             .map(ServiceSpec::name),
@@ -924,6 +927,9 @@ fn server_plan_collects_load_balancer_service_intent() {
     }];
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    #[cfg(not(feature = "load-balancer"))]
+    assert!(!plan.has_service(ServiceKind::LoadBalancerHealthChecks));
+    #[cfg(feature = "load-balancer")]
     assert!(plan.has_service(ServiceKind::LoadBalancerHealthChecks));
 }
 

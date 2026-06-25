@@ -1,5 +1,7 @@
 use super::*;
-use fluxheim_config::{AdminSelfHealingConfig, CacheConfig, Config, RouteConfig, VhostConfig};
+use fluxheim_config::{
+    AdminSelfHealingConfig, CacheConfig, Config, ProxyConfig, RouteConfig, VhostConfig,
+};
 use fluxheim_runtime::{BackgroundTaskKind, BackgroundTaskSpec};
 
 #[test]
@@ -91,6 +93,46 @@ fn server_plan_from_config_collects_background_task_inventory() {
     assert!(launch_plan.to_tsv().contains(
         "native-runtime-launch-background-task\tMetricsExport\tOTLP metrics export\tfalse\n"
     ));
+}
+
+#[test]
+fn server_plan_schedules_load_balancer_refresh_for_pool_config() {
+    let mut config = Config::default();
+    config.server.listen = Vec::new();
+    config.proxy = ProxyConfig {
+        upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
+        ..ProxyConfig::default()
+    };
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+
+    #[cfg(not(feature = "load-balancer"))]
+    {
+        assert!(!plan.has_background_task(BackgroundTaskKind::LoadBalancerRefresh));
+        assert!(
+            !plan
+                .native_runtime_manifest()
+                .expect("native manifest")
+                .to_tsv()
+                .contains("native-runtime-manifest-background-task\tLoadBalancerRefresh")
+        );
+    }
+    #[cfg(feature = "load-balancer")]
+    {
+        assert!(plan.has_background_task(BackgroundTaskKind::LoadBalancerRefresh));
+        assert_eq!(
+            plan.background_task(BackgroundTaskKind::LoadBalancerRefresh)
+                .map(BackgroundTaskSpec::name),
+            Some("Load balancer refresh")
+        );
+
+        let launch_plan = plan
+            .native_runtime_launch_plan()
+            .expect("load-balancer launch plan");
+        assert!(launch_plan.to_tsv().contains(
+        "native-runtime-launch-background-task\tLoadBalancerRefresh\tLoad balancer refresh\tfalse\n"
+    ));
+    }
 }
 
 #[test]
