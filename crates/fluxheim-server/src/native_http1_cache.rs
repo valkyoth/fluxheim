@@ -71,10 +71,26 @@ struct NativeStorageBinBackend {
     free_map: Mutex<StorageBinFreeMap>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct NativeDiskCacheEncryption {
     key_id: Arc<str>,
-    key: Arc<LessSafeKey>,
+    provider: NativeDiskCacheEncryptionProvider,
+}
+
+#[derive(Debug)]
+enum NativeDiskCacheEncryptionProvider {
+    Local {
+        key: Arc<LessSafeKey>,
+    },
+    #[cfg(feature = "openbao-cache-encryption")]
+    OpenBaoTransit {
+        address: Arc<str>,
+        mount: Arc<str>,
+        key_name: Arc<str>,
+        token: Zeroizing<String>,
+    },
+    #[cfg(not(feature = "openbao-cache-encryption"))]
+    OpenBaoTransitDisabled,
 }
 
 #[derive(Debug, Default)]
@@ -871,64 +887,102 @@ pub(crate) fn native_disk_cache_supported(cache: &CacheConfig) -> bool {
         || (matches!(
             cache.disk.backend,
             CacheDiskBackend::Filesystem | CacheDiskBackend::StorageBin
-        ) && (!cache.disk.encryption.enabled
-            || cache.disk.encryption.provider == CacheDiskEncryptionProvider::Local))
+        ) && (!cache.disk.encryption.enabled || native_disk_cache_encryption_supported(cache)))
+}
+
+fn native_disk_cache_encryption_supported(cache: &CacheConfig) -> bool {
+    match cache.disk.encryption.provider {
+        CacheDiskEncryptionProvider::Local => true,
+        CacheDiskEncryptionProvider::OpenbaoTransit => cfg!(feature = "openbao-cache-encryption"),
+    }
 }
 
 const NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-ENC-v1\n";
+#[cfg(feature = "openbao-cache-encryption")]
+const OPENBAO_TRANSIT_RESPONSE_OVERHEAD_BYTES: u64 = 4096;
+#[cfg(feature = "openbao-cache-encryption")]
+const OPENBAO_TRANSIT_MAX_RESPONSE_BYTES: u64 = 512 * 1024 * 1024;
 
 impl NativeDiskCacheEncryption {
     fn from_config(config: &CacheDiskEncryptionConfig) -> std::io::Result<Option<Self>> {
         if !config.enabled {
             return Ok(None);
         }
-        if config.provider != CacheDiskEncryptionProvider::Local {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "native disk cache currently supports only local encryption",
-            ));
-        }
-
         let key_id = Arc::from(config.key_id.as_deref().unwrap_or("local"));
-        let key_bytes = match (&config.key_file, config.key_credential.as_deref()) {
-            (Some(path), None) => read_native_cache_encryption_key_file(path)?,
-            (None, Some(credential)) => {
-                let path = native_cache_encryption_credential_path(credential);
-                read_native_cache_encryption_key_file(&path)?
+        let provider = match config.provider {
+            CacheDiskEncryptionProvider::Local => {
+                let key_bytes = match (&config.key_file, config.key_credential.as_deref()) {
+                    (Some(path), None) => read_native_cache_encryption_key_file(path)?,
+                    (None, Some(credential)) => {
+                        let path = native_cache_encryption_credential_path(credential);
+                        read_native_cache_encryption_key_file(&path)?
+                    }
+                    _ => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "native disk cache encryption requires exactly one local key source",
+                        ));
+                    }
+                };
+                let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "invalid native disk cache encryption key",
+                    )
+                })?;
+                NativeDiskCacheEncryptionProvider::Local {
+                    key: Arc::new(LessSafeKey::new(unbound)),
+                }
             }
-            _ => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "native disk cache encryption requires exactly one local key source",
-                ));
-            }
+            CacheDiskEncryptionProvider::OpenbaoTransit => native_openbao_transit_provider(config)?,
         };
-        let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "invalid native disk cache encryption key",
-            )
-        })?;
-        Ok(Some(Self {
-            key_id,
-            key: Arc::new(LessSafeKey::new(unbound)),
-        }))
+        Ok(Some(Self { key_id, provider }))
     }
 
     fn encrypt(&self, combined_key: &str, plaintext: &[u8]) -> std::io::Result<Vec<u8>> {
-        let mut nonce = [0_u8; 12];
-        getrandom::fill(&mut nonce).map_err(|error| {
-            std::io::Error::other(format!("generate native cache encryption nonce: {error}"))
-        })?;
         let aad = native_cache_encryption_aad(&self.key_id, combined_key);
-        let mut ciphertext = plaintext.to_vec();
-        self.key
-            .seal_in_place_append_tag(
-                Nonce::assume_unique_for_key(nonce),
-                Aad::from(aad),
-                &mut ciphertext,
-            )
-            .map_err(|_| std::io::Error::other("encrypt native cache object"))?;
+        let (nonce, ciphertext) = match &self.provider {
+            NativeDiskCacheEncryptionProvider::Local { key } => {
+                let mut nonce = [0_u8; 12];
+                getrandom::fill(&mut nonce).map_err(|error| {
+                    std::io::Error::other(format!(
+                        "generate native cache encryption nonce: {error}"
+                    ))
+                })?;
+                let mut ciphertext = plaintext.to_vec();
+                key.seal_in_place_append_tag(
+                    Nonce::assume_unique_for_key(nonce),
+                    Aad::from(aad),
+                    &mut ciphertext,
+                )
+                .map_err(|_| std::io::Error::other("encrypt native cache object"))?;
+                (nonce.to_vec(), ciphertext)
+            }
+            #[cfg(feature = "openbao-cache-encryption")]
+            NativeDiskCacheEncryptionProvider::OpenBaoTransit {
+                address,
+                mount,
+                key_name,
+                token,
+            } => {
+                let ciphertext = openbao_transit_encrypt(
+                    address,
+                    mount,
+                    key_name,
+                    token.as_str(),
+                    plaintext,
+                    &aad,
+                )?;
+                (Vec::new(), ciphertext.into_bytes())
+            }
+            #[cfg(not(feature = "openbao-cache-encryption"))]
+            NativeDiskCacheEncryptionProvider::OpenBaoTransitDisabled => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "native disk cache OpenBao Transit encryption is not enabled in this build",
+                ));
+            }
+        };
 
         let mut encoded = Vec::with_capacity(
             NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1.len()
@@ -994,40 +1048,128 @@ impl NativeDiskCacheEncryption {
             ));
         }
         let combined_key = native_cache_utf8(&bytes[key_id_end..combined_key_end], "combined key")?;
-        if nonce_len != 12 {
+        let aad = native_cache_encryption_aad(&self.key_id, &combined_key);
+        match &self.provider {
+            NativeDiskCacheEncryptionProvider::Local { key } => {
+                if nonce_len != 12 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "invalid encrypted native cache object nonce length",
+                    ));
+                }
+                let mut nonce = [0_u8; 12];
+                nonce.copy_from_slice(&bytes[combined_key_end..nonce_end]);
+                let mut plaintext = bytes[nonce_end..].to_vec();
+                key.open_in_place(
+                    Nonce::assume_unique_for_key(nonce),
+                    Aad::from(aad),
+                    &mut plaintext,
+                )
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "decrypt native cache object",
+                    )
+                })?;
+                let plaintext_len = plaintext
+                    .len()
+                    .checked_sub(AES_256_GCM.tag_len())
+                    .ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "short encrypted native cache object",
+                        )
+                    })?;
+                plaintext.truncate(plaintext_len);
+                Ok(plaintext)
+            }
+            #[cfg(feature = "openbao-cache-encryption")]
+            NativeDiskCacheEncryptionProvider::OpenBaoTransit {
+                address,
+                mount,
+                key_name,
+                token,
+            } => {
+                if nonce_len != 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "invalid OpenBao encrypted native cache object nonce length",
+                    ));
+                }
+                let ciphertext = native_cache_utf8(&bytes[nonce_end..], "openbao ciphertext")?;
+                openbao_transit_decrypt(address, mount, key_name, token.as_str(), &ciphertext, &aad)
+            }
+            #[cfg(not(feature = "openbao-cache-encryption"))]
+            NativeDiskCacheEncryptionProvider::OpenBaoTransitDisabled => Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "native disk cache OpenBao Transit encryption is not enabled in this build",
+            )),
+        }
+    }
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn native_openbao_transit_provider(
+    config: &CacheDiskEncryptionConfig,
+) -> std::io::Result<NativeDiskCacheEncryptionProvider> {
+    let token = match (
+        &config.openbao.token_file,
+        config.openbao.token_credential.as_deref(),
+    ) {
+        (Some(path), None) => read_native_cache_encryption_secret_file(path)?,
+        (None, Some(credential)) => {
+            let path = native_cache_encryption_credential_path(credential);
+            read_native_cache_encryption_secret_file(&path)?
+        }
+        _ => {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "invalid encrypted native cache object nonce length",
+                std::io::ErrorKind::InvalidInput,
+                "native disk cache encryption requires exactly one OpenBao token source",
             ));
         }
-        let mut nonce = [0_u8; 12];
-        nonce.copy_from_slice(&bytes[combined_key_end..nonce_end]);
-        let aad = native_cache_encryption_aad(&self.key_id, &combined_key);
-        let mut plaintext = bytes[nonce_end..].to_vec();
-        self.key
-            .open_in_place(
-                Nonce::assume_unique_for_key(nonce),
-                Aad::from(aad),
-                &mut plaintext,
-            )
-            .map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "decrypt native cache object",
-                )
-            })?;
-        let plaintext_len = plaintext
-            .len()
-            .checked_sub(AES_256_GCM.tag_len())
-            .ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "short encrypted native cache object",
-                )
-            })?;
-        plaintext.truncate(plaintext_len);
-        Ok(plaintext)
+    };
+    if token.trim().is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "native disk cache OpenBao token must not be empty",
+        ));
     }
+    let token = Zeroizing::new(token.trim().to_owned());
+    Ok(NativeDiskCacheEncryptionProvider::OpenBaoTransit {
+        address: Arc::from(
+            config
+                .openbao
+                .address
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .trim_end_matches('/'),
+        ),
+        mount: Arc::from(
+            config
+                .openbao
+                .mount
+                .as_deref()
+                .unwrap_or_default()
+                .trim_matches('/'),
+        ),
+        key_name: Arc::from(
+            config
+                .openbao
+                .key_name
+                .as_deref()
+                .unwrap_or_default()
+                .trim_matches('/'),
+        ),
+        token,
+    })
+}
+
+#[cfg(not(feature = "openbao-cache-encryption"))]
+fn native_openbao_transit_provider(
+    _config: &CacheDiskEncryptionConfig,
+) -> std::io::Result<NativeDiskCacheEncryptionProvider> {
+    Ok(NativeDiskCacheEncryptionProvider::OpenBaoTransitDisabled)
 }
 
 fn native_encrypted_disk_len(bytes: &[u8], offset: &mut usize) -> std::io::Result<usize> {
@@ -1073,6 +1215,180 @@ fn native_cache_encryption_aad(key_id: &str, combined_key: &str) -> Vec<u8> {
     aad.push(0);
     aad.extend_from_slice(combined_key.as_bytes());
     aad
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn openbao_transit_encrypt(
+    address: &str,
+    mount: &str,
+    key_name: &str,
+    token: &str,
+    plaintext: &[u8],
+    aad: &[u8],
+) -> std::io::Result<String> {
+    let plaintext = base64_standard_encode(plaintext)?;
+    let associated_data = base64_standard_encode(aad)?;
+    let request = serde_json::json!({
+        "plaintext": plaintext,
+        "associated_data": associated_data,
+    });
+    let mut response = openbao_transit_agent()
+        .post(openbao_transit_url(address, mount, "encrypt", key_name))
+        .header("X-Vault-Token", token)
+        .header("Accept", "application/json")
+        .send_json(request)
+        .map_err(|error| openbao_io_error("encrypt", error))?;
+    let value = openbao_transit_read_json(
+        &mut response,
+        "encrypt response",
+        openbao_transit_response_limit(plaintext.len().max(associated_data.len()) as u64),
+    )?;
+    value
+        .pointer("/data/ciphertext")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| value.starts_with("vault:v"))
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "OpenBao Transit encrypt response did not include a ciphertext",
+            )
+        })
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn openbao_transit_decrypt(
+    address: &str,
+    mount: &str,
+    key_name: &str,
+    token: &str,
+    ciphertext: &str,
+    aad: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    let associated_data = base64_standard_encode(aad)?;
+    let request = serde_json::json!({
+        "ciphertext": ciphertext,
+        "associated_data": associated_data,
+    });
+    let mut response = openbao_transit_agent()
+        .post(openbao_transit_url(address, mount, "decrypt", key_name))
+        .header("X-Vault-Token", token)
+        .header("Accept", "application/json")
+        .send_json(request)
+        .map_err(|error| openbao_io_error("decrypt", error))?;
+    let value = openbao_transit_read_json(
+        &mut response,
+        "decrypt response",
+        openbao_transit_response_limit(ciphertext.len().max(associated_data.len()) as u64),
+    )?;
+    let plaintext = value
+        .pointer("/data/plaintext")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "OpenBao Transit decrypt response did not include plaintext",
+            )
+        })?;
+    base64_ng::STANDARD
+        .decode_vec(plaintext.as_bytes())
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "OpenBao Transit decrypt response plaintext is not valid base64",
+            )
+        })
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn openbao_transit_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .into()
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn openbao_transit_response_limit(input_bytes: u64) -> u64 {
+    input_bytes
+        .saturating_mul(2)
+        .saturating_add(OPENBAO_TRANSIT_RESPONSE_OVERHEAD_BYTES)
+        .min(OPENBAO_TRANSIT_MAX_RESPONSE_BYTES)
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn openbao_transit_read_json(
+    response: &mut ureq::http::Response<ureq::Body>,
+    operation: &str,
+    max_response_bytes: u64,
+) -> std::io::Result<serde_json::Value> {
+    let body = response
+        .body_mut()
+        .with_config()
+        .limit(max_response_bytes.saturating_add(1))
+        .read_to_vec()
+        .map_err(|error| openbao_io_error(operation, error))?;
+    if body.len() as u64 > max_response_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("OpenBao Transit {operation} exceeded response size limit"),
+        ));
+    }
+    serde_json::from_slice(&body).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("OpenBao Transit {operation} returned invalid JSON: {error}"),
+        )
+    })
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn base64_standard_encode(input: &[u8]) -> std::io::Result<String> {
+    base64_ng::STANDARD.encode_string(input).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("base64 encode failed: {error}"),
+        )
+    })
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn openbao_io_error(operation: &str, error: ureq::Error) -> std::io::Error {
+    std::io::Error::other(format!("OpenBao Transit {operation} failed: {error}"))
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn openbao_transit_url(address: &str, mount: &str, operation: &str, key_name: &str) -> String {
+    format!(
+        "{}/v1/{}/{}/{}",
+        address.trim_end_matches('/'),
+        openbao_path_encode(mount.trim_matches('/')),
+        operation,
+        openbao_path_encode(key_name.trim_matches('/'))
+    )
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn openbao_path_encode(value: &str) -> String {
+    value
+        .split('/')
+        .map(percent_encode_openbao_path_segment)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn percent_encode_openbao_path_segment(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
 }
 
 fn native_cache_encryption_credential_path(credential_name: &str) -> PathBuf {

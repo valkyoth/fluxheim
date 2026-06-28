@@ -11,6 +11,7 @@ description = "Internal Fluxheim listener and server boundary types."
 default = []
 acme = []
 auth-request = ["dep:ureq"]
+openbao-cache-encryption = ["dep:serde_json", "dep:ureq", "ureq/json"]
 privacy-mode = []
 compression = ["dep:fluxheim-compression"]
 compression-brotli = ["compression", "fluxheim-compression/brotli"]
@@ -56,6 +57,7 @@ ring = "0.17.14"
 rustls = { version = "0.23.41", optional = true }
 rustls-native-certs = { version = "0.8.4", optional = true }
 sanitization = { version = "1.2.2", optional = true }
+serde_json = { version = "1.0.150", optional = true }
 sha2 = "0.11.0"
 socket2 = { version = "0.6.3", features = ["all"] }
 tokio = { version = "1.52.3", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }

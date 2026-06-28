@@ -1250,6 +1250,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs 0.8.4",
  "sanitization",
+ "serde_json",
  "sha2",
  "socket2",
  "tempfile",

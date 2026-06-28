@@ -28,10 +28,11 @@ The same encryption layer applies to reverse-proxy cache responses and to
 local/static cache responses when the selected cache policy has
 `local_static = true`.
 
-Native runtime status: the native HTTP/1 proxy cache supports local-key
-encrypted `backend = "filesystem"` and `backend = "storage-bin"` cache
-objects. OpenBao Transit encryption remains on the compatibility runtime until
-its native cache adapter has dedicated parity coverage.
+Native runtime status: the native HTTP/1 proxy cache supports local-key and
+OpenBao Transit encrypted `backend = "filesystem"` and `backend =
+"storage-bin"` cache objects. OpenBao Transit support is enabled in Fluxheim's
+normal cache profile through the server crate's optional
+`openbao-cache-encryption` feature.
 
 ## Providers
 

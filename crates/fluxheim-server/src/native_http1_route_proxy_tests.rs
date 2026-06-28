@@ -690,6 +690,23 @@ fn native_proxy_encrypted_storage_bin_cache_config(
     cache
 }
 
+#[cfg(feature = "openbao-cache-encryption")]
+fn native_proxy_openbao_storage_bin_cache_config(
+    root: std::path::PathBuf,
+    address: String,
+    token_file: std::path::PathBuf,
+) -> fluxheim_config::CacheConfig {
+    let mut cache = native_proxy_storage_bin_cache_config(root);
+    cache.disk.encryption.enabled = true;
+    cache.disk.encryption.provider = fluxheim_config::CacheDiskEncryptionProvider::OpenbaoTransit;
+    cache.disk.encryption.key_id = Some("native-openbao-v1".to_owned());
+    cache.disk.encryption.openbao.address = Some(address);
+    cache.disk.encryption.openbao.mount = Some("transit/cache".to_owned());
+    cache.disk.encryption.openbao.key_name = Some("native-key".to_owned());
+    cache.disk.encryption.openbao.token_file = Some(token_file);
+    cache
+}
+
 fn native_proxy_tiered_cache_config(root: std::path::PathBuf) -> fluxheim_config::CacheConfig {
     let mut cache = native_proxy_memory_cache_config();
     cache.disk.enabled = true;
@@ -3272,7 +3289,10 @@ async fn native_route_proxy_caches_proxy_response_in_memory() {
         response_header(&first, "x-cache-status").as_deref(),
         Some("MISS")
     );
-    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(
+        second.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected second response: {second:?}"
+    );
     assert!(second.ends_with("origin-one"));
     assert_eq!(
         response_header(&second, "x-cache-status").as_deref(),
@@ -3305,7 +3325,10 @@ async fn native_route_proxy_caches_proxy_response_on_disk() {
         route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
 
     let second = downstream_get(second_listener, "/asset.png").await;
-    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(
+        second.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected second response: {second:?}"
+    );
     assert!(second.ends_with("disk-origin"));
     assert_eq!(
         response_header(&second, "x-cache-status").as_deref(),
@@ -3449,6 +3472,78 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_storage_bin_disk(
     );
 }
 
+#[cfg(feature = "openbao-cache-encryption")]
+#[tokio::test]
+async fn native_route_proxy_caches_proxy_response_on_openbao_storage_bin_disk() {
+    let root = tempfile::tempdir().unwrap();
+    let token_file = root.path().join("openbao.token");
+    std::fs::write(&token_file, "test-token\n").unwrap();
+    let openbao = native_openbao_transit_mock();
+    let cache_root = root.path().join("objects");
+    let upstream = upstream_cacheable_once("openbao-storage-bin-origin").await;
+    let cache = native_proxy_openbao_storage_bin_cache_config(
+        cache_root.clone(),
+        openbao.address.clone(),
+        token_file,
+    );
+    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let first_listener =
+        route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy))).await;
+
+    let first = downstream_get(first_listener, "/asset.png").await;
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("openbao-storage-bin-origin"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    let bin_bytes = native_storage_bin_bytes(&cache_root);
+    assert!(!bin_bytes.is_empty());
+    assert!(
+        bin_bytes
+            .iter()
+            .any(|bytes| bytes.windows(8).any(|window| window == b"vault:v1"))
+    );
+    assert!(bin_bytes.iter().all(|bytes| {
+        !bytes
+            .windows("openbao-storage-bin-origin".len())
+            .any(|window| window == "openbao-storage-bin-origin".as_bytes())
+    }));
+
+    let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let unavailable_origin = unused_origin_listener.local_addr().unwrap();
+    drop(unused_origin_listener);
+    let second_proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let second_listener =
+        route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
+
+    let second = downstream_get(second_listener, "/asset.png").await;
+    let requests = openbao.join();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0].contains("POST /v1/transit/cache/encrypt/native-key HTTP/1.1"));
+    assert!(
+        requests[0]
+            .to_ascii_lowercase()
+            .contains("x-vault-token: test-token")
+    );
+    assert!(requests[0].contains("\"associated_data\""));
+    assert!(requests[1].contains("POST /v1/transit/cache/decrypt/native-key HTTP/1.1"));
+    assert!(requests[1].contains("\"ciphertext\""));
+    assert!(requests[1].contains("vault:v1:native-test"));
+    assert!(requests[2].contains("POST /v1/transit/cache/decrypt/native-key HTTP/1.1"));
+    assert!(requests[2].contains("\"ciphertext\""));
+    assert!(requests[2].contains("vault:v1:native-test"));
+    assert!(
+        second.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected second response: {second:?}"
+    );
+    assert!(second.ends_with("openbao-storage-bin-origin"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
 #[tokio::test]
 async fn native_route_proxy_tiered_cache_refills_memory_from_disk() {
     let root = tempfile::tempdir().unwrap();
@@ -3516,6 +3611,118 @@ fn native_storage_bin_bytes(root: &std::path::Path) -> Vec<Vec<u8>> {
         .flatten()
         .filter_map(|entry| std::fs::read(entry.path()).ok())
         .collect()
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+struct NativeOpenBaoTransitMock {
+    address: String,
+    handle: std::thread::JoinHandle<Vec<String>>,
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+impl NativeOpenBaoTransitMock {
+    fn join(self) -> Vec<String> {
+        self.handle.join().unwrap()
+    }
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn native_openbao_transit_mock() -> NativeOpenBaoTransitMock {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let handle = std::thread::spawn(move || {
+        let mut requests = Vec::new();
+        let (mut encrypt_stream, _) = listener.accept().unwrap();
+        let encrypt_request = native_openbao_read_request(&mut encrypt_stream);
+        let encrypt_body = native_openbao_request_body(&encrypt_request);
+        let encrypt_json: serde_json::Value = serde_json::from_str(encrypt_body).unwrap();
+        let plaintext = encrypt_json
+            .pointer("/plaintext")
+            .and_then(serde_json::Value::as_str)
+            .unwrap()
+            .to_owned();
+        let decoded_plaintext = base64_ng::STANDARD
+            .decode_vec(plaintext.as_bytes())
+            .unwrap();
+        assert!(decoded_plaintext.starts_with(b"FLUXHEIM-CACHE-v5\n"));
+        assert!(
+            decoded_plaintext
+                .windows("openbao-storage-bin-origin".len())
+                .any(|window| window == "openbao-storage-bin-origin".as_bytes())
+        );
+        native_openbao_write_response(
+            &mut encrypt_stream,
+            r#"{"data":{"ciphertext":"vault:v1:native-test"}}"#,
+        );
+        requests.push(encrypt_request);
+
+        for _ in 0..2 {
+            let (mut decrypt_stream, _) = listener.accept().unwrap();
+            let decrypt_request = native_openbao_read_request(&mut decrypt_stream);
+            native_openbao_write_response(
+                &mut decrypt_stream,
+                &format!(r#"{{"data":{{"plaintext":"{plaintext}"}}}}"#),
+            );
+            requests.push(decrypt_request);
+        }
+        requests
+    });
+    NativeOpenBaoTransitMock { address, handle }
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn native_openbao_read_request(stream: &mut std::net::TcpStream) -> String {
+    use std::io::Read as _;
+
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 1024];
+    let mut header_end = None;
+    while header_end.is_none() {
+        let read = stream.read(&mut chunk).unwrap();
+        assert!(read > 0, "mock OpenBao connection closed before headers");
+        request.extend_from_slice(&chunk[..read]);
+        header_end = request.windows(4).position(|window| window == b"\r\n\r\n");
+    }
+    let header_end = header_end.unwrap() + 4;
+    let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Content-Length:")
+                .or_else(|| line.strip_prefix("content-length:"))
+                .and_then(|value| value.trim().parse::<usize>().ok())
+        })
+        .unwrap_or(0);
+    while request.len() < header_end + content_length {
+        let read = stream.read(&mut chunk).unwrap();
+        assert!(read > 0, "mock OpenBao connection closed before body");
+        request.extend_from_slice(&chunk[..read]);
+    }
+    String::from_utf8(request).unwrap()
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn native_openbao_request_body(request: &str) -> &str {
+    request
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .unwrap()
+}
+
+#[cfg(feature = "openbao-cache-encryption")]
+fn native_openbao_write_response(stream: &mut std::net::TcpStream, body: &str) {
+    use std::io::Write as _;
+
+    stream
+        .write_all(
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .as_bytes(),
+        )
+        .unwrap();
 }
 
 #[tokio::test]

@@ -20,8 +20,7 @@ behavior when the change improves security or project direction.
   checks for request bypass, response `no-store`/`private`, `Set-Cookie`,
   content type, status TTL, and object-size policy.
 - Native cache readiness now accepts root, vhost, and route proxy cache
-  policies for the supported native proxy-cache subset while keeping OpenBao
-  Transit encryption blocked until its native parity work lands.
+  policies for the supported native proxy-cache subset.
 - Native HTTP/1 TLS startup now recognizes managed ACME certificate sources on
   `server.default_vhost`, allowing the rustls native listener to bind while the
   default-vhost certificate is still pending first issuance.
@@ -83,6 +82,11 @@ behavior when the change improves security or project direction.
 - Native proxy cache now supports local-key encrypted storage-bin disk cache,
   proving encrypted bin-file persistence across a native proxy restart without
   storing the origin response body in plaintext.
+- Native proxy cache now supports OpenBao Transit encrypted disk cache through
+  the native cache adapter, including redirect-disabled Transit requests,
+  bounded Transit response bodies, zeroized token-file/credential loading, and
+  live storage-bin restart coverage that exercises both validation and hit-time
+  decrypts.
 - Harden native peer-fill by subtracting upstream `Age` during admission,
   returning bounded `504` misses for `only-if-cached` cache misses, and
   preventing a client-supplied peer-fill marker alone from forcing origin
