@@ -381,7 +381,7 @@ impl NativeHttp1ProxyRuntime {
             #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
             let openssl_acceptor = self.openssl_acceptor.clone();
             let handle = tokio::spawn(async move {
-                match listener.protocol {
+                let result = match listener.protocol {
                     ListenerProtocol::Http if listener.proxy_protocol_enabled => {
                         serve_native_http1_listener_with_proxy_protocol(
                             listener.listener,
@@ -487,7 +487,15 @@ impl NativeHttp1ProxyRuntime {
                     | ListenerProtocol::Udp => Err(NativeHttp1Error::Io(io::Error::other(
                         "unsupported native HTTP/1 proxy listener protocol",
                     ))),
+                };
+                if let Err(error) = &result {
+                    log::error!(
+                        target: "fluxheim::native_runtime",
+                        "native HTTP/1 proxy listener {local_addr} exited unexpectedly: {error}"
+                    );
+                    std::process::exit(1);
                 }
+                result
             });
             handles.push(NativeHttp1ProxyListenerHandle {
                 local_addr,

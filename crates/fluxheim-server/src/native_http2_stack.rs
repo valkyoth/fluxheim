@@ -316,15 +316,16 @@ where
 fn handle_completed_native_http2_stream(
     completed: Result<Result<(), NativeHttp2StackError>, tokio::task::JoinError>,
 ) -> Result<(), NativeHttp2StackError> {
-    completed
-        .map_err(NativeHttp2StackError::StreamTaskJoin)?
-        .map_err(|error| {
+    match completed.map_err(NativeHttp2StackError::StreamTaskJoin)? {
+        Ok(()) => Ok(()),
+        Err(error) => {
             log::debug!(
                 target: "fluxheim::native_http2",
                 "native HTTP/2 stream failed: {error}"
             );
-            error
-        })
+            Ok(())
+        }
+    }
 }
 
 async fn handle_native_http2_stream<H>(
@@ -336,12 +337,16 @@ async fn handle_native_http2_stream<H>(
 where
     H: NativeHttp2Handler,
 {
-    validate_request(request, policy)?;
+    if let Err(error) = validate_request(request, policy) {
+        let response = native_http2_stream_error_response(&error);
+        send_native_http2_response(respond, response).await?;
+        return Ok(());
+    }
     let method = request.method().clone();
     let uri = request.uri().clone();
     let headers = request.headers().clone();
     let body_capacity_hint = request_body_capacity_hint(request.headers(), policy.max_body_bytes());
-    let (body, trailers) = tokio::time::timeout(
+    let (body, trailers) = match tokio::time::timeout(
         policy.request_body_timeout(),
         drain_request_body(
             request.body_mut(),
@@ -350,8 +355,23 @@ where
         ),
     )
     .await
-    .map_err(|_| NativeHttp2StackError::BodyReadTimeout)??;
-    let response = tokio::time::timeout(
+    {
+        Ok(Ok(result)) => result,
+        Ok(Err(error @ NativeHttp2StackError::BodyTooLarge { .. })) => {
+            send_native_http2_response(respond, native_http2_stream_error_response(&error)).await?;
+            return Ok(());
+        }
+        Ok(Err(error)) => return Err(error),
+        Err(_) => {
+            send_native_http2_response(
+                respond,
+                native_http2_stream_error_response(&NativeHttp2StackError::BodyReadTimeout),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let response = match tokio::time::timeout(
         policy.handler_timeout(),
         handler.handle(NativeHttp2Request {
             method,
@@ -362,13 +382,52 @@ where
         }),
     )
     .await
-    .map_err(|_| NativeHttp2StackError::HandlerTimeout)?;
+    {
+        Ok(response) => response,
+        Err(_) => {
+            send_native_http2_response(
+                respond,
+                native_http2_stream_error_response(&NativeHttp2StackError::HandlerTimeout),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
     tokio::time::timeout(
         policy.response_write_lifetime(),
         send_native_http2_response(respond, response),
     )
     .await
     .map_err(|_| NativeHttp2StackError::ResponseWriteTimeout)?
+}
+
+fn native_http2_stream_error_response(error: &NativeHttp2StackError) -> NativeHttp2Response {
+    match error {
+        NativeHttp2StackError::TooManyHeaders { .. } => NativeHttp2Response::new(
+            StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+            Bytes::from_static(b"too many headers\n"),
+        ),
+        NativeHttp2StackError::UriTooLarge { .. } => NativeHttp2Response::new(
+            StatusCode::URI_TOO_LONG,
+            Bytes::from_static(b"uri too large\n"),
+        ),
+        NativeHttp2StackError::BodyReadTimeout => NativeHttp2Response::new(
+            StatusCode::REQUEST_TIMEOUT,
+            Bytes::from_static(b"request body timeout\n"),
+        ),
+        NativeHttp2StackError::BodyTooLarge { .. } => NativeHttp2Response::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Bytes::from_static(b"request body too large\n"),
+        ),
+        NativeHttp2StackError::HandlerTimeout => NativeHttp2Response::new(
+            StatusCode::GATEWAY_TIMEOUT,
+            Bytes::from_static(b"handler timeout\n"),
+        ),
+        _ => NativeHttp2Response::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Bytes::from_static(b"stream error\n"),
+        ),
+    }
 }
 
 fn validate_request(

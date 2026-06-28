@@ -358,7 +358,7 @@ fn route_test_request(path: &str) -> NativeHttp1Request {
         target: path.to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![("host".to_owned(), "route.test".to_owned())],
-        body: Vec::new(),
+        body: zeroize::Zeroizing::new(Vec::new()),
         trailers: Vec::new(),
     }
 }
@@ -1984,6 +1984,89 @@ async fn native_route_proxy_applies_route_request_headers_before_forwarding() {
         "GET /api/item HTTP/1.1\r\nHost: route.test\r\nX-Remove: secret\r\nConnection: close\r\n\r\n",
     )
     .await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("headers"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_renders_request_header_templates_before_forwarding() {
+    let upstream = upstream_expect_header(
+        "/api/item?version=1",
+        "x-forwarded-host",
+        "route.test",
+        "x-remove",
+    )
+    .await;
+    let mut set = BTreeMap::new();
+    set.insert("x-forwarded-host".to_owned(), "{host}".to_owned());
+    set.insert("x-original-uri".to_owned(), "{uri}".to_owned());
+    set.insert("x-client-upgrade".to_owned(), "{http.upgrade}".to_owned());
+    let policy = fluxheim_config::RequestHeaderPolicyOverlayConfig {
+        unset: vec!["x-remove".to_owned()],
+        set,
+        ..Default::default()
+    };
+    let route = NativeHttp1RouteProxyRoute::prefix("/api/", Vec::new(), proxy_for(upstream))
+        .with_request_header_policy(&policy);
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_request(
+        proxy,
+        "GET /api/item?version=1 HTTP/1.1\r\nHost: route.test\r\nX-Remove: secret\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("headers"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_renders_route_regex_captures_in_request_headers() {
+    let upstream =
+        upstream_expect_header("/internal/v2/users?id=7", "x-api-version", "2", "x-remove").await;
+    let mut add = BTreeMap::new();
+    add.insert(
+        "x-api-version".to_owned(),
+        "{route.regex.version}".to_owned(),
+    );
+    let policy = fluxheim_config::RequestHeaderPolicyOverlayConfig {
+        add,
+        ..Default::default()
+    };
+    let route_config = fluxheim_config::RouteConfig {
+        name: "api".to_owned(),
+        path_exact: None,
+        path_prefix: None,
+        path_regex: Some(r"^/api/v(?P<version>[0-9]+)/(?P<rest>.*)$".to_owned()),
+        methods: Vec::new(),
+        fallback: false,
+        https_redirect_exempt: false,
+        strip_prefix: None,
+        rewrite_prefix: None,
+        rewrite_template: Some("/internal/v{route.regex.version}/{route.regex.rest}".to_owned()),
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        grpc: Default::default(),
+        redirect: None,
+        proxy: Some(fluxheim_config::ProxyConfig {
+            upstreams: vec![upstream.to_string()],
+            ..Default::default()
+        }),
+        web: None,
+        php: None,
+        cache: None,
+        compression: None,
+        headers: Default::default(),
+    };
+    let route = NativeHttp1RouteProxyRoute::from_config(&route_config, Some(proxy_for(upstream)))
+        .unwrap()
+        .with_request_header_policy(&policy);
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_get(proxy, "/api/v2/users?id=7").await;
 
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.ends_with("headers"));

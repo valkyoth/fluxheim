@@ -21,6 +21,7 @@ use tokio::time::timeout;
 use tokio_openssl::SslStream;
 #[cfg(feature = "tls-rustls-backend")]
 use tokio_rustls::TlsAcceptor;
+use zeroize::Zeroizing;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::DownstreamHttp2Policy;
@@ -49,7 +50,7 @@ pub struct NativeHttp1Request {
     pub target: String,
     pub version: Http1Version,
     pub headers: Vec<(String, String)>,
-    pub body: Vec<u8>,
+    pub body: Zeroizing<Vec<u8>>,
     pub trailers: Vec<(String, String)>,
 }
 
@@ -480,7 +481,7 @@ where
             Err(error) => return Err(error),
         };
         let mut request = request;
-        request.body = body;
+        request.body = Zeroizing::new(body);
         handler.prepare_request_context(&mut request);
         if handler.handles_connection_takeover(&request) {
             let prebuffered = std::mem::take(&mut buffer);
@@ -1140,7 +1141,7 @@ fn owned_request_from_head(
         target: head.target.to_owned(),
         version: head.version,
         headers: owned_headers(&head.headers),
-        body: Vec::new(),
+        body: Zeroizing::new(Vec::new()),
         trailers: Vec::new(),
     }
 }

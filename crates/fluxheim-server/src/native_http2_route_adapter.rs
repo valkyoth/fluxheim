@@ -101,7 +101,7 @@ fn native_http2_request_to_http1(
         target,
         version: fluxheim_protocol::Http1Version::Http11,
         headers: owned_headers,
-        body: body.to_vec(),
+        body,
         trailers: native_http2_headers_to_native(trailers.as_ref())?,
     })
 }
@@ -172,7 +172,7 @@ mod tests {
 
         assert_eq!(converted.method, "POST");
         assert_eq!(converted.target, "/upload?x=1");
-        assert_eq!(converted.body, b"body");
+        assert_eq!(converted.body.as_slice(), b"body");
         assert_eq!(
             converted.trailers,
             vec![("grpc-status".to_owned(), "0".to_owned())]

@@ -549,14 +549,14 @@ where
     };
     inner.set_metric_labels(metric_labels);
 
-    let service =
-        UpstreamLoadBalancerService::new(crate::background::background_service_with_kind(
-            format!("LB {name}"),
-            crate::background::BackgroundTaskKind::LoadBalancerRefresh,
-            inner,
-        ));
+    let inner_service = crate::background::background_service_with_kind(
+        format!("LB {name}"),
+        crate::background::BackgroundTaskKind::LoadBalancerRefresh,
+        inner,
+    );
     let load_balancer =
-        UpstreamLoadBalancer::from_inner(wrap(service.task()), config, backend_policy);
+        UpstreamLoadBalancer::from_inner(wrap(inner_service.task()), config, backend_policy);
+    let service = UpstreamLoadBalancerService::new(inner_service, load_balancer.clone());
     Ok(Some((load_balancer, service)))
 }
 
@@ -571,20 +571,20 @@ pub(super) fn background_maglev_service_for(
     };
     inner.set_metric_labels(metric_labels);
     let table = Arc::new(configured_maglev_table(config)?);
-    let service =
-        UpstreamLoadBalancerService::new(crate::background::background_service_with_kind(
-            format!("LB {name}"),
-            crate::background::BackgroundTaskKind::LoadBalancerRefresh,
-            inner,
-        ));
+    let inner_service = crate::background::background_service_with_kind(
+        format!("LB {name}"),
+        crate::background::BackgroundTaskKind::LoadBalancerRefresh,
+        inner,
+    );
     let load_balancer = UpstreamLoadBalancer::from_inner(
         UpstreamLoadBalancerInner::MaglevHash {
-            inner: service.task(),
+            inner: inner_service.task(),
             table,
         },
         config,
         backend_policy,
     );
+    let service = UpstreamLoadBalancerService::new(inner_service, load_balancer.clone());
     Ok(Some((load_balancer, service)))
 }
 
@@ -604,6 +604,15 @@ pub(super) fn configured_maglev_table(config: &ProxyConfig) -> io::Result<Maglev
 }
 
 pub(super) fn configured_nginx_ketama_table(config: &ProxyConfig) -> io::Result<NginxKetamaTable> {
+    if config.upstreams_file.is_some()
+        || config.upstreams_http_url.is_some()
+        || config.upstream_dns_refresh_secs.is_some()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "nginx-compatible Ketama selections require static proxy.upstreams; dynamic discovery would make the compatibility ring stale",
+        ));
+    }
     let backends = configured_backends(config).map_err(FluxError::into_io)?;
     NginxKetamaTable::from_backend_identities(backends.iter()).map_err(FluxError::into_io)
 }

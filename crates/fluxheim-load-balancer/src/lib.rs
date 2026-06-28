@@ -86,15 +86,18 @@ pub use self::persistence::LoadBalancerRequestView;
 
 pub struct UpstreamLoadBalancerService {
     inner: background::FluxBackgroundService<backend::FluxLoadBalancerRuntime>,
+    load_balancer: UpstreamLoadBalancer,
 }
 
 impl UpstreamLoadBalancerService {
-    fn new(inner: background::FluxBackgroundService<backend::FluxLoadBalancerRuntime>) -> Self {
-        Self { inner }
-    }
-
-    fn task(&self) -> Arc<backend::FluxLoadBalancerRuntime> {
-        self.inner.task()
+    fn new(
+        inner: background::FluxBackgroundService<backend::FluxLoadBalancerRuntime>,
+        load_balancer: UpstreamLoadBalancer,
+    ) -> Self {
+        Self {
+            inner,
+            load_balancer,
+        }
     }
 
     pub async fn start(
@@ -116,6 +119,10 @@ impl UpstreamLoadBalancerService {
 
     pub fn name(&self) -> &str {
         self.inner.name()
+    }
+
+    pub fn load_balancer(&self) -> UpstreamLoadBalancer {
+        self.load_balancer.clone()
     }
 
     #[allow(deprecated)]
@@ -877,6 +884,10 @@ impl UpstreamLoadBalancer {
 
     pub fn runtime_state_persistent(&self) -> bool {
         self.runtime_state_file.is_some()
+    }
+
+    pub fn all_down_status(&self) -> u16 {
+        self.all_down_status
     }
 
     #[cfg(test)]
@@ -2869,6 +2880,32 @@ mod tests {
             balancer.runtime_stats().selection,
             LoadBalanceSelection::NginxConsistentUriHash
         );
+    }
+
+    #[test]
+    fn rejects_nginx_consistent_hash_with_dynamic_discovery() {
+        install_test_crypto_provider();
+        let root = unique_temp_path("lb-nginx-consistent-dynamic-file");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = safe_child_path(&root, "upstreams.txt");
+        std::fs::write(&path, "127.0.0.1:3000\n127.0.0.1:3001\n").unwrap();
+        let error = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams_file: Some(path),
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::NginxConsistentUriHash,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("nginx-compatible Ketama selections require static proxy.upstreams"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

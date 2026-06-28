@@ -964,8 +964,17 @@ impl NginxKetamaTable {
                 "nginx-compatible consistent hash requires at least one backend",
             ));
         }
+        let point_count = points.len();
         points.sort_unstable_by_key(|point| point.hash);
         points.dedup_by(|left, right| left.hash == right.hash);
+        let deduped_count = points.len();
+        if deduped_count < point_count {
+            log::warn!(
+                target: "fluxheim::load_balancer",
+                "nginx-compatible Ketama ring dropped {} duplicate continuum point(s); backend coverage is slightly reduced",
+                point_count - deduped_count
+            );
+        }
         Ok(Self { points })
     }
 

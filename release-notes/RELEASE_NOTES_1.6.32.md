@@ -175,6 +175,11 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   `nginx-consistent-cookie-hash`; they build a static CRC32 continuum from the
   configured `proxy.upstreams` pool and intentionally reject dynamic discovery
   pools and runtime backend-set mutations in this release.
+- Native Ketama startup now rejects file, HTTP, and DNS discovery sources
+  before building the ring, and logs if CRC32 point collisions reduce the
+  continuum. The release documentation now calls out that Ketama remains
+  unsalted for nginx/Pingora compatibility and is therefore not the right mode
+  for attacker-controlled hash keys.
 - Native HTTP/1 now has a connection-takeover handoff that preserves any
   bytes read after the request head. This prevents early WebSocket frames sent
   in the same TCP packet as the upgrade request from being lost when a handler
@@ -185,6 +190,11 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   validates the upstream `101 Switching Protocols` response with the shared
   HTTP/1 parser, forwards prebuffered bytes in both directions, and runs the
   bidirectional tunnel under the configured upstream read timeout.
+- Native WebSocket proxying now strips hop-by-hop request headers, including
+  headers named by the downstream `Connection` field, before forwarding the
+  upgrade upstream. The downstream `101 Switching Protocols` response is now
+  emitted as a canonical WebSocket handshake response instead of forwarding
+  arbitrary upstream `101` headers such as `Set-Cookie` or `Server`.
 - Native WebSocket proxying now also works with native load-balanced upstream
   pools. The proxy performs one normal load-balancer selection at upgrade time,
   then pins the tunnel to that selected upstream for the lifetime of the
@@ -230,6 +240,21 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   parity blockers rather than hidden launch blockers: proxy cache still needs
   native lookup/fill/stale/purge behavior before cache-enabled proxy routes
   can leave the compatibility path.
+- HTTP/2 stream handling now treats bounded per-stream failures as stream
+  responses instead of connection-level failures. Oversized request bodies,
+  request-body timeouts, header-count rejection, oversized URIs, and handler
+  timeouts return the matching 4xx/5xx response on that stream while allowing
+  sibling streams on the same connection to continue.
+- Native HTTP/1 request bodies now use zeroizing storage through the H2-to-H1
+  route adapter so request-body copies do not lose the zero-on-drop behavior
+  used by native H2.
+- Native metrics bearer-token checks now compare fixed-size digests instead of
+  branching on token length before the constant-time comparison. The docs also
+  recommend `metrics.token_file` over `metrics.token_env` for deployments where
+  local process-environment exposure matters.
+- Native proxy listener accept-loop failures now mirror the metrics listener
+  behavior: unexpected listener exit logs an error and terminates the process
+  instead of leaving a live process that silently stopped accepting traffic.
 
 ## Tests
 
@@ -299,6 +324,14 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   selectors, including alias parsing, header-hash requirements, dynamic
   discovery rejection for static-ring selections, native selection
   construction, and runtime backend-set mutation rejection.
+- Added Ketama startup coverage proving dynamic discovery sources are rejected
+  for nginx-compatible static-ring selections.
+- Added HTTP/2 stream-isolation coverage proving an oversized request body on
+  one stream returns `413` without aborting a sibling stream on the same
+  connection.
+- Added WebSocket request/response sanitization tests proving hop-by-hop
+  request headers are stripped and arbitrary upstream `101` response headers
+  are not forwarded downstream.
 - Added a live native HTTP/1 runtime test that binds a real listener and serves
   a downstream request through a nginx-compatible Ketama URI-hash upstream pool.
 - Added native runtime launch-plan tests proving `proxy.websocket = true` is

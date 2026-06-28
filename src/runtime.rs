@@ -334,8 +334,6 @@ async fn run_native_runtime_async(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let launch_plan = server_plan.native_runtime_launch_plan()?;
 
-    let proxy = crate::proxy::FluxProxy::from_config(&config)?;
-
     #[cfg(feature = "metrics")]
     {
         crate::metrics::init()?;
@@ -373,6 +371,34 @@ async fn run_native_runtime_async(
         &launch_plan,
         native_certificate_reloader.is_some(),
     )?;
+    #[cfg(feature = "load-balancer")]
+    let native_load_balancer_services = native_proxy_runtime
+        .as_mut()
+        .map(fluxheim_server::NativeHttp1ProxyRuntime::take_load_balancer_services)
+        .unwrap_or_default();
+    #[cfg(feature = "load-balancer")]
+    let proxy = {
+        crate::proxy::FluxProxy::from_config_with_load_balancer_resolver(
+            &config,
+            |name, _vhost, _route, proxy_config| {
+                if !native_proxy_load_balancer_pool_configured(proxy_config) {
+                    return Ok(None);
+                }
+                let service_name = format!("LB {name}");
+                match native_load_balancer_services
+                    .iter()
+                    .find(|service| service.name() == service_name)
+                {
+                    Some(service) => Ok(Some(service.load_balancer())),
+                    None => fluxheim_load_balancer::UpstreamLoadBalancer::from_proxy_config(
+                        proxy_config,
+                    ),
+                }
+            },
+        )?
+    };
+    #[cfg(not(feature = "load-balancer"))]
+    let proxy = crate::proxy::FluxProxy::from_config(&config)?;
 
     let supervisor = fluxheim_runtime::NativeBackgroundSupervisor::new();
     let mut background_handles = Vec::new();
@@ -475,9 +501,8 @@ async fn run_native_runtime_async(
     #[cfg(feature = "load-balancer")]
     if let Some(load_balancer_service_spec) =
         server_plan.service(fluxheim_server::ServiceKind::LoadBalancerHealthChecks)
-        && let Some(native_proxy_runtime) = native_proxy_runtime.as_mut()
     {
-        for service in native_proxy_runtime.take_load_balancer_services() {
+        for service in native_load_balancer_services {
             log::info!("{} enabled", load_balancer_service_spec.name());
             background_handles.push(supervisor.spawn_service(service.into_native_service()));
         }
@@ -797,6 +822,14 @@ fn validate_native_http1_router_factory(
     )?;
     log::debug!("native HTTP/1 host-router factory validated for proxy service");
     Ok(())
+}
+
+#[cfg(all(feature = "proxy", feature = "load-balancer"))]
+fn native_proxy_load_balancer_pool_configured(proxy: &crate::config::ProxyConfig) -> bool {
+    proxy.upstreams.len() >= 2
+        || proxy.upstreams_file.is_some()
+        || proxy.upstreams_http_url.is_some()
+        || proxy.upstream_dns_refresh_secs.is_some()
 }
 
 #[cfg(feature = "proxy")]

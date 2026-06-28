@@ -107,7 +107,7 @@ fn native_http1_cache_view_request(
         target: target.to_owned(),
         version: Http1Version::Http11,
         headers,
-        body: Vec::new(),
+        body: zeroize::Zeroizing::new(Vec::new()),
         trailers: Vec::new(),
     }
 }
@@ -540,7 +540,7 @@ async fn native_http1_reads_content_length_body() {
 #[tokio::test]
 async fn native_http1_reads_chunked_body() {
     let addr = spawn_server(|request| {
-        NativeHttp1Response::new(200, "OK", String::from_utf8(request.body).unwrap())
+        NativeHttp1Response::new(200, "OK", String::from_utf8(request.body.to_vec()).unwrap())
     })
     .await;
     let mut stream = TcpStream::connect(addr).await.unwrap();

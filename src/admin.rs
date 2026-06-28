@@ -4413,7 +4413,7 @@ mod tests {
             target: target.to_owned(),
             version: fluxheim_protocol::Http1Version::Http11,
             headers,
-            body: Vec::new(),
+            body: zeroize::Zeroizing::new(Vec::new()),
             trailers: Vec::new(),
         }
     }

@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use fluxheim_config::UpstreamProxyProtocol;
 use fluxheim_protocol::{
-    Http1HeadLimits, Http1Header, Http1ParseError, http1_request_target, proxy_protocol_v1_header,
-    proxy_protocol_v2_header,
+    Http1HeadLimits, Http1Header, Http1ParseError, Http1ResponseHead, http1_request_target,
+    proxy_protocol_v1_header, proxy_protocol_v2_header,
 };
 use h2::client::SendRequest;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Uri};
@@ -14,7 +14,6 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant as TokioInstant, timeout, timeout_at};
-use zeroize::Zeroizing;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::NativeHttp1UpstreamTls;
@@ -555,7 +554,8 @@ impl NativeHttp1Upstream {
             websocket_upgrade_response_head_limits(self.max_head_bytes),
         )?;
         let head_len = parsed.head_len;
-        downstream.write_all(&response_head[..head_len]).await?;
+        let downstream_head = websocket_downstream_upgrade_response_head(&parsed)?;
+        downstream.write_all(&downstream_head).await?;
         if response_head.len() > head_len {
             downstream.write_all(&response_head[head_len..]).await?;
         }
@@ -1434,8 +1434,11 @@ where
         .await?;
     stream.write_all(b"connection: Upgrade\r\n").await?;
     stream.write_all(b"upgrade: websocket\r\n").await?;
+    let connection_tokens = connection_tokens(request);
     for (name, value) in &request.headers {
-        if upstream_websocket_owned_header(name) {
+        if upstream_hop_by_hop_header(name, &connection_tokens)
+            || upstream_websocket_owned_header(name)
+        {
             continue;
         }
         if !valid_upstream_request_header(name, value) {
@@ -1449,6 +1452,51 @@ where
     stream.write_all(b"\r\n").await?;
     stream.flush().await?;
     Ok(())
+}
+
+fn websocket_downstream_upgrade_response_head(
+    head: &Http1ResponseHead<'_>,
+) -> Result<Vec<u8>, NativeHttp1Error> {
+    let mut response = Vec::new();
+    response.extend_from_slice(b"HTTP/1.1 101 Switching Protocols\r\n");
+    response.extend_from_slice(b"connection: Upgrade\r\n");
+    response.extend_from_slice(b"upgrade: websocket\r\n");
+    let mut accept_seen = false;
+    for header in &head.headers {
+        let Some(name) = websocket_downstream_response_header_name(header.name) else {
+            continue;
+        };
+        if !valid_upstream_header_value(header.value) {
+            return Err(Http1ParseError::InvalidHeaderValue.into());
+        }
+        if name.eq_ignore_ascii_case("sec-websocket-accept") {
+            accept_seen = true;
+        }
+        response.extend_from_slice(name.as_bytes());
+        response.extend_from_slice(b": ");
+        response.extend_from_slice(header.value.as_bytes());
+        response.extend_from_slice(b"\r\n");
+    }
+    if !accept_seen {
+        return Err(NativeHttp1Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native WebSocket upgrade response missing Sec-WebSocket-Accept",
+        )));
+    }
+    response.extend_from_slice(b"\r\n");
+    Ok(response)
+}
+
+fn websocket_downstream_response_header_name(name: &str) -> Option<&'static str> {
+    if name.eq_ignore_ascii_case("sec-websocket-accept") {
+        Some("sec-websocket-accept")
+    } else if name.eq_ignore_ascii_case("sec-websocket-protocol") {
+        Some("sec-websocket-protocol")
+    } else if name.eq_ignore_ascii_case("sec-websocket-extensions") {
+        Some("sec-websocket-extensions")
+    } else {
+        None
+    }
 }
 
 fn upstream_origin_target(request: &NativeHttp1Request) -> Result<String, NativeHttp1Error> {
@@ -1513,7 +1561,7 @@ fn native_http2_upstream_request(
         method,
         uri,
         headers,
-        body: Zeroizing::new(request.body.clone()),
+        body: request.body.clone(),
         trailers,
     })
 }
@@ -1690,8 +1738,10 @@ mod tests {
     use super::{
         h2c_upgrade_error_can_fallback, h2c_upgrade_settings_header, native_http2_error,
         native_http2_response_to_http1, native_http2_upstream_request,
-        validate_switching_protocols_response,
+        validate_switching_protocols_response, websocket_downstream_upgrade_response_head,
+        write_websocket_upgrade_request,
     };
+    use crate::native_http1_upstream_response::parsed_upstream_response_head;
     use crate::{
         DownstreamHttp2Policy, NativeHttp1Error, NativeHttp1Request, NativeHttp2StackError,
         NativeHttp2UpstreamResponse,
@@ -1761,6 +1811,84 @@ mod tests {
         assert!(error.to_string().contains("upgrade rejected"));
     }
 
+    #[tokio::test]
+    async fn websocket_upgrade_request_strips_hop_by_hop_headers() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let mut request = NativeHttp1Request {
+            method: "GET".to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: false,
+            tls_identity: None,
+            geo_context: None,
+            target: "/socket".to_owned(),
+            version: fluxheim_protocol::Http1Version::Http11,
+            headers: vec![
+                ("host".to_owned(), "client.test".to_owned()),
+                ("connection".to_owned(), "Upgrade, x-secret-hop".to_owned()),
+                ("upgrade".to_owned(), "websocket".to_owned()),
+                ("proxy-authorization".to_owned(), "Basic secret".to_owned()),
+                ("keep-alive".to_owned(), "timeout=5".to_owned()),
+                ("x-secret-hop".to_owned(), "remove-me".to_owned()),
+                ("sec-websocket-key".to_owned(), "abc".to_owned()),
+            ],
+            body: zeroize::Zeroizing::new(Vec::new()),
+            trailers: Vec::new(),
+        };
+        request
+            .headers
+            .push(("x-keep".to_owned(), "yes".to_owned()));
+
+        let writer = tokio::spawn(async move {
+            write_websocket_upgrade_request(&mut client, "origin.test", &request)
+                .await
+                .unwrap();
+        });
+        let mut bytes = Vec::new();
+        tokio::io::AsyncReadExt::read_to_end(&mut server, &mut bytes)
+            .await
+            .unwrap();
+        writer.await.unwrap();
+        let request = String::from_utf8(bytes).unwrap();
+
+        assert!(request.contains("connection: Upgrade\r\n"));
+        assert!(request.contains("upgrade: websocket\r\n"));
+        assert!(request.contains("sec-websocket-key: abc\r\n"));
+        assert!(request.contains("x-keep: yes\r\n"));
+        assert!(!request.contains("proxy-authorization:"));
+        assert!(!request.contains("keep-alive:"));
+        assert!(!request.contains("x-secret-hop:"));
+    }
+
+    #[test]
+    fn websocket_downstream_upgrade_response_strips_untrusted_headers() {
+        let head = parsed_upstream_response_head(
+            b"HTTP/1.1 101 Switching Protocols\r\n\
+              Connection: upgrade\r\n\
+              Upgrade: websocket\r\n\
+              Sec-WebSocket-Accept: abc\r\n\
+              Sec-WebSocket-Protocol: chat\r\n\
+              Set-Cookie: sid=leak\r\n\
+              Server: origin\r\n\
+              X-Internal: secret\r\n\r\n",
+            fluxheim_protocol::Http1HeadLimits::default(),
+        )
+        .unwrap();
+
+        let response = websocket_downstream_upgrade_response_head(&head).unwrap();
+        let response = String::from_utf8(response).unwrap();
+
+        assert!(response.starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
+        assert!(response.contains("connection: Upgrade\r\n"));
+        assert!(response.contains("upgrade: websocket\r\n"));
+        assert!(response.contains("sec-websocket-accept: abc\r\n"));
+        assert!(response.contains("sec-websocket-protocol: chat\r\n"));
+        assert!(!response.contains("Set-Cookie"));
+        assert!(!response.contains("Server:"));
+        assert!(!response.contains("X-Internal"));
+    }
+
     #[test]
     fn h2_response_conversion_strips_hop_by_hop_headers() {
         let mut headers = http::HeaderMap::new();
@@ -1815,7 +1943,7 @@ mod tests {
                 ("host".to_owned(), "origin.test".to_owned()),
                 ("content-type".to_owned(), "application/grpc".to_owned()),
             ],
-            body: b"request".to_vec(),
+            body: zeroize::Zeroizing::new(b"request".to_vec()),
             trailers: vec![("grpc-status".to_owned(), "0".to_owned())],
         };
 

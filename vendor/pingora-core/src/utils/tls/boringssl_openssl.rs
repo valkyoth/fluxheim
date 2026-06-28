@@ -21,12 +21,7 @@ fn get_subject_name(cert: &X509, name_type: Nid) -> Option<String> {
     cert.subject_name()
         .entries_by_nid(name_type)
         .next()
-        .map(|name| {
-            name.data()
-                .as_utf8()
-                .map(|s| s.to_string())
-                .unwrap_or_default()
-        })
+        .map(|name| String::from_utf8_lossy(name.data().as_slice()).into_owned())
 }
 
 /// Return the organization associated with the X509 certificate.

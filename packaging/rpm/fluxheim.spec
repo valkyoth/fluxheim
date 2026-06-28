@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.31
+Version:        1.6.32
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,14 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jun 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.32-1
+- Harden native HTTP/2 stream error isolation, WebSocket upgrade handling, and
+  native metrics bearer-token comparison.
+- Tighten native load-balancer Ketama compatibility checks and collision
+  diagnostics.
+- Extend Pingora dependency cutover enforcement for manifest-only compatibility
+  dependencies.
+
 * Wed Jun 24 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.31-1
 - Move cache/PHP native integration primitives into Fluxheim-owned crates and
   tighten native cutover evidence for cache and PHP blockers.

@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.6.31"
+version = "1.6.32"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -128,7 +128,12 @@ acme-client = [
     "dep:tokio",
     "instant-acme/hyper-rustls",
 ]
-metrics = ["dep:prometheus", "dep:sanitization", "fluxheim-load-balancer?/metrics"]
+metrics = [
+    "dep:prometheus",
+    "dep:sanitization",
+    "dep:sha2",
+    "fluxheim-load-balancer?/metrics",
+]
 metrics-otlp = [
     "metrics",
     "dep:ureq",

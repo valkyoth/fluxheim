@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fluxheim_config::{PhpConfig, PhpFpmConfig, PhpFpmMode, PhpFpmProcessManager};
+use zeroize::Zeroizing;
 
 static MANAGED_PHP_FPM_INSTANCE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 static PHP_REQUEST_BODY_SPOOL_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -247,7 +248,7 @@ enum PhpFpmPooledClient {
 }
 
 enum PhpRequestBodyInner {
-    Memory(Vec<u8>),
+    Memory(Zeroizing<Vec<u8>>),
     Spool(PhpRequestBodySpool),
 }
 
@@ -298,6 +299,10 @@ impl PhpFpmPoolMetrics {
 
 impl PhpRequestBody {
     pub fn memory(body: Vec<u8>) -> Self {
+        Self::memory_zeroizing(Zeroizing::new(body))
+    }
+
+    pub fn memory_zeroizing(body: Zeroizing<Vec<u8>>) -> Self {
         Self {
             len: body.len(),
             inner: Arc::new(PhpRequestBodyInner::Memory(body)),
@@ -324,7 +329,7 @@ impl PhpRequestBody {
     ) -> io::Result<Box<dyn fastcgi_client::io::AsyncRead + Unpin + Send>> {
         match self.inner.as_ref() {
             PhpRequestBodyInner::Memory(body) => {
-                Ok(Box::new(fastcgi_client::io::Cursor::new(body.clone())))
+                Ok(Box::new(fastcgi_client::io::Cursor::new(body.to_vec())))
             }
             PhpRequestBodyInner::Spool(spool) => {
                 let file = tokio::fs::File::open(&spool.path).await?;

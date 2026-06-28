@@ -61,12 +61,12 @@ pub(crate) async fn native_php_request_body(
         ));
     }
     let Some(threshold) = php.request_body_spool_threshold_bytes else {
-        return Ok(fluxheim_php_fpm::PhpRequestBody::memory(
+        return Ok(fluxheim_php_fpm::PhpRequestBody::memory_zeroizing(
             request.body.clone(),
         ));
     };
     if request.body.len() as u64 <= threshold.as_u64() {
-        return Ok(fluxheim_php_fpm::PhpRequestBody::memory(
+        return Ok(fluxheim_php_fpm::PhpRequestBody::memory_zeroizing(
             request.body.clone(),
         ));
     }
@@ -547,7 +547,7 @@ mod tests {
                 ("x-test".to_owned(), "two".to_owned()),
                 ("proxy".to_owned(), "drop-me".to_owned()),
             ],
-            body: b"name=fluxheim".to_vec(),
+            body: zeroize::Zeroizing::new(b"name=fluxheim".to_vec()),
         }
     }
 

@@ -92,6 +92,7 @@ exception_keys="$out_dir/exceptions.keys"
 unexpected="$out_dir/unexpected.keys"
 stale="$out_dir/stale-exceptions.keys"
 expired="$out_dir/expired-exceptions.tsv"
+manifest_expired="$out_dir/manifest-expired-exceptions.tsv"
 
 {
     printf 'profile\tcrate\tversion\n'
@@ -113,6 +114,8 @@ awk -F '\t' '
         print "pingora dependency policy: malformed exception line " NR ": " $0 > "/dev/stderr"
         exit 2
     }
+    $1 == "lock" { next }
+    $1 == "manifest" { next }
     { print $1 "\t" $2 }
 ' "$exceptions" | sort -u >"$exception_keys"
 
@@ -151,6 +154,8 @@ awk -F '\t' -v current_version="$current_version" -v current_keys="$current_keys
     /^[[:space:]]*#/ { next }
     NF == 0 { next }
     $1 == "profile" { next }
+    $1 == "lock" { next }
+    $1 == "manifest" { next }
     NF < 4 { next }
     {
         key = $1 "\t" $2
@@ -167,6 +172,51 @@ awk -F '\t' -v current_version="$current_version" -v current_keys="$current_keys
     }
 ' "$exceptions" | sort -u >"$expired"
 
+awk -F '\t' -v current_version="$current_version" '
+    function compare_version(left, right, left_parts, right_parts, i) {
+        sub(/^v/, "", left)
+        sub(/^v/, "", right)
+        split(left, left_parts, /[^0-9]+/)
+        split(right, right_parts, /[^0-9]+/)
+        for (i = 1; i <= 3; i++) {
+            if (left_parts[i] !~ /^[0-9]+$/ || right_parts[i] !~ /^[0-9]+$/) {
+                return "invalid"
+            }
+            if ((left_parts[i] + 0) < (right_parts[i] + 0)) {
+                return -1
+            }
+            if ((left_parts[i] + 0) > (right_parts[i] + 0)) {
+                return 1
+            }
+        }
+        return 0
+    }
+    BEGIN {
+        if (compare_version(current_version, "0.0.0") == "invalid") {
+            print "pingora dependency policy: invalid current version " current_version > "/dev/stderr"
+            exit 2
+        }
+    }
+    /^[[:space:]]*#/ { next }
+    NF == 0 { next }
+    $1 != "manifest" { next }
+    NF < 4 { next }
+    {
+        comparison = compare_version(current_version, $3)
+        if (comparison == "invalid") {
+            print "pingora dependency policy: invalid removal_target " $3 " for manifest/" $2 > "/dev/stderr"
+            exit 2
+        }
+        if (comparison >= 0) {
+            print $1 "\t" $2 "\t" $3
+        }
+    }
+' "$exceptions" | while IFS="$(printf '\t')" read -r scope crate target; do
+    if grep -Eq "^[[:space:]]*$crate[[:space:]]*=" Cargo.toml; then
+        printf '%s\t%s\t%s\n' "$scope" "$crate" "$target"
+    fi
+done | sort -u >"$manifest_expired"
+
 if [ -s "$unexpected" ]; then
     echo "pingora dependency policy: unexpected Pingora crates:" >&2
     cat "$unexpected" >&2
@@ -182,7 +232,12 @@ if [ -s "$expired" ]; then
     cat "$expired" >&2
 fi
 
-if [ "$mode" = "check" ] && { [ -s "$unexpected" ] || [ -s "$stale" ] || [ -s "$expired" ]; }; then
+if [ -s "$manifest_expired" ]; then
+    echo "pingora dependency policy: expired manifest Pingora dependencies still present for Fluxheim $current_version:" >&2
+    cat "$manifest_expired" >&2
+fi
+
+if [ "$mode" = "check" ] && { [ -s "$unexpected" ] || [ -s "$stale" ] || [ -s "$expired" ] || [ -s "$manifest_expired" ]; }; then
     exit 1
 fi
 

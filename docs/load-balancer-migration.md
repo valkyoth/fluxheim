@@ -252,6 +252,10 @@ tracked for future module lines.
   `ketama` as a source-hash alias. It exists for migration cases that need an
   nginx/Pingora-style CRC32 continuum; the default Fluxheim consistent-hash
   modes remain the project-owned rendezvous and bounded-load algorithms.
+  Ketama is intentionally unsalted for nginx/Pingora mapping compatibility, so
+  client-controlled keys can be precomputed to target a backend. Use the
+  Fluxheim-owned salted hash modes when compatibility with nginx's Ketama ring
+  is not required.
 - Bounded-load consistent hashing is local to one Fluxheim process. It avoids
   selecting an over-bound hash target when another eligible ring candidate is
   available, but it does not coordinate load across multiple Fluxheim nodes.

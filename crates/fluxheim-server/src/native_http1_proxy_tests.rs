@@ -291,7 +291,7 @@ fn native_proxy_test_request() -> NativeHttp1Request {
         target: "/socket-policy".to_owned(),
         version: fluxheim_protocol::Http1Version::Http11,
         headers: vec![("host".to_owned(), "proxy.test".to_owned())],
-        body: Vec::new(),
+        body: zeroize::Zeroizing::new(Vec::new()),
         trailers: Vec::new(),
     }
 }
@@ -625,8 +625,8 @@ async fn native_proxy_websocket_upgrade_tunnels_prebuffered_bytes() {
     let mut tunneled = response[response_head_len..].to_vec();
     let response_head = String::from_utf8(response[..response_head_len].to_vec()).unwrap();
     assert!(response_head.starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
-    assert!(response_head.contains("Upgrade: websocket\r\n"));
-    assert!(response_head.contains("Sec-WebSocket-Accept: test-accept\r\n"));
+    assert!(response_head.contains("upgrade: websocket\r\n"));
+    assert!(response_head.contains("sec-websocket-accept: test-accept\r\n"));
     while tunneled.len() < 4 {
         let mut byte = [0u8; 1];
         client.read_exact(&mut byte).await.unwrap();

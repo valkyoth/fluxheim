@@ -2549,6 +2549,26 @@ where
 
 impl FluxProxy {
     #[cfg(feature = "load-balancer")]
+    pub fn from_config_with_load_balancer_resolver<F>(
+        config: &Config,
+        load_balancer: F,
+    ) -> io::Result<Self>
+    where
+        F: FnMut(
+            &str,
+            &str,
+            Option<&str>,
+            &ProxyConfig,
+        ) -> io::Result<Option<UpstreamLoadBalancer>>,
+    {
+        let state = ProxyRuntimeState::from_config_with_load_balancers(config, load_balancer)?;
+        Ok(Self {
+            state: Arc::new(ArcSwap::from_pointee(state)),
+            health_reporter: Arc::new(ArcSwapOption::empty()),
+        })
+    }
+
+    #[cfg(feature = "load-balancer")]
     pub fn from_config_with_background_services(
         config: &Config,
     ) -> io::Result<(Self, Vec<UpstreamLoadBalancerService>)> {

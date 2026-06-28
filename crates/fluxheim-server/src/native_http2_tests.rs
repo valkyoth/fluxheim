@@ -116,17 +116,25 @@ async fn native_http2_connection_times_out_slow_handler() {
         tokio::time::sleep(Duration::from_millis(100)).await;
         NativeHttp2Response::no_content()
     });
-    let server = tokio::spawn(serve_native_http2_connection(server_io, policy, handler));
+    let server = tokio::spawn(serve_native_http2_connection_until_idle(
+        server_io,
+        policy,
+        handler,
+        Duration::from_millis(25),
+    ));
     let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
     let client_connection = tokio::spawn(async move {
         let _ = connection.await;
     });
     let request = http::Request::builder().uri("/slow").body(()).unwrap();
 
-    let (_response, _send_stream) = client.send_request(request, true).unwrap();
-    let error = server.await.unwrap().unwrap_err();
+    let (response, send_stream) = client.send_request(request, true).unwrap();
+    let response = response.await.unwrap();
 
-    assert!(matches!(error, NativeHttp2StackError::HandlerTimeout));
+    assert_eq!(response.status(), http::StatusCode::GATEWAY_TIMEOUT);
+    drop(send_stream);
+    drop(client);
+    server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }
 
@@ -150,13 +158,15 @@ async fn native_http2_stack_probe_rejects_too_many_decoded_headers() {
         .header("x-two", "2")
         .body(())
         .unwrap();
-    let _ = client.send_request(request, true).unwrap();
+    let (response, _send_stream) = client.send_request(request, true).unwrap();
+    let response = response.await.unwrap();
 
-    let error = server.await.unwrap().unwrap_err();
-    assert!(matches!(
-        error,
-        NativeHttp2StackError::TooManyHeaders { count: 2, limit: 1 }
-    ));
+    assert_eq!(
+        response.status(),
+        http::StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+    );
+    drop(client);
+    server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }
 
@@ -175,13 +185,12 @@ async fn native_http2_stack_probe_rejects_oversized_uri() {
         let _ = connection.await;
     });
     let request = http::Request::builder().uri("/too-long").body(()).unwrap();
-    let _ = client.send_request(request, true).unwrap();
+    let (response, _send_stream) = client.send_request(request, true).unwrap();
+    let response = response.await.unwrap();
 
-    let error = server.await.unwrap().unwrap_err();
-    assert!(matches!(
-        error,
-        NativeHttp2StackError::UriTooLarge { len: 9, limit: 4 }
-    ));
+    assert_eq!(response.status(), http::StatusCode::URI_TOO_LONG);
+    drop(client);
+    server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }
 
@@ -271,17 +280,16 @@ async fn native_http2_stack_probe_rejects_oversized_request_body() {
         let _ = connection.await;
     });
     let request = http::Request::builder().uri("/").body(()).unwrap();
-    let (_response, mut send_stream) = client.send_request(request, false).unwrap();
+    let (response, mut send_stream) = client.send_request(request, false).unwrap();
 
     send_stream
         .send_data(bytes::Bytes::from_static(b"too-large"), true)
         .unwrap();
-    let error = server.await.unwrap().unwrap_err();
+    let response = response.await.unwrap();
 
-    assert!(matches!(
-        error,
-        NativeHttp2StackError::BodyTooLarge { limit: 1 }
-    ));
+    assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
+    drop(client);
+    server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }
 
@@ -297,10 +305,45 @@ async fn native_http2_stack_probe_times_out_slow_request_body() {
     });
     let request = http::Request::builder().uri("/").body(()).unwrap();
 
-    let (_response, _send_stream) = client.send_request(request, false).unwrap();
-    let error = server.await.unwrap().unwrap_err();
+    let (response, _send_stream) = client.send_request(request, false).unwrap();
+    let response = response.await.unwrap();
 
-    assert!(matches!(error, NativeHttp2StackError::BodyReadTimeout));
+    assert_eq!(response.status(), http::StatusCode::REQUEST_TIMEOUT);
+    drop(client);
+    server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_bad_stream_does_not_abort_sibling_stream() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let policy = DownstreamHttp2Policy::from_server_limits(fluxheim_config::ServerLimitsConfig {
+        max_request_header_bytes: fluxheim_config::ByteSize::from_bytes(4096),
+        max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
+        max_request_headers: 16,
+        max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(1),
+    });
+    let server = tokio::spawn(native_http2_stack_probe(server_io, policy));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    let bad_request = http::Request::builder().uri("/bad").body(()).unwrap();
+    let good_request = http::Request::builder().uri("/good").body(()).unwrap();
+
+    let (bad_response, mut bad_stream) = client.send_request(bad_request, false).unwrap();
+    let (good_response, _good_stream) = client.send_request(good_request, true).unwrap();
+    bad_stream
+        .send_data(bytes::Bytes::from_static(b"too-large"), true)
+        .unwrap();
+
+    let bad_response = bad_response.await.unwrap();
+    let good_response = good_response.await.unwrap();
+
+    assert_eq!(bad_response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(good_response.status(), http::StatusCode::NO_CONTENT);
+    drop(client);
+    server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }
 
@@ -426,7 +469,7 @@ async fn native_http2_route_adapter_serves_native_http1_handler() {
             "POST".to_owned(),
             "/upload?x=1".to_owned(),
             Some("native.test".to_owned()),
-            b"body".to_vec(),
+            zeroize::Zeroizing::new(b"body".to_vec()),
             vec![("grpc-status".to_owned(), "0".to_owned())]
         ))
     );
@@ -515,13 +558,12 @@ async fn native_http2_stack_probe_rejects_prohibited_response_headers() {
     });
     let request = http::Request::builder().uri("/").body(()).unwrap();
 
-    let (_response, _send_stream) = client.send_request(request, true).unwrap();
-    let error = server.await.unwrap().unwrap_err();
+    let (response, _send_stream) = client.send_request(request, true).unwrap();
+    let error = response.await.unwrap_err();
 
-    assert!(matches!(
-        error,
-        NativeHttp2StackError::ProhibitedResponseHeader { .. }
-    ));
+    assert!(error.is_reset() || error.is_io(), "{error:?}");
+    drop(client);
+    server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }
 
@@ -548,9 +590,11 @@ async fn native_http2_stack_probe_times_out_response_flow_control_hold() {
     });
     let request = http::Request::builder().uri("/").body(()).unwrap();
 
-    let (_response, _send_stream) = client.send_request(request, true).unwrap();
-    let error = server.await.unwrap().unwrap_err();
+    let (response, _send_stream) = client.send_request(request, true).unwrap();
+    let response = response.await.unwrap();
 
-    assert!(matches!(error, NativeHttp2StackError::ResponseWriteTimeout));
+    assert_eq!(response.status(), http::StatusCode::OK);
+    drop(client);
+    server.await.unwrap().unwrap();
     client_connection.await.unwrap();
 }

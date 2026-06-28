@@ -272,33 +272,36 @@ fn route_proxy_from_config(
         &mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
     >,
 ) -> Result<NativeHttp1RouteProxy, NativeHttp1RouteProxyConfigError> {
-    #[cfg(feature = "acme")]
-    {
-        NativeHttp1RouteProxy::from_config_with_trusted_sources_and_load_balancer_services(
-            config,
-            vhost,
-            base_headers,
-            Some(&config.compression),
-            policy,
-            pool_max_idle,
-            trusted_sources,
-            #[cfg(feature = "load-balancer")]
-            load_balancer_services,
-        )
-    }
-    #[cfg(not(feature = "acme"))]
-    {
-        NativeHttp1RouteProxy::from_vhost_config_with_trusted_sources_and_load_balancer_services(
-            vhost,
-            base_headers,
-            Some(&config.compression),
-            policy,
-            pool_max_idle,
-            trusted_sources,
-            #[cfg(feature = "load-balancer")]
-            load_balancer_services,
-        )
-    }
+    let route_proxy = {
+        #[cfg(feature = "acme")]
+        {
+            NativeHttp1RouteProxy::from_config_with_trusted_sources_and_load_balancer_services(
+                config,
+                vhost,
+                base_headers,
+                Some(&config.compression),
+                policy,
+                pool_max_idle,
+                trusted_sources,
+                #[cfg(feature = "load-balancer")]
+                load_balancer_services,
+            )
+        }
+        #[cfg(not(feature = "acme"))]
+        {
+            NativeHttp1RouteProxy::from_vhost_config_with_trusted_sources_and_load_balancer_services(
+                vhost,
+                base_headers,
+                Some(&config.compression),
+                policy,
+                pool_max_idle,
+                trusted_sources,
+                #[cfg(feature = "load-balancer")]
+                load_balancer_services,
+            )
+        }
+    }?;
+    Ok(route_proxy.with_https_redirect(config.server.https_redirect))
 }
 
 fn default_proxy(

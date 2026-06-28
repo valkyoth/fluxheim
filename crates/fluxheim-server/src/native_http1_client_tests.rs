@@ -56,7 +56,7 @@ fn request() -> NativeHttp1Request {
             ("Host".to_owned(), "example.test".to_owned()),
             ("Accept".to_owned(), "text/plain".to_owned()),
         ],
-        body: Vec::new(),
+        body: zeroize::Zeroizing::new(Vec::new()),
         trailers: Vec::new(),
     }
 }
@@ -291,7 +291,7 @@ async fn native_upstream_does_not_retry_unsafe_method_on_stale_pool_connection()
 
     let mut post = request();
     post.method = "POST".to_owned();
-    post.body = b"do not replay".to_vec();
+    post.body = zeroize::Zeroizing::new(b"do not replay".to_vec());
 
     let error = upstream.send(&post).await.unwrap_err();
 
@@ -719,7 +719,7 @@ async fn native_upstream_write_timeout_is_bounded() {
     let (client, _blocked_peer) = tokio::io::duplex(1);
     let mut request = request();
     request.method = "POST".to_owned();
-    request.body = vec![b'a'; 1024 * 1024];
+    request.body = zeroize::Zeroizing::new(vec![b'a'; 1024 * 1024]);
 
     let error = NativeHttp1Upstream::new("127.0.0.1:3000")
         .with_write_timeout(Duration::from_millis(25))

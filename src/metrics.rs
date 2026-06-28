@@ -18,6 +18,7 @@ use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
 };
 use sanitization::ct::ConstantTimeEq;
+use sha2::{Digest, Sha256};
 #[cfg(feature = "proxy")]
 use tokio::net::TcpListener;
 use zeroize::Zeroizing;
@@ -407,11 +408,19 @@ fn native_metrics_bearer_token_matches(value: &str, token: &str) -> bool {
     let Some(candidate) = value.trim().strip_prefix("Bearer ") else {
         return false;
     };
-    candidate.len() == token.len()
-        && candidate
-            .as_bytes()
-            .ct_eq(token.as_bytes())
-            .declassify("native metrics bearer-token comparison result is public")
+    let candidate = Zeroizing::new(candidate.as_bytes().to_vec());
+    let candidate_digest = metrics_bearer_token_digest(candidate.as_slice());
+    let token_digest = metrics_bearer_token_digest(token.as_bytes());
+    candidate_digest
+        .ct_eq(&token_digest)
+        .declassify("native metrics bearer-token comparison result is public")
+}
+
+fn metrics_bearer_token_digest(token: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update((token.len() as u64).to_le_bytes());
+    hasher.update(token);
+    hasher.finalize().into()
 }
 
 impl fluxheim_server::NativeHttp1Handler for NativeMetricsApp {
@@ -2088,7 +2097,9 @@ mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::Duration;
 
+    use fluxheim_common::test_support::safe_child_path;
     use prometheus::Encoder;
+    use zeroize::Zeroizing;
 
     use crate::config::{
         CacheConfig, CacheDiskConfig, CacheMemoryConfig, CachePeerConfig, CachePeerFillConfig,
@@ -2616,7 +2627,8 @@ mod tests {
             target: "/metrics".to_owned(),
             version: fluxheim_protocol::Http1Version::Http11,
             headers: vec![("host".to_owned(), "metrics.test".to_owned())],
-            body: Vec::new(),
+            body: Zeroizing::new(Vec::new()),
+            trailers: Vec::new(),
         };
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -2903,7 +2915,8 @@ mod tests {
             target: target.to_owned(),
             version: fluxheim_protocol::Http1Version::Http11,
             headers: vec![("host".to_owned(), "metrics.test".to_owned())],
-            body: Vec::new(),
+            body: Zeroizing::new(Vec::new()),
+            trailers: Vec::new(),
         }
     }
 
@@ -3507,6 +3520,9 @@ mod tests {
             .join("target")
             .join("fluxheim-test-secrets");
         std::fs::create_dir_all(&root).unwrap();
-        root.join(format!("fluxheim-{label}-{}-{id}", std::process::id()))
+        safe_child_path(
+            &root,
+            &format!("fluxheim-{label}-{}-{id}", std::process::id()),
+        )
     }
 }

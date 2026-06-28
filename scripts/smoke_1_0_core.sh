@@ -142,7 +142,12 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             data = self.connection.recv(64)
             if data:
-                self.connection.sendall(b"echo:" + data)
+                self.connection.sendall(
+                    f"path={self.path}\n"
+                    f"xcu={self.headers.get('x-client-upgrade', '')}\n".encode("ascii")
+                    + b"echo:"
+                    + data
+                )
             self.close_connection = True
             return
         self._write_response(True)
@@ -549,14 +554,16 @@ with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
     header_block = response.decode("iso-8859-1", errors="replace")
     if " 101 " not in header_block.split("\r\n", 1)[0]:
         raise SystemExit(f"upgrade did not return 101:\n{header_block}")
-    if "x-upstream-path: /room?id=7" not in header_block.lower():
-        raise SystemExit(f"upgrade route did not strip /chat/ prefix:\n{header_block}")
-    if "x-client-upgrade: websocket" not in header_block.lower():
-        raise SystemExit(f"upgrade template was not forwarded:\n{header_block}")
+    if "x-upstream-path:" in header_block.lower() or "x-client-upgrade:" in header_block.lower():
+        raise SystemExit(f"upgrade leaked non-allowlisted upstream 101 headers:\n{header_block}")
 
     sock.sendall(b"ping\n")
     echo = sock.recv(64)
-    if echo != b"echo:ping\n":
+    if b"path=/room?id=7\n" not in echo:
+        raise SystemExit(f"upgrade route did not strip /chat/ prefix in tunnel: {echo!r}")
+    if b"xcu=websocket\n" not in echo:
+        raise SystemExit(f"upgrade template was not forwarded in tunnel: {echo!r}")
+    if not echo.endswith(b"echo:ping\n"):
         raise SystemExit(f"upgrade tunnel did not echo bytes: {echo!r}")
 PY
 

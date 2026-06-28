@@ -693,6 +693,13 @@ compatibility metrics listener still relies on the metrics listener binding and
 network ACLs for access control until the final native runner cutover owns this
 service.
 
+For high-assurance deployments, prefer `metrics.token_file` over
+`metrics.token_env`. Environment variables are copied into zeroizing memory
+after startup, but the original process environment is controlled by the OS and
+may remain visible through `/proc/self/environ` to sufficiently privileged local
+readers. Token files can be permissioned, mounted from a secret store, and
+rotated without exposing the token in the process environment.
+
 ```toml
 [metrics]
 enabled = false
@@ -1394,7 +1401,11 @@ Maglev until dynamic table rebuild semantics are promoted later. The
 nginx-compatible Ketama modes build a static CRC32 continuum with 160 points per
 weight unit and are intended for migration cases that need nginx/Pingora
 Ketama-style request-to-backend mapping; they are also static `proxy.upstreams`
-only and reject file, HTTP, and DNS discovery pools in this release.
+only and reject file, HTTP, and DNS discovery pools in this release. Ketama
+uses unsalted CRC32 by design so its mapping remains compatible with nginx and
+Pingora Ketama behavior. Do not use Ketama when the hash key is attacker
+controlled and deterministic backend targeting is unacceptable; use Fluxheim's
+salted rendezvous, bounded-load consistent, or Maglev selectors instead.
 `max_iterations` bounds how many ready candidates Pingora or Fluxheim may
 inspect while applying health, drain, slow-start, backup, priority, and
 in-flight policies. `all_down_status` defaults to `502` and may be set to
@@ -1751,7 +1762,10 @@ When `websocket = true` and the downstream request contains a valid
 and `Sec-WebSocket-Version: 13`, Fluxheim forwards the request upstream with a
 canonical `Connection: upgrade` and `Upgrade: websocket`. Upgrade requests
 bypass proxy cache policy and should normally use route-level read/send
-timeouts sized for long-lived connections. Leave `websocket = false` on normal
+timeouts sized for long-lived connections. The current native WebSocket tunnel
+uses the selected upstream `read_timeout_secs` as an absolute tunnel lifetime
+cap, not as an idle timeout; active tunnels are closed when that duration
+expires. Leave `websocket = false` on normal
 HTTP routes; Fluxheim strips HTTP/1 `Connection` and `Upgrade` request headers
 in that mode so normal proxy routes cannot tunnel upgraded protocols
 accidentally.

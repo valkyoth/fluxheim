@@ -7,6 +7,31 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.32 - 2026-06-28
+
+### Changed
+
+- Continue the native-runtime cutover by adding native metrics service token
+  loading, native service handoffs for stream/UDP/load-balancer refresh tasks,
+  and native runtime dispatcher coverage.
+- Add native proxy HTTP/1 listener startup paths for plaintext, Rustls, OpenSSL,
+  trusted downstream PROXY protocol, and certificate reload integration while
+  keeping unsupported HTTP/2 listener dispatch fail-closed.
+- Tighten native load-balancer compatibility by rejecting nginx-compatible
+  Ketama tables with dynamic discovery sources and warning when CRC32 ring
+  collisions reduce compatibility points.
+- Harden native HTTP/2 per-stream failures so validation/body/handler errors
+  return stream-local HTTP errors without terminating sibling streams.
+- Harden native WebSocket upgrade handling by releasing concurrency permits
+  before tunnel entry, stripping upstream hop-by-hop headers, and rebuilding
+  downstream `101 Switching Protocols` responses from an allowlist.
+- Store native HTTP request bodies in zeroizing memory and preserve that
+  behavior across the native HTTP/2-to-HTTP/1 adapter.
+- Compare native metrics bearer tokens through fixed-size digests and document
+  `metrics.token_file` as the preferred high-assurance token source.
+- Extend Pingora dependency cutover enforcement with manifest-scoped
+  compatibility dependency tracking.
+
 ## 1.6.31 - 2026-06-24
 
 ### Changed

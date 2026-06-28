@@ -719,7 +719,7 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 feature = "compression-zstd"
             ))]
             let compression_request = self.compression.as_ref().map(|_| request.clone());
-            self.request_headers.apply(&mut request);
+            self.request_headers.apply(&mut request, None);
             #[cfg(feature = "load-balancer")]
             if self.load_balancer.is_some() {
                 return self
@@ -829,7 +829,7 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
         stream: NativeHttp1ConnectionStream,
     ) -> Pin<Box<dyn Future<Output = Result<(), crate::NativeHttp1Error>> + Send + 'a>> {
         Box::pin(async move {
-            self.request_headers.apply(&mut request);
+            self.request_headers.apply(&mut request, None);
             #[cfg(feature = "load-balancer")]
             if self.load_balancer.is_some() {
                 return self
@@ -935,6 +935,19 @@ impl NativeHttp1Proxy {
         let max_attempts = self.upstreams.len().max(1);
         for attempt in 0..max_attempts {
             let Some(selected) = load_balancer.select_or_wait(&request, client_ip).await else {
+                if attempt == 0 {
+                    let status = load_balancer.all_down_status();
+                    return self
+                        .error_page_response(&request, status)
+                        .unwrap_or_else(|| {
+                            NativeHttp1Response::new(
+                                status,
+                                native_proxy_status_reason(status),
+                                b"service unavailable\n",
+                            )
+                            .close_connection()
+                        });
+                }
                 break;
             };
             let authority = selected.authority();
@@ -1267,6 +1280,22 @@ fn native_request_replace_header(request: &mut NativeHttp1Request, name: &str, v
         .headers
         .retain(|(header_name, _)| !header_name.eq_ignore_ascii_case(name));
     request.headers.push((name.to_owned(), value.to_owned()));
+}
+
+#[cfg(feature = "load-balancer")]
+fn native_proxy_status_reason(status: u16) -> &'static str {
+    match status {
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => "Error",
+    }
 }
 
 #[cfg(feature = "auth-request")]

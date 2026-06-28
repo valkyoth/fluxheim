@@ -1,5 +1,6 @@
 #[cfg(feature = "proxy")]
 use std::collections::{HashMap, HashSet};
+#[cfg(feature = "proxy")]
 use std::fmt::Write as _;
 #[cfg(feature = "proxy")]
 use std::path::Path;

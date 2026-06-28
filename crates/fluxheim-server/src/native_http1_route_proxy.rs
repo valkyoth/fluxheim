@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 #[cfg(feature = "php-fpm")]
 use std::io;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 #[cfg(feature = "php-fpm")]
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -30,9 +30,9 @@ use fluxheim_compression::{
 #[cfg(not(feature = "privacy-mode"))]
 use fluxheim_config::ForwardedClientIpHeaderMode;
 use fluxheim_config::{
-    AccessPolicyConfig, GrpcRouteConfig, HeaderPolicyConfig, HeaderValues, RateLimitMode,
-    RequestHeaderPolicyConfig, ResponseHeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig,
-    ResponseHeaderRewriteConfig,
+    AccessPolicyConfig, GrpcRouteConfig, HeaderPolicyConfig, HeaderValues, HttpsRedirectConfig,
+    RateLimitMode, RequestHeaderPolicyConfig, ResponseHeaderPolicyConfig,
+    ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig, normalize_host,
 };
 #[cfg(feature = "acme")]
 use fluxheim_config::{AcmeChallenge, Config};
@@ -88,6 +88,8 @@ pub struct NativeHttp1RouteProxy {
     access: NativeIpAccessPolicy,
     rate_limit: NativeRateLimit,
     concurrency: NativeConcurrencyLimit,
+    max_request_body_bytes: Option<u64>,
+    https_redirect: HttpsRedirectConfig,
     #[cfg(not(feature = "privacy-mode"))]
     trusted_sources: Vec<ProxyProtocolTrustedSource>,
 }
@@ -100,6 +102,7 @@ pub struct NativeHttp1RouteProxyRoute {
     rewrite_prefix: Option<String>,
     rewrite_template: Option<String>,
     max_request_body_bytes: Option<u64>,
+    https_redirect_exempt: bool,
     #[cfg(any(
         feature = "compression-brotli",
         feature = "compression-gzip",
@@ -236,6 +239,11 @@ pub(crate) struct NativeRouteRequestHeaderPolicy {
     unset: Vec<String>,
     set: Vec<(String, String)>,
     append: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct NativeRequestHeaderTemplateContext {
+    route_regex_captures: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -879,6 +887,8 @@ impl NativeHttp1RouteProxy {
             access: NativeIpAccessPolicy::default(),
             rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
+            max_request_body_bytes: None,
+            https_redirect: HttpsRedirectConfig::default(),
             #[cfg(not(feature = "privacy-mode"))]
             trusted_sources: Vec::new(),
         }
@@ -937,6 +947,7 @@ impl NativeHttp1RouteProxy {
         }
         let mut proxy = Self::new(Vec::new(), fallback);
         proxy.fallback_web = fallback_web;
+        proxy.https_redirect = config.server.https_redirect;
         proxy.fallback_response_headers =
             NativeRouteResponseHeaderPolicy::from_policy(&config.headers.response);
         #[cfg(any(
@@ -956,6 +967,11 @@ impl NativeHttp1RouteProxy {
 
     pub fn fallback(&self) -> Option<&NativeHttp1Proxy> {
         self.fallback.as_ref()
+    }
+
+    pub(crate) fn with_https_redirect(mut self, https_redirect: HttpsRedirectConfig) -> Self {
+        self.https_redirect = https_redirect;
+        self
     }
 
     #[cfg(feature = "acme")]
@@ -1026,6 +1042,7 @@ impl NativeHttp1RouteProxy {
             #[cfg(feature = "load-balancer")]
             load_balancer_services,
         )?;
+        proxy.https_redirect = config.server.https_redirect;
         if let Some(route) = native_managed_http_01_route(config, vhost, base_headers)? {
             proxy.routes.insert(0, route);
         }
@@ -1193,6 +1210,8 @@ impl NativeHttp1RouteProxy {
             access,
             rate_limit,
             concurrency,
+            max_request_body_bytes: vhost.max_request_body_bytes.map(|bytes| bytes.as_u64()),
+            https_redirect: HttpsRedirectConfig::default(),
             #[cfg(not(feature = "privacy-mode"))]
             trusted_sources: trusted_sources.to_vec(),
         })
@@ -1324,6 +1343,7 @@ impl NativeHttp1RouteProxyRoute {
             rewrite_prefix: None,
             rewrite_template: None,
             max_request_body_bytes: None,
+            https_redirect_exempt: false,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -1348,6 +1368,7 @@ impl NativeHttp1RouteProxyRoute {
             rewrite_prefix: None,
             rewrite_template: None,
             max_request_body_bytes: None,
+            https_redirect_exempt: false,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -1372,6 +1393,7 @@ impl NativeHttp1RouteProxyRoute {
             rewrite_prefix: None,
             rewrite_template: None,
             max_request_body_bytes: None,
+            https_redirect_exempt: false,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -1401,6 +1423,7 @@ impl NativeHttp1RouteProxyRoute {
             rewrite_prefix: None,
             rewrite_template: None,
             max_request_body_bytes: None,
+            https_redirect_exempt: false,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -1433,6 +1456,7 @@ impl NativeHttp1RouteProxyRoute {
             rewrite_prefix: None,
             rewrite_template: None,
             max_request_body_bytes: None,
+            https_redirect_exempt: false,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -1464,6 +1488,7 @@ impl NativeHttp1RouteProxyRoute {
             rewrite_prefix: None,
             rewrite_template: None,
             max_request_body_bytes: None,
+            https_redirect_exempt: false,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -1493,6 +1518,7 @@ impl NativeHttp1RouteProxyRoute {
             rewrite_prefix: None,
             rewrite_template: None,
             max_request_body_bytes: None,
+            https_redirect_exempt: true,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -1602,6 +1628,7 @@ impl NativeHttp1RouteProxyRoute {
             rewrite_prefix: route.rewrite_prefix.clone(),
             rewrite_template: route.rewrite_template.clone(),
             max_request_body_bytes: route.max_request_body_bytes.map(|bytes| bytes.as_u64()),
+            https_redirect_exempt: route.https_redirect_exempt,
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -1697,6 +1724,17 @@ impl NativeHttp1RouteProxyRoute {
 
     pub fn is_redirect(&self) -> bool {
         matches!(self.action, NativeHttp1RouteAction::Redirect(_))
+    }
+
+    fn https_redirect_exempt_or_redirect(&self) -> bool {
+        if self.https_redirect_exempt || self.is_redirect() {
+            return true;
+        }
+        #[cfg(feature = "acme")]
+        if matches!(self.action, NativeHttp1RouteAction::AcmeHttp01(_)) {
+            return true;
+        }
+        false
     }
 
     pub fn is_static_web(&self) -> bool {
@@ -2069,6 +2107,9 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
                     .close_connection();
             }
+            if let Some(response) = self.https_redirect_response(&request, selected_route) {
+                return response;
+            }
             let concurrency_route = decoded_policy_route.or(selected_route);
             // Delay-mode rate limiting sleeps are still live downstream work.
             // Count them against concurrency so an attacker cannot park
@@ -2113,6 +2154,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     };
                 if route
                     .max_request_body_bytes
+                    .or(self.max_request_body_bytes)
                     .is_some_and(|limit| (request.body.len() as u64) > limit)
                 {
                     return NativeHttp1Response::new(
@@ -2122,7 +2164,10 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     )
                     .close_connection();
                 }
-                route.request_headers.apply(&mut request);
+                let header_context = NativeRequestHeaderTemplateContext::from_route(route, &path);
+                route
+                    .request_headers
+                    .apply(&mut request, Some(&header_context));
                 return route.handle(request).await;
             }
             if let Some(response) = self.fallback_web_response(&request, &path) {
@@ -2179,6 +2224,37 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
 }
 
 impl NativeHttp1RouteProxy {
+    fn https_redirect_response(
+        &self,
+        request: &NativeHttp1Request,
+        selected_route: Option<&NativeHttp1RouteProxyRoute>,
+    ) -> Option<NativeHttp1Response> {
+        if !self.https_redirect.enabled || request.downstream_tls {
+            return None;
+        }
+        if selected_route.is_some_and(NativeHttp1RouteProxyRoute::https_redirect_exempt_or_redirect)
+        {
+            return None;
+        }
+        let Some(location) = https_redirect_location(request, &self.https_redirect) else {
+            return Some(
+                NativeHttp1Response::new(400, "Bad Request", b"missing or invalid host\n")
+                    .close_connection(),
+            );
+        };
+        let mut response = NativeHttp1Response::new(
+            self.https_redirect.status,
+            redirect_reason(self.https_redirect.status),
+            Vec::new(),
+        )
+        .with_header("location", location)
+        .with_header("content-length", "0");
+        self.fallback_response_headers.apply(&mut response);
+        Some(response)
+    }
+}
+
+impl NativeHttp1RouteProxy {
     async fn handle_connection_takeover_inner(
         &self,
         request: NativeHttp1Request,
@@ -2215,7 +2291,7 @@ impl NativeHttp1RouteProxy {
             return write_takeover_rejection(&mut stream, 403, "Forbidden", b"forbidden\n").await;
         }
         let concurrency_route = decoded_policy_route.or(selected_route);
-        let _concurrency_permits = match self.acquire_concurrency_permits(concurrency_route).await {
+        let concurrency_permits = match self.acquire_concurrency_permits(concurrency_route).await {
             Ok(permits) => permits,
             Err(status) => {
                 return write_takeover_rejection(
@@ -2240,6 +2316,7 @@ impl NativeHttp1RouteProxy {
                 .await;
             }
         }
+        drop(concurrency_permits);
         if let Some(route) = selected_route {
             let mut request = match rewrite_route_request(request, route, &path, query.as_deref()) {
                 Some(request) => request,
@@ -2255,6 +2332,7 @@ impl NativeHttp1RouteProxy {
             };
             if route
                 .max_request_body_bytes
+                .or(self.max_request_body_bytes)
                 .is_some_and(|limit| (request.body.len() as u64) > limit)
             {
                 return write_takeover_rejection(
@@ -2265,7 +2343,10 @@ impl NativeHttp1RouteProxy {
                 )
                 .await;
             }
-            route.request_headers.apply(&mut request);
+            let header_context = NativeRequestHeaderTemplateContext::from_route(route, &path);
+            route
+                .request_headers
+                .apply(&mut request, Some(&header_context));
             return route
                 .handle_connection_takeover(request, prebuffered, stream)
                 .await;
@@ -3086,6 +3167,30 @@ fn route_rewrite_template_path(
     Some(rewritten)
 }
 
+fn route_regex_header_captures(
+    path: &str,
+    matcher: &NativeHttp1RouteMatcher,
+) -> Vec<(String, String)> {
+    let NativeHttp1RouteMatcher::Regex(regex_matcher) = matcher else {
+        return Vec::new();
+    };
+    let Some(captures) = regex_matcher.regex.captures(path) else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    for index in 1..captures.len() {
+        if let Some(value) = captures.get(index) {
+            values.push((format!("route.regex.{index}"), value.as_str().to_owned()));
+        }
+    }
+    for name in regex_matcher.regex.capture_names().flatten() {
+        if let Some(value) = captures.name(name) {
+            values.push((format!("route.regex.{name}"), value.as_str().to_owned()));
+        }
+    }
+    values
+}
+
 fn route_regex_capture_value<'a>(
     regex: &regex::Regex,
     captures: &'a regex::Captures<'a>,
@@ -3172,6 +3277,34 @@ fn redirect_reason(status: u16) -> &'static str {
     }
 }
 
+fn https_redirect_location(
+    request: &NativeHttp1Request,
+    config: &HttpsRedirectConfig,
+) -> Option<String> {
+    let host = request_header_value(request, "host")?;
+    let normalized_host = normalize_host(host)?;
+    let authority = redirect_authority(&normalized_host, config.target_port)?;
+    let target = request.target.as_str();
+    if !target.starts_with('/') || target.chars().any(char::is_control) {
+        return None;
+    }
+    Some(format!("https://{authority}{target}"))
+}
+
+fn redirect_authority(host: &str, target_port: Option<u16>) -> Option<String> {
+    let host = if host.parse::<Ipv6Addr>().is_ok() {
+        format!("[{host}]")
+    } else {
+        host.to_owned()
+    };
+
+    match target_port {
+        Some(443) | None => Some(host),
+        Some(0) => None,
+        Some(port) => Some(format!("{host}:{port}")),
+    }
+}
+
 fn route_redirect_location(
     request: &NativeHttp1Request,
     redirect: &NativeHttp1RouteRedirect,
@@ -3245,8 +3378,7 @@ fn redirect_location_path_safe(location: &str) -> bool {
     path.is_empty() || safe_forward_path(path)
 }
 
-#[cfg(not(feature = "privacy-mode"))]
-fn header_value<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a str> {
+fn request_header_value<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a str> {
     request
         .headers
         .iter()
@@ -3254,6 +3386,11 @@ fn header_value<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a s
             header_name.eq_ignore_ascii_case(name) && !value.trim().is_empty()
         })
         .map(|(_, value)| value.trim())
+}
+
+#[cfg(not(feature = "privacy-mode"))]
+fn header_value<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a str> {
+    request_header_value(request, name)
 }
 
 #[cfg(not(feature = "privacy-mode"))]
@@ -3297,6 +3434,90 @@ fn replace_request_header(
     let name = name.into();
     remove_request_header(request, &name);
     request.headers.push((name, value.into()));
+}
+
+fn render_native_request_header_template(
+    value: &str,
+    request: &NativeHttp1Request,
+    context: Option<&NativeRequestHeaderTemplateContext>,
+) -> String {
+    let mut rendered = String::with_capacity(value.len());
+    let mut rest = value;
+
+    while let Some(open) = rest.find('{') {
+        rendered.push_str(&rest[..open]);
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find('}') else {
+            rendered.push_str(&rest[open..]);
+            return rendered;
+        };
+        let variable = &after_open[..close];
+        if let Some(value) = native_request_header_template_variable(variable, request, context) {
+            rendered.extend(value.chars().filter(|character| !character.is_control()));
+        }
+        rest = &after_open[close + 1..];
+    }
+
+    rendered.push_str(rest);
+    rendered
+}
+
+fn native_request_header_template_variable(
+    variable: &str,
+    request: &NativeHttp1Request,
+    context: Option<&NativeRequestHeaderTemplateContext>,
+) -> Option<String> {
+    if let Some(value) = context.and_then(|context| context.variable(variable)) {
+        return Some(value.to_owned());
+    }
+    match variable {
+        "host" => request_header_value(request, "host").map(str::to_owned),
+        "scheme" => Some(
+            if request.downstream_tls {
+                "https"
+            } else {
+                "http"
+            }
+            .to_owned(),
+        ),
+        "uri" => Some(request.target.clone()),
+        "path" => Some(
+            request
+                .target
+                .split_once('?')
+                .map(|(path, _)| path)
+                .unwrap_or(request.target.as_str())
+                .to_owned(),
+        ),
+        "query" => request
+            .target
+            .split_once('?')
+            .map(|(_, query)| query.to_owned()),
+        "request_id" => request_header_value(request, "x-request-id").map(str::to_owned),
+        "tls.client_cert_sha256" => request
+            .tls_identity
+            .as_ref()
+            .and_then(|identity| identity.cert_sha256.clone()),
+        "tls.client_cert_serial" => request
+            .tls_identity
+            .as_ref()
+            .and_then(|identity| identity.serial_number.clone()),
+        "tls.version" => request
+            .tls_identity
+            .as_ref()
+            .and_then(|identity| identity.version.clone()),
+        "http.upgrade" => request_header_value(request, "upgrade").map(str::to_owned),
+        #[cfg(not(feature = "privacy-mode"))]
+        "remote_addr" => request
+            .effective_client_addr
+            .as_ref()
+            .or(request.peer_addr.as_ref())
+            .map(std::net::SocketAddr::ip)
+            .map(|ip| ip.to_string()),
+        #[cfg(feature = "privacy-mode")]
+        "remote_addr" => None,
+        _ => None,
+    }
 }
 
 impl NativeRouteRequestHeaderPolicy {
@@ -3354,7 +3575,11 @@ impl NativeRouteRequestHeaderPolicy {
         policy
     }
 
-    pub(crate) fn apply(&self, request: &mut NativeHttp1Request) {
+    pub(crate) fn apply(
+        &self,
+        request: &mut NativeHttp1Request,
+        context: Option<&NativeRequestHeaderTemplateContext>,
+    ) {
         if !self.enabled {
             #[cfg(feature = "privacy-mode")]
             strip_spoofable_client_ip_headers(request);
@@ -3371,10 +3596,16 @@ impl NativeRouteRequestHeaderPolicy {
             request
                 .headers
                 .retain(|(header_name, _)| !header_name.eq_ignore_ascii_case(name));
-            request.headers.push((name.clone(), value.clone()));
+            let value = render_native_request_header_template(value, request, context);
+            if !value.is_empty() {
+                request.headers.push((name.clone(), value));
+            }
         }
         for (name, value) in &self.append {
-            request.headers.push((name.clone(), value.clone()));
+            let value = render_native_request_header_template(value, request, context);
+            if !value.is_empty() {
+                request.headers.push((name.clone(), value));
+            }
         }
         #[cfg(feature = "privacy-mode")]
         strip_spoofable_client_ip_headers(request);
@@ -3485,6 +3716,20 @@ impl NativeRouteRequestHeaderPolicy {
         self.trusted_sources
             .iter()
             .any(|source| source.contains(address))
+    }
+}
+
+impl NativeRequestHeaderTemplateContext {
+    fn from_route(route: &NativeHttp1RouteProxyRoute, path: &str) -> Self {
+        Self {
+            route_regex_captures: route_regex_header_captures(path, &route.matcher),
+        }
+    }
+
+    fn variable(&self, variable: &str) -> Option<&str> {
+        self.route_regex_captures
+            .iter()
+            .find_map(|(name, value)| (name == variable).then_some(value.as_str()))
     }
 }
 
