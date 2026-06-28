@@ -2096,7 +2096,7 @@ mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::Duration;
 
-    use fluxheim_common::test_support::safe_child_path;
+    use fluxheim_common::test_support::unique_temp_path;
     use prometheus::Encoder;
     use zeroize::Zeroizing;
 
@@ -2741,7 +2741,7 @@ mod tests {
         let _guard = metrics_test_lock();
         init().unwrap();
 
-        let token_file = unique_metrics_temp_path();
+        let token_file = unique_temp_path("native-metrics-token-file");
         std::fs::write(&token_file, "metrics-file-secret\n").unwrap();
         let config = crate::config::MetricsConfig {
             token_file: Some(token_file.clone()),
@@ -3507,24 +3507,5 @@ mod tests {
     fn metrics_test_lock() -> MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
-    }
-
-    fn unique_metrics_temp_path() -> std::path::PathBuf {
-        static COUNTER: OnceLock<std::sync::atomic::AtomicU64> = OnceLock::new();
-        let id = COUNTER
-            .get_or_init(|| std::sync::atomic::AtomicU64::new(0))
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let root = std::env::current_dir()
-            .unwrap()
-            .join("target")
-            .join("fluxheim-test-secrets");
-        std::fs::create_dir_all(&root).unwrap();
-        safe_child_path(
-            &root,
-            &format!(
-                "fluxheim-native-metrics-token-file-{}-{id}",
-                std::process::id()
-            ),
-        )
     }
 }
