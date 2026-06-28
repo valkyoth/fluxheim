@@ -2863,11 +2863,13 @@ available for the stabilization/security-only follow-up.
     bounded background refresh, supports `[cache.lock]` same-key request
     collapsing for concurrent memory-cache misses, supports memory-tier
     `[cache.range.slice]` fixed-slice range composition, supports peer-fill
-    over HTTPS and loopback-or-opt-in HTTP, and has live native listener `MISS`
-    then `HIT`, collapsed-fill `HIT`, slice-fill then slice `HIT`, multipart
-    slice composition, `PEER-HIT` then `HIT`, and stale-refresh tests. Native
-    readiness still blocks disk/tiered cache until those semantics are owned by
-    the native adapter.
+    over HTTPS and loopback-or-opt-in HTTP, supports unencrypted filesystem
+    disk cache and memory+filesystem-disk tiering, and has live native listener
+    `MISS` then `HIT`, collapsed-fill `HIT`, slice-fill then slice `HIT`,
+    multipart slice composition, disk persistence, memory refill from disk,
+    `PEER-HIT` then `HIT`, and stale-refresh tests. Native readiness still
+    blocks encrypted disk and storage-bin cache until those semantics are owned
+    by the native adapter.
 - `v1.6.34`: remove the final Pingora runtime/listener/TLS adapter crates from
   normal builds after proxy-cache parity is proven. The native WebSocket
   baseline already covers strict `Upgrade: websocket` requests on forced HTTP/1

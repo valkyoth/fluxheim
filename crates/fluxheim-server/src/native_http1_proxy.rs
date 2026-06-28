@@ -14,10 +14,11 @@ use crate::NativeHttp1UpstreamTls;
 #[cfg(not(feature = "privacy-mode"))]
 use crate::ProxyProtocolTrustedSource;
 use crate::native_http1_cache::{
-    NativeMemoryCacheCounter, NativeMemoryCacheEntry, NativeMemoryCacheFill,
-    NativeMemoryCacheState, NativeMemoryCacheVariant, lock_native_memory_cache,
-    native_cache_entry_weight, native_cache_ttl, native_peer_fill_cache_ttl,
-    native_response_header_map, prune_native_memory_cache, remove_native_memory_cache_entry,
+    NativeDiskCache, NativeDiskCacheStoreKey, NativeMemoryCacheCounter, NativeMemoryCacheEntry,
+    NativeMemoryCacheFill, NativeMemoryCacheState, NativeMemoryCacheVariant,
+    lock_native_memory_cache, native_cache_entry_weight, native_cache_ttl,
+    native_disk_cache_supported, native_peer_fill_cache_ttl, native_response_header_map,
+    prune_native_memory_cache, remove_native_memory_cache_entry,
     remove_native_memory_cache_variants, with_native_cache_status,
 };
 #[cfg(any(
@@ -110,6 +111,7 @@ struct NativeProxyMemoryCache {
     config: CacheConfig,
     max_bytes: u64,
     state: Arc<Mutex<NativeMemoryCacheState>>,
+    disk: Option<Arc<NativeDiskCache>>,
     origin_fill_key: Arc<str>,
     peer_fill_key: Arc<str>,
     peer_fill_peers: Vec<NativePeerFillPeer>,
@@ -526,8 +528,7 @@ impl NativeHttp1Proxy {
 
     pub fn proxy_cache_supported(cache: &CacheConfig) -> bool {
         cache.enabled
-            && cache.memory.enabled
-            && !cache.disk.enabled
+            && (cache.memory.enabled || (cache.disk.enabled && native_disk_cache_supported(cache)))
             && native_peer_fill_supported(cache)
     }
 
@@ -988,14 +989,30 @@ fn native_peer_fill_tls_upstream(
 impl NativeProxyMemoryCache {
     fn from_config(config: &CacheConfig) -> Option<Self> {
         let id = NATIVE_PROXY_CACHE_ID.fetch_add(1, Ordering::Relaxed);
-        NativeHttp1Proxy::proxy_cache_supported(config).then(|| Self {
+        if !NativeHttp1Proxy::proxy_cache_supported(config) {
+            return None;
+        }
+        let disk = NativeDiskCache::from_config(config).map(Arc::new);
+        if !config.memory.enabled && disk.is_none() {
+            return None;
+        }
+        Some(Self {
             config: config.clone(),
-            max_bytes: config.memory.max_size_bytes.as_u64(),
+            max_bytes: if config.memory.enabled {
+                config.memory.max_size_bytes.as_u64()
+            } else {
+                0
+            },
             state: Arc::new(Mutex::new(NativeMemoryCacheState::default())),
+            disk,
             origin_fill_key: Arc::from(format!("native-proxy-cache:{id}:origin")),
             peer_fill_key: Arc::from(format!("native-proxy-cache:{id}:peer-fill")),
             peer_fill_peers: native_peer_fill_peers(config),
         })
+    }
+
+    fn memory_enabled(&self) -> bool {
+        self.config.memory.enabled
     }
 
     fn lookup(&self, request: &NativeHttp1Request) -> NativeProxyCacheLookup {
@@ -1353,46 +1370,49 @@ impl NativeProxyMemoryCache {
 
     fn get(&self, key: &str, request: &NativeHttp1Request) -> Option<NativeMemoryCacheEntry> {
         let now = std::time::Instant::now();
-        let mut state = lock_native_memory_cache(&self.state, "proxy");
+        if self.memory_enabled() {
+            let mut state = lock_native_memory_cache(&self.state, "proxy");
 
-        if let Some(variants) = state.variants.get(key).cloned() {
-            for variant in variants {
-                let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request) else {
-                    continue;
-                };
-                if variant_key != variant.key {
-                    continue;
-                }
-                match state.objects.get(&variant.key) {
-                    Some(entry) if entry.expires_at > now => return Some(entry.clone()),
-                    Some(entry) => {
-                        if native_cache_entry_has_stale_window(entry, now) {
-                            return None;
-                        }
-                        let weight = entry.weight;
-                        remove_native_memory_cache_entry(&mut state, &variant.key);
-                        state.bytes = state.bytes.saturating_sub(weight);
-                        return None;
+            if let Some(variants) = state.variants.get(key).cloned() {
+                for variant in variants {
+                    let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request)
+                    else {
+                        continue;
+                    };
+                    if variant_key != variant.key {
+                        continue;
                     }
-                    None => {}
+                    match state.objects.get(&variant.key) {
+                        Some(entry) if entry.expires_at > now => return Some(entry.clone()),
+                        Some(entry) => {
+                            if native_cache_entry_has_stale_window(entry, now) {
+                                return self.get_disk_fresh(key, request);
+                            }
+                            let weight = entry.weight;
+                            remove_native_memory_cache_entry(&mut state, &variant.key);
+                            state.bytes = state.bytes.saturating_sub(weight);
+                            return self.get_disk_fresh(key, request);
+                        }
+                        None => {}
+                    }
                 }
+                return self.get_disk_fresh(key, request);
             }
-            return None;
-        }
 
-        match state.objects.get(key) {
-            Some(entry) if entry.expires_at > now => Some(entry.clone()),
-            Some(entry) => {
-                if native_cache_entry_has_stale_window(entry, now) {
-                    return None;
+            match state.objects.get(key) {
+                Some(entry) if entry.expires_at > now => return Some(entry.clone()),
+                Some(entry) => {
+                    if native_cache_entry_has_stale_window(entry, now) {
+                        return self.get_disk_fresh(key, request);
+                    }
+                    let weight = entry.weight;
+                    remove_native_memory_cache_entry(&mut state, key);
+                    state.bytes = state.bytes.saturating_sub(weight);
                 }
-                let weight = entry.weight;
-                remove_native_memory_cache_entry(&mut state, key);
-                state.bytes = state.bytes.saturating_sub(weight);
-                None
+                None => {}
             }
-            None => None,
         }
+        self.get_disk_fresh(key, request)
     }
 
     fn get_stale_while_revalidate(
@@ -1401,27 +1421,33 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
     ) -> Option<NativeMemoryCacheEntry> {
         let now = std::time::Instant::now();
-        let state = lock_native_memory_cache(&self.state, "proxy");
-        if let Some(variants) = state.variants.get(key).cloned() {
-            for variant in variants {
-                let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request) else {
-                    continue;
-                };
-                if variant_key != variant.key {
-                    continue;
+        if self.memory_enabled() {
+            let state = lock_native_memory_cache(&self.state, "proxy");
+            if let Some(variants) = state.variants.get(key).cloned() {
+                for variant in variants {
+                    let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request)
+                    else {
+                        continue;
+                    };
+                    if variant_key != variant.key {
+                        continue;
+                    }
+                    if let Some(entry) = state.objects.get(&variant.key)
+                        && native_cache_entry_serve_stale_while_revalidate(entry, now)
+                    {
+                        return Some(entry.clone());
+                    }
                 }
-                if let Some(entry) = state.objects.get(&variant.key)
-                    && native_cache_entry_serve_stale_while_revalidate(entry, now)
-                {
-                    return Some(entry.clone());
-                }
+                return self.get_disk_stale_while_revalidate(key, request);
             }
-            return None;
-        }
 
-        state.objects.get(key).and_then(|entry| {
-            native_cache_entry_serve_stale_while_revalidate(entry, now).then(|| entry.clone())
-        })
+            if let Some(entry) = state.objects.get(key)
+                && native_cache_entry_serve_stale_while_revalidate(entry, now)
+            {
+                return Some(entry.clone());
+            }
+        }
+        self.get_disk_stale_while_revalidate(key, request)
     }
 
     fn get_stale(
@@ -1435,48 +1461,141 @@ impl NativeProxyMemoryCache {
         }
 
         let now = std::time::Instant::now();
-        let mut state = lock_native_memory_cache(&self.state, "proxy");
-        if let Some(variants) = state.variants.get(key).cloned() {
-            for variant in variants {
-                let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request) else {
-                    continue;
-                };
-                if variant_key != variant.key {
-                    continue;
-                }
-                match state.objects.get(&variant.key) {
-                    Some(entry)
-                        if entry.expires_at <= now
-                            && entry.stale_if_error_until.is_some_and(|until| until > now) =>
-                    {
-                        return Some(entry.clone());
+        if self.memory_enabled() {
+            let mut state = lock_native_memory_cache(&self.state, "proxy");
+            if let Some(variants) = state.variants.get(key).cloned() {
+                for variant in variants {
+                    let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request)
+                    else {
+                        continue;
+                    };
+                    if variant_key != variant.key {
+                        continue;
                     }
-                    Some(entry) if entry.stale_if_error_until.is_some_and(|until| until <= now) => {
-                        let weight = entry.weight;
-                        remove_native_memory_cache_entry(&mut state, &variant.key);
-                        state.bytes = state.bytes.saturating_sub(weight);
-                        return None;
+                    match state.objects.get(&variant.key) {
+                        Some(entry)
+                            if entry.expires_at <= now
+                                && entry.stale_if_error_until.is_some_and(|until| until > now) =>
+                        {
+                            return Some(entry.clone());
+                        }
+                        Some(entry)
+                            if entry.stale_if_error_until.is_some_and(|until| until <= now) =>
+                        {
+                            let weight = entry.weight;
+                            remove_native_memory_cache_entry(&mut state, &variant.key);
+                            state.bytes = state.bytes.saturating_sub(weight);
+                            return self.get_disk_stale_if_error(key, request);
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
+                return self.get_disk_stale_if_error(key, request);
             }
-            return None;
-        }
 
-        match state.objects.get(key) {
-            Some(entry)
-                if entry.expires_at <= now
-                    && entry.stale_if_error_until.is_some_and(|until| until > now) =>
-            {
-                Some(entry.clone())
+            match state.objects.get(key) {
+                Some(entry)
+                    if entry.expires_at <= now
+                        && entry.stale_if_error_until.is_some_and(|until| until > now) =>
+                {
+                    return Some(entry.clone());
+                }
+                Some(entry) if entry.stale_if_error_until.is_some_and(|until| until <= now) => {
+                    let weight = entry.weight;
+                    remove_native_memory_cache_entry(&mut state, key);
+                    state.bytes = state.bytes.saturating_sub(weight);
+                }
+                _ => {}
             }
-            Some(entry) if entry.stale_if_error_until.is_some_and(|until| until <= now) => {
-                let weight = entry.weight;
-                remove_native_memory_cache_entry(&mut state, key);
-                state.bytes = state.bytes.saturating_sub(weight);
-                None
+        }
+        self.get_disk_stale_if_error(key, request)
+    }
+
+    fn get_disk_fresh(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+    ) -> Option<NativeMemoryCacheEntry> {
+        let entry = self.disk_entry(key, request)?;
+        (entry.expires_at > std::time::Instant::now()).then(|| {
+            self.promote_disk_entry(key, request, &entry);
+            entry
+        })
+    }
+
+    fn get_disk_stale_while_revalidate(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+    ) -> Option<NativeMemoryCacheEntry> {
+        let entry = self.disk_entry(key, request)?;
+        native_cache_entry_serve_stale_while_revalidate(&entry, std::time::Instant::now())
+            .then_some(entry)
+    }
+
+    fn get_disk_stale_if_error(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+    ) -> Option<NativeMemoryCacheEntry> {
+        let entry = self.disk_entry(key, request)?;
+        let now = std::time::Instant::now();
+        (entry.expires_at <= now && entry.stale_if_error_until.is_some_and(|until| until > now))
+            .then_some(entry)
+    }
+
+    fn disk_entry(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+    ) -> Option<NativeMemoryCacheEntry> {
+        self.disk
+            .as_ref()?
+            .get(key, |fields| native_vary_cache_key(key, fields, request))
+    }
+
+    fn promote_disk_entry(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+        entry: &NativeMemoryCacheEntry,
+    ) {
+        if !self.memory_enabled() || entry.weight > self.max_bytes {
+            return;
+        }
+        let headers = native_response_header_map(&entry.to_response());
+        let vary_fields = match cache_vary_policy(&headers, &self.config) {
+            VaryCachePolicy::None => None,
+            VaryCachePolicy::Fields(fields) => Some(fields),
+            VaryCachePolicy::Uncacheable(_) => return,
+        };
+        let store_key = if let Some(fields) = vary_fields.as_ref() {
+            let Some(key) = native_vary_cache_key(key, fields, request) else {
+                return;
+            };
+            key
+        } else {
+            key.to_owned()
+        };
+        let needs_prune = {
+            let mut state = lock_native_memory_cache(&self.state, "proxy");
+            if let Some(fields) = vary_fields {
+                let variants = state.variants.entry(key.to_owned()).or_default();
+                variants.retain(|variant| variant.key != store_key);
+                variants.push(NativeMemoryCacheVariant {
+                    fields,
+                    key: store_key.clone(),
+                });
             }
-            _ => None,
+            if let Some(previous) = state.objects.insert(store_key, entry.clone()) {
+                state.bytes = state.bytes.saturating_sub(previous.weight);
+            }
+            state.bytes = state.bytes.saturating_add(entry.weight);
+            state.bytes > self.max_bytes
+        };
+        if needs_prune {
+            let mut state = lock_native_memory_cache(&self.state, "proxy");
+            prune_native_memory_cache(&mut state, self.max_bytes);
         }
     }
 
@@ -1536,7 +1655,7 @@ impl NativeProxyMemoryCache {
         if body_len == 0 {
             return Err("empty-body");
         }
-        if body_len > self.config.max_object_bytes.as_u64() || body_len > self.max_bytes {
+        if body_len > self.config.max_object_bytes.as_u64() {
             return Err("object-too-large");
         }
         let headers = native_response_header_map(response);
@@ -1586,7 +1705,7 @@ impl NativeProxyMemoryCache {
             return Err("ttl-overflow");
         };
         let weight = native_cache_entry_weight(&store_key, response, body_len);
-        if weight > self.max_bytes {
+        if self.memory_enabled() && weight > self.max_bytes {
             return Err("object-too-large");
         }
         let entry = NativeMemoryCacheEntry {
@@ -1601,37 +1720,56 @@ impl NativeProxyMemoryCache {
             stored_at: now,
             weight,
         };
-        let needs_prune = {
-            let mut state = lock_native_memory_cache(&self.state, "proxy");
-            if let Some(fields) = vary_fields {
-                if let Some(previous) = remove_native_memory_cache_entry(&mut state, key) {
-                    state.bytes = state.bytes.saturating_sub(previous.weight);
-                }
-                if let Some(previous) = remove_native_memory_cache_entry(&mut state, &store_key) {
-                    state.bytes = state.bytes.saturating_sub(previous.weight);
-                }
-                let variants = state.variants.entry(key.to_owned()).or_default();
-                variants.retain(|variant| variant.key != store_key);
-                variants.push(NativeMemoryCacheVariant {
-                    fields,
-                    key: store_key.clone(),
-                });
-            } else {
-                let removed_bytes = remove_native_memory_cache_variants(&mut state, key);
-                state.bytes = state.bytes.saturating_sub(removed_bytes);
-                if let Some(previous) = remove_native_memory_cache_entry(&mut state, &store_key) {
-                    state.bytes = state.bytes.saturating_sub(previous.weight);
-                }
-            }
-            if let Some(previous) = state.objects.insert(store_key, entry) {
-                state.bytes = state.bytes.saturating_sub(previous.weight);
-            }
-            state.bytes = state.bytes.saturating_add(weight);
-            state.bytes > self.max_bytes
+        let disk_key = NativeDiskCacheStoreKey {
+            combined: store_key.clone(),
+            primary: key.to_owned(),
+            user_tag: native_cache_user_tag(request),
+            index_path: Some(request.path().to_owned()),
+            vary_fields: vary_fields.clone().unwrap_or_default(),
         };
-        if needs_prune {
-            let mut state = lock_native_memory_cache(&self.state, "proxy");
-            prune_native_memory_cache(&mut state, self.max_bytes);
+        if self.memory_enabled() {
+            let needs_prune = {
+                let mut state = lock_native_memory_cache(&self.state, "proxy");
+                if let Some(fields) = vary_fields {
+                    if let Some(previous) = remove_native_memory_cache_entry(&mut state, key) {
+                        state.bytes = state.bytes.saturating_sub(previous.weight);
+                    }
+                    if let Some(previous) = remove_native_memory_cache_entry(&mut state, &store_key)
+                    {
+                        state.bytes = state.bytes.saturating_sub(previous.weight);
+                    }
+                    let variants = state.variants.entry(key.to_owned()).or_default();
+                    variants.retain(|variant| variant.key != store_key);
+                    variants.push(NativeMemoryCacheVariant {
+                        fields,
+                        key: store_key.clone(),
+                    });
+                } else {
+                    let removed_bytes = remove_native_memory_cache_variants(&mut state, key);
+                    state.bytes = state.bytes.saturating_sub(removed_bytes);
+                    if let Some(previous) = remove_native_memory_cache_entry(&mut state, &store_key)
+                    {
+                        state.bytes = state.bytes.saturating_sub(previous.weight);
+                    }
+                }
+                if let Some(previous) = state.objects.insert(store_key, entry.clone()) {
+                    state.bytes = state.bytes.saturating_sub(previous.weight);
+                }
+                state.bytes = state.bytes.saturating_add(weight);
+                state.bytes > self.max_bytes
+            };
+            if needs_prune {
+                let mut state = lock_native_memory_cache(&self.state, "proxy");
+                prune_native_memory_cache(&mut state, self.max_bytes);
+            }
+        }
+        if let Some(disk) = &self.disk
+            && let Err(error) = disk.store(disk_key, &entry)
+        {
+            log::debug!(
+                target: "fluxheim::native_http1",
+                "native disk cache store failed: {error}"
+            );
         }
         Ok(())
     }
@@ -3629,6 +3767,12 @@ fn native_request_header<'a>(request: &'a NativeHttp1Request, name: &str) -> Opt
         .iter()
         .find_map(|(header_name, value)| header_name.eq_ignore_ascii_case(name).then_some(value))
         .map(String::as_str)
+}
+
+fn native_cache_user_tag(request: &NativeHttp1Request) -> String {
+    native_request_header(request, "host")
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn native_request_is_peer_fill(request: &NativeHttp1Request) -> bool {

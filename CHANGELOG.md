@@ -20,8 +20,8 @@ behavior when the change improves security or project direction.
   checks for request bypass, response `no-store`/`private`, `Set-Cookie`,
   content type, status TTL, and object-size policy.
 - Native cache readiness now accepts root, vhost, and route proxy cache
-  policies only for the supported memory-cache subset while keeping disk and
-  tiered cache policies blocked until their native parity work lands.
+  policies for the supported native proxy-cache subset while keeping encrypted
+  disk and storage-bin policies blocked until their native parity work lands.
 - Native HTTP/1 TLS startup now recognizes managed ACME certificate sources on
   `server.default_vhost`, allowing the rustls native listener to bind while the
   default-vhost certificate is still pending first issuance.
@@ -67,6 +67,9 @@ behavior when the change improves security or project direction.
 - Native peer-fill preserves the peer-fill loop marker, `only-if-cached`
   request mode, bounded peer-fill concurrency, local storage of successful peer
   `200` responses, and `PEER-HIT` status reporting.
+- Native proxy cache now supports unencrypted filesystem disk cache and
+  memory+filesystem-disk tiering, with live listener tests proving disk
+  persistence across native proxy instances and memory refill from disk.
 - Harden native peer-fill by subtracting upstream `Age` during admission,
   returning bounded `504` misses for `only-if-cached` cache misses, and
   preventing a client-supplied peer-fill marker alone from forcing origin

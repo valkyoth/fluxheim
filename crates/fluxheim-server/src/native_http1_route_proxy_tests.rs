@@ -654,6 +654,23 @@ fn native_proxy_memory_cache_config() -> fluxheim_config::CacheConfig {
     }
 }
 
+fn native_proxy_disk_cache_config(root: std::path::PathBuf) -> fluxheim_config::CacheConfig {
+    let mut cache = native_proxy_memory_cache_config();
+    cache.memory.enabled = false;
+    cache.disk.enabled = true;
+    cache.disk.path = Some(root);
+    cache.disk.max_size_bytes = fluxheim_config::ByteSize::from_bytes(1024 * 1024);
+    cache
+}
+
+fn native_proxy_tiered_cache_config(root: std::path::PathBuf) -> fluxheim_config::CacheConfig {
+    let mut cache = native_proxy_memory_cache_config();
+    cache.disk.enabled = true;
+    cache.disk.path = Some(root);
+    cache.disk.max_size_bytes = fluxheim_config::ByteSize::from_bytes(1024 * 1024);
+    cache
+}
+
 fn route_test_request(path: &str) -> NativeHttp1Request {
     NativeHttp1Request {
         method: "GET".to_owned(),
@@ -3232,6 +3249,76 @@ async fn native_route_proxy_caches_proxy_response_in_memory() {
     assert!(second.ends_with("origin-one"));
     assert_eq!(
         response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_caches_proxy_response_on_disk() {
+    let root = tempfile::tempdir().unwrap();
+    let upstream = upstream_cacheable_once("disk-origin").await;
+    let cache = native_proxy_disk_cache_config(root.path().to_path_buf());
+    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let first_listener =
+        route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy))).await;
+
+    let first = downstream_get(first_listener, "/asset.png").await;
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("disk-origin"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+
+    let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let unavailable_origin = unused_origin_listener.local_addr().unwrap();
+    drop(unused_origin_listener);
+    let second_proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let second_listener =
+        route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
+
+    let second = downstream_get(second_listener, "/asset.png").await;
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.ends_with("disk-origin"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_tiered_cache_refills_memory_from_disk() {
+    let root = tempfile::tempdir().unwrap();
+    let upstream = upstream_cacheable_once("tiered-origin").await;
+    let cache = native_proxy_tiered_cache_config(root.path().to_path_buf());
+    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let first_listener =
+        route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy))).await;
+
+    let first = downstream_get(first_listener, "/asset.png").await;
+    assert!(first.ends_with("tiered-origin"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+
+    let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let unavailable_origin = unused_origin_listener.local_addr().unwrap();
+    drop(unused_origin_listener);
+    let second_proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let second_listener =
+        route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
+
+    let second = downstream_get(second_listener, "/asset.png").await;
+    let third = downstream_get(second_listener, "/asset.png").await;
+    assert!(second.ends_with("tiered-origin"));
+    assert!(third.ends_with("tiered-origin"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+    assert_eq!(
+        response_header(&third, "x-cache-status").as_deref(),
         Some("HIT")
     );
 }
