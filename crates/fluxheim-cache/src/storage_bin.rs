@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::io::{Read as _, Seek as _, Write as _};
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use fluxheim_config::{ByteSize, CacheDiskBackend};
@@ -167,6 +168,93 @@ pub struct StorageBinIndexEntry {
     pub combined_key: String,
     pub location: StorageBinObjectLocation,
     pub accessed: SystemTime,
+}
+
+#[derive(Debug, Clone)]
+pub struct StorageBinFileSet {
+    layout: StorageBinLayoutPlan,
+}
+
+impl StorageBinFileSet {
+    pub fn new(layout: StorageBinLayoutPlan) -> Self {
+        Self { layout }
+    }
+
+    pub fn write_object(
+        &self,
+        location: StorageBinObjectLocation,
+        bytes: &[u8],
+    ) -> std::io::Result<()> {
+        if bytes.len() as u64 != location.len {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "storage-bin write length does not match object location",
+            ));
+        }
+        let location = location.validate(self.layout.bin_size_bytes)?;
+        let mut file = self.open_bin_for_write(location.bin_id)?;
+        write_storage_bin_range(&mut file, location.offset, bytes)
+    }
+
+    pub fn read_object(&self, location: StorageBinObjectLocation) -> std::io::Result<Vec<u8>> {
+        let location = location.validate(self.layout.bin_size_bytes)?;
+        let mut file = self.open_bin_for_read(location.bin_id)?;
+        read_storage_bin_range(&mut file, location.offset, location.len)
+    }
+
+    pub fn remove_bin(&self, bin_id: u64) -> std::io::Result<()> {
+        let path = self.safe_bin_path(bin_id)?;
+        let safe_path = StorageBinSafePath::from_path(path);
+        match safe_path.remove_file() {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn open_bin_for_write(&self, bin_id: u64) -> std::io::Result<std::fs::File> {
+        let path = self.safe_bin_path(bin_id)?;
+        if let Some(parent) = path.parent() {
+            prepare_storage_bin_data_dir(&self.layout.root, parent)?;
+        }
+        let safe_path = StorageBinSafePath::from_path(path);
+        match safe_path.open_read_write_file() {
+            Ok(file) => Ok(file),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let file = safe_path.create_new_read_write_file()?;
+                if self.layout.preallocate {
+                    file.set_len(self.layout.bin_size_bytes.as_u64())?;
+                    file.sync_all()?;
+                }
+                Ok(file)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn open_bin_for_read(&self, bin_id: u64) -> std::io::Result<std::fs::File> {
+        let path = self.safe_bin_path(bin_id)?;
+        StorageBinSafePath::from_path(path).open_existing_file()
+    }
+
+    fn safe_bin_path(&self, bin_id: u64) -> std::io::Result<PathBuf> {
+        if bin_id >= self.layout.max_bins() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "storage-bin id exceeds configured cache budget",
+            ));
+        }
+        let path = self.layout.bin_path(bin_id);
+        if !path.starts_with(&self.layout.root)
+            || storage_bin_path_contains_symlink(&self.layout.root, &path)?
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("storage-bin path is unsafe: {}", path.display()),
+            ));
+        }
+        Ok(path)
+    }
 }
 
 impl StorageBinFreeMap {
@@ -464,6 +552,260 @@ impl StorageBinFreeMap {
     }
 }
 
+fn write_storage_bin_range(
+    file: &mut std::fs::File,
+    offset: u64,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    file.seek(std::io::SeekFrom::Start(offset))?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+fn read_storage_bin_range(
+    file: &mut std::fs::File,
+    offset: u64,
+    len: u64,
+) -> std::io::Result<Vec<u8>> {
+    let capacity = usize::try_from(len).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "storage-bin object is too large for this platform",
+        )
+    })?;
+    file.seek(std::io::SeekFrom::Start(offset))?;
+    let mut bytes = vec![0; capacity];
+    file.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+
+fn prepare_storage_bin_data_dir(root: &Path, data_dir: &Path) -> std::io::Result<PathBuf> {
+    if storage_bin_path_contains_symlink(root, data_dir)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin data directory contains symlink: {}",
+                data_dir.display()
+            ),
+        ));
+    }
+    match storage_bin_path_file_type_no_follow(data_dir)? {
+        Some(file_type) if file_type.is_symlink() || !file_type.is_dir() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "storage-bin data directory is not a real directory: {}",
+                    data_dir.display()
+                ),
+            ));
+        }
+        Some(_) => {}
+        None => {
+            create_storage_bin_dir_all(data_dir)?;
+        }
+    }
+    if storage_bin_path_contains_symlink(root, data_dir)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin data directory contains symlink: {}",
+                data_dir.display()
+            ),
+        ));
+    }
+    let canonical = data_dir.canonicalize()?;
+    if !canonical.starts_with(root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin data directory escaped root: {}",
+                canonical.display()
+            ),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn create_storage_bin_dir_all(path: &Path) -> std::io::Result<()> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        if matches!(
+            component,
+            std::path::Component::Prefix(_)
+                | std::path::Component::RootDir
+                | std::path::Component::CurDir
+        ) {
+            continue;
+        }
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "storage-bin directory path must not contain parent traversal: {}",
+                    path.display()
+                ),
+            ));
+        }
+
+        match storage_bin_path_file_type_no_follow(&current)? {
+            Some(file_type) if file_type.is_symlink() || !file_type.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "storage-bin directory path is not a real directory: {}",
+                        current.display()
+                    ),
+                ));
+            }
+            Some(_) => {}
+            None => {
+                let mode = rustix::fs::Mode::RWXU | rustix::fs::Mode::RGRP | rustix::fs::Mode::XGRP;
+                match rustix::fs::mkdir(&current, mode) {
+                    Ok(()) => {}
+                    Err(error) if error == rustix::io::Errno::EXIST => {}
+                    Err(error) => return Err(storage_bin_rustix_to_io_error(error)),
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn storage_bin_path_file_type_no_follow(
+    path: &Path,
+) -> std::io::Result<Option<rustix::fs::FileType>> {
+    match rustix::fs::statat(rustix::fs::CWD, path, rustix::fs::AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(stat) => Ok(Some(rustix::fs::FileType::from_raw_mode(stat.st_mode))),
+        Err(error) if error == rustix::io::Errno::NOENT => Ok(None),
+        Err(error) => Err(storage_bin_rustix_to_io_error(error)),
+    }
+}
+
+fn storage_bin_path_contains_symlink(root: &Path, path: &Path) -> std::io::Result<bool> {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return Ok(true);
+    };
+
+    for component in relative.components() {
+        if !matches!(component, std::path::Component::Normal(_)) {
+            return Ok(true);
+        }
+    }
+
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(std::io::Error::new(
+                    error.kind(),
+                    format!("inspect storage-bin path {}: {error}", current.display()),
+                ));
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+#[derive(Debug, Clone)]
+struct StorageBinSafePath {
+    path: PathBuf,
+}
+
+impl StorageBinSafePath {
+    fn from_path(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn parent_and_name(&self) -> std::io::Result<(&Path, &std::ffi::OsStr)> {
+        let parent = self.path.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("storage-bin path has no parent: {}", self.path.display()),
+            )
+        })?;
+        let name = self.path.file_name().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("storage-bin path has no file name: {}", self.path.display()),
+            )
+        })?;
+        Ok((parent, name))
+    }
+
+    fn open_parent_dir(&self) -> std::io::Result<std::fs::File> {
+        let (parent, _) = self.parent_and_name()?;
+        let fd = rustix::fs::open(
+            parent,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::DIRECTORY,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(storage_bin_rustix_to_io_error)?;
+        Ok(fd.into())
+    }
+
+    fn create_new_read_write_file(&self) -> std::io::Result<std::fs::File> {
+        let (_, name) = self.parent_and_name()?;
+        let parent = self.open_parent_dir()?;
+        let fd = rustix::fs::openat(
+            &parent,
+            name,
+            rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::RDWR
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .map_err(storage_bin_rustix_to_io_error)?;
+        Ok(fd.into())
+    }
+
+    fn open_existing_file(&self) -> std::io::Result<std::fs::File> {
+        let (_, name) = self.parent_and_name()?;
+        let parent = self.open_parent_dir()?;
+        let fd = rustix::fs::openat(
+            &parent,
+            name,
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(storage_bin_rustix_to_io_error)?;
+        Ok(fd.into())
+    }
+
+    fn open_read_write_file(&self) -> std::io::Result<std::fs::File> {
+        let (_, name) = self.parent_and_name()?;
+        let parent = self.open_parent_dir()?;
+        let fd = rustix::fs::openat(
+            &parent,
+            name,
+            rustix::fs::OFlags::RDWR | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(storage_bin_rustix_to_io_error)?;
+        Ok(fd.into())
+    }
+
+    fn remove_file(&self) -> std::io::Result<()> {
+        let (_, name) = self.parent_and_name()?;
+        let parent = self.open_parent_dir()?;
+        rustix::fs::unlinkat(&parent, name, rustix::fs::AtFlags::empty())
+            .map_err(storage_bin_rustix_to_io_error)
+    }
+}
+
+fn storage_bin_rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
+    std::io::Error::from_raw_os_error(error.raw_os_error())
+}
+
 fn parse_storage_bin_manifest_u64(line: Option<&str>, key: &str) -> std::io::Result<u64> {
     parse_storage_bin_manifest_value(line, key)?
         .parse::<u64>()
@@ -525,8 +867,8 @@ mod tests {
     };
 
     use super::{
-        StorageBinFreeMap, StorageBinFreeRange, StorageBinIndexEntry, StorageBinLayoutPlan,
-        StorageBinManifest, StorageBinObjectLocation,
+        StorageBinFileSet, StorageBinFreeMap, StorageBinFreeRange, StorageBinIndexEntry,
+        StorageBinLayoutPlan, StorageBinManifest, StorageBinObjectLocation,
     };
     use crate::DiskTierPlan;
 
@@ -623,5 +965,35 @@ mod tests {
                 len: 16
             }
         );
+    }
+
+    #[test]
+    fn storage_bin_file_set_writes_reads_and_preallocates_bins() {
+        let root = tempfile::tempdir().unwrap();
+        let plan = DiskTierPlan {
+            path: root.path().to_path_buf(),
+            max_size_bytes: ByteSize::from_bytes(128),
+            max_object_bytes: ByteSize::from_bytes(64),
+            backend: CacheDiskBackend::StorageBin,
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(64),
+                preallocate: true,
+                max_open_bins: 4,
+            },
+            encryption: CacheDiskEncryptionConfig::default(),
+            cache_tag_headers: Vec::new(),
+        };
+        let layout = StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+        let files = StorageBinFileSet::new(layout.clone());
+        let location = StorageBinObjectLocation {
+            bin_id: 0,
+            offset: 8,
+            len: 12,
+        };
+
+        files.write_object(location, b"hello-native").unwrap();
+
+        assert_eq!(files.read_object(location).unwrap(), b"hello-native");
+        assert_eq!(std::fs::metadata(layout.bin_path(0)).unwrap().len(), 64);
     }
 }

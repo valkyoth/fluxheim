@@ -1082,7 +1082,10 @@ dependencies = [
  "async-trait",
  "bytes",
  "fluxheim-config",
+ "getrandom 0.3.4",
  "http",
+ "rustix",
+ "tempfile",
  "tokio",
 ]
 

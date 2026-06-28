@@ -71,8 +71,9 @@ pub use storage::{
     FluxHandleMiss, SerializedCacheMeta,
 };
 pub use storage_bin::{
-    STORAGE_BIN_DATA_DIR, STORAGE_BIN_MANIFEST_FILENAME, StorageBinFreeMap, StorageBinFreeRange,
-    StorageBinIndexEntry, StorageBinLayoutPlan, StorageBinManifest, StorageBinObjectLocation,
+    STORAGE_BIN_DATA_DIR, STORAGE_BIN_MANIFEST_FILENAME, StorageBinFileSet, StorageBinFreeMap,
+    StorageBinFreeRange, StorageBinIndexEntry, StorageBinLayoutPlan, StorageBinManifest,
+    StorageBinObjectLocation,
 };
 pub use tags::{
     MAX_CACHE_TAG_BYTES_PER_OBJECT, MAX_CACHE_TAG_LEN, MAX_CACHE_TAGS_PER_OBJECT,
