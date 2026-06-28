@@ -29,9 +29,9 @@ local/static cache responses when the selected cache policy has
 `local_static = true`.
 
 Native runtime status: the native HTTP/1 proxy cache supports local-key
-encrypted `backend = "filesystem"` cache objects. OpenBao Transit encryption
-and `backend = "storage-bin"` remain on the compatibility runtime until their
-native cache adapters have dedicated parity coverage.
+encrypted `backend = "filesystem"` and `backend = "storage-bin"` cache
+objects. OpenBao Transit encryption remains on the compatibility runtime until
+its native cache adapter has dedicated parity coverage.
 
 ## Providers
 

@@ -673,6 +673,23 @@ fn native_proxy_encrypted_disk_cache_config(
     cache
 }
 
+fn native_proxy_storage_bin_cache_config(root: std::path::PathBuf) -> fluxheim_config::CacheConfig {
+    let mut cache = native_proxy_disk_cache_config(root);
+    cache.disk.backend = fluxheim_config::CacheDiskBackend::StorageBin;
+    cache.disk.storage_bin.bin_size_bytes = fluxheim_config::ByteSize::from_bytes(64 * 1024);
+    cache
+}
+
+fn native_proxy_encrypted_storage_bin_cache_config(
+    root: std::path::PathBuf,
+    key_file: std::path::PathBuf,
+) -> fluxheim_config::CacheConfig {
+    let mut cache = native_proxy_storage_bin_cache_config(root);
+    cache.disk.encryption.enabled = true;
+    cache.disk.encryption.key_file = Some(key_file);
+    cache
+}
+
 fn native_proxy_tiered_cache_config(root: std::path::PathBuf) -> fluxheim_config::CacheConfig {
     let mut cache = native_proxy_memory_cache_config();
     cache.disk.enabled = true;
@@ -3350,6 +3367,89 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_disk() {
 }
 
 #[tokio::test]
+async fn native_route_proxy_caches_proxy_response_on_storage_bin_disk() {
+    let root = tempfile::tempdir().unwrap();
+    let upstream = upstream_cacheable_once("storage-bin-origin").await;
+    let cache = native_proxy_storage_bin_cache_config(root.path().to_path_buf());
+    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let first_listener =
+        route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy))).await;
+
+    let first = downstream_get(first_listener, "/asset.png").await;
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("storage-bin-origin"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(root.path().join(".fluxheim-storage-bin-v1").is_file());
+    assert!(root.path().join(".fluxheim-storage-bin-index-v1").is_file());
+    assert!(root.path().join("bins").is_dir());
+
+    let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let unavailable_origin = unused_origin_listener.local_addr().unwrap();
+    drop(unused_origin_listener);
+    let second_proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let second_listener =
+        route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
+
+    let second = downstream_get(second_listener, "/asset.png").await;
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.ends_with("storage-bin-origin"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_caches_proxy_response_on_encrypted_storage_bin_disk() {
+    let root = tempfile::tempdir().unwrap();
+    let key_file = root.path().join("cache.key");
+    std::fs::write(
+        &key_file,
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\n",
+    )
+    .unwrap();
+    let cache_root = root.path().join("objects");
+    let upstream = upstream_cacheable_once("encrypted-storage-bin-origin").await;
+    let cache = native_proxy_encrypted_storage_bin_cache_config(cache_root.clone(), key_file);
+    let first_proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let first_listener =
+        route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(first_proxy))).await;
+
+    let first = downstream_get(first_listener, "/asset.png").await;
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("encrypted-storage-bin-origin"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    let bin_bytes = native_storage_bin_bytes(&cache_root);
+    assert!(!bin_bytes.is_empty());
+    assert!(bin_bytes.iter().all(|bytes| {
+        !bytes
+            .windows("encrypted-storage-bin-origin".len())
+            .any(|window| window == "encrypted-storage-bin-origin".as_bytes())
+    }));
+
+    let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let unavailable_origin = unused_origin_listener.local_addr().unwrap();
+    drop(unused_origin_listener);
+    let second_proxy = proxy_for(unavailable_origin).with_proxy_cache_config(&cache);
+    let second_listener =
+        route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(second_proxy))).await;
+
+    let second = downstream_get(second_listener, "/asset.png").await;
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.ends_with("encrypted-storage-bin-origin"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
 async fn native_route_proxy_tiered_cache_refills_memory_from_disk() {
     let root = tempfile::tempdir().unwrap();
     let upstream = upstream_cacheable_once("tiered-origin").await;
@@ -3406,6 +3506,16 @@ fn native_collect_disk_cache_object_bytes(root: &std::path::Path, objects: &mut 
             objects.push(bytes);
         }
     }
+}
+
+fn native_storage_bin_bytes(root: &std::path::Path) -> Vec<Vec<u8>> {
+    let Ok(entries) = std::fs::read_dir(root.join("bins")) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| std::fs::read(entry.path()).ok())
+        .collect()
 }
 
 #[tokio::test]

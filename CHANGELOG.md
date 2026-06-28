@@ -21,8 +21,7 @@ behavior when the change improves security or project direction.
   content type, status TTL, and object-size policy.
 - Native cache readiness now accepts root, vhost, and route proxy cache
   policies for the supported native proxy-cache subset while keeping OpenBao
-  Transit encryption and storage-bin policies blocked until their native parity
-  work lands.
+  Transit encryption blocked until its native parity work lands.
 - Native HTTP/1 TLS startup now recognizes managed ACME certificate sources on
   `server.default_vhost`, allowing the rustls native listener to bind while the
   default-vhost certificate is still pending first issuance.
@@ -78,6 +77,12 @@ behavior when the change improves security or project direction.
   `fluxheim-cache` with crate-local safe `openat`/`NOFOLLOW` coverage,
   preparing the native storage-bin adapter without depending on root
   compatibility cache code.
+- Native proxy cache now supports the `storage-bin` disk backend, including
+  manifest/index preparation, bin-slot allocation, native index recovery,
+  oldest-object eviction, and live restart `MISS` then `HIT` coverage.
+- Native proxy cache now supports local-key encrypted storage-bin disk cache,
+  proving encrypted bin-file persistence across a native proxy restart without
+  storing the origin response body in plaintext.
 - Harden native peer-fill by subtracting upstream `Age` during admission,
   returning bounded `504` misses for `only-if-cached` cache misses, and
   preventing a client-supplied peer-fill marker alone from forcing origin

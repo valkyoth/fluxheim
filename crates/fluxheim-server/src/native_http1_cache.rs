@@ -6,8 +6,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fluxheim_cache::{
-    DiskCacheObjectKey, SerializedCacheObject, encode_disk_cache_object, parse_disk_cache_object,
+    DiskCacheObjectKey, DiskTierPlan, STORAGE_BIN_DATA_DIR, STORAGE_BIN_MANIFEST_FILENAME,
+    SerializedCacheObject, StorageBinFileSet, StorageBinFreeMap, StorageBinIndexEntry,
+    StorageBinLayoutPlan, StorageBinObjectLocation, encode_disk_cache_object,
+    parse_disk_cache_object, prepare_storage_bin_layout, read_storage_bin_index,
     remaining_fresh_ttl_secs, response_age_secs, response_cache_control_max_age,
+    write_storage_bin_index,
 };
 use fluxheim_config::{
     CacheConfig, CacheDiskBackend, CacheDiskEncryptionConfig, CacheDiskEncryptionProvider,
@@ -49,8 +53,22 @@ pub(crate) struct NativeDiskCache {
     root: PathBuf,
     max_bytes: u64,
     max_object_bytes: fluxheim_config::ByteSize,
+    backend: NativeDiskCacheBackend,
     encryption: Option<NativeDiskCacheEncryption>,
     state: Mutex<NativeDiskCacheState>,
+}
+
+#[derive(Debug)]
+enum NativeDiskCacheBackend {
+    Filesystem,
+    StorageBin(Box<NativeStorageBinBackend>),
+}
+
+#[derive(Debug)]
+struct NativeStorageBinBackend {
+    layout: StorageBinLayoutPlan,
+    files: StorageBinFileSet,
+    free_map: Mutex<StorageBinFreeMap>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,9 +86,27 @@ struct NativeDiskCacheState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct NativeDiskCacheRecord {
-    path: PathBuf,
+    location: NativeDiskCacheLocation,
     weight: u64,
     accessed_at: SystemTime,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum NativeDiskCacheLocation {
+    Filesystem(PathBuf),
+    StorageBin(StorageBinObjectLocation),
+}
+
+impl NativeDiskCacheLocation {
+    fn display(&self) -> String {
+        match self {
+            Self::Filesystem(path) => path.display().to_string(),
+            Self::StorageBin(location) => format!(
+                "storage-bin:{:016x}:{}+{}",
+                location.bin_id, location.offset, location.len
+            ),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -132,19 +168,69 @@ impl NativeMemoryCacheEntry {
     }
 }
 
+impl NativeDiskCacheBackend {
+    fn from_config(config: &CacheConfig) -> std::io::Result<(PathBuf, Self)> {
+        let path = config.disk.path.as_ref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "native disk cache requires cache.disk.path",
+            )
+        })?;
+        match config.disk.backend {
+            CacheDiskBackend::Filesystem => {
+                let root = prepare_native_disk_cache_root(path)?;
+                Ok((root, Self::Filesystem))
+            }
+            CacheDiskBackend::StorageBin => {
+                let plan = DiskTierPlan {
+                    backend: CacheDiskBackend::StorageBin,
+                    path: path.clone(),
+                    max_size_bytes: config.disk.max_size_bytes,
+                    max_object_bytes: config.max_object_bytes,
+                    cache_tag_headers: Vec::new(),
+                    storage_bin: config.disk.storage_bin.clone(),
+                    encryption: config.disk.encryption.clone(),
+                };
+                let mut layout = StorageBinLayoutPlan::from_disk_plan(&plan).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "native storage-bin cache requires a storage-bin disk plan",
+                    )
+                })?;
+                prepare_storage_bin_layout(&layout)?;
+                let root = layout.root.canonicalize()?;
+                layout = StorageBinLayoutPlan {
+                    root: root.clone(),
+                    manifest_path: root.join(STORAGE_BIN_MANIFEST_FILENAME),
+                    data_dir: root.join(STORAGE_BIN_DATA_DIR),
+                    ..layout
+                };
+                let free_map = StorageBinFreeMap::new(&layout);
+                let files = StorageBinFileSet::new(layout.clone());
+                Ok((
+                    root,
+                    Self::StorageBin(Box::new(NativeStorageBinBackend {
+                        layout,
+                        files,
+                        free_map: Mutex::new(free_map),
+                    })),
+                ))
+            }
+        }
+    }
+}
+
 impl NativeDiskCache {
     pub(crate) fn from_config(config: &CacheConfig) -> Option<Self> {
         if !native_disk_cache_supported(config) {
             return None;
         }
-        let root = config.disk.path.as_ref()?;
-        let root = match prepare_native_disk_cache_root(root) {
-            Ok(root) => root,
+        let (root, backend) = match NativeDiskCacheBackend::from_config(config) {
+            Ok(backend) => backend,
             Err(error) => {
                 log::error!(
                     target: "fluxheim::native_http1",
-                    "native disk cache root {}: {error}",
-                    root.display()
+                    "native disk cache backend: {error}"
                 );
                 return None;
             }
@@ -164,6 +250,7 @@ impl NativeDiskCache {
             root,
             max_bytes: config.disk.max_size_bytes.as_u64(),
             max_object_bytes: config.max_object_bytes,
+            backend,
             encryption,
             state: Mutex::new(NativeDiskCacheState::default()),
         };
@@ -202,10 +289,6 @@ impl NativeDiskCache {
         key: NativeDiskCacheStoreKey,
         entry: &NativeMemoryCacheEntry,
     ) -> std::io::Result<()> {
-        let path = self.path_for_combined_key(&key.combined);
-        if let Some(parent) = path.parent() {
-            create_native_cache_dir_all(parent)?;
-        }
         let meta = NativeDiskCacheMeta::from_entry(entry, key.vary_fields.clone());
         let disk_key = DiskCacheObjectKey {
             combined: key.combined.clone(),
@@ -225,21 +308,23 @@ impl NativeDiskCache {
         } else {
             encoded
         };
-        if encoded.len() as u64 > self.max_bytes {
+        let encoded_len = encoded.len() as u64;
+        if !self.evict_until_admissible(&key.combined, encoded_len)? {
             return Ok(());
         }
-        self.write_object_atomically(&path, &encoded)?;
+        self.remove_combined(&key.combined);
+        let Some(location) = self.write_encoded_object(&key.combined, &encoded)? else {
+            return Ok(());
+        };
         self.with_state_mut(|state| {
-            if let Some(previous) = state.objects.insert(
+            state.objects.insert(
                 key.combined.clone(),
                 NativeDiskCacheRecord {
-                    path: path.clone(),
-                    weight: encoded.len() as u64,
+                    location,
+                    weight: encoded_len,
                     accessed_at: SystemTime::now(),
                 },
-            ) {
-                state.bytes = state.bytes.saturating_sub(previous.weight);
-            }
+            );
             if key.vary_fields.is_empty() {
                 state.variants.remove(&key.primary);
             } else {
@@ -250,10 +335,93 @@ impl NativeDiskCache {
                     key: key.combined,
                 });
             }
-            state.bytes = state.bytes.saturating_add(encoded.len() as u64);
+            state.bytes = state.bytes.saturating_add(encoded_len);
         });
-        self.prune();
+        self.persist_storage_bin_index();
         Ok(())
+    }
+
+    fn evict_until_admissible(
+        &self,
+        incoming_key: &str,
+        incoming_weight: u64,
+    ) -> std::io::Result<bool> {
+        if incoming_weight > self.max_bytes {
+            return Ok(false);
+        }
+        loop {
+            let admissible = self.with_state(|state| {
+                let existing = state
+                    .objects
+                    .get(incoming_key)
+                    .map(|record| record.weight)
+                    .unwrap_or(0);
+                state
+                    .bytes
+                    .saturating_sub(existing)
+                    .saturating_add(incoming_weight)
+                    <= self.max_bytes
+            });
+            if admissible {
+                return Ok(true);
+            }
+            if !self.evict_oldest()? {
+                return Ok(false);
+            }
+        }
+    }
+
+    fn write_encoded_object(
+        &self,
+        combined_key: &str,
+        encoded: &[u8],
+    ) -> std::io::Result<Option<NativeDiskCacheLocation>> {
+        match &self.backend {
+            NativeDiskCacheBackend::Filesystem => {
+                let path = self.path_for_combined_key(combined_key);
+                if let Some(parent) = path.parent() {
+                    create_native_cache_dir_all(parent)?;
+                }
+                self.write_object_atomically(&path, encoded)?;
+                Ok(Some(NativeDiskCacheLocation::Filesystem(path)))
+            }
+            NativeDiskCacheBackend::StorageBin(storage_bin) => {
+                let encoded_len = encoded.len() as u64;
+                let Some(location) = self.allocate_storage_bin_location(encoded_len)? else {
+                    return Ok(None);
+                };
+                match storage_bin.files.write_object(location, encoded) {
+                    Ok(()) => Ok(Some(NativeDiskCacheLocation::StorageBin(location))),
+                    Err(error) => {
+                        self.release_storage_bin_location(location)?;
+                        Err(error)
+                    }
+                }
+            }
+        }
+    }
+
+    fn allocate_storage_bin_location(
+        &self,
+        len: u64,
+    ) -> std::io::Result<Option<StorageBinObjectLocation>> {
+        loop {
+            let allocation = match &self.backend {
+                NativeDiskCacheBackend::StorageBin(storage_bin) => {
+                    let mut free_map = storage_bin.free_map.lock().map_err(|_| {
+                        std::io::Error::other("native storage-bin free map mutex poisoned")
+                    })?;
+                    free_map.allocate(len)?
+                }
+                NativeDiskCacheBackend::Filesystem => return Ok(None),
+            };
+            if allocation.is_some() {
+                return Ok(allocation);
+            }
+            if !self.evict_oldest()? {
+                return Ok(None);
+            }
+        }
     }
 
     fn get_combined(&self, combined_key: &str) -> Option<NativeMemoryCacheEntry> {
@@ -264,7 +432,7 @@ impl NativeDiskCache {
                 log::debug!(
                     target: "fluxheim::native_http1",
                     "native disk cache read {}: {error}",
-                    record.path.display()
+                    record.location.display()
                 );
                 self.remove_combined(combined_key);
                 return None;
@@ -287,6 +455,28 @@ impl NativeDiskCache {
 
     fn rebuild_index(&mut self) -> std::io::Result<()> {
         let mut state = NativeDiskCacheState::default();
+        match &self.backend {
+            NativeDiskCacheBackend::Filesystem => self.rebuild_filesystem_index(&mut state)?,
+            NativeDiskCacheBackend::StorageBin(storage_bin) => {
+                let valid_entries = self.rebuild_storage_bin_index(
+                    &mut state,
+                    &storage_bin.layout,
+                    &storage_bin.files,
+                )?;
+                let rebuilt =
+                    StorageBinFreeMap::from_occupied(&storage_bin.layout, &valid_entries)?;
+                let mut free_map = storage_bin.free_map.lock().map_err(|_| {
+                    std::io::Error::other("native storage-bin free map mutex poisoned")
+                })?;
+                *free_map = rebuilt;
+            }
+        }
+        self.state = Mutex::new(state);
+        self.prune();
+        Ok(())
+    }
+
+    fn rebuild_filesystem_index(&self, state: &mut NativeDiskCacheState) -> std::io::Result<()> {
         for shard in std::fs::read_dir(&self.root)? {
             let shard = shard?;
             let shard_path = shard.path();
@@ -333,7 +523,7 @@ impl NativeDiskCache {
                 state.objects.insert(
                     combined.clone(),
                     NativeDiskCacheRecord {
-                        path,
+                        location: NativeDiskCacheLocation::Filesystem(path),
                         weight,
                         accessed_at: SystemTime::now(),
                     },
@@ -350,22 +540,91 @@ impl NativeDiskCache {
                 }
             }
         }
-        self.state = Mutex::new(state);
-        self.prune();
         Ok(())
+    }
+
+    fn rebuild_storage_bin_index(
+        &self,
+        state: &mut NativeDiskCacheState,
+        layout: &StorageBinLayoutPlan,
+        files: &StorageBinFileSet,
+    ) -> std::io::Result<Vec<StorageBinIndexEntry>> {
+        let mut valid_entries = Vec::new();
+        for entry in read_storage_bin_index(layout)? {
+            let bytes = match files.read_object(entry.location) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            let bytes = match self.decrypt_if_needed(&bytes) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            let parsed = match parse_disk_cache_object(&bytes, self.max_object_bytes) {
+                Ok(parsed) => parsed,
+                Err(_) => continue,
+            };
+            if parsed.combined_key.as_deref() != Some(entry.combined_key.as_str()) {
+                continue;
+            }
+            let Some(primary) = parsed.primary_key.clone() else {
+                continue;
+            };
+            let Some(meta) = NativeDiskCacheMeta::decode(&parsed.internal_meta) else {
+                continue;
+            };
+            if native_memory_entry_from_disk_object(&parsed).is_none() {
+                continue;
+            }
+            let combined = entry.combined_key.clone();
+            state.bytes = state.bytes.saturating_add(entry.location.len);
+            state.objects.insert(
+                combined.clone(),
+                NativeDiskCacheRecord {
+                    location: NativeDiskCacheLocation::StorageBin(entry.location),
+                    weight: entry.location.len,
+                    accessed_at: entry.accessed,
+                },
+            );
+            if !meta.vary_fields.is_empty() {
+                state
+                    .variants
+                    .entry(primary)
+                    .or_default()
+                    .push(NativeMemoryCacheVariant {
+                        fields: meta.vary_fields,
+                        key: combined,
+                    });
+            }
+            valid_entries.push(entry);
+        }
+        Ok(valid_entries)
     }
 
     fn read_record(
         &self,
         record: &NativeDiskCacheRecord,
     ) -> std::io::Result<SerializedCacheObject> {
-        if native_cache_path_contains_symlink(&self.root, &record.path)? {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "native disk cache object path crosses symlink",
-            ));
-        }
-        let bytes = read_native_disk_cache_file(&record.path)?;
+        let bytes = match (&self.backend, &record.location) {
+            (NativeDiskCacheBackend::Filesystem, NativeDiskCacheLocation::Filesystem(path)) => {
+                if native_cache_path_contains_symlink(&self.root, path)? {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "native disk cache object path crosses symlink",
+                    ));
+                }
+                read_native_disk_cache_file(path)?
+            }
+            (
+                NativeDiskCacheBackend::StorageBin(storage_bin),
+                NativeDiskCacheLocation::StorageBin(location),
+            ) => storage_bin.files.read_object(*location)?,
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "native disk cache record backend mismatch",
+                ));
+            }
+        };
         let bytes = self.decrypt_if_needed(&bytes)?;
         parse_disk_cache_object(&bytes, self.max_object_bytes)
     }
@@ -446,41 +705,24 @@ impl NativeDiskCache {
     }
 
     fn prune(&self) {
-        let mut removed = Vec::new();
-        self.with_state_mut(|state| {
-            if state.bytes <= self.max_bytes {
-                return;
+        loop {
+            let over_budget = self.with_state(|state| state.bytes > self.max_bytes);
+            if !over_budget {
+                break;
             }
-            let mut candidates = state
-                .objects
-                .iter()
-                .map(|(key, record)| {
-                    (
-                        record.accessed_at,
-                        key.clone(),
-                        record.weight,
-                        record.path.clone(),
-                    )
-                })
-                .collect::<Vec<_>>();
-            candidates.sort_by_key(|(accessed_at, key, _, _)| (*accessed_at, key.clone()));
-            for (_, key, weight, path) in candidates {
-                if state.bytes <= self.max_bytes {
+            match self.evict_oldest() {
+                Ok(true) => {}
+                Ok(false) => break,
+                Err(error) => {
+                    log::debug!(
+                        target: "fluxheim::native_http1",
+                        "native disk cache prune failed: {error}"
+                    );
                     break;
                 }
-                if state.objects.remove(&key).is_some() {
-                    state.bytes = state.bytes.saturating_sub(weight);
-                    state.variants.retain(|_, variants| {
-                        variants.retain(|variant| variant.key != key);
-                        !variants.is_empty()
-                    });
-                    removed.push(path);
-                }
             }
-        });
-        for path in removed {
-            let _ = NativeSafeDiskCachePath::from_path(path).remove_file();
         }
+        self.persist_storage_bin_index();
     }
 
     fn remove_combined(&self, combined_key: &str) {
@@ -496,7 +738,104 @@ impl NativeDiskCache {
             removed
         });
         if let Some(record) = removed {
-            let _ = NativeSafeDiskCachePath::from_path(record.path).remove_file();
+            let _ = self.remove_location(&record.location);
+            self.persist_storage_bin_index();
+        }
+    }
+
+    fn evict_oldest(&self) -> std::io::Result<bool> {
+        let removed = self.with_state_mut(|state| {
+            let key = state
+                .objects
+                .iter()
+                .min_by_key(|(key, record)| (record.accessed_at, (*key).clone()))
+                .map(|(key, _)| key.clone())?;
+            let removed = state.objects.remove(&key);
+            if let Some(record) = &removed {
+                state.bytes = state.bytes.saturating_sub(record.weight);
+            }
+            state.variants.retain(|_, variants| {
+                variants.retain(|variant| variant.key != key);
+                !variants.is_empty()
+            });
+            removed
+        });
+        let Some(record) = removed else {
+            return Ok(false);
+        };
+        self.remove_location(&record.location)?;
+        self.persist_storage_bin_index();
+        Ok(true)
+    }
+
+    fn remove_location(&self, location: &NativeDiskCacheLocation) -> std::io::Result<()> {
+        match (&self.backend, location) {
+            (NativeDiskCacheBackend::Filesystem, NativeDiskCacheLocation::Filesystem(path)) => {
+                match NativeSafeDiskCachePath::from_path(path.clone()).remove_file() {
+                    Ok(()) => Ok(()),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(error) => Err(error),
+                }
+            }
+            (
+                NativeDiskCacheBackend::StorageBin(_),
+                NativeDiskCacheLocation::StorageBin(location),
+            ) => self.release_storage_bin_location(*location),
+            _ => Ok(()),
+        }
+    }
+
+    fn release_storage_bin_location(
+        &self,
+        location: StorageBinObjectLocation,
+    ) -> std::io::Result<()> {
+        let NativeDiskCacheBackend::StorageBin(storage_bin) = &self.backend else {
+            return Ok(());
+        };
+        {
+            let mut free_map = storage_bin
+                .free_map
+                .lock()
+                .map_err(|_| std::io::Error::other("native storage-bin free map mutex poisoned"))?;
+            free_map.release(location)?;
+            for bin_id in free_map.reclaim_free_tail_bins() {
+                if let Err(error) = storage_bin.files.remove_bin(bin_id) {
+                    log::debug!(
+                        target: "fluxheim::native_http1",
+                        "native storage-bin tail reclaim failed for bin {bin_id}: {error}"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn persist_storage_bin_index(&self) {
+        let NativeDiskCacheBackend::StorageBin(storage_bin) = &self.backend else {
+            return;
+        };
+        let entries = self.with_state(|state| {
+            state
+                .objects
+                .iter()
+                .filter_map(|(combined_key, record)| {
+                    let NativeDiskCacheLocation::StorageBin(location) = &record.location else {
+                        return None;
+                    };
+                    Some(StorageBinIndexEntry {
+                        combined_key: combined_key.clone(),
+                        location: *location,
+                        accessed: record.accessed_at,
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
+        if let Err(error) = write_storage_bin_index(&storage_bin.layout, &entries) {
+            log::warn!(
+                target: "fluxheim::native_http1",
+                "native storage-bin index write {}: {error}",
+                storage_bin.layout.root.display()
+            );
         }
     }
 
@@ -529,9 +868,11 @@ impl NativeDiskCache {
 
 pub(crate) fn native_disk_cache_supported(cache: &CacheConfig) -> bool {
     !cache.disk.enabled
-        || (cache.disk.backend == CacheDiskBackend::Filesystem
-            && (!cache.disk.encryption.enabled
-                || cache.disk.encryption.provider == CacheDiskEncryptionProvider::Local))
+        || (matches!(
+            cache.disk.backend,
+            CacheDiskBackend::Filesystem | CacheDiskBackend::StorageBin
+        ) && (!cache.disk.encryption.enabled
+            || cache.disk.encryption.provider == CacheDiskEncryptionProvider::Local))
 }
 
 const NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-ENC-v1\n";
