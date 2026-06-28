@@ -136,15 +136,18 @@ memory+disk tiering for ordinary HTTP/1 proxy responses.
   If `cache.range.enabled = true`, bounded single `Range` requests can be
   served from fresh cached full objects or from compatible fixed-size memory
   slices when slice caching is enabled.
-- Still blocked for native runtime readiness: policies outside the supported
-  native proxy-cache subset.
+- Native runtime readiness still rejects cache policies that are attached to no
+  native cacheable handler or whose route/upstream shape is outside the
+  supported native proxy-cache subset; it no longer has a backend/encryption
+  parity gate for filesystem, storage-bin, local-key, or OpenBao Transit disk
+  cache.
 - Security note: native HTTP peer-fill is intentionally available only when
   the peer is loopback or `allow_insecure_http = true`. Plaintext HTTP has no
   transport integrity and can be cache-poisoned by a network-path attacker; use
   HTTPS peers, loopback peers, encrypted overlays, mTLS sidecars, or trusted
   private networks.
-- The compatibility runtime remains available for unsupported cache policies
-  until the remaining native cache parity gates are implemented and tested.
+- The compatibility runtime remains available for unsupported cache policy
+  shapes while operators migrate route layouts to the native-supported subset.
 
 ## Verification
 
