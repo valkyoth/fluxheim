@@ -773,10 +773,8 @@ impl NativeProxyMemoryCache {
             return NativeProxyCacheLookup::Bypass("proxy-ineligible");
         };
         let revalidation = request_cache_revalidation_requested(request, &self.config);
-        if !revalidation {
-            if let Some(hit) = self.get(&key, request) {
-                return NativeProxyCacheLookup::Hit(hit);
-            }
+        if !revalidation && let Some(hit) = self.get(&key, request) {
+            return NativeProxyCacheLookup::Hit(hit);
         }
         let status = if revalidation { "REVALIDATED" } else { "MISS" };
         NativeProxyCacheLookup::Miss { key, status }

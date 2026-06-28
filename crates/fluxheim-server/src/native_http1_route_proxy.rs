@@ -1188,7 +1188,7 @@ impl NativeHttp1RouteProxy {
                 )?;
                 #[cfg(not(feature = "privacy-mode"))]
                 let proxy = proxy.map(|proxy| proxy.with_trusted_sources(trusted_sources));
-                let proxy = proxy.map(|proxy| {
+                proxy.map(|proxy| {
                     if let Some(cache) = route.cache.as_ref().filter(|cache| {
                         NativeHttp1Proxy::proxy_cache_supported_for_proxy(cache, proxy_config)
                     }) {
@@ -1196,8 +1196,7 @@ impl NativeHttp1RouteProxy {
                     } else {
                         proxy
                     }
-                });
-                proxy
+                })
             } else {
                 None
             };
