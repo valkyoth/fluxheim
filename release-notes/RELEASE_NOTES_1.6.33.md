@@ -31,6 +31,10 @@ are proven.
 - Native root, vhost, and route readiness checks now accept only the supported
   memory-tier proxy cache subset and keep unsupported cache shapes blocked
   instead of silently dropping policy.
+- Native HTTP/1 TLS startup now recognizes managed ACME certificate sources on
+  `server.default_vhost`, so rustls deployments using `server.tls_listen` can
+  start with a pending default-vhost ACME certificate source and serve HTTP-01
+  issuance traffic instead of failing the TLS listener plan.
 
 ## Compatibility Notes
 
@@ -46,6 +50,7 @@ are proven.
 ## Verification
 
 - `cargo test -p fluxheim-server native_route_proxy_caches_proxy_response_in_memory --locked`
+- `cargo test -p fluxheim-server --features acme,tls-rustls-backend native_http1_proxy_runtime_accepts_default_vhost_acme_certificate_source --locked`
 - `cargo test -p fluxheim-server native_route_proxy_accepts_ --locked`
 - `cargo test -p fluxheim-server native_http1_plan --locked`
 - `cargo check -p fluxheim-server --all-features --locked`

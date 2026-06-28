@@ -524,6 +524,75 @@ async fn native_http1_proxy_runtime_binds_rustls_launch_plan_and_serves_https_li
     }
 }
 
+#[cfg(all(feature = "tls-rustls-backend", feature = "acme"))]
+#[tokio::test]
+async fn native_http1_proxy_runtime_accepts_default_vhost_acme_certificate_source() {
+    use fluxheim_config::{
+        AcmeConfig, ProxyConfig, TlsAlpnPolicy, TlsConfig, VhostAcmeConfig, VhostConfig,
+        VhostTlsConfig,
+    };
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let storage = tempfile::tempdir().unwrap();
+    let upstream = upstream_response("unused").await;
+    let mut vhost_proxy = ProxyConfig::disabled();
+    vhost_proxy.upstream = Some(upstream.to_string());
+
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = Vec::new();
+    config.server.tls_listen = vec!["127.0.0.1:0".to_owned()];
+    config.server.default_vhost = Some("ulyaoth.eu".to_owned());
+    config.proxy.upstream = Some(upstream.to_string());
+    config.tls = TlsConfig {
+        enabled: true,
+        alpn: TlsAlpnPolicy::Http1,
+        acme: AcmeConfig {
+            enabled: true,
+            storage: Some(storage.path().to_path_buf()),
+            contact_email: Some("info@example.test".to_owned()),
+            ..AcmeConfig::default()
+        },
+        ..TlsConfig::default()
+    };
+    config.vhosts = vec![VhostConfig {
+        name: "ulyaoth.eu".to_owned(),
+        hosts: vec!["ulyaoth.eu".to_owned(), "www.ulyaoth.eu".to_owned()],
+        max_request_body_bytes: None,
+        access: Default::default(),
+        rate_limit: Default::default(),
+        concurrency: Default::default(),
+        tls: VhostTlsConfig {
+            enabled: true,
+            acme: VhostAcmeConfig {
+                enabled: true,
+                issuer: Some("actalis".to_owned()),
+                domains: vec!["ulyaoth.eu".to_owned(), "www.ulyaoth.eu".to_owned()],
+            },
+            ..VhostTlsConfig::default()
+        },
+        acme_challenge: Default::default(),
+        redirect: Default::default(),
+        proxy: vhost_proxy,
+        cache: Default::default(),
+        compression: None,
+        headers: Default::default(),
+        php: Default::default(),
+        web: Default::default(),
+        routes: Vec::new(),
+    }];
+
+    let plan = ServerPlan::from_config(&config).expect("valid server plan");
+    assert!(plan.native_runtime_cutover_summary().is_ready());
+    let runtime = NativeHttp1ProxyRuntime::bind_from_config(&config, &plan)
+        .await
+        .expect("bind native rustls proxy runtime with pending ACME fallback");
+    let resolver = runtime
+        .rustls_certificate_resolver()
+        .expect("rustls certificate resolver");
+    assert_eq!(resolver.certificate_slot_count(), 1);
+    assert_eq!(resolver.loaded_certificate_count(), 0);
+}
+
 #[cfg(feature = "tls-rustls-backend")]
 #[tokio::test]
 async fn native_http1_proxy_runtime_serves_rustls_http2_alpn_listener() {

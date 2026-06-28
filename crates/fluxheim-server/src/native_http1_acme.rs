@@ -4,6 +4,9 @@ use std::path::{Component, Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 const HTTP_01_CHALLENGE_DIR: &str = "http-01";
+const MANAGED_CERTIFICATE_DIR: &str = "certificates";
+const MANAGED_FULLCHAIN_FILE: &str = "fullchain.pem";
+const MANAGED_PRIVATE_KEY_FILE: &str = "privkey.pem";
 const MAX_HTTP_01_TOKEN_BYTES: usize = 256;
 const MAX_HTTP_01_KEY_AUTHORIZATION_BYTES: u64 = 4096;
 
@@ -69,6 +72,19 @@ impl NativeHttp1AcmeHttp01Store {
         }
 
         Ok(Some(value.trim_end_matches(['\r', '\n']).to_owned()))
+    }
+}
+
+pub(crate) fn native_managed_certificate_config(
+    storage: &Path,
+    vhost_name: &str,
+) -> fluxheim_config::StaticCertificateConfig {
+    let directory = storage
+        .join(MANAGED_CERTIFICATE_DIR)
+        .join(managed_certificate_segment(vhost_name));
+    fluxheim_config::StaticCertificateConfig {
+        cert_path: directory.join(MANAGED_FULLCHAIN_FILE),
+        key_path: directory.join(MANAGED_PRIVATE_KEY_FILE),
     }
 }
 

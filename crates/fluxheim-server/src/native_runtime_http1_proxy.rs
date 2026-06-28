@@ -555,7 +555,7 @@ fn native_rustls_server_config(
     ),
     NativeHttp1ProxyRuntimeError,
 > {
-    let plan = fluxheim_tls::DownstreamTlsListenerPlan::from_config(config)
+    let plan = native_downstream_tls_listener_plan(config)
         .map_err(NativeHttp1ProxyRuntimeError::TlsPlan)?
         .ok_or(NativeHttp1ProxyRuntimeError::MissingProxyHttpListener)?;
     let resolver = Arc::new(
@@ -585,7 +585,7 @@ fn native_openssl_acceptor(
     ),
     NativeHttp1ProxyRuntimeError,
 > {
-    let plan = fluxheim_tls::DownstreamTlsListenerPlan::from_config(config)
+    let plan = native_downstream_tls_listener_plan(config)
         .map_err(NativeHttp1ProxyRuntimeError::TlsPlan)?
         .ok_or(NativeHttp1ProxyRuntimeError::MissingProxyHttpListener)?;
     let selector = plan.selector();
@@ -609,6 +609,60 @@ fn native_openssl_acceptor(
             .map(Arc::new)
             .map_err(NativeHttp1ProxyRuntimeError::OpenSslAcceptor)?;
     Ok((acceptor, None))
+}
+
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
+))]
+fn native_downstream_tls_listener_plan(
+    config: &Config,
+) -> Result<Option<fluxheim_tls::DownstreamTlsListenerPlan>, fluxheim_tls::DownstreamTlsPlanError> {
+    fluxheim_tls::DownstreamTlsListenerPlan::from_config_with_acme_resolver(
+        config,
+        native_managed_acme_certificate_source,
+    )
+}
+
+#[cfg(all(
+    any(
+        feature = "tls-rustls-backend",
+        all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
+    ),
+    feature = "acme"
+))]
+fn native_managed_acme_certificate_source(
+    config: &Config,
+    vhost: &fluxheim_config::VhostConfig,
+) -> Option<fluxheim_tls::DownstreamCertificateSource> {
+    if !config.tls.acme.enabled {
+        return None;
+    }
+    let storage = config.tls.acme.storage.as_deref()?;
+    let owner = if vhost.tls.enabled && vhost.tls.acme.enabled {
+        vhost.name.as_str()
+    } else {
+        fluxheim_tls::shared_managed_acme_certificate_owner(config, vhost)?
+    };
+
+    Some(fluxheim_tls::DownstreamCertificateSource {
+        certificate: crate::native_http1_acme::native_managed_certificate_config(storage, owner),
+        managed_acme: true,
+    })
+}
+
+#[cfg(all(
+    any(
+        feature = "tls-rustls-backend",
+        all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
+    ),
+    not(feature = "acme")
+))]
+fn native_managed_acme_certificate_source(
+    _config: &Config,
+    _vhost: &fluxheim_config::VhostConfig,
+) -> Option<fluxheim_tls::DownstreamCertificateSource> {
+    None
 }
 
 #[cfg(any(

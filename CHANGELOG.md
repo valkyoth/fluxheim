@@ -23,6 +23,9 @@ behavior when the change improves security or project direction.
   range/slice, Vary, stale serving, peer-fill, predictor/origin-protection,
   and load-balanced proxy cache paths blocked until their native parity work
   lands.
+- Native HTTP/1 TLS startup now recognizes managed ACME certificate sources on
+  `server.default_vhost`, allowing the rustls native listener to bind while the
+  default-vhost certificate is still pending first issuance.
 
 ## 1.6.32 - 2026-06-28
 
