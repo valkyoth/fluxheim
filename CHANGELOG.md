@@ -20,8 +20,8 @@ behavior when the change improves security or project direction.
   checks for request bypass, response `no-store`/`private`, `Set-Cookie`,
   content type, status TTL, and object-size policy.
 - Native cache readiness now accepts root, vhost, and route proxy cache
-  policies only for the supported memory-cache subset while keeping disk,
-  and unsupported peer-fill blocked until their native parity work lands.
+  policies only for the supported memory-cache subset while keeping disk and
+  tiered cache policies blocked until their native parity work lands.
 - Native HTTP/1 TLS startup now recognizes managed ACME certificate sources on
   `server.default_vhost`, allowing the rustls native listener to bind while the
   default-vhost certificate is still pending first issuance.
@@ -60,10 +60,13 @@ behavior when the change improves security or project direction.
   composition for fixed-size slices, including bounded origin slice fills,
   slice identity checks, single-range responses, multipart range responses, and
   live tests that prove the native listener sends bounded `Range` subrequests.
-- Native proxy memory cache now supports opt-in HTTP peer-fill when
-  `cache.peer_fill.allow_insecure_http = true`, preserving the peer-fill loop
-  marker, `only-if-cached` request mode, bounded peer-fill concurrency, local
-  storage of successful peer `200` responses, and `PEER-HIT` status reporting.
+- Native proxy memory cache now supports peer-fill over HTTPS and constrained
+  plaintext HTTP peers. HTTPS peer-fill uses the native upstream TLS connector;
+  HTTP peer-fill remains limited to loopback peers unless
+  `cache.peer_fill.allow_insecure_http = true`.
+- Native peer-fill preserves the peer-fill loop marker, `only-if-cached`
+  request mode, bounded peer-fill concurrency, local storage of successful peer
+  `200` responses, and `PEER-HIT` status reporting.
 - Harden native peer-fill by subtracting upstream `Age` during admission,
   returning bounded `504` misses for `only-if-cached` cache misses, and
   preventing a client-supplied peer-fill marker alone from forcing origin

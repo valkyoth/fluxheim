@@ -850,8 +850,7 @@ impl Eq for NativeHttp1Proxy {}
 
 fn native_peer_fill_supported(cache: &CacheConfig) -> bool {
     !cache.peer_fill.enabled
-        || (cache.peer_fill.allow_insecure_http
-            && !cache.peer_fill.peers.is_empty()
+        || (!cache.peer_fill.peers.is_empty()
             && cache
                 .peer_fill
                 .peers
@@ -883,13 +882,10 @@ fn native_peer_fill_peer_from_config(
     peer_fill: &fluxheim_config::CachePeerFillConfig,
 ) -> Option<NativePeerFillPeer> {
     let uri = peer.base_url.parse::<Uri>().ok()?;
-    if uri.scheme_str() != Some("http") || !peer_fill.allow_insecure_http {
-        return None;
-    }
     if uri.query().is_some() {
         return None;
     }
-    let authority = uri.authority()?.as_str().to_owned();
+    let upstream = native_peer_fill_upstream_from_uri(&uri, peer_fill)?;
     let base_path = uri
         .path_and_query()
         .map(|path| path.as_str())
@@ -899,10 +895,94 @@ fn native_peer_fill_peer_from_config(
     Some(NativePeerFillPeer {
         name: peer.name.clone(),
         base_path,
-        upstream: NativeHttp1Upstream::new(authority)
+        upstream,
+    })
+}
+
+fn native_peer_fill_upstream_from_uri(
+    uri: &Uri,
+    peer_fill: &fluxheim_config::CachePeerFillConfig,
+) -> Option<NativeHttp1Upstream> {
+    let authority = uri.authority()?;
+    match uri.scheme_str()? {
+        "http" => {
+            if !peer_fill.allow_insecure_http && !native_peer_fill_authority_is_loopback(authority)
+            {
+                return None;
+            }
+            Some(native_peer_fill_plain_upstream(authority, peer_fill))
+        }
+        "https" => native_peer_fill_tls_upstream(authority, peer_fill),
+        _ => None,
+    }
+}
+
+fn native_peer_fill_plain_upstream(
+    authority: &http::uri::Authority,
+    peer_fill: &fluxheim_config::CachePeerFillConfig,
+) -> NativeHttp1Upstream {
+    NativeHttp1Upstream::new(authority.as_str().to_owned())
+        .with_connect_timeout(Duration::from_secs(peer_fill.connect_timeout_secs))
+        .with_read_timeout(Duration::from_secs(peer_fill.read_timeout_secs))
+}
+
+fn native_peer_fill_authority_is_loopback(authority: &http::uri::Authority) -> bool {
+    let host = native_peer_fill_authority_host(authority);
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
+fn native_peer_fill_authority_host(authority: &http::uri::Authority) -> &str {
+    let authority = authority.as_str();
+    if let Some(rest) = authority.strip_prefix('[') {
+        return rest.split_once(']').map_or(authority, |(host, _)| host);
+    }
+    authority
+        .rsplit_once(':')
+        .map_or(authority, |(host, _)| host)
+}
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+fn native_peer_fill_tls_upstream(
+    authority: &http::uri::Authority,
+    peer_fill: &fluxheim_config::CachePeerFillConfig,
+) -> Option<NativeHttp1Upstream> {
+    let host = native_peer_fill_authority_host(authority);
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return None;
+    }
+
+    let authority = authority.as_str().to_owned();
+    let mut proxy = fluxheim_config::ProxyConfig {
+        upstream: None,
+        upstreams: vec![authority.clone()],
+        upstream_tls: true,
+        upstream_sni: Some(host.to_owned()),
+        connect_timeout_secs: Some(peer_fill.connect_timeout_secs),
+        read_timeout_secs: Some(peer_fill.read_timeout_secs),
+        ..Default::default()
+    };
+    proxy.upstream_http_version = fluxheim_config::UpstreamHttpVersion::Http1;
+
+    let tls = NativeHttp1UpstreamTls::from_proxy_config(&proxy)
+        .ok()
+        .flatten()?;
+    Some(
+        NativeHttp1Upstream::new(authority)
+            .with_tls(tls)
             .with_connect_timeout(Duration::from_secs(peer_fill.connect_timeout_secs))
             .with_read_timeout(Duration::from_secs(peer_fill.read_timeout_secs)),
-    })
+    )
+}
+
+#[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
+fn native_peer_fill_tls_upstream(
+    _authority: &http::uri::Authority,
+    _peer_fill: &fluxheim_config::CachePeerFillConfig,
+) -> Option<NativeHttp1Upstream> {
+    None
 }
 
 impl NativeProxyMemoryCache {

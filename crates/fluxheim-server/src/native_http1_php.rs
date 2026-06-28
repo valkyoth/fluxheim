@@ -547,6 +547,7 @@ mod tests {
                 ("x-test".to_owned(), "two".to_owned()),
                 ("proxy".to_owned(), "drop-me".to_owned()),
             ],
+            trailers: Vec::new(),
             body: zeroize::Zeroizing::new(b"name=fluxheim".to_vec()),
         }
     }

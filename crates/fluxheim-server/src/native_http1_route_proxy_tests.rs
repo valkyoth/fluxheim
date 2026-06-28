@@ -3142,7 +3142,30 @@ fn native_route_proxy_accepts_route_memory_proxy_cache_with_http_peer_fill() {
 }
 
 #[test]
-fn native_route_proxy_rejects_route_memory_proxy_cache_with_https_peer_fill() {
+fn native_route_proxy_accepts_loopback_http_peer_fill_without_insecure_opt_in() {
+    let mut route = native_route_proxy_test_route();
+    route.redirect = None;
+    route.proxy = Some(fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        ..Default::default()
+    });
+    let mut cache = native_proxy_memory_cache_config();
+    cache.peer_fill.enabled = true;
+    cache.peer_fill.peers = vec![fluxheim_config::CachePeerConfig {
+        name: "local-peer".to_owned(),
+        base_url: "http://localhost:3001".to_owned(),
+    }];
+    route.cache = Some(cache);
+
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new("127.0.0.1:3000"));
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, Some(proxy)).unwrap();
+
+    assert!(route.proxy().is_some());
+}
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+#[test]
+fn native_route_proxy_accepts_route_memory_proxy_cache_with_https_peer_fill() {
     let mut route = native_route_proxy_test_route();
     route.redirect = None;
     route.proxy = Some(fluxheim_config::ProxyConfig {
@@ -3153,7 +3176,30 @@ fn native_route_proxy_rejects_route_memory_proxy_cache_with_https_peer_fill() {
     cache.peer_fill.enabled = true;
     cache.peer_fill.peers = vec![fluxheim_config::CachePeerConfig {
         name: "secure-peer".to_owned(),
-        base_url: "https://127.0.0.1:3001".to_owned(),
+        base_url: "https://localhost:3001".to_owned(),
+    }];
+    route.cache = Some(cache);
+
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new("127.0.0.1:3000"));
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, Some(proxy)).unwrap();
+
+    assert!(route.proxy().is_some());
+}
+
+#[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")))]
+#[test]
+fn native_route_proxy_rejects_route_memory_proxy_cache_with_https_peer_fill_without_tls_backend() {
+    let mut route = native_route_proxy_test_route();
+    route.redirect = None;
+    route.proxy = Some(fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        ..Default::default()
+    });
+    let mut cache = native_proxy_memory_cache_config();
+    cache.peer_fill.enabled = true;
+    cache.peer_fill.peers = vec![fluxheim_config::CachePeerConfig {
+        name: "secure-peer".to_owned(),
+        base_url: "https://localhost:3001".to_owned(),
     }];
     route.cache = Some(cache);
 

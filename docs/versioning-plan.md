@@ -2862,12 +2862,12 @@ available for the stabilization/security-only follow-up.
     Fluxheim-owned counters, serves `stale_while_revalidate_secs` objects with
     bounded background refresh, supports `[cache.lock]` same-key request
     collapsing for concurrent memory-cache misses, supports memory-tier
-    `[cache.range.slice]` fixed-slice range composition, supports opt-in HTTP
-    peer-fill when `allow_insecure_http = true`, and has live native listener
-    `MISS` then `HIT`, collapsed-fill `HIT`, slice-fill then slice `HIT`,
-    multipart slice composition, `PEER-HIT` then `HIT`, and stale-refresh
-    tests. Native readiness still blocks disk/tiered cache and HTTPS peer-fill
-    until those semantics are owned by the native adapter.
+    `[cache.range.slice]` fixed-slice range composition, supports peer-fill
+    over HTTPS and loopback-or-opt-in HTTP, and has live native listener `MISS`
+    then `HIT`, collapsed-fill `HIT`, slice-fill then slice `HIT`, multipart
+    slice composition, `PEER-HIT` then `HIT`, and stale-refresh tests. Native
+    readiness still blocks disk/tiered cache until those semantics are owned by
+    the native adapter.
 - `v1.6.34`: remove the final Pingora runtime/listener/TLS adapter crates from
   normal builds after proxy-cache parity is proven. The native WebSocket
   baseline already covers strict `Upgrade: websocket` requests on forced HTTP/1

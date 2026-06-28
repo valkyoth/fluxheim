@@ -4,8 +4,8 @@ Fluxheim 1.6.33 is the native proxy-cache parity release in the Pingora
 removal line.
 
 This checkpoint adds Fluxheim-owned native memory-cache support for ordinary
-HTTP/1 proxy responses. Disk cache and secure HTTPS peer-fill remain explicit
-compatibility gates until their native implementations are proven.
+HTTP/1 proxy responses. Disk cache remains an explicit compatibility gate until
+its native implementation is proven.
 
 ## Highlights
 
@@ -73,8 +73,10 @@ compatibility gates until their native implementations are proven.
   `Range` subrequests, validates `206`, `Content-Range`, `Content-Length`,
   identity encoding, and matching ETag/Last-Modified identity, then composes
   single-range or multipart responses from cached slices.
-- Native proxy memory cache now supports opt-in HTTP peer-fill for deployments
-  that explicitly set `cache.peer_fill.allow_insecure_http = true`. Native
+- Native proxy memory cache now supports peer-fill over HTTPS and over
+  constrained HTTP peers. HTTPS peers use the native upstream TLS connector and
+  derive SNI from the peer URL host; plaintext HTTP peers are accepted only for
+  loopback peers or when `cache.peer_fill.allow_insecure_http = true`. Native
   peer-fill preserves the `X-Fluxheim-Peer-Fill` loop guard, sends
   `Cache-Control: only-if-cached`, honors peer-fill concurrency limits, stores
   successful peer `200` responses locally, and returns `PEER-HIT` before later
@@ -99,16 +101,17 @@ compatibility gates until their native implementations are proven.
   native load-balanced pools, `cache.min_uses`, `pass_uncacheable_after`,
   opt-in `[cache.predictor]` cache-pass decisions,
   `stale_while_revalidate_secs` background refresh, `[cache.lock]` same-key
-  request collapsing, memory-tier `[cache.range.slice]` composition, and HTTP
-  peer-fill when `allow_insecure_http = true`. If `cache.range.enabled = true`,
+  request collapsing, memory-tier `[cache.range.slice]` composition, and
+  HTTPS/loopback-or-opt-in HTTP peer-fill. If `cache.range.enabled = true`,
   bounded single `Range` requests can be served from fresh cached full objects
   or from compatible fixed-size memory slices when slice caching is enabled.
-- Still blocked for native runtime readiness: disk/tiered proxy cache, HTTPS
-  peer-fill, and policies outside the supported native memory-cache subset.
+- Still blocked for native runtime readiness: disk/tiered proxy cache and
+  policies outside the supported native memory-cache subset.
 - Security note: native HTTP peer-fill is intentionally available only when
-  `allow_insecure_http = true`. That mode has no transport integrity and can be
-  cache-poisoned by a network-path attacker; use loopback peers, encrypted
-  overlays, mTLS sidecars, or trusted private networks.
+  the peer is loopback or `allow_insecure_http = true`. Plaintext HTTP has no
+  transport integrity and can be cache-poisoned by a network-path attacker; use
+  HTTPS peers, loopback peers, encrypted overlays, mTLS sidecars, or trusted
+  private networks.
 - The compatibility runtime remains available for unsupported cache policies
   until the remaining native cache parity gates are implemented and tested.
 
@@ -121,6 +124,7 @@ compatibility gates until their native implementations are proven.
 - `cargo test -p fluxheim-server native_route_proxy_cache_lock_collapses_concurrent_memory_fills --locked`
 - `cargo test -p fluxheim-server native_route_proxy_slice_cache_fills_and_composes_memory_range --locked`
 - `cargo test -p fluxheim-server native_route_proxy_slice_cache_composes_multipart_memory_response --locked`
+- `cargo test -p fluxheim-server native_route_proxy_accepts_route_memory_proxy_cache_with_https_peer_fill --locked`
 - `cargo test -p fluxheim-server native_route_proxy_peer_fills_and_stores_memory_cache_response --locked`
 - `cargo test -p fluxheim-server static_cache_expiry_rejects_unrepresentable_ttl --locked`
 - `cargo test -p fluxheim-server native_route_proxy_ --locked`
