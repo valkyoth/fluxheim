@@ -1095,9 +1095,8 @@ impl NativeProxyMemoryCache {
         (self.config.predictor.enabled || self.config.pass_uncacheable_after > 0) && {
             let mut state = lock_native_memory_cache(&self.state, "proxy");
             prune_native_predictor_counters(&mut state.cache_pass, self.config.predictor.capacity);
-            state.cache_pass.get(key).is_some_and(|uses| {
-                self.config.predictor.enabled
-                    || uses.uses >= self.config.pass_uncacheable_after.max(1)
+            native_predictor_counter_uses(&mut state.cache_pass, key).is_some_and(|uses| {
+                self.config.predictor.enabled || uses >= self.config.pass_uncacheable_after.max(1)
             })
         }
     }
@@ -1115,10 +1114,7 @@ impl NativeProxyMemoryCache {
         let mut state = lock_native_memory_cache(&self.state, "proxy");
         prune_native_predictor_counters(&mut state.cache_pass, self.config.predictor.capacity);
         let threshold = self.config.pass_uncacheable_after.max(1);
-        let uses = state
-            .cache_pass
-            .get(key)
-            .map(|counter| counter.uses)
+        let uses = native_predictor_counter_uses(&mut state.cache_pass, key)
             .unwrap_or(0)
             .saturating_add(1)
             .min(threshold);
@@ -1138,10 +1134,7 @@ impl NativeProxyMemoryCache {
 
         let mut state = lock_native_memory_cache(&self.state, "proxy");
         prune_native_predictor_counters(&mut state.min_uses, self.config.predictor.capacity);
-        let uses = state
-            .min_uses
-            .get(key)
-            .map(|counter| counter.uses)
+        let uses = native_predictor_counter_uses(&mut state.min_uses, key)
             .unwrap_or(0)
             .saturating_add(1);
         if uses >= self.config.min_uses {
@@ -1164,18 +1157,31 @@ fn prune_native_predictor_counters(
     counters: &mut HashMap<String, NativeMemoryCacheCounter>,
     capacity: usize,
 ) {
-    let now = std::time::Instant::now();
-    counters.retain(|_, counter| {
-        now.saturating_duration_since(counter.seen_at) < NATIVE_CACHE_PREDICTOR_COUNTER_TTL
-    });
-
     let capacity = capacity.max(1);
     if counters.len() < capacity {
         return;
     }
-    if let Some(key) = counters.keys().next().cloned() {
+
+    while counters.len() >= capacity {
+        let Some(key) = counters.keys().next().cloned() else {
+            break;
+        };
         counters.remove(&key);
     }
+}
+
+fn native_predictor_counter_uses(
+    counters: &mut HashMap<String, NativeMemoryCacheCounter>,
+    key: &str,
+) -> Option<u32> {
+    let counter = counters.get(key).copied()?;
+    if std::time::Instant::now().saturating_duration_since(counter.seen_at)
+        >= NATIVE_CACHE_PREDICTOR_COUNTER_TTL
+    {
+        counters.remove(key);
+        return None;
+    }
+    Some(counter.uses)
 }
 
 fn native_cache_entry_has_stale_window(
@@ -1584,9 +1590,19 @@ impl NativeHttp1Proxy {
         key: String,
         request: NativeHttp1Request,
     ) {
+        {
+            let mut state = lock_native_memory_cache(&cache.state, "proxy");
+            if !state.revalidating.insert(key.clone()) {
+                return;
+            }
+        }
         let proxy = self.clone();
         tokio::spawn(async move {
-            proxy.revalidate_cache_entry(cache, key, request).await;
+            proxy
+                .revalidate_cache_entry(cache.clone(), key.clone(), request)
+                .await;
+            let mut state = lock_native_memory_cache(&cache.state, "proxy");
+            state.revalidating.remove(&key);
         });
     }
 

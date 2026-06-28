@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use fluxheim_cache::{
     CacheRequestView, StaticCacheRequest, request_cache_bypass_reason,
@@ -672,13 +672,16 @@ impl NativeStaticMemoryCache {
         let body: Arc<[u8]> = Arc::from(response.body().to_vec());
         let key = key.to_owned();
         let now = Instant::now();
+        let Some(expires_at) = native_static_cache_expires_at(now, ttl) else {
+            return Err("ttl-overflow");
+        };
         let entry = NativeMemoryCacheEntry {
             status: response.status(),
             reason: response.reason().to_owned(),
             headers: response.headers().to_vec(),
             content_length: response.content_length(),
             body,
-            expires_at: now + ttl,
+            expires_at,
             stale_while_revalidate_until: None,
             stale_if_error_until: None,
             stored_at: now,
@@ -879,6 +882,10 @@ fn directory_listing_response(
         .with_header("cache-control", "private, no-store")
 }
 
+fn native_static_cache_expires_at(now: Instant, ttl: Duration) -> Option<Instant> {
+    now.checked_add(ttl)
+}
+
 fn static_web_method_allowed(method: &str) -> bool {
     matches!(method, "GET" | "HEAD")
 }
@@ -927,7 +934,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{NativeStaticFile, open_static_body_file};
+    use super::{NativeStaticFile, native_static_cache_expires_at, open_static_body_file};
     use crate::NativeHttp1Response;
     use crate::native_http1_cache::{
         NativeMemoryCacheEntry, NativeMemoryCacheState, native_cache_entry_weight,
@@ -943,6 +950,11 @@ mod tests {
         let weight = native_cache_entry_weight("cache-key", &response, 5);
 
         assert!(weight >= raw_bytes + 256 + "cache-key".len() as u64 + "OK".len() as u64);
+    }
+
+    #[test]
+    fn static_cache_expiry_rejects_unrepresentable_ttl() {
+        assert!(native_static_cache_expires_at(Instant::now(), Duration::MAX).is_none());
     }
 
     #[test]

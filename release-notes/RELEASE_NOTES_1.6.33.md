@@ -64,6 +64,10 @@ explicit compatibility gates until their native implementations are proven.
   expired memory objects. The native path serves a `STALE-UPDATING` response,
   keeps origin-fill protection in front of the refresh task, and updates the
   cached object through the same response admission path.
+- Hardened native cache internals by using checked static-web cache expiry
+  arithmetic, suppressing duplicate stale-while-revalidate refresh tasks per
+  cache key before task allocation, and avoiding full predictor-counter table
+  scans on the hot miss path.
 
 ## Compatibility Notes
 
@@ -88,6 +92,7 @@ explicit compatibility gates until their native implementations are proven.
 - `cargo test -p fluxheim-server native_route_proxy_min_uses_delays_memory_cache_admission --locked`
 - `cargo test -p fluxheim-server native_route_proxy_predictor_passes_repeated_uncacheable_memory_response --locked`
 - `cargo test -p fluxheim-server native_route_proxy_serves_stale_while_revalidating_memory_cache --locked`
+- `cargo test -p fluxheim-server static_cache_expiry_rejects_unrepresentable_ttl --locked`
 - `cargo test -p fluxheim-server native_route_proxy_ --locked`
 - `cargo test -p fluxheim-server --features acme,tls-rustls-backend native_http1_proxy_runtime_accepts_default_vhost_acme_certificate_source --locked`
 - `cargo test -p fluxheim-server native_route_proxy_accepts_ --locked`

@@ -54,6 +54,10 @@ behavior when the change improves security or project direction.
 - Native proxy memory cache now supports `stale_while_revalidate_secs` for
   expired memory objects, serving `STALE-UPDATING` responses while a bounded
   background refresh updates the cached object through the same admission path.
+- Harden native cache internals by using checked static-web cache expiry
+  arithmetic, suppressing duplicate stale-while-revalidate refresh tasks per
+  cache key before task spawn, and avoiding full predictor-counter table scans
+  on the hot miss path.
 
 ## 1.6.32 - 2026-06-28
 

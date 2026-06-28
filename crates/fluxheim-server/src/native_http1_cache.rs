@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -27,6 +27,7 @@ pub(crate) struct NativeMemoryCacheState {
     pub(crate) variants: HashMap<String, Vec<NativeMemoryCacheVariant>>,
     pub(crate) min_uses: HashMap<String, NativeMemoryCacheCounter>,
     pub(crate) cache_pass: HashMap<String, NativeMemoryCacheCounter>,
+    pub(crate) revalidating: HashSet<String>,
     pub(crate) bytes: u64,
 }
 
