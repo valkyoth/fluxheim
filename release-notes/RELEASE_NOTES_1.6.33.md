@@ -65,6 +65,10 @@ implementations are proven.
   expired memory objects. The native path serves a `STALE-UPDATING` response,
   keeps origin-fill protection in front of the refresh task, and updates the
   cached object through the same response admission path.
+- Native proxy memory cache now supports `[cache.lock]` request collapsing for
+  concurrent same-key memory-cache misses. The first request fills from origin;
+  matching readers wait up to `wait_timeout_secs` and then serve the completed
+  object as a normal `HIT` when the fill succeeds.
 - Native proxy memory cache now supports opt-in HTTP peer-fill for deployments
   that explicitly set `cache.peer_fill.allow_insecure_http = true`. Native
   peer-fill preserves the `X-Fluxheim-Peer-Fill` loop guard, sends
@@ -90,9 +94,10 @@ implementations are proven.
   `stale_if_error_secs` serving, `cache.origin_protection` fill budgets,
   native load-balanced pools, `cache.min_uses`, `pass_uncacheable_after`,
   opt-in `[cache.predictor]` cache-pass decisions,
-  `stale_while_revalidate_secs` background refresh, and HTTP peer-fill when
-  `allow_insecure_http = true`. If `cache.range.enabled = true`, bounded
-  single `Range` requests can be served from fresh cached full objects.
+  `stale_while_revalidate_secs` background refresh, `[cache.lock]` same-key
+  request collapsing, and HTTP peer-fill when `allow_insecure_http = true`. If
+  `cache.range.enabled = true`, bounded single `Range` requests can be served
+  from fresh cached full objects.
 - Still blocked for native runtime readiness: disk/tiered proxy cache, slice
   composition, HTTPS peer-fill, and policies outside the supported native
   memory-cache subset.
@@ -109,6 +114,7 @@ implementations are proven.
 - `cargo test -p fluxheim-server native_route_proxy_min_uses_delays_memory_cache_admission --locked`
 - `cargo test -p fluxheim-server native_route_proxy_predictor_passes_repeated_uncacheable_memory_response --locked`
 - `cargo test -p fluxheim-server native_route_proxy_serves_stale_while_revalidating_memory_cache --locked`
+- `cargo test -p fluxheim-server native_route_proxy_cache_lock_collapses_concurrent_memory_fills --locked`
 - `cargo test -p fluxheim-server native_route_proxy_peer_fills_and_stores_memory_cache_response --locked`
 - `cargo test -p fluxheim-server static_cache_expiry_rejects_unrepresentable_ttl --locked`
 - `cargo test -p fluxheim-server native_route_proxy_ --locked`

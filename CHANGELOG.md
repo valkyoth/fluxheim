@@ -54,6 +54,9 @@ behavior when the change improves security or project direction.
 - Native proxy memory cache now supports `stale_while_revalidate_secs` for
   expired memory objects, serving `STALE-UPDATING` responses while a bounded
   background refresh updates the cached object through the same admission path.
+- Native proxy memory cache now supports `[cache.lock]` same-key request
+  collapsing for concurrent memory-cache misses, allowing waiting readers to
+  serve the completed origin fill as a `HIT`.
 - Native proxy memory cache now supports opt-in HTTP peer-fill when
   `cache.peer_fill.allow_insecure_http = true`, preserving the peer-fill loop
   marker, `only-if-cached` request mode, bounded peer-fill concurrency, local

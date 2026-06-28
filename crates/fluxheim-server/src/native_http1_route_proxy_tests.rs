@@ -3588,6 +3588,7 @@ async fn native_route_proxy_origin_protection_limits_concurrent_cache_fills() {
     let (upstream, accepted) =
         upstream_delayed_cacheable_once("slow-origin", Duration::from_millis(200)).await;
     let mut cache = native_proxy_memory_cache_config();
+    cache.lock.enabled = false;
     cache.origin_protection.enabled = true;
     cache.origin_protection.max_concurrent_fills = 1;
     let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
@@ -3612,6 +3613,35 @@ async fn native_route_proxy_origin_protection_limits_concurrent_cache_fills() {
     assert_eq!(
         response_header(&second, "x-cache-reason").as_deref(),
         Some("origin-protected")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_cache_lock_collapses_concurrent_memory_fills() {
+    let (upstream, accepted) =
+        upstream_delayed_cacheable_once("collapsed-fill", Duration::from_millis(150)).await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.lock.enabled = true;
+    cache.lock.wait_timeout_secs = 5;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = tokio::spawn(async move { downstream_get(listener, "/asset.png").await });
+    accepted.await.unwrap();
+    let second = downstream_get(listener, "/asset.png").await;
+    let first = first.await.unwrap();
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("collapsed-fill"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.ends_with("collapsed-fill"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
     );
 }
 

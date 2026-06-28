@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use fluxheim_cache::{remaining_fresh_ttl_secs, response_age_secs, response_cache_control_max_age};
 use fluxheim_config::CacheConfig;
+use tokio::sync::Notify;
 
 use crate::NativeHttp1Response;
 
@@ -28,6 +29,7 @@ pub(crate) struct NativeMemoryCacheState {
     pub(crate) min_uses: HashMap<String, NativeMemoryCacheCounter>,
     pub(crate) cache_pass: HashMap<String, NativeMemoryCacheCounter>,
     pub(crate) revalidating: HashSet<String>,
+    pub(crate) filling: HashMap<String, NativeMemoryCacheFill>,
     pub(crate) bytes: u64,
 }
 
@@ -41,6 +43,12 @@ pub(crate) struct NativeMemoryCacheCounter {
 pub(crate) struct NativeMemoryCacheVariant {
     pub(crate) fields: Vec<String>,
     pub(crate) key: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NativeMemoryCacheFill {
+    pub(crate) notify: Arc<Notify>,
+    pub(crate) started_at: Instant,
 }
 
 impl NativeMemoryCacheEntry {

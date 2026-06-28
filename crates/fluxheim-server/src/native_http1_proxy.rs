@@ -14,10 +14,10 @@ use crate::NativeHttp1UpstreamTls;
 #[cfg(not(feature = "privacy-mode"))]
 use crate::ProxyProtocolTrustedSource;
 use crate::native_http1_cache::{
-    NativeMemoryCacheCounter, NativeMemoryCacheEntry, NativeMemoryCacheState,
-    NativeMemoryCacheVariant, lock_native_memory_cache, native_cache_entry_weight,
-    native_cache_ttl, native_peer_fill_cache_ttl, native_response_header_map,
-    prune_native_memory_cache, remove_native_memory_cache_entry,
+    NativeMemoryCacheCounter, NativeMemoryCacheEntry, NativeMemoryCacheFill,
+    NativeMemoryCacheState, NativeMemoryCacheVariant, lock_native_memory_cache,
+    native_cache_entry_weight, native_cache_ttl, native_peer_fill_cache_ttl,
+    native_response_header_map, prune_native_memory_cache, remove_native_memory_cache_entry,
     remove_native_memory_cache_variants, with_native_cache_status,
 };
 #[cfg(any(
@@ -45,6 +45,7 @@ use fluxheim_cache::{
 use fluxheim_config::{CacheConfig, CacheStaleErrorKind};
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 use sanitization::ct::ConstantTimeEq;
+use tokio::sync::Notify;
 
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 const NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
@@ -162,9 +163,40 @@ struct NativePeerFillPermit {
     counter: Arc<AtomicUsize>,
 }
 
+#[derive(Debug)]
+enum NativeCacheFillGate {
+    Disabled,
+    Writer(NativeCacheFillPermit),
+    Waiter {
+        notify: Arc<Notify>,
+        timeout: Duration,
+    },
+}
+
+#[derive(Debug)]
+struct NativeCacheFillPermit {
+    state: Arc<Mutex<NativeMemoryCacheState>>,
+    key: String,
+    notify: Arc<Notify>,
+}
+
 impl Drop for NativePeerFillPermit {
     fn drop(&mut self) {
         self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+impl Drop for NativeCacheFillPermit {
+    fn drop(&mut self) {
+        let mut state = lock_native_memory_cache(&self.state, "proxy");
+        if state
+            .filling
+            .get(&self.key)
+            .is_some_and(|fill| Arc::ptr_eq(&fill.notify, &self.notify))
+        {
+            state.filling.remove(&self.key);
+        }
+        self.notify.notify_waiters();
     }
 }
 
@@ -904,6 +936,52 @@ impl NativeProxyMemoryCache {
             self.config.origin_protection.max_concurrent_fills,
         )
         .map(Some)
+    }
+
+    fn cache_fill_gate(&self, key: &str) -> NativeCacheFillGate {
+        if !self.config.lock.enabled {
+            return NativeCacheFillGate::Disabled;
+        }
+        let mut state = lock_native_memory_cache(&self.state, "proxy");
+        let now = std::time::Instant::now();
+        let age_timeout = Duration::from_secs(self.config.lock.age_timeout_secs);
+        if let Some(fill) = state.filling.get(key) {
+            if now.saturating_duration_since(fill.started_at) < age_timeout {
+                return NativeCacheFillGate::Waiter {
+                    notify: fill.notify.clone(),
+                    timeout: Duration::from_secs(self.config.lock.wait_timeout_secs),
+                };
+            }
+            let expired = state.filling.remove(key);
+            if let Some(expired) = expired {
+                expired.notify.notify_waiters();
+            }
+        }
+
+        let notify = Arc::new(Notify::new());
+        state.filling.insert(
+            key.to_owned(),
+            NativeMemoryCacheFill {
+                notify: notify.clone(),
+                started_at: now,
+            },
+        );
+        NativeCacheFillGate::Writer(NativeCacheFillPermit {
+            state: self.state.clone(),
+            key: key.to_owned(),
+            notify,
+        })
+    }
+
+    async fn wait_for_cache_fill(
+        &self,
+        notify: Arc<Notify>,
+        timeout: Duration,
+        key: &str,
+        request: &NativeHttp1Request,
+    ) -> Option<NativeMemoryCacheEntry> {
+        let _ = tokio::time::timeout(timeout, notify.notified()).await;
+        self.get(key, request)
     }
 
     fn acquire_peer_fill_permit(&self) -> Option<NativePeerFillPermit> {
@@ -1662,6 +1740,33 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     }
                 }
             }
+            let _cache_fill_permit = if let Some((cache, key, _)) = proxy_cache_fill.as_ref() {
+                loop {
+                    match cache.cache_fill_gate(key) {
+                        NativeCacheFillGate::Disabled => break None,
+                        NativeCacheFillGate::Writer(permit) => break Some(permit),
+                        NativeCacheFillGate::Waiter { notify, timeout } => {
+                            if let Some(entry) = cache
+                                .wait_for_cache_fill(notify, timeout, key, &request)
+                                .await
+                            {
+                                return self.finish_response(
+                                    entry.to_response(),
+                                    Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
+                                    #[cfg(any(
+                                        feature = "compression-brotli",
+                                        feature = "compression-gzip",
+                                        feature = "compression-zstd"
+                                    ))]
+                                    compression_request.as_ref(),
+                                );
+                            }
+                        }
+                    }
+                }
+            } else {
+                None
+            };
             let _origin_fill_permit = if let Some((cache, _, _)) = proxy_cache_fill.as_ref() {
                 match cache.acquire_origin_fill_permit() {
                     Some(permit) => permit,
@@ -2204,6 +2309,33 @@ impl NativeHttp1Proxy {
                 }
             }
         }
+        let _cache_fill_permit = if let Some((cache, key, _)) = proxy_cache_fill.as_ref() {
+            loop {
+                match cache.cache_fill_gate(key) {
+                    NativeCacheFillGate::Disabled => break None,
+                    NativeCacheFillGate::Writer(permit) => break Some(permit),
+                    NativeCacheFillGate::Waiter { notify, timeout } => {
+                        if let Some(entry) = cache
+                            .wait_for_cache_fill(notify, timeout, key, &request)
+                            .await
+                        {
+                            return self.finish_response(
+                                entry.to_response(),
+                                Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
+                                #[cfg(any(
+                                    feature = "compression-brotli",
+                                    feature = "compression-gzip",
+                                    feature = "compression-zstd"
+                                ))]
+                                compression_request,
+                            );
+                        }
+                    }
+                }
+            }
+        } else {
+            None
+        };
         let _origin_fill_permit = if let Some((cache, _, _)) = proxy_cache_fill.as_ref() {
             match cache.acquire_origin_fill_permit() {
                 Some(permit) => permit,
