@@ -8,9 +8,11 @@ use fluxheim_config::{ByteSize, CacheDiskBackend};
 use crate::DiskTierPlan;
 
 pub const STORAGE_BIN_MANIFEST_FILENAME: &str = ".fluxheim-storage-bin-v1";
+pub const STORAGE_BIN_INDEX_FILENAME: &str = ".fluxheim-storage-bin-index-v1";
 pub const STORAGE_BIN_DATA_DIR: &str = "bins";
 
 const STORAGE_BIN_MANIFEST_MAGIC_V1: &str = "FLUXHEIM-STORAGE-BIN-v1";
+const STORAGE_BIN_INDEX_MAGIC_V1: &str = "FLUXHEIM-STORAGE-BIN-INDEX-v1";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StorageBinLayoutPlan {
@@ -552,6 +554,253 @@ impl StorageBinFreeMap {
     }
 }
 
+pub fn prepare_storage_bin_layout(
+    layout: &StorageBinLayoutPlan,
+) -> std::io::Result<StorageBinManifest> {
+    let root = prepare_storage_bin_root(&layout.root)?;
+    let canonical_layout = StorageBinLayoutPlan {
+        root: root.clone(),
+        manifest_path: root.join(STORAGE_BIN_MANIFEST_FILENAME),
+        data_dir: root.join(STORAGE_BIN_DATA_DIR),
+        bin_size_bytes: layout.bin_size_bytes,
+        max_size_bytes: layout.max_size_bytes,
+        preallocate: layout.preallocate,
+        max_open_bins: layout.max_open_bins,
+    };
+
+    prepare_storage_bin_data_dir(&root, &canonical_layout.data_dir)?;
+    match read_storage_bin_manifest(&root, &canonical_layout.manifest_path)? {
+        Some(manifest) => {
+            manifest.ensure_matches_layout(&canonical_layout)?;
+            Ok(manifest)
+        }
+        None => {
+            let manifest = StorageBinManifest::from_layout(&canonical_layout);
+            write_storage_bin_manifest(&root, &canonical_layout.manifest_path, &manifest)?;
+            Ok(manifest)
+        }
+    }
+}
+
+pub fn storage_bin_index_path(root: &Path) -> PathBuf {
+    root.join(STORAGE_BIN_INDEX_FILENAME)
+}
+
+pub fn read_storage_bin_index(
+    layout: &StorageBinLayoutPlan,
+) -> std::io::Result<Vec<StorageBinIndexEntry>> {
+    let path = storage_bin_index_path(&layout.root);
+    if storage_bin_path_contains_symlink(&layout.root, &path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin index path contains symlink: {}",
+                path.display()
+            ),
+        ));
+    }
+    let canonical = match path.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    if !canonical.starts_with(&layout.root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin index escaped root: {}", canonical.display()),
+        ));
+    }
+
+    let mut file = StorageBinSafePath::from_path(canonical).open_existing_file()?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    parse_storage_bin_index(layout, &contents)
+}
+
+pub fn write_storage_bin_index(
+    layout: &StorageBinLayoutPlan,
+    entries: &[StorageBinIndexEntry],
+) -> std::io::Result<()> {
+    let path = storage_bin_index_path(&layout.root);
+    if !path.starts_with(&layout.root) || storage_bin_path_contains_symlink(&layout.root, &path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin index path is unsafe: {}", path.display()),
+        ));
+    }
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin index path has no parent: {}", path.display()),
+        )
+    })?;
+    let temp_path = storage_bin_temp_path(parent, "index")?;
+    let path = StorageBinSafePath::from_path(path);
+    let temp_path = StorageBinSafePath::from_path(temp_path);
+    let write_result = (|| {
+        let mut file = temp_path.create_new_file()?;
+        writeln!(file, "{STORAGE_BIN_INDEX_MAGIC_V1}")?;
+        let mut entries = entries.to_vec();
+        entries.sort_by(|left, right| left.combined_key.cmp(&right.combined_key));
+        for entry in entries {
+            entry.location.validate(layout.bin_size_bytes)?;
+            writeln!(
+                file,
+                "{}\t{}\t{}\t{}\t{}",
+                storage_bin_hex_encode(entry.combined_key.as_bytes()),
+                entry.location.bin_id,
+                entry.location.offset,
+                entry.location.len,
+                storage_bin_system_time_unix_secs(entry.accessed).unwrap_or(0)
+            )?;
+        }
+        file.sync_all()?;
+        path.rename_from(&temp_path)
+    })();
+    if write_result.is_err() {
+        let _ = temp_path.remove_file();
+    }
+    write_result
+}
+
+fn prepare_storage_bin_root(root: &Path) -> std::io::Result<PathBuf> {
+    if storage_bin_configured_path_contains_symlink(root)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin root contains symlink: {}", root.display()),
+        ));
+    }
+    match storage_bin_path_file_type_no_follow(root)? {
+        Some(file_type) if file_type.is_symlink() || !file_type.is_dir() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "storage-bin root is not a real directory: {}",
+                    root.display()
+                ),
+            ));
+        }
+        Some(_) => {}
+        None => {
+            create_storage_bin_dir_all(root)?;
+        }
+    }
+    if storage_bin_configured_path_contains_symlink(root)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin root contains symlink: {}", root.display()),
+        ));
+    }
+    root.canonicalize()
+}
+
+fn read_storage_bin_manifest(
+    root: &Path,
+    path: &Path,
+) -> std::io::Result<Option<StorageBinManifest>> {
+    if storage_bin_path_contains_symlink(root, path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin manifest path contains symlink: {}",
+                path.display()
+            ),
+        ));
+    }
+    let canonical = match path.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if !canonical.starts_with(root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin manifest escaped root: {}", canonical.display()),
+        ));
+    }
+
+    let mut file = StorageBinSafePath::from_path(canonical).open_existing_file()?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    StorageBinManifest::decode(&contents).map(Some)
+}
+
+fn write_storage_bin_manifest(
+    root: &Path,
+    path: &Path,
+    manifest: &StorageBinManifest,
+) -> std::io::Result<()> {
+    if !path.starts_with(root) || storage_bin_path_contains_symlink(root, path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin manifest path is unsafe: {}", path.display()),
+        ));
+    }
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin manifest path has no parent: {}",
+                path.display()
+            ),
+        )
+    })?;
+    let temp_path = storage_bin_temp_path(parent, "manifest")?;
+    let path = StorageBinSafePath::from_path(path.to_path_buf());
+    let temp_path = StorageBinSafePath::from_path(temp_path);
+    let write_result = (|| {
+        let mut file = temp_path.create_new_file()?;
+        file.write_all(manifest.encode().as_bytes())?;
+        file.sync_all()?;
+        path.rename_from(&temp_path)
+    })();
+    if write_result.is_err() {
+        let _ = temp_path.remove_file();
+    }
+    write_result
+}
+
+fn parse_storage_bin_index(
+    layout: &StorageBinLayoutPlan,
+    contents: &str,
+) -> std::io::Result<Vec<StorageBinIndexEntry>> {
+    let mut lines = contents.lines();
+    match lines.next() {
+        Some(STORAGE_BIN_INDEX_MAGIC_V1) => {}
+        _ => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid storage-bin index magic",
+            ));
+        }
+    }
+    let mut entries = Vec::new();
+    for line in lines {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() != 5 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid storage-bin index line",
+            ));
+        }
+        let combined_key = storage_bin_hex_decode_string(fields[0])?;
+        let location = StorageBinObjectLocation {
+            bin_id: parse_storage_bin_index_u64(fields[1], "bin id")?,
+            offset: parse_storage_bin_index_u64(fields[2], "offset")?,
+            len: parse_storage_bin_index_u64(fields[3], "length")?,
+        }
+        .validate(layout.bin_size_bytes)?;
+        entries.push(StorageBinIndexEntry {
+            combined_key,
+            location,
+            accessed: storage_bin_unix_secs_system_time(parse_storage_bin_index_u64(
+                fields[4], "accessed",
+            )?),
+        });
+    }
+    Ok(entries)
+}
+
 fn write_storage_bin_range(
     file: &mut std::fs::File,
     offset: u64,
@@ -682,6 +931,21 @@ fn storage_bin_path_file_type_no_follow(
     }
 }
 
+fn storage_bin_configured_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(false)
+}
+
 fn storage_bin_path_contains_symlink(root: &Path, path: &Path) -> std::io::Result<bool> {
     let Ok(relative) = path.strip_prefix(root) else {
         return Ok(true);
@@ -710,6 +974,93 @@ fn storage_bin_path_contains_symlink(root: &Path, path: &Path) -> std::io::Resul
     }
 
     Ok(false)
+}
+
+fn storage_bin_temp_path(parent: &Path, label: &str) -> std::io::Result<PathBuf> {
+    let mut nonce = [0_u8; 16];
+    getrandom::fill(&mut nonce).map_err(|error| {
+        std::io::Error::other(format!("generate storage-bin {label} temp nonce: {error}"))
+    })?;
+    let mut encoded = String::with_capacity(nonce.len() * 2);
+    for byte in nonce {
+        use std::fmt::Write as _;
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    Ok(parent.join(format!(
+        ".fluxheim-storage-bin-{label}.{}.{}.tmp",
+        std::process::id(),
+        encoded
+    )))
+}
+
+fn parse_storage_bin_index_u64(value: &str, field: &str) -> std::io::Result<u64> {
+    value.parse::<u64>().map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("invalid storage-bin index {field}: {error}"),
+        )
+    })
+}
+
+fn storage_bin_hex_encode(bytes: &[u8]) -> String {
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    encoded
+}
+
+fn storage_bin_hex_decode_string(value: &str) -> std::io::Result<String> {
+    if !value.len().is_multiple_of(2) || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid storage-bin index hex key",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(value.len() / 2);
+    for chunk in value.as_bytes().chunks_exact(2) {
+        let high = storage_bin_hex_nibble(chunk[0]).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid storage-bin index hex key",
+            )
+        })?;
+        let low = storage_bin_hex_nibble(chunk[1]).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid storage-bin index hex key",
+            )
+        })?;
+        bytes.push((high << 4) | low);
+    }
+    String::from_utf8(bytes).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("storage-bin index key is not utf-8: {error}"),
+        )
+    })
+}
+
+fn storage_bin_hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn storage_bin_system_time_unix_secs(time: SystemTime) -> Option<u64> {
+    time.duration_since(SystemTime::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs())
+}
+
+fn storage_bin_unix_secs_system_time(secs: u64) -> SystemTime {
+    SystemTime::UNIX_EPOCH
+        .checked_add(std::time::Duration::from_secs(secs))
+        .unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
 #[derive(Debug, Clone)]
@@ -746,6 +1097,23 @@ impl StorageBinSafePath {
                 | rustix::fs::OFlags::CLOEXEC
                 | rustix::fs::OFlags::DIRECTORY,
             rustix::fs::Mode::empty(),
+        )
+        .map_err(storage_bin_rustix_to_io_error)?;
+        Ok(fd.into())
+    }
+
+    fn create_new_file(&self) -> std::io::Result<std::fs::File> {
+        let (_, name) = self.parent_and_name()?;
+        let parent = self.open_parent_dir()?;
+        let fd = rustix::fs::openat(
+            &parent,
+            name,
+            rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::WRONLY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
         )
         .map_err(storage_bin_rustix_to_io_error)?;
         Ok(fd.into())
@@ -792,6 +1160,20 @@ impl StorageBinSafePath {
         )
         .map_err(storage_bin_rustix_to_io_error)?;
         Ok(fd.into())
+    }
+
+    fn rename_from(&self, source: &StorageBinSafePath) -> std::io::Result<()> {
+        let (_, source_name) = source.parent_and_name()?;
+        let (_, destination_name) = self.parent_and_name()?;
+        let source_parent = source.open_parent_dir()?;
+        let destination_parent = self.open_parent_dir()?;
+        rustix::fs::renameat(
+            &source_parent,
+            source_name,
+            &destination_parent,
+            destination_name,
+        )
+        .map_err(storage_bin_rustix_to_io_error)
     }
 
     fn remove_file(&self) -> std::io::Result<()> {
@@ -869,6 +1251,8 @@ mod tests {
     use super::{
         StorageBinFileSet, StorageBinFreeMap, StorageBinFreeRange, StorageBinIndexEntry,
         StorageBinLayoutPlan, StorageBinManifest, StorageBinObjectLocation,
+        prepare_storage_bin_layout, read_storage_bin_index, storage_bin_index_path,
+        write_storage_bin_index,
     };
     use crate::DiskTierPlan;
 
@@ -995,5 +1379,46 @@ mod tests {
 
         assert_eq!(files.read_object(location).unwrap(), b"hello-native");
         assert_eq!(std::fs::metadata(layout.bin_path(0)).unwrap().len(), 64);
+    }
+
+    #[test]
+    fn storage_bin_layout_and_index_io_round_trip() {
+        let root = tempfile::tempdir().unwrap();
+        let plan = DiskTierPlan {
+            path: root.path().join("cache"),
+            max_size_bytes: ByteSize::from_bytes(128),
+            max_object_bytes: ByteSize::from_bytes(64),
+            backend: CacheDiskBackend::StorageBin,
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(64),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+            encryption: CacheDiskEncryptionConfig::default(),
+            cache_tag_headers: Vec::new(),
+        };
+        let mut layout = StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+        prepare_storage_bin_layout(&layout).unwrap();
+        let root = layout.root.canonicalize().unwrap();
+        layout = StorageBinLayoutPlan {
+            root: root.clone(),
+            manifest_path: root.join(super::STORAGE_BIN_MANIFEST_FILENAME),
+            data_dir: root.join(super::STORAGE_BIN_DATA_DIR),
+            ..layout
+        };
+        let entries = vec![StorageBinIndexEntry {
+            combined_key: "combined-key".to_owned(),
+            location: StorageBinObjectLocation {
+                bin_id: 0,
+                offset: 4,
+                len: 12,
+            },
+            accessed: SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(42),
+        }];
+
+        write_storage_bin_index(&layout, &entries).unwrap();
+
+        assert!(storage_bin_index_path(&root).is_file());
+        assert_eq!(read_storage_bin_index(&layout).unwrap(), entries);
     }
 }

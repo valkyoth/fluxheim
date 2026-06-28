@@ -74,9 +74,10 @@ behavior when the change improves security or project direction.
 - Native proxy cache now supports local-key encrypted filesystem disk cache,
   reusing the existing AES-256-GCM disk-object envelope and safe key-source
   loading while preserving plaintext rejection when encryption is enabled.
-- Move the storage-bin file-set helper into `fluxheim-cache` with crate-local
-  safe `openat`/`NOFOLLOW` coverage, preparing the native storage-bin adapter
-  without depending on root compatibility cache code.
+- Move storage-bin file-set, manifest, and index I/O helpers into
+  `fluxheim-cache` with crate-local safe `openat`/`NOFOLLOW` coverage,
+  preparing the native storage-bin adapter without depending on root
+  compatibility cache code.
 - Harden native peer-fill by subtracting upstream `Age` during admission,
   returning bounded `504` misses for `only-if-cached` cache misses, and
   preventing a client-supplied peer-fill marker alone from forcing origin

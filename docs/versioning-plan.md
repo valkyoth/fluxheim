@@ -2868,10 +2868,10 @@ available for the stabilization/security-only follow-up.
     has live native listener `MISS` then `HIT`, collapsed-fill `HIT`,
     slice-fill then slice `HIT`, multipart slice composition, disk persistence,
     encrypted disk persistence, memory refill from disk, `PEER-HIT` then
-    `HIT`, and stale-refresh tests. Storage-bin file-set helpers have moved
-    into `fluxheim-cache` as native adapter prework. Native readiness still
-    blocks OpenBao Transit encryption and storage-bin cache until those
-    semantics are owned by the native adapter.
+    `HIT`, and stale-refresh tests. Storage-bin file-set, manifest, and index
+    I/O helpers have moved into `fluxheim-cache` as native adapter prework.
+    Native readiness still blocks OpenBao Transit encryption and storage-bin
+    cache until those semantics are owned by the native adapter.
 - `v1.6.34`: remove the final Pingora runtime/listener/TLS adapter crates from
   normal builds after proxy-cache parity is proven. The native WebSocket
   baseline already covers strict `Upgrade: websocket` requests on forced HTTP/1
