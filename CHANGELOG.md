@@ -7,6 +7,23 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.33 - Unreleased
+
+### Changed
+
+- Start the final native proxy-cache parity release with a Fluxheim-owned
+  native memory-cache adapter for ordinary HTTP/1 proxy responses.
+- Native proxy cache now supports safe memory-tier `GET` lookup/fill for
+  non-load-balanced upstreams, emits configured cache status/reason headers,
+  preserves HEAD bypass behavior, and reuses shared Fluxheim cache admission
+  checks for request bypass, response `no-store`/`private`, `Set-Cookie`,
+  content type, status TTL, and object-size policy.
+- Native cache readiness now accepts root, vhost, and route proxy cache
+  policies only for the supported memory-cache subset while keeping disk,
+  range/slice, Vary, stale serving, peer-fill, predictor/origin-protection,
+  and load-balanced proxy cache paths blocked until their native parity work
+  lands.
+
 ## 1.6.32 - 2026-06-28
 
 ### Changed

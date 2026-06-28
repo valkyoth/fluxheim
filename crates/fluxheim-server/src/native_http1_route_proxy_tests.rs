@@ -69,6 +69,43 @@ async fn upstream_expect_method_path(
     addr
 }
 
+async fn upstream_cacheable_once(body: &'static str) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(request).unwrap();
+        assert!(
+            request.starts_with("GET /asset.png HTTP/1.1\r\n"),
+            "unexpected upstream request: {request:?}"
+        );
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    addr
+}
+
 #[cfg(feature = "php-fpm")]
 async fn fastcgi_responder(stdout: &'static [u8]) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -344,6 +381,19 @@ async fn downstream_request_bytes(proxy: std::net::SocketAddr, request: &str) ->
 
 fn proxy_for(upstream: std::net::SocketAddr) -> NativeHttp1Proxy {
     NativeHttp1Proxy::new(NativeHttp1Upstream::new(upstream.to_string()))
+}
+
+fn native_proxy_memory_cache_config() -> fluxheim_config::CacheConfig {
+    fluxheim_config::CacheConfig {
+        enabled: true,
+        status_header: Some("x-cache-status".to_owned()),
+        status_reason_header: Some("x-cache-reason".to_owned()),
+        memory: fluxheim_config::CacheMemoryConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
 }
 
 fn route_test_request(path: &str) -> NativeHttp1Request {
@@ -2651,6 +2701,27 @@ fn native_route_proxy_rejects_vhost_cache_policy_until_native_adapter_exists() {
 }
 
 #[test]
+fn native_route_proxy_accepts_vhost_memory_proxy_cache() {
+    let mut vhost = native_route_proxy_test_vhost();
+    vhost.proxy = fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        ..Default::default()
+    };
+    vhost.cache = native_proxy_memory_cache_config();
+
+    let proxy = NativeHttp1RouteProxy::from_vhost_config(
+        &vhost,
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        None,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+
+    assert!(proxy.fallback().is_some());
+}
+
+#[test]
 fn native_route_proxy_rejects_vhost_php_without_root() {
     let mut vhost = native_route_proxy_test_vhost();
     vhost.php.enabled = true;
@@ -2687,6 +2758,46 @@ fn native_route_proxy_rejects_route_cache_policy_until_native_adapter_exists() {
 }
 
 #[test]
+fn native_route_proxy_accepts_route_memory_proxy_cache() {
+    let mut route = native_route_proxy_test_route();
+    route.redirect = None;
+    route.proxy = Some(fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        ..Default::default()
+    });
+    route.cache = Some(native_proxy_memory_cache_config());
+
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new("127.0.0.1:3000"));
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, Some(proxy)).unwrap();
+
+    assert!(route.proxy().is_some());
+}
+
+#[tokio::test]
+async fn native_route_proxy_caches_proxy_response_in_memory() {
+    let upstream = upstream_cacheable_once("origin-one").await;
+    let cache = native_proxy_memory_cache_config();
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_get(listener, "/asset.png").await;
+    let second = downstream_get(listener, "/asset.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("origin-one"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.ends_with("origin-one"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[test]
 fn native_route_proxy_rejects_route_php_without_root() {
     let mut route = native_route_proxy_test_route();
     route.redirect = None;
@@ -2703,6 +2814,7 @@ fn native_route_proxy_rejects_route_php_without_root() {
     );
 }
 
+#[cfg(feature = "php-fpm")]
 #[tokio::test]
 async fn native_route_proxy_php_route_fails_closed_when_fpm_unavailable() {
     let root = tempfile::TempDir::new().unwrap();

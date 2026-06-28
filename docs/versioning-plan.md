@@ -2849,6 +2849,14 @@ available for the stabilization/security-only follow-up.
   supported, and disk/memory/tier behavior. Do not remove Pingora in this
   release unless the cache smoke and pentest pass cleanly; the goal is cache
   parity, not simultaneous dependency deletion.
+  - Current checkpoint: native HTTP/1 proxy memory-cache lookup/fill is wired
+    for ordinary single-upstream GET responses. It reuses `fluxheim-cache`
+    request/response policy helpers, emits configured cache status/reason
+    headers, preserves HEAD bypass behavior, and has a live native listener
+    `MISS` then `HIT` test. Native readiness still blocks disk/tiered cache,
+    range/slice, Vary variants, stale serving, peer-fill, predictor/origin
+    protection, and load-balanced proxy cache until those semantics are owned
+    by the native adapter.
 - `v1.6.34`: remove the final Pingora runtime/listener/TLS adapter crates from
   normal builds after proxy-cache parity is proven. The native WebSocket
   baseline already covers strict `Upgrade: websocket` requests on forced HTTP/1

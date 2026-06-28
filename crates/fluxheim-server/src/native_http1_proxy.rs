@@ -3,15 +3,21 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::NativeHttp1UpstreamTls;
 #[cfg(not(feature = "privacy-mode"))]
 use crate::ProxyProtocolTrustedSource;
+use crate::native_http1_cache::{
+    NativeMemoryCacheEntry, NativeMemoryCacheState, lock_native_memory_cache,
+    native_cache_entry_weight, native_cache_ttl, native_response_header_map,
+    prune_native_memory_cache, with_native_cache_status,
+};
 #[cfg(any(
     feature = "compression-brotli",
     feature = "compression-gzip",
@@ -27,6 +33,12 @@ use crate::{
     NativeHttp1Response, NativeHttp1ResponseWritePolicy, NativeHttp1StaticWeb, NativeHttp1Upstream,
     NativeTcpKeepalivePolicy,
 };
+use fluxheim_cache::{
+    CacheRequest, CacheRequestView, VaryCachePolicy, cache_method_temporarily_bypassed,
+    cache_vary_policy, image_cache_key, request_cache_bypass_reason,
+    request_cache_revalidation_requested, response_cache_admission_rejection,
+};
+use fluxheim_config::CacheConfig;
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 use sanitization::ct::ConstantTimeEq;
 
@@ -67,6 +79,7 @@ pub struct NativeHttp1Proxy {
     mirror: Option<NativeTrafficMirror>,
     #[cfg(feature = "auth-request")]
     auth_request: Option<NativeAuthRequest>,
+    cache: Option<NativeProxyMemoryCache>,
     next_upstream: Arc<AtomicUsize>,
 }
 
@@ -75,6 +88,28 @@ struct NativeHttp1ProxyErrorPage {
     status: u16,
     path: String,
     web: NativeHttp1StaticWeb,
+}
+
+#[derive(Clone, Debug)]
+struct NativeProxyMemoryCache {
+    config: CacheConfig,
+    max_bytes: u64,
+    state: Arc<Mutex<NativeMemoryCacheState>>,
+}
+
+impl Eq for NativeProxyMemoryCache {}
+
+impl PartialEq for NativeProxyMemoryCache {
+    fn eq(&self, other: &Self) -> bool {
+        self.config == other.config && self.max_bytes == other.max_bytes
+    }
+}
+
+#[derive(Debug)]
+enum NativeProxyCacheLookup {
+    Bypass(&'static str),
+    Miss { key: String, status: &'static str },
+    Hit(NativeMemoryCacheEntry),
 }
 
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
@@ -233,6 +268,7 @@ impl NativeHttp1Proxy {
             mirror: None,
             #[cfg(feature = "auth-request")]
             auth_request: None,
+            cache: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -267,6 +303,7 @@ impl NativeHttp1Proxy {
             mirror: None,
             #[cfg(feature = "auth-request")]
             auth_request: None,
+            cache: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -309,6 +346,7 @@ impl NativeHttp1Proxy {
             mirror: None,
             #[cfg(feature = "auth-request")]
             auth_request: None,
+            cache: None,
             next_upstream: Arc::new(AtomicUsize::new(0)),
         })
     }
@@ -375,6 +413,36 @@ impl NativeHttp1Proxy {
         self
     }
 
+    pub fn proxy_cache_supported(cache: &CacheConfig) -> bool {
+        cache.enabled
+            && cache.memory.enabled
+            && !cache.disk.enabled
+            && !cache.range.enabled
+            && !cache.range.slice.enabled
+            && !cache.peer_fill.enabled
+            && !cache.predictor.enabled
+            && !cache.origin_protection.enabled
+            && cache.stale_if_error_secs.is_none()
+            && cache.stale_while_revalidate_secs.is_none()
+            && cache.vary_request_headers.is_empty()
+            && cache.min_uses == 1
+            && cache.pass_uncacheable_after == 0
+    }
+
+    pub fn proxy_cache_supported_for_proxy(
+        cache: &CacheConfig,
+        proxy: &fluxheim_config::ProxyConfig,
+    ) -> bool {
+        Self::proxy_cache_supported(cache) && !proxy_uses_load_balancer(proxy)
+    }
+
+    pub fn with_proxy_cache_config(mut self, cache: &CacheConfig) -> Self {
+        if let Some(cache) = NativeProxyMemoryCache::from_config(cache) {
+            self.cache = Some(cache);
+        }
+        self
+    }
+
     pub fn from_proxy_config(
         proxy: &fluxheim_config::ProxyConfig,
         policy: crate::DownstreamHttp1Policy,
@@ -389,6 +457,13 @@ impl NativeHttp1Proxy {
     ) -> Result<Option<Self>, NativeHttp1ProxyConfigError> {
         let native = Self::from_proxy_config_with_pool_size(&config.proxy, policy, pool_max_idle)?
             .map(|proxy| proxy.with_header_policy(&config.headers));
+        let native = native.map(|proxy| {
+            if Self::proxy_cache_supported_for_proxy(&config.cache, &config.proxy) {
+                proxy.with_proxy_cache_config(&config.cache)
+            } else {
+                proxy
+            }
+        });
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -569,6 +644,7 @@ impl NativeHttp1Proxy {
                 mirror: None,
                 #[cfg(feature = "auth-request")]
                 auth_request: None,
+                cache: None,
                 next_upstream: Arc::new(AtomicUsize::new(0)),
             }
         } else {
@@ -611,7 +687,8 @@ impl PartialEq for NativeHttp1Proxy {
             && self.response_headers == other.response_headers
             && self.response_write_policy == other.response_write_policy
             && self.request_body_timeout == other.request_body_timeout
-            && self.websocket == other.websocket;
+            && self.websocket == other.websocket
+            && self.cache == other.cache;
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -668,6 +745,126 @@ impl PartialEq for NativeHttp1Proxy {
 }
 
 impl Eq for NativeHttp1Proxy {}
+
+impl NativeProxyMemoryCache {
+    fn from_config(config: &CacheConfig) -> Option<Self> {
+        NativeHttp1Proxy::proxy_cache_supported(config).then(|| Self {
+            config: config.clone(),
+            max_bytes: config.memory.max_size_bytes.as_u64(),
+            state: Arc::new(Mutex::new(NativeMemoryCacheState::default())),
+        })
+    }
+
+    fn lookup(&self, request: &NativeHttp1Request) -> NativeProxyCacheLookup {
+        if cache_method_temporarily_bypassed(request.method()) {
+            return NativeProxyCacheLookup::Bypass("method-head");
+        }
+        if let Some(reason) = request_cache_bypass_reason(request, &self.config) {
+            return NativeProxyCacheLookup::Bypass(reason);
+        }
+        let Some(key) = self.key(request) else {
+            return NativeProxyCacheLookup::Bypass("proxy-ineligible");
+        };
+        if !request_cache_revalidation_requested(request, &self.config)
+            && let Some(hit) = self.get(&key)
+        {
+            return NativeProxyCacheLookup::Hit(hit);
+        }
+        let status = if request_cache_revalidation_requested(request, &self.config) {
+            "REVALIDATED"
+        } else {
+            "MISS"
+        };
+        NativeProxyCacheLookup::Miss { key, status }
+    }
+
+    fn key(&self, request: &NativeHttp1Request) -> Option<String> {
+        image_cache_key(
+            &self.config,
+            &CacheRequest {
+                method: request.method(),
+                host: native_request_header(request, "host"),
+                path: request.path(),
+                query: request.query(),
+            },
+        )
+        .map(|key| key.as_str().to_owned())
+    }
+
+    fn get(&self, key: &str) -> Option<NativeMemoryCacheEntry> {
+        let now = std::time::Instant::now();
+        let mut state = lock_native_memory_cache(&self.state, "proxy");
+        match state.objects.get(key) {
+            Some(entry) if entry.expires_at > now => Some(entry.clone()),
+            Some(entry) => {
+                let weight = entry.weight;
+                state.objects.remove(key);
+                state.bytes = state.bytes.saturating_sub(weight);
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn store(&self, key: &str, response: &NativeHttp1Response) -> Result<(), &'static str> {
+        let body_len = response.body().len() as u64;
+        if body_len == 0 {
+            return Err("empty-body");
+        }
+        if body_len > self.config.max_object_bytes.as_u64() || body_len > self.max_bytes {
+            return Err("object-too-large");
+        }
+        let headers = native_response_header_map(response);
+        if !matches!(
+            cache_vary_policy(&headers, &self.config),
+            VaryCachePolicy::None
+        ) {
+            return Err("vary-not-supported-native");
+        }
+        if let Some(reason) =
+            response_cache_admission_rejection(response.status(), &headers, &self.config)
+        {
+            return Err(reason);
+        }
+        let Some(ttl) = native_cache_ttl(response.status(), &headers, &self.config) else {
+            return Err("ttl-missing");
+        };
+        if ttl.is_zero() {
+            return Err("ttl-zero");
+        }
+
+        let weight = native_cache_entry_weight(key, response, body_len);
+        if weight > self.max_bytes {
+            return Err("object-too-large");
+        }
+        let key = key.to_owned();
+        let now = std::time::Instant::now();
+        let entry = NativeMemoryCacheEntry {
+            status: response.status(),
+            reason: response.reason().to_owned(),
+            headers: cached_proxy_headers(response, &self.config),
+            content_length: response.content_length(),
+            body: Arc::from(response.body().to_vec()),
+            expires_at: now + ttl,
+            stored_at: now,
+            weight,
+        };
+        let needs_prune = {
+            let mut state = lock_native_memory_cache(&self.state, "proxy");
+            if let Some(previous) = state.objects.remove(&key) {
+                state.bytes = state.bytes.saturating_sub(previous.weight);
+            }
+            state.bytes = state.bytes.saturating_add(weight);
+            state.objects.insert(key, entry);
+            state.bytes > self.max_bytes
+        };
+        if needs_prune {
+            let mut state = lock_native_memory_cache(&self.state, "proxy");
+            prune_native_memory_cache(&mut state, self.max_bytes);
+        }
+        Ok(())
+    }
+}
 
 impl NativeHttp1Handler for NativeHttp1Proxy {
     fn handle<'a>(
@@ -734,6 +931,35 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     )
                     .await;
             }
+            let mut proxy_cache_fill = None::<(NativeProxyMemoryCache, String, &'static str)>;
+            let mut proxy_cache_status = None::<(
+                &CacheConfig,
+                &'static str,
+                Option<&'static str>,
+                Option<u64>,
+            )>;
+            if let Some(cache) = &self.cache {
+                match cache.lookup(&request) {
+                    NativeProxyCacheLookup::Hit(hit) => {
+                        return self.finish_response(
+                            hit.to_response(),
+                            Some((&cache.config, "HIT", None, Some(hit.age_secs()))),
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request.as_ref(),
+                        );
+                    }
+                    NativeProxyCacheLookup::Miss { key, status } => {
+                        proxy_cache_fill = Some((cache.clone(), key, status));
+                    }
+                    NativeProxyCacheLookup::Bypass(reason) => {
+                        proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
+                    }
+                }
+            }
             let mut last_error = None;
             let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
             let total = self.upstream_slots.len();
@@ -749,32 +975,24 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 unique_attempts += 1;
                 let upstream = &self.upstreams[index];
                 match upstream.send(&request).await {
-                    Ok(mut response) => {
-                        self.response_headers.apply(&mut response);
-                        response = response.with_write_policy(self.response_write_policy);
-                        #[cfg(any(
-                            feature = "compression-brotli",
-                            feature = "compression-gzip",
-                            feature = "compression-zstd"
-                        ))]
-                        {
-                            if let Some(compression) = &self.compression
-                                && let Some(compression_request) = compression_request.as_ref()
-                            {
-                                apply_native_response_compression(
-                                    compression_request,
-                                    &mut response,
-                                    compression,
-                                );
-                            }
-                            return response;
+                    Ok(response) => {
+                        let mut cache_status = proxy_cache_status;
+                        if let Some((cache, key, status)) = proxy_cache_fill.as_ref() {
+                            cache_status = Some(match cache.store(key, &response) {
+                                Ok(()) => (&cache.config, *status, None, None),
+                                Err(reason) => (&cache.config, "BYPASS", Some(reason), None),
+                            });
                         }
-                        #[cfg(not(any(
-                            feature = "compression-brotli",
-                            feature = "compression-gzip",
-                            feature = "compression-zstd"
-                        )))]
-                        return response;
+                        return self.finish_response(
+                            response,
+                            cache_status,
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request.as_ref(),
+                        );
                     }
                     Err(error) if retry_allowed && unique_attempts < self.upstreams.len() => {
                         log::debug!(
@@ -1063,6 +1281,42 @@ impl NativeHttp1Proxy {
             .and_then(|page| page.web.handle_error_page(request, &page.path, status))
             .map(|response| response.with_write_policy(self.response_write_policy))
             .map(NativeHttp1Response::close_connection)
+    }
+
+    fn finish_response(
+        &self,
+        mut response: NativeHttp1Response,
+        cache_status: Option<(
+            &CacheConfig,
+            &'static str,
+            Option<&'static str>,
+            Option<u64>,
+        )>,
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        compression_request: Option<&NativeHttp1Request>,
+    ) -> NativeHttp1Response {
+        if let Some((cache, status, reason, age_secs)) = cache_status {
+            response = with_native_cache_status(response, cache, status, reason, age_secs);
+        }
+        self.response_headers.apply(&mut response);
+        response = response.with_write_policy(self.response_write_policy);
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        {
+            if let Some(compression) = &self.compression
+                && let Some(compression_request) = compression_request
+            {
+                apply_native_response_compression(compression_request, &mut response, compression);
+            }
+        }
+        response
     }
 }
 
@@ -1640,6 +1894,31 @@ fn native_proxy_error_is_timeout(error: &crate::NativeHttp1Error) -> bool {
     )
 }
 
+fn native_request_header<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a str> {
+    request
+        .headers
+        .iter()
+        .find_map(|(header_name, value)| header_name.eq_ignore_ascii_case(name).then_some(value))
+        .map(String::as_str)
+}
+
+fn cached_proxy_headers(
+    response: &NativeHttp1Response,
+    cache: &CacheConfig,
+) -> Vec<(String, String)> {
+    response
+        .headers()
+        .iter()
+        .filter(|(name, _)| {
+            !cache
+                .hide_response_headers
+                .iter()
+                .any(|hidden| hidden.eq_ignore_ascii_case(name))
+        })
+        .cloned()
+        .collect()
+}
+
 fn native_upstream_from_proxy_config(
     authority: impl Into<String>,
     proxy: &fluxheim_config::ProxyConfig,
@@ -1779,6 +2058,10 @@ fn native_load_balancer_pool_configured(proxy: &fluxheim_config::ProxyConfig) ->
         || proxy.upstreams_file.is_some()
         || proxy.upstreams_http_url.is_some()
         || proxy.upstream_dns_refresh_secs.is_some()
+}
+
+fn proxy_uses_load_balancer(proxy: &fluxheim_config::ProxyConfig) -> bool {
+    native_load_balancer_pool_configured(proxy)
 }
 
 fn proxy_uses_dynamic_upstream_discovery(proxy: &fluxheim_config::ProxyConfig) -> bool {

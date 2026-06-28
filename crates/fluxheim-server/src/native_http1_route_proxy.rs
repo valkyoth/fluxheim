@@ -916,9 +916,7 @@ impl NativeHttp1RouteProxy {
             &mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
         >,
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
-        if native_cache_policy_enabled(&config.cache)
-            && (!config.web.enabled() || !NativeHttp1StaticWeb::cache_supported(&config.cache))
-        {
+        if native_cache_policy_enabled(&config.cache) && !root_native_cache_supported(config) {
             return Err(NativeHttp1RouteProxyConfigError::Proxy(
                 NativeHttp1ProxyConfigError::CachePolicy,
             ));
@@ -941,7 +939,14 @@ impl NativeHttp1RouteProxy {
             #[cfg(feature = "load-balancer")]
             load_balancer_services,
         )?
-        .map(|proxy| proxy.with_header_policy(&config.headers));
+        .map(|proxy| {
+            let proxy = proxy.with_header_policy(&config.headers);
+            if NativeHttp1Proxy::proxy_cache_supported_for_proxy(&config.cache, &config.proxy) {
+                proxy.with_proxy_cache_config(&config.cache)
+            } else {
+                proxy
+            }
+        });
         if fallback_web.is_none() && fallback.is_none() {
             return Err(NativeHttp1RouteProxyConfigError::MissingRouteAction);
         }
@@ -1139,7 +1144,14 @@ impl NativeHttp1RouteProxy {
             #[cfg(feature = "load-balancer")]
             native_load_balancer_services_reborrow(&mut load_balancer_services),
         )?;
-        let fallback = fallback.map(|proxy| proxy.with_header_policy(&headers));
+        let fallback = fallback.map(|proxy| {
+            let proxy = proxy.with_header_policy(&headers);
+            if NativeHttp1Proxy::proxy_cache_supported_for_proxy(&vhost.cache, &vhost.proxy) {
+                proxy.with_proxy_cache_config(&vhost.cache)
+            } else {
+                proxy
+            }
+        });
         #[cfg(not(feature = "privacy-mode"))]
         let fallback = fallback.map(|proxy| proxy.with_trusted_sources(trusted_sources));
         #[cfg(any(
@@ -1176,6 +1188,15 @@ impl NativeHttp1RouteProxy {
                 )?;
                 #[cfg(not(feature = "privacy-mode"))]
                 let proxy = proxy.map(|proxy| proxy.with_trusted_sources(trusted_sources));
+                let proxy = proxy.map(|proxy| {
+                    if let Some(cache) = route.cache.as_ref().filter(|cache| {
+                        NativeHttp1Proxy::proxy_cache_supported_for_proxy(cache, proxy_config)
+                    }) {
+                        proxy.with_proxy_cache_config(cache)
+                    } else {
+                        proxy
+                    }
+                });
                 proxy
             } else {
                 None
@@ -2053,7 +2074,7 @@ fn native_vhost_cache_policy_blocked(vhost: &fluxheim_config::VhostConfig) -> bo
     if !native_cache_policy_enabled(&vhost.cache) {
         return false;
     }
-    !vhost.web.enabled() || !NativeHttp1StaticWeb::cache_supported(&vhost.cache)
+    !vhost_native_cache_supported(vhost)
 }
 
 fn native_route_cache_policy_blocked(route: &fluxheim_config::RouteConfig) -> bool {
@@ -2061,9 +2082,34 @@ fn native_route_cache_policy_blocked(route: &fluxheim_config::RouteConfig) -> bo
         if !native_cache_policy_enabled(cache) {
             return false;
         }
-        let has_static_web = route.web.as_ref().is_some_and(|web| web.enabled());
-        !has_static_web || !NativeHttp1StaticWeb::cache_supported(cache)
+        !route_native_cache_supported(route, cache)
     })
+}
+
+fn root_native_cache_supported(config: &fluxheim_config::Config) -> bool {
+    (config.web.enabled() && NativeHttp1StaticWeb::cache_supported(&config.cache))
+        || (config.proxy.has_configured_upstream()
+            && NativeHttp1Proxy::proxy_cache_supported_for_proxy(&config.cache, &config.proxy))
+}
+
+fn vhost_native_cache_supported(vhost: &fluxheim_config::VhostConfig) -> bool {
+    (vhost.web.enabled() && NativeHttp1StaticWeb::cache_supported(&vhost.cache))
+        || (vhost.proxy.has_configured_upstream()
+            && NativeHttp1Proxy::proxy_cache_supported_for_proxy(&vhost.cache, &vhost.proxy))
+}
+
+fn route_native_cache_supported(
+    route: &fluxheim_config::RouteConfig,
+    cache: &fluxheim_config::CacheConfig,
+) -> bool {
+    route
+        .web
+        .as_ref()
+        .is_some_and(|web| web.enabled() && NativeHttp1StaticWeb::cache_supported(cache))
+        || route.proxy.as_ref().is_some_and(|proxy| {
+            proxy.has_configured_upstream()
+                && NativeHttp1Proxy::proxy_cache_supported_for_proxy(cache, proxy)
+        })
 }
 
 impl NativeHttp1Handler for NativeHttp1RouteProxy {

@@ -286,9 +286,7 @@ fn root_policy_support(config: &Config) -> Result<(), NativeHttp1ProxyConfigErro
     if !header_policy_supported(&config.headers) || !compression_supported(&config.compression) {
         return Err(NativeHttp1ProxyConfigError::HttpPolicy);
     }
-    if cache_enabled(&config.cache)
-        && (!config.web.enabled() || !NativeHttp1StaticWeb::cache_supported(&config.cache))
-    {
+    if cache_enabled(&config.cache) && !root_cache_supported(config) {
         return Err(NativeHttp1ProxyConfigError::CachePolicy);
     }
     Ok(())
@@ -408,7 +406,7 @@ fn vhost_cache_policy_blocked(vhost: &VhostConfig) -> bool {
     if !cache_enabled(&vhost.cache) {
         return false;
     }
-    !vhost.web.enabled() || !NativeHttp1StaticWeb::cache_supported(&vhost.cache)
+    !vhost_cache_supported(vhost)
 }
 
 fn route_cache_policy_blocked(route: &RouteConfig) -> bool {
@@ -416,9 +414,31 @@ fn route_cache_policy_blocked(route: &RouteConfig) -> bool {
         if !cache_enabled(cache) {
             return false;
         }
-        let has_static_web = route.web.as_ref().is_some_and(|web| web.enabled());
-        !has_static_web || !NativeHttp1StaticWeb::cache_supported(cache)
+        !route_cache_supported(route, cache)
     })
+}
+
+fn root_cache_supported(config: &Config) -> bool {
+    (config.web.enabled() && NativeHttp1StaticWeb::cache_supported(&config.cache))
+        || (config.proxy.has_configured_upstream()
+            && NativeHttp1Proxy::proxy_cache_supported_for_proxy(&config.cache, &config.proxy))
+}
+
+fn vhost_cache_supported(vhost: &VhostConfig) -> bool {
+    (vhost.web.enabled() && NativeHttp1StaticWeb::cache_supported(&vhost.cache))
+        || (vhost.proxy.has_configured_upstream()
+            && NativeHttp1Proxy::proxy_cache_supported_for_proxy(&vhost.cache, &vhost.proxy))
+}
+
+fn route_cache_supported(route: &RouteConfig, cache: &fluxheim_config::CacheConfig) -> bool {
+    route
+        .web
+        .as_ref()
+        .is_some_and(|web| web.enabled() && NativeHttp1StaticWeb::cache_supported(cache))
+        || route.proxy.as_ref().is_some_and(|proxy| {
+            proxy.has_configured_upstream()
+                && NativeHttp1Proxy::proxy_cache_supported_for_proxy(cache, proxy)
+        })
 }
 
 fn compression_supported(compression: &fluxheim_config::CompressionConfig) -> bool {
