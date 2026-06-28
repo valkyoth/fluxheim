@@ -136,11 +136,13 @@ small Fluxheim-owned runtime proof primitives, then removes Pingora dependency
 surface profile by profile. The remaining `1.6.x` work is intentionally split
 into smaller checkpoints instead of one risky proxy cutover: native HTTP/1.1
 upstream connector/pooling parity, upstream TLS/mTLS and discovery parity,
-native HTTP/2 upstream safety, simple native proxy/cache/static/PHP cutover,
+native HTTP/2 upstream safety, simple native proxy/static/PHP cutover,
 full official-profile cutover, HTTP/2 downstream parity proof, explicit
 compatibility-blocker evidence, route/policy parity, rich proxy integration
-parity, final Pingora dependency removal, a security-only stabilization
-release, and then nginx/Ketama-compatible load-balancer hash polish. The
+parity, a release checkpoint for the native runtime/load-balancer/PHP/H2 work,
+a focused proxy-cache parity release, final Pingora dependency removal, a
+security-only stabilization release, and then nginx/Ketama-compatible
+load-balancer hash polish. The
 `1.6.25` slice begins route/policy parity with a native exact/prefix/fallback
 route-proxy primitive, and `1.6.26` adds native route redirects, route body
 limits, and route response-header overlays while keeping richer policy
