@@ -1024,6 +1024,7 @@ impl NativeHttp1RouteProxy {
     }
 
     #[cfg(feature = "acme")]
+    #[allow(clippy::too_many_arguments)]
     pub fn from_config_with_trusted_sources_and_load_balancer_services(
         config: &Config,
         vhost: &fluxheim_config::VhostConfig,

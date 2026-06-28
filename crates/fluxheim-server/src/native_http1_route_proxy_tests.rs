@@ -321,6 +321,49 @@ async fn upstream_raw_response_sequence(
     addr
 }
 
+async fn upstream_slice_response_sequence(
+    responses: &'static [(&'static str, &'static str, &'static str)],
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        for (expected_path, expected_range, response) in responses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(
+                request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
+                "unexpected upstream request: {request:?}"
+            );
+            assert!(
+                request
+                    .lines()
+                    .any(|line| { line.eq_ignore_ascii_case(&format!("range: {expected_range}")) }),
+                "missing expected range {expected_range:?}: {request:?}"
+            );
+            assert!(
+                request
+                    .lines()
+                    .any(|line| line.eq_ignore_ascii_case("accept-encoding: identity")),
+                "missing identity accept-encoding: {request:?}"
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+    addr
+}
+
 #[cfg(feature = "php-fpm")]
 async fn fastcgi_responder(stdout: &'static [u8]) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -3504,6 +3547,115 @@ async fn native_route_proxy_bypasses_cache_fill_on_range_miss() {
     assert_eq!(
         response_header(&full, "x-cache-status").as_deref(),
         Some("MISS")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_slice_cache_fills_and_composes_memory_range() {
+    let upstream = upstream_slice_response_sequence(&[
+        (
+            "/asset.png",
+            "bytes=0-3",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"slice-v1\"\r\ncontent-range: bytes 0-3/10\r\ncontent-length: 4\r\n\r\n0123",
+        ),
+        (
+            "/asset.png",
+            "bytes=4-7",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"slice-v1\"\r\ncontent-range: bytes 4-7/10\r\ncontent-length: 4\r\n\r\n4567",
+        ),
+    ])
+    .await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.range.enabled = true;
+    cache.range.slice.enabled = true;
+    cache.range.slice.fill_missing = true;
+    cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
+    cache.range.slice.max_slices = 4;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=2-5\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let second = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=2-5\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(first.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+    assert!(first.ends_with("2345"));
+    assert_eq!(
+        response_header(&first, "content-range").as_deref(),
+        Some("bytes 2-5/10")
+    );
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(
+        response_header(&first, "x-cache-reason").as_deref(),
+        Some("slice-fill")
+    );
+    assert!(second.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+    assert!(second.ends_with("2345"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+    assert_eq!(
+        response_header(&second, "x-cache-reason").as_deref(),
+        Some("slice")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_slice_cache_composes_multipart_memory_response() {
+    let upstream = upstream_slice_response_sequence(&[
+        (
+            "/asset.png",
+            "bytes=0-3",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\nlast-modified: Wed, 21 Oct 2015 07:28:00 GMT\r\ncontent-range: bytes 0-3/10\r\ncontent-length: 4\r\n\r\n0123",
+        ),
+        (
+            "/asset.png",
+            "bytes=4-7",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\nlast-modified: Wed, 21 Oct 2015 07:28:00 GMT\r\ncontent-range: bytes 4-7/10\r\ncontent-length: 4\r\n\r\n4567",
+        ),
+    ])
+    .await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.range.enabled = true;
+    cache.range.slice.enabled = true;
+    cache.range.slice.fill_missing = true;
+    cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
+    cache.range.slice.max_slices = 4;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let response = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=0-1,6-7\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+    assert!(
+        response_header(&response, "content-type")
+            .as_deref()
+            .is_some_and(|value| value.starts_with("multipart/byteranges; boundary=fluxheim-"))
+    );
+    assert!(response.contains("Content-Range: bytes 0-1/10\r\n\r\n01"));
+    assert!(response.contains("Content-Range: bytes 6-7/10\r\n\r\n67"));
+    assert_eq!(
+        response_header(&response, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(
+        response_header(&response, "x-cache-reason").as_deref(),
+        Some("slice-fill")
     );
 }
 

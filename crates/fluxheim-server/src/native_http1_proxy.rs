@@ -36,11 +36,14 @@ use crate::{
     NativeTcpKeepalivePolicy,
 };
 use fluxheim_cache::{
-    CacheRangeRequest, CacheRequest, CacheRequestView, CacheStaleEvent, VaryCachePolicy,
-    VaryRequestHashField, cache_method_temporarily_bypassed, cache_should_serve_stale,
-    cache_vary_policy, image_cache_key, request_cache_bypass_reason,
-    request_cache_revalidation_requested, response_cache_admission_rejection,
-    selected_cache_range_request, vary_request_hash_material,
+    CacheRangeRequest, CacheRequest, CacheRequestView, CacheSliceBounds, CacheStaleEvent,
+    VaryCachePolicy, VaryRequestHashField, cache_key_with_component,
+    cache_method_temporarily_bypassed, cache_should_serve_stale, cache_vary_policy,
+    image_cache_key, parse_cache_content_range, request_cache_bypass_reason,
+    request_cache_revalidation_requested, resolve_client_slice_ranges,
+    response_cache_admission_rejection, response_range_cache_admission_rejection,
+    sanitize_multipart_content_type, selected_cache_range_request,
+    selected_cache_slice_range_request, slice_request_within_policy, vary_request_hash_material,
 };
 use fluxheim_config::{CacheConfig, CacheStaleErrorKind};
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
@@ -135,6 +138,26 @@ enum NativeProxyCacheLookup {
         key: String,
         entry: NativeMemoryCacheEntry,
     },
+}
+
+#[derive(Clone, Debug)]
+struct NativeCacheSliceObject {
+    entry: NativeMemoryCacheEntry,
+    bounds: CacheSliceBounds,
+    total: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NativeCacheSliceIdentity {
+    total: u64,
+    etag: Option<String>,
+    last_modified: Option<String>,
+}
+
+#[derive(Debug)]
+struct NativeCacheSliceResponse {
+    response: NativeHttp1Response,
+    filled: bool,
 }
 
 #[derive(Debug)]
@@ -505,15 +528,14 @@ impl NativeHttp1Proxy {
         cache.enabled
             && cache.memory.enabled
             && !cache.disk.enabled
-            && !cache.range.slice.enabled
             && native_peer_fill_supported(cache)
     }
 
     pub fn proxy_cache_supported_for_proxy(
         cache: &CacheConfig,
-        _proxy: &fluxheim_config::ProxyConfig,
+        proxy: &fluxheim_config::ProxyConfig,
     ) -> bool {
-        Self::proxy_cache_supported(cache)
+        Self::proxy_cache_supported(cache) && native_slice_cache_supported_for_proxy(cache, proxy)
     }
 
     pub fn with_proxy_cache_config(mut self, cache: &CacheConfig) -> Self {
@@ -837,6 +859,13 @@ fn native_peer_fill_supported(cache: &CacheConfig) -> bool {
                 .all(|peer| native_peer_fill_peer_from_config(peer, &cache.peer_fill).is_some()))
 }
 
+fn native_slice_cache_supported_for_proxy(
+    cache: &CacheConfig,
+    proxy: &fluxheim_config::ProxyConfig,
+) -> bool {
+    !cache.range.slice.enabled || proxy.configured_primary_upstream().is_some()
+}
+
 fn native_peer_fill_peers(cache: &CacheConfig) -> Vec<NativePeerFillPeer> {
     if !cache.peer_fill.enabled {
         return Vec::new();
@@ -982,6 +1011,192 @@ impl NativeProxyMemoryCache {
     ) -> Option<NativeMemoryCacheEntry> {
         let _ = tokio::time::timeout(timeout, notify.notified()).await;
         self.get(key, request)
+    }
+
+    async fn slice_response(
+        &self,
+        request: &NativeHttp1Request,
+        proxy: &NativeHttp1Proxy,
+    ) -> Option<NativeCacheSliceResponse> {
+        if !self.config.range.enabled || !self.config.range.slice.enabled {
+            return None;
+        }
+        if request_cache_bypass_reason(request, &self.config).is_some()
+            || self.cache_pass_should_bypass(&self.key(request)?)
+        {
+            return None;
+        }
+        let slice_request = selected_cache_slice_range_request(request, &self.config)?;
+        let base_key = self.key(request)?;
+        let slice_size = self.config.range.slice.size_bytes.as_u64();
+        let (total, first_slice, first_filled) = self
+            .discover_slice_total(&base_key, request, proxy, slice_size)
+            .await?;
+        let ranges = resolve_client_slice_ranges(&slice_request.ranges, total)?;
+        if ranges.is_empty()
+            || !slice_request_within_policy(
+                &ranges,
+                self.config.range.max_bytes.as_u64(),
+                usize::try_from(self.config.range.slice.max_slices).ok()?,
+                slice_size,
+            )
+        {
+            return Some(NativeCacheSliceResponse {
+                response: native_slice_not_satisfiable_response(total),
+                filled: false,
+            });
+        }
+
+        let identity = native_slice_identity(&first_slice);
+        if let Some(if_range) = slice_request.if_range.as_deref()
+            && !native_if_range_matches_slice_identity(if_range, &identity)
+        {
+            return None;
+        }
+
+        let mut filled = first_filled;
+        let mut slices = HashMap::<(u64, u64), NativeCacheSliceObject>::new();
+        slices.insert(
+            (first_slice.bounds.start, first_slice.bounds.end),
+            first_slice,
+        );
+        for bounds in fluxheim_cache::required_slice_bounds(&ranges, slice_size, total) {
+            if slices.contains_key(&(bounds.start, bounds.end)) {
+                continue;
+            }
+            let result = self
+                .lookup_or_fill_slice(&base_key, request, proxy, bounds)
+                .await?;
+            filled |= result.1;
+            if native_slice_identity(&result.0) != identity {
+                return None;
+            }
+            slices.insert((result.0.bounds.start, result.0.bounds.end), result.0);
+        }
+
+        native_compose_slice_response(&ranges, &slices, &identity, filled)
+    }
+
+    async fn discover_slice_total(
+        &self,
+        base_key: &str,
+        request: &NativeHttp1Request,
+        proxy: &NativeHttp1Proxy,
+        slice_size: u64,
+    ) -> Option<(u64, NativeCacheSliceObject, bool)> {
+        let first_bounds = CacheSliceBounds {
+            start: 0,
+            end: slice_size.saturating_sub(1),
+        };
+        let (slice, filled) = self
+            .lookup_or_fill_slice(base_key, request, proxy, first_bounds)
+            .await?;
+        Some((slice.total, slice, filled))
+    }
+
+    async fn lookup_or_fill_slice(
+        &self,
+        base_key: &str,
+        request: &NativeHttp1Request,
+        proxy: &NativeHttp1Proxy,
+        bounds: CacheSliceBounds,
+    ) -> Option<(NativeCacheSliceObject, bool)> {
+        let key = native_slice_cache_key(base_key, bounds.range_request());
+        if let Some(slice) = self.lookup_cached_slice(&key) {
+            return Some((slice, false));
+        }
+        if !self.config.range.slice.fill_missing {
+            return None;
+        }
+        let _permit = self.acquire_origin_fill_permit()?;
+        if let Some(slice) = self.lookup_cached_slice(&key) {
+            return Some((slice, false));
+        }
+        let response = proxy.fetch_origin_slice(request, bounds).await?;
+        let slice = self.store_origin_slice(&key, bounds, &response)?;
+        Some((slice, true))
+    }
+
+    fn lookup_cached_slice(&self, key: &str) -> Option<NativeCacheSliceObject> {
+        let now = std::time::Instant::now();
+        let mut state = lock_native_memory_cache(&self.state, "proxy");
+        match state.objects.get(key) {
+            Some(entry) if entry.expires_at > now => native_slice_object_from_entry(entry.clone()),
+            Some(entry) => {
+                let weight = entry.weight;
+                remove_native_memory_cache_entry(&mut state, key);
+                state.bytes = state.bytes.saturating_sub(weight);
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn store_origin_slice(
+        &self,
+        key: &str,
+        bounds: CacheSliceBounds,
+        response: &NativeHttp1Response,
+    ) -> Option<NativeCacheSliceObject> {
+        if response.status() == 416 {
+            return None;
+        }
+        let headers = native_response_header_map(response);
+        if fluxheim_cache::range_response_cache_admission_rejection(
+            response.status(),
+            &headers,
+            Some(bounds.range_request()),
+        )
+        .is_some()
+            || response_range_cache_admission_rejection(&headers, &self.config).is_some()
+            || native_response_has_non_identity_encoding(response)
+        {
+            return None;
+        }
+        let ttl = native_cache_ttl(response.status(), &headers, &self.config)?;
+        if ttl.is_zero() {
+            return None;
+        }
+        let now = std::time::Instant::now();
+        let (expires_at, stale_while_revalidate_until, stale_if_error_until) =
+            native_cache_expiry_times(
+                now,
+                ttl,
+                self.config.stale_while_revalidate_secs,
+                self.config.stale_if_error_secs,
+            )?;
+        let body_len = response.body().len() as u64;
+        if body_len > self.config.range.slice.size_bytes.as_u64() || body_len > self.max_bytes {
+            return None;
+        }
+        let mut entry = NativeMemoryCacheEntry {
+            status: response.status(),
+            reason: response.reason().to_owned(),
+            headers: cached_proxy_headers(response, &self.config),
+            content_length: response.content_length(),
+            body: Arc::from(response.body().to_vec()),
+            expires_at,
+            stale_while_revalidate_until,
+            stale_if_error_until,
+            stored_at: now,
+            weight: native_cache_entry_weight(key, response, body_len),
+        };
+        let slice = native_slice_object_from_entry(entry.clone())?;
+        entry.weight = native_cache_entry_weight(key, response, body_len);
+        let needs_prune = {
+            let mut state = lock_native_memory_cache(&self.state, "proxy");
+            if let Some(previous) = remove_native_memory_cache_entry(&mut state, key) {
+                state.bytes = state.bytes.saturating_sub(previous.weight);
+            }
+            state.bytes = state.bytes.saturating_add(entry.weight);
+            state.objects.insert(key.to_owned(), entry);
+            state.bytes > self.max_bytes
+        };
+        if needs_prune {
+            let mut state = lock_native_memory_cache(&self.state, "proxy");
+            prune_native_memory_cache(&mut state, self.max_bytes);
+        }
+        Some(slice)
     }
 
     fn acquire_peer_fill_permit(&self) -> Option<NativePeerFillPermit> {
@@ -1222,10 +1437,10 @@ impl NativeProxyMemoryCache {
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
         let result = self.store_inner(key, request, response, NativeCacheStoreMode::PeerFill);
-        if let Err(reason) = result {
-            if reason != "cache-min-uses" {
-                self.record_uncacheable(key);
-            }
+        if let Err(reason) = result
+            && reason != "cache-min-uses"
+        {
+            self.record_uncacheable(key);
         }
         result
     }
@@ -1649,6 +1864,23 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 Option<u64>,
             )>;
             if let Some(cache) = &self.cache {
+                if let Some(slice) = cache.slice_response(&request, self).await {
+                    return self.finish_response(
+                        slice.response,
+                        Some((
+                            &cache.config,
+                            if slice.filled { "MISS" } else { "HIT" },
+                            Some(if slice.filled { "slice-fill" } else { "slice" }),
+                            None,
+                        )),
+                        #[cfg(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        ))]
+                        compression_request.as_ref(),
+                    );
+                }
                 match cache.lookup(&request) {
                     NativeProxyCacheLookup::Hit { entry, range } => {
                         let response = if let Some(range) = range {
@@ -2012,6 +2244,44 @@ impl NativeHttp1Proxy {
         }
     }
 
+    async fn fetch_origin_slice(
+        &self,
+        request: &NativeHttp1Request,
+        bounds: CacheSliceBounds,
+    ) -> Option<NativeHttp1Response> {
+        let cache = self.cache.as_ref()?;
+        let max_body_bytes = cache.config.range.slice.size_bytes.as_u64();
+        let capped_body_bytes = usize::try_from(max_body_bytes.saturating_add(1)).ok()?;
+        let request = native_origin_slice_request(request, bounds)?;
+        let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
+        let total = self.upstream_slots.len();
+        let mut attempted = vec![false; self.upstreams.len()];
+        for attempt in 0..total {
+            let slot = start.wrapping_add(attempt) % total;
+            let index = self.upstream_slots[slot];
+            if attempted[index] {
+                continue;
+            }
+            attempted[index] = true;
+            let upstream = self.upstreams[index]
+                .clone()
+                .with_max_body_bytes(capped_body_bytes);
+            match upstream.send(&request).await {
+                Ok(response) if response.body().len() as u64 <= max_body_bytes => {
+                    return Some(response);
+                }
+                Ok(_) => return None,
+                Err(error) => {
+                    log::debug!(
+                        target: "fluxheim::native_http1",
+                        "native proxy cache slice fill failed: {error:?}"
+                    );
+                }
+            }
+        }
+        None
+    }
+
     #[cfg(not(feature = "load-balancer"))]
     async fn send_cache_revalidation_request(
         &self,
@@ -2219,6 +2489,23 @@ impl NativeHttp1Proxy {
             Option<u64>,
         )>;
         if let Some(cache) = &self.cache {
+            if let Some(slice) = cache.slice_response(&request, self).await {
+                return self.finish_response(
+                    slice.response,
+                    Some((
+                        &cache.config,
+                        if slice.filled { "MISS" } else { "HIT" },
+                        Some(if slice.filled { "slice-fill" } else { "slice" }),
+                        None,
+                    )),
+                    #[cfg(any(
+                        feature = "compression-brotli",
+                        feature = "compression-gzip",
+                        feature = "compression-zstd"
+                    ))]
+                    compression_request,
+                );
+            }
             match cache.lookup(&request) {
                 NativeProxyCacheLookup::Hit { entry, range } => {
                     let response = if let Some(range) = range {
@@ -3379,6 +3666,238 @@ fn cached_proxy_headers(
         })
         .cloned()
         .collect()
+}
+
+fn native_slice_cache_key(base_key: &str, range: CacheRangeRequest) -> String {
+    cache_key_with_component(base_key, "slice", &range.component())
+}
+
+fn native_slice_object_from_entry(entry: NativeMemoryCacheEntry) -> Option<NativeCacheSliceObject> {
+    let content_range = native_entry_first_header(&entry, "content-range")
+        .and_then(|value| parse_cache_content_range(&value))?;
+    let total = content_range.total?;
+    let bounds = CacheSliceBounds {
+        start: content_range.start,
+        end: content_range.end,
+    };
+    (entry.body.len() as u64 == bounds.len()).then_some(NativeCacheSliceObject {
+        entry,
+        bounds,
+        total,
+    })
+}
+
+fn native_entry_first_header(entry: &NativeMemoryCacheEntry, name: &str) -> Option<String> {
+    entry
+        .headers
+        .iter()
+        .find_map(|(header_name, value)| header_name.eq_ignore_ascii_case(name).then_some(value))
+        .cloned()
+}
+
+fn native_slice_identity(slice: &NativeCacheSliceObject) -> NativeCacheSliceIdentity {
+    NativeCacheSliceIdentity {
+        total: slice.total,
+        etag: native_entry_first_header(&slice.entry, "etag"),
+        last_modified: native_entry_first_header(&slice.entry, "last-modified"),
+    }
+}
+
+fn native_if_range_matches_slice_identity(
+    if_range: &str,
+    identity: &NativeCacheSliceIdentity,
+) -> bool {
+    let if_range = if_range.trim();
+    identity.etag.as_deref() == Some(if_range)
+        || identity.last_modified.as_deref() == Some(if_range)
+}
+
+fn native_response_has_non_identity_encoding(response: &NativeHttp1Response) -> bool {
+    response.headers().iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("content-encoding")
+            && !value.trim().eq_ignore_ascii_case("identity")
+    })
+}
+
+fn native_origin_slice_request(
+    request: &NativeHttp1Request,
+    bounds: CacheSliceBounds,
+) -> Option<NativeHttp1Request> {
+    if !fluxheim_common::path_safety::safe_forward_path_and_query(&request.target) {
+        return None;
+    }
+    let mut request = request.clone();
+    request.method = "GET".to_owned();
+    request.body = zeroize::Zeroizing::new(Vec::new());
+    request.trailers.clear();
+    request.headers.retain(|(name, _)| {
+        !name.eq_ignore_ascii_case("range")
+            && !name.eq_ignore_ascii_case("if-range")
+            && !name.eq_ignore_ascii_case("accept-encoding")
+            && !name.eq_ignore_ascii_case("content-length")
+            && !name.eq_ignore_ascii_case("transfer-encoding")
+    });
+    request
+        .headers
+        .push(("range".to_owned(), bounds.range_request().component()));
+    request
+        .headers
+        .push(("accept-encoding".to_owned(), "identity".to_owned()));
+    Some(request)
+}
+
+fn native_compose_slice_response(
+    ranges: &[CacheSliceBounds],
+    slices: &HashMap<(u64, u64), NativeCacheSliceObject>,
+    identity: &NativeCacheSliceIdentity,
+    filled: bool,
+) -> Option<NativeCacheSliceResponse> {
+    let first_slice = slices.values().min_by_key(|slice| slice.bounds.start)?;
+    if ranges.len() == 1 {
+        let range = ranges[0];
+        let body = native_compose_single_slice_body(range, slices)?;
+        let mut response =
+            NativeHttp1Response::new(206, "Partial Content", body).with_content_length(range.len());
+        for (name, value) in &first_slice.entry.headers {
+            if native_cached_range_response_header_preserved(name) {
+                response.push_header(name.clone(), value.clone());
+            }
+        }
+        response.push_header("accept-ranges", "bytes");
+        response.push_header(
+            "content-range",
+            format!("bytes {}-{}/{}", range.start, range.end, identity.total),
+        );
+        response.push_header("age", native_max_slice_age_secs(slices).to_string());
+        return Some(NativeCacheSliceResponse { response, filled });
+    }
+
+    let boundary = native_random_multipart_boundary();
+    let body = native_compose_multipart_slice_body(ranges, slices, identity.total, &boundary)?;
+    let mut response =
+        NativeHttp1Response::new(206, "Partial Content", body).with_content_length(0);
+    response.remove_header("content-length");
+    response.push_header("content-length", response.body().len().to_string());
+    for (name, value) in &first_slice.entry.headers {
+        if native_cached_range_response_header_preserved(name)
+            && !name.eq_ignore_ascii_case("content-type")
+        {
+            response.push_header(name.clone(), value.clone());
+        }
+    }
+    response.push_header(
+        "content-type",
+        format!("multipart/byteranges; boundary={boundary}"),
+    );
+    response.push_header("age", native_max_slice_age_secs(slices).to_string());
+    Some(NativeCacheSliceResponse { response, filled })
+}
+
+fn native_compose_single_slice_body(
+    range: CacheSliceBounds,
+    slices: &HashMap<(u64, u64), NativeCacheSliceObject>,
+) -> Option<Vec<u8>> {
+    let mut body = Vec::with_capacity(usize::try_from(range.len()).ok()?);
+    for slice in native_slices_for_range(range, slices) {
+        native_append_slice_overlap(&mut body, range, slice)?;
+    }
+    Some(body)
+}
+
+fn native_compose_multipart_slice_body(
+    ranges: &[CacheSliceBounds],
+    slices: &HashMap<(u64, u64), NativeCacheSliceObject>,
+    total: u64,
+    boundary: &str,
+) -> Option<Vec<u8>> {
+    let content_type = sanitize_multipart_content_type(
+        &slices
+            .values()
+            .find_map(|slice| native_entry_first_header(&slice.entry, "content-type"))
+            .unwrap_or_else(|| "application/octet-stream".to_owned()),
+    );
+    let mut body = Vec::new();
+    for range in ranges {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(format!("Content-Type: {content_type}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!(
+                "Content-Range: bytes {}-{}/{}\r\n\r\n",
+                range.start, range.end, total
+            )
+            .as_bytes(),
+        );
+        for slice in native_slices_for_range(*range, slices) {
+            native_append_slice_overlap(&mut body, *range, slice)?;
+        }
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    Some(body)
+}
+
+fn native_slices_for_range(
+    range: CacheSliceBounds,
+    slices: &HashMap<(u64, u64), NativeCacheSliceObject>,
+) -> Vec<&NativeCacheSliceObject> {
+    let mut selected = slices
+        .values()
+        .filter(|slice| slice.bounds.start <= range.end && slice.bounds.end >= range.start)
+        .collect::<Vec<_>>();
+    selected.sort_by_key(|slice| slice.bounds.start);
+    selected
+}
+
+fn native_append_slice_overlap(
+    body: &mut Vec<u8>,
+    range: CacheSliceBounds,
+    slice: &NativeCacheSliceObject,
+) -> Option<()> {
+    let start = range.start.max(slice.bounds.start);
+    let end = range.end.min(slice.bounds.end);
+    if end < start {
+        return Some(());
+    }
+    let offset = usize::try_from(start.saturating_sub(slice.bounds.start)).ok()?;
+    let len = usize::try_from(end.saturating_sub(start).saturating_add(1)).ok()?;
+    let end_offset = offset.checked_add(len)?;
+    if end_offset > slice.entry.body.len() {
+        return None;
+    }
+    body.extend_from_slice(&slice.entry.body[offset..end_offset]);
+    Some(())
+}
+
+fn native_max_slice_age_secs(slices: &HashMap<(u64, u64), NativeCacheSliceObject>) -> u64 {
+    slices
+        .values()
+        .map(|slice| slice.entry.age_secs())
+        .max()
+        .unwrap_or(0)
+}
+
+fn native_slice_not_satisfiable_response(total: u64) -> NativeHttp1Response {
+    NativeHttp1Response::new(416, "Range Not Satisfiable", Vec::new())
+        .with_content_length(0)
+        .with_header("content-range", format!("bytes */{total}"))
+}
+
+fn native_random_multipart_boundary() -> String {
+    let mut raw = [0_u8; 16];
+    if let Err(error) = getrandom::fill(&mut raw) {
+        log::error!(
+            target: "fluxheim::security",
+            "native slice multipart boundary generation failed: {error}; aborting"
+        );
+        std::process::abort();
+    }
+    let mut boundary = String::with_capacity("fluxheim-".len() + raw.len() * 2);
+    boundary.push_str("fluxheim-");
+    for byte in raw {
+        use std::fmt::Write as _;
+        let _ = write!(&mut boundary, "{byte:02x}");
+    }
+    boundary
 }
 
 fn native_cached_range_response(

@@ -21,8 +21,7 @@ behavior when the change improves security or project direction.
   content type, status TTL, and object-size policy.
 - Native cache readiness now accepts root, vhost, and route proxy cache
   policies only for the supported memory-cache subset while keeping disk,
-  slice composition, and peer-fill blocked until their native parity work
-  lands.
+  and unsupported peer-fill blocked until their native parity work lands.
 - Native HTTP/1 TLS startup now recognizes managed ACME certificate sources on
   `server.default_vhost`, allowing the rustls native listener to bind while the
   default-vhost certificate is still pending first issuance.
@@ -57,6 +56,10 @@ behavior when the change improves security or project direction.
 - Native proxy memory cache now supports `[cache.lock]` same-key request
   collapsing for concurrent memory-cache misses, allowing waiting readers to
   serve the completed origin fill as a `HIT`.
+- Native proxy memory cache now supports memory-tier `[cache.range.slice]`
+  composition for fixed-size slices, including bounded origin slice fills,
+  slice identity checks, single-range responses, multipart range responses, and
+  live tests that prove the native listener sends bounded `Range` subrequests.
 - Native proxy memory cache now supports opt-in HTTP peer-fill when
   `cache.peer_fill.allow_insecure_http = true`, preserving the peer-fill loop
   marker, `only-if-cached` request mode, bounded peer-fill concurrency, local
