@@ -2741,7 +2741,7 @@ mod tests {
         let _guard = metrics_test_lock();
         init().unwrap();
 
-        let token_file = unique_metrics_temp_path("native-metrics-token-file");
+        let token_file = unique_metrics_temp_path();
         std::fs::write(&token_file, "metrics-file-secret\n").unwrap();
         let config = crate::config::MetricsConfig {
             token_file: Some(token_file.clone()),
@@ -3509,7 +3509,7 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
     }
 
-    fn unique_metrics_temp_path(label: &str) -> std::path::PathBuf {
+    fn unique_metrics_temp_path() -> std::path::PathBuf {
         static COUNTER: OnceLock<std::sync::atomic::AtomicU64> = OnceLock::new();
         let id = COUNTER
             .get_or_init(|| std::sync::atomic::AtomicU64::new(0))
@@ -3521,7 +3521,10 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         safe_child_path(
             &root,
-            &format!("fluxheim-{label}-{}-{id}", std::process::id()),
+            &format!(
+                "fluxheim-native-metrics-token-file-{}-{id}",
+                std::process::id()
+            ),
         )
     }
 }
