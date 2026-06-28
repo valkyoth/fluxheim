@@ -694,7 +694,7 @@ if ! curl -sS --max-time "$CURL_MAX_TIME" -o "$metrics_body" \
     cat "$TMP_DIR/fluxheim.log" >&2 || true
     exit 1
 fi
-if ! grep -q 'fluxheim_proxy_requests_total' "$metrics_body"; then
+if ! grep -q '^fluxheim_cache_configured_routes ' "$metrics_body"; then
     echo "proxy cache smoke failed: metrics endpoint did not expose Fluxheim metrics" >&2
     head -n 40 "$metrics_body" >&2 || true
     exit 1

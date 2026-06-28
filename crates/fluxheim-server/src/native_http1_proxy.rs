@@ -40,11 +40,12 @@ use fluxheim_cache::{
     CacheRangeRequest, CacheRequest, CacheRequestView, CacheSliceBounds, CacheStaleEvent,
     VaryCachePolicy, VaryRequestHashField, cache_key_with_component,
     cache_method_temporarily_bypassed, cache_should_serve_stale, cache_vary_policy,
-    image_cache_key, parse_cache_content_range, request_cache_bypass_reason,
+    collect_cache_tags, image_cache_key, parse_cache_content_range,
+    range_response_cache_admission_rejection, request_cache_bypass_reason,
     request_cache_revalidation_requested, resolve_client_slice_ranges,
     response_cache_admission_rejection, response_range_cache_admission_rejection,
     sanitize_multipart_content_type, selected_cache_range_request,
-    selected_cache_slice_range_request, slice_request_within_policy, vary_request_hash_material,
+    selected_cache_slice_range_request, vary_request_hash_material,
 };
 use fluxheim_config::{CacheConfig, CacheStaleErrorKind};
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
@@ -61,6 +62,20 @@ const MAX_NATIVE_UPSTREAM_H2_STREAMS: usize = 1024;
 static NATIVE_PROXY_CACHE_ID: AtomicUsize = AtomicUsize::new(0);
 static NATIVE_PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> =
     OnceLock::new();
+static NATIVE_CACHE_METRICS_RECORDER: OnceLock<Arc<dyn NativeCacheMetricsRecorder>> =
+    OnceLock::new();
+
+pub trait NativeCacheMetricsRecorder: Send + Sync + 'static {
+    fn record_activity(&self, tier: &str, event: &str);
+
+    fn record_activity_scope(&self, vhost: &str, route: Option<&str>, tier: &str, event: &str);
+}
+
+pub fn install_native_cache_metrics_recorder(
+    recorder: Arc<dyn NativeCacheMetricsRecorder>,
+) -> bool {
+    NATIVE_CACHE_METRICS_RECORDER.set(recorder).is_ok()
+}
 
 #[cfg(feature = "load-balancer")]
 type NativeProxyConfigBuild = (
@@ -112,6 +127,8 @@ struct NativeProxyMemoryCache {
     max_bytes: u64,
     state: Arc<Mutex<NativeMemoryCacheState>>,
     disk: Option<Arc<NativeDiskCache>>,
+    metrics_vhost: Arc<str>,
+    metrics_route: Option<Arc<str>>,
     origin_fill_key: Arc<str>,
     peer_fill_key: Arc<str>,
     peer_fill_peers: Vec<NativePeerFillPeer>,
@@ -131,12 +148,17 @@ enum NativeProxyCacheLookup {
     Miss {
         key: String,
         status: &'static str,
+        reason: Option<&'static str>,
     },
     Hit {
         entry: NativeMemoryCacheEntry,
         range: Option<CacheRangeRequest>,
     },
     StaleWhileRevalidate {
+        key: String,
+        entry: NativeMemoryCacheEntry,
+    },
+    Revalidate {
         key: String,
         entry: NativeMemoryCacheEntry,
     },
@@ -546,6 +568,18 @@ impl NativeHttp1Proxy {
         self
     }
 
+    pub fn with_proxy_cache_config_for(
+        mut self,
+        cache: &CacheConfig,
+        vhost: &str,
+        route: Option<&str>,
+    ) -> Self {
+        if let Some(cache) = NativeProxyMemoryCache::from_config_with_metrics(cache, vhost, route) {
+            self.cache = Some(cache);
+        }
+        self
+    }
+
     pub fn from_proxy_config(
         proxy: &fluxheim_config::ProxyConfig,
         policy: crate::DownstreamHttp1Policy,
@@ -562,7 +596,7 @@ impl NativeHttp1Proxy {
             .map(|proxy| proxy.with_header_policy(&config.headers));
         let native = native.map(|proxy| {
             if Self::proxy_cache_supported_for_proxy(&config.cache, &config.proxy) {
-                proxy.with_proxy_cache_config(&config.cache)
+                proxy.with_proxy_cache_config_for(&config.cache, "root", None)
             } else {
                 proxy
             }
@@ -988,6 +1022,14 @@ fn native_peer_fill_tls_upstream(
 
 impl NativeProxyMemoryCache {
     fn from_config(config: &CacheConfig) -> Option<Self> {
+        Self::from_config_with_metrics(config, "native", None)
+    }
+
+    fn from_config_with_metrics(
+        config: &CacheConfig,
+        vhost: &str,
+        route: Option<&str>,
+    ) -> Option<Self> {
         let id = NATIVE_PROXY_CACHE_ID.fetch_add(1, Ordering::Relaxed);
         if !NativeHttp1Proxy::proxy_cache_supported(config) {
             return None;
@@ -1005,6 +1047,8 @@ impl NativeProxyMemoryCache {
             },
             state: Arc::new(Mutex::new(NativeMemoryCacheState::default())),
             disk,
+            metrics_vhost: Arc::from(vhost),
+            metrics_route: route.map(Arc::from),
             origin_fill_key: Arc::from(format!("native-proxy-cache:{id}:origin")),
             peer_fill_key: Arc::from(format!("native-proxy-cache:{id}:peer-fill")),
             peer_fill_peers: native_peer_fill_peers(config),
@@ -1015,15 +1059,44 @@ impl NativeProxyMemoryCache {
         self.config.memory.enabled
     }
 
+    fn user_tag(&self) -> String {
+        self.metrics_route
+            .as_deref()
+            .map(|route| format!("{}:route:{route}", self.metrics_vhost))
+            .unwrap_or_else(|| self.metrics_vhost.to_string())
+    }
+
+    fn record_policy_activity(&self, event: &'static str) {
+        self.record_activity("policy", event);
+        self.record_activity_scope("policy", event);
+    }
+
+    fn record_activity(&self, tier: &'static str, event: &'static str) {
+        if let Some(recorder) = NATIVE_CACHE_METRICS_RECORDER.get() {
+            recorder.record_activity(tier, event);
+        }
+    }
+
+    fn record_activity_scope(&self, tier: &'static str, event: &'static str) {
+        if let Some(recorder) = NATIVE_CACHE_METRICS_RECORDER.get() {
+            recorder.record_activity_scope(
+                &self.metrics_vhost,
+                self.metrics_route.as_deref(),
+                tier,
+                event,
+            );
+        }
+    }
+
     fn lookup(&self, request: &NativeHttp1Request) -> NativeProxyCacheLookup {
         if cache_method_temporarily_bypassed(request.method()) {
             return NativeProxyCacheLookup::Bypass("method-head");
         }
-        if request.contains_header("authorization") {
-            return NativeProxyCacheLookup::Bypass("request-authorization");
-        }
         if let Some(reason) = request_cache_bypass_reason(request, &self.config) {
             return NativeProxyCacheLookup::Bypass(reason);
+        }
+        if request.contains_header("authorization") {
+            return NativeProxyCacheLookup::Bypass("request-authorization");
         }
         let Some(key) = self.key(request) else {
             return NativeProxyCacheLookup::Bypass("proxy-ineligible");
@@ -1040,17 +1113,41 @@ impl NativeProxyMemoryCache {
         if !revalidation && let Some(hit) = self.get(&key, request) {
             return NativeProxyCacheLookup::Hit { entry: hit, range };
         }
+        let range_key =
+            range.map(|range| cache_key_with_component(&key, "range", &range.component()));
+        if !revalidation
+            && let Some(range_key) = range_key.as_deref()
+            && let Some(hit) = self.get(range_key, request)
+        {
+            return NativeProxyCacheLookup::Hit {
+                entry: hit,
+                range: None,
+            };
+        }
         if !revalidation
             && !range_requested
             && let Some(stale) = self.get_stale_while_revalidate(&key, request)
         {
             return NativeProxyCacheLookup::StaleWhileRevalidate { key, entry: stale };
         }
-        if range_requested {
-            return NativeProxyCacheLookup::Bypass("range-miss");
+        if !revalidation
+            && !range_requested
+            && let Some(entry) = self.get_revalidatable(&key, request)
+        {
+            return NativeProxyCacheLookup::Revalidate { key, entry };
         }
-        let status = if revalidation { "REVALIDATED" } else { "MISS" };
-        NativeProxyCacheLookup::Miss { key, status }
+        if let Some(range_key) = range_key {
+            return NativeProxyCacheLookup::Miss {
+                key: range_key,
+                status: "MISS",
+                reason: Some("range-miss"),
+            };
+        }
+        NativeProxyCacheLookup::Miss {
+            key,
+            status: if revalidation { "REVALIDATED" } else { "MISS" },
+            reason: revalidation.then_some("request-refresh"),
+        }
     }
 
     fn acquire_origin_fill_permit(&self) -> Option<Option<NativeOriginFillPermit>> {
@@ -1131,7 +1228,7 @@ impl NativeProxyMemoryCache {
             .await?;
         let ranges = resolve_client_slice_ranges(&slice_request.ranges, total)?;
         if ranges.is_empty()
-            || !slice_request_within_policy(
+            || !native_slice_request_within_policy(
                 &ranges,
                 self.config.range.max_bytes.as_u64(),
                 usize::try_from(self.config.range.slice.max_slices).ok()?,
@@ -1511,6 +1608,41 @@ impl NativeProxyMemoryCache {
         self.get_disk_stale_if_error(key, request)
     }
 
+    fn get_revalidatable(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+    ) -> Option<NativeMemoryCacheEntry> {
+        let now = std::time::Instant::now();
+        if self.memory_enabled() {
+            let state = lock_native_memory_cache(&self.state, "proxy");
+            if let Some(variants) = state.variants.get(key).cloned() {
+                for variant in variants {
+                    let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request)
+                    else {
+                        continue;
+                    };
+                    if variant_key != variant.key {
+                        continue;
+                    }
+                    if let Some(entry) = state.objects.get(&variant.key)
+                        && native_cache_entry_revalidatable(entry, now)
+                    {
+                        return Some(entry.clone());
+                    }
+                }
+                return self.get_disk_revalidatable(key, request);
+            }
+
+            if let Some(entry) = state.objects.get(key)
+                && native_cache_entry_revalidatable(entry, now)
+            {
+                return Some(entry.clone());
+            }
+        }
+        self.get_disk_revalidatable(key, request)
+    }
+
     fn get_disk_fresh(
         &self,
         key: &str,
@@ -1518,6 +1650,8 @@ impl NativeProxyMemoryCache {
     ) -> Option<NativeMemoryCacheEntry> {
         let entry = self.disk_entry(key, request)?;
         (entry.expires_at > std::time::Instant::now()).then(|| {
+            self.record_activity("disk", "hit");
+            self.record_activity_scope("disk", "hit");
             self.promote_disk_entry(key, request, &entry);
             entry
         })
@@ -1542,6 +1676,15 @@ impl NativeProxyMemoryCache {
         let now = std::time::Instant::now();
         (entry.expires_at <= now && entry.stale_if_error_until.is_some_and(|until| until > now))
             .then_some(entry)
+    }
+
+    fn get_disk_revalidatable(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+    ) -> Option<NativeMemoryCacheEntry> {
+        let entry = self.disk_entry(key, request)?;
+        native_cache_entry_revalidatable(&entry, std::time::Instant::now()).then_some(entry)
     }
 
     fn disk_entry(
@@ -1629,6 +1772,63 @@ impl NativeProxyMemoryCache {
         result
     }
 
+    fn store_not_modified_revalidated(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+        entry: &NativeMemoryCacheEntry,
+        response: &NativeHttp1Response,
+    ) -> Result<NativeMemoryCacheEntry, &'static str> {
+        if response.status() != 304 {
+            return Err("not-modified-status");
+        }
+        let headers = native_response_header_map(response);
+        let ttl = native_cache_ttl(response.status(), &headers, &self.config)
+            .or_else(|| native_cache_ttl(entry.status, &headers, &self.config))
+            .ok_or("ttl-missing")?;
+        if ttl.is_zero() {
+            return Err("ttl-zero");
+        }
+        let now = std::time::Instant::now();
+        let (expires_at, stale_while_revalidate_until, stale_if_error_until) =
+            native_cache_expiry_times(
+                now,
+                ttl,
+                self.config.stale_while_revalidate_secs,
+                self.config.stale_if_error_secs,
+            )
+            .ok_or("ttl-overflow")?;
+        let mut refreshed = entry.to_response();
+        for (name, value) in cached_proxy_headers(response, &self.config) {
+            if native_not_modified_refresh_header_skipped(&name) {
+                continue;
+            }
+            refreshed.remove_header(&name);
+            refreshed.push_header(name, value);
+        }
+        let mut refreshed_entry = NativeMemoryCacheEntry {
+            status: entry.status,
+            reason: entry.reason.clone(),
+            headers: cached_proxy_headers(&refreshed, &self.config),
+            content_length: refreshed.content_length(),
+            body: entry.body.clone(),
+            expires_at,
+            stale_while_revalidate_until,
+            stale_if_error_until,
+            stored_at: now,
+            weight: native_cache_entry_weight(key, &refreshed, entry.body.len() as u64),
+        };
+        refreshed_entry.weight =
+            native_cache_entry_weight(key, &refreshed, entry.body.len() as u64);
+        self.store_inner(
+            key,
+            request,
+            &refreshed_entry.to_response(),
+            NativeCacheStoreMode::Revalidated,
+        )?;
+        Ok(refreshed_entry)
+    }
+
     fn store_peer_fill(
         &self,
         key: &str,
@@ -1652,9 +1852,6 @@ impl NativeProxyMemoryCache {
         mode: NativeCacheStoreMode,
     ) -> Result<(), &'static str> {
         let body_len = response.body().len() as u64;
-        if body_len == 0 {
-            return Err("empty-body");
-        }
         if body_len > self.config.max_object_bytes.as_u64() {
             return Err("object-too-large");
         }
@@ -1664,10 +1861,27 @@ impl NativeProxyMemoryCache {
             VaryCachePolicy::Fields(fields) => Some(fields),
             VaryCachePolicy::Uncacheable(reason) => return Err(reason),
         };
-        if let Some(reason) =
-            response_cache_admission_rejection(response.status(), &headers, &self.config)
-        {
-            return Err(reason);
+        let range = selected_cache_range_request(request, &self.config);
+        if response.status() == 206 {
+            if let Some(reason) =
+                range_response_cache_admission_rejection(response.status(), &headers, range)
+            {
+                return Err(reason);
+            }
+            if let Some(reason) = response_range_cache_admission_rejection(&headers, &self.config) {
+                return Err(reason);
+            }
+        } else {
+            if let Some(reason) =
+                range_response_cache_admission_rejection(response.status(), &headers, None)
+            {
+                return Err(reason);
+            }
+            if let Some(reason) =
+                response_cache_admission_rejection(response.status(), &headers, &self.config)
+            {
+                return Err(reason);
+            }
         }
         let ttl = match mode {
             NativeCacheStoreMode::Origin | NativeCacheStoreMode::Revalidated => {
@@ -1680,6 +1894,9 @@ impl NativeProxyMemoryCache {
         let Some(ttl) = ttl else {
             return Err("ttl-missing");
         };
+        if body_len == 0 && !self.config.status_ttls.contains_key(&response.status()) {
+            return Err("empty-body");
+        }
         if ttl.is_zero() {
             return Err("ttl-zero");
         }
@@ -1720,11 +1937,13 @@ impl NativeProxyMemoryCache {
             stored_at: now,
             weight,
         };
+        let cache_tags = native_response_cache_tags(response, &self.config);
         let disk_key = NativeDiskCacheStoreKey {
             combined: store_key.clone(),
             primary: key.to_owned(),
-            user_tag: native_cache_user_tag(request),
+            user_tag: self.user_tag(),
             index_path: Some(request.path().to_owned()),
+            cache_tags,
             vary_fields: vary_fields.clone().unwrap_or_default(),
         };
         if self.memory_enabled() {
@@ -2074,7 +2293,13 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     )
                     .await;
             }
-            let mut proxy_cache_fill = None::<(NativeProxyMemoryCache, String, &'static str)>;
+            let mut proxy_cache_fill = None::<(
+                NativeProxyMemoryCache,
+                String,
+                &'static str,
+                Option<&'static str>,
+                Option<NativeMemoryCacheEntry>,
+            )>;
             let mut proxy_cache_status = None::<(
                 &CacheConfig,
                 &'static str,
@@ -2101,11 +2326,7 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 }
                 match cache.lookup(&request) {
                     NativeProxyCacheLookup::Hit { entry, range } => {
-                        let response = if let Some(range) = range {
-                            native_cached_range_response(&entry, range)
-                        } else {
-                            entry.to_response()
-                        };
+                        let response = native_cached_hit_response(&entry, &request, range);
                         return self.finish_response(
                             response,
                             Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
@@ -2118,7 +2339,13 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                         );
                     }
                     NativeProxyCacheLookup::StaleWhileRevalidate { key, entry } => {
-                        self.spawn_cache_revalidation(cache.clone(), key, request.clone());
+                        cache.record_policy_activity("stale");
+                        self.spawn_cache_revalidation(
+                            cache.clone(),
+                            key,
+                            request.clone(),
+                            entry.clone(),
+                        );
                         return self.finish_response(
                             entry.to_response(),
                             Some((
@@ -2135,15 +2362,28 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                             compression_request.as_ref(),
                         );
                     }
-                    NativeProxyCacheLookup::Miss { key, status } => {
-                        proxy_cache_fill = Some((cache.clone(), key, status));
+                    NativeProxyCacheLookup::Miss {
+                        key,
+                        status,
+                        reason,
+                    } => {
+                        if status == "REVALIDATED" {
+                            cache.record_policy_activity("revalidate");
+                        }
+                        proxy_cache_fill = Some((cache.clone(), key, status, reason, None));
+                    }
+                    NativeProxyCacheLookup::Revalidate { key, entry } => {
+                        cache.record_policy_activity("revalidate");
+                        request = native_cache_revalidation_request(request, &entry);
+                        proxy_cache_fill = Some((cache.clone(), key, "EXPIRED", None, Some(entry)));
                     }
                     NativeProxyCacheLookup::Bypass(reason) => {
+                        cache.record_policy_activity("bypass");
                         proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
                     }
                 }
             }
-            if let Some((cache, key, _)) = proxy_cache_fill.as_ref() {
+            if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref() {
                 if native_request_cache_only_if_cached(&request) {
                     let response =
                         NativeHttp1Response::new(504, "Gateway Timeout", b"cache miss\n")
@@ -2190,7 +2430,8 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     }
                 }
             }
-            let _cache_fill_permit = if let Some((cache, key, _)) = proxy_cache_fill.as_ref() {
+            let _cache_fill_permit = if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref()
+            {
                 loop {
                     match cache.cache_fill_gate(key) {
                         NativeCacheFillGate::Disabled => break None,
@@ -2217,7 +2458,7 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
             } else {
                 None
             };
-            let _origin_fill_permit = if let Some((cache, _, _)) = proxy_cache_fill.as_ref() {
+            let _origin_fill_permit = if let Some((cache, _, _, _, _)) = proxy_cache_fill.as_ref() {
                 match cache.acquire_origin_fill_permit() {
                     Some(permit) => permit,
                     None => {
@@ -2259,12 +2500,15 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 match upstream.send(&request).await {
                     Ok(response) => {
                         let mut cache_status = proxy_cache_status;
-                        if let Some((cache, key, status)) = proxy_cache_fill.as_ref() {
+                        if let Some((cache, key, status, reason, stale_entry)) =
+                            proxy_cache_fill.as_ref()
+                        {
                             if let Some(stale) = cache.get_stale(
                                 key,
                                 &request,
                                 CacheStaleEvent::UpstreamHttpStatus(response.status()),
                             ) {
+                                cache.record_policy_activity("stale");
                                 return self.finish_response(
                                     stale.to_response(),
                                     Some((
@@ -2281,13 +2525,41 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                                     compression_request.as_ref(),
                                 );
                             }
+                            let revalidated = if response.status() == 304 {
+                                stale_entry.as_ref().and_then(|entry| {
+                                    cache
+                                        .store_not_modified_revalidated(
+                                            key, &request, entry, &response,
+                                        )
+                                        .ok()
+                                })
+                            } else {
+                                None
+                            };
+                            if let Some(revalidated) = revalidated {
+                                return self.finish_response(
+                                    revalidated.to_response(),
+                                    Some((
+                                        &cache.config,
+                                        "REVALIDATED",
+                                        None,
+                                        Some(revalidated.age_secs()),
+                                    )),
+                                    #[cfg(any(
+                                        feature = "compression-brotli",
+                                        feature = "compression-gzip",
+                                        feature = "compression-zstd"
+                                    ))]
+                                    compression_request.as_ref(),
+                                );
+                            }
                             let store_result = if *status == "REVALIDATED" {
                                 cache.store_revalidated(key, &request, &response)
                             } else {
                                 cache.store(key, &request, &response)
                             };
                             cache_status = Some(match store_result {
-                                Ok(()) => (&cache.config, *status, None, None),
+                                Ok(()) => (&cache.config, *status, *reason, None),
                                 Err(reason) => (&cache.config, "BYPASS", Some(reason), None),
                             });
                         }
@@ -2327,11 +2599,12 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
             } else {
                 502
             };
-            if let (Some((cache, key, _)), Some(error)) =
+            if let (Some((cache, key, _, _, _)), Some(error)) =
                 (proxy_cache_fill.as_ref(), last_error.as_ref())
                 && let Some(stale) =
                     cache.get_stale(key, &request, native_cache_stale_event_for_error(error))
             {
+                cache.record_policy_activity("stale");
                 return self.finish_response(
                     stale.to_response(),
                     Some((
@@ -2417,6 +2690,7 @@ impl NativeHttp1Proxy {
         cache: NativeProxyMemoryCache,
         key: String,
         request: NativeHttp1Request,
+        entry: NativeMemoryCacheEntry,
     ) {
         {
             let mut state = lock_native_memory_cache(&cache.state, "proxy");
@@ -2427,7 +2701,7 @@ impl NativeHttp1Proxy {
         let proxy = self.clone();
         tokio::spawn(async move {
             proxy
-                .revalidate_cache_entry(cache.clone(), key.clone(), request)
+                .revalidate_cache_entry(cache.clone(), key.clone(), request, entry)
                 .await;
             let mut state = lock_native_memory_cache(&cache.state, "proxy");
             state.revalidating.remove(&key);
@@ -2439,14 +2713,23 @@ impl NativeHttp1Proxy {
         cache: NativeProxyMemoryCache,
         key: String,
         request: NativeHttp1Request,
+        entry: NativeMemoryCacheEntry,
     ) {
         let _origin_fill_permit = match cache.acquire_origin_fill_permit() {
             Some(permit) => permit,
             None => return,
         };
+        let request = native_cache_revalidation_request(request, &entry);
         match self.send_cache_revalidation_request(&request).await {
             Ok(response) => {
-                if let Err(reason) = cache.store_revalidated(&key, &request, &response) {
+                let result = if response.status() == 304 {
+                    cache
+                        .store_not_modified_revalidated(&key, &request, &entry, &response)
+                        .map(|_| ())
+                } else {
+                    cache.store_revalidated(&key, &request, &response)
+                };
+                if let Err(reason) = result {
                     log::debug!(
                         target: "fluxheim::native_http1",
                         "native proxy cache stale-while-revalidate refresh bypassed storage: {reason}"
@@ -2682,7 +2965,7 @@ impl NativeHttp1Proxy {
     #[cfg(feature = "load-balancer")]
     async fn handle_load_balanced(
         &self,
-        request: NativeHttp1Request,
+        mut request: NativeHttp1Request,
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -2699,7 +2982,13 @@ impl NativeHttp1Proxy {
             .effective_client_addr
             .or(request.peer_addr)
             .map(|address| address.ip());
-        let mut proxy_cache_fill = None::<(NativeProxyMemoryCache, String, &'static str)>;
+        let mut proxy_cache_fill = None::<(
+            NativeProxyMemoryCache,
+            String,
+            &'static str,
+            Option<&'static str>,
+            Option<NativeMemoryCacheEntry>,
+        )>;
         let mut proxy_cache_status = None::<(
             &CacheConfig,
             &'static str,
@@ -2726,11 +3015,7 @@ impl NativeHttp1Proxy {
             }
             match cache.lookup(&request) {
                 NativeProxyCacheLookup::Hit { entry, range } => {
-                    let response = if let Some(range) = range {
-                        native_cached_range_response(&entry, range)
-                    } else {
-                        entry.to_response()
-                    };
+                    let response = native_cached_hit_response(&entry, &request, range);
                     return self.finish_response(
                         response,
                         Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
@@ -2743,7 +3028,13 @@ impl NativeHttp1Proxy {
                     );
                 }
                 NativeProxyCacheLookup::StaleWhileRevalidate { key, entry } => {
-                    self.spawn_cache_revalidation(cache.clone(), key, request.clone());
+                    cache.record_policy_activity("stale");
+                    self.spawn_cache_revalidation(
+                        cache.clone(),
+                        key,
+                        request.clone(),
+                        entry.clone(),
+                    );
                     return self.finish_response(
                         entry.to_response(),
                         Some((
@@ -2760,15 +3051,28 @@ impl NativeHttp1Proxy {
                         compression_request,
                     );
                 }
-                NativeProxyCacheLookup::Miss { key, status } => {
-                    proxy_cache_fill = Some((cache.clone(), key, status));
+                NativeProxyCacheLookup::Miss {
+                    key,
+                    status,
+                    reason,
+                } => {
+                    if status == "REVALIDATED" {
+                        cache.record_policy_activity("revalidate");
+                    }
+                    proxy_cache_fill = Some((cache.clone(), key, status, reason, None));
+                }
+                NativeProxyCacheLookup::Revalidate { key, entry } => {
+                    cache.record_policy_activity("revalidate");
+                    request = native_cache_revalidation_request(request, &entry);
+                    proxy_cache_fill = Some((cache.clone(), key, "EXPIRED", None, Some(entry)));
                 }
                 NativeProxyCacheLookup::Bypass(reason) => {
+                    cache.record_policy_activity("bypass");
                     proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
                 }
             }
         }
-        if let Some((cache, key, _)) = proxy_cache_fill.as_ref() {
+        if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref() {
             if native_request_cache_only_if_cached(&request) {
                 let response = NativeHttp1Response::new(504, "Gateway Timeout", b"cache miss\n")
                     .close_connection();
@@ -2814,7 +3118,7 @@ impl NativeHttp1Proxy {
                 }
             }
         }
-        let _cache_fill_permit = if let Some((cache, key, _)) = proxy_cache_fill.as_ref() {
+        let _cache_fill_permit = if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref() {
             loop {
                 match cache.cache_fill_gate(key) {
                     NativeCacheFillGate::Disabled => break None,
@@ -2841,7 +3145,7 @@ impl NativeHttp1Proxy {
         } else {
             None
         };
-        let _origin_fill_permit = if let Some((cache, _, _)) = proxy_cache_fill.as_ref() {
+        let _origin_fill_permit = if let Some((cache, _, _, _, _)) = proxy_cache_fill.as_ref() {
             match cache.acquire_origin_fill_permit() {
                 Some(permit) => permit,
                 None => {
@@ -2872,13 +3176,14 @@ impl NativeHttp1Proxy {
             let Some(selected) = load_balancer.select_or_wait(&request, client_ip).await else {
                 if attempt == 0 {
                     let status = load_balancer.all_down_status();
-                    if let Some((cache, key, _)) = proxy_cache_fill.as_ref()
+                    if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref()
                         && let Some(stale) = cache.get_stale(
                             key,
                             &request,
                             CacheStaleEvent::UpstreamError(CacheStaleErrorKind::Connect),
                         )
                     {
+                        cache.record_policy_activity("stale");
                         return self.finish_response(
                             stale.to_response(),
                             Some((
@@ -2946,12 +3251,15 @@ impl NativeHttp1Proxy {
                         reporter.record_status(response.status(), None);
                     }
                     let mut cache_status = proxy_cache_status;
-                    if let Some((cache, key, status)) = proxy_cache_fill.as_ref() {
+                    if let Some((cache, key, status, reason, stale_entry)) =
+                        proxy_cache_fill.as_ref()
+                    {
                         if let Some(stale) = cache.get_stale(
                             key,
                             &request,
                             CacheStaleEvent::UpstreamHttpStatus(response.status()),
                         ) {
+                            cache.record_policy_activity("stale");
                             return self.finish_response(
                                 stale.to_response(),
                                 Some((
@@ -2968,13 +3276,39 @@ impl NativeHttp1Proxy {
                                 compression_request,
                             );
                         }
+                        let revalidated = if response.status() == 304 {
+                            stale_entry.as_ref().and_then(|entry| {
+                                cache
+                                    .store_not_modified_revalidated(key, &request, entry, &response)
+                                    .ok()
+                            })
+                        } else {
+                            None
+                        };
+                        if let Some(revalidated) = revalidated {
+                            return self.finish_response(
+                                revalidated.to_response(),
+                                Some((
+                                    &cache.config,
+                                    "REVALIDATED",
+                                    None,
+                                    Some(revalidated.age_secs()),
+                                )),
+                                #[cfg(any(
+                                    feature = "compression-brotli",
+                                    feature = "compression-gzip",
+                                    feature = "compression-zstd"
+                                ))]
+                                compression_request,
+                            );
+                        }
                         let store_result = if *status == "REVALIDATED" {
                             cache.store_revalidated(key, &request, &response)
                         } else {
                             cache.store(key, &request, &response)
                         };
                         cache_status = Some(match store_result {
-                            Ok(()) => (&cache.config, *status, None, None),
+                            Ok(()) => (&cache.config, *status, *reason, None),
                             Err(reason) => (&cache.config, "BYPASS", Some(reason), None),
                         });
                     }
@@ -3025,11 +3359,12 @@ impl NativeHttp1Proxy {
         } else {
             502
         };
-        if let (Some((cache, key, _)), Some(error)) =
+        if let (Some((cache, key, _, _, _)), Some(error)) =
             (proxy_cache_fill.as_ref(), last_error.as_ref())
             && let Some(stale) =
                 cache.get_stale(key, &request, native_cache_stale_event_for_error(error))
         {
+            cache.record_policy_activity("stale");
             return self.finish_response(
                 stale.to_response(),
                 Some((
@@ -3769,15 +4104,44 @@ fn native_request_header<'a>(request: &'a NativeHttp1Request, name: &str) -> Opt
         .map(String::as_str)
 }
 
-fn native_cache_user_tag(request: &NativeHttp1Request) -> String {
-    native_request_header(request, "host")
-        .unwrap_or_default()
-        .to_owned()
-}
-
 fn native_request_is_peer_fill(request: &NativeHttp1Request) -> bool {
     native_request_header_values(request, NATIVE_PEER_FILL_MARKER_HEADER)
         .any(|value| value.trim() == "1")
+}
+
+fn native_cache_entry_revalidatable(
+    entry: &NativeMemoryCacheEntry,
+    now: std::time::Instant,
+) -> bool {
+    entry.expires_at <= now
+        && (native_entry_first_header(entry, "etag").is_some()
+            || native_entry_first_header(entry, "last-modified").is_some())
+}
+
+fn native_cache_revalidation_request(
+    mut request: NativeHttp1Request,
+    entry: &NativeMemoryCacheEntry,
+) -> NativeHttp1Request {
+    if !request.contains_header("if-none-match")
+        && let Some(etag) = native_entry_first_header(entry, "etag")
+    {
+        request.headers.push(("if-none-match".to_owned(), etag));
+        return request;
+    }
+    if !request.contains_header("if-modified-since")
+        && let Some(last_modified) = native_entry_first_header(entry, "last-modified")
+    {
+        request
+            .headers
+            .push(("if-modified-since".to_owned(), last_modified));
+    }
+    request
+}
+
+fn native_not_modified_refresh_header_skipped(name: &str) -> bool {
+    name.eq_ignore_ascii_case("content-length")
+        || name.eq_ignore_ascii_case("content-range")
+        || name.eq_ignore_ascii_case("transfer-encoding")
 }
 
 fn native_request_cache_only_if_cached(request: &NativeHttp1Request) -> bool {
@@ -3892,6 +4256,21 @@ fn cached_proxy_headers(
         .collect()
 }
 
+fn native_response_cache_tags(response: &NativeHttp1Response, cache: &CacheConfig) -> Vec<String> {
+    let mut tags = Vec::new();
+    let mut total_bytes = 0_usize;
+    for tag_header in &cache.tag_headers {
+        for (_, value) in response
+            .headers()
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case(tag_header))
+        {
+            collect_cache_tags(value, &mut tags, &mut total_bytes);
+        }
+    }
+    tags
+}
+
 fn native_slice_cache_key(base_key: &str, range: CacheRangeRequest) -> String {
     cache_key_with_component(base_key, "slice", &range.component())
 }
@@ -3934,6 +4313,23 @@ fn native_if_range_matches_slice_identity(
     let if_range = if_range.trim();
     identity.etag.as_deref() == Some(if_range)
         || identity.last_modified.as_deref() == Some(if_range)
+}
+
+fn native_slice_request_within_policy(
+    ranges: &[CacheSliceBounds],
+    max_bytes: u64,
+    max_slices: usize,
+    slice_size: u64,
+) -> bool {
+    let Some(requested_bytes) = ranges
+        .iter()
+        .try_fold(0_u64, |sum, range| sum.checked_add(range.len()))
+    else {
+        return false;
+    };
+    requested_bytes <= max_bytes
+        && !ranges.is_empty()
+        && fluxheim_cache::required_slice_bounds(ranges, slice_size, u64::MAX).len() <= max_slices
 }
 
 fn native_response_has_non_identity_encoding(response: &NativeHttp1Response) -> bool {
@@ -3998,10 +4394,9 @@ fn native_compose_slice_response(
 
     let boundary = native_random_multipart_boundary();
     let body = native_compose_multipart_slice_body(ranges, slices, identity.total, &boundary)?;
+    let content_length = body.len() as u64;
     let mut response =
-        NativeHttp1Response::new(206, "Partial Content", body).with_content_length(0);
-    response.remove_header("content-length");
-    response.push_header("content-length", response.body().len().to_string());
+        NativeHttp1Response::new(206, "Partial Content", body).with_content_length(content_length);
     for (name, value) in &first_slice.entry.headers {
         if native_cached_range_response_header_preserved(name)
             && !name.eq_ignore_ascii_case("content-type")
@@ -4122,6 +4517,152 @@ fn native_random_multipart_boundary() -> String {
         let _ = write!(&mut boundary, "{byte:02x}");
     }
     boundary
+}
+
+fn native_cached_hit_response(
+    entry: &NativeMemoryCacheEntry,
+    request: &NativeHttp1Request,
+    range: Option<CacheRangeRequest>,
+) -> NativeHttp1Response {
+    if native_cached_conditional_not_modified(entry, request) {
+        return native_cached_not_modified_response(entry);
+    }
+    if entry.status == 206 {
+        return entry.to_response();
+    }
+    if let Some(range) = range.or_else(|| native_cached_full_body_range_request(entry, request)) {
+        native_cached_range_response(entry, range)
+    } else {
+        entry.to_response()
+    }
+}
+
+fn native_cached_full_body_range_request(
+    entry: &NativeMemoryCacheEntry,
+    request: &NativeHttp1Request,
+) -> Option<CacheRangeRequest> {
+    if request.method != "GET" {
+        return None;
+    }
+    let mut range = None;
+    for value in native_request_header_values(request, "range") {
+        if range.is_some() {
+            return None;
+        }
+        range = Some(value.trim());
+    }
+    if let Some(if_range) = native_joined_request_header_values(request, "if-range")
+        && !native_if_range_matches_cache(entry, if_range.trim())
+    {
+        return None;
+    }
+    native_parse_bounded_single_range(range?)
+}
+
+fn native_parse_bounded_single_range(value: &str) -> Option<CacheRangeRequest> {
+    let value = value.strip_prefix("bytes=")?;
+    if value.contains(',') {
+        return None;
+    }
+    let (start, end) = value.split_once('-')?;
+    if start.is_empty() || end.is_empty() {
+        return None;
+    }
+    let start = start.parse::<u64>().ok()?;
+    let end = end.parse::<u64>().ok()?;
+    if end < start {
+        return None;
+    }
+    Some(CacheRangeRequest { start, end })
+}
+
+fn native_if_range_matches_cache(entry: &NativeMemoryCacheEntry, if_range: &str) -> bool {
+    if if_range.starts_with('"') {
+        return native_cached_header_value(entry, "etag")
+            .is_some_and(|etag| etag.trim() == if_range);
+    }
+    let Some(last_modified) = native_cached_header_value(entry, "last-modified") else {
+        return false;
+    };
+    let Ok(request_time) = httpdate::parse_http_date(if_range) else {
+        return false;
+    };
+    let Ok(cached_time) = httpdate::parse_http_date(last_modified.trim()) else {
+        return false;
+    };
+    cached_time <= request_time
+}
+
+fn native_cached_conditional_not_modified(
+    entry: &NativeMemoryCacheEntry,
+    request: &NativeHttp1Request,
+) -> bool {
+    if let Some(if_none_match) = native_joined_request_header_values(request, "if-none-match") {
+        let Some(etag) = native_cached_header_value(entry, "etag") else {
+            return false;
+        };
+        return native_if_none_match_matches(if_none_match.as_str(), etag);
+    }
+
+    let Some(if_modified_since) = native_joined_request_header_values(request, "if-modified-since")
+    else {
+        return false;
+    };
+    let Some(last_modified) = native_cached_header_value(entry, "last-modified") else {
+        return false;
+    };
+    let Ok(request_time) = httpdate::parse_http_date(if_modified_since.trim()) else {
+        return false;
+    };
+    let Ok(cached_time) = httpdate::parse_http_date(last_modified.trim()) else {
+        return false;
+    };
+    cached_time <= request_time
+}
+
+fn native_cached_header_value<'a>(
+    entry: &'a NativeMemoryCacheEntry,
+    name: &str,
+) -> Option<&'a str> {
+    entry
+        .headers
+        .iter()
+        .find(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+fn native_joined_request_header_values(request: &NativeHttp1Request, name: &str) -> Option<String> {
+    fluxheim_headers::join_header_values(
+        native_request_header_values(request, name).filter(|value| !value.trim().is_empty()),
+    )
+}
+
+fn native_if_none_match_matches(if_none_match: &str, etag: &str) -> bool {
+    let etag = native_weak_etag_value(etag.trim());
+    if_none_match.split(',').any(|candidate| {
+        let candidate = candidate.trim();
+        candidate == "*" || native_weak_etag_value(candidate) == etag
+    })
+}
+
+fn native_weak_etag_value(value: &str) -> &str {
+    value.strip_prefix("W/").unwrap_or(value)
+}
+
+fn native_cached_not_modified_response(entry: &NativeMemoryCacheEntry) -> NativeHttp1Response {
+    let mut response = NativeHttp1Response::new(304, "Not Modified", Vec::new());
+    for (name, value) in &entry.headers {
+        if native_cached_not_modified_response_header_preserved(name) {
+            response.push_header(name.clone(), value.clone());
+        }
+    }
+    response
+}
+
+fn native_cached_not_modified_response_header_preserved(name: &str) -> bool {
+    !name.eq_ignore_ascii_case("content-length")
+        && !name.eq_ignore_ascii_case("content-range")
+        && !name.eq_ignore_ascii_case("accept-ranges")
 }
 
 fn native_cached_range_response(

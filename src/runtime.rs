@@ -337,6 +337,7 @@ async fn run_native_runtime_async(
     #[cfg(feature = "metrics")]
     {
         crate::metrics::init()?;
+        crate::metrics::install_native_cache_metrics_recorder();
         crate::metrics::record_config(&config);
     }
 

@@ -942,7 +942,7 @@ impl NativeHttp1RouteProxy {
         .map(|proxy| {
             let proxy = proxy.with_header_policy(&config.headers);
             if NativeHttp1Proxy::proxy_cache_supported_for_proxy(&config.cache, &config.proxy) {
-                proxy.with_proxy_cache_config(&config.cache)
+                proxy.with_proxy_cache_config_for(&config.cache, "root", None)
             } else {
                 proxy
             }
@@ -1148,7 +1148,7 @@ impl NativeHttp1RouteProxy {
         let fallback = fallback.map(|proxy| {
             let proxy = proxy.with_header_policy(&headers);
             if NativeHttp1Proxy::proxy_cache_supported_for_proxy(&vhost.cache, &vhost.proxy) {
-                proxy.with_proxy_cache_config(&vhost.cache)
+                proxy.with_proxy_cache_config_for(&vhost.cache, &vhost.name, None)
             } else {
                 proxy
             }
@@ -1193,7 +1193,7 @@ impl NativeHttp1RouteProxy {
                     if let Some(cache) = route.cache.as_ref().filter(|cache| {
                         NativeHttp1Proxy::proxy_cache_supported_for_proxy(cache, proxy_config)
                     }) {
-                        proxy.with_proxy_cache_config(cache)
+                        proxy.with_proxy_cache_config_for(cache, &vhost.name, Some(&route.name))
                     } else {
                         proxy
                     }

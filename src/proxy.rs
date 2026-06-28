@@ -128,6 +128,8 @@ use crate::route_policy::{RuntimeRouteMatcher, route_method_matches};
 use crate::upstream_tls::RuntimeUpstreamTls;
 #[cfg(feature = "web")]
 use crate::web::{ResolveResult, StaticFileServer};
+#[cfg(feature = "cache")]
+use fluxheim_cache::{CacheObjectHeaderValue, CacheObjectMetadata, CacheObjectTier};
 
 #[cfg(feature = "cache")]
 const CACHE_MIN_USES_REASON: &str = "cache-min-uses";
@@ -1057,6 +1059,19 @@ impl ProxySnapshot {
         {
             objects.push(metadata);
         }
+        if objects.is_empty()
+            && let Some(cache_config) = route_cache
+                .map(|cache| &cache.config)
+                .or_else(|| route_cache.is_none().then_some(&vhost.cache))
+            && let Some(native_key) = preview.primary_key.as_deref()
+            && let Some(metadata) = fluxheim_server::inspect_native_disk_cache_object(
+                cache_config,
+                native_key,
+                &native_cache_lookup_request_headers(request),
+            )
+        {
+            objects.push(native_cache_object_metadata(metadata));
+        }
 
         Ok(CacheObjectLookup { preview, objects })
     }
@@ -1738,6 +1753,17 @@ impl ProxySnapshot {
             .map(|storage| storage.purge_cache_key(&key))
             .transpose()?
             .unwrap_or(false);
+        if !disk_purged {
+            let native_primary_key = key
+                .primary_key_str()
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| key.primary());
+            disk_purged |= fluxheim_server::purge_native_disk_cache_primary(
+                cache_config,
+                &native_primary_key,
+                &native_primary_key,
+            );
+        }
         if cache_config.range.enabled && cache_config.range.slice.enabled {
             let slice_limit = usize::try_from(cache_config.range.slice.max_slices)
                 .unwrap_or(usize::MAX.saturating_sub(4))
@@ -2347,6 +2373,48 @@ impl ProxySnapshot {
             disk_truncated: disk.truncated,
         })
     }
+}
+
+#[cfg(feature = "cache")]
+fn native_cache_object_metadata(
+    metadata: fluxheim_server::NativeDiskCacheObjectMetadata,
+) -> CacheObjectMetadata {
+    CacheObjectMetadata {
+        tier: CacheObjectTier::Disk,
+        purge_indexed: true,
+        status: metadata.status,
+        fresh: metadata.fresh,
+        freshness_state: metadata.freshness_state,
+        serve_stale_while_revalidate: metadata.serve_stale_while_revalidate,
+        serve_stale_if_error: metadata.serve_stale_if_error,
+        body_bytes: metadata.body_bytes,
+        weight_bytes: metadata.weight_bytes,
+        created_unix_secs: metadata.created_unix_secs,
+        updated_unix_secs: metadata.updated_unix_secs,
+        fresh_until_unix_secs: metadata.fresh_until_unix_secs,
+        age_secs: metadata.age_secs,
+        fresh_ttl_secs: metadata.fresh_ttl_secs,
+        stale_while_revalidate_secs: metadata.stale_while_revalidate_secs,
+        stale_if_error_secs: metadata.stale_if_error_secs,
+        cache_tags: metadata.cache_tags,
+        header_names: metadata.header_names,
+        header_values: metadata
+            .header_values
+            .into_iter()
+            .map(|(name, value)| CacheObjectHeaderValue { name, value })
+            .collect(),
+    }
+}
+
+#[cfg(feature = "cache")]
+fn native_cache_lookup_request_headers(request: &RequestHeader) -> Vec<(String, String)> {
+    request
+        .headers
+        .iter()
+        .filter_map(|(name, value)| {
+            Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned()))
+        })
+        .collect()
 }
 
 #[cfg(feature = "cache")]

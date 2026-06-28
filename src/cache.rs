@@ -1035,6 +1035,7 @@ impl PingoraMemoryStorage {
         entries.truncate(limit);
 
         let now = std::time::SystemTime::now();
+        let now_unix_secs = system_time_unix_secs(now).unwrap_or_default();
         let scanned = entries.len();
         let mut stale = 0;
         let mut purged = 0;
@@ -1045,8 +1046,15 @@ impl PingoraMemoryStorage {
                 self.purge_index.remove_combined(&entry.combined_key);
                 continue;
             };
-            let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
-            if meta.is_fresh(now) {
+            let fresh = if let Some(fresh) =
+                native_proxy_cache_internal_meta_fresh(&object.internal_meta, now_unix_secs)
+            {
+                fresh
+            } else {
+                CacheMeta::deserialize(&object.internal_meta, &object.response_header)?
+                    .is_fresh(now)
+            };
+            if fresh {
                 if truncated && !dry_run {
                     deferred_fresh_keys.push(entry.combined_key.clone());
                 }
@@ -1993,6 +2001,7 @@ impl StorageBinDiskStorage {
         entries.truncate(limit);
 
         let now = std::time::SystemTime::now();
+        let now_unix_secs = system_time_unix_secs(now).unwrap_or_default();
         let scanned = entries.len();
         let mut stale = 0;
         let mut purged = 0;
@@ -2004,8 +2013,15 @@ impl StorageBinDiskStorage {
                 self.purge_index.remove_combined(&entry.combined_key);
                 continue;
             };
-            let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
-            if meta.is_fresh(now) {
+            let fresh = if let Some(fresh) =
+                native_proxy_cache_internal_meta_fresh(&object.internal_meta, now_unix_secs)
+            {
+                fresh
+            } else {
+                CacheMeta::deserialize(&object.internal_meta, &object.response_header)?
+                    .is_fresh(now)
+            };
+            if fresh {
                 if truncated && !dry_run {
                     deferred_fresh_keys.push(entry.combined_key.clone());
                 }
@@ -3058,6 +3074,7 @@ impl PingoraDiskStorage {
         entries.truncate(limit);
 
         let now = std::time::SystemTime::now();
+        let now_unix_secs = system_time_unix_secs(now).unwrap_or_default();
         let scanned = entries.len();
         let mut stale = 0;
         let mut purged = 0;
@@ -3068,8 +3085,15 @@ impl PingoraDiskStorage {
                 self.purge_index.remove_combined(&entry.combined_key);
                 continue;
             };
-            let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
-            if meta.is_fresh(now) {
+            let fresh = if let Some(fresh) =
+                native_proxy_cache_internal_meta_fresh(&object.internal_meta, now_unix_secs)
+            {
+                fresh
+            } else {
+                CacheMeta::deserialize(&object.internal_meta, &object.response_header)?
+                    .is_fresh(now)
+            };
+            if fresh {
                 if truncated && !dry_run {
                     deferred_fresh_keys.push(entry.combined_key.clone());
                 }
@@ -5567,6 +5591,37 @@ fn cache_object_metadata(
         header_names,
         header_values,
     }))
+}
+
+#[cfg(feature = "proxy")]
+fn native_proxy_cache_internal_meta_fresh(
+    internal_meta: &[u8],
+    now_unix_secs: u64,
+) -> Option<bool> {
+    let mut offset = 0_usize;
+    let magic = native_proxy_cache_meta_line(internal_meta, &mut offset)?;
+    if magic != "FLUXHEIM-NATIVE-PROXY-CACHE-v1" {
+        return None;
+    }
+    let _status = native_proxy_cache_meta_line(internal_meta, &mut offset)?;
+    let _reason_len = native_proxy_cache_meta_line(internal_meta, &mut offset)?;
+    let _content_length = native_proxy_cache_meta_line(internal_meta, &mut offset)?;
+    let expires_at_unix_secs = native_proxy_cache_meta_line(internal_meta, &mut offset)?
+        .parse::<u64>()
+        .ok()?;
+    Some(expires_at_unix_secs > now_unix_secs)
+}
+
+#[cfg(feature = "proxy")]
+fn native_proxy_cache_meta_line<'a>(bytes: &'a [u8], offset: &mut usize) -> Option<&'a str> {
+    let relative = bytes
+        .get(*offset..)?
+        .iter()
+        .position(|byte| *byte == b'\n')?;
+    let start = *offset;
+    let end = start.checked_add(relative)?;
+    *offset = end.checked_add(1)?;
+    std::str::from_utf8(bytes.get(start..end)?).ok()
 }
 
 #[cfg(feature = "proxy")]

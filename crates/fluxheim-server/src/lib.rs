@@ -59,12 +59,19 @@ pub use native_http1::{
 };
 #[cfg(feature = "acme")]
 pub use native_http1_acme::NativeHttp1AcmeHttp01Store;
+pub use native_http1_cache::{
+    NativeDiskCacheObjectMetadata, inspect_native_disk_cache_object,
+    purge_native_disk_cache_primary,
+};
 pub use native_http1_client::{NativeHttp1Upstream, NativeTcpKeepalivePolicy};
 pub use native_http1_host_router::{NativeHttp1HostRouter, NativeHttp1HostRouterConfigError};
 pub use native_http1_plan::{
     NativeHttp1ProxyCandidate, NativeHttp1ProxyCutoverStatus, NativeHttp1ProxyCutoverSummary,
 };
-pub use native_http1_proxy::{NativeHttp1Proxy, NativeHttp1ProxyConfigError};
+pub use native_http1_proxy::{
+    NativeCacheMetricsRecorder, NativeHttp1Proxy, NativeHttp1ProxyConfigError,
+    install_native_cache_metrics_recorder,
+};
 pub use native_http1_route_proxy::{
     NativeHttp1RouteProxy, NativeHttp1RouteProxyConfigError, NativeHttp1RouteProxyRoute,
 };

@@ -859,6 +859,27 @@ pub fn record_cache_activity_scope(vhost: &str, route: Option<&str>, tier: &str,
     }
 }
 
+#[cfg(feature = "proxy")]
+struct NativeCachePrometheusRecorder;
+
+#[cfg(feature = "proxy")]
+impl fluxheim_server::NativeCacheMetricsRecorder for NativeCachePrometheusRecorder {
+    fn record_activity(&self, tier: &str, event: &str) {
+        record_cache_activity(tier, event);
+    }
+
+    fn record_activity_scope(&self, vhost: &str, route: Option<&str>, tier: &str, event: &str) {
+        record_cache_activity_scope(vhost, route, tier, event);
+    }
+}
+
+#[cfg(feature = "proxy")]
+pub fn install_native_cache_metrics_recorder() {
+    let _ = fluxheim_server::install_native_cache_metrics_recorder(Arc::new(
+        NativeCachePrometheusRecorder,
+    ));
+}
+
 pub fn record_cache_operation_duration(
     vhost: &str,
     route: Option<&str>,
