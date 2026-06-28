@@ -73,6 +73,53 @@ async fn upstream_cacheable_once(body: &'static str) -> std::net::SocketAddr {
     upstream_cacheable_once_with_max_age(body, 60).await
 }
 
+async fn peer_fill_cacheable_once(body: &'static str) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(request).unwrap();
+        assert!(
+            request.starts_with("GET /asset.png HTTP/1.1\r\n"),
+            "unexpected peer-fill request: {request:?}"
+        );
+        assert!(
+            request.contains("cache-control: only-if-cached\r\n")
+                || request.contains("Cache-Control: only-if-cached\r\n"),
+            "peer-fill request missing only-if-cached: {request:?}"
+        );
+        assert!(
+            request.contains("x-fluxheim-peer-fill: 1\r\n")
+                || request.contains("X-Fluxheim-Peer-Fill: 1\r\n"),
+            "peer-fill request missing loop marker: {request:?}"
+        );
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    addr
+}
+
 async fn upstream_cacheable_once_with_max_age(
     body: &'static str,
     max_age_secs: u64,
@@ -3028,6 +3075,54 @@ fn native_route_proxy_accepts_route_memory_proxy_cache_with_stale_while_revalida
     assert!(route.proxy().is_some());
 }
 
+#[test]
+fn native_route_proxy_accepts_route_memory_proxy_cache_with_http_peer_fill() {
+    let mut route = native_route_proxy_test_route();
+    route.redirect = None;
+    route.proxy = Some(fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        ..Default::default()
+    });
+    let mut cache = native_proxy_memory_cache_config();
+    cache.peer_fill.enabled = true;
+    cache.peer_fill.allow_insecure_http = true;
+    cache.peer_fill.peers = vec![fluxheim_config::CachePeerConfig {
+        name: "local-peer".to_owned(),
+        base_url: "http://127.0.0.1:3001".to_owned(),
+    }];
+    route.cache = Some(cache);
+
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new("127.0.0.1:3000"));
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, Some(proxy)).unwrap();
+
+    assert!(route.proxy().is_some());
+}
+
+#[test]
+fn native_route_proxy_rejects_route_memory_proxy_cache_with_https_peer_fill() {
+    let mut route = native_route_proxy_test_route();
+    route.redirect = None;
+    route.proxy = Some(fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        ..Default::default()
+    });
+    let mut cache = native_proxy_memory_cache_config();
+    cache.peer_fill.enabled = true;
+    cache.peer_fill.peers = vec![fluxheim_config::CachePeerConfig {
+        name: "secure-peer".to_owned(),
+        base_url: "https://127.0.0.1:3001".to_owned(),
+    }];
+    route.cache = Some(cache);
+
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new("127.0.0.1:3000"));
+    let error = NativeHttp1RouteProxyRoute::from_config(&route, Some(proxy)).unwrap_err();
+
+    assert_eq!(
+        error,
+        NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::CachePolicy)
+    );
+}
+
 #[tokio::test]
 async fn native_route_proxy_caches_proxy_response_in_memory() {
     let upstream = upstream_cacheable_once("origin-one").await;
@@ -3046,6 +3141,39 @@ async fn native_route_proxy_caches_proxy_response_in_memory() {
     );
     assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(second.ends_with("origin-one"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_peer_fills_and_stores_memory_cache_response() {
+    let peer = peer_fill_cacheable_once("peer-object").await;
+    let unused_origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = unused_origin_listener.local_addr().unwrap();
+    drop(unused_origin_listener);
+    let mut cache = native_proxy_memory_cache_config();
+    cache.peer_fill.enabled = true;
+    cache.peer_fill.allow_insecure_http = true;
+    cache.peer_fill.peers = vec![fluxheim_config::CachePeerConfig {
+        name: "local-peer".to_owned(),
+        base_url: format!("http://{peer}"),
+    }];
+    let proxy = proxy_for(origin).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_get(listener, "/asset.png").await;
+    let second = downstream_get(listener, "/asset.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("peer-object"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("PEER-HIT")
+    );
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.ends_with("peer-object"));
     assert_eq!(
         response_header(&second, "x-cache-status").as_deref(),
         Some("HIT")

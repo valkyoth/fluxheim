@@ -4,8 +4,9 @@ Fluxheim 1.6.33 is the native proxy-cache parity release in the Pingora
 removal line.
 
 This checkpoint adds Fluxheim-owned native memory-cache support for ordinary
-HTTP/1 proxy responses. Disk cache, slice composition, and peer-fill remain
-explicit compatibility gates until their native implementations are proven.
+HTTP/1 proxy responses. Disk cache, slice composition, and secure HTTPS
+peer-fill remain explicit compatibility gates until their native
+implementations are proven.
 
 ## Highlights
 
@@ -64,6 +65,12 @@ explicit compatibility gates until their native implementations are proven.
   expired memory objects. The native path serves a `STALE-UPDATING` response,
   keeps origin-fill protection in front of the refresh task, and updates the
   cached object through the same response admission path.
+- Native proxy memory cache now supports opt-in HTTP peer-fill for deployments
+  that explicitly set `cache.peer_fill.allow_insecure_http = true`. Native
+  peer-fill preserves the `X-Fluxheim-Peer-Fill` loop guard, sends
+  `Cache-Control: only-if-cached`, honors peer-fill concurrency limits, stores
+  successful peer `200` responses locally, and returns `PEER-HIT` before later
+  requests become normal memory-cache `HIT`s.
 - Hardened native cache internals by using checked static-web cache expiry
   arithmetic, suppressing duplicate stale-while-revalidate refresh tasks per
   cache key before task allocation, and avoiding full predictor-counter table
@@ -75,13 +82,13 @@ explicit compatibility gates until their native implementations are proven.
   responses from static or native load-balanced upstream pools, with optional
   cache-status headers, Vary/request-header variant isolation,
   `stale_if_error_secs` serving, `cache.origin_protection` fill budgets,
-  native load-balanced pools, `cache.min_uses`, `pass_uncacheable_after`, and
-  opt-in `[cache.predictor]` cache-pass decisions, and
-  `stale_while_revalidate_secs` background refresh. If `cache.range.enabled =
-  true`, bounded single `Range` requests can be served from fresh cached full
-  objects.
+  native load-balanced pools, `cache.min_uses`, `pass_uncacheable_after`,
+  opt-in `[cache.predictor]` cache-pass decisions,
+  `stale_while_revalidate_secs` background refresh, and HTTP peer-fill when
+  `allow_insecure_http = true`. If `cache.range.enabled = true`, bounded
+  single `Range` requests can be served from fresh cached full objects.
 - Still blocked for native runtime readiness: disk/tiered proxy cache, slice
-  composition, peer-fill, and policies outside the supported native
+  composition, HTTPS peer-fill, and policies outside the supported native
   memory-cache subset.
 - The compatibility runtime remains available for unsupported cache policies
   until the remaining native cache parity gates are implemented and tested.
@@ -92,6 +99,7 @@ explicit compatibility gates until their native implementations are proven.
 - `cargo test -p fluxheim-server native_route_proxy_min_uses_delays_memory_cache_admission --locked`
 - `cargo test -p fluxheim-server native_route_proxy_predictor_passes_repeated_uncacheable_memory_response --locked`
 - `cargo test -p fluxheim-server native_route_proxy_serves_stale_while_revalidating_memory_cache --locked`
+- `cargo test -p fluxheim-server native_route_proxy_peer_fills_and_stores_memory_cache_response --locked`
 - `cargo test -p fluxheim-server static_cache_expiry_rejects_unrepresentable_ttl --locked`
 - `cargo test -p fluxheim-server native_route_proxy_ --locked`
 - `cargo test -p fluxheim-server --features acme,tls-rustls-backend native_http1_proxy_runtime_accepts_default_vhost_acme_certificate_source --locked`

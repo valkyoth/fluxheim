@@ -2860,9 +2860,11 @@ available for the stabilization/security-only follow-up.
     subset, supports `cache.min_uses`, `cache.pass_uncacheable_after`, and
     opt-in `[cache.predictor]` cache-pass decisions through bounded
     Fluxheim-owned counters, serves `stale_while_revalidate_secs` objects with
-    bounded background refresh, and has live native listener `MISS` then `HIT`
-    tests. Native readiness still blocks disk/tiered cache, slice composition,
-    and peer-fill until those semantics are owned by the native adapter.
+    bounded background refresh, supports opt-in HTTP peer-fill when
+    `allow_insecure_http = true`, and has live native listener `MISS` then
+    `HIT`, `PEER-HIT` then `HIT`, and stale-refresh tests. Native readiness
+    still blocks disk/tiered cache, slice composition, and HTTPS peer-fill until
+    those semantics are owned by the native adapter.
 - `v1.6.34`: remove the final Pingora runtime/listener/TLS adapter crates from
   normal builds after proxy-cache parity is proven. The native WebSocket
   baseline already covers strict `Upgrade: websocket` requests on forced HTTP/1

@@ -7,6 +7,8 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use http::Uri;
+
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 use crate::NativeHttp1UpstreamTls;
 #[cfg(not(feature = "privacy-mode"))]
@@ -47,9 +49,13 @@ use sanitization::ct::ConstantTimeEq;
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 const NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
 const NATIVE_ORIGIN_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
+const NATIVE_PEER_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
+const NATIVE_PEER_FILL_MARKER_HEADER: &str = "x-fluxheim-peer-fill";
 const NATIVE_CACHE_PREDICTOR_COUNTER_TTL: Duration = Duration::from_secs(600);
 const MAX_NATIVE_UPSTREAM_H2_STREAMS: usize = 1024;
 static NATIVE_PROXY_CACHE_ID: AtomicUsize = AtomicUsize::new(0);
+static NATIVE_PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> =
+    OnceLock::new();
 
 #[cfg(feature = "load-balancer")]
 type NativeProxyConfigBuild = (
@@ -101,6 +107,8 @@ struct NativeProxyMemoryCache {
     max_bytes: u64,
     state: Arc<Mutex<NativeMemoryCacheState>>,
     origin_fill_key: Arc<str>,
+    peer_fill_key: Arc<str>,
+    peer_fill_peers: Vec<NativePeerFillPeer>,
 }
 
 impl Eq for NativeProxyMemoryCache {}
@@ -126,6 +134,31 @@ enum NativeProxyCacheLookup {
         key: String,
         entry: NativeMemoryCacheEntry,
     },
+}
+
+#[derive(Debug)]
+enum NativePeerFillDecision {
+    Skip,
+    Hit(NativeHttp1Response),
+    FailClosed(&'static str),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NativePeerFillPeer {
+    name: String,
+    base_path: String,
+    upstream: NativeHttp1Upstream,
+}
+
+#[derive(Debug)]
+struct NativePeerFillPermit {
+    counter: Arc<AtomicUsize>,
+}
+
+impl Drop for NativePeerFillPermit {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
@@ -434,7 +467,7 @@ impl NativeHttp1Proxy {
             && cache.memory.enabled
             && !cache.disk.enabled
             && !cache.range.slice.enabled
-            && !cache.peer_fill.enabled
+            && native_peer_fill_supported(cache)
     }
 
     pub fn proxy_cache_supported_for_proxy(
@@ -754,16 +787,66 @@ impl PartialEq for NativeHttp1Proxy {
 
 impl Eq for NativeHttp1Proxy {}
 
+fn native_peer_fill_supported(cache: &CacheConfig) -> bool {
+    !cache.peer_fill.enabled
+        || (cache.peer_fill.allow_insecure_http
+            && !cache.peer_fill.peers.is_empty()
+            && cache
+                .peer_fill
+                .peers
+                .iter()
+                .all(|peer| native_peer_fill_peer_from_config(peer, &cache.peer_fill).is_some()))
+}
+
+fn native_peer_fill_peers(cache: &CacheConfig) -> Vec<NativePeerFillPeer> {
+    if !cache.peer_fill.enabled {
+        return Vec::new();
+    }
+    cache
+        .peer_fill
+        .peers
+        .iter()
+        .filter_map(|peer| native_peer_fill_peer_from_config(peer, &cache.peer_fill))
+        .collect()
+}
+
+fn native_peer_fill_peer_from_config(
+    peer: &fluxheim_config::CachePeerConfig,
+    peer_fill: &fluxheim_config::CachePeerFillConfig,
+) -> Option<NativePeerFillPeer> {
+    let uri = peer.base_url.parse::<Uri>().ok()?;
+    if uri.scheme_str() != Some("http") || !peer_fill.allow_insecure_http {
+        return None;
+    }
+    if uri.query().is_some() {
+        return None;
+    }
+    let authority = uri.authority()?.as_str().to_owned();
+    let base_path = uri
+        .path_and_query()
+        .map(|path| path.as_str())
+        .unwrap_or("/")
+        .trim_end_matches('/')
+        .to_owned();
+    Some(NativePeerFillPeer {
+        name: peer.name.clone(),
+        base_path,
+        upstream: NativeHttp1Upstream::new(authority)
+            .with_connect_timeout(Duration::from_secs(peer_fill.connect_timeout_secs))
+            .with_read_timeout(Duration::from_secs(peer_fill.read_timeout_secs)),
+    })
+}
+
 impl NativeProxyMemoryCache {
     fn from_config(config: &CacheConfig) -> Option<Self> {
+        let id = NATIVE_PROXY_CACHE_ID.fetch_add(1, Ordering::Relaxed);
         NativeHttp1Proxy::proxy_cache_supported(config).then(|| Self {
             config: config.clone(),
             max_bytes: config.memory.max_size_bytes.as_u64(),
             state: Arc::new(Mutex::new(NativeMemoryCacheState::default())),
-            origin_fill_key: Arc::from(format!(
-                "native-proxy-cache:{}",
-                NATIVE_PROXY_CACHE_ID.fetch_add(1, Ordering::Relaxed)
-            )),
+            origin_fill_key: Arc::from(format!("native-proxy-cache:{id}:origin")),
+            peer_fill_key: Arc::from(format!("native-proxy-cache:{id}:peer-fill")),
+            peer_fill_peers: native_peer_fill_peers(config),
         })
     }
 
@@ -814,6 +897,64 @@ impl NativeProxyMemoryCache {
             self.config.origin_protection.max_concurrent_fills,
         )
         .map(Some)
+    }
+
+    fn acquire_peer_fill_permit(&self) -> Option<NativePeerFillPermit> {
+        acquire_native_peer_fill_permit(
+            self.peer_fill_key.as_ref().to_owned(),
+            self.config.peer_fill.max_concurrent_requests,
+        )
+    }
+
+    async fn peer_fill(&self, key: &str, request: &NativeHttp1Request) -> NativePeerFillDecision {
+        if !self.config.peer_fill.enabled
+            || request.method != "GET"
+            || native_request_is_peer_fill(request)
+        {
+            return NativePeerFillDecision::Skip;
+        }
+        let Some(_permit) = self.acquire_peer_fill_permit() else {
+            return if self.config.peer_fill.fail_open {
+                NativePeerFillDecision::Skip
+            } else {
+                NativePeerFillDecision::FailClosed("peer-fill-concurrency-limit")
+            };
+        };
+        let max_body_bytes = self
+            .config
+            .peer_fill
+            .max_object_bytes
+            .unwrap_or(self.config.max_object_bytes)
+            .as_u64()
+            .min(self.config.max_object_bytes.as_u64());
+
+        for peer in &self.peer_fill_peers {
+            match native_peer_fill_fetch(peer, &self.config, request, max_body_bytes).await {
+                Ok(Some(response)) => {
+                    if response.status() != 200 {
+                        continue;
+                    }
+                    if self.store_revalidated(key, request, &response).is_err() {
+                        continue;
+                    }
+                    return NativePeerFillDecision::Hit(response);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    log::warn!(
+                        target: "fluxheim::native_http1",
+                        "native peer fill from {} failed: {error:?}",
+                        peer.name
+                    );
+                }
+            }
+        }
+
+        if self.config.peer_fill.fail_open {
+            NativePeerFillDecision::Skip
+        } else {
+            NativePeerFillDecision::FailClosed("peer-fill-miss")
+        }
     }
 
     fn key(&self, request: &NativeHttp1Request) -> Option<String> {
@@ -1265,8 +1406,62 @@ fn acquire_native_origin_fill_permit(
     }
 }
 
+fn acquire_native_peer_fill_permit(
+    key: String,
+    max_concurrent: usize,
+) -> Option<NativePeerFillPermit> {
+    let counter = {
+        let mut counters = match NATIVE_PEER_FILL_CONCURRENCY
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+        {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "native peer-fill concurrency lock poisoned; aborting to avoid inconsistent cache-fill limits"
+                );
+                std::process::abort();
+            }
+        };
+        prune_inactive_native_peer_fill_counters(&mut counters);
+        if counters.len() >= NATIVE_PEER_FILL_CONCURRENCY_MAX_KEYS && !counters.contains_key(&key) {
+            return None;
+        }
+        counters
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
+            .clone()
+    };
+
+    let mut current = counter.load(Ordering::Acquire);
+    loop {
+        if current >= max_concurrent {
+            return None;
+        }
+        let Some(next) = current.checked_add(1) else {
+            log::error!(
+                target: "fluxheim::security",
+                "native peer-fill concurrency counter saturated for {key}; refusing permit"
+            );
+            return None;
+        };
+        match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return Some(NativePeerFillPermit { counter }),
+            Err(observed) => current = observed,
+        }
+    }
+}
+
 fn prune_inactive_native_origin_fill_counters(counters: &mut HashMap<String, Arc<AtomicUsize>>) {
     if counters.len() < NATIVE_ORIGIN_FILL_CONCURRENCY_MAX_KEYS {
+        return;
+    }
+    counters.retain(|_, counter| counter.load(Ordering::Acquire) > 0);
+}
+
+fn prune_inactive_native_peer_fill_counters(counters: &mut HashMap<String, Arc<AtomicUsize>>) {
+    if counters.len() < NATIVE_PEER_FILL_CONCURRENCY_MAX_KEYS {
         return;
     }
     counters.retain(|_, counter| counter.load(Ordering::Acquire) > 0);
@@ -1386,6 +1581,38 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     }
                     NativeProxyCacheLookup::Bypass(reason) => {
                         proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
+                    }
+                }
+            }
+            if let Some((cache, key, _)) = proxy_cache_fill.as_ref() {
+                match cache.peer_fill(key, &request).await {
+                    NativePeerFillDecision::Skip => {}
+                    NativePeerFillDecision::Hit(response) => {
+                        return self.finish_response(
+                            response,
+                            Some((&cache.config, "PEER-HIT", None, None)),
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request.as_ref(),
+                        );
+                    }
+                    NativePeerFillDecision::FailClosed(reason) => {
+                        let response =
+                            NativeHttp1Response::new(504, "Gateway Timeout", b"cache miss\n")
+                                .close_connection();
+                        return self.finish_response(
+                            response,
+                            Some((&cache.config, "MISS", Some(reason), None)),
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request.as_ref(),
+                        );
                     }
                 }
             }
@@ -1882,6 +2109,38 @@ impl NativeHttp1Proxy {
                 }
                 NativeProxyCacheLookup::Bypass(reason) => {
                     proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
+                }
+            }
+        }
+        if let Some((cache, key, _)) = proxy_cache_fill.as_ref() {
+            match cache.peer_fill(key, &request).await {
+                NativePeerFillDecision::Skip => {}
+                NativePeerFillDecision::Hit(response) => {
+                    return self.finish_response(
+                        response,
+                        Some((&cache.config, "PEER-HIT", None, None)),
+                        #[cfg(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        ))]
+                        compression_request,
+                    );
+                }
+                NativePeerFillDecision::FailClosed(reason) => {
+                    let response =
+                        NativeHttp1Response::new(504, "Gateway Timeout", b"cache miss\n")
+                            .close_connection();
+                    return self.finish_response(
+                        response,
+                        Some((&cache.config, "MISS", Some(reason), None)),
+                        #[cfg(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        ))]
+                        compression_request,
+                    );
                 }
             }
         }
@@ -2811,6 +3070,97 @@ fn native_request_header<'a>(request: &'a NativeHttp1Request, name: &str) -> Opt
         .iter()
         .find_map(|(header_name, value)| header_name.eq_ignore_ascii_case(name).then_some(value))
         .map(String::as_str)
+}
+
+fn native_request_is_peer_fill(request: &NativeHttp1Request) -> bool {
+    native_request_header_values(request, NATIVE_PEER_FILL_MARKER_HEADER)
+        .any(|value| value.trim() == "1")
+}
+
+async fn native_peer_fill_fetch(
+    peer: &NativePeerFillPeer,
+    cache: &CacheConfig,
+    request: &NativeHttp1Request,
+    max_body_bytes: u64,
+) -> Result<Option<NativeHttp1Response>, crate::NativeHttp1Error> {
+    let Some(peer_request) = native_peer_fill_request(peer, request) else {
+        return Ok(None);
+    };
+    let max_body_bytes = usize::try_from(max_body_bytes.saturating_add(1)).unwrap_or(usize::MAX);
+    let response = peer
+        .upstream
+        .clone()
+        .with_max_body_bytes(max_body_bytes)
+        .send(&peer_request)
+        .await?;
+    if response.status() == 504 {
+        return Ok(None);
+    }
+    if response.body().len() >= max_body_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native peer fill response exceeds configured object limit",
+        )
+        .into());
+    }
+    Ok(Some(native_peer_fill_response_without_cache_status(
+        response, cache,
+    )))
+}
+
+fn native_peer_fill_request(
+    peer: &NativePeerFillPeer,
+    request: &NativeHttp1Request,
+) -> Option<NativeHttp1Request> {
+    if !fluxheim_common::path_safety::safe_forward_path_and_query(&request.target) {
+        return None;
+    }
+    let target = if peer.base_path.is_empty() {
+        request.target.clone()
+    } else {
+        format!("{}{}", peer.base_path, request.target)
+    };
+    if !fluxheim_common::path_safety::safe_forward_path_and_query(&target) {
+        return None;
+    }
+    let mut headers = Vec::new();
+    if let Some(host) = native_request_header(request, "host") {
+        headers.push(("host".to_owned(), host.to_owned()));
+    }
+    for name in ["accept", "accept-encoding", "accept-language"] {
+        for value in native_request_header_values(request, name) {
+            headers.push((name.to_owned(), value.to_owned()));
+        }
+    }
+    headers.push(("cache-control".to_owned(), "only-if-cached".to_owned()));
+    headers.push((NATIVE_PEER_FILL_MARKER_HEADER.to_owned(), "1".to_owned()));
+    Some(NativeHttp1Request {
+        method: "GET".to_owned(),
+        peer_addr: request.peer_addr,
+        local_addr: request.local_addr,
+        effective_client_addr: request.effective_client_addr,
+        downstream_tls: request.downstream_tls,
+        tls_identity: request.tls_identity.clone(),
+        geo_context: request.geo_context.clone(),
+        target,
+        version: request.version,
+        headers,
+        body: zeroize::Zeroizing::new(Vec::new()),
+        trailers: Vec::new(),
+    })
+}
+
+fn native_peer_fill_response_without_cache_status(
+    mut response: NativeHttp1Response,
+    cache: &CacheConfig,
+) -> NativeHttp1Response {
+    if let Some(header) = cache.status_header.as_deref() {
+        response.remove_header(header);
+    }
+    if let Some(header) = cache.status_reason_header.as_deref() {
+        response.remove_header(header);
+    }
+    response
 }
 
 fn cached_proxy_headers(
