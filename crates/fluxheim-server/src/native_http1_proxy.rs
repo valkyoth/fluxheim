@@ -122,6 +122,10 @@ enum NativeProxyCacheLookup {
         entry: NativeMemoryCacheEntry,
         range: Option<CacheRangeRequest>,
     },
+    StaleWhileRevalidate {
+        key: String,
+        entry: NativeMemoryCacheEntry,
+    },
 }
 
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
@@ -431,7 +435,6 @@ impl NativeHttp1Proxy {
             && !cache.disk.enabled
             && !cache.range.slice.enabled
             && !cache.peer_fill.enabled
-            && cache.stale_while_revalidate_secs.is_none()
     }
 
     pub fn proxy_cache_supported_for_proxy(
@@ -789,6 +792,12 @@ impl NativeProxyMemoryCache {
         if !revalidation && let Some(hit) = self.get(&key, request) {
             return NativeProxyCacheLookup::Hit { entry: hit, range };
         }
+        if !revalidation
+            && !range_requested
+            && let Some(stale) = self.get_stale_while_revalidate(&key, request)
+        {
+            return NativeProxyCacheLookup::StaleWhileRevalidate { key, entry: stale };
+        }
         if range_requested {
             return NativeProxyCacheLookup::Bypass("range-miss");
         }
@@ -835,7 +844,7 @@ impl NativeProxyMemoryCache {
                 match state.objects.get(&variant.key) {
                     Some(entry) if entry.expires_at > now => return Some(entry.clone()),
                     Some(entry) => {
-                        if entry.stale_if_error_until.is_some_and(|until| until > now) {
+                        if native_cache_entry_has_stale_window(entry, now) {
                             return None;
                         }
                         let weight = entry.weight;
@@ -852,7 +861,7 @@ impl NativeProxyMemoryCache {
         match state.objects.get(key) {
             Some(entry) if entry.expires_at > now => Some(entry.clone()),
             Some(entry) => {
-                if entry.stale_if_error_until.is_some_and(|until| until > now) {
+                if native_cache_entry_has_stale_window(entry, now) {
                     return None;
                 }
                 let weight = entry.weight;
@@ -862,6 +871,35 @@ impl NativeProxyMemoryCache {
             }
             None => None,
         }
+    }
+
+    fn get_stale_while_revalidate(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+    ) -> Option<NativeMemoryCacheEntry> {
+        let now = std::time::Instant::now();
+        let state = lock_native_memory_cache(&self.state, "proxy");
+        if let Some(variants) = state.variants.get(key).cloned() {
+            for variant in variants {
+                let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request) else {
+                    continue;
+                };
+                if variant_key != variant.key {
+                    continue;
+                }
+                if let Some(entry) = state.objects.get(&variant.key)
+                    && native_cache_entry_serve_stale_while_revalidate(entry, now)
+                {
+                    return Some(entry.clone());
+                }
+            }
+            return None;
+        }
+
+        state.objects.get(key).and_then(|entry| {
+            native_cache_entry_serve_stale_while_revalidate(entry, now).then(|| entry.clone())
+        })
     }
 
     fn get_stale(
@@ -926,7 +964,22 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
-        let result = self.store_inner(key, request, response);
+        let result = self.store_inner(key, request, response, true);
+        if let Err(reason) = result {
+            if reason != "cache-min-uses" {
+                self.record_uncacheable(key);
+            }
+        }
+        result
+    }
+
+    fn store_revalidated(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+        response: &NativeHttp1Response,
+    ) -> Result<(), &'static str> {
+        let result = self.store_inner(key, request, response, false);
         if let Err(reason) = result {
             if reason != "cache-min-uses" {
                 self.record_uncacheable(key);
@@ -940,6 +993,7 @@ impl NativeProxyMemoryCache {
         key: &str,
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
+        apply_min_uses: bool,
     ) -> Result<(), &'static str> {
         let body_len = response.body().len() as u64;
         if body_len == 0 {
@@ -966,7 +1020,7 @@ impl NativeProxyMemoryCache {
             return Err("ttl-zero");
         }
         self.record_cacheable(key);
-        if !self.min_uses_allows_store(key) {
+        if apply_min_uses && !self.min_uses_allows_store(key) {
             return Err("cache-min-uses");
         }
 
@@ -976,8 +1030,13 @@ impl NativeProxyMemoryCache {
             key.to_owned()
         };
         let now = std::time::Instant::now();
-        let Some((expires_at, stale_if_error_until)) =
-            native_cache_expiry_times(now, ttl, self.config.stale_if_error_secs)
+        let Some((expires_at, stale_while_revalidate_until, stale_if_error_until)) =
+            native_cache_expiry_times(
+                now,
+                ttl,
+                self.config.stale_while_revalidate_secs,
+                self.config.stale_if_error_secs,
+            )
         else {
             return Err("ttl-overflow");
         };
@@ -992,6 +1051,7 @@ impl NativeProxyMemoryCache {
             content_length: response.content_length(),
             body: Arc::from(response.body().to_vec()),
             expires_at,
+            stale_while_revalidate_until,
             stale_if_error_until,
             stored_at: now,
             weight,
@@ -1116,6 +1176,26 @@ fn prune_native_predictor_counters(
     if let Some(key) = counters.keys().next().cloned() {
         counters.remove(&key);
     }
+}
+
+fn native_cache_entry_has_stale_window(
+    entry: &NativeMemoryCacheEntry,
+    now: std::time::Instant,
+) -> bool {
+    entry
+        .stale_while_revalidate_until
+        .is_some_and(|until| until > now)
+        || entry.stale_if_error_until.is_some_and(|until| until > now)
+}
+
+fn native_cache_entry_serve_stale_while_revalidate(
+    entry: &NativeMemoryCacheEntry,
+    now: std::time::Instant,
+) -> bool {
+    entry.expires_at <= now
+        && entry
+            .stale_while_revalidate_until
+            .is_some_and(|until| until > now)
 }
 
 struct NativeOriginFillPermit {
@@ -1277,6 +1357,24 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                             compression_request.as_ref(),
                         );
                     }
+                    NativeProxyCacheLookup::StaleWhileRevalidate { key, entry } => {
+                        self.spawn_cache_revalidation(cache.clone(), key, request.clone());
+                        return self.finish_response(
+                            entry.to_response(),
+                            Some((
+                                &cache.config,
+                                "STALE-UPDATING",
+                                Some("stale-while-revalidate"),
+                                Some(entry.age_secs()),
+                            )),
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request.as_ref(),
+                        );
+                    }
                     NativeProxyCacheLookup::Miss { key, status } => {
                         proxy_cache_fill = Some((cache.clone(), key, status));
                     }
@@ -1349,7 +1447,12 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                                     compression_request.as_ref(),
                                 );
                             }
-                            cache_status = Some(match cache.store(key, &request, &response) {
+                            let store_result = if *status == "REVALIDATED" {
+                                cache.store_revalidated(key, &request, &response)
+                            } else {
+                                cache.store(key, &request, &response)
+                            };
+                            cache_status = Some(match store_result {
                                 Ok(()) => (&cache.config, *status, None, None),
                                 Err(reason) => (&cache.config, "BYPASS", Some(reason), None),
                             });
@@ -1475,6 +1578,168 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
 }
 
 impl NativeHttp1Proxy {
+    fn spawn_cache_revalidation(
+        &self,
+        cache: NativeProxyMemoryCache,
+        key: String,
+        request: NativeHttp1Request,
+    ) {
+        let proxy = self.clone();
+        tokio::spawn(async move {
+            proxy.revalidate_cache_entry(cache, key, request).await;
+        });
+    }
+
+    async fn revalidate_cache_entry(
+        self,
+        cache: NativeProxyMemoryCache,
+        key: String,
+        request: NativeHttp1Request,
+    ) {
+        let _origin_fill_permit = match cache.acquire_origin_fill_permit() {
+            Some(permit) => permit,
+            None => return,
+        };
+        match self.send_cache_revalidation_request(&request).await {
+            Ok(response) => {
+                if let Err(reason) = cache.store_revalidated(&key, &request, &response) {
+                    log::debug!(
+                        target: "fluxheim::native_http1",
+                        "native proxy cache stale-while-revalidate refresh bypassed storage: {reason}"
+                    );
+                }
+            }
+            Err(error) => {
+                log::debug!(
+                    target: "fluxheim::native_http1",
+                    "native proxy cache stale-while-revalidate refresh failed: {error:?}"
+                );
+            }
+        }
+    }
+
+    #[cfg(not(feature = "load-balancer"))]
+    async fn send_cache_revalidation_request(
+        &self,
+        request: &NativeHttp1Request,
+    ) -> Result<NativeHttp1Response, crate::NativeHttp1Error> {
+        let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
+        let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
+        let total = self.upstream_slots.len();
+        let mut attempted = vec![false; self.upstreams.len()];
+        let mut unique_attempts = 0usize;
+        let mut last_error = None;
+        for attempt in 0..total {
+            let slot = start.wrapping_add(attempt) % total;
+            let index = self.upstream_slots[slot];
+            if attempted[index] {
+                continue;
+            }
+            attempted[index] = true;
+            unique_attempts += 1;
+            match self.upstreams[index].send(request).await {
+                Ok(response) => return Ok(response),
+                Err(error) if retry_allowed && unique_attempts < self.upstreams.len() => {
+                    last_error = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "native proxy cache refresh has no upstream",
+            )
+            .into()
+        }))
+    }
+
+    #[cfg(feature = "load-balancer")]
+    async fn send_cache_revalidation_request(
+        &self,
+        request: &NativeHttp1Request,
+    ) -> Result<NativeHttp1Response, crate::NativeHttp1Error> {
+        let Some(load_balancer) = &self.load_balancer else {
+            return self.send_static_cache_revalidation_request(request).await;
+        };
+        let client_ip = request
+            .effective_client_addr
+            .or(request.peer_addr)
+            .map(|address| address.ip());
+        let Some(selected) = load_balancer.select_or_wait(request, client_ip).await else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "native proxy cache refresh did not select an upstream",
+            )
+            .into());
+        };
+        let authority = selected.authority();
+        let dynamic_upstream = self
+            .upstream_for_authority(&authority)
+            .is_none()
+            .then(|| self.dynamic_upstream_for_authority(&authority))
+            .flatten();
+        let Some(upstream) = self
+            .upstream_for_authority(&authority)
+            .or(dynamic_upstream.as_ref())
+        else {
+            if let Some(reporter) = selected.reporter() {
+                reporter.record_failure();
+            }
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                format!(
+                    "native proxy cache refresh selected upstream {authority} without transport"
+                ),
+            )
+            .into());
+        };
+        let result = upstream.send(request).await;
+        if let Some(reporter) = selected.reporter() {
+            match &result {
+                Ok(response) => reporter.record_status(response.status(), None),
+                Err(_) => reporter.record_failure(),
+            };
+        }
+        result
+    }
+
+    #[cfg(feature = "load-balancer")]
+    async fn send_static_cache_revalidation_request(
+        &self,
+        request: &NativeHttp1Request,
+    ) -> Result<NativeHttp1Response, crate::NativeHttp1Error> {
+        let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
+        let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
+        let total = self.upstream_slots.len();
+        let mut attempted = vec![false; self.upstreams.len()];
+        let mut unique_attempts = 0usize;
+        let mut last_error = None;
+        for attempt in 0..total {
+            let slot = start.wrapping_add(attempt) % total;
+            let index = self.upstream_slots[slot];
+            if attempted[index] {
+                continue;
+            }
+            attempted[index] = true;
+            unique_attempts += 1;
+            match self.upstreams[index].send(request).await {
+                Ok(response) => return Ok(response),
+                Err(error) if retry_allowed && unique_attempts < self.upstreams.len() => {
+                    last_error = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "native proxy cache refresh has no upstream",
+            )
+            .into()
+        }))
+    }
+
     #[cfg(feature = "load-balancer")]
     async fn handle_load_balanced_connection_takeover(
         &self,
@@ -1570,6 +1835,24 @@ impl NativeHttp1Proxy {
                     return self.finish_response(
                         response,
                         Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
+                        #[cfg(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        ))]
+                        compression_request,
+                    );
+                }
+                NativeProxyCacheLookup::StaleWhileRevalidate { key, entry } => {
+                    self.spawn_cache_revalidation(cache.clone(), key, request.clone());
+                    return self.finish_response(
+                        entry.to_response(),
+                        Some((
+                            &cache.config,
+                            "STALE-UPDATING",
+                            Some("stale-while-revalidate"),
+                            Some(entry.age_secs()),
+                        )),
                         #[cfg(any(
                             feature = "compression-brotli",
                             feature = "compression-gzip",
@@ -1713,7 +1996,12 @@ impl NativeHttp1Proxy {
                                 compression_request,
                             );
                         }
-                        cache_status = Some(match cache.store(key, &request, &response) {
+                        let store_result = if *status == "REVALIDATED" {
+                            cache.store_revalidated(key, &request, &response)
+                        } else {
+                            cache.store(key, &request, &response)
+                        };
+                        cache_status = Some(match store_result {
                             Ok(()) => (&cache.config, *status, None, None),
                             Err(reason) => (&cache.config, "BYPASS", Some(reason), None),
                         });
@@ -2474,16 +2762,31 @@ fn native_cache_stale_error_kind(error: &crate::NativeHttp1Error) -> CacheStaleE
 fn native_cache_expiry_times(
     now: std::time::Instant,
     ttl: Duration,
+    stale_while_revalidate_secs: Option<u32>,
     stale_if_error_secs: Option<u32>,
-) -> Option<(std::time::Instant, Option<std::time::Instant>)> {
+) -> Option<(
+    std::time::Instant,
+    Option<std::time::Instant>,
+    Option<std::time::Instant>,
+)> {
     let expires_at = now.checked_add(ttl)?;
+    let stale_while_revalidate_until = match stale_while_revalidate_secs {
+        Some(stale_secs) => {
+            Some(expires_at.checked_add(Duration::from_secs(u64::from(stale_secs)))?)
+        }
+        None => None,
+    };
     let stale_if_error_until = match stale_if_error_secs {
         Some(stale_secs) => {
             Some(expires_at.checked_add(Duration::from_secs(u64::from(stale_secs)))?)
         }
         None => None,
     };
-    Some((expires_at, stale_if_error_until))
+    Some((
+        expires_at,
+        stale_while_revalidate_until,
+        stale_if_error_until,
+    ))
 }
 
 fn native_request_header<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a str> {
@@ -2824,17 +3127,25 @@ mod tests {
 
     #[test]
     fn native_cache_expiry_times_rejects_unrepresentable_ttl() {
-        assert!(native_cache_expiry_times(Instant::now(), Duration::MAX, None).is_none());
+        assert!(native_cache_expiry_times(Instant::now(), Duration::MAX, None, None).is_none());
     }
 
     #[test]
     fn native_cache_expiry_times_extends_stale_window_from_fresh_expiry() {
         let now = Instant::now();
-        let (expires_at, stale_until) =
-            native_cache_expiry_times(now, Duration::from_secs(1), Some(2)).unwrap();
+        let (expires_at, stale_while_revalidate_until, stale_if_error_until) =
+            native_cache_expiry_times(now, Duration::from_secs(1), Some(2), Some(3)).unwrap();
 
         assert!(expires_at > now);
-        assert!(stale_until.is_some_and(|stale_until| stale_until > expires_at));
+        assert!(
+            stale_while_revalidate_until.is_some_and(|stale_while_revalidate_until| {
+                stale_while_revalidate_until > expires_at
+            })
+        );
+        assert!(
+            stale_if_error_until
+                .is_some_and(|stale_if_error_until| stale_if_error_until > expires_at)
+        );
     }
 
     #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]

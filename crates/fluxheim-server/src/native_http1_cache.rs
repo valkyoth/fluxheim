@@ -15,6 +15,7 @@ pub(crate) struct NativeMemoryCacheEntry {
     pub(crate) content_length: Option<u64>,
     pub(crate) body: Arc<[u8]>,
     pub(crate) expires_at: Instant,
+    pub(crate) stale_while_revalidate_until: Option<Instant>,
     pub(crate) stale_if_error_until: Option<Instant>,
     pub(crate) stored_at: Instant,
     pub(crate) weight: u64,
@@ -138,7 +139,14 @@ pub(crate) fn prune_native_memory_cache(state: &mut NativeMemoryCacheState, max_
         .objects
         .iter()
         .filter_map(|(key, entry)| {
-            let stale_until = entry.stale_if_error_until.unwrap_or(entry.expires_at);
+            let stale_until = [
+                entry.stale_while_revalidate_until,
+                entry.stale_if_error_until,
+            ]
+            .into_iter()
+            .flatten()
+            .max()
+            .unwrap_or(entry.expires_at);
             (stale_until <= now).then_some(key.clone())
         })
         .collect::<Vec<_>>();

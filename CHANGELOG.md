@@ -21,8 +21,8 @@ behavior when the change improves security or project direction.
   content type, status TTL, and object-size policy.
 - Native cache readiness now accepts root, vhost, and route proxy cache
   policies only for the supported memory-cache subset while keeping disk,
-  slice composition, stale-while-revalidate, and peer-fill blocked until their
-  native parity work lands.
+  slice composition, and peer-fill blocked until their native parity work
+  lands.
 - Native HTTP/1 TLS startup now recognizes managed ACME certificate sources on
   `server.default_vhost`, allowing the rustls native listener to bind while the
   default-vhost certificate is still pending first issuance.
@@ -51,6 +51,9 @@ behavior when the change improves security or project direction.
   `cache.pass_uncacheable_after`, and opt-in `[cache.predictor]` cache-pass
   decisions with bounded Fluxheim-owned counters and live native listener
   coverage.
+- Native proxy memory cache now supports `stale_while_revalidate_secs` for
+  expired memory objects, serving `STALE-UPDATING` responses while a bounded
+  background refresh updates the cached object through the same admission path.
 
 ## 1.6.32 - 2026-06-28
 

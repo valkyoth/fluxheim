@@ -4,9 +4,8 @@ Fluxheim 1.6.33 is the native proxy-cache parity release in the Pingora
 removal line.
 
 This checkpoint adds Fluxheim-owned native memory-cache support for ordinary
-HTTP/1 proxy responses. Disk cache, slice composition,
-stale-while-revalidate, and peer-fill remain explicit compatibility gates until
-their native implementations are proven.
+HTTP/1 proxy responses. Disk cache, slice composition, and peer-fill remain
+explicit compatibility gates until their native implementations are proven.
 
 ## Highlights
 
@@ -61,6 +60,10 @@ their native implementations are proven.
   decisions with bounded Fluxheim-owned counters. Cacheable responses clear
   cache-pass state before min-use admission, matching the existing
   compatibility behavior.
+- Native proxy memory cache now supports `stale_while_revalidate_secs` for
+  expired memory objects. The native path serves a `STALE-UPDATING` response,
+  keeps origin-fill protection in front of the refresh task, and updates the
+  cached object through the same response admission path.
 
 ## Compatibility Notes
 
@@ -69,12 +72,13 @@ their native implementations are proven.
   cache-status headers, Vary/request-header variant isolation,
   `stale_if_error_secs` serving, `cache.origin_protection` fill budgets,
   native load-balanced pools, `cache.min_uses`, `pass_uncacheable_after`, and
-  opt-in `[cache.predictor]` cache-pass decisions. If `cache.range.enabled =
+  opt-in `[cache.predictor]` cache-pass decisions, and
+  `stale_while_revalidate_secs` background refresh. If `cache.range.enabled =
   true`, bounded single `Range` requests can be served from fresh cached full
   objects.
 - Still blocked for native runtime readiness: disk/tiered proxy cache, slice
-  composition, stale-while-revalidate, peer-fill, and policies outside the
-  supported native memory-cache subset.
+  composition, peer-fill, and policies outside the supported native
+  memory-cache subset.
 - The compatibility runtime remains available for unsupported cache policies
   until the remaining native cache parity gates are implemented and tested.
 
@@ -83,6 +87,7 @@ their native implementations are proven.
 - `cargo test -p fluxheim-server native_route_proxy_caches_proxy_response_in_memory --locked`
 - `cargo test -p fluxheim-server native_route_proxy_min_uses_delays_memory_cache_admission --locked`
 - `cargo test -p fluxheim-server native_route_proxy_predictor_passes_repeated_uncacheable_memory_response --locked`
+- `cargo test -p fluxheim-server native_route_proxy_serves_stale_while_revalidating_memory_cache --locked`
 - `cargo test -p fluxheim-server native_route_proxy_ --locked`
 - `cargo test -p fluxheim-server --features acme,tls-rustls-backend native_http1_proxy_runtime_accepts_default_vhost_acme_certificate_source --locked`
 - `cargo test -p fluxheim-server native_route_proxy_accepts_ --locked`

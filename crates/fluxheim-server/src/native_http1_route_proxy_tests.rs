@@ -3010,6 +3010,24 @@ fn native_route_proxy_accepts_route_memory_proxy_cache_with_predictor_policy() {
     assert!(route.proxy().is_some());
 }
 
+#[test]
+fn native_route_proxy_accepts_route_memory_proxy_cache_with_stale_while_revalidate() {
+    let mut route = native_route_proxy_test_route();
+    route.redirect = None;
+    route.proxy = Some(fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        ..Default::default()
+    });
+    let mut cache = native_proxy_memory_cache_config();
+    cache.stale_while_revalidate_secs = Some(60);
+    route.cache = Some(cache);
+
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new("127.0.0.1:3000"));
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, Some(proxy)).unwrap();
+
+    assert!(route.proxy().is_some());
+}
+
 #[tokio::test]
 async fn native_route_proxy_caches_proxy_response_in_memory() {
     let upstream = upstream_cacheable_once("origin-one").await;
@@ -3114,6 +3132,54 @@ async fn native_route_proxy_predictor_passes_repeated_uncacheable_memory_respons
     assert_eq!(
         response_header(&second, "x-cache-reason").as_deref(),
         Some("cache-pass")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_serves_stale_while_revalidating_memory_cache() {
+    let upstream = upstream_raw_response_sequence(&[
+        (
+            "/asset.png",
+            "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=1\r\ncontent-length: 9\r\n\r\nstale-one",
+        ),
+        (
+            "/asset.png",
+            "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-length: 9\r\n\r\nfresh-two",
+        ),
+    ])
+    .await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.stale_while_revalidate_secs = Some(60);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_get(listener, "/asset.png").await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let stale = downstream_get(listener, "/asset.png").await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let refreshed = downstream_get(listener, "/asset.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("stale-one"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(stale.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(stale.ends_with("stale-one"));
+    assert_eq!(
+        response_header(&stale, "x-cache-status").as_deref(),
+        Some("STALE-UPDATING")
+    );
+    assert_eq!(
+        response_header(&stale, "x-cache-reason").as_deref(),
+        Some("stale-while-revalidate")
+    );
+    assert!(refreshed.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(refreshed.ends_with("fresh-two"));
+    assert_eq!(
+        response_header(&refreshed, "x-cache-status").as_deref(),
+        Some("HIT")
     );
 }
 
