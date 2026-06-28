@@ -68,14 +68,10 @@ impl MetricsConfig {
                 reason: "OTLP metrics export requires metrics.enabled = true",
             });
         }
-        if self
-            .token_env
-            .as_deref()
-            .is_some_and(|value| value.trim().is_empty())
-        {
+        if self.token_env.is_some() {
             return Err(ConfigError::InvalidMetricsPolicy {
                 field: "metrics.token_env",
-                reason: "token environment variable name cannot be empty",
+                reason: "metrics.token_env is disabled because process environments cannot be scrubbed without unsafe code; use metrics.token_file",
             });
         }
         if self
@@ -86,12 +82,6 @@ impl MetricsConfig {
             return Err(ConfigError::InvalidMetricsPolicy {
                 field: "metrics.token_file",
                 reason: "token file path cannot be empty",
-            });
-        }
-        if self.token_env.is_some() && self.token_file.is_some() {
-            return Err(ConfigError::InvalidMetricsPolicy {
-                field: "metrics.token_env",
-                reason: "metrics.token_env and metrics.token_file cannot both be configured",
             });
         }
         validate_path("metrics.token_file", self.token_file.as_deref())?;

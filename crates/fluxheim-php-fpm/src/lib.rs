@@ -329,7 +329,7 @@ impl PhpRequestBody {
     ) -> io::Result<Box<dyn fastcgi_client::io::AsyncRead + Unpin + Send>> {
         match self.inner.as_ref() {
             PhpRequestBodyInner::Memory(body) => {
-                Ok(Box::new(fastcgi_client::io::Cursor::new(body.to_vec())))
+                Ok(Box::new(fastcgi_client::io::Cursor::new(body.clone())))
             }
             PhpRequestBodyInner::Spool(spool) => {
                 let file = tokio::fs::File::open(&spool.path).await?;

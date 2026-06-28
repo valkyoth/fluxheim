@@ -10339,7 +10339,6 @@ fn parses_metrics_config() {
             [metrics]
             enabled = true
             listen = "127.0.0.1:9091"
-            token_env = "FLUXHEIM_METRICS_TOKEN"
             "#,
     )
     .unwrap();
@@ -10347,20 +10346,16 @@ fn parses_metrics_config() {
     config.validate().unwrap();
     assert!(config.metrics.enabled);
     assert_eq!(config.metrics.listen, "127.0.0.1:9091");
-    assert_eq!(
-        config.metrics.token_env.as_deref(),
-        Some("FLUXHEIM_METRICS_TOKEN")
-    );
+    assert!(config.metrics.token_env.is_none());
 }
 
 #[test]
-fn rejects_conflicting_metrics_token_sources() {
+fn rejects_metrics_token_env() {
     let config: Config = toml::from_str(
         r#"
             [metrics]
             enabled = true
             token_env = "FLUXHEIM_METRICS_TOKEN"
-            token_file = "/run/secrets/fluxheim-metrics-token"
             "#,
     )
     .unwrap();
@@ -10369,13 +10364,13 @@ fn rejects_conflicting_metrics_token_sources() {
         config.validate(),
         Err(ConfigError::InvalidMetricsPolicy {
             field: "metrics.token_env",
-            reason: "metrics.token_env and metrics.token_file cannot both be configured"
+            reason: "metrics.token_env is disabled because process environments cannot be scrubbed without unsafe code; use metrics.token_file"
         })
     );
 }
 
 #[test]
-fn rejects_empty_metrics_token_env() {
+fn rejects_metrics_token_env_even_when_empty() {
     let config: Config = toml::from_str(
         r#"
             [metrics]
@@ -10389,7 +10384,7 @@ fn rejects_empty_metrics_token_env() {
         config.validate(),
         Err(ConfigError::InvalidMetricsPolicy {
             field: "metrics.token_env",
-            reason: "token environment variable name cannot be empty"
+            reason: "metrics.token_env is disabled because process environments cannot be scrubbed without unsafe code; use metrics.token_file"
         })
     );
 }

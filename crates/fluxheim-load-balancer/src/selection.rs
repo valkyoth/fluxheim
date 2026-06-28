@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::process;
 use std::sync::OnceLock;
@@ -990,12 +991,13 @@ impl NginxKetamaTable {
         };
         let limit = max_iterations.max(1).min(self.points.len());
         let mut keys = Vec::new();
+        let mut seen = HashSet::with_capacity(limit);
         for offset in 0..self.points.len() {
             if keys.len() >= limit {
                 break;
             }
             let key = self.points[(start + offset) % self.points.len()].backend_key;
-            if !keys.contains(&key) {
+            if seen.insert(key) {
                 keys.push(key);
             }
         }
@@ -1178,5 +1180,31 @@ mod tests {
         assert_eq!(maglev_candidate(offset, next, skip), expected);
         assert_eq!(expected, 1);
         assert_eq!(u32::MAX as usize % MAGLEV_TABLE_SIZE, 0);
+    }
+
+    #[test]
+    fn nginx_ketama_backend_keys_suppresses_duplicate_points() {
+        let table = NginxKetamaTable {
+            points: vec![
+                NginxKetamaPoint {
+                    hash: 0,
+                    backend_key: 10,
+                },
+                NginxKetamaPoint {
+                    hash: 1,
+                    backend_key: 10,
+                },
+                NginxKetamaPoint {
+                    hash: 2,
+                    backend_key: 20,
+                },
+                NginxKetamaPoint {
+                    hash: u32::MAX,
+                    backend_key: 20,
+                },
+            ],
+        };
+
+        assert_eq!(table.backend_keys(b"", 4), vec![10, 20]);
     }
 }

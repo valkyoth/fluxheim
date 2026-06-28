@@ -10,10 +10,10 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
 
 ## Highlights
 
-- Metrics configuration now supports optional `metrics.token_env` and
-  `metrics.token_file` bearer-token sources for the native metrics service.
-  The token file path is resolved with the normal safe-path rules and rejected
-  when it is empty, unsafe, or below a group/world-writable parent.
+- Metrics configuration now supports an optional `metrics.token_file`
+  bearer-token source for the native metrics service. The token file path is
+  resolved with the normal safe-path rules and rejected when it is empty,
+  unsafe, or below a group/world-writable parent.
 - Native metrics service construction now loads the configured token source,
   stores it in zeroizing memory, redacts it from debug output, and enforces it
   with constant-time comparison for `GET`/`HEAD /metrics`. It also exposes a
@@ -218,6 +218,20 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   canonical web-root/symlink-safe resolver as static serving while applying PHP
   `SCRIPT_NAME`, front-controller, deny-prefix, directory-index redirect, and
   decline-existing-static decisions.
+- PHP-FPM in-memory request bodies now keep their FastCGI replay buffer inside
+  `Zeroizing<Vec<u8>>` instead of cloning sensitive request bytes into a plain
+  heap vector for the duration of the FastCGI exchange.
+- `metrics.token_env` is parsed but rejected. Rust 2024 treats process
+  environment mutation as unsafe, Fluxheim forbids unsafe code in the root
+  crate, and leaving bearer tokens in `/proc/self/environ` is not acceptable
+  for the native metrics listener. Use `metrics.token_file` instead.
+- Native nginx/Pingora Ketama-compatible backend iteration now tracks seen
+  backends with a set, preserving existing `max_iterations` behavior while
+  avoiding quadratic duplicate checks on large weighted rings.
+- The native admin control-plane and local ops listeners remain explicitly
+  PROXY-protocol disabled even when the public HTTP/HTTPS listeners enable
+  trusted downstream PROXY protocol. The server-plan tests continue to assert
+  that only public HTTP/HTTPS listeners inherit that trust boundary.
 - The staged native PHP-FPM adapter now has request-body planning for the
   upcoming live execution path. It enforces `php.max_request_body_bytes`, keeps
   small bodies in memory, and uses Fluxheim's existing private PHP spool-file
@@ -249,17 +263,17 @@ lookup/fill/stale behavior in a later `1.6.x` stop.
   route adapter so request-body copies do not lose the zero-on-drop behavior
   used by native H2.
 - Native metrics bearer-token checks now compare fixed-size digests instead of
-  branching on token length before the constant-time comparison. The docs also
-  recommend `metrics.token_file` over `metrics.token_env` for deployments where
-  local process-environment exposure matters.
+  branching on token length before the constant-time comparison. Metrics bearer
+  auth now uses `metrics.token_file`; `metrics.token_env` is rejected to avoid
+  local process-environment exposure.
 - Native proxy listener accept-loop failures now mirror the metrics listener
   behavior: unexpected listener exit logs an error and terminates the process
   instead of leaving a live process that silently stopped accepting traffic.
 
 ## Tests
 
-- Added config tests for metrics bearer-token parsing, `token_env` parsing, and
-  conflicting token sources.
+- Added config tests for metrics bearer-token parsing and the fail-closed
+  `metrics.token_env` rejection.
 - Added native metrics tests for token loading from a file source,
   authenticated scrape acceptance, unauthenticated rejection, and debug
   redaction.

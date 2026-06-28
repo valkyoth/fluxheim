@@ -687,26 +687,24 @@ rootless container secrets or a local file readable only by the Fluxheim user.
 `[metrics]` is disabled by default and should remain loopback-only unless it is
 fronted by a trusted local monitoring agent. The native metrics handler only
 serves `GET`/`HEAD /metrics` and can enforce a bearer token from
-`metrics.token_env` or `metrics.token_file`. During the Pingora compatibility
+`metrics.token_file`. During the Pingora compatibility
 runtime, Fluxheim validates the configured token source at startup, but the
 compatibility metrics listener still relies on the metrics listener binding and
 network ACLs for access control until the final native runner cutover owns this
 service.
 
-For high-assurance deployments, prefer `metrics.token_file` over
-`metrics.token_env`. Environment variables are copied into zeroizing memory
-after startup, but the original process environment is controlled by the OS and
-may remain visible through `/proc/self/environ` to sufficiently privileged local
-readers. Token files can be permissioned, mounted from a secret store, and
-rotated without exposing the token in the process environment.
+`metrics.token_env` is parsed but rejected because Rust 2024 treats process
+environment mutation as unsafe and Fluxheim forbids unsafe code in the root
+crate. Use `metrics.token_file` instead. Token files can be permissioned,
+mounted from a secret store, and rotated without exposing the token in the
+process environment.
 
 ```toml
 [metrics]
 enabled = false
 listen = "127.0.0.1:9091"
 require_loopback = true
-# Optional native metrics bearer-token source. Configure at most one.
-# token_env = "FLUXHEIM_METRICS_TOKEN"
+# Optional native metrics bearer-token source.
 # token_file = "/run/secrets/fluxheim-metrics-token"
 
 [metrics.otlp]

@@ -217,7 +217,7 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
     config.admin.ops_socket.enabled = true;
     config.metrics.enabled = true;
     config.metrics.listen = "127.0.0.1:9091".to_owned();
-    config.metrics.token_env = Some("FLUXHEIM_METRICS_TOKEN".to_owned());
+    config.metrics.token_file = Some("/run/secrets/fluxheim-metrics-token".into());
     config.stream.enabled = true;
     config.stream.routes = vec![StreamRouteConfig {
         name: "tcp".to_owned(),

@@ -1,4 +1,3 @@
-use std::env;
 use std::error::Error;
 use std::fmt;
 use std::fs;
@@ -226,10 +225,10 @@ fn load_native_metrics_token(
     config: &crate::config::MetricsConfig,
 ) -> Result<Option<Zeroizing<String>>, Box<dyn Error + Send + Sync>> {
     let raw = match (&config.token_env, &config.token_file) {
-        (Some(env_name), None) => {
-            Some(Zeroizing::new(env::var(env_name).map_err(|error| {
-                format!("failed to read metrics token env {env_name:?}: {error}")
-            })?))
+        (Some(_), None) => {
+            return Err(
+                "metrics.token_env is disabled; use metrics.token_file for bearer auth".into(),
+            );
         }
         (None, Some(path)) => Some(read_metrics_secret_file(path)?),
         (None, None) => None,

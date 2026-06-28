@@ -241,7 +241,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
                 native_metrics_service.name()
             );
         }
-        if config.metrics.token_env.is_some() || config.metrics.token_file.is_some() {
+        if config.metrics.token_file.is_some() {
             log::info!(
                 "native metrics bearer-token source validated; compatibility metrics listener still relies on listener binding and network ACLs until native runtime startup owns this service"
             );

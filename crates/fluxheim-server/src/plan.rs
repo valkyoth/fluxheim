@@ -448,8 +448,7 @@ impl ServerPlan {
             native_admin_control_plane_ready: config.admin.enabled,
             native_admin_ops_socket_ready: native_admin_ops_socket_ready(config),
             native_metrics_http_ready: config.metrics.enabled,
-            native_metrics_http_auth_required: config.metrics.token_env.is_some()
-                || config.metrics.token_file.is_some(),
+            native_metrics_http_auth_required: config.metrics.token_file.is_some(),
             native_stream_proxy_ready: config.stream.enabled,
             native_udp_proxy_ready: config.udp.enabled,
             native_http1_proxy_candidates:
