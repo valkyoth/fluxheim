@@ -1242,6 +1242,7 @@ dependencies = [
  "percent-encoding",
  "rcgen",
  "regex",
+ "ring",
  "rustix",
  "rustls",
  "rustls-native-certs 0.8.4",

@@ -52,6 +52,7 @@ base64-ng = "1.2.3"
 openssl = { version = "0.10.81", optional = true }
 percent-encoding = "2.3.2"
 regex = "1.12.4"
+ring = "0.17.14"
 rustls = { version = "0.23.41", optional = true }
 rustls-native-certs = { version = "0.8.4", optional = true }
 sanitization = { version = "1.2.2", optional = true }

@@ -9,9 +9,13 @@ use fluxheim_cache::{
     DiskCacheObjectKey, SerializedCacheObject, encode_disk_cache_object, parse_disk_cache_object,
     remaining_fresh_ttl_secs, response_age_secs, response_cache_control_max_age,
 };
-use fluxheim_config::{CacheConfig, CacheDiskBackend};
+use fluxheim_config::{
+    CacheConfig, CacheDiskBackend, CacheDiskEncryptionConfig, CacheDiskEncryptionProvider,
+};
+use ring::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use sha2::{Digest as _, Sha256};
 use tokio::sync::Notify;
+use zeroize::Zeroizing;
 
 use crate::NativeHttp1Response;
 
@@ -45,7 +49,14 @@ pub(crate) struct NativeDiskCache {
     root: PathBuf,
     max_bytes: u64,
     max_object_bytes: fluxheim_config::ByteSize,
+    encryption: Option<NativeDiskCacheEncryption>,
     state: Mutex<NativeDiskCacheState>,
+}
+
+#[derive(Debug, Clone)]
+struct NativeDiskCacheEncryption {
+    key_id: Arc<str>,
+    key: Arc<LessSafeKey>,
 }
 
 #[derive(Debug, Default)]
@@ -138,10 +149,22 @@ impl NativeDiskCache {
                 return None;
             }
         };
+        let encryption = match NativeDiskCacheEncryption::from_config(&config.disk.encryption) {
+            Ok(encryption) => encryption,
+            Err(error) => {
+                log::error!(
+                    target: "fluxheim::native_http1",
+                    "native disk cache encryption {}: {error}",
+                    root.display()
+                );
+                return None;
+            }
+        };
         let mut cache = Self {
             root,
             max_bytes: config.disk.max_size_bytes.as_u64(),
             max_object_bytes: config.max_object_bytes,
+            encryption,
             state: Mutex::new(NativeDiskCacheState::default()),
         };
         if let Err(error) = cache.rebuild_index() {
@@ -197,6 +220,11 @@ impl NativeDiskCache {
             &native_disk_response_header_bytes(entry),
             &entry.body,
         )?;
+        let encoded = if let Some(encryption) = &self.encryption {
+            encryption.encrypt(&key.combined, &encoded)?
+        } else {
+            encoded
+        };
         if encoded.len() as u64 > self.max_bytes {
             return Ok(());
         }
@@ -280,6 +308,10 @@ impl NativeDiskCache {
                     Ok(bytes) => bytes,
                     Err(_) => continue,
                 };
+                let bytes = match self.decrypt_if_needed(&bytes) {
+                    Ok(bytes) => bytes,
+                    Err(_) => continue,
+                };
                 let parsed = match parse_disk_cache_object(&bytes, self.max_object_bytes) {
                     Ok(parsed) => parsed,
                     Err(_) => continue,
@@ -334,7 +366,25 @@ impl NativeDiskCache {
             ));
         }
         let bytes = read_native_disk_cache_file(&record.path)?;
+        let bytes = self.decrypt_if_needed(&bytes)?;
         parse_disk_cache_object(&bytes, self.max_object_bytes)
+    }
+
+    fn decrypt_if_needed(&self, bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+        match &self.encryption {
+            Some(encryption) => encryption.decrypt(bytes),
+            None => {
+                if bytes.get(..NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1.len())
+                    == Some(NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1)
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "encrypted cache object found while native disk encryption is disabled",
+                    ));
+                }
+                Ok(bytes.to_vec())
+            }
+        }
     }
 
     fn write_object_atomically(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -479,7 +529,269 @@ impl NativeDiskCache {
 
 pub(crate) fn native_disk_cache_supported(cache: &CacheConfig) -> bool {
     !cache.disk.enabled
-        || (cache.disk.backend == CacheDiskBackend::Filesystem && !cache.disk.encryption.enabled)
+        || (cache.disk.backend == CacheDiskBackend::Filesystem
+            && (!cache.disk.encryption.enabled
+                || cache.disk.encryption.provider == CacheDiskEncryptionProvider::Local))
+}
+
+const NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-ENC-v1\n";
+
+impl NativeDiskCacheEncryption {
+    fn from_config(config: &CacheDiskEncryptionConfig) -> std::io::Result<Option<Self>> {
+        if !config.enabled {
+            return Ok(None);
+        }
+        if config.provider != CacheDiskEncryptionProvider::Local {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "native disk cache currently supports only local encryption",
+            ));
+        }
+
+        let key_id = Arc::from(config.key_id.as_deref().unwrap_or("local"));
+        let key_bytes = match (&config.key_file, config.key_credential.as_deref()) {
+            (Some(path), None) => read_native_cache_encryption_key_file(path)?,
+            (None, Some(credential)) => {
+                let path = native_cache_encryption_credential_path(credential);
+                read_native_cache_encryption_key_file(&path)?
+            }
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "native disk cache encryption requires exactly one local key source",
+                ));
+            }
+        };
+        let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid native disk cache encryption key",
+            )
+        })?;
+        Ok(Some(Self {
+            key_id,
+            key: Arc::new(LessSafeKey::new(unbound)),
+        }))
+    }
+
+    fn encrypt(&self, combined_key: &str, plaintext: &[u8]) -> std::io::Result<Vec<u8>> {
+        let mut nonce = [0_u8; 12];
+        getrandom::fill(&mut nonce).map_err(|error| {
+            std::io::Error::other(format!("generate native cache encryption nonce: {error}"))
+        })?;
+        let aad = native_cache_encryption_aad(&self.key_id, combined_key);
+        let mut ciphertext = plaintext.to_vec();
+        self.key
+            .seal_in_place_append_tag(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(aad),
+                &mut ciphertext,
+            )
+            .map_err(|_| std::io::Error::other("encrypt native cache object"))?;
+
+        let mut encoded = Vec::with_capacity(
+            NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1.len()
+                + 128
+                + self.key_id.len()
+                + combined_key.len()
+                + nonce.len()
+                + ciphertext.len(),
+        );
+        encoded.write_all(NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1)?;
+        writeln!(encoded, "{}", self.key_id.len())?;
+        writeln!(encoded, "{}", combined_key.len())?;
+        writeln!(encoded, "{}", nonce.len())?;
+        writeln!(encoded, "{}", ciphertext.len())?;
+        encoded.write_all(self.key_id.as_bytes())?;
+        encoded.write_all(combined_key.as_bytes())?;
+        encoded.write_all(&nonce)?;
+        encoded.write_all(&ciphertext)?;
+        Ok(encoded)
+    }
+
+    fn decrypt(&self, bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+        if bytes.get(..NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1.len())
+            != Some(NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "unencrypted cache object found while native disk encryption is enabled",
+            ));
+        }
+
+        let mut offset = NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1.len();
+        let key_id_len = native_encrypted_disk_len(bytes, &mut offset)?;
+        let combined_key_len = native_encrypted_disk_len(bytes, &mut offset)?;
+        let nonce_len = native_encrypted_disk_len(bytes, &mut offset)?;
+        let ciphertext_len = native_encrypted_disk_len(bytes, &mut offset)?;
+        let total_len = offset
+            .checked_add(key_id_len)
+            .and_then(|value| value.checked_add(combined_key_len))
+            .and_then(|value| value.checked_add(nonce_len))
+            .and_then(|value| value.checked_add(ciphertext_len))
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "encrypted native cache object size overflow",
+                )
+            })?;
+        if total_len != bytes.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "encrypted native cache object length mismatch",
+            ));
+        }
+
+        let key_id_end = offset + key_id_len;
+        let combined_key_end = key_id_end + combined_key_len;
+        let nonce_end = combined_key_end + nonce_len;
+        let key_id = native_cache_utf8(&bytes[offset..key_id_end], "encryption key id")?;
+        if key_id != self.key_id.as_ref() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "encrypted native cache object key id does not match configured key",
+            ));
+        }
+        let combined_key = native_cache_utf8(&bytes[key_id_end..combined_key_end], "combined key")?;
+        if nonce_len != 12 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid encrypted native cache object nonce length",
+            ));
+        }
+        let mut nonce = [0_u8; 12];
+        nonce.copy_from_slice(&bytes[combined_key_end..nonce_end]);
+        let aad = native_cache_encryption_aad(&self.key_id, &combined_key);
+        let mut plaintext = bytes[nonce_end..].to_vec();
+        self.key
+            .open_in_place(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(aad),
+                &mut plaintext,
+            )
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "decrypt native cache object",
+                )
+            })?;
+        let plaintext_len = plaintext
+            .len()
+            .checked_sub(AES_256_GCM.tag_len())
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "short encrypted native cache object",
+                )
+            })?;
+        plaintext.truncate(plaintext_len);
+        Ok(plaintext)
+    }
+}
+
+fn native_encrypted_disk_len(bytes: &[u8], offset: &mut usize) -> std::io::Result<usize> {
+    let relative_newline = bytes
+        .get(*offset..)
+        .and_then(|tail| tail.iter().position(|byte| *byte == b'\n'))
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "encrypted native cache object length line is truncated",
+            )
+        })?;
+    let end = (*offset).checked_add(relative_newline).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "encrypted native cache object length offset overflow",
+        )
+    })?;
+    let line = std::str::from_utf8(&bytes[*offset..end]).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "encrypted native cache object length is not UTF-8",
+        )
+    })?;
+    *offset = end.checked_add(1).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "encrypted native cache object length offset overflow",
+        )
+    })?;
+    line.parse::<usize>().map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "encrypted native cache object length is invalid",
+        )
+    })
+}
+
+fn native_cache_encryption_aad(key_id: &str, combined_key: &str) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(32 + key_id.len() + combined_key.len());
+    aad.extend_from_slice(b"fluxheim-cache-disk-v1\0");
+    aad.extend_from_slice(key_id.as_bytes());
+    aad.push(0);
+    aad.extend_from_slice(combined_key.as_bytes());
+    aad
+}
+
+fn native_cache_encryption_credential_path(credential_name: &str) -> PathBuf {
+    std::env::var_os("CREDENTIALS_DIRECTORY")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/run/secrets"))
+        .join(credential_name)
+}
+
+fn read_native_cache_encryption_key_file(path: &Path) -> std::io::Result<[u8; 32]> {
+    let contents = read_native_cache_encryption_secret_file(path)?;
+    parse_native_cache_encryption_hex_key(contents.trim())
+}
+
+fn read_native_cache_encryption_secret_file(path: &Path) -> std::io::Result<Zeroizing<String>> {
+    let mut file = NativeSafeDiskCachePath::from_path(path.to_path_buf()).open_existing_file()?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > 4096 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native cache disk encryption secret must be a small regular file",
+        ));
+    }
+    let mut contents = Zeroizing::new(String::new());
+    file.read_to_string(&mut contents)?;
+    Ok(contents)
+}
+
+fn parse_native_cache_encryption_hex_key(value: &str) -> std::io::Result<[u8; 32]> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native cache disk encryption key must be 64 hex characters",
+        ));
+    }
+    let mut key = [0_u8; 32];
+    for (index, chunk) in value.as_bytes().chunks_exact(2).enumerate() {
+        let high = native_hex_value(chunk[0])?;
+        let low = native_hex_value(chunk[1])?;
+        key[index] = (high << 4) | low;
+    }
+    Ok(key)
+}
+
+fn native_hex_value(byte: u8) -> std::io::Result<u8> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid hex digit",
+        )),
+    }
+}
+
+fn native_cache_utf8(bytes: &[u8], field: &str) -> std::io::Result<String> {
+    std::str::from_utf8(bytes)
+        .map(str::to_owned)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, field))
 }
 
 pub(crate) fn lock_native_memory_cache<'a>(

@@ -28,6 +28,11 @@ The same encryption layer applies to reverse-proxy cache responses and to
 local/static cache responses when the selected cache policy has
 `local_static = true`.
 
+Native runtime status: the native HTTP/1 proxy cache supports local-key
+encrypted `backend = "filesystem"` cache objects. OpenBao Transit encryption
+and `backend = "storage-bin"` remain on the compatibility runtime until their
+native cache adapters have dedicated parity coverage.
+
 ## Providers
 
 `provider = "local"` uses AES-256-GCM with a 64-character hex key loaded from
