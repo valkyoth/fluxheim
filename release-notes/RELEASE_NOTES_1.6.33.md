@@ -47,6 +47,9 @@ proven.
   matching upstream error or 5xx status.
 - Native proxy memory cache now enforces `cache.origin_protection` fill budgets
   for the supported single-upstream memory-cache path.
+- Native proxy memory cache now uses checked `Instant` arithmetic for freshness
+  and stale-if-error expiry, bypassing cache admission instead of panicking if a
+  constrained platform cannot represent the configured window.
 
 ## Compatibility Notes
 

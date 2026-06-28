@@ -38,6 +38,8 @@ behavior when the change improves security or project direction.
   connection/protocol error or configured 5xx status.
 - Native proxy memory cache now supports `cache.origin_protection` fill budgets
   for the supported single-upstream memory-cache path.
+- Native proxy memory cache now uses checked expiry arithmetic and bypasses
+  caching if a platform cannot represent the configured freshness/stale window.
 
 ## 1.6.32 - 2026-06-28
 

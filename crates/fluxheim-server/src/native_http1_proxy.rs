@@ -941,12 +941,11 @@ impl NativeProxyMemoryCache {
             key.to_owned()
         };
         let now = std::time::Instant::now();
-        let stale_if_error_until = self
-            .config
-            .stale_if_error_secs
-            .map(u64::from)
-            .map(std::time::Duration::from_secs)
-            .map(|stale_ttl| now + ttl + stale_ttl);
+        let Some((expires_at, stale_if_error_until)) =
+            native_cache_expiry_times(now, ttl, self.config.stale_if_error_secs)
+        else {
+            return Err("ttl-overflow");
+        };
         let weight = native_cache_entry_weight(&store_key, response, body_len);
         if weight > self.max_bytes {
             return Err("object-too-large");
@@ -957,7 +956,7 @@ impl NativeProxyMemoryCache {
             headers: cached_proxy_headers(response, &self.config),
             content_length: response.content_length(),
             body: Arc::from(response.body().to_vec()),
-            expires_at: now + ttl,
+            expires_at,
             stale_if_error_until,
             stored_at: now,
             weight,
@@ -2196,6 +2195,21 @@ fn native_cache_stale_error_kind(error: &crate::NativeHttp1Error) -> CacheStaleE
     }
 }
 
+fn native_cache_expiry_times(
+    now: std::time::Instant,
+    ttl: Duration,
+    stale_if_error_secs: Option<u32>,
+) -> Option<(std::time::Instant, Option<std::time::Instant>)> {
+    let expires_at = now.checked_add(ttl)?;
+    let stale_if_error_until = match stale_if_error_secs {
+        Some(stale_secs) => {
+            Some(expires_at.checked_add(Duration::from_secs(u64::from(stale_secs)))?)
+        }
+        None => None,
+    };
+    Some((expires_at, stale_if_error_until))
+}
+
 fn native_request_header<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a str> {
     request
         .headers
@@ -2487,12 +2501,32 @@ fn native_http1_static_failover_method_allowed(method: &str) -> bool {
     matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE")
 }
 
-#[cfg(all(test, feature = "traffic-mirror", not(feature = "privacy-mode")))]
+#[cfg(test)]
 mod tests {
+    use super::native_cache_expiry_times;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn native_cache_expiry_times_rejects_unrepresentable_ttl() {
+        assert!(native_cache_expiry_times(Instant::now(), Duration::MAX, None).is_none());
+    }
+
+    #[test]
+    fn native_cache_expiry_times_extends_stale_window_from_fresh_expiry() {
+        let now = Instant::now();
+        let (expires_at, stale_until) =
+            native_cache_expiry_times(now, Duration::from_secs(1), Some(2)).unwrap();
+
+        assert!(expires_at > now);
+        assert!(stale_until.is_some_and(|stale_until| stale_until > expires_at));
+    }
+
+    #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
     use super::{
         native_traffic_mirror_marker_signature, native_traffic_mirror_marker_signature_matches,
     };
 
+    #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
     #[test]
     fn native_mirror_marker_signature_uses_sanitization_constant_time_match() {
         let signature = native_traffic_mirror_marker_signature();
