@@ -12,10 +12,11 @@ use crate::NativeHttp1UpstreamTls;
 #[cfg(not(feature = "privacy-mode"))]
 use crate::ProxyProtocolTrustedSource;
 use crate::native_http1_cache::{
-    NativeMemoryCacheEntry, NativeMemoryCacheState, NativeMemoryCacheVariant,
-    lock_native_memory_cache, native_cache_entry_weight, native_cache_ttl,
-    native_response_header_map, prune_native_memory_cache, remove_native_memory_cache_entry,
-    remove_native_memory_cache_variants, with_native_cache_status,
+    NativeMemoryCacheCounter, NativeMemoryCacheEntry, NativeMemoryCacheState,
+    NativeMemoryCacheVariant, lock_native_memory_cache, native_cache_entry_weight,
+    native_cache_ttl, native_response_header_map, prune_native_memory_cache,
+    remove_native_memory_cache_entry, remove_native_memory_cache_variants,
+    with_native_cache_status,
 };
 #[cfg(any(
     feature = "compression-brotli",
@@ -46,6 +47,7 @@ use sanitization::ct::ConstantTimeEq;
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 const NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
 const NATIVE_ORIGIN_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
+const NATIVE_CACHE_PREDICTOR_COUNTER_TTL: Duration = Duration::from_secs(600);
 const MAX_NATIVE_UPSTREAM_H2_STREAMS: usize = 1024;
 static NATIVE_PROXY_CACHE_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -429,10 +431,7 @@ impl NativeHttp1Proxy {
             && !cache.disk.enabled
             && !cache.range.slice.enabled
             && !cache.peer_fill.enabled
-            && !cache.predictor.enabled
             && cache.stale_while_revalidate_secs.is_none()
-            && cache.min_uses == 1
-            && cache.pass_uncacheable_after == 0
     }
 
     pub fn proxy_cache_supported_for_proxy(
@@ -778,6 +777,9 @@ impl NativeProxyMemoryCache {
         let Some(key) = self.key(request) else {
             return NativeProxyCacheLookup::Bypass("proxy-ineligible");
         };
+        if self.cache_pass_should_bypass(&key) {
+            return NativeProxyCacheLookup::Bypass("cache-pass");
+        }
         let range = selected_cache_range_request(request, &self.config);
         let range_requested = self.config.range.enabled && request.contains_header("range");
         if range_requested && range.is_none() {
@@ -924,6 +926,21 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
+        let result = self.store_inner(key, request, response);
+        if let Err(reason) = result {
+            if reason != "cache-min-uses" {
+                self.record_uncacheable(key);
+            }
+        }
+        result
+    }
+
+    fn store_inner(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+        response: &NativeHttp1Response,
+    ) -> Result<(), &'static str> {
         let body_len = response.body().len() as u64;
         if body_len == 0 {
             return Err("empty-body");
@@ -947,6 +964,10 @@ impl NativeProxyMemoryCache {
         };
         if ttl.is_zero() {
             return Err("ttl-zero");
+        }
+        self.record_cacheable(key);
+        if !self.min_uses_allows_store(key) {
+            return Err("cache-min-uses");
         }
 
         let store_key = if let Some(fields) = vary_fields.as_ref() {
@@ -1008,6 +1029,92 @@ impl NativeProxyMemoryCache {
             prune_native_memory_cache(&mut state, self.max_bytes);
         }
         Ok(())
+    }
+
+    fn cache_pass_should_bypass(&self, key: &str) -> bool {
+        (self.config.predictor.enabled || self.config.pass_uncacheable_after > 0) && {
+            let mut state = lock_native_memory_cache(&self.state, "proxy");
+            prune_native_predictor_counters(&mut state.cache_pass, self.config.predictor.capacity);
+            state.cache_pass.get(key).is_some_and(|uses| {
+                self.config.predictor.enabled
+                    || uses.uses >= self.config.pass_uncacheable_after.max(1)
+            })
+        }
+    }
+
+    fn record_cacheable(&self, key: &str) {
+        let mut state = lock_native_memory_cache(&self.state, "proxy");
+        state.cache_pass.remove(key);
+    }
+
+    fn record_uncacheable(&self, key: &str) {
+        if !self.config.predictor.enabled && self.config.pass_uncacheable_after == 0 {
+            return;
+        }
+
+        let mut state = lock_native_memory_cache(&self.state, "proxy");
+        prune_native_predictor_counters(&mut state.cache_pass, self.config.predictor.capacity);
+        let threshold = self.config.pass_uncacheable_after.max(1);
+        let uses = state
+            .cache_pass
+            .get(key)
+            .map(|counter| counter.uses)
+            .unwrap_or(0)
+            .saturating_add(1)
+            .min(threshold);
+        state.cache_pass.insert(
+            key.to_owned(),
+            NativeMemoryCacheCounter {
+                uses,
+                seen_at: std::time::Instant::now(),
+            },
+        );
+    }
+
+    fn min_uses_allows_store(&self, key: &str) -> bool {
+        if self.config.min_uses <= 1 {
+            return true;
+        }
+
+        let mut state = lock_native_memory_cache(&self.state, "proxy");
+        prune_native_predictor_counters(&mut state.min_uses, self.config.predictor.capacity);
+        let uses = state
+            .min_uses
+            .get(key)
+            .map(|counter| counter.uses)
+            .unwrap_or(0)
+            .saturating_add(1);
+        if uses >= self.config.min_uses {
+            state.min_uses.remove(key);
+            true
+        } else {
+            state.min_uses.insert(
+                key.to_owned(),
+                NativeMemoryCacheCounter {
+                    uses,
+                    seen_at: std::time::Instant::now(),
+                },
+            );
+            false
+        }
+    }
+}
+
+fn prune_native_predictor_counters(
+    counters: &mut HashMap<String, NativeMemoryCacheCounter>,
+    capacity: usize,
+) {
+    let now = std::time::Instant::now();
+    counters.retain(|_, counter| {
+        now.saturating_duration_since(counter.seen_at) < NATIVE_CACHE_PREDICTOR_COUNTER_TTL
+    });
+
+    let capacity = capacity.max(1);
+    if counters.len() < capacity {
+        return;
+    }
+    if let Some(key) = counters.keys().next().cloned() {
+        counters.remove(&key);
     }
 }
 

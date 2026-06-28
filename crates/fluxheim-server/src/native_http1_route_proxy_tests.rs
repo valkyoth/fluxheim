@@ -2990,6 +2990,26 @@ fn native_route_proxy_accepts_route_memory_proxy_cache_with_range_policy() {
     assert!(route.proxy().is_some());
 }
 
+#[test]
+fn native_route_proxy_accepts_route_memory_proxy_cache_with_predictor_policy() {
+    let mut route = native_route_proxy_test_route();
+    route.redirect = None;
+    route.proxy = Some(fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        ..Default::default()
+    });
+    let mut cache = native_proxy_memory_cache_config();
+    cache.predictor.enabled = true;
+    cache.min_uses = 2;
+    cache.pass_uncacheable_after = 1;
+    route.cache = Some(cache);
+
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new("127.0.0.1:3000"));
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, Some(proxy)).unwrap();
+
+    assert!(route.proxy().is_some());
+}
+
 #[tokio::test]
 async fn native_route_proxy_caches_proxy_response_in_memory() {
     let upstream = upstream_cacheable_once("origin-one").await;
@@ -3011,6 +3031,89 @@ async fn native_route_proxy_caches_proxy_response_in_memory() {
     assert_eq!(
         response_header(&second, "x-cache-status").as_deref(),
         Some("HIT")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_min_uses_delays_memory_cache_admission() {
+    let upstream = upstream_cacheable_sequence(&[
+        ("/asset.png", "first-cacheable"),
+        ("/asset.png", "second-cacheable"),
+    ])
+    .await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.min_uses = 2;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_get(listener, "/asset.png").await;
+    let second = downstream_get(listener, "/asset.png").await;
+    let third = downstream_get(listener, "/asset.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("first-cacheable"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&first, "x-cache-reason").as_deref(),
+        Some("cache-min-uses")
+    );
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.ends_with("second-cacheable"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(third.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(third.ends_with("second-cacheable"));
+    assert_eq!(
+        response_header(&third, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_predictor_passes_repeated_uncacheable_memory_response() {
+    let upstream = upstream_raw_response_sequence(&[
+        (
+            "/asset.png",
+            "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: no-store\r\ncontent-length: 17\r\n\r\nuncacheable-first",
+        ),
+        (
+            "/asset.png",
+            "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: no-store\r\ncontent-length: 18\r\n\r\nuncacheable-second",
+        ),
+    ])
+    .await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.predictor.enabled = true;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_get(listener, "/asset.png").await;
+    let second = downstream_get(listener, "/asset.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("uncacheable-first"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&first, "x-cache-reason").as_deref(),
+        Some("cache-control-no-store")
+    );
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.ends_with("uncacheable-second"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&second, "x-cache-reason").as_deref(),
+        Some("cache-pass")
     );
 }
 

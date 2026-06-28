@@ -2857,10 +2857,12 @@ available for the stabilization/security-only follow-up.
     upstream errors/statuses, enforces `cache.origin_protection` fill budgets,
     serves bounded single `Range` requests from fresh cached full objects,
     supports native load-balanced upstream pools for the same memory-cache
-    subset, and has live native listener `MISS` then `HIT` tests. Native
-    readiness still blocks disk/tiered cache, slice composition,
-    stale-while-revalidate, peer-fill, and predictor until those semantics are
-    owned by the native adapter.
+    subset, supports `cache.min_uses`, `cache.pass_uncacheable_after`, and
+    opt-in `[cache.predictor]` cache-pass decisions through bounded
+    Fluxheim-owned counters, and has live native listener `MISS` then `HIT`
+    tests. Native readiness still blocks disk/tiered cache, slice composition,
+    stale-while-revalidate, and peer-fill until those semantics are owned by
+    the native adapter.
 - `v1.6.34`: remove the final Pingora runtime/listener/TLS adapter crates from
   normal builds after proxy-cache parity is proven. The native WebSocket
   baseline already covers strict `Upgrade: websocket` requests on forced HTTP/1

@@ -14,15 +14,15 @@ behavior when the change improves security or project direction.
 - Start the final native proxy-cache parity release with a Fluxheim-owned
   native memory-cache adapter for ordinary HTTP/1 proxy responses.
 - Native proxy cache now supports safe memory-tier `GET` lookup/fill for
-  non-load-balanced upstreams, emits configured cache status/reason headers,
+  static and native load-balanced upstream pools, emits configured cache
+  status/reason headers,
   preserves HEAD bypass behavior, and reuses shared Fluxheim cache admission
   checks for request bypass, response `no-store`/`private`, `Set-Cookie`,
   content type, status TTL, and object-size policy.
 - Native cache readiness now accepts root, vhost, and route proxy cache
   policies only for the supported memory-cache subset while keeping disk,
-  range/slice, Vary, stale serving, peer-fill, predictor/origin-protection,
-  and load-balanced proxy cache paths blocked until their native parity work
-  lands.
+  slice composition, stale-while-revalidate, and peer-fill blocked until their
+  native parity work lands.
 - Native HTTP/1 TLS startup now recognizes managed ACME certificate sources on
   `server.default_vhost`, allowing the rustls native listener to bind while the
   default-vhost certificate is still pending first issuance.
@@ -47,6 +47,10 @@ behavior when the change improves security or project direction.
 - Native proxy memory cache now works with native load-balanced upstream pools;
   cache hits return before backend selection and misses fill from the selected
   backend.
+- Native proxy memory cache now supports `cache.min_uses`,
+  `cache.pass_uncacheable_after`, and opt-in `[cache.predictor]` cache-pass
+  decisions with bounded Fluxheim-owned counters and live native listener
+  coverage.
 
 ## 1.6.32 - 2026-06-28
 

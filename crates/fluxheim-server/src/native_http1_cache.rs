@@ -24,7 +24,15 @@ pub(crate) struct NativeMemoryCacheEntry {
 pub(crate) struct NativeMemoryCacheState {
     pub(crate) objects: HashMap<String, NativeMemoryCacheEntry>,
     pub(crate) variants: HashMap<String, Vec<NativeMemoryCacheVariant>>,
+    pub(crate) min_uses: HashMap<String, NativeMemoryCacheCounter>,
+    pub(crate) cache_pass: HashMap<String, NativeMemoryCacheCounter>,
     pub(crate) bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct NativeMemoryCacheCounter {
+    pub(crate) uses: u32,
+    pub(crate) seen_at: Instant,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

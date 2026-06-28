@@ -839,12 +839,15 @@ Additional Pingora cache primitives worth exposing as Fluxheim matures:
   These are good candidates for low-cardinality Prometheus histograms and
   OpenTelemetry span attributes because they explain slow cache hits and
   stampede waits without exposing cache keys or paths.
-- `CacheablePredictor` is exposed through opt-in `[cache.predictor]`,
+- Cacheability prediction is exposed through opt-in `[cache.predictor]`,
   `[vhosts.cache.predictor]`, and `[vhosts.routes.cache.predictor]` settings.
-  `cache-key` and `cache-lookup` report and can assert the selected predictor
-  state with `--expect-cache-predictor-enabled`. Fluxheim skips custom
-  Fluxheim policy reasons in the predictor so local min-use, bypass, and
-  response-header refusal controls remain governed by Fluxheim counters.
+  The native HTTP/1 memory-cache path uses Fluxheim-owned bounded cache-pass
+  counters; the compatibility runtime maps the same setting to Pingora's
+  `CacheablePredictor`. `cache-key` and `cache-lookup` report and can assert
+  the selected predictor state with `--expect-cache-predictor-enabled`.
+  Fluxheim skips custom Fluxheim policy reasons in the compatibility predictor
+  so local min-use, bypass, and response-header refusal controls remain
+  governed by Fluxheim counters.
 - `ForcedFreshness::ForceExpired` is already used for bounded client refresh
   revalidation (`Cache-Control: no-cache`, `Cache-Control: max-age=0`, and
   `Pragma: no-cache`). Future force-miss or force-fresh controls should only be

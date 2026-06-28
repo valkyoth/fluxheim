@@ -2147,7 +2147,9 @@ the cache phase has an explicit no-cache reason. Leave it unset unless you are
 actively debugging cache policy.
 
 `[cache.predictor]`, `[vhosts.cache.predictor]`, and
-`[vhosts.routes.cache.predictor]` are opt-in Pingora cacheability predictors.
+`[vhosts.routes.cache.predictor]` are opt-in cacheability predictors. The
+native HTTP/1 memory-cache path uses Fluxheim-owned bounded cache-pass counters;
+the compatibility runtime maps the same setting to Pingora's predictor.
 When enabled, Fluxheim can remember recent origin-level uncacheable outcomes
 such as `private`/`no-store` cache responses or oversized responses and bypass
 future cache lookup and cache locking for the same primary key until the
