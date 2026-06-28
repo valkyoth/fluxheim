@@ -33,10 +33,11 @@ use crate::{
     NativeTcpKeepalivePolicy,
 };
 use fluxheim_cache::{
-    CacheRequest, CacheRequestView, CacheStaleEvent, VaryCachePolicy, VaryRequestHashField,
-    cache_method_temporarily_bypassed, cache_should_serve_stale, cache_vary_policy,
-    image_cache_key, request_cache_bypass_reason, request_cache_revalidation_requested,
-    response_cache_admission_rejection, vary_request_hash_material,
+    CacheRangeRequest, CacheRequest, CacheRequestView, CacheStaleEvent, VaryCachePolicy,
+    VaryRequestHashField, cache_method_temporarily_bypassed, cache_should_serve_stale,
+    cache_vary_policy, image_cache_key, request_cache_bypass_reason,
+    request_cache_revalidation_requested, response_cache_admission_rejection,
+    selected_cache_range_request, vary_request_hash_material,
 };
 use fluxheim_config::{CacheConfig, CacheStaleErrorKind};
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
@@ -111,8 +112,14 @@ impl PartialEq for NativeProxyMemoryCache {
 #[derive(Debug)]
 enum NativeProxyCacheLookup {
     Bypass(&'static str),
-    Miss { key: String, status: &'static str },
-    Hit(NativeMemoryCacheEntry),
+    Miss {
+        key: String,
+        status: &'static str,
+    },
+    Hit {
+        entry: NativeMemoryCacheEntry,
+        range: Option<CacheRangeRequest>,
+    },
 }
 
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
@@ -420,7 +427,6 @@ impl NativeHttp1Proxy {
         cache.enabled
             && cache.memory.enabled
             && !cache.disk.enabled
-            && !cache.range.enabled
             && !cache.range.slice.enabled
             && !cache.peer_fill.enabled
             && !cache.predictor.enabled
@@ -431,9 +437,9 @@ impl NativeHttp1Proxy {
 
     pub fn proxy_cache_supported_for_proxy(
         cache: &CacheConfig,
-        proxy: &fluxheim_config::ProxyConfig,
+        _proxy: &fluxheim_config::ProxyConfig,
     ) -> bool {
-        Self::proxy_cache_supported(cache) && !proxy_uses_load_balancer(proxy)
+        Self::proxy_cache_supported(cache)
     }
 
     pub fn with_proxy_cache_config(mut self, cache: &CacheConfig) -> Self {
@@ -772,9 +778,17 @@ impl NativeProxyMemoryCache {
         let Some(key) = self.key(request) else {
             return NativeProxyCacheLookup::Bypass("proxy-ineligible");
         };
+        let range = selected_cache_range_request(request, &self.config);
+        let range_requested = self.config.range.enabled && request.contains_header("range");
+        if range_requested && range.is_none() {
+            return NativeProxyCacheLookup::Bypass("range-unsupported");
+        }
         let revalidation = request_cache_revalidation_requested(request, &self.config);
         if !revalidation && let Some(hit) = self.get(&key, request) {
-            return NativeProxyCacheLookup::Hit(hit);
+            return NativeProxyCacheLookup::Hit { entry: hit, range };
+        }
+        if range_requested {
+            return NativeProxyCacheLookup::Bypass("range-miss");
         }
         let status = if revalidation { "REVALIDATED" } else { "MISS" };
         NativeProxyCacheLookup::Miss { key, status }
@@ -1139,10 +1153,15 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
             )>;
             if let Some(cache) = &self.cache {
                 match cache.lookup(&request) {
-                    NativeProxyCacheLookup::Hit(hit) => {
+                    NativeProxyCacheLookup::Hit { entry, range } => {
+                        let response = if let Some(range) = range {
+                            native_cached_range_response(&entry, range)
+                        } else {
+                            entry.to_response()
+                        };
                         return self.finish_response(
-                            hit.to_response(),
-                            Some((&cache.config, "HIT", None, Some(hit.age_secs()))),
+                            response,
+                            Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
                             #[cfg(any(
                                 feature = "compression-brotli",
                                 feature = "compression-gzip",
@@ -1426,22 +1445,114 @@ impl NativeHttp1Proxy {
             .effective_client_addr
             .or(request.peer_addr)
             .map(|address| address.ip());
-        let mut last_error_timed_out = false;
+        let mut proxy_cache_fill = None::<(NativeProxyMemoryCache, String, &'static str)>;
+        let mut proxy_cache_status = None::<(
+            &CacheConfig,
+            &'static str,
+            Option<&'static str>,
+            Option<u64>,
+        )>;
+        if let Some(cache) = &self.cache {
+            match cache.lookup(&request) {
+                NativeProxyCacheLookup::Hit { entry, range } => {
+                    let response = if let Some(range) = range {
+                        native_cached_range_response(&entry, range)
+                    } else {
+                        entry.to_response()
+                    };
+                    return self.finish_response(
+                        response,
+                        Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
+                        #[cfg(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        ))]
+                        compression_request,
+                    );
+                }
+                NativeProxyCacheLookup::Miss { key, status } => {
+                    proxy_cache_fill = Some((cache.clone(), key, status));
+                }
+                NativeProxyCacheLookup::Bypass(reason) => {
+                    proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
+                }
+            }
+        }
+        let _origin_fill_permit = if let Some((cache, _, _)) = proxy_cache_fill.as_ref() {
+            match cache.acquire_origin_fill_permit() {
+                Some(permit) => permit,
+                None => {
+                    let response = NativeHttp1Response::new(
+                        503,
+                        "Service Unavailable",
+                        b"cache origin fill budget exhausted\n",
+                    )
+                    .close_connection();
+                    return self.finish_response(
+                        response,
+                        Some((&cache.config, "BYPASS", Some("origin-protected"), None)),
+                        #[cfg(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        ))]
+                        compression_request,
+                    );
+                }
+            }
+        } else {
+            None
+        };
+        let mut last_error = None;
         let max_attempts = self.upstreams.len().max(1);
         for attempt in 0..max_attempts {
             let Some(selected) = load_balancer.select_or_wait(&request, client_ip).await else {
                 if attempt == 0 {
                     let status = load_balancer.all_down_status();
-                    return self
-                        .error_page_response(&request, status)
-                        .unwrap_or_else(|| {
-                            NativeHttp1Response::new(
-                                status,
-                                native_proxy_status_reason(status),
-                                b"service unavailable\n",
-                            )
-                            .close_connection()
-                        });
+                    if let Some((cache, key, _)) = proxy_cache_fill.as_ref()
+                        && let Some(stale) = cache.get_stale(
+                            key,
+                            &request,
+                            CacheStaleEvent::UpstreamError(CacheStaleErrorKind::Connect),
+                        )
+                    {
+                        return self.finish_response(
+                            stale.to_response(),
+                            Some((
+                                &cache.config,
+                                "STALE",
+                                Some("upstream-error"),
+                                Some(stale.age_secs()),
+                            )),
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request,
+                        );
+                    }
+                    let error_response =
+                        self.error_page_response(&request, status)
+                            .unwrap_or_else(|| {
+                                NativeHttp1Response::new(
+                                    status,
+                                    native_proxy_status_reason(status),
+                                    b"service unavailable\n",
+                                )
+                                .close_connection()
+                            });
+                    return self.finish_response(
+                        error_response,
+                        proxy_cache_status,
+                        #[cfg(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        ))]
+                        compression_request,
+                    );
                 }
                 break;
             };
@@ -1472,56 +1583,104 @@ impl NativeHttp1Proxy {
                     if let Some(reporter) = selected.reporter() {
                         reporter.record_status(response.status(), None);
                     }
+                    let mut cache_status = proxy_cache_status;
+                    if let Some((cache, key, status)) = proxy_cache_fill.as_ref() {
+                        if let Some(stale) = cache.get_stale(
+                            key,
+                            &request,
+                            CacheStaleEvent::UpstreamHttpStatus(response.status()),
+                        ) {
+                            return self.finish_response(
+                                stale.to_response(),
+                                Some((
+                                    &cache.config,
+                                    "STALE",
+                                    Some("upstream-status"),
+                                    Some(stale.age_secs()),
+                                )),
+                                #[cfg(any(
+                                    feature = "compression-brotli",
+                                    feature = "compression-gzip",
+                                    feature = "compression-zstd"
+                                ))]
+                                compression_request,
+                            );
+                        }
+                        cache_status = Some(match cache.store(key, &request, &response) {
+                            Ok(()) => (&cache.config, *status, None, None),
+                            Err(reason) => (&cache.config, "BYPASS", Some(reason), None),
+                        });
+                    }
                     if (200..400).contains(&response.status())
                         && let Some(cookie) = managed_affinity_cookie
                     {
                         response.push_header("set-cookie", cookie);
                     }
-                    self.response_headers.apply(&mut response);
-                    response = response.with_write_policy(self.response_write_policy);
-                    #[cfg(any(
-                        feature = "compression-brotli",
-                        feature = "compression-gzip",
-                        feature = "compression-zstd"
-                    ))]
-                    {
-                        if let Some(compression) = &self.compression
-                            && let Some(compression_request) = compression_request
-                        {
-                            apply_native_response_compression(
-                                compression_request,
-                                &mut response,
-                                compression,
-                            );
-                        }
-                    }
-                    return response;
+                    return self.finish_response(
+                        response,
+                        cache_status,
+                        #[cfg(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        ))]
+                        compression_request,
+                    );
                 }
                 Err(error) if retry_allowed && attempt + 1 < max_attempts => {
                     if let Some(reporter) = selected.reporter() {
                         reporter.record_failure();
                     }
-                    last_error_timed_out = native_proxy_error_is_timeout(&error);
                     log::debug!(
                         target: "fluxheim::native_http1",
                         "native load-balanced upstream attempt failed before retry: {error:?}"
                     );
+                    last_error = Some(error);
                 }
                 Err(error) => {
                     if let Some(reporter) = selected.reporter() {
                         reporter.record_failure();
                     }
-                    last_error_timed_out = native_proxy_error_is_timeout(&error);
                     log::debug!(
                         target: "fluxheim::native_http1",
                         "native load-balanced upstream attempt failed: {error:?}"
                     );
+                    last_error = Some(error);
                     break;
                 }
             }
         }
-        let status = if last_error_timed_out { 504 } else { 502 };
-        self.error_page_response(&request, status)
+        let status = if last_error
+            .as_ref()
+            .is_some_and(native_proxy_error_is_timeout)
+        {
+            504
+        } else {
+            502
+        };
+        if let (Some((cache, key, _)), Some(error)) =
+            (proxy_cache_fill.as_ref(), last_error.as_ref())
+            && let Some(stale) =
+                cache.get_stale(key, &request, native_cache_stale_event_for_error(error))
+        {
+            return self.finish_response(
+                stale.to_response(),
+                Some((
+                    &cache.config,
+                    "STALE",
+                    Some("upstream-error"),
+                    Some(stale.age_secs()),
+                )),
+                #[cfg(any(
+                    feature = "compression-brotli",
+                    feature = "compression-gzip",
+                    feature = "compression-zstd"
+                ))]
+                compression_request,
+            );
+        }
+        let error_response = self
+            .error_page_response(&request, status)
             .unwrap_or_else(|| {
                 if status == 504 {
                     NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
@@ -1530,7 +1689,17 @@ impl NativeHttp1Proxy {
                     NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
                         .close_connection()
                 }
-            })
+            });
+        self.finish_response(
+            error_response,
+            proxy_cache_status,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression_request,
+        )
     }
 
     #[cfg(feature = "load-balancer")]
@@ -2236,6 +2405,50 @@ fn cached_proxy_headers(
         .collect()
 }
 
+fn native_cached_range_response(
+    entry: &NativeMemoryCacheEntry,
+    range: CacheRangeRequest,
+) -> NativeHttp1Response {
+    let total = entry.body.len() as u64;
+    if total == 0 || range.start >= total {
+        let mut response = NativeHttp1Response::new(416, "Range Not Satisfiable", Vec::new())
+            .with_content_length(0);
+        for (name, value) in &entry.headers {
+            if native_cached_range_response_header_preserved(name) {
+                response.push_header(name.clone(), value.clone());
+            }
+        }
+        response.push_header("accept-ranges", "bytes");
+        response.push_header("content-range", format!("bytes */{total}"));
+        return response;
+    }
+
+    let end = range.end.min(total.saturating_sub(1));
+    let start = usize::try_from(range.start).expect("range start is bounded by body length");
+    let end_index = usize::try_from(end).expect("range end is bounded by body length");
+    let body = entry.body[start..=end_index].to_vec();
+    let content_length = body.len() as u64;
+    let mut response =
+        NativeHttp1Response::new(206, "Partial Content", body).with_content_length(content_length);
+    for (name, value) in &entry.headers {
+        if native_cached_range_response_header_preserved(name) {
+            response.push_header(name.clone(), value.clone());
+        }
+    }
+    response.push_header("accept-ranges", "bytes");
+    response.push_header(
+        "content-range",
+        format!("bytes {}-{}/{}", range.start, end, total),
+    );
+    response
+}
+
+fn native_cached_range_response_header_preserved(name: &str) -> bool {
+    !name.eq_ignore_ascii_case("content-length")
+        && !name.eq_ignore_ascii_case("content-range")
+        && !name.eq_ignore_ascii_case("accept-ranges")
+}
+
 fn native_vary_cache_key(
     base_key: &str,
     fields: &[String],
@@ -2396,10 +2609,6 @@ fn native_load_balancer_pool_configured(proxy: &fluxheim_config::ProxyConfig) ->
         || proxy.upstreams_file.is_some()
         || proxy.upstreams_http_url.is_some()
         || proxy.upstream_dns_refresh_secs.is_some()
-}
-
-fn proxy_uses_load_balancer(proxy: &fluxheim_config::ProxyConfig) -> bool {
-    native_load_balancer_pool_configured(proxy)
 }
 
 fn proxy_uses_dynamic_upstream_discovery(proxy: &fluxheim_config::ProxyConfig) -> bool {

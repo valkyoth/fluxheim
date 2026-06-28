@@ -2972,6 +2972,24 @@ fn native_route_proxy_accepts_route_memory_proxy_cache_with_origin_protection() 
     assert!(route.proxy().is_some());
 }
 
+#[test]
+fn native_route_proxy_accepts_route_memory_proxy_cache_with_range_policy() {
+    let mut route = native_route_proxy_test_route();
+    route.redirect = None;
+    route.proxy = Some(fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        ..Default::default()
+    });
+    let mut cache = native_proxy_memory_cache_config();
+    cache.range.enabled = true;
+    route.cache = Some(cache);
+
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new("127.0.0.1:3000"));
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, Some(proxy)).unwrap();
+
+    assert!(route.proxy().is_some());
+}
+
 #[tokio::test]
 async fn native_route_proxy_caches_proxy_response_in_memory() {
     let upstream = upstream_cacheable_once("origin-one").await;
@@ -2993,6 +3011,113 @@ async fn native_route_proxy_caches_proxy_response_in_memory() {
     assert_eq!(
         response_header(&second, "x-cache-status").as_deref(),
         Some("HIT")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_serves_bounded_range_from_memory_cache_hit() {
+    let upstream = upstream_cacheable_once("0123456789").await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.range.enabled = true;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_get(listener, "/asset.png").await;
+    let range = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=2-5\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(range.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+    assert!(range.ends_with("2345"));
+    assert_eq!(
+        response_header(&range, "content-range").as_deref(),
+        Some("bytes 2-5/10")
+    );
+    assert_eq!(
+        response_header(&range, "content-length").as_deref(),
+        Some("4")
+    );
+    assert_eq!(
+        response_header(&range, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_serves_range_not_satisfiable_from_memory_cache_hit() {
+    let upstream = upstream_cacheable_once("0123456789").await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.range.enabled = true;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_get(listener, "/asset.png").await;
+    let range = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=20-29\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(range.starts_with("HTTP/1.1 416 Range Not Satisfiable\r\n"));
+    assert!(range.ends_with("\r\n\r\n"));
+    assert_eq!(
+        response_header(&range, "content-range").as_deref(),
+        Some("bytes */10")
+    );
+    assert_eq!(
+        response_header(&range, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_bypasses_cache_fill_on_range_miss() {
+    let upstream = upstream_raw_response_sequence(&[
+        (
+            "/asset.png",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-range: bytes 0-3/10\r\ncontent-length: 4\r\n\r\nrang",
+        ),
+        (
+            "/asset.png",
+            "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-length: 9\r\n\r\nfull-body",
+        ),
+    ])
+    .await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.range.enabled = true;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let range = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nRange: bytes=0-3\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let full = downstream_get(listener, "/asset.png").await;
+
+    assert!(range.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+    assert!(range.ends_with("rang"));
+    assert_eq!(
+        response_header(&range, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&range, "x-cache-reason").as_deref(),
+        Some("range-miss")
+    );
+    assert!(full.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(full.ends_with("full-body"));
+    assert_eq!(
+        response_header(&full, "x-cache-status").as_deref(),
+        Some("MISS")
     );
 }
 

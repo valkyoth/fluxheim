@@ -4,10 +4,9 @@ Fluxheim 1.6.33 is the native proxy-cache parity release in the Pingora
 removal line.
 
 This first checkpoint adds Fluxheim-owned native memory-cache support for
-ordinary HTTP/1 proxy responses. Disk cache, range/slice cache,
-stale-while-revalidate, peer-fill, predictor, and load-balanced proxy cache
-remain explicit compatibility gates until their native implementations are
-proven.
+ordinary HTTP/1 proxy responses. Disk cache, slice cache,
+stale-while-revalidate, peer-fill, and predictor remain explicit compatibility
+gates until their native implementations are proven.
 
 ## Highlights
 
@@ -50,16 +49,25 @@ proven.
 - Native proxy memory cache now uses checked `Instant` arithmetic for freshness
   and stale-if-error expiry, bypassing cache admission instead of panicking if a
   constrained platform cannot represent the configured window.
+- Native proxy memory cache now serves bounded single `Range` requests from
+  fresh cached full objects, emits cached `416` responses for unsatisfiable
+  ranges, and bypasses cache fill on range misses so upstream `206` responses
+  are never stored under full-object keys.
+- Native proxy memory cache now supports native load-balanced upstream pools;
+  cache hits return before backend selection, and cache misses fill from the
+  selected backend.
 
 ## Compatibility Notes
 
 - Supported in this checkpoint: memory-tier proxy cache for ordinary GET
-  responses from a single static upstream, with optional cache-status headers,
-  Vary/request-header variant isolation, `stale_if_error_secs` serving, and
-  `cache.origin_protection` fill budgets.
+  responses from static or native load-balanced upstream pools, with optional
+  cache-status headers, Vary/request-header variant isolation,
+  `stale_if_error_secs` serving, and `cache.origin_protection` fill budgets. If
+  `cache.range.enabled = true`, bounded single `Range` requests can be served
+  from fresh cached full objects.
 - Still blocked for native runtime readiness: disk/tiered proxy cache,
-  range/slice responses, stale-while-revalidate, peer-fill, cache
-  predictor, and cache over native load-balanced upstream pools.
+  slice composition, stale-while-revalidate, peer-fill, cache predictor, and
+  policies outside the supported native memory-cache subset.
 - The compatibility runtime remains available for unsupported cache policies
   until the remaining native cache parity gates are implemented and tested.
 

@@ -40,6 +40,13 @@ behavior when the change improves security or project direction.
   for the supported single-upstream memory-cache path.
 - Native proxy memory cache now uses checked expiry arithmetic and bypasses
   caching if a platform cannot represent the configured freshness/stale window.
+- Native proxy memory cache now serves bounded single `Range` requests from
+  fresh cached full objects, returns cached `416` responses for unsatisfiable
+  ranges, and bypasses cache fill on range misses to avoid storing partial
+  upstream responses under full-object keys.
+- Native proxy memory cache now works with native load-balanced upstream pools;
+  cache hits return before backend selection and misses fill from the selected
+  backend.
 
 ## 1.6.32 - 2026-06-28
 
