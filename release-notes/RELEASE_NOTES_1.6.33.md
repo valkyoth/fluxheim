@@ -71,6 +71,12 @@ implementations are proven.
   `Cache-Control: only-if-cached`, honors peer-fill concurrency limits, stores
   successful peer `200` responses locally, and returns `PEER-HIT` before later
   requests become normal memory-cache `HIT`s.
+- Native peer-fill admission now subtracts upstream `Age` from peer response
+  freshness, so aged peer objects cannot extend origin freshness when copied
+  into local memory cache.
+- Native cache-only requests with `Cache-Control: only-if-cached` now return a
+  bounded `504` miss instead of contacting origin. A client-supplied
+  `X-Fluxheim-Peer-Fill` marker alone no longer suppresses peer-fill.
 - Hardened native cache internals by using checked static-web cache expiry
   arithmetic, suppressing duplicate stale-while-revalidate refresh tasks per
   cache key before task allocation, and avoiding full predictor-counter table
@@ -90,6 +96,10 @@ implementations are proven.
 - Still blocked for native runtime readiness: disk/tiered proxy cache, slice
   composition, HTTPS peer-fill, and policies outside the supported native
   memory-cache subset.
+- Security note: native HTTP peer-fill is intentionally available only when
+  `allow_insecure_http = true`. That mode has no transport integrity and can be
+  cache-poisoned by a network-path attacker; use loopback peers, encrypted
+  overlays, mTLS sidecars, or trusted private networks.
 - The compatibility runtime remains available for unsupported cache policies
   until the remaining native cache parity gates are implemented and tested.
 

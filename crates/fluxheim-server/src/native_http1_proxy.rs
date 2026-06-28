@@ -16,9 +16,9 @@ use crate::ProxyProtocolTrustedSource;
 use crate::native_http1_cache::{
     NativeMemoryCacheCounter, NativeMemoryCacheEntry, NativeMemoryCacheState,
     NativeMemoryCacheVariant, lock_native_memory_cache, native_cache_entry_weight,
-    native_cache_ttl, native_response_header_map, prune_native_memory_cache,
-    remove_native_memory_cache_entry, remove_native_memory_cache_variants,
-    with_native_cache_status,
+    native_cache_ttl, native_peer_fill_cache_ttl, native_response_header_map,
+    prune_native_memory_cache, remove_native_memory_cache_entry,
+    remove_native_memory_cache_variants, with_native_cache_status,
 };
 #[cfg(any(
     feature = "compression-brotli",
@@ -141,6 +141,13 @@ enum NativePeerFillDecision {
     Skip,
     Hit(NativeHttp1Response),
     FailClosed(&'static str),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativeCacheStoreMode {
+    Origin,
+    Revalidated,
+    PeerFill,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -909,7 +916,8 @@ impl NativeProxyMemoryCache {
     async fn peer_fill(&self, key: &str, request: &NativeHttp1Request) -> NativePeerFillDecision {
         if !self.config.peer_fill.enabled
             || request.method != "GET"
-            || native_request_is_peer_fill(request)
+            || (native_request_is_peer_fill(request)
+                && native_request_cache_only_if_cached(request))
         {
             return NativePeerFillDecision::Skip;
         }
@@ -934,7 +942,7 @@ impl NativeProxyMemoryCache {
                     if response.status() != 200 {
                         continue;
                     }
-                    if self.store_revalidated(key, request, &response).is_err() {
+                    if self.store_peer_fill(key, request, &response).is_err() {
                         continue;
                     }
                     return NativePeerFillDecision::Hit(response);
@@ -1105,7 +1113,7 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
-        let result = self.store_inner(key, request, response, true);
+        let result = self.store_inner(key, request, response, NativeCacheStoreMode::Origin);
         if let Err(reason) = result {
             if reason != "cache-min-uses" {
                 self.record_uncacheable(key);
@@ -1120,7 +1128,22 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
-        let result = self.store_inner(key, request, response, false);
+        let result = self.store_inner(key, request, response, NativeCacheStoreMode::Revalidated);
+        if let Err(reason) = result {
+            if reason != "cache-min-uses" {
+                self.record_uncacheable(key);
+            }
+        }
+        result
+    }
+
+    fn store_peer_fill(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+        response: &NativeHttp1Response,
+    ) -> Result<(), &'static str> {
+        let result = self.store_inner(key, request, response, NativeCacheStoreMode::PeerFill);
         if let Err(reason) = result {
             if reason != "cache-min-uses" {
                 self.record_uncacheable(key);
@@ -1134,7 +1157,7 @@ impl NativeProxyMemoryCache {
         key: &str,
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
-        apply_min_uses: bool,
+        mode: NativeCacheStoreMode,
     ) -> Result<(), &'static str> {
         let body_len = response.body().len() as u64;
         if body_len == 0 {
@@ -1154,14 +1177,22 @@ impl NativeProxyMemoryCache {
         {
             return Err(reason);
         }
-        let Some(ttl) = native_cache_ttl(response.status(), &headers, &self.config) else {
+        let ttl = match mode {
+            NativeCacheStoreMode::Origin | NativeCacheStoreMode::Revalidated => {
+                native_cache_ttl(response.status(), &headers, &self.config)
+            }
+            NativeCacheStoreMode::PeerFill => {
+                native_peer_fill_cache_ttl(response.status(), &headers, &self.config)
+            }
+        };
+        let Some(ttl) = ttl else {
             return Err("ttl-missing");
         };
         if ttl.is_zero() {
             return Err("ttl-zero");
         }
         self.record_cacheable(key);
-        if apply_min_uses && !self.min_uses_allows_store(key) {
+        if mode == NativeCacheStoreMode::Origin && !self.min_uses_allows_store(key) {
             return Err("cache-min-uses");
         }
 
@@ -1585,6 +1616,21 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 }
             }
             if let Some((cache, key, _)) = proxy_cache_fill.as_ref() {
+                if native_request_cache_only_if_cached(&request) {
+                    let response =
+                        NativeHttp1Response::new(504, "Gateway Timeout", b"cache miss\n")
+                            .close_connection();
+                    return self.finish_response(
+                        response,
+                        Some((&cache.config, "MISS", Some("only-if-cached-miss"), None)),
+                        #[cfg(any(
+                            feature = "compression-brotli",
+                            feature = "compression-gzip",
+                            feature = "compression-zstd"
+                        ))]
+                        compression_request.as_ref(),
+                    );
+                }
                 match cache.peer_fill(key, &request).await {
                     NativePeerFillDecision::Skip => {}
                     NativePeerFillDecision::Hit(response) => {
@@ -2113,6 +2159,20 @@ impl NativeHttp1Proxy {
             }
         }
         if let Some((cache, key, _)) = proxy_cache_fill.as_ref() {
+            if native_request_cache_only_if_cached(&request) {
+                let response = NativeHttp1Response::new(504, "Gateway Timeout", b"cache miss\n")
+                    .close_connection();
+                return self.finish_response(
+                    response,
+                    Some((&cache.config, "MISS", Some("only-if-cached-miss"), None)),
+                    #[cfg(any(
+                        feature = "compression-brotli",
+                        feature = "compression-gzip",
+                        feature = "compression-zstd"
+                    ))]
+                    compression_request,
+                );
+            }
             match cache.peer_fill(key, &request).await {
                 NativePeerFillDecision::Skip => {}
                 NativePeerFillDecision::Hit(response) => {
@@ -3075,6 +3135,14 @@ fn native_request_header<'a>(request: &'a NativeHttp1Request, name: &str) -> Opt
 fn native_request_is_peer_fill(request: &NativeHttp1Request) -> bool {
     native_request_header_values(request, NATIVE_PEER_FILL_MARKER_HEADER)
         .any(|value| value.trim() == "1")
+}
+
+fn native_request_cache_only_if_cached(request: &NativeHttp1Request) -> bool {
+    native_request_header_values(request, "cache-control").any(|value| {
+        value
+            .split(',')
+            .any(|directive| directive.trim().eq_ignore_ascii_case("only-if-cached"))
+    })
 }
 
 async fn native_peer_fill_fetch(

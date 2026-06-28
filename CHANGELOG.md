@@ -58,6 +58,10 @@ behavior when the change improves security or project direction.
   `cache.peer_fill.allow_insecure_http = true`, preserving the peer-fill loop
   marker, `only-if-cached` request mode, bounded peer-fill concurrency, local
   storage of successful peer `200` responses, and `PEER-HIT` status reporting.
+- Harden native peer-fill by subtracting upstream `Age` during admission,
+  returning bounded `504` misses for `only-if-cached` cache misses, and
+  preventing a client-supplied peer-fill marker alone from forcing origin
+  traffic.
 - Harden native cache internals by using checked static-web cache expiry
   arithmetic, suppressing duplicate stale-while-revalidate refresh tasks per
   cache key before task spawn, and avoiding full predictor-counter table scans

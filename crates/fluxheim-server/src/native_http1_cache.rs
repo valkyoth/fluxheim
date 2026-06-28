@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fluxheim_cache::response_cache_control_max_age;
+use fluxheim_cache::{remaining_fresh_ttl_secs, response_age_secs, response_cache_control_max_age};
 use fluxheim_config::CacheConfig;
 
 use crate::NativeHttp1Response;
@@ -109,6 +109,22 @@ pub(crate) fn native_cache_ttl(
         .copied()
         .or(cache.default_status_ttl_secs)
         .or_else(|| response_cache_control_max_age(headers))
+        .map(u64::from)
+        .map(Duration::from_secs)
+}
+
+pub(crate) fn native_peer_fill_cache_ttl(
+    status: u16,
+    headers: &http::HeaderMap,
+    cache: &CacheConfig,
+) -> Option<Duration> {
+    let ttl_secs = cache
+        .status_ttls
+        .get(&status)
+        .copied()
+        .or(cache.default_status_ttl_secs)
+        .or_else(|| response_cache_control_max_age(headers))?;
+    remaining_fresh_ttl_secs(ttl_secs, response_age_secs(headers))
         .map(u64::from)
         .map(Duration::from_secs)
 }
