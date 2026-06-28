@@ -1114,10 +1114,10 @@ impl NativeProxyMemoryCache {
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
         let result = self.store_inner(key, request, response, NativeCacheStoreMode::Origin);
-        if let Err(reason) = result {
-            if reason != "cache-min-uses" {
-                self.record_uncacheable(key);
-            }
+        if let Err(reason) = result
+            && reason != "cache-min-uses"
+        {
+            self.record_uncacheable(key);
         }
         result
     }
@@ -1129,10 +1129,10 @@ impl NativeProxyMemoryCache {
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
         let result = self.store_inner(key, request, response, NativeCacheStoreMode::Revalidated);
-        if let Err(reason) = result {
-            if reason != "cache-min-uses" {
-                self.record_uncacheable(key);
-            }
+        if let Err(reason) = result
+            && reason != "cache-min-uses"
+        {
+            self.record_uncacheable(key);
         }
         result
     }
@@ -3255,21 +3255,16 @@ fn native_cached_range_response(
 ) -> NativeHttp1Response {
     let total = entry.body.len() as u64;
     if total == 0 || range.start >= total {
-        let mut response = NativeHttp1Response::new(416, "Range Not Satisfiable", Vec::new())
-            .with_content_length(0);
-        for (name, value) in &entry.headers {
-            if native_cached_range_response_header_preserved(name) {
-                response.push_header(name.clone(), value.clone());
-            }
-        }
-        response.push_header("accept-ranges", "bytes");
-        response.push_header("content-range", format!("bytes */{total}"));
-        return response;
+        return native_cached_range_not_satisfiable_response(entry, total);
     }
 
     let end = range.end.min(total.saturating_sub(1));
-    let start = usize::try_from(range.start).expect("range start is bounded by body length");
-    let end_index = usize::try_from(end).expect("range end is bounded by body length");
+    let Ok(start) = usize::try_from(range.start) else {
+        return native_cached_range_not_satisfiable_response(entry, total);
+    };
+    let Ok(end_index) = usize::try_from(end) else {
+        return native_cached_range_not_satisfiable_response(entry, total);
+    };
     let body = entry.body[start..=end_index].to_vec();
     let content_length = body.len() as u64;
     let mut response =
@@ -3284,6 +3279,22 @@ fn native_cached_range_response(
         "content-range",
         format!("bytes {}-{}/{}", range.start, end, total),
     );
+    response
+}
+
+fn native_cached_range_not_satisfiable_response(
+    entry: &NativeMemoryCacheEntry,
+    total: u64,
+) -> NativeHttp1Response {
+    let mut response =
+        NativeHttp1Response::new(416, "Range Not Satisfiable", Vec::new()).with_content_length(0);
+    for (name, value) in &entry.headers {
+        if native_cached_range_response_header_preserved(name) {
+            response.push_header(name.clone(), value.clone());
+        }
+    }
+    response.push_header("accept-ranges", "bytes");
+    response.push_header("content-range", format!("bytes */{total}"));
     response
 }
 
