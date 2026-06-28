@@ -1,10 +1,8 @@
-#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
-#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -14,9 +12,10 @@ use crate::NativeHttp1UpstreamTls;
 #[cfg(not(feature = "privacy-mode"))]
 use crate::ProxyProtocolTrustedSource;
 use crate::native_http1_cache::{
-    NativeMemoryCacheEntry, NativeMemoryCacheState, lock_native_memory_cache,
-    native_cache_entry_weight, native_cache_ttl, native_response_header_map,
-    prune_native_memory_cache, with_native_cache_status,
+    NativeMemoryCacheEntry, NativeMemoryCacheState, NativeMemoryCacheVariant,
+    lock_native_memory_cache, native_cache_entry_weight, native_cache_ttl,
+    native_response_header_map, prune_native_memory_cache, remove_native_memory_cache_entry,
+    remove_native_memory_cache_variants, with_native_cache_status,
 };
 #[cfg(any(
     feature = "compression-brotli",
@@ -34,17 +33,20 @@ use crate::{
     NativeTcpKeepalivePolicy,
 };
 use fluxheim_cache::{
-    CacheRequest, CacheRequestView, VaryCachePolicy, cache_method_temporarily_bypassed,
-    cache_vary_policy, image_cache_key, request_cache_bypass_reason,
-    request_cache_revalidation_requested, response_cache_admission_rejection,
+    CacheRequest, CacheRequestView, CacheStaleEvent, VaryCachePolicy, VaryRequestHashField,
+    cache_method_temporarily_bypassed, cache_should_serve_stale, cache_vary_policy,
+    image_cache_key, request_cache_bypass_reason, request_cache_revalidation_requested,
+    response_cache_admission_rejection, vary_request_hash_material,
 };
-use fluxheim_config::CacheConfig;
+use fluxheim_config::{CacheConfig, CacheStaleErrorKind};
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 use sanitization::ct::ConstantTimeEq;
 
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 const NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
+const NATIVE_ORIGIN_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
 const MAX_NATIVE_UPSTREAM_H2_STREAMS: usize = 1024;
+static NATIVE_PROXY_CACHE_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(feature = "load-balancer")]
 type NativeProxyConfigBuild = (
@@ -95,6 +97,7 @@ struct NativeProxyMemoryCache {
     config: CacheConfig,
     max_bytes: u64,
     state: Arc<Mutex<NativeMemoryCacheState>>,
+    origin_fill_key: Arc<str>,
 }
 
 impl Eq for NativeProxyMemoryCache {}
@@ -421,10 +424,7 @@ impl NativeHttp1Proxy {
             && !cache.range.slice.enabled
             && !cache.peer_fill.enabled
             && !cache.predictor.enabled
-            && !cache.origin_protection.enabled
-            && cache.stale_if_error_secs.is_none()
             && cache.stale_while_revalidate_secs.is_none()
-            && cache.vary_request_headers.is_empty()
             && cache.min_uses == 1
             && cache.pass_uncacheable_after == 0
     }
@@ -752,6 +752,10 @@ impl NativeProxyMemoryCache {
             config: config.clone(),
             max_bytes: config.memory.max_size_bytes.as_u64(),
             state: Arc::new(Mutex::new(NativeMemoryCacheState::default())),
+            origin_fill_key: Arc::from(format!(
+                "native-proxy-cache:{}",
+                NATIVE_PROXY_CACHE_ID.fetch_add(1, Ordering::Relaxed)
+            )),
         })
     }
 
@@ -759,23 +763,34 @@ impl NativeProxyMemoryCache {
         if cache_method_temporarily_bypassed(request.method()) {
             return NativeProxyCacheLookup::Bypass("method-head");
         }
+        if request.contains_header("authorization") {
+            return NativeProxyCacheLookup::Bypass("request-authorization");
+        }
         if let Some(reason) = request_cache_bypass_reason(request, &self.config) {
             return NativeProxyCacheLookup::Bypass(reason);
         }
         let Some(key) = self.key(request) else {
             return NativeProxyCacheLookup::Bypass("proxy-ineligible");
         };
-        if !request_cache_revalidation_requested(request, &self.config)
-            && let Some(hit) = self.get(&key)
-        {
-            return NativeProxyCacheLookup::Hit(hit);
+        let revalidation = request_cache_revalidation_requested(request, &self.config);
+        if !revalidation {
+            if let Some(hit) = self.get(&key, request) {
+                return NativeProxyCacheLookup::Hit(hit);
+            }
         }
-        let status = if request_cache_revalidation_requested(request, &self.config) {
-            "REVALIDATED"
-        } else {
-            "MISS"
-        };
+        let status = if revalidation { "REVALIDATED" } else { "MISS" };
         NativeProxyCacheLookup::Miss { key, status }
+    }
+
+    fn acquire_origin_fill_permit(&self) -> Option<Option<NativeOriginFillPermit>> {
+        if !self.config.origin_protection.enabled {
+            return Some(None);
+        }
+        acquire_native_origin_fill_permit(
+            self.origin_fill_key.as_ref().to_owned(),
+            self.config.origin_protection.max_concurrent_fills,
+        )
+        .map(Some)
     }
 
     fn key(&self, request: &NativeHttp1Request) -> Option<String> {
@@ -791,14 +806,43 @@ impl NativeProxyMemoryCache {
         .map(|key| key.as_str().to_owned())
     }
 
-    fn get(&self, key: &str) -> Option<NativeMemoryCacheEntry> {
+    fn get(&self, key: &str, request: &NativeHttp1Request) -> Option<NativeMemoryCacheEntry> {
         let now = std::time::Instant::now();
         let mut state = lock_native_memory_cache(&self.state, "proxy");
+
+        if let Some(variants) = state.variants.get(key).cloned() {
+            for variant in variants {
+                let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request) else {
+                    continue;
+                };
+                if variant_key != variant.key {
+                    continue;
+                }
+                match state.objects.get(&variant.key) {
+                    Some(entry) if entry.expires_at > now => return Some(entry.clone()),
+                    Some(entry) => {
+                        if entry.stale_if_error_until.is_some_and(|until| until > now) {
+                            return None;
+                        }
+                        let weight = entry.weight;
+                        remove_native_memory_cache_entry(&mut state, &variant.key);
+                        state.bytes = state.bytes.saturating_sub(weight);
+                        return None;
+                    }
+                    None => {}
+                }
+            }
+            return None;
+        }
+
         match state.objects.get(key) {
             Some(entry) if entry.expires_at > now => Some(entry.clone()),
             Some(entry) => {
+                if entry.stale_if_error_until.is_some_and(|until| until > now) {
+                    return None;
+                }
                 let weight = entry.weight;
-                state.objects.remove(key);
+                remove_native_memory_cache_entry(&mut state, key);
                 state.bytes = state.bytes.saturating_sub(weight);
                 None
             }
@@ -806,7 +850,68 @@ impl NativeProxyMemoryCache {
         }
     }
 
-    fn store(&self, key: &str, response: &NativeHttp1Response) -> Result<(), &'static str> {
+    fn get_stale(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+        event: CacheStaleEvent,
+    ) -> Option<NativeMemoryCacheEntry> {
+        if !cache_should_serve_stale(&self.config, event) {
+            return None;
+        }
+
+        let now = std::time::Instant::now();
+        let mut state = lock_native_memory_cache(&self.state, "proxy");
+        if let Some(variants) = state.variants.get(key).cloned() {
+            for variant in variants {
+                let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request) else {
+                    continue;
+                };
+                if variant_key != variant.key {
+                    continue;
+                }
+                match state.objects.get(&variant.key) {
+                    Some(entry)
+                        if entry.expires_at <= now
+                            && entry.stale_if_error_until.is_some_and(|until| until > now) =>
+                    {
+                        return Some(entry.clone());
+                    }
+                    Some(entry) if entry.stale_if_error_until.is_some_and(|until| until <= now) => {
+                        let weight = entry.weight;
+                        remove_native_memory_cache_entry(&mut state, &variant.key);
+                        state.bytes = state.bytes.saturating_sub(weight);
+                        return None;
+                    }
+                    _ => {}
+                }
+            }
+            return None;
+        }
+
+        match state.objects.get(key) {
+            Some(entry)
+                if entry.expires_at <= now
+                    && entry.stale_if_error_until.is_some_and(|until| until > now) =>
+            {
+                Some(entry.clone())
+            }
+            Some(entry) if entry.stale_if_error_until.is_some_and(|until| until <= now) => {
+                let weight = entry.weight;
+                remove_native_memory_cache_entry(&mut state, key);
+                state.bytes = state.bytes.saturating_sub(weight);
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn store(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+        response: &NativeHttp1Response,
+    ) -> Result<(), &'static str> {
         let body_len = response.body().len() as u64;
         if body_len == 0 {
             return Err("empty-body");
@@ -815,12 +920,11 @@ impl NativeProxyMemoryCache {
             return Err("object-too-large");
         }
         let headers = native_response_header_map(response);
-        if !matches!(
-            cache_vary_policy(&headers, &self.config),
-            VaryCachePolicy::None
-        ) {
-            return Err("vary-not-supported-native");
-        }
+        let vary_fields = match cache_vary_policy(&headers, &self.config) {
+            VaryCachePolicy::None => None,
+            VaryCachePolicy::Fields(fields) => Some(fields),
+            VaryCachePolicy::Uncacheable(reason) => return Err(reason),
+        };
         if let Some(reason) =
             response_cache_admission_rejection(response.status(), &headers, &self.config)
         {
@@ -833,12 +937,22 @@ impl NativeProxyMemoryCache {
             return Err("ttl-zero");
         }
 
-        let weight = native_cache_entry_weight(key, response, body_len);
+        let store_key = if let Some(fields) = vary_fields.as_ref() {
+            native_vary_cache_key(key, fields, request).ok_or("vary-invalid")?
+        } else {
+            key.to_owned()
+        };
+        let now = std::time::Instant::now();
+        let stale_if_error_until = self
+            .config
+            .stale_if_error_secs
+            .map(u64::from)
+            .map(std::time::Duration::from_secs)
+            .map(|stale_ttl| now + ttl + stale_ttl);
+        let weight = native_cache_entry_weight(&store_key, response, body_len);
         if weight > self.max_bytes {
             return Err("object-too-large");
         }
-        let key = key.to_owned();
-        let now = std::time::Instant::now();
         let entry = NativeMemoryCacheEntry {
             status: response.status(),
             reason: response.reason().to_owned(),
@@ -846,16 +960,36 @@ impl NativeProxyMemoryCache {
             content_length: response.content_length(),
             body: Arc::from(response.body().to_vec()),
             expires_at: now + ttl,
+            stale_if_error_until,
             stored_at: now,
             weight,
         };
         let needs_prune = {
             let mut state = lock_native_memory_cache(&self.state, "proxy");
-            if let Some(previous) = state.objects.remove(&key) {
+            if let Some(fields) = vary_fields {
+                if let Some(previous) = remove_native_memory_cache_entry(&mut state, key) {
+                    state.bytes = state.bytes.saturating_sub(previous.weight);
+                }
+                if let Some(previous) = remove_native_memory_cache_entry(&mut state, &store_key) {
+                    state.bytes = state.bytes.saturating_sub(previous.weight);
+                }
+                let variants = state.variants.entry(key.to_owned()).or_default();
+                variants.retain(|variant| variant.key != store_key);
+                variants.push(NativeMemoryCacheVariant {
+                    fields,
+                    key: store_key.clone(),
+                });
+            } else {
+                let removed_bytes = remove_native_memory_cache_variants(&mut state, key);
+                state.bytes = state.bytes.saturating_sub(removed_bytes);
+                if let Some(previous) = remove_native_memory_cache_entry(&mut state, &store_key) {
+                    state.bytes = state.bytes.saturating_sub(previous.weight);
+                }
+            }
+            if let Some(previous) = state.objects.insert(store_key, entry) {
                 state.bytes = state.bytes.saturating_sub(previous.weight);
             }
             state.bytes = state.bytes.saturating_add(weight);
-            state.objects.insert(key, entry);
             state.bytes > self.max_bytes
         };
         if needs_prune {
@@ -864,6 +998,74 @@ impl NativeProxyMemoryCache {
         }
         Ok(())
     }
+}
+
+struct NativeOriginFillPermit {
+    counter: Arc<AtomicUsize>,
+}
+
+impl Drop for NativeOriginFillPermit {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn acquire_native_origin_fill_permit(
+    key: String,
+    max_concurrent: usize,
+) -> Option<NativeOriginFillPermit> {
+    static NATIVE_ORIGIN_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> =
+        OnceLock::new();
+
+    let counter = {
+        let mut counters = match NATIVE_ORIGIN_FILL_CONCURRENCY
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+        {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "native origin-fill concurrency lock poisoned; aborting to avoid inconsistent cache-fill limits"
+                );
+                std::process::abort();
+            }
+        };
+        prune_inactive_native_origin_fill_counters(&mut counters);
+        if counters.len() >= NATIVE_ORIGIN_FILL_CONCURRENCY_MAX_KEYS && !counters.contains_key(&key)
+        {
+            return None;
+        }
+        counters
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
+            .clone()
+    };
+
+    let mut current = counter.load(Ordering::Acquire);
+    loop {
+        if current >= max_concurrent {
+            return None;
+        }
+        let Some(next) = current.checked_add(1) else {
+            log::error!(
+                target: "fluxheim::security",
+                "native origin-fill concurrency counter saturated for {key}; refusing permit"
+            );
+            return None;
+        };
+        match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return Some(NativeOriginFillPermit { counter }),
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn prune_inactive_native_origin_fill_counters(counters: &mut HashMap<String, Arc<AtomicUsize>>) {
+    if counters.len() < NATIVE_ORIGIN_FILL_CONCURRENCY_MAX_KEYS {
+        return;
+    }
+    counters.retain(|_, counter| counter.load(Ordering::Acquire) > 0);
 }
 
 impl NativeHttp1Handler for NativeHttp1Proxy {
@@ -960,6 +1162,31 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     }
                 }
             }
+            let _origin_fill_permit = if let Some((cache, _, _)) = proxy_cache_fill.as_ref() {
+                match cache.acquire_origin_fill_permit() {
+                    Some(permit) => permit,
+                    None => {
+                        let response = NativeHttp1Response::new(
+                            503,
+                            "Service Unavailable",
+                            b"cache origin fill budget exhausted\n",
+                        )
+                        .close_connection();
+                        return self.finish_response(
+                            response,
+                            Some((&cache.config, "BYPASS", Some("origin-protected"), None)),
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request.as_ref(),
+                        );
+                    }
+                }
+            } else {
+                None
+            };
             let mut last_error = None;
             let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
             let total = self.upstream_slots.len();
@@ -978,7 +1205,28 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     Ok(response) => {
                         let mut cache_status = proxy_cache_status;
                         if let Some((cache, key, status)) = proxy_cache_fill.as_ref() {
-                            cache_status = Some(match cache.store(key, &response) {
+                            if let Some(stale) = cache.get_stale(
+                                key,
+                                &request,
+                                CacheStaleEvent::UpstreamHttpStatus(response.status()),
+                            ) {
+                                return self.finish_response(
+                                    stale.to_response(),
+                                    Some((
+                                        &cache.config,
+                                        "STALE",
+                                        Some("upstream-status"),
+                                        Some(stale.age_secs()),
+                                    )),
+                                    #[cfg(any(
+                                        feature = "compression-brotli",
+                                        feature = "compression-gzip",
+                                        feature = "compression-zstd"
+                                    ))]
+                                    compression_request.as_ref(),
+                                );
+                            }
+                            cache_status = Some(match cache.store(key, &request, &response) {
                                 Ok(()) => (&cache.config, *status, None, None),
                                 Err(reason) => (&cache.config, "BYPASS", Some(reason), None),
                             });
@@ -1019,7 +1267,29 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
             } else {
                 502
             };
-            self.error_page_response(&request, status)
+            if let (Some((cache, key, _)), Some(error)) =
+                (proxy_cache_fill.as_ref(), last_error.as_ref())
+                && let Some(stale) =
+                    cache.get_stale(key, &request, native_cache_stale_event_for_error(error))
+            {
+                return self.finish_response(
+                    stale.to_response(),
+                    Some((
+                        &cache.config,
+                        "STALE",
+                        Some("upstream-error"),
+                        Some(stale.age_secs()),
+                    )),
+                    #[cfg(any(
+                        feature = "compression-brotli",
+                        feature = "compression-gzip",
+                        feature = "compression-zstd"
+                    ))]
+                    compression_request.as_ref(),
+                );
+            }
+            let error_response = self
+                .error_page_response(&request, status)
                 .unwrap_or_else(|| {
                     if status == 504 {
                         NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
@@ -1028,7 +1298,17 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                         NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
                             .close_connection()
                     }
-                })
+                });
+            self.finish_response(
+                error_response,
+                proxy_cache_status,
+                #[cfg(any(
+                    feature = "compression-brotli",
+                    feature = "compression-gzip",
+                    feature = "compression-zstd"
+                ))]
+                compression_request.as_ref(),
+            )
         })
     }
 
@@ -1894,6 +2174,30 @@ fn native_proxy_error_is_timeout(error: &crate::NativeHttp1Error) -> bool {
     )
 }
 
+fn native_cache_stale_event_for_error(error: &crate::NativeHttp1Error) -> CacheStaleEvent {
+    CacheStaleEvent::UpstreamError(native_cache_stale_error_kind(error))
+}
+
+fn native_cache_stale_error_kind(error: &crate::NativeHttp1Error) -> CacheStaleErrorKind {
+    match error {
+        crate::NativeHttp1Error::Io(error) => match error.kind() {
+            std::io::ErrorKind::TimedOut => CacheStaleErrorKind::Timeout,
+            std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::NotConnected
+            | std::io::ErrorKind::AddrInUse
+            | std::io::ErrorKind::AddrNotAvailable => CacheStaleErrorKind::Connect,
+            std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::UnexpectedEof => CacheStaleErrorKind::ConnectionClosed,
+            std::io::ErrorKind::InvalidData => CacheStaleErrorKind::Protocol,
+            std::io::ErrorKind::PermissionDenied => CacheStaleErrorKind::Other,
+            _ => CacheStaleErrorKind::Other,
+        },
+        crate::NativeHttp1Error::Parse(_) => CacheStaleErrorKind::Protocol,
+    }
+}
+
 fn native_request_header<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a str> {
     request
         .headers
@@ -1910,13 +2214,35 @@ fn cached_proxy_headers(
         .headers()
         .iter()
         .filter(|(name, _)| {
-            !cache
-                .hide_response_headers
-                .iter()
-                .any(|hidden| hidden.eq_ignore_ascii_case(name))
+            !name.eq_ignore_ascii_case("age")
+                && !cache
+                    .hide_response_headers
+                    .iter()
+                    .any(|hidden| hidden.eq_ignore_ascii_case(name))
         })
         .cloned()
         .collect()
+}
+
+fn native_vary_cache_key(
+    base_key: &str,
+    fields: &[String],
+    request: &NativeHttp1Request,
+) -> Option<String> {
+    let material = vary_request_hash_material(fields.iter().map(|field| {
+        VaryRequestHashField {
+            name: field.as_str(),
+            values: request
+                .headers
+                .iter()
+                .filter_map(|(name, value)| {
+                    name.eq_ignore_ascii_case(field).then_some(value.as_bytes())
+                })
+                .collect(),
+        }
+    }));
+    let variance = base64_ng::URL_SAFE_NO_PAD.encode_string(&material).ok()?;
+    Some(format!("{base_key};vary:{variance}"))
 }
 
 fn native_upstream_from_proxy_config(

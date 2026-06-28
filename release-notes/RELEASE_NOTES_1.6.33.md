@@ -4,10 +4,10 @@ Fluxheim 1.6.33 is the native proxy-cache parity release in the Pingora
 removal line.
 
 This first checkpoint adds Fluxheim-owned native memory-cache support for
-ordinary HTTP/1 proxy responses. Disk cache, range/slice cache, Vary variants,
-stale serving, peer-fill, predictor/origin-protection, and load-balanced proxy
-cache remain explicit compatibility gates until their native implementations
-are proven.
+ordinary HTTP/1 proxy responses. Disk cache, range/slice cache,
+stale-while-revalidate, peer-fill, predictor, and load-balanced proxy cache
+remain explicit compatibility gates until their native implementations are
+proven.
 
 ## Highlights
 
@@ -35,21 +35,35 @@ are proven.
   `server.default_vhost`, so rustls deployments using `server.tls_listen` can
   start with a pending default-vhost ACME certificate source and serve HTTP-01
   issuance traffic instead of failing the TLS listener plan.
+- Native proxy memory cache now bypasses shared-cache lookup/fill for requests
+  carrying `Authorization`, keeps configured `BYPASS` cache-status headers on
+  upstream error responses, and strips stored upstream `Age` so cache hits emit
+  one recomputed `Age` header.
+- Native proxy memory cache now isolates origin `Vary` response variants and
+  configured `cache.vary_request_headers` variants in the native memory-cache
+  key space.
+- Native proxy memory cache now serves expired memory-cache entries under
+  configured `stale_if_error_secs` when the single-upstream native proxy sees a
+  matching upstream error or 5xx status.
+- Native proxy memory cache now enforces `cache.origin_protection` fill budgets
+  for the supported single-upstream memory-cache path.
 
 ## Compatibility Notes
 
 - Supported in this checkpoint: memory-tier proxy cache for ordinary GET
-  responses from a single static upstream, with optional cache-status headers.
+  responses from a single static upstream, with optional cache-status headers,
+  Vary/request-header variant isolation, `stale_if_error_secs` serving, and
+  `cache.origin_protection` fill budgets.
 - Still blocked for native runtime readiness: disk/tiered proxy cache,
-  range/slice responses, Vary isolation, stale-if-error,
-  stale-while-revalidate, peer-fill, cache predictor/origin protection, and
-  cache over native load-balanced upstream pools.
+  range/slice responses, stale-while-revalidate, peer-fill, cache
+  predictor, and cache over native load-balanced upstream pools.
 - The compatibility runtime remains available for unsupported cache policies
   until the remaining native cache parity gates are implemented and tested.
 
 ## Verification
 
 - `cargo test -p fluxheim-server native_route_proxy_caches_proxy_response_in_memory --locked`
+- `cargo test -p fluxheim-server native_route_proxy_ --locked`
 - `cargo test -p fluxheim-server --features acme,tls-rustls-backend native_http1_proxy_runtime_accepts_default_vhost_acme_certificate_source --locked`
 - `cargo test -p fluxheim-server native_route_proxy_accepts_ --locked`
 - `cargo test -p fluxheim-server native_http1_plan --locked`

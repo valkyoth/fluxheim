@@ -70,6 +70,13 @@ async fn upstream_expect_method_path(
 }
 
 async fn upstream_cacheable_once(body: &'static str) -> std::net::SocketAddr {
+    upstream_cacheable_once_with_max_age(body, 60).await
+}
+
+async fn upstream_cacheable_once_with_max_age(
+    body: &'static str,
+    max_age_secs: u64,
+) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -94,6 +101,49 @@ async fn upstream_cacheable_once(body: &'static str) -> std::net::SocketAddr {
         stream
             .write_all(
                 format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age={max_age_secs}\r\ncontent-length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    addr
+}
+
+async fn upstream_delayed_cacheable_once(
+    body: &'static str,
+    delay: Duration,
+) -> (std::net::SocketAddr, tokio::sync::oneshot::Receiver<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(request).unwrap();
+        assert!(
+            request.starts_with("GET /asset.png HTTP/1.1\r\n"),
+            "unexpected upstream request: {request:?}"
+        );
+        let _ = accepted_tx.send(());
+        tokio::time::sleep(delay).await;
+        stream
+            .write_all(
+                format!(
                     "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-length: {}\r\n\r\n{}",
                     body.len(),
                     body
@@ -102,6 +152,124 @@ async fn upstream_cacheable_once(body: &'static str) -> std::net::SocketAddr {
             )
             .await
             .unwrap();
+    });
+    (addr, accepted_rx)
+}
+
+async fn upstream_cacheable_sequence(
+    responses: &'static [(&'static str, &'static str)],
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        for (expected_path, body) in responses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(
+                request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
+                "unexpected upstream request: {request:?}"
+            );
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        }
+    });
+    addr
+}
+
+async fn upstream_vary_sequence(
+    responses: &'static [(&'static str, &'static str, &'static str, &'static str)],
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        for (expected_path, expected_language, vary, body) in responses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(
+                request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
+                "unexpected upstream request: {request:?}"
+            );
+            assert!(
+                request.lines().any(|line| line
+                    .eq_ignore_ascii_case(&format!("accept-language: {expected_language}"))),
+                "missing expected language {expected_language:?}: {request:?}"
+            );
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\nvary: {vary}\r\ncontent-length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        }
+    });
+    addr
+}
+
+async fn upstream_raw_response_sequence(
+    responses: &'static [(&'static str, &'static str)],
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        for (expected_path, response) in responses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(
+                request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
+                "unexpected upstream request: {request:?}"
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
     });
     addr
 }
@@ -421,6 +589,18 @@ fn response_header(response: &str, name: &str) -> Option<String> {
             .eq_ignore_ascii_case(&expected)
             .then(|| value.trim().to_owned())
     })
+}
+
+fn response_header_values(response: &str, name: &str) -> Vec<String> {
+    response
+        .lines()
+        .filter_map(|line| {
+            let (header_name, value) = line.split_once(':')?;
+            header_name
+                .eq_ignore_ascii_case(name)
+                .then(|| value.trim().to_owned())
+        })
+        .collect()
 }
 
 #[tokio::test]
@@ -2773,6 +2953,25 @@ fn native_route_proxy_accepts_route_memory_proxy_cache() {
     assert!(route.proxy().is_some());
 }
 
+#[test]
+fn native_route_proxy_accepts_route_memory_proxy_cache_with_origin_protection() {
+    let mut route = native_route_proxy_test_route();
+    route.redirect = None;
+    route.proxy = Some(fluxheim_config::ProxyConfig {
+        upstream: Some("127.0.0.1:3000".to_owned()),
+        ..Default::default()
+    });
+    let mut cache = native_proxy_memory_cache_config();
+    cache.origin_protection.enabled = true;
+    cache.origin_protection.max_concurrent_fills = 1;
+    route.cache = Some(cache);
+
+    let proxy = NativeHttp1Proxy::new(NativeHttp1Upstream::new("127.0.0.1:3000"));
+    let route = NativeHttp1RouteProxyRoute::from_config(&route, Some(proxy)).unwrap();
+
+    assert!(route.proxy().is_some());
+}
+
 #[tokio::test]
 async fn native_route_proxy_caches_proxy_response_in_memory() {
     let upstream = upstream_cacheable_once("origin-one").await;
@@ -2793,6 +2992,290 @@ async fn native_route_proxy_caches_proxy_response_in_memory() {
     assert!(second.ends_with("origin-one"));
     assert_eq!(
         response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_serves_stale_proxy_response_on_upstream_error() {
+    let upstream = upstream_cacheable_once_with_max_age("stale-origin", 1).await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.stale_if_error_secs = Some(60);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_get(listener, "/asset.png").await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let second = downstream_get(listener, "/asset.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("stale-origin"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.ends_with("stale-origin"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("STALE")
+    );
+    assert_eq!(
+        response_header(&second, "x-cache-reason").as_deref(),
+        Some("upstream-error")
+    );
+    assert!(
+        response_header(&second, "age")
+            .and_then(|age| age.parse::<u64>().ok())
+            .is_some_and(|age| age >= 1),
+        "response: {second:?}"
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_serves_stale_proxy_response_on_upstream_status() {
+    let upstream = upstream_raw_response_sequence(&[
+        (
+            "/asset.png",
+            "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=1\r\ncontent-length: 12\r\n\r\nstatus-stale",
+        ),
+        (
+            "/asset.png",
+            "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 14\r\n\r\norigin-failure",
+        ),
+    ])
+    .await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.stale_if_error_secs = Some(60);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_get(listener, "/asset.png").await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let second = downstream_get(listener, "/asset.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("status-stale"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.ends_with("status-stale"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("STALE")
+    );
+    assert_eq!(
+        response_header(&second, "x-cache-reason").as_deref(),
+        Some("upstream-status")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_origin_protection_limits_concurrent_cache_fills() {
+    let (upstream, accepted) =
+        upstream_delayed_cacheable_once("slow-origin", Duration::from_millis(200)).await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.origin_protection.enabled = true;
+    cache.origin_protection.max_concurrent_fills = 1;
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = tokio::spawn(async move { downstream_get(listener, "/asset.png").await });
+    accepted.await.unwrap();
+    let second = downstream_get(listener, "/asset.png").await;
+    let first = first.await.unwrap();
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("slow-origin"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(second.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&second, "x-cache-reason").as_deref(),
+        Some("origin-protected")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_does_not_cache_authorized_proxy_response() {
+    let upstream = upstream_cacheable_sequence(&[
+        ("/tenant.png", "authorized-origin"),
+        ("/tenant.png", "public-origin"),
+    ])
+    .await;
+    let cache = native_proxy_memory_cache_config();
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let authorized = downstream_request(
+        listener,
+        "GET /tenant.png HTTP/1.1\r\nHost: route.test\r\nAuthorization: Bearer token-a\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let public = downstream_get(listener, "/tenant.png").await;
+
+    assert!(authorized.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(authorized.ends_with("authorized-origin"));
+    assert_eq!(
+        response_header(&authorized, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&authorized, "x-cache-reason").as_deref(),
+        Some("request-authorization")
+    );
+    assert!(public.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(public.ends_with("public-origin"));
+    assert_eq!(
+        response_header(&public, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_applies_cache_bypass_status_to_upstream_error() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let unused_upstream = listener.local_addr().unwrap();
+    drop(listener);
+    let cache = native_proxy_memory_cache_config();
+    let proxy = proxy_for(unused_upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let response = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"));
+    assert_eq!(
+        response_header(&response, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&response, "x-cache-reason").as_deref(),
+        Some("request-no-store")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_replaces_upstream_age_on_cache_hit() {
+    let upstream = upstream_response(
+        "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\nage: 5\r\ncontent-length: 10\r\n\r\norigin-age",
+    )
+    .await;
+    let cache = native_proxy_memory_cache_config();
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_get(listener, "/asset.png").await;
+    let second = downstream_get(listener, "/asset.png").await;
+
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(
+        response_header(&second, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+    let age_values = response_header_values(&second, "age");
+    assert_eq!(age_values.len(), 1, "response: {second:?}");
+}
+
+#[tokio::test]
+async fn native_route_proxy_respects_origin_vary_header_in_memory_cache() {
+    let upstream = upstream_vary_sequence(&[
+        ("/asset.png", "en", "accept-language", "hello"),
+        ("/asset.png", "sv", "accept-language", "hej"),
+    ])
+    .await;
+    let cache = native_proxy_memory_cache_config();
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let english = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nAccept-Language: en\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let swedish = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nAccept-Language: sv\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let english_hit = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nAccept-Language: en\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(english.ends_with("hello"));
+    assert_eq!(
+        response_header(&english, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(swedish.ends_with("hej"));
+    assert_eq!(
+        response_header(&swedish, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(english_hit.ends_with("hello"));
+    assert_eq!(
+        response_header(&english_hit, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_configured_vary_headers_isolate_memory_cache() {
+    let upstream = upstream_cacheable_sequence(&[
+        ("/asset.png", "configured-english"),
+        ("/asset.png", "configured-swedish"),
+    ])
+    .await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.vary_request_headers = vec!["accept-language".to_owned()];
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let english = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nAccept-Language: en\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let swedish = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nAccept-Language: sv\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let english_hit = downstream_request(
+        listener,
+        "GET /asset.png HTTP/1.1\r\nHost: route.test\r\nAccept-Language: en\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(english.ends_with("configured-english"));
+    assert_eq!(
+        response_header(&english, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(swedish.ends_with("configured-swedish"));
+    assert_eq!(
+        response_header(&swedish, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(english_hit.ends_with("configured-english"));
+    assert_eq!(
+        response_header(&english_hit, "x-cache-status").as_deref(),
         Some("HIT")
     );
 }

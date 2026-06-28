@@ -2852,11 +2852,13 @@ available for the stabilization/security-only follow-up.
   - Current checkpoint: native HTTP/1 proxy memory-cache lookup/fill is wired
     for ordinary single-upstream GET responses. It reuses `fluxheim-cache`
     request/response policy helpers, emits configured cache status/reason
-    headers, preserves HEAD bypass behavior, and has a live native listener
-    `MISS` then `HIT` test. Native readiness still blocks disk/tiered cache,
-    range/slice, Vary variants, stale serving, peer-fill, predictor/origin
-    protection, and load-balanced proxy cache until those semantics are owned
-    by the native adapter.
+    headers, preserves HEAD bypass behavior, isolates origin/configured Vary
+    variants in memory, serves configured `stale_if_error_secs` entries on
+    upstream errors/statuses, enforces `cache.origin_protection` fill budgets,
+    and has live native listener `MISS` then `HIT` tests. Native readiness
+    still blocks disk/tiered cache, range/slice, stale-while-revalidate,
+    peer-fill, predictor, and load-balanced proxy cache until those semantics
+    are owned by the native adapter.
 - `v1.6.34`: remove the final Pingora runtime/listener/TLS adapter crates from
   normal builds after proxy-cache parity is proven. The native WebSocket
   baseline already covers strict `Upgrade: websocket` requests on forced HTTP/1

@@ -26,6 +26,18 @@ behavior when the change improves security or project direction.
 - Native HTTP/1 TLS startup now recognizes managed ACME certificate sources on
   `server.default_vhost`, allowing the rustls native listener to bind while the
   default-vhost certificate is still pending first issuance.
+- Harden native proxy memory cache by bypassing shared-cache lookup/fill for
+  requests carrying `Authorization`, preserving `BYPASS` cache status headers
+  on upstream error responses, and replacing upstream `Age` headers with a
+  single recomputed cache-hit age.
+- Native proxy memory cache now isolates origin `Vary` variants and configured
+  `cache.vary_request_headers` variants in the Fluxheim-owned in-memory cache
+  key space.
+- Native proxy memory cache now honors `stale_if_error_secs` for expired
+  memory-cache entries when the single-upstream native proxy sees an upstream
+  connection/protocol error or configured 5xx status.
+- Native proxy memory cache now supports `cache.origin_protection` fill budgets
+  for the supported single-upstream memory-cache path.
 
 ## 1.6.32 - 2026-06-28
 

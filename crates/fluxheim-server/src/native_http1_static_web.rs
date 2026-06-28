@@ -679,6 +679,7 @@ impl NativeStaticMemoryCache {
             content_length: response.content_length(),
             body,
             expires_at: now + ttl,
+            stale_if_error_until: None,
             stored_at: now,
             weight,
         };
@@ -989,6 +990,7 @@ mod tests {
             content_length: Some(1),
             body: Arc::from([b'x']),
             expires_at,
+            stale_if_error_until: None,
             stored_at,
             weight,
         }

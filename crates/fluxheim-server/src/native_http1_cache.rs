@@ -15,6 +15,7 @@ pub(crate) struct NativeMemoryCacheEntry {
     pub(crate) content_length: Option<u64>,
     pub(crate) body: Arc<[u8]>,
     pub(crate) expires_at: Instant,
+    pub(crate) stale_if_error_until: Option<Instant>,
     pub(crate) stored_at: Instant,
     pub(crate) weight: u64,
 }
@@ -22,7 +23,14 @@ pub(crate) struct NativeMemoryCacheEntry {
 #[derive(Debug, Default)]
 pub(crate) struct NativeMemoryCacheState {
     pub(crate) objects: HashMap<String, NativeMemoryCacheEntry>,
+    pub(crate) variants: HashMap<String, Vec<NativeMemoryCacheVariant>>,
     pub(crate) bytes: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct NativeMemoryCacheVariant {
+    pub(crate) fields: Vec<String>,
+    pub(crate) key: String,
 }
 
 impl NativeMemoryCacheEntry {
@@ -118,14 +126,18 @@ pub(crate) fn native_cache_entry_weight(
 
 pub(crate) fn prune_native_memory_cache(state: &mut NativeMemoryCacheState, max_bytes: u64) {
     let now = Instant::now();
-    let mut expired_bytes = 0_u64;
-    state.objects.retain(|_, entry| {
-        let keep = entry.expires_at > now;
-        if !keep {
-            expired_bytes = expired_bytes.saturating_add(entry.weight);
-        }
-        keep
-    });
+    let expired = state
+        .objects
+        .iter()
+        .filter_map(|(key, entry)| {
+            let stale_until = entry.stale_if_error_until.unwrap_or(entry.expires_at);
+            (stale_until <= now).then_some(key.clone())
+        })
+        .collect::<Vec<_>>();
+    let expired_bytes = expired
+        .iter()
+        .filter_map(|key| remove_native_memory_cache_entry(state, key))
+        .fold(0_u64, |total, entry| total.saturating_add(entry.weight));
     state.bytes = state.bytes.saturating_sub(expired_bytes);
 
     if state.bytes > max_bytes {
@@ -139,7 +151,7 @@ pub(crate) fn prune_native_memory_cache(state: &mut NativeMemoryCacheState, max_
             if state.bytes <= max_bytes {
                 break;
             }
-            if let Some(entry) = state.objects.remove(&key) {
+            if let Some(entry) = remove_native_memory_cache_entry(state, &key) {
                 state.bytes = state.bytes.saturating_sub(entry.weight);
             }
         }
@@ -153,6 +165,39 @@ pub(crate) fn prune_native_memory_cache(state: &mut NativeMemoryCacheState, max_
             state.bytes = state.bytes.min(actual_bytes);
         }
     }
+}
+
+pub(crate) fn remove_native_memory_cache_entry(
+    state: &mut NativeMemoryCacheState,
+    key: &str,
+) -> Option<NativeMemoryCacheEntry> {
+    let removed = state.objects.remove(key);
+    if removed.is_some() {
+        prune_native_memory_cache_variants_for_key(state, key);
+    }
+    removed
+}
+
+pub(crate) fn remove_native_memory_cache_variants(
+    state: &mut NativeMemoryCacheState,
+    base_key: &str,
+) -> u64 {
+    let Some(variants) = state.variants.remove(base_key) else {
+        return 0;
+    };
+    variants.into_iter().fold(0_u64, |removed_bytes, variant| {
+        let Some(entry) = state.objects.remove(&variant.key) else {
+            return removed_bytes;
+        };
+        removed_bytes.saturating_add(entry.weight)
+    })
+}
+
+fn prune_native_memory_cache_variants_for_key(state: &mut NativeMemoryCacheState, key: &str) {
+    state.variants.retain(|_, variants| {
+        variants.retain(|variant| variant.key != key);
+        !variants.is_empty()
+    });
 }
 
 pub(crate) fn with_native_cache_status(
@@ -169,6 +214,7 @@ pub(crate) fn with_native_cache_status(
         response.push_header(header.clone(), reason.to_owned());
     }
     if let Some(age_secs) = age_secs {
+        response.remove_header("age");
         response.push_header("age", age_secs.to_string());
     }
     response
