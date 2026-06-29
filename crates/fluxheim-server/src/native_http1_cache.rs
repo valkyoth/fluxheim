@@ -2458,6 +2458,13 @@ fn create_native_cache_dir_all(path: &Path) -> std::io::Result<()> {
                     &current,
                     rustix::fs::Mode::RWXU | rustix::fs::Mode::RGRP | rustix::fs::Mode::XGRP,
                 )
+                .or_else(|error| {
+                    if error == rustix::io::Errno::EXIST {
+                        Ok(())
+                    } else {
+                        Err(error)
+                    }
+                })
                 .map_err(native_rustix_to_io_error)?;
             }
             Err(error) => return Err(error),
