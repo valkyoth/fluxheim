@@ -9,9 +9,11 @@ use std::time::SystemTime;
 use percent_encoding::percent_decode_str;
 
 use crate::config::WebConfig;
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+use crate::flux_error::FluxErrorPingoraExt;
 #[cfg(feature = "proxy")]
-use crate::flux_error::{FluxError, FluxErrorPingoraExt, FluxResult};
-#[cfg(feature = "proxy")]
+use crate::flux_error::{FluxError, FluxResult};
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 use crate::http_types::PingoraResponseHeader as ResponseHeader;
 use fluxheim_web::SafeRelativePath;
 #[cfg(feature = "proxy")]
@@ -382,7 +384,7 @@ impl StaticFile {
     }
 }
 
-#[cfg(all(feature = "web", feature = "proxy"))]
+#[cfg(all(feature = "web", feature = "proxy", feature = "pingora-compat"))]
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct StaticCacheHeaders<'a> {
     pub status_header: Option<&'a str>,
@@ -430,7 +432,7 @@ pub fn plan_static_response(
     )
 }
 
-#[cfg(all(feature = "web", feature = "proxy"))]
+#[cfg(all(feature = "web", feature = "proxy", feature = "pingora-compat"))]
 pub async fn serve_static_file(
     session: &mut pingora::proxy::Session,
     server: &StaticFileServer,
@@ -441,7 +443,7 @@ pub async fn serve_static_file(
     serve_static_file_with_status(session, server, file, plan, response_policy, plan.status).await
 }
 
-#[cfg(all(feature = "web", feature = "proxy"))]
+#[cfg(all(feature = "web", feature = "proxy", feature = "pingora-compat"))]
 pub async fn serve_static_file_with_status(
     session: &mut pingora::proxy::Session,
     server: &StaticFileServer,
@@ -462,7 +464,7 @@ pub async fn serve_static_file_with_status(
     .await
 }
 
-#[cfg(all(feature = "web", feature = "proxy"))]
+#[cfg(all(feature = "web", feature = "proxy", feature = "pingora-compat"))]
 pub async fn serve_static_file_with_cache_headers(
     session: &mut pingora::proxy::Session,
     server: &StaticFileServer,
@@ -495,7 +497,7 @@ pub async fn serve_static_file_with_cache_headers(
     Ok(())
 }
 
-#[cfg(all(feature = "web", feature = "proxy"))]
+#[cfg(all(feature = "web", feature = "proxy", feature = "pingora-compat"))]
 pub async fn serve_static_file_with_body_and_cache_headers(
     session: &mut pingora::proxy::Session,
     server: &StaticFileServer,
@@ -521,7 +523,7 @@ pub async fn serve_static_file_with_body_and_cache_headers(
     Ok(())
 }
 
-#[cfg(all(feature = "web", feature = "proxy"))]
+#[cfg(all(feature = "web", feature = "proxy", feature = "pingora-compat"))]
 pub async fn serve_directory_listing(
     session: &mut pingora::proxy::Session,
     listing: &DirectoryListing,
@@ -556,7 +558,7 @@ pub async fn serve_directory_listing(
     Ok(response_body_bytes)
 }
 
-#[cfg(all(feature = "web", feature = "proxy"))]
+#[cfg(all(feature = "web", feature = "proxy", feature = "pingora-compat"))]
 pub fn build_static_response_header(
     server: &StaticFileServer,
     file: &StaticFile,
@@ -769,7 +771,7 @@ mod tests {
     use crate::config::WebConfig;
     use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
 
-    #[cfg(feature = "proxy")]
+    #[cfg(all(feature = "proxy", feature = "pingora-compat"))]
     use super::StaticCacheHeaders;
     use super::{
         ByteRangeParse, ResolveResult, StaticFile, StaticFileServer, StaticRequestConditions,
@@ -921,7 +923,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "proxy")]
+    #[cfg(all(feature = "proxy", feature = "pingora-compat"))]
     #[test]
     fn builds_static_response_headers_from_config() {
         let root = TestDir::new("static-response-headers");

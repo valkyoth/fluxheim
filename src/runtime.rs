@@ -32,10 +32,11 @@ const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
         feature = "tls-openssl"
     )
 ))]
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
 use crate::config::TlsAlpnPolicy;
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     any(
         all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
         feature = "tls-openssl"
@@ -44,13 +45,14 @@ use crate::config::TlsAlpnPolicy;
 use crate::config::{TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference};
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     any(
         all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
         feature = "tls-openssl"
     )
 ))]
 use crate::config::{TlsConfig, TlsProtocolVersion};
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
 use pingora::tls::{
     ssl::{SslVerifyMode, SslVersion},
     x509::X509Name,
@@ -95,6 +97,31 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     ) {
         return run_native_runtime(config, server_plan);
     }
+    #[cfg(not(feature = "pingora-compat"))]
+    {
+        let blockers = server_plan
+            .native_runtime_cutover_summary()
+            .blockers()
+            .iter()
+            .map(|blocker| blocker.key())
+            .collect::<Vec<_>>()
+            .join(",");
+        Err(format!(
+            "native runtime launch blocked and Pingora compatibility is not compiled; blockers={blockers}"
+        )
+        .into())
+    }
+    #[cfg(feature = "pingora-compat")]
+    {
+        run_pingora_compat_runtime(config, server_plan)
+    }
+}
+
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+fn run_pingora_compat_runtime(
+    config: Config,
+    server_plan: fluxheim_server::ServerPlan,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     log_native_runtime_cutover_summary(&server_plan);
     log_native_runtime_manifest_preview(&server_plan);
     log_native_http1_proxy_cutover_summary(&server_plan);
@@ -307,6 +334,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     server.add_service(proxy_service);
     server.run_forever();
+    Ok(())
 }
 
 #[cfg(feature = "proxy")]
@@ -373,34 +401,15 @@ async fn run_native_runtime_async(
         native_certificate_reloader.is_some(),
     )?;
     #[cfg(feature = "load-balancer")]
+    let native_load_balancer_admin_pools = native_proxy_runtime
+        .as_ref()
+        .map(fluxheim_server::NativeHttp1ProxyRuntime::load_balancer_admin_pools)
+        .unwrap_or_default();
+    #[cfg(feature = "load-balancer")]
     let native_load_balancer_services = native_proxy_runtime
         .as_mut()
         .map(fluxheim_server::NativeHttp1ProxyRuntime::take_load_balancer_services)
         .unwrap_or_default();
-    #[cfg(feature = "load-balancer")]
-    let proxy = {
-        crate::proxy::FluxProxy::from_config_with_load_balancer_resolver(
-            &config,
-            |name, _vhost, _route, proxy_config| {
-                if !native_proxy_load_balancer_pool_configured(proxy_config) {
-                    return Ok(None);
-                }
-                let service_name = format!("LB {name}");
-                match native_load_balancer_services
-                    .iter()
-                    .find(|service| service.name() == service_name)
-                {
-                    Some(service) => Ok(Some(service.load_balancer())),
-                    None => fluxheim_load_balancer::UpstreamLoadBalancer::from_proxy_config(
-                        proxy_config,
-                    ),
-                }
-            },
-        )?
-    };
-    #[cfg(not(feature = "load-balancer"))]
-    let proxy = crate::proxy::FluxProxy::from_config(&config)?;
-
     let supervisor = fluxheim_runtime::NativeBackgroundSupervisor::new();
     let mut background_handles = Vec::new();
 
@@ -437,14 +446,12 @@ async fn run_native_runtime_async(
         if let Some(task) =
             server_plan.background_task(fluxheim_runtime::BackgroundTaskKind::CacheMetrics)
         {
-            record_cache_runtime_metrics(&proxy);
+            record_cache_runtime_metrics();
             background_handles.push(
                 supervisor.spawn_service(
                     crate::background::background_service_for_spec(
                         task,
-                        CacheRuntimeMetricsBackgroundService {
-                            proxy: proxy.clone(),
-                        },
+                        CacheRuntimeMetricsBackgroundService,
                     )
                     .into_native(),
                 ),
@@ -491,7 +498,6 @@ async fn run_native_runtime_async(
                     task,
                     CacheStalePurgerBackgroundService {
                         config: config.cache_purger.clone(),
-                        proxy: proxy.clone(),
                     },
                 )
                 .into_native(),
@@ -550,8 +556,12 @@ async fn run_native_runtime_async(
 
     if let Some(admin_service_spec) =
         server_plan.service(fluxheim_server::ServiceKind::AdminControlPlane)
-        && let Some(admin_services) =
-            crate::admin::native_admin_services_from_config(&config, proxy.clone(), &server_plan)?
+        && let Some(admin_services) = crate::admin::native_admin_services_from_config(
+            &config,
+            &server_plan,
+            #[cfg(feature = "load-balancer")]
+            native_load_balancer_admin_pools,
+        )?
     {
         let app = Arc::new(admin_services.control_plane);
         for listener in
@@ -825,15 +835,7 @@ fn validate_native_http1_router_factory(
     Ok(())
 }
 
-#[cfg(all(feature = "proxy", feature = "load-balancer"))]
-fn native_proxy_load_balancer_pool_configured(proxy: &crate::config::ProxyConfig) -> bool {
-    proxy.upstreams.len() >= 2
-        || proxy.upstreams_file.is_some()
-        || proxy.upstreams_http_url.is_some()
-        || proxy.upstream_dns_refresh_secs.is_some()
-}
-
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 fn hardened_downstream_h2_options(
     policy: &fluxheim_server::DownstreamHttp2Policy,
 ) -> pingora::protocols::http::v2::server::H2Options {
@@ -847,7 +849,7 @@ fn hardened_downstream_h2_options(
     options
 }
 
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 fn harden_proxy_service_http2_options<SV>(
     service: &mut pingora::services::listening::Service<pingora::proxy::HttpProxy<SV>>,
     policy: &fluxheim_server::DownstreamHttp2Policy,
@@ -862,7 +864,7 @@ where
     Ok(())
 }
 
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 fn apply_downstream_proxy_protocol<S>(
     service: &mut pingora::services::listening::Service<S>,
     server_plan: &fluxheim_server::ServerPlan,
@@ -896,7 +898,7 @@ where
     Ok(())
 }
 
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 fn pingora_proxy_protocol_trusted_sources(
     sources: &[fluxheim_server::ProxyProtocolTrustedSource],
 ) -> Vec<pingora::listeners::ProxyProtocolTrustedSource> {
@@ -1045,9 +1047,7 @@ impl crate::background::FluxBackgroundTask for CertificateReloadControlBackgroun
 }
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
-struct CacheRuntimeMetricsBackgroundService {
-    proxy: crate::proxy::FluxProxy,
-}
+struct CacheRuntimeMetricsBackgroundService;
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
 #[async_trait::async_trait]
@@ -1065,7 +1065,7 @@ impl crate::background::FluxBackgroundTask for CacheRuntimeMetricsBackgroundServ
                 break;
             }
 
-            record_cache_runtime_metrics(&self.proxy);
+            record_cache_runtime_metrics();
             if shutdown.sleep_or_shutdown(interval).await {
                 break;
             }
@@ -1074,11 +1074,7 @@ impl crate::background::FluxBackgroundTask for CacheRuntimeMetricsBackgroundServ
 }
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
-fn record_cache_runtime_metrics(proxy: &crate::proxy::FluxProxy) {
-    match proxy.cache_runtime_stats() {
-        Ok(stats) => crate::metrics::record_cache_runtime_totals(&stats.totals),
-        Err(error) => log::debug!("cache runtime metrics unavailable: {error}"),
-    }
+fn record_cache_runtime_metrics() {
     let native_totals = fluxheim_server::native_cache_runtime_totals();
     if native_totals.memory_tiers > 0 || native_totals.disk_tiers > 0 {
         crate::metrics::record_native_cache_runtime_totals(&native_totals);
@@ -1094,7 +1090,6 @@ fn acme_background_service_enabled(config: &Config) -> bool {
 #[cfg(all(feature = "proxy", feature = "cache"))]
 struct CacheStalePurgerBackgroundService {
     config: CachePurgerConfig,
-    proxy: crate::proxy::FluxProxy,
 }
 
 #[cfg(all(feature = "proxy", feature = "cache"))]
@@ -1113,7 +1108,7 @@ impl crate::background::FluxBackgroundTask for CacheStalePurgerBackgroundService
                 break;
             }
 
-            run_cache_stale_purge_tick(&self.config, &self.proxy);
+            run_cache_stale_purge_tick(&self.config);
             if shutdown.sleep_or_shutdown(interval).await {
                 break;
             }
@@ -1122,11 +1117,11 @@ impl crate::background::FluxBackgroundTask for CacheStalePurgerBackgroundService
 }
 
 #[cfg(all(feature = "proxy", feature = "cache"))]
-fn run_cache_stale_purge_tick(config: &CachePurgerConfig, proxy: &crate::proxy::FluxProxy) {
+fn run_cache_stale_purge_tick(config: &CachePurgerConfig) {
     #[cfg(feature = "metrics")]
     let started_at = std::time::Instant::now();
 
-    match proxy.purge_stale_disk_cache_once(config.limit, config.batches) {
+    match native_stale_disk_cache_purge_once(config.limit, config.batches) {
         Ok(result) if result.targets == 0 => {
             #[cfg(feature = "metrics")]
             record_cache_stale_purge_metrics("skipped", &result, started_at.elapsed());
@@ -1180,6 +1175,14 @@ fn run_cache_stale_purge_tick(config: &CachePurgerConfig, proxy: &crate::proxy::
             log::error!("cache stale disk purge failed: {error}");
         }
     }
+}
+
+#[cfg(all(feature = "proxy", feature = "cache"))]
+fn native_stale_disk_cache_purge_once(
+    limit: usize,
+    batches: usize,
+) -> std::io::Result<fluxheim_cache::CacheBackgroundPurgeResult> {
+    fluxheim_server::purge_native_disk_cache_stale_all(limit, batches)
 }
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
@@ -1327,7 +1330,7 @@ async fn run_acme_renewal_tick(config: &Config, reloader: Option<&DownstreamCert
     }
 }
 
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 fn pingora_server_conf(
     plan: &fluxheim_server::ServerPlan,
 ) -> pingora::server::configuration::ServerConf {
@@ -1499,9 +1502,9 @@ fn log_record_json(timestamp: &str, level: &str, target: &str, message: &str) ->
 
 #[cfg(all(test, feature = "proxy"))]
 mod tests {
-    use super::{
-        harden_proxy_service_http2_options, log_record_json, open_log_file, pingora_server_conf,
-    };
+    #[cfg(feature = "pingora-compat")]
+    use super::{harden_proxy_service_http2_options, pingora_server_conf};
+    use super::{log_record_json, open_log_file};
     use crate::test_support::unique_temp_path;
 
     #[test]
@@ -1527,6 +1530,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "pingora-compat")]
     #[test]
     fn hardened_downstream_h2_options_builds_with_flow_control_caps() {
         let policy = fluxheim_server::DownstreamHttp2Policy::default();
@@ -1537,6 +1541,7 @@ mod tests {
         assert_eq!(policy.max_pending_accept_reset_streams(), 8);
     }
 
+    #[cfg(feature = "pingora-compat")]
     #[test]
     fn maps_server_process_config_to_pingora_conf() {
         let config = crate::config::Config {
@@ -1585,6 +1590,7 @@ mod tests {
         assert_eq!(pingora.graceful_shutdown_timeout_seconds, Some(30));
     }
 
+    #[cfg(feature = "pingora-compat")]
     #[test]
     fn proxy_service_installs_hardened_http2_options() {
         #[cfg(feature = "tls-rustls-backend")]
@@ -1860,7 +1866,11 @@ mod tests {
         assert!(protocols.iter().any(|protocol| protocol == b"http/1.1"));
     }
 
-    #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
+    #[cfg(all(
+        feature = "pingora-compat",
+        feature = "tls-rustls-backend",
+        not(feature = "tls-openssl")
+    ))]
     #[test]
     fn rustls_sni_resolver_can_reload_certificate_files()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -1893,6 +1903,7 @@ mod tests {
     }
 
     #[cfg(all(
+        feature = "pingora-compat",
         feature = "tls-rustls-backend",
         feature = "acme",
         not(feature = "tls-openssl")
@@ -1964,6 +1975,7 @@ mod tests {
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     any(feature = "tls-rustls-backend", feature = "tls-openssl")
 ))]
 fn add_tls_listeners<S>(
@@ -1992,7 +2004,7 @@ where
     Ok(reloader)
 }
 
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
 fn tls_alpn_policy(policy: TlsAlpnPolicy) -> pingora::protocols::ALPN {
     match policy {
         TlsAlpnPolicy::Http1 => pingora::protocols::ALPN::H1,
@@ -2003,6 +2015,7 @@ fn tls_alpn_policy(policy: TlsAlpnPolicy) -> pingora::protocols::ALPN {
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2038,6 +2051,7 @@ fn apply_tls_policy(
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2107,6 +2121,7 @@ fn rustls_client_cert_verifier(
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2125,6 +2140,7 @@ fn rustls_alpn_protocols(tls: &TlsConfig) -> Vec<Vec<u8>> {
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2137,6 +2153,7 @@ fn rustls_cipher_suite(
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2147,7 +2164,7 @@ fn rustls_kx_group(
     fluxheim_tls::rustls_kx_group(curve, fips_required).map_err(Into::into)
 }
 
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
 fn apply_tls_policy(
     settings: &mut pingora::listeners::tls::TlsSettings,
     tls: &TlsConfig,
@@ -2170,7 +2187,7 @@ fn apply_tls_policy(
     Ok(())
 }
 
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
 fn apply_openssl_client_auth(
     settings: &mut pingora::listeners::tls::TlsSettings,
     tls: &TlsConfig,
@@ -2197,12 +2214,12 @@ fn apply_openssl_client_auth(
     Ok(())
 }
 
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
 fn openssl_curve_list(curves: &[TlsCurvePreference]) -> String {
     fluxheim_tls::openssl_curve_list(curves)
 }
 
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
 fn openssl_cipher_lists(ciphers: &[TlsCipherSuite]) -> (String, String) {
     fluxheim_tls::openssl_cipher_lists(ciphers)
 }
@@ -2236,7 +2253,7 @@ impl DownstreamCertificateReloader {
     }
 }
 
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
 fn add_downstream_tls_listeners<S>(
     service: &mut pingora::services::listening::Service<S>,
     listens: &[String],
@@ -2276,7 +2293,7 @@ where
     Ok(None)
 }
 
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
 fn openssl_pending_managed_certificate_recorder() -> Option<fn()> {
     #[cfg(feature = "metrics")]
     {
@@ -2290,6 +2307,7 @@ fn openssl_pending_managed_certificate_recorder() -> Option<fn()> {
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2335,6 +2353,7 @@ type RustlsSniCertificateResolver = fluxheim_tls::RustlsDownstreamCertificateRes
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2361,6 +2380,7 @@ fn rustls_sni_certificate_resolver(
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     feature = "tls-rustls-backend",
     feature = "acme",
     not(feature = "tls-openssl")
@@ -2371,6 +2391,7 @@ fn rustls_acme_tls_alpn_enabled(tls: &TlsConfig) -> bool {
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     feature = "tls-rustls-backend",
     feature = "acme",
     not(feature = "tls-openssl")
@@ -2382,6 +2403,7 @@ struct AcmeTlsAlpnCertificateLoader {
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     feature = "tls-rustls-backend",
     feature = "acme",
     not(feature = "tls-openssl")
@@ -2403,12 +2425,12 @@ impl fluxheim_tls::RustlsTlsAlpnCertificateLoader for AcmeTlsAlpnCertificateLoad
     }
 }
 
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
 struct SharedSniCertificateCallback {
     inner: std::sync::Arc<fluxheim_tls::OpenSslDownstreamCertificateStore>,
 }
 
-#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
 #[async_trait::async_trait]
 impl pingora::listeners::TlsAccept for SharedSniCertificateCallback {
     async fn certificate_callback(&self, ssl: &mut pingora::tls::ssl::SslRef) {
@@ -2423,6 +2445,7 @@ impl pingora::listeners::TlsAccept for SharedSniCertificateCallback {
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     any(feature = "tls-rustls-backend", feature = "tls-openssl")
 ))]
 fn downstream_certificate_paths(
@@ -2442,6 +2465,7 @@ fn downstream_certificate_paths(
 
 #[cfg(all(
     feature = "proxy",
+    feature = "pingora-compat",
     not(any(feature = "tls-rustls-backend", feature = "tls-openssl"))
 ))]
 fn add_tls_listeners<S>(

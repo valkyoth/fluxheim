@@ -7,14 +7,19 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-#[cfg(unix)]
+#[cfg(all(unix, feature = "pingora-compat"))]
 use std::{fs::Permissions, os::unix::fs::PermissionsExt};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use http::{HeaderMap, Response, StatusCode, header};
+#[cfg(feature = "pingora-compat")]
+use http::Response;
+use http::{HeaderMap, StatusCode, header};
+#[cfg(feature = "pingora-compat")]
 use pingora::apps::http_app::{HttpServer, ServeHttp};
+#[cfg(feature = "pingora-compat")]
 use pingora::protocols::http::ServerSession;
+#[cfg(feature = "pingora-compat")]
 use pingora::services::listening::Service;
 use sanitization::ct::ConstantTimeEq;
 use serde::Serialize;
@@ -362,6 +367,7 @@ fn auth_source_label(source: Option<IpAddr>) -> String {
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
+#[cfg(feature = "pingora-compat")]
 pub(crate) struct AdminServices {
     pub(crate) control_plane: Service<HttpServer<AdminApp>>,
     #[cfg(unix)]
@@ -378,8 +384,10 @@ pub(crate) struct NativeAdminServices {
 
 pub(crate) fn native_admin_services_from_config(
     config: &Config,
-    proxy: FluxProxy,
     server_plan: &fluxheim_server::ServerPlan,
+    #[cfg(feature = "load-balancer")] load_balancer_admin_pools: Vec<
+        fluxheim_server::NativeLoadBalancerAdminPool,
+    >,
 ) -> Result<Option<NativeAdminServices>, Box<dyn Error + Send + Sync>> {
     if !config.admin.enabled {
         return Ok(None);
@@ -391,7 +399,14 @@ pub(crate) fn native_admin_services_from_config(
         return Err("admin.enabled requires an admin service in the server plan".into());
     }
 
-    let app = AdminApp::from_config(config, proxy)?;
+    let app = AdminApp::from_config(
+        config,
+        FluxProxy::from_config_with_native_load_balancers(
+            config,
+            #[cfg(feature = "load-balancer")]
+            load_balancer_admin_pools,
+        )?,
+    )?;
     let watchdog = if app.self_healing_enabled {
         let Some(task) =
             server_plan.background_task(crate::background::BackgroundTaskKind::RuntimeWatchdog)
@@ -424,6 +439,7 @@ pub(crate) fn native_admin_services_from_config(
     }))
 }
 
+#[cfg(feature = "pingora-compat")]
 pub(crate) fn admin_services_from_config(
     config: &Config,
     proxy: FluxProxy,
@@ -2802,6 +2818,7 @@ impl crate::background::FluxBackgroundTask for AdminApp {
     }
 }
 
+#[cfg(feature = "pingora-compat")]
 #[async_trait]
 impl ServeHttp for AdminApp {
     async fn response(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
@@ -2851,6 +2868,7 @@ impl AdminApp {
 }
 
 #[cfg(unix)]
+#[cfg(feature = "pingora-compat")]
 #[async_trait]
 impl ServeHttp for AdminOpsApp {
     async fn response(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
@@ -2895,6 +2913,7 @@ impl AdminOpsApp {
     }
 }
 
+#[cfg(feature = "pingora-compat")]
 fn admin_http_response(response: AdminResponse) -> Response<Vec<u8>> {
     let body_len = response.body.len();
     match Response::builder()
@@ -4294,11 +4313,12 @@ mod tests {
     #[cfg(any(feature = "load-balancer", feature = "udp-proxy"))]
     use serde_json::Value;
 
+    #[cfg(feature = "pingora-compat")]
+    use super::admin_services_from_config;
     use super::{
         AdminApp, AdminAuthThrottle, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
-        admin_fingerprint_list_contains, admin_services_from_config, authorized, constant_time_eq,
-        error_response, json_response, native_admin_target_parts, read_bounded_secret_file,
-        read_secret_file,
+        admin_fingerprint_list_contains, authorized, constant_time_eq, error_response,
+        json_response, native_admin_target_parts, read_bounded_secret_file, read_secret_file,
     };
     #[cfg(feature = "cache")]
     use crate::config::ByteSize;
@@ -6785,7 +6805,7 @@ mod tests {
         assert_eq!(route["peer_fill_fail_open"], true);
         assert_eq!(route["storage_tiers"], 1);
 
-        std::fs::remove_dir_all(cache_path).unwrap();
+        let _ = std::fs::remove_dir_all(cache_path);
     }
 
     #[cfg(feature = "cache")]
@@ -6857,7 +6877,7 @@ mod tests {
         assert_eq!(route["disk"]["backend"], "filesystem");
         assert_eq!(route["disk"]["entries"], 0);
 
-        std::fs::remove_dir_all(cache_path).unwrap();
+        let _ = std::fs::remove_dir_all(cache_path);
     }
 
     #[cfg(feature = "cache")]
@@ -6934,7 +6954,7 @@ mod tests {
         assert!(body.contains(r#""memory_tiers":2"#));
         assert!(body.contains(r#""disk_tiers":1"#));
 
-        std::fs::remove_dir_all(cache_path).unwrap();
+        let _ = std::fs::remove_dir_all(cache_path);
     }
 
     #[cfg(feature = "cache")]
@@ -6989,7 +7009,7 @@ mod tests {
         assert!(body.contains(r#""memory_tiers":1"#));
         assert!(body.contains(r#""disk_tiers":1"#));
 
-        std::fs::remove_dir_all(cache_path).unwrap();
+        let _ = std::fs::remove_dir_all(cache_path);
     }
 
     #[cfg(feature = "cache")]
@@ -7192,6 +7212,7 @@ mod tests {
         assert_eq!(response.status, StatusCode::BAD_REQUEST);
     }
 
+    #[cfg(feature = "pingora-compat")]
     #[test]
     fn admin_services_enable_watchdog_only_when_self_healing_is_enabled() {
         let dir = TestDir::new("admin-services-watchdog");

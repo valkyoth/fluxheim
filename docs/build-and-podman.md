@@ -140,9 +140,11 @@ scripts/validate-features.sh proxy,web,tls-rustls
 
 ## System Build Dependencies
 
-Fluxheim builds with Rust 1.96.0. The default feature set uses Pingora,
-Rustls, cache support, and static file serving. Native builds need a normal C/C++
-toolchain plus a few build helpers for transitive native code.
+Fluxheim builds with Rust 1.96.0. Starting in `1.6.34`, the default feature set
+uses the Fluxheim-owned native runtime with rustls, cache support, and static
+file serving; normal profiles no longer compile Pingora crates. Native builds
+need a normal C/C++ toolchain plus a few build helpers for transitive native
+code.
 
 Required for the default build:
 
@@ -200,8 +202,8 @@ The Alpine, Wolfi, and SUSE Micro variants build with the official Rust
 small runtime bases. The Debian variant builds with the official Rust
 `1.96.0-bookworm` image and runs on `debian:trixie-slim`.
 
-The builder installs `cmake` because Pingora's compression and TLS transitives
-compile native C code. The runtime runs as UID/GID `65532` and owns only:
+The builder installs `cmake` for native TLS/compression transitives that may
+compile C code. The runtime runs as UID/GID `65532` and owns only:
 
 - `/etc/fluxheim`
 - `/var/lib/fluxheim`
@@ -401,9 +403,8 @@ scripts/smoke_load_balancer_container.sh
 This smoke builds the `profile-load-balancer-edge,acme-client` image by
 default, starts Fluxheim with host networking, verifies HTTP active health
 checks plus round-robin/header persistence, and fails if the
-load-balancer-edge dependency tree compiles `pingora-load-balancing` or
-`pingora-ketama` or if the `fluxheim-load-balancer` crate dependency tree
-contains any Pingora crate.
+load-balancer-edge dependency tree or the `fluxheim-load-balancer` crate
+dependency tree contains any Pingora crate.
 
 Run every runtime variant smoke:
 
@@ -444,7 +445,7 @@ FreeBSD host. The expected path is a normal Fluxheim binary plus an rc.d service
 or jail deployment, not the Linux container images above.
 
 Cross-compiling from Linux to FreeBSD may be possible later, but it needs its
-own CI job because Pingora and native TLS/compression dependencies can require
+own CI job because native TLS/compression dependencies can require
 platform-specific toolchains and libraries.
 
 ## Publishing Images
@@ -470,15 +471,15 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.6.33-wolfi`, `v1.6.33-alpine`, `v1.6.33-suse-micro`, `v1.6.33-debian`
+- `v1.6.34-wolfi`, `v1.6.34-alpine`, `v1.6.34-suse-micro`, `v1.6.34-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.6.33`
-- `v1.6.33-base`
+- `v1.6.34`
+- `v1.6.34-base`
 - `latest`
 - `latest-base`
 
@@ -487,21 +488,21 @@ automation. They point at the full/default image profile.
 
 The focused image profiles publish tags with a profile segment:
 
-- `v1.6.33-cache-wolfi`, `v1.6.33-cache-alpine`,
-  `v1.6.33-cache-suse-micro`, `v1.6.33-cache-debian`
-- `v1.6.33-proxy-wolfi`, `v1.6.33-proxy-alpine`,
-  `v1.6.33-proxy-suse-micro`, `v1.6.33-proxy-debian`
-- `v1.6.33-load-balancer-wolfi`, `v1.6.33-load-balancer-alpine`,
-  `v1.6.33-load-balancer-suse-micro`, `v1.6.33-load-balancer-debian`
-- `v1.6.33-php-wolfi`, `v1.6.33-php-alpine`,
-  `v1.6.33-php-suse-micro`, `v1.6.33-php-debian`
+- `v1.6.34-cache-wolfi`, `v1.6.34-cache-alpine`,
+  `v1.6.34-cache-suse-micro`, `v1.6.34-cache-debian`
+- `v1.6.34-proxy-wolfi`, `v1.6.34-proxy-alpine`,
+  `v1.6.34-proxy-suse-micro`, `v1.6.34-proxy-debian`
+- `v1.6.34-load-balancer-wolfi`, `v1.6.34-load-balancer-alpine`,
+  `v1.6.34-load-balancer-suse-micro`, `v1.6.34-load-balancer-debian`
+- `v1.6.34-php-wolfi`, `v1.6.34-php-alpine`,
+  `v1.6.34-php-suse-micro`, `v1.6.34-php-debian`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-load-balancer-wolfi`, `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`,
   `latest-load-balancer-wolfi`, `latest-php-wolfi`, etc. when run from the
   default branch
-- Wolfi short aliases: `v1.6.33-cache`, `v1.6.33-proxy`,
-  `v1.6.33-load-balancer`, `v1.6.33-php`, `latest-cache`, `latest-proxy`,
+- Wolfi short aliases: `v1.6.34-cache`, `v1.6.34-proxy`,
+  `v1.6.34-load-balancer`, `v1.6.34-php`, `latest-cache`, `latest-proxy`,
   `latest-load-balancer`, and `latest-php`
 
 Starting with `v1.5.0`, the load-balancer image profile is part of normal tag

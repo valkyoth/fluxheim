@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.33
+Version:        1.6.34
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,18 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Mon Jun 29 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.34-1
+- Remove the final Pingora compatibility runtime from normal Fluxheim builds
+  after the native proxy-cache parity release.
+- Tighten release gates so default, full, cache-edge, proxy-edge,
+  load-balancer-edge, PHP, privacy, source, RPM, and container builds prove
+  they no longer compile Pingora crates.
+- Wire native admin cache purge, cache object lookup, stale disk-cache purge,
+  and live load-balancer stats/mutation handlers to Fluxheim-owned runtime
+  handles.
+- Keep compatibility notes focused on native HTTP/1, HTTP/2, TLS, WebSocket,
+  cache, load-balancer, admin, metrics, and background-service coverage.
+
 * Sun Jun 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.33-1
 - Add native proxy-cache memory, filesystem disk, storage-bin, local-key
   encrypted disk, OpenBao Transit encrypted disk, tiered memory+disk, peer-fill,

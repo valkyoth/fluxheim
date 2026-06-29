@@ -1,18 +1,18 @@
 pub use fluxheim_load_balancer::*;
 
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 pub(crate) struct PingoraRequestView<'a> {
     request: &'a pingora::http::RequestHeader,
 }
 
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 impl<'a> PingoraRequestView<'a> {
     pub(crate) fn new(request: &'a pingora::http::RequestHeader) -> Self {
         Self { request }
     }
 }
 
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 impl fluxheim_load_balancer::LoadBalancerRequestView for PingoraRequestView<'_> {
     fn uri_key(&self) -> Vec<u8> {
         self.request.uri.to_string().into_bytes()
@@ -39,14 +39,14 @@ impl fluxheim_load_balancer::LoadBalancerRequestView for PingoraRequestView<'_> 
     }
 }
 
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 pub(crate) struct PingoraLoadBalancerService {
     inner: fluxheim_runtime::FluxBackgroundService<
         fluxheim_load_balancer::UpstreamLoadBalancerService,
     >,
 }
 
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 impl PingoraLoadBalancerService {
     pub(crate) fn new(inner: fluxheim_load_balancer::UpstreamLoadBalancerService) -> Self {
         Self {
@@ -55,7 +55,7 @@ impl PingoraLoadBalancerService {
     }
 }
 
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 #[async_trait::async_trait]
 impl pingora::services::ServiceWithDependents for PingoraLoadBalancerService {
     async fn start_service(
@@ -86,7 +86,7 @@ impl pingora::services::ServiceWithDependents for PingoraLoadBalancerService {
     }
 }
 
-#[cfg(all(test, feature = "proxy"))]
+#[cfg(all(test, feature = "proxy", feature = "pingora-compat"))]
 mod tests {
     use fluxheim_config::ProxyConfig;
 

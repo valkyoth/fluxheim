@@ -563,6 +563,14 @@ type NativeProxyConfigBuild = (
 #[cfg(not(feature = "load-balancer"))]
 type NativeProxyConfigBuild = NativeHttp1Proxy;
 
+#[cfg(feature = "load-balancer")]
+#[derive(Clone)]
+pub struct NativeLoadBalancerAdminPool {
+    pub vhost: Arc<str>,
+    pub route: Option<Arc<str>>,
+    pub load_balancer: fluxheim_load_balancer::UpstreamLoadBalancer,
+}
+
 #[derive(Clone, Debug)]
 pub struct NativeHttp1Proxy {
     upstreams: Vec<NativeHttp1Upstream>,
@@ -989,6 +997,21 @@ impl NativeHttp1Proxy {
 
     pub const fn request_body_timeout(&self) -> Option<Duration> {
         self.request_body_timeout
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub(crate) fn load_balancer_admin_pool(
+        &self,
+        vhost: &str,
+        route: Option<&str>,
+    ) -> Option<NativeLoadBalancerAdminPool> {
+        self.load_balancer
+            .as_ref()
+            .map(|load_balancer| NativeLoadBalancerAdminPool {
+                vhost: Arc::from(vhost),
+                route: route.map(Arc::from),
+                load_balancer: load_balancer.clone(),
+            })
     }
 
     pub const fn with_request_body_timeout(mut self, timeout: Option<Duration>) -> Self {

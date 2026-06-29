@@ -7,6 +7,22 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.6.34 - Unreleased
+
+### Changed
+
+- Start the final Pingora-free proof release after native proxy-cache parity.
+- Remove the remaining Pingora compatibility runtime from normal Fluxheim
+  builds and tighten dependency-policy gates so default, full, edge, PHP,
+  privacy, RPM, source, and container release artifacts fail if they compile
+  Pingora crates.
+- Wire native admin cache purge, cache object lookup, stale disk-cache purge,
+  and live load-balancer stats/mutation handlers to the Fluxheim-owned runtime
+  handles used by traffic.
+- Keep native-runtime compatibility reporting explicit for any configuration
+  shape that still needs a future native feature instead of silently falling
+  back to a Pingora adapter.
+
 ## 1.6.33 - Unreleased
 
 ### Changed

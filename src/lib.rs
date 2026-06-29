@@ -4,19 +4,23 @@
     deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 mod access_log;
 #[cfg(feature = "acme")]
 pub mod acme;
 pub mod acme_companion;
 #[cfg(feature = "proxy")]
 pub mod admin;
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 mod auth_request;
 #[cfg(feature = "proxy")]
 mod background;
-#[cfg(feature = "cache")]
+#[cfg(all(feature = "cache", feature = "pingora-compat"))]
 pub mod cache;
+#[cfg(all(feature = "cache", not(feature = "pingora-compat")))]
+pub mod cache {
+    pub use crate::cache_api::*;
+}
 #[cfg(all(feature = "proxy", feature = "cache"))]
 mod cache_api;
 pub mod cache_headers;
@@ -26,6 +30,7 @@ pub mod cli;
     feature = "compression-gzip",
     feature = "compression-zstd"
 ))]
+#[cfg(feature = "pingora-compat")]
 mod compression;
 pub mod config {
     #[allow(unused_imports)]
@@ -124,17 +129,54 @@ pub(crate) mod config_web {
     #[allow(unused_imports)]
     pub(crate) use fluxheim_config::config_web::*;
 }
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 mod edge_policy;
-#[cfg(feature = "proxy")]
 mod flux_error;
 mod fs_trust;
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 mod geo_context;
 #[cfg(feature = "geoip")]
 pub mod geoip;
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 pub mod headers;
+#[cfg(all(feature = "proxy", not(feature = "pingora-compat")))]
+pub mod headers {
+    #[derive(Clone, Debug, Default)]
+    pub struct RequestTlsClientIdentity {
+        pub cipher: Option<String>,
+        pub version: Option<String>,
+        pub organization: Option<String>,
+        pub serial_number: Option<String>,
+        pub cert_sha256: Option<String>,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct RouteRegexCaptures {
+        numbered: Vec<Option<String>>,
+        named: std::collections::BTreeMap<String, String>,
+    }
+
+    impl RouteRegexCaptures {
+        pub fn new(
+            numbered: Vec<Option<String>>,
+            named: std::collections::BTreeMap<String, String>,
+        ) -> Self {
+            Self { numbered, named }
+        }
+
+        pub fn variable(&self, variable: &str) -> Option<&str> {
+            let key = variable.strip_prefix("route.regex.")?;
+            if key.bytes().all(|byte| byte.is_ascii_digit()) {
+                return key
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|index| self.numbered.get(index))
+                    .and_then(Option::as_deref);
+            }
+            self.named.get(key).map(String::as_str)
+        }
+    }
+}
 #[cfg(feature = "ingress")]
 mod http_types;
 pub mod internal_crypto;
@@ -146,6 +188,8 @@ pub mod metrics;
 pub mod metrics_otlp;
 #[cfg(all(feature = "web", feature = "proxy"))]
 mod native_http1_static;
+#[cfg(all(feature = "proxy", not(feature = "pingora-compat")))]
+pub mod native_proxy_shim;
 #[cfg(feature = "otel-otlp")]
 pub mod otel_otlp;
 #[cfg(feature = "metrics-otlp")]
@@ -154,14 +198,19 @@ mod otlp_http;
 mod path_safety;
 #[cfg(feature = "php-fpm")]
 pub(crate) mod php_fpm;
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 pub mod proxy;
-#[cfg(all(feature = "proxy", feature = "cache"))]
+#[cfg(all(feature = "proxy", not(feature = "pingora-compat")))]
+pub use native_proxy_shim as proxy;
+#[cfg(all(feature = "proxy", feature = "cache", feature = "pingora-compat"))]
 mod proxy_cache;
-#[cfg(any(feature = "proxy", feature = "stream-proxy"))]
+#[cfg(all(
+    any(feature = "proxy", feature = "stream-proxy"),
+    feature = "pingora-compat"
+))]
 mod proxy_protocol;
 pub mod reload;
-#[cfg(feature = "proxy")]
+#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
 mod route_policy;
 #[cfg(feature = "security")]
 pub mod security;
@@ -181,11 +230,21 @@ mod stream_tls;
 pub mod tls;
 #[cfg(feature = "otel-tracing")]
 pub mod trace_context;
-#[cfg(feature = "traffic-mirror")]
+#[cfg(all(feature = "traffic-mirror", feature = "pingora-compat"))]
 mod traffic_mirror;
 #[cfg(feature = "udp-proxy")]
 mod udp_proxy;
-#[cfg(feature = "proxy")]
+#[cfg(any(
+    all(
+        feature = "stream-proxy",
+        any(feature = "tls-rustls-backend", feature = "tls-openssl")
+    ),
+    all(
+        feature = "proxy",
+        feature = "pingora-compat",
+        any(feature = "tls-rustls-backend", feature = "tls-openssl")
+    )
+))]
 mod upstream_tls;
 #[cfg(feature = "web")]
 pub mod web;

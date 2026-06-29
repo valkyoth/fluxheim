@@ -1,4 +1,10 @@
-# Pingora Patches
+# Historical Pingora Patches
+
+Starting in Fluxheim `1.6.34`, normal Fluxheim builds no longer compile
+Pingora crates and `Cargo.toml` no longer carries Pingora patch overrides. This
+document is retained as historical context for the `1.5.x` and earlier `1.6.x`
+compatibility-runtime line and should not be read as an active dependency
+policy for current release profiles.
 
 Fluxheim vendors `pingora-core 0.8.0` for a small set of narrow proxy/TLS
 compatibility fixes required by the default `tls-rustls` build and the `1.4`

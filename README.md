@@ -132,7 +132,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Load-balancer module split | ✅ | `1.5.0`; health checks, backend state, persistence, selection algorithms, backend policy/status, and file/DNS discovery are split into focused `load_balancer/*` modules while keeping `crate::load_balancer::*` stable. |
 | Apple Silicon macOS dev builds | ✅ | `1.4.4`; Level 1 developer support with Mac-safe runtime paths while some upstream macOS support remains experimental. |
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional `geoip` feature with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. |
-| Pingora-free runtime | 🚧 | Planned as the `1.6.x` priority line: remove Pingora from every normal Fluxheim build by replacing server/listener/TLS and HTTP proxy runtime boundaries with Fluxheim-owned Rust crates. |
+| Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
 | HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.8` protocol milestone using the Rust `quinn`/`h3` stack after the `1.6` Pingora-free runtime is stable. |
 | WASM policy hooks | ❌ | Planned for the later `1.7` extensibility line. |
 
@@ -145,9 +145,8 @@ Apple Silicon developer workflow.
 
 - **Rust first**: memory-safe implementation with a pinned stable toolchain.
 - **Production edge core**: Fluxheim owns the config, security, operations,
-  load-balancer, cache, PHP-FPM, stream, and observability model, with the
-  remaining Pingora runtime internals being replaced by project-owned Rust
-  crates across the `1.6` roadmap.
+  load-balancer, cache, PHP-FPM, stream, observability, and HTTP runtime model
+  through project-owned Rust crates.
 - **Modular builds**: compile only the modules needed for a deployment.
 - **Secure defaults**: strict config validation, request limits, safe filesystem
   handling, dependency policy, and no hidden legacy protocol fallback.
@@ -296,11 +295,10 @@ Recommended profile features:
 | `profile-fips-rustls` | `proxy`, `security`, `tls-rustls-fips` | rustls/AWS-LC FIPS-capable candidate build. |
 | `profile-iso19790-rustls` | `profile-fips-rustls` | ISO/IEC 19790 terminology alias for the same rustls/AWS-LC candidate path. |
 
-The remaining Pingora compatibility runtime is selected explicitly through the
-internal `pingora-compat` feature, which is currently pulled in by `proxy`.
-Starting in `1.6.20`, `web,tls-rustls` and `web,tls-openssl` are release-gate
-checked as native TLS-only dependency proofs and do not compile Pingora crates,
-but they are not yet the production static-site runtime profile.
+Starting in `1.6.34`, normal Fluxheim profiles no longer compile Pingora
+crates. The internal `pingora-compat` feature name remains only as a
+source-quarantine cfg for legacy adapter code while the dead source is removed;
+it is not part of any supported release profile.
 
 Fluxheim 1.3 started the focused image split. The `profile-cache-edge` and
 `profile-proxy-edge` aliases are TLS-capable without compiling local static web
@@ -344,8 +342,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.6.33-wolfi`, `v1.6.33-cache-wolfi`, `v1.6.33-proxy-wolfi`,
-`v1.6.33-load-balancer-wolfi`, and `v1.6.33-php-wolfi`.
+`v1.6.34-wolfi`, `v1.6.34-cache-wolfi`, `v1.6.34-proxy-wolfi`,
+`v1.6.34-load-balancer-wolfi`, and `v1.6.34-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the

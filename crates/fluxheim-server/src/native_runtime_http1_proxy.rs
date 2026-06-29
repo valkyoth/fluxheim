@@ -43,6 +43,8 @@ pub struct NativeHttp1ProxyRuntime {
     listeners: Vec<NativeHttp1ProxyRuntimeListener>,
     #[cfg(feature = "load-balancer")]
     load_balancer_services: Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
+    #[cfg(feature = "load-balancer")]
+    load_balancer_admin_pools: Vec<crate::NativeLoadBalancerAdminPool>,
     #[cfg(feature = "tls-rustls-backend")]
     rustls_config: Option<Arc<rustls::ServerConfig>>,
     #[cfg(feature = "tls-rustls-backend")]
@@ -205,7 +207,7 @@ impl NativeHttp1ProxyRuntime {
         launch_plan: &NativeRuntimeLaunchPlan,
     ) -> Result<Self, NativeHttp1ProxyRuntimeError> {
         #[cfg(feature = "load-balancer")]
-        let (router, load_balancer_services) =
+        let (router, load_balancer_services, load_balancer_admin_pools) =
             NativeHttp1HostRouter::from_config_with_native_load_balancer_services(
                 config,
                 launch_plan.downstream_http1(),
@@ -307,6 +309,8 @@ impl NativeHttp1ProxyRuntime {
             listeners,
             #[cfg(feature = "load-balancer")]
             load_balancer_services,
+            #[cfg(feature = "load-balancer")]
+            load_balancer_admin_pools,
             #[cfg(feature = "tls-rustls-backend")]
             rustls_config,
             #[cfg(feature = "tls-rustls-backend")]
@@ -342,6 +346,11 @@ impl NativeHttp1ProxyRuntime {
         &mut self,
     ) -> Vec<fluxheim_load_balancer::UpstreamLoadBalancerService> {
         std::mem::take(&mut self.load_balancer_services)
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn load_balancer_admin_pools(&self) -> Vec<crate::NativeLoadBalancerAdminPool> {
+        self.load_balancer_admin_pools.clone()
     }
 
     #[cfg(feature = "tls-rustls-backend")]

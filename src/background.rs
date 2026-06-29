@@ -1,7 +1,10 @@
+#[cfg(feature = "pingora-compat")]
 use async_trait::async_trait;
-#[cfg(unix)]
+#[cfg(all(feature = "pingora-compat", unix))]
 use pingora::server::ListenFds;
+#[cfg(feature = "pingora-compat")]
 use pingora::server::ShutdownWatch;
+#[cfg(feature = "pingora-compat")]
 use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 
 pub(crate) use fluxheim_runtime::{
@@ -52,6 +55,7 @@ where
     FluxBackgroundService::with_kind(spec.name(), spec.kind(), task)
 }
 
+#[cfg(feature = "pingora-compat")]
 #[async_trait]
 impl<T> ServiceWithDependents for FluxBackgroundService<T>
 where

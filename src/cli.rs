@@ -651,22 +651,22 @@ fn validate_php_module_absent(config: &Config) -> Result<(), Box<dyn Error + Sen
 pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     validate_compiled_module_config(config)?;
     validate_fips_runtime_config(config)?;
+    #[cfg(feature = "web")]
+    validate_web_runtime_config(config)?;
     crate::proxy::FluxProxy::from_config(config)?;
     #[cfg(feature = "stream-proxy")]
     crate::stream_proxy::stream_services_from_config(config)?;
     Ok(())
 }
 
-#[cfg(all(feature = "web", not(feature = "proxy")))]
-pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
-    validate_compiled_module_config(config)?;
-    validate_fips_runtime_config(config)?;
-    validate_web_runtime_config("global web", &config.web)?;
+#[cfg(feature = "web")]
+fn validate_web_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    validate_web_runtime_scope("global web", &config.web)?;
     for vhost in &config.vhosts {
-        validate_web_runtime_config(&format!("vhost {:?} web", vhost.name), &vhost.web)?;
+        validate_web_runtime_scope(&format!("vhost {:?} web", vhost.name), &vhost.web)?;
         for route in &vhost.routes {
             if let Some(web) = &route.web {
-                validate_web_runtime_config(
+                validate_web_runtime_scope(
                     &format!("vhost {:?} route {:?} web", vhost.name, route.name),
                     web,
                 )?;
@@ -677,7 +677,15 @@ pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Se
 }
 
 #[cfg(all(feature = "web", not(feature = "proxy")))]
-fn validate_web_runtime_config(
+pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    validate_compiled_module_config(config)?;
+    validate_fips_runtime_config(config)?;
+    validate_web_runtime_config(config)?;
+    Ok(())
+}
+
+#[cfg(feature = "web")]
+fn validate_web_runtime_scope(
     scope: &str,
     config: &crate::config::WebConfig,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {

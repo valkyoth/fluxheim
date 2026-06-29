@@ -63,13 +63,16 @@ pub use native_http1_cache::{
     NativeDiskCacheObjectMetadata, inspect_native_disk_cache_object,
     purge_native_disk_cache_path_exact, purge_native_disk_cache_path_pattern,
     purge_native_disk_cache_path_prefix, purge_native_disk_cache_primary,
-    purge_native_disk_cache_stale, purge_native_disk_cache_tag, purge_native_disk_cache_user_tag,
+    purge_native_disk_cache_stale, purge_native_disk_cache_stale_all, purge_native_disk_cache_tag,
+    purge_native_disk_cache_user_tag,
 };
 pub use native_http1_client::{NativeHttp1Upstream, NativeTcpKeepalivePolicy};
 pub use native_http1_host_router::{NativeHttp1HostRouter, NativeHttp1HostRouterConfigError};
 pub use native_http1_plan::{
     NativeHttp1ProxyCandidate, NativeHttp1ProxyCutoverStatus, NativeHttp1ProxyCutoverSummary,
 };
+#[cfg(feature = "load-balancer")]
+pub use native_http1_proxy::NativeLoadBalancerAdminPool;
 pub use native_http1_proxy::{
     NativeCacheMetricsRecorder, NativeCacheRuntimeTotals, NativeHttp1Proxy,
     NativeHttp1ProxyConfigError, NativeProxyMetricsRecorder, install_native_cache_metrics_recorder,

@@ -12,13 +12,13 @@ use fluxheim_cache::purge_index::{
     CacheIndexedPurgeResult, CachePurgeIndexEntry, CacheStalePurgeResult,
 };
 use fluxheim_cache::{
-    CacheObjectFreshnessState, CachePurgeIndex, DiskCacheObjectKey, DiskTierPlan,
-    STORAGE_BIN_DATA_DIR, STORAGE_BIN_MANIFEST_FILENAME, SerializedCacheObject, StorageBinFileSet,
-    StorageBinFreeMap, StorageBinIndexEntry, StorageBinLayoutPlan, StorageBinObjectLocation,
-    VaryRequestHashField, collect_cache_tags, encode_disk_cache_object, parse_disk_cache_object,
-    prepare_storage_bin_layout, read_storage_bin_index, remaining_fresh_ttl_secs,
-    response_age_secs, response_cache_control_max_age, vary_request_hash_material,
-    write_storage_bin_index,
+    CacheBackgroundPurgeResult, CacheObjectFreshnessState, CachePurgeIndex, DiskCacheObjectKey,
+    DiskTierPlan, STORAGE_BIN_DATA_DIR, STORAGE_BIN_MANIFEST_FILENAME, SerializedCacheObject,
+    StorageBinFileSet, StorageBinFreeMap, StorageBinIndexEntry, StorageBinLayoutPlan,
+    StorageBinObjectLocation, VaryRequestHashField, collect_cache_tags, encode_disk_cache_object,
+    parse_disk_cache_object, prepare_storage_bin_layout, read_storage_bin_index,
+    remaining_fresh_ttl_secs, response_age_secs, response_cache_control_max_age,
+    vary_request_hash_material, write_storage_bin_index,
 };
 use fluxheim_config::{
     CacheConfig, CacheDiskBackend, CacheDiskEncryptionConfig, CacheDiskEncryptionProvider,
@@ -1402,6 +1402,57 @@ pub fn purge_native_disk_cache_stale(
     })
 }
 
+pub fn purge_native_disk_cache_stale_all(
+    limit: usize,
+    batches: usize,
+) -> std::io::Result<CacheBackgroundPurgeResult> {
+    if limit == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "cache stale disk purge limit must be greater than zero",
+        ));
+    }
+    if batches == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "cache stale disk purge batches must be greater than zero",
+        ));
+    }
+    let Some(registry) = NATIVE_DISK_CACHE_PURGE_REGISTRY.get() else {
+        return Ok(CacheBackgroundPurgeResult::default());
+    };
+    let mut registry = match registry.lock() {
+        Ok(registry) => registry,
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::native_http1",
+                "native disk cache purge registry mutex poisoned: {error}"
+            );
+            std::process::abort();
+        }
+    };
+    let mut result = CacheBackgroundPurgeResult::default();
+    registry.retain(|handle| {
+        let Some(cache) = handle.cache.upgrade() else {
+            return false;
+        };
+        result.targets = result.targets.saturating_add(1);
+        let user_tag = native_disk_cache_user_tag(handle.vhost.as_ref(), handle.route.as_deref());
+        for _ in 0..batches {
+            let batch = cache.purge_stale(&user_tag, limit, false);
+            result.scanned = result.scanned.saturating_add(batch.scanned);
+            result.stale = result.stale.saturating_add(batch.stale);
+            result.purged = result.purged.saturating_add(batch.purged);
+            result.truncated |= batch.truncated;
+            if !batch.truncated {
+                break;
+            }
+        }
+        true
+    });
+    Ok(result)
+}
+
 fn purge_native_disk_cache(
     vhost: &str,
     route: Option<&str>,
@@ -1503,6 +1554,12 @@ fn purge_native_disk_cache_stale_indexed(
         true
     });
     result
+}
+
+fn native_disk_cache_user_tag(vhost: &str, route: Option<&str>) -> String {
+    route
+        .map(|route| format!("{vhost}:route:{route}"))
+        .unwrap_or_else(|| vhost.to_owned())
 }
 
 fn native_inspection_vary_cache_key(
