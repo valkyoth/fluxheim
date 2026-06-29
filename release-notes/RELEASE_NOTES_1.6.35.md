@@ -30,6 +30,8 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
   behavior.
 - Align the legacy cache OpenBao token holder with the native cache token
   migration so both cache code paths use `sanitization::SecretString`.
+- Move admin bearer-token digest clearing from the `zeroize` derive path to an
+  explicit `sanitization::SecureSanitize` drop implementation.
 - Fix the release version-bump helper so package versions such as `1.6.35` are
   not interpreted as regex backreferences during automated metadata updates.
 - Keep dependency, metadata, container, RPM, and smoke-test gates as blocking

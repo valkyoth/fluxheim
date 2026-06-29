@@ -31,6 +31,8 @@ behavior when the change improves security or project direction.
   `sanitization::SecretString`.
 - Align the legacy cache OpenBao token holder with the native cache token
   migration.
+- Move admin bearer-token digest clearing from `ZeroizeOnDrop` to an explicit
+  `sanitization::SecureSanitize` drop implementation.
 
 ## 1.6.34 - 2026-06-29
 

@@ -21,10 +21,10 @@ use pingora::apps::http_app::{HttpServer, ServeHttp};
 use pingora::protocols::http::ServerSession;
 #[cfg(any())]
 use pingora::services::listening::Service;
-use sanitization::ct::ConstantTimeEq;
+use sanitization::{SecureSanitize, ct::ConstantTimeEq};
 use serde::Serialize;
 use serde_json::{Value, json};
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::config::{AdminAuthThrottleConfig, AdminConfig, AdminHealthResponseMode, Config};
 #[cfg(feature = "load-balancer")]
@@ -110,11 +110,10 @@ enum AdminClientCertificateHeader {
     Invalid,
 }
 
-#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone)]
 struct AdminToken {
     len: usize,
     digest: [u8; 32],
-    #[zeroize(skip)]
     mac_provider: crate::internal_crypto::AdminMacProvider,
 }
 
@@ -127,6 +126,13 @@ impl AdminToken {
             digest: digest_admin_token(token.as_bytes(), mac_provider),
             mac_provider,
         }
+    }
+}
+
+impl Drop for AdminToken {
+    fn drop(&mut self) {
+        self.len = 0;
+        self.digest.secure_sanitize();
     }
 }
 
