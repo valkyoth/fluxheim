@@ -301,7 +301,10 @@ fn route_proxy_from_config(
             )
         }
     }?;
-    Ok(route_proxy.with_https_redirect(config.server.https_redirect))
+    let route_proxy = route_proxy.with_https_redirect(config.server.https_redirect);
+    #[cfg(feature = "otel-tracing")]
+    let route_proxy = route_proxy.with_trace_config(&config.tracing);
+    Ok(route_proxy)
 }
 
 fn default_proxy(

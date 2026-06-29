@@ -119,6 +119,17 @@ memory+disk tiering for ordinary HTTP/1 proxy responses.
   arithmetic, suppressing duplicate stale-while-revalidate refresh tasks per
   cache key before task allocation, and avoiding full predictor-counter table
   scans on the hot miss path.
+- Hardened native cache admin purge parity by adding a Fluxheim-owned native
+  memory-cache purge index and wiring exact, bulk, prefix, tag, wildcard,
+  route-scope, and stale purge operations through live native memory state as
+  well as disk state. The proxy-cache smoke now proves those purges cannot
+  leave a native memory `HIT` or `STALE` response behind while the origin is
+  stopped.
+- Closed native observability parity gaps found during the final release gate:
+  native HTTP/1 proxy requests now regenerate forwarded `traceparent` span IDs,
+  record proxy request counters, expose native cache memory/disk runtime gauges,
+  and publish native cache lookup duration histograms through the existing
+  Prometheus metrics surface.
 
 ## Compatibility Notes
 
@@ -167,8 +178,12 @@ memory+disk tiering for ordinary HTTP/1 proxy responses.
 - `cargo test -p fluxheim-server native_route_proxy_tiered_cache_refills_memory_from_disk --locked`
 - `cargo test -p fluxheim-server native_route_proxy_peer_fills_and_stores_memory_cache_response --locked`
 - `cargo test -p fluxheim-server static_cache_expiry_rejects_unrepresentable_ttl --locked`
-- `cargo test -p fluxheim-server native_route_proxy_ --locked`
+- `cargo test -p fluxheim-server native_route_proxy_regenerates_forwarded_traceparent_span_id --features otel-tracing --locked`
 - `cargo test -p fluxheim-server --features acme,tls-rustls-backend native_http1_proxy_runtime_accepts_default_vhost_acme_certificate_source --locked`
-- `cargo test -p fluxheim-server native_route_proxy_accepts_ --locked`
 - `cargo test -p fluxheim-server native_http1_plan --locked`
 - `cargo check -p fluxheim-server --all-features --locked`
+- `cargo check -p fluxheim --features profile-observability --locked`
+- `sh scripts/smoke_observability_local.sh`
+- `sh scripts/smoke_proxy_cache.sh`
+- `scripts/podman_smoke.sh`
+- `scripts/stable_release_gate.sh check`

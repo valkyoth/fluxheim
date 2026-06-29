@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.6.32"
+version = "1.6.33"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -141,7 +141,7 @@ metrics-otlp = [
     "fluxheim-observability/otlp-http",
     "fluxheim-observability/otlp-metrics",
 ]
-otel-tracing = ["proxy", "fluxheim-config/otel-tracing"]
+otel-tracing = ["proxy", "fluxheim-config/otel-tracing", "fluxheim-server/otel-tracing"]
 otel-otlp = [
     "otel-tracing",
     "dep:serde_json",

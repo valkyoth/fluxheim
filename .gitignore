@@ -1,5 +1,5 @@
 # Rust build output
-/target/
+target/
 /fuzz/target/
 /fuzz/artifacts/
 /fuzz/corpus/

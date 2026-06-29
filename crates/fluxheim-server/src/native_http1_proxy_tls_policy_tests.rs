@@ -6,6 +6,7 @@ fn native_proxy_config_rejects_mixed_static_ip_tls_without_sni() {
         upstreams: vec!["localhost:3000".to_owned(), "127.0.0.1:3001".to_owned()],
         upstream_tls: true,
         upstream_verify_cert: true,
+        load_balance: static_load_balance_without_health_check(),
         ..Default::default()
     };
 
@@ -13,6 +14,16 @@ fn native_proxy_config_rejects_mixed_static_ip_tls_without_sni() {
         NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default()),
         Err(NativeHttp1ProxyConfigError::UpstreamTlsPolicy)
     );
+}
+
+fn static_load_balance_without_health_check() -> fluxheim_config::LoadBalanceConfig {
+    fluxheim_config::LoadBalanceConfig {
+        health_check: fluxheim_config::LoadBalanceHealthCheckConfig {
+            enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
 }
 
 #[test]

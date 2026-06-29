@@ -81,6 +81,19 @@ pub(crate) struct NativeDiskCache {
     state: Mutex<NativeDiskCacheState>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct NativeDiskCacheStats {
+    pub(crate) entries: u64,
+    pub(crate) size_bytes: u64,
+    pub(crate) allocated_size_bytes: u64,
+    pub(crate) free_size_bytes: u64,
+    pub(crate) free_range_count: u64,
+    pub(crate) largest_free_range_bytes: u64,
+    pub(crate) bin_files: u64,
+    pub(crate) max_size_bytes: u64,
+    pub(crate) purge_index_entries: u64,
+}
+
 #[derive(Debug)]
 enum NativeDiskCacheBackend {
     Filesystem,
@@ -302,6 +315,46 @@ impl NativeDiskCache {
             );
         }
         Some(cache)
+    }
+
+    pub(crate) fn stats(&self) -> NativeDiskCacheStats {
+        let (entries, size_bytes, weighted_size_bytes) = self.with_state(|state| {
+            (
+                state.objects.len() as u64,
+                state.bytes,
+                state
+                    .objects
+                    .values()
+                    .fold(0_u64, |total, record| total.saturating_add(record.weight)),
+            )
+        });
+        let mut stats = NativeDiskCacheStats {
+            entries,
+            size_bytes,
+            allocated_size_bytes: weighted_size_bytes,
+            free_size_bytes: self.max_bytes.saturating_sub(size_bytes),
+            largest_free_range_bytes: self.max_bytes.saturating_sub(size_bytes),
+            max_size_bytes: self.max_bytes,
+            ..NativeDiskCacheStats::default()
+        };
+        if let NativeDiskCacheBackend::StorageBin(storage_bin) = &self.backend {
+            let free_map = match storage_bin.free_map.lock() {
+                Ok(free_map) => free_map,
+                Err(error) => {
+                    log::error!(
+                        target: "fluxheim::security",
+                        "native disk cache storage-bin free-map mutex poisoned: {error}"
+                    );
+                    std::process::abort();
+                }
+            };
+            stats.allocated_size_bytes = free_map.allocated_size_bytes();
+            stats.free_size_bytes = free_map.free_size_bytes();
+            stats.free_range_count = free_map.free_range_count();
+            stats.largest_free_range_bytes = free_map.largest_free_range_bytes();
+            stats.bin_files = free_map.bin_files();
+        }
+        stats
     }
 
     pub(crate) fn get(

@@ -90,6 +90,8 @@ pub struct NativeHttp1RouteProxy {
     concurrency: NativeConcurrencyLimit,
     max_request_body_bytes: Option<u64>,
     https_redirect: HttpsRedirectConfig,
+    #[cfg(feature = "otel-tracing")]
+    trace_propagation: NativeTracePropagation,
     #[cfg(not(feature = "privacy-mode"))]
     trusted_sources: Vec<ProxyProtocolTrustedSource>,
 }
@@ -381,6 +383,23 @@ impl PartialEq for NativeConcurrencyLimit {
 }
 
 impl Eq for NativeConcurrencyLimit {}
+
+#[cfg(feature = "otel-tracing")]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct NativeTracePropagation {
+    enabled: bool,
+    traceparent: bool,
+}
+
+#[cfg(feature = "otel-tracing")]
+impl NativeTracePropagation {
+    const fn from_config(config: &fluxheim_config::TracingConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            traceparent: config.traceparent,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeHttp1RouteProxyConfigError {
@@ -889,6 +908,8 @@ impl NativeHttp1RouteProxy {
             concurrency: NativeConcurrencyLimit::default(),
             max_request_body_bytes: None,
             https_redirect: HttpsRedirectConfig::default(),
+            #[cfg(feature = "otel-tracing")]
+            trace_propagation: NativeTracePropagation::default(),
             #[cfg(not(feature = "privacy-mode"))]
             trusted_sources: Vec::new(),
         }
@@ -953,6 +974,10 @@ impl NativeHttp1RouteProxy {
         let mut proxy = Self::new(Vec::new(), fallback);
         proxy.fallback_web = fallback_web;
         proxy.https_redirect = config.server.https_redirect;
+        #[cfg(feature = "otel-tracing")]
+        {
+            proxy.trace_propagation = NativeTracePropagation::from_config(&config.tracing);
+        }
         proxy.fallback_response_headers =
             NativeRouteResponseHeaderPolicy::from_policy(&config.headers.response);
         #[cfg(any(
@@ -976,6 +1001,15 @@ impl NativeHttp1RouteProxy {
 
     pub(crate) fn with_https_redirect(mut self, https_redirect: HttpsRedirectConfig) -> Self {
         self.https_redirect = https_redirect;
+        self
+    }
+
+    #[cfg(feature = "otel-tracing")]
+    pub(crate) const fn with_trace_config(
+        mut self,
+        tracing: &fluxheim_config::TracingConfig,
+    ) -> Self {
+        self.trace_propagation = NativeTracePropagation::from_config(tracing);
         self
     }
 
@@ -1049,6 +1083,10 @@ impl NativeHttp1RouteProxy {
             load_balancer_services,
         )?;
         proxy.https_redirect = config.server.https_redirect;
+        #[cfg(feature = "otel-tracing")]
+        {
+            proxy.trace_propagation = NativeTracePropagation::from_config(&config.tracing);
+        }
         if let Some(route) = native_managed_http_01_route(config, vhost, base_headers)? {
             proxy.routes.insert(0, route);
         }
@@ -1233,6 +1271,8 @@ impl NativeHttp1RouteProxy {
             concurrency,
             max_request_body_bytes: vhost.max_request_body_bytes.map(|bytes| bytes.as_u64()),
             https_redirect: HttpsRedirectConfig::default(),
+            #[cfg(feature = "otel-tracing")]
+            trace_propagation: NativeTracePropagation::default(),
             #[cfg(not(feature = "privacy-mode"))]
             trusted_sources: trusted_sources.to_vec(),
         })
@@ -1264,6 +1304,7 @@ fn native_proxy_from_config_collecting_load_balancer(
         let Some((proxy, service)) = result else {
             return Ok(None);
         };
+        let proxy = proxy.with_metrics_scope(vhost, route);
         if let (Some(services), Some(service)) = (load_balancer_services, service) {
             services.push(service);
         }
@@ -1271,8 +1312,9 @@ fn native_proxy_from_config_collecting_load_balancer(
     }
     #[cfg(not(feature = "load-balancer"))]
     {
-        let _ = (name, vhost, route);
+        let _ = name;
         NativeHttp1Proxy::from_proxy_config_with_pool_size(proxy, policy, pool_max_idle)
+            .map(|proxy| proxy.map(|proxy| proxy.with_metrics_scope(vhost, route)))
             .map_err(NativeHttp1RouteProxyConfigError::Proxy)
     }
 }
@@ -2115,7 +2157,7 @@ fn route_native_cache_supported(
 impl NativeHttp1Handler for NativeHttp1RouteProxy {
     fn handle<'a>(
         &'a self,
-        request: NativeHttp1Request,
+        mut request: NativeHttp1Request,
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>> {
         Box::pin(async move {
             let Some((path, query)) = request_path_and_query(&request) else {
@@ -2211,6 +2253,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .close_connection();
                 }
                 let header_context = NativeRequestHeaderTemplateContext::from_route(route, &path);
+                self.apply_traceparent(&mut request);
                 route
                     .request_headers
                     .apply(&mut request, Some(&header_context));
@@ -2224,6 +2267,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 return php.handle(request).await;
             }
             if let Some(proxy) = &self.fallback {
+                self.apply_traceparent(&mut request);
                 return proxy.handle(request).await;
             }
             NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection()
@@ -2513,6 +2557,49 @@ impl NativeHttp1RouteProxy {
             direct_ip
         }
     }
+
+    #[cfg(feature = "otel-tracing")]
+    fn apply_traceparent(&self, request: &mut NativeHttp1Request) {
+        let inbound = request
+            .headers
+            .iter()
+            .find(|(name, value)| {
+                name.eq_ignore_ascii_case("traceparent") && !value.trim().is_empty()
+            })
+            .map(|(_, value)| value.trim().to_owned());
+        request
+            .headers
+            .retain(|(name, _)| !name.eq_ignore_ascii_case("traceparent"));
+        if !self.trace_propagation.enabled || !self.trace_propagation.traceparent {
+            return;
+        }
+        let trusted_peer = self.trace_trusted_peer(request);
+        if let Some(trace_context) =
+            fluxheim_observability::context_from_traceparent(inbound.as_deref(), trusted_peer)
+        {
+            request
+                .headers
+                .push(("traceparent".to_owned(), trace_context.to_traceparent()));
+        }
+    }
+
+    #[cfg(feature = "otel-tracing")]
+    fn trace_trusted_peer(&self, request: &NativeHttp1Request) -> bool {
+        #[cfg(not(feature = "privacy-mode"))]
+        {
+            request
+                .peer_addr
+                .is_some_and(|addr| self.trusted_source_contains(addr.ip()))
+        }
+        #[cfg(feature = "privacy-mode")]
+        {
+            let _ = request;
+            false
+        }
+    }
+
+    #[cfg(not(feature = "otel-tracing"))]
+    fn apply_traceparent(&self, _request: &mut NativeHttp1Request) {}
 
     #[cfg(not(feature = "privacy-mode"))]
     fn trusted_source_contains(&self, address: IpAddr) -> bool {

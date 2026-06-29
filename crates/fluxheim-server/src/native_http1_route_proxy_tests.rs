@@ -481,6 +481,55 @@ async fn upstream_expect_header(
     addr
 }
 
+#[cfg(feature = "otel-tracing")]
+async fn upstream_echo_header(
+    expected_path: &'static str,
+    header: &'static str,
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(request).unwrap();
+        assert!(
+            request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
+            "unexpected upstream request: {request:?}"
+        );
+        let value = request
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case(header)
+                    .then(|| value.trim().to_owned())
+            })
+            .unwrap_or_default();
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
+                    value.len(),
+                    value
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    addr
+}
+
 #[cfg(feature = "privacy-mode")]
 async fn upstream_expect_headers_absent(
     expected_path: &'static str,
@@ -2368,6 +2417,40 @@ async fn native_route_proxy_applies_route_request_headers_before_forwarding() {
 
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.ends_with("headers"));
+}
+
+#[cfg(feature = "otel-tracing")]
+#[tokio::test]
+async fn native_route_proxy_regenerates_forwarded_traceparent_span_id() {
+    let trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
+    let inbound_span_id = "00f067aa0ba902b7";
+    let inbound_traceparent = format!("00-{trace_id}-{inbound_span_id}-01");
+    let upstream = upstream_echo_header("/api/trace", "traceparent").await;
+    let route = NativeHttp1RouteProxyRoute::prefix("/api/", Vec::new(), proxy_for(upstream));
+    let tracing = fluxheim_config::TracingConfig {
+        enabled: true,
+        mode: fluxheim_config::TracingMode::PropagateOnly,
+        traceparent: true,
+        log_trace_id: true,
+        otlp: Default::default(),
+    };
+    let proxy = route_proxy_listener(
+        NativeHttp1RouteProxy::new(vec![route], None).with_trace_config(&tracing),
+    )
+    .await;
+
+    let response = downstream_request(
+        proxy,
+        &format!(
+            "GET /api/trace HTTP/1.1\r\nHost: route.test\r\nConnection: close\r\ntraceparent: {inbound_traceparent}\r\n\r\n"
+        ),
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("-00"));
+    assert!(response.contains(&format!("00-{trace_id}-")));
+    assert!(!response.contains(inbound_span_id));
 }
 
 #[tokio::test]

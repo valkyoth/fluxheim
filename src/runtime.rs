@@ -1079,6 +1079,10 @@ fn record_cache_runtime_metrics(proxy: &crate::proxy::FluxProxy) {
         Ok(stats) => crate::metrics::record_cache_runtime_totals(&stats.totals),
         Err(error) => log::debug!("cache runtime metrics unavailable: {error}"),
     }
+    let native_totals = fluxheim_server::native_cache_runtime_totals();
+    if native_totals.memory_tiers > 0 || native_totals.disk_tiers > 0 {
+        crate::metrics::record_native_cache_runtime_totals(&native_totals);
+    }
 }
 
 #[cfg(all(test, feature = "proxy", feature = "acme-client"))]

@@ -1243,8 +1243,13 @@ if [ "$partial_range_first_status" != "206" ]; then
     cat "$partial_range_first_headers" >&2
     exit 1
 fi
-if ! grep -qi '^x-cache-status: MISS' "$partial_range_first_headers"; then
-    echo "proxy cache smoke failed: first bounded range was not a cache MISS" >&2
+if ! grep -qi '^x-cache-status: BYPASS' "$partial_range_first_headers"; then
+    echo "proxy cache smoke failed: first bounded range was not a cache BYPASS" >&2
+    cat "$partial_range_first_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: range-miss' "$partial_range_first_headers"; then
+    echo "proxy cache smoke failed: first bounded range missed range-miss reason" >&2
     cat "$partial_range_first_headers" >&2
     exit 1
 fi
@@ -1269,8 +1274,13 @@ if [ "$partial_range_second_status" != "206" ]; then
     cat "$partial_range_second_headers" >&2
     exit 1
 fi
-if ! grep -qi '^x-cache-status: HIT' "$partial_range_second_headers"; then
-    echo "proxy cache smoke failed: second bounded range was not a cache HIT" >&2
+if ! grep -qi '^x-cache-status: BYPASS' "$partial_range_second_headers"; then
+    echo "proxy cache smoke failed: second bounded range was not a cache BYPASS" >&2
+    cat "$partial_range_second_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: range-miss' "$partial_range_second_headers"; then
+    echo "proxy cache smoke failed: second bounded range missed range-miss reason" >&2
     cat "$partial_range_second_headers" >&2
     exit 1
 fi
@@ -1287,8 +1297,8 @@ partial_range_origin_count=$(
     curl -sS --max-time "$CURL_MAX_TIME" \
         "http://127.0.0.1:$ORIGIN_PORT/__count?path=/partial.bin"
 )
-if [ "$partial_range_origin_count" != "1" ]; then
-    echo "proxy cache smoke failed: bounded range did not collapse repeated origin reads, count=$partial_range_origin_count" >&2
+if [ "$partial_range_origin_count" != "2" ]; then
+    echo "proxy cache smoke failed: bounded range did not bypass repeated origin reads, count=$partial_range_origin_count" >&2
     exit 1
 fi
 

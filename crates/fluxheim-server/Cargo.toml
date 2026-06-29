@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-server"
-version = "1.6.32"
+version = "1.6.33"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -18,6 +18,7 @@ compression-brotli = ["compression", "fluxheim-compression/brotli"]
 compression-gzip = ["compression", "fluxheim-compression/gzip"]
 compression-zstd = ["compression", "fluxheim-compression/zstd"]
 load-balancer = ["dep:fluxheim-load-balancer"]
+otel-tracing = ["dep:fluxheim-observability", "fluxheim-config/otel-tracing"]
 php-fpm = ["dep:fastcgi-client", "dep:fluxheim-php-fpm", "tokio/fs"]
 tls-rustls-backend = ["dep:fluxheim-tls", "dep:rustls", "dep:rustls-native-certs", "dep:tokio-rustls", "fluxheim-tls/tls-rustls-backend", "rustls/ring"]
 tls-rustls = ["tls-rustls-backend", "fluxheim-tls/tls-rustls", "rustls/ring"]
@@ -36,6 +37,7 @@ fluxheim-compression = { path = "../fluxheim-compression", optional = true }
 fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-headers = { path = "../fluxheim-headers" }
 fluxheim-load-balancer = { path = "../fluxheim-load-balancer", optional = true }
+fluxheim-observability = { path = "../fluxheim-observability", optional = true }
 fluxheim-php-fpm = { path = "../fluxheim-php-fpm", optional = true }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-runtime = { path = "../fluxheim-runtime" }

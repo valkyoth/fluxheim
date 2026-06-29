@@ -95,6 +95,15 @@ behavior when the change improves security or project direction.
   arithmetic, suppressing duplicate stale-while-revalidate refresh tasks per
   cache key before task spawn, and avoiding full predictor-counter table scans
   on the hot miss path.
+- Harden native cache admin purge parity by adding a Fluxheim-owned native
+  memory-cache purge index and wiring exact, bulk, prefix, tag, wildcard,
+  route-scope, and stale purges through live native memory state as well as
+  disk state. The proxy-cache smoke now fails if a purge leaves a native memory
+  `HIT` or `STALE` response behind while the origin is stopped.
+- Close native observability parity gaps by regenerating forwarded
+  `traceparent` span IDs, recording native proxy request counters, exporting
+  native cache memory/disk runtime gauges, and publishing native cache lookup
+  duration histograms through the Prometheus metrics surface.
 
 ## 1.6.32 - 2026-06-28
 

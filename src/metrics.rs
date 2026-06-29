@@ -611,6 +611,49 @@ pub fn record_cache_runtime_totals(totals: &crate::proxy::CacheRuntimeTotals) {
     );
 }
 
+pub fn record_native_cache_runtime_totals(totals: &fluxheim_server::NativeCacheRuntimeTotals) {
+    set_gauge(cache_memory_entries(), totals.memory_entries);
+    set_gauge(
+        cache_memory_weighted_size_bytes(),
+        totals.memory_weighted_size_bytes,
+    );
+    set_gauge(cache_memory_max_size_bytes(), totals.memory_max_size_bytes);
+    set_gauge(cache_memory_tiers(), totals.memory_tiers);
+    set_gauge(
+        cache_memory_purge_index_entries(),
+        totals.memory_purge_index_entries,
+    );
+    set_gauge(
+        cache_memory_fill_ratio_per_mille(),
+        ratio_per_mille(
+            totals.memory_weighted_size_bytes,
+            totals.memory_max_size_bytes,
+        ),
+    );
+    set_gauge(cache_disk_entries(), totals.disk_entries);
+    set_gauge(cache_disk_size_bytes(), totals.disk_size_bytes);
+    set_gauge(
+        cache_disk_allocated_size_bytes(),
+        totals.disk_allocated_size_bytes,
+    );
+    set_gauge(cache_disk_free_size_bytes(), totals.disk_free_size_bytes);
+    set_gauge(cache_disk_free_range_count(), totals.disk_free_range_count);
+    set_gauge(
+        cache_disk_largest_free_range_bytes(),
+        totals.disk_largest_free_range_bytes,
+    );
+    set_gauge(cache_disk_bin_files(), totals.disk_bin_files);
+    set_gauge(cache_disk_max_size_bytes(), totals.disk_max_size_bytes);
+    set_gauge(
+        cache_disk_fill_ratio_per_mille(),
+        ratio_per_mille(totals.disk_size_bytes, totals.disk_max_size_bytes),
+    );
+    set_gauge(
+        cache_disk_purge_index_entries(),
+        totals.disk_purge_index_entries,
+    );
+}
+
 pub fn record_proxy_outcome(vhost: &str, method: &str, status: Option<u16>, error: bool) {
     match proxy_requests_total() {
         Ok(counter) => counter
@@ -871,12 +914,36 @@ impl fluxheim_server::NativeCacheMetricsRecorder for NativeCachePrometheusRecord
     fn record_activity_scope(&self, vhost: &str, route: Option<&str>, tier: &str, event: &str) {
         record_cache_activity_scope(vhost, route, tier, event);
     }
+
+    fn record_operation_duration(
+        &self,
+        vhost: &str,
+        route: Option<&str>,
+        phase: &str,
+        operation: &str,
+        duration: Duration,
+    ) {
+        record_cache_operation_duration(vhost, route, phase, operation, duration);
+    }
+}
+
+#[cfg(feature = "proxy")]
+struct NativeProxyPrometheusRecorder;
+
+#[cfg(feature = "proxy")]
+impl fluxheim_server::NativeProxyMetricsRecorder for NativeProxyPrometheusRecorder {
+    fn record_outcome(&self, vhost: &str, method: &str, status: u16) {
+        record_proxy_outcome(vhost, method, Some(status), false);
+    }
 }
 
 #[cfg(feature = "proxy")]
 pub fn install_native_cache_metrics_recorder() {
     let _ = fluxheim_server::install_native_cache_metrics_recorder(Arc::new(
         NativeCachePrometheusRecorder,
+    ));
+    let _ = fluxheim_server::install_native_proxy_metrics_recorder(Arc::new(
+        NativeProxyPrometheusRecorder,
     ));
 }
 

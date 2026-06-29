@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.32
+Version:        1.6.33
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,13 +154,16 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
-* Sun Jun 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.32-1
-- Harden native HTTP/2 stream error isolation, WebSocket upgrade handling, and
-  native metrics bearer-token comparison.
-- Tighten native load-balancer Ketama compatibility checks and collision
-  diagnostics.
-- Extend Pingora dependency cutover enforcement for manifest-only compatibility
-  dependencies.
+* Sun Jun 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.33-1
+- Add native proxy-cache memory, filesystem disk, storage-bin, local-key
+  encrypted disk, OpenBao Transit encrypted disk, tiered memory+disk, peer-fill,
+  stale, range, slice, lock, predictor, min-use, and load-balanced cache parity.
+- Harden native cache admin purge parity so exact, bulk, prefix, tag, wildcard,
+  route-scope, and stale purges invalidate live native memory state as well as
+  disk state.
+- Extend proxy-cache smoke coverage for native memory/disk purge, tiering,
+  encryption, OpenBao, peer-fill, range, slice, stale, metrics, and restart
+  behavior.
 
 * Wed Jun 24 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.31-1
 - Move cache/PHP native integration primitives into Fluxheim-owned crates and

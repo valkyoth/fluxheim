@@ -69,11 +69,12 @@ pub use native_http1_plan::{
     NativeHttp1ProxyCandidate, NativeHttp1ProxyCutoverStatus, NativeHttp1ProxyCutoverSummary,
 };
 pub use native_http1_proxy::{
-    NativeCacheMetricsRecorder, NativeHttp1Proxy, NativeHttp1ProxyConfigError,
-    install_native_cache_metrics_recorder, purge_native_memory_cache_path_pattern,
-    purge_native_memory_cache_path_prefix, purge_native_memory_cache_primary,
-    purge_native_memory_cache_stale, purge_native_memory_cache_tag,
-    purge_native_memory_cache_user_tag,
+    NativeCacheMetricsRecorder, NativeCacheRuntimeTotals, NativeHttp1Proxy,
+    NativeHttp1ProxyConfigError, NativeProxyMetricsRecorder, install_native_cache_metrics_recorder,
+    install_native_proxy_metrics_recorder, native_cache_runtime_totals,
+    purge_native_memory_cache_path_pattern, purge_native_memory_cache_path_prefix,
+    purge_native_memory_cache_primary, purge_native_memory_cache_stale,
+    purge_native_memory_cache_tag, purge_native_memory_cache_user_tag,
 };
 pub use native_http1_route_proxy::{
     NativeHttp1RouteProxy, NativeHttp1RouteProxyConfigError, NativeHttp1RouteProxyRoute,
