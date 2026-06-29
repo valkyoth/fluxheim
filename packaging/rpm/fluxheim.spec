@@ -163,6 +163,8 @@ fi
   toward Fluxheim's sanitization crate where practical.
 - Move legacy auth subrequest forwarded-header secret storage onto
   sanitization::SecretString.
+- Move native auth-request forwarded and allowed response-header secret storage
+  onto sanitization::SecretString.
 - Keep RPM, container, dependency-policy, native-runtime, and smoke-test gates
   as blocking evidence during stabilization.
 

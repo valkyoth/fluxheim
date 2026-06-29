@@ -10,7 +10,7 @@ description = "Internal Fluxheim listener and server boundary types."
 [features]
 default = []
 acme = []
-auth-request = ["dep:ureq"]
+auth-request = ["dep:sanitization", "dep:ureq", "sanitization/alloc"]
 openbao-cache-encryption = ["dep:serde_json", "dep:ureq", "ureq/json"]
 privacy-mode = []
 compression = ["dep:fluxheim-compression"]

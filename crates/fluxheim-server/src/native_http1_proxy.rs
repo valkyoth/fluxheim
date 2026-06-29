@@ -53,6 +53,8 @@ use fluxheim_cache::{
     selected_cache_slice_range_request, vary_request_hash_material,
 };
 use fluxheim_config::{CacheConfig, CacheStaleErrorKind};
+#[cfg(feature = "auth-request")]
+use sanitization::SecretString;
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 use sanitization::ct::ConstantTimeEq;
 use tokio::sync::Notify;
@@ -773,7 +775,7 @@ struct NativeAuthRequest {
 #[derive(Debug)]
 enum NativeAuthRequestDecision {
     Allow {
-        headers: Vec<(String, zeroize::Zeroizing<String>)>,
+        headers: Vec<(String, SecretString)>,
     },
     Deny {
         status: u16,
@@ -784,7 +786,7 @@ enum NativeAuthRequestDecision {
 #[cfg(feature = "auth-request")]
 #[derive(Debug)]
 struct NativeAuthRequestInput {
-    headers: Vec<(String, zeroize::Zeroizing<String>)>,
+    headers: Vec<(String, SecretString)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -4224,7 +4226,7 @@ impl NativeAuthRequest {
             if let Some(value) = native_auth_context_header_value(name, request)
                 .or_else(|| native_request_header_values_joined_for_auth(request, name))
             {
-                headers.push((name.clone(), zeroize::Zeroizing::new(value)));
+                headers.push((name.clone(), SecretString::from_string(value)));
             }
         }
         NativeAuthRequestInput { headers }
@@ -4242,7 +4244,9 @@ impl NativeAuthRequest {
             .into();
         let mut builder = agent.get(&self.url).header("cache-control", "no-store");
         for (name, value) in &input.headers {
-            builder = builder.header(name.as_str(), value.as_str());
+            builder = value
+                .try_with_secret(|value| builder.header(name.as_str(), value))
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         }
         let mut response = builder
             .call()
@@ -4290,7 +4294,7 @@ impl NativeAuthRequest {
     fn allowed_response_headers(
         &self,
         response: &ureq::http::Response<ureq::Body>,
-    ) -> Vec<(String, zeroize::Zeroizing<String>)> {
+    ) -> Vec<(String, SecretString)> {
         response
             .headers()
             .iter()
@@ -4305,7 +4309,7 @@ impl NativeAuthRequest {
                 value.to_str().ok().map(|value| {
                     (
                         name.as_str().to_ascii_lowercase(),
-                        zeroize::Zeroizing::new(value.to_owned()),
+                        SecretString::from_secret_str(value),
                     )
                 })
             })
@@ -4352,10 +4356,17 @@ fn native_auth_context_header_value(name: &str, request: &NativeHttp1Request) ->
 #[cfg(feature = "auth-request")]
 fn apply_native_auth_request_headers(
     request: &mut NativeHttp1Request,
-    headers: &[(String, zeroize::Zeroizing<String>)],
+    headers: &[(String, SecretString)],
 ) {
     for (name, value) in headers {
-        native_request_replace_header(request, name, value);
+        if let Err(error) =
+            value.try_with_secret(|value| native_request_replace_header(request, name, value))
+        {
+            log::warn!(
+                target: "fluxheim::auth_request",
+                "skipping invalid UTF-8 auth_request response header value: {error}"
+            );
+        }
     }
 }
 

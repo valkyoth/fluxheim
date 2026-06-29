@@ -19,6 +19,8 @@ behavior when the change improves security or project direction.
   `zeroize` usage for practical migration to Fluxheim's `sanitization` crate.
 - Move legacy root auth subrequest forwarded-header secrets from direct
   `zeroize::Zeroizing<String>` wrappers to `sanitization::SecretString`.
+- Move native auth-request forwarded and allowed response-header secrets to
+  `sanitization::SecretString`.
 
 ## 1.6.34 - 2026-06-29
 
