@@ -5658,13 +5658,14 @@ fn cache_object_header_values_from_meta(
     values
 }
 
-#[cfg(feature = "proxy")]
+#[allow(dead_code)]
 fn system_time_unix_secs(time: std::time::SystemTime) -> Option<u64> {
     time.duration_since(std::time::UNIX_EPOCH)
         .ok()
         .map(|duration| duration.as_secs())
 }
 
+#[allow(dead_code)]
 fn stale_purge_now_unix_secs(now: std::time::SystemTime) -> u64 {
     match system_time_unix_secs(now) {
         Some(now_unix_secs) => now_unix_secs,
