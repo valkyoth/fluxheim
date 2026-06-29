@@ -1,18 +1,18 @@
 # path	reason
 # crates/fluxheim-tls intentionally has no entry: TLS policy/planning must stay Pingora-free.
-src/admin.rs	Current Pingora admin HTTP app/listener adapter until native admin runtime cutover.
-src/background.rs	Current Pingora background service/shutdown adapter until native task supervisor cutover.
-src/cache.rs	Temporary Pingora cache storage adapter; removed with native cache/runtime cutover.
-src/compression.rs	Temporary Pingora response adapter for compression errors.
-src/flux_error.rs	Narrow Fluxheim-to-Pingora error conversion boundary.
-src/headers.rs	Current Pingora request/response header mutation adapter until native HTTP cutover.
-src/http_types.rs	Narrow Pingora request/response header type aliases during HTTP runtime migration.
-src/load_balancer.rs	Narrow request-header adapter for load-balancer request view.
-src/proxy.rs	Current Pingora ProxyHttp runtime adapter until native HTTP cutover.
-src/proxy_cache.rs	Current Pingora cache request/response adapter until native cache/runtime cutover.
-src/proxy_protocol.rs	Current Pingora L4 connector adapter for HTTP upstream PROXY protocol.
-src/runtime.rs	Current Pingora server/listener/TLS bootstrap adapter until native runtime cutover.
-src/stream_proxy.rs	Current Pingora service wrapper for the Fluxheim-owned stream proxy until native service supervisor cutover.
-src/udp_proxy.rs	Current Pingora service wrapper for the beta UDP proxy until native service supervisor cutover.
-src/upstream_tls.rs	Current Pingora upstream TLS material adapter until native upstream connector cutover.
-src/web.rs	Current Pingora session adapter for static web responses until native HTTP cutover.
+src/admin.rs	Quarantined legacy Pingora admin adapter source; not compiled by supported profiles.
+src/background.rs	Quarantined legacy Pingora background-service adapter source; not compiled by supported profiles.
+src/cache.rs	Quarantined legacy Pingora cache storage adapter source; not compiled by supported profiles.
+src/compression.rs	Quarantined legacy Pingora compression response adapter source; not compiled by supported profiles.
+src/flux_error.rs	Quarantined legacy Fluxheim-to-Pingora error conversion source; not compiled by supported profiles.
+src/headers.rs	Quarantined legacy Pingora request/response header adapter source; not compiled by supported profiles.
+src/http_types.rs	Quarantined legacy Pingora request/response header aliases; not compiled by supported profiles.
+src/load_balancer.rs	Quarantined legacy Pingora request-view/background-service adapter source; not compiled by supported profiles.
+src/proxy.rs	Quarantined legacy Pingora ProxyHttp runtime adapter source; not compiled by supported profiles.
+src/proxy_cache.rs	Quarantined legacy Pingora cache request/response adapter source; not compiled by supported profiles.
+src/proxy_protocol.rs	Quarantined legacy Pingora L4 connector adapter source; not compiled by supported profiles.
+src/runtime.rs	Quarantined legacy Pingora server/listener/TLS bootstrap adapter source; not compiled by supported profiles.
+src/stream_proxy.rs	Quarantined legacy Pingora service wrapper source; not compiled by supported profiles.
+src/udp_proxy.rs	Quarantined legacy Pingora service wrapper source; not compiled by supported profiles.
+src/upstream_tls.rs	Quarantined legacy Pingora upstream TLS material adapter source; not compiled by supported profiles.
+src/web.rs	Quarantined legacy Pingora session adapter source; not compiled by supported profiles.
