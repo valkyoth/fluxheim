@@ -15,6 +15,12 @@ pub mod storage;
 pub mod storage_bin;
 pub mod tags;
 
+pub fn cache_user_tag(vhost: &str, route: Option<&str>) -> String {
+    route
+        .map(|route| format!("{vhost}:route:{route}"))
+        .unwrap_or_else(|| vhost.to_owned())
+}
+
 pub use api::{
     CacheActivityResetResult, CacheActivityStats, CacheBackgroundPurgeResult,
     CacheBulkPurgeRequest, CacheBulkPurgeResult, CacheIndexedPathPatternPurgeRequest,

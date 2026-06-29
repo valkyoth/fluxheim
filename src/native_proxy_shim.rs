@@ -458,7 +458,7 @@ impl FluxProxy {
             let slice_limit = usize::try_from(cache_config.range.slice.max_slices)
                 .unwrap_or(usize::MAX.saturating_sub(4))
                 .saturating_add(4);
-            let user_tag = native_cache_user_tag(&result.vhost, result.route.as_deref());
+            let user_tag = fluxheim_cache::cache_user_tag(&result.vhost, result.route.as_deref());
             let native_memory = fluxheim_server::purge_native_memory_cache_path_exact(
                 &result.vhost,
                 result.route.as_deref(),
@@ -516,7 +516,7 @@ impl FluxProxy {
         request: CacheIndexedPurgeRequest<'_>,
     ) -> io::Result<CacheIndexedPurgeResult> {
         self.validate_indexed_cache_purge_request(request.vhost, request.route, request.limit)?;
-        let user_tag = native_cache_user_tag(request.vhost, request.route);
+        let user_tag = fluxheim_cache::cache_user_tag(request.vhost, request.route);
         let memory = fluxheim_server::purge_native_memory_cache_user_tag(
             request.vhost,
             request.route,
@@ -551,7 +551,7 @@ impl FluxProxy {
                 "cache indexed path-prefix purge requires a non-root path prefix",
             ));
         }
-        let user_tag = native_cache_user_tag(request.vhost, request.route);
+        let user_tag = fluxheim_cache::cache_user_tag(request.vhost, request.route);
         let memory = fluxheim_server::purge_native_memory_cache_path_prefix(
             request.vhost,
             request.route,
@@ -588,7 +588,7 @@ impl FluxProxy {
                 "cache tag purge requires a non-empty cache tag",
             ));
         }
-        let user_tag = native_cache_user_tag(request.vhost, request.route);
+        let user_tag = fluxheim_cache::cache_user_tag(request.vhost, request.route);
         let memory = fluxheim_server::purge_native_memory_cache_tag(
             request.vhost,
             request.route,
@@ -619,7 +619,7 @@ impl FluxProxy {
         request: CacheStalePurgeRequest<'_>,
     ) -> io::Result<CacheStalePurgeResult> {
         self.validate_indexed_cache_purge_request(request.vhost, request.route, request.limit)?;
-        let user_tag = native_cache_user_tag(request.vhost, request.route);
+        let user_tag = fluxheim_cache::cache_user_tag(request.vhost, request.route);
         let memory = fluxheim_server::purge_native_memory_cache_stale(
             request.vhost,
             request.route,
@@ -668,7 +668,7 @@ impl FluxProxy {
                 "cache indexed wildcard purge requires a non-root absolute path pattern",
             ));
         }
-        let user_tag = native_cache_user_tag(request.vhost, request.route);
+        let user_tag = fluxheim_cache::cache_user_tag(request.vhost, request.route);
         let memory = fluxheim_server::purge_native_memory_cache_path_pattern(
             request.vhost,
             request.route,
@@ -692,13 +692,6 @@ impl FluxProxy {
             disk,
         ))
     }
-}
-
-#[cfg(feature = "cache")]
-fn native_cache_user_tag(vhost: &str, route: Option<&str>) -> String {
-    route
-        .map(|route| format!("{vhost}:route:{route}"))
-        .unwrap_or_else(|| vhost.to_owned())
 }
 
 #[cfg(feature = "cache")]

@@ -1437,7 +1437,8 @@ pub fn purge_native_disk_cache_stale_all(
             return false;
         };
         result.targets = result.targets.saturating_add(1);
-        let user_tag = native_disk_cache_user_tag(handle.vhost.as_ref(), handle.route.as_deref());
+        let user_tag =
+            fluxheim_cache::cache_user_tag(handle.vhost.as_ref(), handle.route.as_deref());
         for _ in 0..batches {
             let batch = cache.purge_stale(&user_tag, limit, false);
             result.scanned = result.scanned.saturating_add(batch.scanned);
@@ -1554,12 +1555,6 @@ fn purge_native_disk_cache_stale_indexed(
         true
     });
     result
-}
-
-fn native_disk_cache_user_tag(vhost: &str, route: Option<&str>) -> String {
-    route
-        .map(|route| format!("{vhost}:route:{route}"))
-        .unwrap_or_else(|| vhost.to_owned())
 }
 
 fn native_inspection_vary_cache_key(
