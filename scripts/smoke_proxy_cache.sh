@@ -819,7 +819,11 @@ swr_third_headers="$TMP_DIR/swr-third.headers"
 stale_error_first_headers="$TMP_DIR/stale-error-first.headers"
 stale_error_second_headers="$TMP_DIR/stale-error-second.headers"
 restart_headers="$TMP_DIR/restart.headers"
+post_prefix_purge_headers="$TMP_DIR/post-prefix-purge.headers"
+post_tag_purge_headers="$TMP_DIR/post-tag-purge.headers"
+post_wildcard_purge_headers="$TMP_DIR/post-wildcard-purge.headers"
 post_exact_purge_headers="$TMP_DIR/post-exact-purge.headers"
+post_route_purge_headers="$TMP_DIR/post-route-purge.headers"
 body="$TMP_DIR/body.bin"
 range_body="$TMP_DIR/range-body.bin"
 partial_range_body="$TMP_DIR/partial-range-body.bin"
@@ -2165,6 +2169,23 @@ fi
     --path /warm-vary.png \
     --expect-objects 0
 
+post_prefix_purge_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$post_prefix_purge_headers" -o "$body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Accept-Language: de" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/warm-vary.png" 2>/dev/null || true
+)
+if grep -qi '^x-cache-status: HIT' "$post_prefix_purge_headers"; then
+    echo "proxy cache smoke failed: admin prefix purge left native memory cache HIT behind" >&2
+    cat "$post_prefix_purge_headers" >&2
+    exit 1
+fi
+if [ "$post_prefix_purge_status" = "200" ]; then
+    echo "proxy cache smoke failed: admin prefix purge served warmed object while origin was stopped" >&2
+    cat "$post_prefix_purge_headers" >&2
+    exit 1
+fi
+
 if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_tag_purge_body" \
     -H "Authorization: Bearer secret-token" \
     "http://127.0.0.1:$ADMIN_PORT/_fluxheim/cache/purge-tag?vhost=cache.test&cache_tag=smoke:input-warm&limit=16"; then
@@ -2193,6 +2214,22 @@ fi
     --path /input-warm.png \
     --expect-objects 0
 
+post_tag_purge_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$post_tag_purge_headers" -o "$body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/input-warm.png" 2>/dev/null || true
+)
+if grep -qi '^x-cache-status: HIT' "$post_tag_purge_headers"; then
+    echo "proxy cache smoke failed: admin tag purge left native memory cache HIT behind" >&2
+    cat "$post_tag_purge_headers" >&2
+    exit 1
+fi
+if [ "$post_tag_purge_status" = "200" ]; then
+    echo "proxy cache smoke failed: admin tag purge served tagged object while origin was stopped" >&2
+    cat "$post_tag_purge_headers" >&2
+    exit 1
+fi
+
 if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_wildcard_purge_body" \
     -H "Authorization: Bearer secret-token" \
     "http://127.0.0.1:$ADMIN_PORT/_fluxheim/cache/purge-wildcard?vhost=cache.test&pattern=/missing*.png&limit=16"; then
@@ -2220,6 +2257,22 @@ fi
     --host cache.test \
     --path /missing.png \
     --expect-objects 0
+
+post_wildcard_purge_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$post_wildcard_purge_headers" -o "$body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/missing.png" 2>/dev/null || true
+)
+if grep -qi '^x-cache-status: HIT' "$post_wildcard_purge_headers"; then
+    echo "proxy cache smoke failed: admin wildcard purge left native memory cache HIT behind" >&2
+    cat "$post_wildcard_purge_headers" >&2
+    exit 1
+fi
+if [ "$post_wildcard_purge_status" = "404" ]; then
+    echo "proxy cache smoke failed: admin wildcard purge served cached missing object while origin was stopped" >&2
+    cat "$post_wildcard_purge_headers" >&2
+    exit 1
+fi
 
 if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_bulk_purge_body" \
     -H "Authorization: Bearer secret-token" \
@@ -2332,6 +2385,22 @@ fi
     --expect-vhost cache.test \
     --expect-route swr \
     --expect-objects 0
+
+post_route_purge_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$post_route_purge_headers" -o "$body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/swr.png" 2>/dev/null || true
+)
+if grep -Eiq '^x-cache-status: (HIT|STALE)' "$post_route_purge_headers"; then
+    echo "proxy cache smoke failed: admin route purge left native memory route cache behind" >&2
+    cat "$post_route_purge_headers" >&2
+    exit 1
+fi
+if [ "$post_route_purge_status" = "200" ]; then
+    echo "proxy cache smoke failed: admin route purge served route object while origin was stopped" >&2
+    cat "$post_route_purge_headers" >&2
+    exit 1
+fi
 
 curl -sS --max-time "$CURL_MAX_TIME" -o "$metrics_body" \
     "http://127.0.0.1:$METRICS_PORT/metrics"

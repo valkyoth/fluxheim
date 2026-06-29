@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fluxheim_cache::{
-    CacheObjectFreshnessState, DiskCacheObjectKey, DiskTierPlan, STORAGE_BIN_DATA_DIR,
-    STORAGE_BIN_MANIFEST_FILENAME, SerializedCacheObject, StorageBinFileSet, StorageBinFreeMap,
-    StorageBinIndexEntry, StorageBinLayoutPlan, StorageBinObjectLocation, VaryRequestHashField,
-    collect_cache_tags, encode_disk_cache_object, parse_disk_cache_object,
+    CacheObjectFreshnessState, CachePurgeIndex, DiskCacheObjectKey, DiskTierPlan,
+    STORAGE_BIN_DATA_DIR, STORAGE_BIN_MANIFEST_FILENAME, SerializedCacheObject, StorageBinFileSet,
+    StorageBinFreeMap, StorageBinIndexEntry, StorageBinLayoutPlan, StorageBinObjectLocation,
+    VaryRequestHashField, collect_cache_tags, encode_disk_cache_object, parse_disk_cache_object,
     prepare_storage_bin_layout, read_storage_bin_index, remaining_fresh_ttl_secs,
     response_age_secs, response_cache_control_max_age, vary_request_hash_material,
     write_storage_bin_index,
@@ -63,6 +63,7 @@ pub struct NativeDiskCacheObjectMetadata {
 pub(crate) struct NativeMemoryCacheState {
     pub(crate) objects: HashMap<String, NativeMemoryCacheEntry>,
     pub(crate) variants: HashMap<String, Vec<NativeMemoryCacheVariant>>,
+    pub(crate) purge_index: CachePurgeIndex,
     pub(crate) min_uses: HashMap<String, NativeMemoryCacheCounter>,
     pub(crate) cache_pass: HashMap<String, NativeMemoryCacheCounter>,
     pub(crate) revalidating: HashSet<String>,
@@ -2191,6 +2192,7 @@ pub(crate) fn remove_native_memory_cache_entry(
 ) -> Option<NativeMemoryCacheEntry> {
     let removed = state.objects.remove(key);
     if removed.is_some() {
+        state.purge_index.remove_combined(key);
         prune_native_memory_cache_variants_for_key(state, key);
     }
     removed
@@ -2207,6 +2209,7 @@ pub(crate) fn remove_native_memory_cache_variants(
         let Some(entry) = state.objects.remove(&variant.key) else {
             return removed_bytes;
         };
+        state.purge_index.remove_combined(&variant.key);
         removed_bytes.saturating_add(entry.weight)
     })
 }

@@ -37,6 +37,9 @@ use crate::{
     NativeHttp1Response, NativeHttp1ResponseWritePolicy, NativeHttp1StaticWeb, NativeHttp1Upstream,
     NativeTcpKeepalivePolicy,
 };
+use fluxheim_cache::purge_index::{
+    CacheIndexedPurgeResult, CachePurgeIndexEntry, CacheStalePurgeResult,
+};
 use fluxheim_cache::{
     CacheRangeRequest, CacheRequest, CacheRequestView, CacheSliceBounds, CacheStaleEvent,
     VaryCachePolicy, VaryRequestHashField, cache_key_with_component,
@@ -119,6 +122,222 @@ pub fn purge_native_memory_cache_primary(
         true
     });
     purged
+}
+
+pub fn purge_native_memory_cache_user_tag(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    limit: usize,
+    soft: bool,
+) -> CacheIndexedPurgeResult {
+    purge_native_memory_cache_indexed(vhost, route, |state| {
+        let entries = state.purge_index.entries_for_user_tag(user_tag, limit);
+        purge_native_memory_indexed_entries(state, entries, soft)
+    })
+}
+
+pub fn purge_native_memory_cache_path_prefix(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    path_prefix: &str,
+    limit: usize,
+    soft: bool,
+) -> CacheIndexedPurgeResult {
+    purge_native_memory_cache_indexed(vhost, route, |state| {
+        let entries =
+            state
+                .purge_index
+                .entries_for_user_tag_path_prefix(user_tag, path_prefix, limit);
+        purge_native_memory_indexed_entries(state, entries, soft)
+    })
+}
+
+pub fn purge_native_memory_cache_tag(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    cache_tag: &str,
+    limit: usize,
+    soft: bool,
+) -> CacheIndexedPurgeResult {
+    purge_native_memory_cache_indexed(vhost, route, |state| {
+        let entries = state
+            .purge_index
+            .entries_for_user_tag_cache_tag(user_tag, cache_tag, limit);
+        purge_native_memory_indexed_entries(state, entries, soft)
+    })
+}
+
+pub fn purge_native_memory_cache_path_pattern(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    path_pattern: &str,
+    limit: usize,
+    soft: bool,
+) -> CacheIndexedPurgeResult {
+    purge_native_memory_cache_indexed(vhost, route, |state| {
+        let entries =
+            state
+                .purge_index
+                .entries_for_user_tag_path_pattern(user_tag, path_pattern, limit);
+        purge_native_memory_indexed_entries(state, entries, soft)
+    })
+}
+
+pub fn purge_native_memory_cache_stale(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    limit: usize,
+    dry_run: bool,
+) -> CacheStalePurgeResult {
+    purge_native_memory_cache_stale_indexed(vhost, route, |state| {
+        let entries = state.purge_index.entries_for_user_tag(user_tag, limit);
+        purge_native_memory_stale_entries(state, entries, dry_run)
+    })
+}
+
+fn purge_native_memory_cache_indexed(
+    vhost: &str,
+    route: Option<&str>,
+    mut purge: impl FnMut(&mut NativeMemoryCacheState) -> CacheIndexedPurgeResult,
+) -> CacheIndexedPurgeResult {
+    let Some(registry) = NATIVE_MEMORY_CACHE_PURGE_REGISTRY.get() else {
+        return CacheIndexedPurgeResult::default();
+    };
+    let mut registry = match registry.lock() {
+        Ok(registry) => registry,
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::native_http1",
+                "native memory cache purge registry mutex poisoned: {error}"
+            );
+            std::process::abort();
+        }
+    };
+    let mut result = CacheIndexedPurgeResult::default();
+    registry.retain(|handle| {
+        let Some(state) = handle.state.upgrade() else {
+            return false;
+        };
+        if handle.vhost.as_ref() != vhost || handle.route.as_deref() != route {
+            return true;
+        }
+        let mut state = lock_native_memory_cache(&state, "proxy purge");
+        let scoped = purge(&mut state);
+        result.matched = result.matched.saturating_add(scoped.matched);
+        result.purged = result.purged.saturating_add(scoped.purged);
+        result.truncated |= scoped.truncated;
+        true
+    });
+    result
+}
+
+fn purge_native_memory_cache_stale_indexed(
+    vhost: &str,
+    route: Option<&str>,
+    mut purge: impl FnMut(&mut NativeMemoryCacheState) -> CacheStalePurgeResult,
+) -> CacheStalePurgeResult {
+    let Some(registry) = NATIVE_MEMORY_CACHE_PURGE_REGISTRY.get() else {
+        return CacheStalePurgeResult::default();
+    };
+    let mut registry = match registry.lock() {
+        Ok(registry) => registry,
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::native_http1",
+                "native memory cache purge registry mutex poisoned: {error}"
+            );
+            std::process::abort();
+        }
+    };
+    let mut result = CacheStalePurgeResult::default();
+    registry.retain(|handle| {
+        let Some(state) = handle.state.upgrade() else {
+            return false;
+        };
+        if handle.vhost.as_ref() != vhost || handle.route.as_deref() != route {
+            return true;
+        }
+        let mut state = lock_native_memory_cache(&state, "proxy purge");
+        let scoped = purge(&mut state);
+        result.scanned = result.scanned.saturating_add(scoped.scanned);
+        result.stale = result.stale.saturating_add(scoped.stale);
+        result.purged = result.purged.saturating_add(scoped.purged);
+        result.truncated |= scoped.truncated;
+        true
+    });
+    result
+}
+
+fn purge_native_memory_indexed_entries(
+    state: &mut NativeMemoryCacheState,
+    entries: Vec<CachePurgeIndexEntry>,
+    soft: bool,
+) -> CacheIndexedPurgeResult {
+    let mut purged = 0_usize;
+    let now = std::time::Instant::now();
+    for entry in &entries {
+        if soft {
+            let Some(object) = state.objects.get_mut(&entry.combined_key) else {
+                state.purge_index.remove_combined(&entry.combined_key);
+                continue;
+            };
+            object.expires_at = now;
+            purged = purged.saturating_add(1);
+            continue;
+        }
+        if let Some(object) = remove_native_memory_cache_entry(state, &entry.combined_key) {
+            state.bytes = state.bytes.saturating_sub(object.weight);
+            purged = purged.saturating_add(1);
+        } else {
+            state.purge_index.remove_combined(&entry.combined_key);
+        }
+    }
+    CacheIndexedPurgeResult {
+        matched: entries.len(),
+        purged,
+        truncated: false,
+    }
+}
+
+fn purge_native_memory_stale_entries(
+    state: &mut NativeMemoryCacheState,
+    entries: Vec<CachePurgeIndexEntry>,
+    dry_run: bool,
+) -> CacheStalePurgeResult {
+    let now = std::time::Instant::now();
+    let mut scanned = 0_usize;
+    let mut stale = 0_usize;
+    let mut purged = 0_usize;
+    for entry in &entries {
+        let Some(object) = state.objects.get(&entry.combined_key) else {
+            state.purge_index.remove_combined(&entry.combined_key);
+            continue;
+        };
+        scanned = scanned.saturating_add(1);
+        if object.expires_at > now {
+            continue;
+        }
+        stale = stale.saturating_add(1);
+        if dry_run {
+            continue;
+        }
+        let weight = object.weight;
+        if remove_native_memory_cache_entry(state, &entry.combined_key).is_some() {
+            state.bytes = state.bytes.saturating_sub(weight);
+            purged = purged.saturating_add(1);
+        }
+    }
+    CacheStalePurgeResult {
+        scanned,
+        stale,
+        purged,
+        truncated: false,
+    }
 }
 
 fn register_native_memory_cache_purge_handle(
@@ -1412,7 +1631,7 @@ impl NativeProxyMemoryCache {
             return Some((slice, false));
         }
         let response = proxy.fetch_origin_slice(request, bounds).await?;
-        let slice = self.store_origin_slice(&key, bounds, &response)?;
+        let slice = self.store_origin_slice(base_key, &key, request, bounds, &response)?;
         Some((slice, true))
     }
 
@@ -1433,7 +1652,9 @@ impl NativeProxyMemoryCache {
 
     fn store_origin_slice(
         &self,
+        base_key: &str,
         key: &str,
+        request: &NativeHttp1Request,
         bounds: CacheSliceBounds,
         response: &NativeHttp1Response,
     ) -> Option<NativeCacheSliceObject> {
@@ -1482,12 +1703,20 @@ impl NativeProxyMemoryCache {
         };
         let slice = native_slice_object_from_entry(entry.clone())?;
         entry.weight = native_cache_entry_weight(key, response, body_len);
+        let cache_tags = native_response_cache_tags(response, &self.config);
         let needs_prune = {
             let mut state = lock_native_memory_cache(&self.state, "proxy");
             if let Some(previous) = remove_native_memory_cache_entry(&mut state, key) {
                 state.bytes = state.bytes.saturating_sub(previous.weight);
             }
             state.bytes = state.bytes.saturating_add(entry.weight);
+            state.purge_index.insert_with_path_and_tags(
+                key.to_owned(),
+                base_key.to_owned(),
+                self.user_tag(),
+                Some(request.path().to_owned()),
+                cache_tags,
+            );
             state.objects.insert(key.to_owned(), entry);
             state.bytes > self.max_bytes
         };
@@ -2048,7 +2277,7 @@ impl NativeProxyMemoryCache {
             primary: key.to_owned(),
             user_tag: self.user_tag(),
             index_path: Some(request.path().to_owned()),
-            cache_tags,
+            cache_tags: cache_tags.clone(),
             vary_fields: vary_fields.clone().unwrap_or_default(),
         };
         if self.memory_enabled() {
@@ -2076,6 +2305,13 @@ impl NativeProxyMemoryCache {
                         state.bytes = state.bytes.saturating_sub(previous.weight);
                     }
                 }
+                state.purge_index.insert_with_path_and_tags(
+                    store_key.clone(),
+                    key.to_owned(),
+                    self.user_tag(),
+                    Some(request.path().to_owned()),
+                    cache_tags,
+                );
                 if let Some(previous) = state.objects.insert(store_key, entry.clone()) {
                     state.bytes = state.bytes.saturating_sub(previous.weight);
                 }
