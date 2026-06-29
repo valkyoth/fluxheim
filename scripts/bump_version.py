@@ -13,6 +13,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from typing import Callable
 
 
 SAFE_VERSION = re.compile(r"^[0-9]+[.][0-9]+[.][0-9]+(?:[-][0-9A-Za-z.-]+)?$")
@@ -22,7 +23,10 @@ PACKAGE_VERSION = re.compile(
 RPM_VERSION = re.compile(r"(?m)^(Version:\s*)(\S+)$")
 
 
-def replace_once(path: Path, pattern: re.Pattern[str], replacement: str) -> bool:
+Replacement = str | Callable[[re.Match[str]], str]
+
+
+def replace_once(path: Path, pattern: re.Pattern[str], replacement: Replacement) -> bool:
     original = path.read_text(encoding="utf-8")
     updated, count = pattern.subn(replacement, original, count=1)
     if count != 1:
@@ -55,7 +59,11 @@ def main() -> int:
     changed: list[Path] = []
 
     for path in cargo_tomls(root):
-        if replace_once(path, PACKAGE_VERSION, rf"\1\2{version}\4"):
+        if replace_once(
+            path,
+            PACKAGE_VERSION,
+            lambda match: f"{match.group(1)}{match.group(2)}{version}{match.group(4)}",
+        ):
             changed.append(path)
 
     rpm_spec = root / "packaging" / "rpm" / "fluxheim.spec"

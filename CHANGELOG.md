@@ -7,7 +7,18 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.6.34 - Unreleased
+## 1.6.35 - Unreleased
+
+### Changed
+
+- Start the Pingora-free runtime stabilization release with release metadata
+  bumped through the workspace and RPM spec.
+- Fix the version-bump helper so semantic versions beginning with digits do not
+  get interpreted as regex backreferences during package-version replacement.
+- Begin the first-party secret-memory cleanup pass by auditing direct
+  `zeroize` usage for practical migration to Fluxheim's `sanitization` crate.
+
+## 1.6.34 - 2026-06-29
 
 ### Changed
 

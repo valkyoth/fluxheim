@@ -98,17 +98,17 @@ fn aws_lc_fips_admin_hmac_sha256(_key: &[u8], _message: &[u8]) -> Result<[u8; 32
 
 #[cfg(all(feature = "proxy", feature = "tls-openssl-fips"))]
 fn digest_vec_to_array(mut digest: Vec<u8>, provider: &'static str) -> Result<[u8; 32], String> {
-    use zeroize::Zeroize;
+    use sanitization::SecureSanitize;
 
     if digest.len() != 32 {
         let len = digest.len();
-        digest.zeroize();
+        digest.secure_sanitize();
         return Err(format!(
             "{provider} HMAC-SHA256 returned {len} bytes instead of 32"
         ));
     }
     let mut output = [0_u8; 32];
     output.copy_from_slice(&digest);
-    digest.zeroize();
+    digest.secure_sanitize();
     Ok(output)
 }

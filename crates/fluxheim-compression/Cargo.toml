@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-compression"
-version = "1.6.34"
+version = "1.6.35"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"

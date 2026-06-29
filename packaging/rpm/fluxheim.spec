@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.34
+Version:        1.6.35
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,16 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Mon Jun 29 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.35-1
+- Start the Pingora-free runtime stabilization release after the 1.6.34 proof
+  release.
+- Fix the version-bump helper so semantic versions beginning with digits do not
+  get interpreted as regex backreferences during workspace version updates.
+- Begin the first-party secret-memory migration audit from direct zeroize APIs
+  toward Fluxheim's sanitization crate where practical.
+- Keep RPM, container, dependency-policy, native-runtime, and smoke-test gates
+  as blocking evidence during stabilization.
+
 * Mon Jun 29 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.34-1
 - Remove the final Pingora compatibility runtime from normal Fluxheim builds
   after the native proxy-cache parity release.
