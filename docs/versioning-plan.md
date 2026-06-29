@@ -2916,6 +2916,11 @@ available for the stabilization/security-only follow-up.
   - Replace root imports of old `crate::proxy::*` compatibility symbols with
     direct imports from `fluxheim-server`, `fluxheim-cache`,
     `fluxheim-load-balancer`, `fluxheim-headers`, or other owning crates.
+  - Move cache-preview route matching onto the same precompiled native route
+    selection structures used by the serving path. The temporary shim currently
+    compiles regex routes on demand for authenticated admin cache-preview
+    calls; this is bounded and off the hot path, but deleting the shim should
+    remove that duplicate matcher entirely.
   - Keep `scripts/validate-pingora-dependency-policy.sh check`,
     `scripts/validate-modularity-policy.sh check`, release containers, RPM,
     and representative smoke tests as blocking evidence for the cleanup.

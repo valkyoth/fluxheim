@@ -29,6 +29,12 @@ behavior when the change improves security or project direction.
 - Keep native-runtime compatibility reporting explicit for any configuration
   shape that still needs a future native feature instead of silently falling
   back to a Pingora adapter.
+- Harden native admin cache-preview and cache-purge paths by normalizing host
+  selection, matching regex routes consistently with the serving path, failing
+  closed on poisoned live config state, avoiding registry-lock disk I/O during
+  stale purges, and restoring explicit cache API re-exports.
+- Refactor native route-proxy construction contexts so release clippy profiles
+  enforce smaller, typed builder boundaries instead of long argument lists.
 
 ## 1.6.33 - 2026-06-28
 

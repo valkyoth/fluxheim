@@ -167,6 +167,10 @@ fi
   handles.
 - Align native cache-key/cache-lookup route-scope previews, HEAD bypass
   reporting, and disk purge activity metrics with the cache runtime.
+- Harden native admin cache-preview/cache-purge host normalization, route-regex
+  preview matching, stale disk-purge lock scope, and cache API exports.
+- Refactor native route-proxy builders to use typed construction contexts for
+  release-profile clippy compliance.
 - Keep compatibility notes focused on native HTTP/1, HTTP/2, TLS, WebSocket,
   cache, load-balancer, admin, metrics, and background-service coverage.
 

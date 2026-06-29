@@ -33,6 +33,13 @@ paths have reached parity coverage.
 - Preserve the native runtime cutover evidence and compatibility reporting so
   unsupported configurations fail closed with explicit blockers instead of
   silently falling back to a Pingora adapter.
+- Harden native admin cache-preview and cache-purge paths so host matching uses
+  the same normalization as runtime routing, regex routes are represented in
+  previews, stale disk purges do not hold the registry mutex while doing disk
+  I/O, poisoned live config state fails closed, and the root cache API exposes
+  only deliberate symbols.
+- Refactor native route-proxy construction around typed build contexts so
+  clippy release profiles keep the native proxy/server boundary maintainable.
 
 ## Compatibility Notes
 
@@ -45,6 +52,9 @@ paths have reached parity coverage.
 - The `1.6.35` follow-up is reserved for stabilization, soak testing,
   performance comparison, and security-only cleanup after the Pingora-free
   runtime lands.
+- The `1.6.36` cleanup follow-up will remove the temporary native proxy shim
+  and move cache-preview route matching onto the same precompiled route
+  structures used by the serving path.
 
 ## Verification
 
