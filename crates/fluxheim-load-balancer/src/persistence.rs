@@ -2,8 +2,8 @@ use std::net::IpAddr;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use sanitization::ct::ConstantTimeEq;
-use zeroize::{Zeroize, Zeroizing};
+use sanitization::{SecureSanitize, ct::ConstantTimeEq};
+use zeroize::Zeroizing;
 
 use fluxheim_config::{
     LoadBalanceManagedCookieSameSite, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
@@ -521,7 +521,7 @@ struct ManagedCookieHmacKey {
 
 impl Drop for ManagedCookieHmacKey {
     fn drop(&mut self) {
-        self.key.zeroize();
+        self.key.secure_sanitize();
     }
 }
 
@@ -575,7 +575,7 @@ impl ManagedCookieHmacKeyRing {
         };
         let old_current = std::mem::replace(&mut self.current, new_current);
         if let Some(mut previous) = self.previous.take() {
-            previous.key.zeroize();
+            previous.key.secure_sanitize();
         }
         self.previous = Some(old_current);
     }

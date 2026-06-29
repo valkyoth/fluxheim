@@ -21,6 +21,8 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
   containers to `sanitization::SecretString`.
 - Move native metrics bearer-token storage and transient Authorization header
   candidate buffers to `sanitization` secret containers.
+- Move managed load-balancer cookie HMAC key-ring clearing from direct
+  `zeroize` calls to `sanitization::SecureSanitize`.
 - Fix the release version-bump helper so package versions such as `1.6.35` are
   not interpreted as regex backreferences during automated metadata updates.
 - Keep dependency, metadata, container, RPM, and smoke-test gates as blocking

@@ -167,6 +167,8 @@ fi
   onto sanitization::SecretString.
 - Move native metrics bearer-token storage and comparison candidates onto
   sanitization secret containers.
+- Move managed load-balancer cookie HMAC key-ring clearing onto
+  sanitization::SecureSanitize.
 - Keep RPM, container, dependency-policy, native-runtime, and smoke-test gates
   as blocking evidence during stabilization.
 

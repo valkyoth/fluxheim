@@ -23,6 +23,8 @@ behavior when the change improves security or project direction.
   `sanitization::SecretString`.
 - Move native metrics bearer-token storage and candidate comparison buffers to
   `sanitization` secret containers.
+- Move managed load-balancer cookie HMAC key-ring clearing from direct
+  `zeroize` calls to `sanitization::SecureSanitize`.
 
 ## 1.6.34 - 2026-06-29
 
