@@ -653,7 +653,12 @@ pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Se
     validate_fips_runtime_config(config)?;
     #[cfg(feature = "web")]
     validate_web_runtime_config(config)?;
-    crate::proxy::FluxProxy::from_config(config)?;
+    fluxheim_server::NativeHttp1HostRouter::from_config(
+        config,
+        fluxheim_server::DownstreamHttp1Policy::default(),
+        0,
+    )
+    .map_err(|error| format!("proxy runtime validation failed: {error}"))?;
     #[cfg(feature = "stream-proxy")]
     crate::stream_proxy::stream_services_from_config(config)?;
     Ok(())

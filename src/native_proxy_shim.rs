@@ -57,11 +57,13 @@ impl FluxProxy {
     }
 
     pub fn route_host(&self, host: Option<&str>) -> String {
-        let config = self
-            .live_config
-            .lock()
-            .map(|config| config.clone())
-            .unwrap_or_else(|_| self.config.clone());
+        let config = self.live_config.lock().unwrap_or_else(|error| {
+            log::error!(
+                target: "fluxheim::native_proxy",
+                "native proxy live configuration mutex poisoned in route_host: {error}"
+            );
+            std::process::abort();
+        });
         let normalized = host
             .and_then(fluxheim_config::config_net::normalize_host)
             .unwrap_or_default();
@@ -327,7 +329,7 @@ impl FluxProxy {
             self.config
                 .vhosts
                 .iter()
-                .find(|vhost| vhost.hosts.iter().any(|candidate| candidate == host))
+                .find(|vhost| native_vhost_matches_host(vhost, host))
                 .or_else(|| {
                     self.config
                         .server
@@ -1102,7 +1104,7 @@ impl NativeProxySnapshot {
             .config
             .vhosts
             .iter()
-            .find(|vhost| vhost.hosts.iter().any(|candidate| candidate == host))
+            .find(|vhost| native_vhost_matches_host(vhost, host))
             .or_else(|| {
                 self.config
                     .server
@@ -1241,6 +1243,7 @@ fn native_cache_preview_route<'a>(
 ) -> Option<&'a crate::config::RouteConfig> {
     let mut fallback = None;
     let mut best_prefix = None;
+    let mut first_regex = None;
     for route in routes {
         if !fluxheim_protocol::route_method_matches(&route.methods, method) {
             continue;
@@ -1263,11 +1266,128 @@ fn native_cache_preview_route<'a>(
         {
             best_prefix = Some(route);
         }
+        if first_regex.is_none()
+            && route
+                .path_regex
+                .as_deref()
+                .is_some_and(|pattern| native_route_regex_matches(pattern, path))
+        {
+            first_regex = Some(route);
+        }
         if route.fallback {
             fallback = Some(route);
         }
     }
-    best_prefix.or(fallback)
+    best_prefix.or(first_regex).or(fallback)
+}
+
+#[cfg(feature = "cache")]
+fn native_vhost_matches_host(vhost: &crate::config::VhostConfig, host: &str) -> bool {
+    let Some(normalized_host) = fluxheim_config::config_net::normalize_host(host) else {
+        return false;
+    };
+    vhost
+        .hosts
+        .iter()
+        .filter_map(|host| fluxheim_config::config_net::normalize_host_pattern(host))
+        .any(|candidate| candidate == normalized_host)
+}
+
+#[cfg(feature = "cache")]
+fn native_route_regex_matches(pattern: &str, path: &str) -> bool {
+    regex::RegexBuilder::new(pattern)
+        .size_limit(fluxheim_config::MAX_ROUTE_REGEX_PROGRAM_BYTES)
+        .dfa_size_limit(fluxheim_config::MAX_ROUTE_REGEX_PROGRAM_BYTES)
+        .build()
+        .map(|regex| regex.is_match(path))
+        .unwrap_or(false)
+}
+
+#[cfg(all(test, feature = "cache"))]
+mod tests {
+    use super::*;
+
+    fn test_config(toml: &str) -> crate::config::Config {
+        toml::from_str(toml).unwrap()
+    }
+
+    #[test]
+    fn route_host_normalizes_candidate_host() {
+        let config = test_config(
+            r#"
+            [server]
+            default_vhost = "fallback"
+
+            [[vhosts]]
+            name = "fallback"
+            hosts = ["fallback.example"]
+
+            [[vhosts]]
+            name = "example"
+            hosts = ["example.com"]
+            "#,
+        );
+        let proxy = FluxProxy::from_config(&config).unwrap();
+
+        assert_eq!(proxy.route_host(Some("EXAMPLE.COM")), "example");
+    }
+
+    #[test]
+    fn cache_config_for_request_normalizes_host() {
+        let config = test_config(
+            r#"
+            [[vhosts]]
+            name = "example"
+            hosts = ["example.com"]
+
+            [vhosts.cache]
+            enabled = true
+            "#,
+        );
+        let proxy = FluxProxy::from_config(&config).unwrap();
+
+        let (vhost, route, _cache) = proxy
+            .cache_config_for_request(None, None, "EXAMPLE.COM")
+            .unwrap();
+
+        assert_eq!(vhost.name, "example");
+        assert_eq!(route, None);
+    }
+
+    #[test]
+    fn cache_key_preview_normalizes_host_and_matches_regex_route() {
+        let config = test_config(
+            r#"
+            [[vhosts]]
+            name = "example"
+            hosts = ["example.com"]
+
+            [vhosts.cache]
+            enabled = true
+            key_namespace = "vhost-cache"
+
+            [[vhosts.routes]]
+            name = "images"
+            path_regex = "^/images/[0-9]+[.]png$"
+
+            [vhosts.routes.cache]
+            enabled = true
+            key_namespace = "image-route-cache"
+            "#,
+        );
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let mut request =
+            crate::http_types::PingoraRequestHeader::build("GET", b"/images/42.png", None).unwrap();
+        request.insert_header("host", "EXAMPLE.COM").unwrap();
+
+        let preview = proxy
+            .snapshot()
+            .pingora_image_cache_key_preview_for_request_header(&request);
+
+        assert_eq!(preview.vhost, "example");
+        assert_eq!(preview.route.as_deref(), Some("images"));
+        assert_eq!(preview.scope, CacheKeyPreviewScope::Route);
+    }
 }
 
 #[cfg(feature = "load-balancer")]

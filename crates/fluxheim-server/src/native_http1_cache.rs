@@ -1421,24 +1421,36 @@ pub fn purge_native_disk_cache_stale_all(
     let Some(registry) = NATIVE_DISK_CACHE_PURGE_REGISTRY.get() else {
         return Ok(CacheBackgroundPurgeResult::default());
     };
-    let mut registry = match registry.lock() {
-        Ok(registry) => registry,
-        Err(error) => {
-            log::error!(
-                target: "fluxheim::native_http1",
-                "native disk cache purge registry mutex poisoned: {error}"
-            );
-            std::process::abort();
-        }
+    let handles: Vec<_> = {
+        let mut registry = match registry.lock() {
+            Ok(registry) => registry,
+            Err(error) => {
+                log::error!(
+                    target: "fluxheim::native_http1",
+                    "native disk cache purge registry mutex poisoned: {error}"
+                );
+                std::process::abort();
+            }
+        };
+        registry.retain(|handle| handle.cache.upgrade().is_some());
+        registry
+            .iter()
+            .map(|handle| {
+                (
+                    handle.cache.clone(),
+                    handle.vhost.clone(),
+                    handle.route.clone(),
+                )
+            })
+            .collect()
     };
     let mut result = CacheBackgroundPurgeResult::default();
-    registry.retain(|handle| {
-        let Some(cache) = handle.cache.upgrade() else {
-            return false;
+    for (cache, vhost, route) in handles {
+        let Some(cache) = cache.upgrade() else {
+            continue;
         };
         result.targets = result.targets.saturating_add(1);
-        let user_tag =
-            fluxheim_cache::cache_user_tag(handle.vhost.as_ref(), handle.route.as_deref());
+        let user_tag = fluxheim_cache::cache_user_tag(vhost.as_ref(), route.as_deref());
         for _ in 0..batches {
             let batch = cache.purge_stale(&user_tag, limit, false);
             result.scanned = result.scanned.saturating_add(batch.scanned);
@@ -1449,8 +1461,7 @@ pub fn purge_native_disk_cache_stale_all(
                 break;
             }
         }
-        true
-    });
+    }
     Ok(result)
 }
 
