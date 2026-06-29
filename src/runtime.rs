@@ -1849,7 +1849,8 @@ mod tests {
             ..crate::config::TlsConfig::default()
         };
 
-        let protocols = super::rustls_alpn_protocols(&tls);
+        let protocols =
+            fluxheim_tls::rustls_alpn_protocols(&tls, Some(crate::acme::acme_tls_alpn_protocol()));
 
         assert_eq!(
             protocols.first().map(Vec::as_slice),

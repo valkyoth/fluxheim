@@ -2874,6 +2874,7 @@ mod tests {
         let service = metrics_background_service_from_config(&config)
             .unwrap()
             .expect("metrics service");
+        let service = service.into_native();
         assert_eq!(service.name(), "Fluxheim metrics HTTP");
 
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -2883,7 +2884,7 @@ mod tests {
         runtime.block_on(async move {
             let supervisor = fluxheim_runtime::NativeBackgroundSupervisor::new();
             let (ready_tx, mut ready_rx) = tokio::sync::watch::channel(false);
-            let handle = supervisor.spawn_service_with_ready(service.into_native(), move || {
+            let handle = supervisor.spawn_service_with_ready(service, move || {
                 let _ = ready_tx.send(true);
             });
             ready_rx.changed().await.unwrap();

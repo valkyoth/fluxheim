@@ -30,7 +30,7 @@ behavior when the change improves security or project direction.
   shape that still needs a future native feature instead of silently falling
   back to a Pingora adapter.
 
-## 1.6.33 - Unreleased
+## 1.6.33 - 2026-06-28
 
 ### Changed
 

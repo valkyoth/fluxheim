@@ -14,6 +14,15 @@ RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"
 TARGET="$(rustc -vV | sed -n 's/^host: //p')"
 ```
 
+When starting a new release, use the version helper for the mechanical package
+and RPM fields, then update the human-facing release text that the metadata
+validator checks:
+
+```bash
+scripts/bump_version.py "${RELEASE_VERSION}"
+scripts/validate-release-metadata.sh
+```
+
 ## 1. Preflight
 
 Confirm you are on the release commit and the worktree is clean:
