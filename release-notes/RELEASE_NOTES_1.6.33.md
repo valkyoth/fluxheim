@@ -114,7 +114,8 @@ memory+disk tiering for ordinary HTTP/1 proxy responses.
   into local memory cache.
 - Native cache-only requests with `Cache-Control: only-if-cached` now return a
   bounded `504` miss instead of contacting origin. A client-supplied
-  `X-Fluxheim-Peer-Fill` marker alone no longer suppresses peer-fill.
+  `X-Fluxheim-Peer-Fill` marker is stripped before normal proxy handling and
+  no longer suppresses peer-fill.
 - Hardened native cache internals by using checked static-web cache expiry
   arithmetic, suppressing duplicate stale-while-revalidate refresh tasks per
   cache key before task allocation, and avoiding full predictor-counter table
@@ -150,6 +151,9 @@ memory+disk tiering for ordinary HTTP/1 proxy responses.
 - Native filesystem disk-cache startup scans now list root and shard
   directories through the native safe disk-cache path wrapper, keeping the
   symlink/canonical path boundary explicit at the directory traversal point.
+- Native disk-cache indexed purge removals now update object state and purge
+  index membership under the same cache-state lock, closing a split-lock race
+  where a concurrent store could become invisible to indexed purge operations.
 - Updated `arc-swap` to 1.9.2 and `env_logger` to 0.11.11.
 - Stale admin purges now log an explicit security warning if the system clock
   regresses before the Unix epoch, instead of silently substituting timestamp

@@ -2238,9 +2238,10 @@ peer can perform the same host-scoped cache-key lookup. They otherwise use the
 authority from their configured `base_url` plus safe negotiation headers such
 as `Accept`, `Accept-Encoding`, and `Accept-Language`. Credentials such as
 `Authorization` and `Cookie` are not forwarded. Outbound peer-fill requests
-carry `X-Fluxheim-Peer-Fill: 1`; inbound requests with that marker and
-`Cache-Control: only-if-cached` are not allowed to launch another peer-fill
-fetch or contact origin, which prevents recursive peer-fill loops in cyclic
+carry `X-Fluxheim-Peer-Fill: 1`; Fluxheim strips that internal marker from
+client-supplied requests before normal proxy handling. Requests with
+`Cache-Control: only-if-cached` are answered only from local cache and are not
+allowed to contact origin, which prevents recursive peer-fill loops in cyclic
 peer topologies.
 `examples/cache-peer-fill.toml` shows the focused validated fixture. Metrics
 builds expose aggregate origin-protection and peer-fill configuration through

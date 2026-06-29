@@ -1084,6 +1084,7 @@ impl NativeDiskCache {
             let removed = state.objects.remove(combined_key);
             if let Some(record) = &removed {
                 state.bytes = state.bytes.saturating_sub(record.weight);
+                state.purge_index.remove_combined(combined_key);
             }
             state.variants.retain(|_, variants| {
                 variants.retain(|variant| variant.key != combined_key);
@@ -1092,9 +1093,6 @@ impl NativeDiskCache {
             removed
         });
         if let Some(record) = removed {
-            self.with_state(|state| {
-                state.purge_index.remove_combined(combined_key);
-            });
             let _ = self.remove_location(&record.location);
             self.persist_storage_bin_index();
             return true;
@@ -2828,4 +2826,44 @@ pub(crate) fn with_native_cache_status(
         response.push_header("age", age_secs.to_string());
     }
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::native_peer_fill_cache_ttl;
+    use fluxheim_config::CacheConfig;
+    use http::HeaderMap;
+    use std::time::Duration;
+
+    fn headers(values: &[(&str, &str)]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for (name, value) in values {
+            if let (Ok(name), Ok(value)) = (
+                http::HeaderName::from_bytes(name.as_bytes()),
+                http::HeaderValue::from_str(value),
+            ) {
+                headers.append(name, value);
+            }
+        }
+        headers
+    }
+
+    #[test]
+    fn native_peer_fill_cache_ttl_subtracts_upstream_age() {
+        let cache = CacheConfig::default();
+        let headers = headers(&[("cache-control", "max-age=60"), ("age", "50")]);
+
+        assert_eq!(
+            native_peer_fill_cache_ttl(200, &headers, &cache),
+            Some(Duration::from_secs(10))
+        );
+    }
+
+    #[test]
+    fn native_peer_fill_cache_ttl_rejects_fully_aged_peer_response() {
+        let cache = CacheConfig::default();
+        let headers = headers(&[("cache-control", "max-age=60"), ("age", "60")]);
+
+        assert_eq!(native_peer_fill_cache_ttl(200, &headers, &cache), None);
+    }
 }

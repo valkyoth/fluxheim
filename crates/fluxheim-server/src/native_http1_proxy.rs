@@ -2882,6 +2882,7 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     mirror.spawn_if_selected(&request);
                 }
             }
+            strip_native_peer_fill_header(&mut request);
             #[cfg(any(
                 feature = "compression-brotli",
                 feature = "compression-gzip",
@@ -4768,6 +4769,12 @@ fn native_request_is_peer_fill(request: &NativeHttp1Request) -> bool {
         .any(|value| value.trim() == "1")
 }
 
+fn strip_native_peer_fill_header(request: &mut NativeHttp1Request) {
+    request
+        .headers
+        .retain(|(name, _)| !name.eq_ignore_ascii_case(NATIVE_PEER_FILL_MARKER_HEADER));
+}
+
 fn native_cache_entry_revalidatable(
     entry: &NativeMemoryCacheEntry,
     now: std::time::Instant,
@@ -5642,13 +5649,19 @@ fn native_http1_static_failover_method_allowed(method: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{native_cache_expiry_times, register_native_disk_cache_purge_handle};
+    use super::{
+        NATIVE_PEER_FILL_MARKER_HEADER, native_cache_expiry_times, native_request_is_peer_fill,
+        register_native_disk_cache_purge_handle, strip_native_peer_fill_header,
+    };
+    use crate::NativeHttp1Request;
     use crate::native_http1_cache::{
         NativeDiskCache, NativeDiskCacheStoreKey, NativeMemoryCacheEntry,
         purge_native_disk_cache_primary,
     };
+    use fluxheim_protocol::Http1Version;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
+    use zeroize::Zeroizing;
 
     #[test]
     fn native_cache_expiry_times_rejects_unrepresentable_ttl() {
@@ -5670,6 +5683,36 @@ mod tests {
         assert!(
             stale_if_error_until
                 .is_some_and(|stale_if_error_until| stale_if_error_until > expires_at)
+        );
+    }
+
+    #[test]
+    fn strips_client_supplied_peer_fill_marker() {
+        let mut request = NativeHttp1Request {
+            method: "GET".to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: false,
+            tls_identity: None,
+            geo_context: None,
+            target: "/asset.png".to_owned(),
+            version: Http1Version::Http11,
+            headers: vec![
+                (NATIVE_PEER_FILL_MARKER_HEADER.to_owned(), "1".to_owned()),
+                ("host".to_owned(), "cache.test".to_owned()),
+            ],
+            body: Zeroizing::new(Vec::new()),
+            trailers: Vec::new(),
+        };
+
+        assert!(native_request_is_peer_fill(&request));
+        strip_native_peer_fill_header(&mut request);
+
+        assert!(!native_request_is_peer_fill(&request));
+        assert_eq!(
+            request.headers,
+            vec![("host".to_owned(), "cache.test".to_owned())]
         );
     }
 
