@@ -165,6 +165,8 @@ fi
 - Wire native admin cache purge, cache object lookup, stale disk-cache purge,
   and live load-balancer stats/mutation handlers to Fluxheim-owned runtime
   handles.
+- Align native cache-key/cache-lookup route-scope previews, HEAD bypass
+  reporting, and disk purge activity metrics with the cache runtime.
 - Keep compatibility notes focused on native HTTP/1, HTTP/2, TLS, WebSocket,
   cache, load-balancer, admin, metrics, and background-service coverage.
 

@@ -35,11 +35,6 @@ where
         }
     }
 
-    #[cfg(feature = "metrics")]
-    pub(crate) fn name(&self) -> &str {
-        self.inner.name()
-    }
-
     pub(crate) fn into_native(self) -> fluxheim_runtime::FluxBackgroundService<T> {
         self.inner
     }

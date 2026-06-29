@@ -18,9 +18,15 @@ paths have reached parity coverage.
 - Wire native admin cache purge, stale disk-cache purge, cache object lookup,
   and live load-balancer stats/mutation handlers to Fluxheim-owned runtime
   handles instead of compatibility shims.
+- Align native cache-key/cache-lookup previews with runtime cache routing for
+  route-scoped cache policies, preserve the documented `HEAD` temporary-bypass
+  reason, and emit disk-cache purge activity metrics from native admin purge
+  paths.
 - Update the Pingora dependency policy so default, full, cache-edge,
   proxy-edge, load-balancer-edge, PHP, privacy, source, RPM, and container
   release gates fail if a normal build still compiles Pingora crates.
+- Refresh the OWASP Top 10 2025 release-gate test inventory so it points at
+  the native HTTP/1 controls that replaced the legacy Pingora-era tests.
 - Make the historical `pingora-compat` feature marker inert: enabling the
   feature no longer compiles legacy Pingora source paths now that the
   dependency is removed from the manifest.

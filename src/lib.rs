@@ -196,7 +196,7 @@ pub mod otel_otlp;
 mod otlp_http;
 #[cfg(feature = "proxy")]
 mod path_safety;
-#[cfg(feature = "php-fpm")]
+#[cfg(all(feature = "php-fpm", any()))]
 pub(crate) mod php_fpm;
 #[cfg(all(feature = "proxy", any()))]
 pub mod proxy;

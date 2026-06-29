@@ -478,6 +478,12 @@ impl FluxProxy {
             );
             result.disk_purged |= native_disk.purged > 0;
         }
+        record_native_cache_purge_activity(
+            &result.vhost,
+            result.route.as_deref(),
+            false,
+            result.disk_purged,
+        );
         Ok(result)
     }
 
@@ -701,6 +707,7 @@ fn native_indexed_purge_result(
     memory: fluxheim_cache::purge_index::CacheIndexedPurgeResult,
     disk: fluxheim_cache::purge_index::CacheIndexedPurgeResult,
 ) -> CacheIndexedPurgeResult {
+    record_native_cache_purge_activity(vhost, route, memory.purged > 0, disk.purged > 0);
     CacheIndexedPurgeResult {
         vhost: vhost.to_owned(),
         route: route.map(str::to_owned),
@@ -710,6 +717,30 @@ fn native_indexed_purge_result(
         disk_matched: disk.matched,
         disk_purged: disk.purged,
         disk_truncated: disk.truncated,
+    }
+}
+
+#[cfg(feature = "cache")]
+fn record_native_cache_purge_activity(
+    vhost: &str,
+    route: Option<&str>,
+    memory_purged: bool,
+    disk_purged: bool,
+) {
+    #[cfg(feature = "metrics")]
+    {
+        if memory_purged {
+            crate::metrics::record_cache_activity("memory", "purge");
+            crate::metrics::record_cache_activity_scope(vhost, route, "memory", "purge");
+        }
+        if disk_purged {
+            crate::metrics::record_cache_activity("disk", "purge");
+            crate::metrics::record_cache_activity_scope(vhost, route, "disk", "purge");
+        }
+    }
+    #[cfg(not(feature = "metrics"))]
+    {
+        let _ = (vhost, route, memory_purged, disk_purged);
     }
 }
 
@@ -1083,19 +1114,30 @@ impl NativeProxySnapshot {
         let vhost_name = selected
             .map(|vhost| vhost.name.clone())
             .unwrap_or_else(|| host.to_owned());
-        let cache_config = selected.map_or(&self.config.cache, |vhost| &vhost.cache);
-        let memory_tier_enabled = self.config.cache.memory.enabled;
-        let disk_tier_enabled = self.config.cache.disk.enabled;
+        let selected_route = selected.and_then(|vhost| {
+            native_cache_preview_route(&vhost.routes, request.method.as_str(), request.uri.path())
+        });
+        let route_cache = selected_route.and_then(|route| route.cache.as_ref());
+        let cache_config = route_cache.or_else(|| selected.map(|vhost| &vhost.cache));
+        let cache_config = cache_config.unwrap_or(&self.config.cache);
+        let memory_tier_enabled = cache_config.memory.enabled;
+        let disk_tier_enabled = cache_config.disk.enabled;
         let method_cacheable = cache_config
             .methods
             .iter()
             .any(|method| method.eq_ignore_ascii_case(request.method.as_str()));
+        let method_temporarily_bypassed =
+            fluxheim_cache::cache_method_temporarily_bypassed(request.method.as_str());
         let safe_path = request
             .uri
             .path_and_query()
             .map(|path| fluxheim_common::path_safety::safe_forward_path_and_query(path.as_str()))
             .unwrap_or(false);
-        let eligible = selected.is_some() && cache_config.enabled && method_cacheable && safe_path;
+        let eligible = selected.is_some()
+            && cache_config.enabled
+            && !method_temporarily_bypassed
+            && method_cacheable
+            && safe_path;
         let cache_request = fluxheim_cache::CacheRequest {
             method: request.method.as_str(),
             host: Some(host),
@@ -1109,6 +1151,11 @@ impl NativeProxySnapshot {
             Some("no matching vhost".to_owned())
         } else if !cache_config.enabled {
             Some("cache disabled".to_owned())
+        } else if method_temporarily_bypassed {
+            Some(format!(
+                "method {} currently bypasses proxy cache storage",
+                request.method
+            ))
         } else if !method_cacheable {
             Some(format!("method {} is not cacheable", request.method))
         } else if !safe_path {
@@ -1120,8 +1167,12 @@ impl NativeProxySnapshot {
         };
         CacheKeyPreview {
             vhost: vhost_name.clone(),
-            route: None,
-            scope: CacheKeyPreviewScope::Vhost,
+            route: route_cache.and_then(|_| selected_route.map(|route| route.name.clone())),
+            scope: if route_cache.is_some() {
+                CacheKeyPreviewScope::Route
+            } else {
+                CacheKeyPreviewScope::Vhost
+            },
             eligible: key.is_some(),
             cache_lock_enabled: cache_config.lock.enabled,
             cache_lock_wait_timeout_secs: cache_config.lock.wait_timeout_secs,
@@ -1147,7 +1198,13 @@ impl NativeProxySnapshot {
             primary_hash: key.as_ref().map(|key| key.as_str().to_owned()),
             variance_hash: None,
             combined_hash: key.as_ref().map(|key| key.as_str().to_owned()),
-            user_tag: key.as_ref().map(|_| vhost_name),
+            user_tag: key.as_ref().map(|_| {
+                route_cache
+                    .and_then(|_| {
+                        selected_route.map(|route| format!("{vhost_name}:route:{}", route.name))
+                    })
+                    .unwrap_or(vhost_name)
+            }),
         }
     }
 
@@ -1174,6 +1231,43 @@ impl NativeProxySnapshot {
         }
         Ok(CacheObjectLookup { preview, objects })
     }
+}
+
+#[cfg(feature = "cache")]
+fn native_cache_preview_route<'a>(
+    routes: &'a [crate::config::RouteConfig],
+    method: &str,
+    path: &str,
+) -> Option<&'a crate::config::RouteConfig> {
+    let mut fallback = None;
+    let mut best_prefix = None;
+    for route in routes {
+        if !fluxheim_protocol::route_method_matches(&route.methods, method) {
+            continue;
+        }
+        if route
+            .path_exact
+            .as_deref()
+            .is_some_and(|exact| path == exact)
+        {
+            return Some(route);
+        }
+        if let Some(prefix) = route.path_prefix.as_deref()
+            && fluxheim_protocol::route_prefix_matches_path(prefix, path)
+            && best_prefix
+                .map(|best: &crate::config::RouteConfig| {
+                    route.path_prefix.as_ref().map_or(0, String::len)
+                        > best.path_prefix.as_ref().map_or(0, String::len)
+                })
+                .unwrap_or(true)
+        {
+            best_prefix = Some(route);
+        }
+        if route.fallback {
+            fallback = Some(route);
+        }
+    }
+    best_prefix.or(fallback)
 }
 
 #[cfg(feature = "load-balancer")]

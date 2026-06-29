@@ -10,13 +10,6 @@ use std::path::Path;
 #[cfg(feature = "proxy")]
 use std::sync::Arc;
 
-#[cfg(all(
-    feature = "acme",
-    feature = "proxy",
-    feature = "tls-rustls-backend",
-    not(feature = "tls-openssl")
-))]
-use crate::config::AcmeChallenge;
 #[cfg(all(feature = "proxy", feature = "cache"))]
 use crate::config::CachePurgerConfig;
 use crate::config::Config;
@@ -2124,7 +2117,8 @@ fn rustls_client_cert_verifier(
 fn rustls_alpn_protocols(tls: &TlsConfig) -> Vec<Vec<u8>> {
     #[cfg(feature = "acme")]
     {
-        let acme_protocol = (tls.acme.enabled && tls.acme.challenge == AcmeChallenge::TlsAlpn01)
+        let acme_protocol = (tls.acme.enabled
+            && tls.acme.challenge == crate::config::AcmeChallenge::TlsAlpn01)
             .then_some(crate::acme::acme_tls_alpn_protocol());
         fluxheim_tls::rustls_alpn_protocols(tls, acme_protocol)
     }
@@ -2382,7 +2376,7 @@ fn rustls_sni_certificate_resolver(
     not(feature = "tls-openssl")
 ))]
 fn rustls_acme_tls_alpn_enabled(tls: &TlsConfig) -> bool {
-    tls.acme.enabled && tls.acme.challenge == AcmeChallenge::TlsAlpn01
+    tls.acme.enabled && tls.acme.challenge == crate::config::AcmeChallenge::TlsAlpn01
 }
 
 #[cfg(all(

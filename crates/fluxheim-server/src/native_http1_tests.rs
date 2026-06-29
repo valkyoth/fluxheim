@@ -584,6 +584,44 @@ async fn native_http1_enforces_configured_body_limit() {
 }
 
 #[tokio::test]
+async fn rejects_header_bytes_over_global_limit() {
+    let policy = DownstreamHttp1Policy::from_server_limits(fluxheim_config::ServerLimitsConfig {
+        max_request_header_bytes: fluxheim_config::ByteSize::from_bytes(64),
+        max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
+        max_request_headers: 32,
+        max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(1024),
+    });
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (result_tx, result_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let (stream, peer_addr) = listener.accept().await.unwrap();
+        let handler = Arc::new(|_| async { NativeHttp1Response::new(200, "OK", b"unexpected") });
+        let result = serve_native_http1_connection(stream, Some(peer_addr), policy, handler).await;
+        let _ = result_tx.send(result);
+    });
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+
+    stream
+        .write_all(
+            b"GET / HTTP/1.1\r\nHost: local.test\r\nX-Oversized: abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut response = [0u8; 1];
+    let read = stream.read(&mut response).await.unwrap();
+    let result = result_rx.await.unwrap();
+
+    assert_eq!(read, 0);
+    assert!(matches!(
+        result,
+        Err(NativeHttp1Error::Parse(
+            fluxheim_protocol::Http1ParseError::HeadTooLarge
+        ))
+    ));
+}
+
+#[tokio::test]
 async fn native_http1_owns_response_framing_headers() {
     let addr = spawn_server(|_| {
         NativeHttp1Response::new(200, "OK", b"ok")
