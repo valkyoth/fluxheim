@@ -1,26 +1,14 @@
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use std::io;
-#[cfg(all(
-    feature = "pingora-compat",
-    any(feature = "tls-rustls-backend", feature = "tls-openssl")
-))]
+#[cfg(all(any(), any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
 use std::sync::Arc;
 
-#[cfg(all(
-    feature = "pingora-compat",
-    any(feature = "tls-rustls-backend", feature = "tls-openssl")
-))]
+#[cfg(all(any(), any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
 use crate::config::ProxyConfig;
-#[cfg(all(
-    feature = "pingora-compat",
-    any(feature = "tls-rustls-backend", feature = "tls-openssl")
-))]
+#[cfg(all(any(), any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
 use zeroize::Zeroizing;
 
-#[cfg(all(
-    feature = "pingora-compat",
-    any(feature = "tls-rustls-backend", feature = "tls-openssl")
-))]
+#[cfg(all(any(), any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RuntimeUpstreamTls {
     pub(crate) ca: Option<Arc<pingora::protocols::tls::CaType>>,
@@ -29,15 +17,12 @@ pub(crate) struct RuntimeUpstreamTls {
 }
 
 #[cfg(all(
-    feature = "pingora-compat",
+    any(),
     not(any(feature = "tls-rustls-backend", feature = "tls-openssl"))
 ))]
 pub(crate) struct RuntimeUpstreamTls;
 
-#[cfg(all(
-    feature = "pingora-compat",
-    any(feature = "tls-rustls-backend", feature = "tls-openssl")
-))]
+#[cfg(all(any(), any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
 impl RuntimeUpstreamTls {
     pub(crate) fn from_config(config: &ProxyConfig) -> io::Result<Self> {
         Self::from_paths(
@@ -103,19 +88,13 @@ compile_error!(
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 const MAX_UPSTREAM_TLS_FILE_BYTES: u64 = 1024 * 1024;
 
-#[cfg(all(
-    feature = "pingora-compat",
-    any(feature = "tls-rustls-backend", feature = "tls-openssl")
-))]
+#[cfg(all(any(), any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
 struct LoadedUpstreamCaBundle {
     ca: Arc<pingora::protocols::tls::CaType>,
     pool_key: u64,
 }
 
-#[cfg(all(
-    feature = "pingora-compat",
-    any(feature = "tls-rustls-backend", feature = "tls-openssl")
-))]
+#[cfg(all(any(), any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
 fn upstream_tls_ca_pool_key(contents: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for byte in b"fluxheim-upstream-ca\0"
@@ -188,11 +167,7 @@ pub(crate) fn read_upstream_tls_file(path: &std::path::Path) -> io::Result<Vec<u
     Ok(contents)
 }
 
-#[cfg(all(
-    feature = "pingora-compat",
-    feature = "tls-rustls-backend",
-    not(feature = "tls-openssl")
-))]
+#[cfg(all(any(), feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
 fn load_upstream_ca_bundle(path: &std::path::Path) -> io::Result<LoadedUpstreamCaBundle> {
     let contents = read_upstream_tls_file(path)?;
     let pool_key = upstream_tls_ca_pool_key(&contents);
@@ -237,11 +212,7 @@ fn load_upstream_ca_bundle(path: &std::path::Path) -> io::Result<LoadedUpstreamC
     })
 }
 
-#[cfg(all(
-    feature = "pingora-compat",
-    feature = "tls-openssl",
-    not(feature = "tls-rustls-backend")
-))]
+#[cfg(all(any(), feature = "tls-openssl", not(feature = "tls-rustls-backend")))]
 fn load_upstream_ca_bundle(path: &std::path::Path) -> io::Result<LoadedUpstreamCaBundle> {
     let contents = read_upstream_tls_file(path)?;
     let pool_key = upstream_tls_ca_pool_key(&contents);
@@ -269,11 +240,7 @@ fn load_upstream_ca_bundle(path: &std::path::Path) -> io::Result<LoadedUpstreamC
     })
 }
 
-#[cfg(all(
-    feature = "pingora-compat",
-    feature = "tls-rustls-backend",
-    not(feature = "tls-openssl")
-))]
+#[cfg(all(any(), feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
 fn load_upstream_client_cert_key(
     cert_path: &std::path::Path,
     key_path: &std::path::Path,
@@ -334,11 +301,7 @@ fn load_upstream_client_cert_key(
     Ok(Arc::new(cert_key))
 }
 
-#[cfg(all(
-    feature = "pingora-compat",
-    feature = "tls-openssl",
-    not(feature = "tls-rustls-backend")
-))]
+#[cfg(all(any(), feature = "tls-openssl", not(feature = "tls-rustls-backend")))]
 fn load_upstream_client_cert_key(
     cert_path: &std::path::Path,
     key_path: &std::path::Path,

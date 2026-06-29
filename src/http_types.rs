@@ -9,9 +9,9 @@
 #[allow(unused_imports)]
 pub(crate) use http::StatusCode;
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 pub(crate) type PingoraRequestHeader = pingora::http::RequestHeader;
-#[cfg(all(feature = "proxy", feature = "cache", not(feature = "pingora-compat")))]
+#[cfg(all(feature = "proxy", feature = "cache", not(any())))]
 #[derive(Clone, Debug)]
 pub(crate) struct PingoraRequestHeader {
     pub method: http::Method,
@@ -19,7 +19,7 @@ pub(crate) struct PingoraRequestHeader {
     pub headers: http::HeaderMap,
 }
 
-#[cfg(all(feature = "proxy", feature = "cache", not(feature = "pingora-compat")))]
+#[cfg(all(feature = "proxy", feature = "cache", not(any())))]
 impl PingoraRequestHeader {
     pub(crate) fn build(
         method: &str,
@@ -46,5 +46,5 @@ impl PingoraRequestHeader {
         Ok(())
     }
 }
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 pub(crate) type PingoraResponseHeader = pingora::http::ResponseHeader;

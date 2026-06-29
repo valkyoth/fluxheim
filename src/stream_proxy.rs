@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 #[cfg(unix)]
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 use pingora::server::ListenFds;
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 use pingora::server::ShutdownWatch;
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
@@ -214,7 +214,7 @@ impl FluxBackgroundTask for StreamProxyTask {
 }
 
 #[async_trait]
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 impl ServiceWithDependents for StreamProxyService {
     async fn start_service(
         &mut self,

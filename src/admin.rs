@@ -7,19 +7,19 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-#[cfg(all(unix, feature = "pingora-compat"))]
+#[cfg(all(unix, any()))]
 use std::{fs::Permissions, os::unix::fs::PermissionsExt};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 use http::Response;
 use http::{HeaderMap, StatusCode, header};
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 use pingora::apps::http_app::{HttpServer, ServeHttp};
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 use pingora::protocols::http::ServerSession;
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 use pingora::services::listening::Service;
 use sanitization::ct::ConstantTimeEq;
 use serde::Serialize;
@@ -367,7 +367,7 @@ fn auth_source_label(source: Option<IpAddr>) -> String {
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 pub(crate) struct AdminServices {
     pub(crate) control_plane: Service<HttpServer<AdminApp>>,
     #[cfg(unix)]
@@ -439,7 +439,7 @@ pub(crate) fn native_admin_services_from_config(
     }))
 }
 
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 pub(crate) fn admin_services_from_config(
     config: &Config,
     proxy: FluxProxy,
@@ -2818,7 +2818,7 @@ impl crate::background::FluxBackgroundTask for AdminApp {
     }
 }
 
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 #[async_trait]
 impl ServeHttp for AdminApp {
     async fn response(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
@@ -2868,7 +2868,7 @@ impl AdminApp {
 }
 
 #[cfg(unix)]
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 #[async_trait]
 impl ServeHttp for AdminOpsApp {
     async fn response(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
@@ -2913,7 +2913,7 @@ impl AdminOpsApp {
     }
 }
 
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 fn admin_http_response(response: AdminResponse) -> Response<Vec<u8>> {
     let body_len = response.body.len();
     match Response::builder()
@@ -4313,7 +4313,7 @@ mod tests {
     #[cfg(any(feature = "load-balancer", feature = "udp-proxy"))]
     use serde_json::Value;
 
-    #[cfg(feature = "pingora-compat")]
+    #[cfg(any())]
     use super::admin_services_from_config;
     use super::{
         AdminApp, AdminAuthThrottle, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
@@ -7212,7 +7212,7 @@ mod tests {
         assert_eq!(response.status, StatusCode::BAD_REQUEST);
     }
 
-    #[cfg(feature = "pingora-compat")]
+    #[cfg(any())]
     #[test]
     fn admin_services_enable_watchdog_only_when_self_healing_is_enabled() {
         let dir = TestDir::new("admin-services-watchdog");

@@ -32,11 +32,11 @@ const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
         feature = "tls-openssl"
     )
 ))]
-#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", any(), feature = "tls-openssl"))]
 use crate::config::TlsAlpnPolicy;
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     any(
         all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
         feature = "tls-openssl"
@@ -45,14 +45,14 @@ use crate::config::TlsAlpnPolicy;
 use crate::config::{TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference};
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     any(
         all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
         feature = "tls-openssl"
     )
 ))]
 use crate::config::{TlsConfig, TlsProtocolVersion};
-#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", any(), feature = "tls-openssl"))]
 use pingora::tls::{
     ssl::{SslVerifyMode, SslVersion},
     x509::X509Name,
@@ -97,7 +97,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     ) {
         return run_native_runtime(config, server_plan);
     }
-    #[cfg(not(feature = "pingora-compat"))]
+    #[cfg(not(any()))]
     {
         let blockers = server_plan
             .native_runtime_cutover_summary()
@@ -111,13 +111,13 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         )
         .into())
     }
-    #[cfg(feature = "pingora-compat")]
+    #[cfg(any())]
     {
         run_pingora_compat_runtime(config, server_plan)
     }
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 fn run_pingora_compat_runtime(
     config: Config,
     server_plan: fluxheim_server::ServerPlan,
@@ -835,7 +835,7 @@ fn validate_native_http1_router_factory(
     Ok(())
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 fn hardened_downstream_h2_options(
     policy: &fluxheim_server::DownstreamHttp2Policy,
 ) -> pingora::protocols::http::v2::server::H2Options {
@@ -849,7 +849,7 @@ fn hardened_downstream_h2_options(
     options
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 fn harden_proxy_service_http2_options<SV>(
     service: &mut pingora::services::listening::Service<pingora::proxy::HttpProxy<SV>>,
     policy: &fluxheim_server::DownstreamHttp2Policy,
@@ -864,7 +864,7 @@ where
     Ok(())
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 fn apply_downstream_proxy_protocol<S>(
     service: &mut pingora::services::listening::Service<S>,
     server_plan: &fluxheim_server::ServerPlan,
@@ -898,7 +898,7 @@ where
     Ok(())
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 fn pingora_proxy_protocol_trusted_sources(
     sources: &[fluxheim_server::ProxyProtocolTrustedSource],
 ) -> Vec<pingora::listeners::ProxyProtocolTrustedSource> {
@@ -1330,7 +1330,7 @@ async fn run_acme_renewal_tick(config: &Config, reloader: Option<&DownstreamCert
     }
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 fn pingora_server_conf(
     plan: &fluxheim_server::ServerPlan,
 ) -> pingora::server::configuration::ServerConf {
@@ -1502,7 +1502,7 @@ fn log_record_json(timestamp: &str, level: &str, target: &str, message: &str) ->
 
 #[cfg(all(test, feature = "proxy"))]
 mod tests {
-    #[cfg(feature = "pingora-compat")]
+    #[cfg(any())]
     use super::{harden_proxy_service_http2_options, pingora_server_conf};
     use super::{log_record_json, open_log_file};
     use crate::test_support::unique_temp_path;
@@ -1530,7 +1530,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "pingora-compat")]
+    #[cfg(any())]
     #[test]
     fn hardened_downstream_h2_options_builds_with_flow_control_caps() {
         let policy = fluxheim_server::DownstreamHttp2Policy::default();
@@ -1541,7 +1541,7 @@ mod tests {
         assert_eq!(policy.max_pending_accept_reset_streams(), 8);
     }
 
-    #[cfg(feature = "pingora-compat")]
+    #[cfg(any())]
     #[test]
     fn maps_server_process_config_to_pingora_conf() {
         let config = crate::config::Config {
@@ -1590,7 +1590,7 @@ mod tests {
         assert_eq!(pingora.graceful_shutdown_timeout_seconds, Some(30));
     }
 
-    #[cfg(feature = "pingora-compat")]
+    #[cfg(any())]
     #[test]
     fn proxy_service_installs_hardened_http2_options() {
         #[cfg(feature = "tls-rustls-backend")]
@@ -1866,11 +1866,7 @@ mod tests {
         assert!(protocols.iter().any(|protocol| protocol == b"http/1.1"));
     }
 
-    #[cfg(all(
-        feature = "pingora-compat",
-        feature = "tls-rustls-backend",
-        not(feature = "tls-openssl")
-    ))]
+    #[cfg(all(any(), feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
     #[test]
     fn rustls_sni_resolver_can_reload_certificate_files()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -1903,7 +1899,7 @@ mod tests {
     }
 
     #[cfg(all(
-        feature = "pingora-compat",
+        any(),
         feature = "tls-rustls-backend",
         feature = "acme",
         not(feature = "tls-openssl")
@@ -1975,7 +1971,7 @@ mod tests {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     any(feature = "tls-rustls-backend", feature = "tls-openssl")
 ))]
 fn add_tls_listeners<S>(
@@ -2004,7 +2000,7 @@ where
     Ok(reloader)
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", any(), feature = "tls-openssl"))]
 fn tls_alpn_policy(policy: TlsAlpnPolicy) -> pingora::protocols::ALPN {
     match policy {
         TlsAlpnPolicy::Http1 => pingora::protocols::ALPN::H1,
@@ -2015,7 +2011,7 @@ fn tls_alpn_policy(policy: TlsAlpnPolicy) -> pingora::protocols::ALPN {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2051,7 +2047,7 @@ fn apply_tls_policy(
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2121,7 +2117,7 @@ fn rustls_client_cert_verifier(
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2140,7 +2136,7 @@ fn rustls_alpn_protocols(tls: &TlsConfig) -> Vec<Vec<u8>> {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2153,7 +2149,7 @@ fn rustls_cipher_suite(
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2164,7 +2160,7 @@ fn rustls_kx_group(
     fluxheim_tls::rustls_kx_group(curve, fips_required).map_err(Into::into)
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", any(), feature = "tls-openssl"))]
 fn apply_tls_policy(
     settings: &mut pingora::listeners::tls::TlsSettings,
     tls: &TlsConfig,
@@ -2187,7 +2183,7 @@ fn apply_tls_policy(
     Ok(())
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", any(), feature = "tls-openssl"))]
 fn apply_openssl_client_auth(
     settings: &mut pingora::listeners::tls::TlsSettings,
     tls: &TlsConfig,
@@ -2214,12 +2210,12 @@ fn apply_openssl_client_auth(
     Ok(())
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", any(), feature = "tls-openssl"))]
 fn openssl_curve_list(curves: &[TlsCurvePreference]) -> String {
     fluxheim_tls::openssl_curve_list(curves)
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", any(), feature = "tls-openssl"))]
 fn openssl_cipher_lists(ciphers: &[TlsCipherSuite]) -> (String, String) {
     fluxheim_tls::openssl_cipher_lists(ciphers)
 }
@@ -2253,7 +2249,7 @@ impl DownstreamCertificateReloader {
     }
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", any(), feature = "tls-openssl"))]
 fn add_downstream_tls_listeners<S>(
     service: &mut pingora::services::listening::Service<S>,
     listens: &[String],
@@ -2293,7 +2289,7 @@ where
     Ok(None)
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", any(), feature = "tls-openssl"))]
 fn openssl_pending_managed_certificate_recorder() -> Option<fn()> {
     #[cfg(feature = "metrics")]
     {
@@ -2307,7 +2303,7 @@ fn openssl_pending_managed_certificate_recorder() -> Option<fn()> {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2353,7 +2349,7 @@ type RustlsSniCertificateResolver = fluxheim_tls::RustlsDownstreamCertificateRes
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     feature = "tls-rustls-backend",
     not(feature = "tls-openssl")
 ))]
@@ -2380,7 +2376,7 @@ fn rustls_sni_certificate_resolver(
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     feature = "tls-rustls-backend",
     feature = "acme",
     not(feature = "tls-openssl")
@@ -2391,7 +2387,7 @@ fn rustls_acme_tls_alpn_enabled(tls: &TlsConfig) -> bool {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     feature = "tls-rustls-backend",
     feature = "acme",
     not(feature = "tls-openssl")
@@ -2403,7 +2399,7 @@ struct AcmeTlsAlpnCertificateLoader {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     feature = "tls-rustls-backend",
     feature = "acme",
     not(feature = "tls-openssl")
@@ -2425,12 +2421,12 @@ impl fluxheim_tls::RustlsTlsAlpnCertificateLoader for AcmeTlsAlpnCertificateLoad
     }
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", any(), feature = "tls-openssl"))]
 struct SharedSniCertificateCallback {
     inner: std::sync::Arc<fluxheim_tls::OpenSslDownstreamCertificateStore>,
 }
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat", feature = "tls-openssl"))]
+#[cfg(all(feature = "proxy", any(), feature = "tls-openssl"))]
 #[async_trait::async_trait]
 impl pingora::listeners::TlsAccept for SharedSniCertificateCallback {
     async fn certificate_callback(&self, ssl: &mut pingora::tls::ssl::SslRef) {
@@ -2445,7 +2441,7 @@ impl pingora::listeners::TlsAccept for SharedSniCertificateCallback {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     any(feature = "tls-rustls-backend", feature = "tls-openssl")
 ))]
 fn downstream_certificate_paths(
@@ -2465,7 +2461,7 @@ fn downstream_certificate_paths(
 
 #[cfg(all(
     feature = "proxy",
-    feature = "pingora-compat",
+    any(),
     not(any(feature = "tls-rustls-backend", feature = "tls-openssl"))
 ))]
 fn add_tls_listeners<S>(

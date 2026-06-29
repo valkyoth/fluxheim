@@ -7,11 +7,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-#[cfg(all(feature = "pingora-compat", unix))]
+#[cfg(all(any(), unix))]
 use pingora::server::ListenFds;
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 use pingora::server::ShutdownWatch;
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 use tokio::net::UdpSocket;
 
@@ -27,7 +27,7 @@ const UDP_RESPONSE_RATE_TRACKED_SOURCES_FLOOR: usize = 4_096;
 type UdpSourceSessions = Arc<Mutex<HashMap<IpAddr, usize>>>;
 type UdpResponseRateWindows = Arc<Mutex<UdpResponseRateState>>;
 
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 pub(crate) fn udp_services_from_config(config: &Config) -> io::Result<Vec<UdpProxyService>> {
     if !config.udp.enabled {
         return Ok(Vec::new());
@@ -221,7 +221,7 @@ impl FluxBackgroundTask for UdpProxyTask {
     }
 }
 
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 #[async_trait]
 impl ServiceWithDependents for UdpProxyService {
     async fn start_service(

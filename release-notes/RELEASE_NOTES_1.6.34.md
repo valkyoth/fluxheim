@@ -21,6 +21,9 @@ paths have reached parity coverage.
 - Update the Pingora dependency policy so default, full, cache-edge,
   proxy-edge, load-balancer-edge, PHP, privacy, source, RPM, and container
   release gates fail if a normal build still compiles Pingora crates.
+- Make the historical `pingora-compat` feature marker inert: enabling the
+  feature no longer compiles legacy Pingora source paths now that the
+  dependency is removed from the manifest.
 - Preserve the native runtime cutover evidence and compatibility reporting so
   unsupported configurations fail closed with explicit blockers instead of
   silently falling back to a Pingora adapter.
@@ -30,6 +33,9 @@ paths have reached parity coverage.
 - Pingora is no longer part of normal Fluxheim builds. If a configuration uses
   a feature that the native runtime still reports as unsupported, Fluxheim
   rejects that cutover path with an explicit native-runtime blocker.
+- The `pingora-compat` feature name remains only as a historical compatibility
+  marker for older build scripts; it has no dependency payload and does not
+  re-enable the removed runtime.
 - The `1.6.35` follow-up is reserved for stabilization, soak testing,
   performance comparison, and security-only cleanup after the Pingora-free
   runtime lands.

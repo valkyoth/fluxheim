@@ -160,6 +160,8 @@ fi
 - Tighten release gates so default, full, cache-edge, proxy-edge,
   load-balancer-edge, PHP, privacy, source, RPM, and container builds prove
   they no longer compile Pingora crates.
+- Make the historical pingora-compat feature marker inert so explicit legacy
+  build invocations cannot re-enable removed Pingora source paths.
 - Wire native admin cache purge, cache object lookup, stale disk-cache purge,
   and live load-balancer stats/mutation handlers to Fluxheim-owned runtime
   handles.

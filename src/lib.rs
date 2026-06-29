@@ -4,20 +4,20 @@
     deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 mod access_log;
 #[cfg(feature = "acme")]
 pub mod acme;
 pub mod acme_companion;
 #[cfg(feature = "proxy")]
 pub mod admin;
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 mod auth_request;
 #[cfg(feature = "proxy")]
 mod background;
-#[cfg(all(feature = "cache", feature = "pingora-compat"))]
+#[cfg(all(feature = "cache", any()))]
 pub mod cache;
-#[cfg(all(feature = "cache", not(feature = "pingora-compat")))]
+#[cfg(all(feature = "cache", not(any())))]
 pub mod cache {
     pub use crate::cache_api::*;
 }
@@ -30,7 +30,7 @@ pub mod cli;
     feature = "compression-gzip",
     feature = "compression-zstd"
 ))]
-#[cfg(feature = "pingora-compat")]
+#[cfg(any())]
 mod compression;
 pub mod config {
     #[allow(unused_imports)]
@@ -129,17 +129,17 @@ pub(crate) mod config_web {
     #[allow(unused_imports)]
     pub(crate) use fluxheim_config::config_web::*;
 }
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 mod edge_policy;
 mod flux_error;
 mod fs_trust;
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 mod geo_context;
 #[cfg(feature = "geoip")]
 pub mod geoip;
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 pub mod headers;
-#[cfg(all(feature = "proxy", not(feature = "pingora-compat")))]
+#[cfg(all(feature = "proxy", not(any())))]
 pub mod headers {
     #[derive(Clone, Debug, Default)]
     pub struct RequestTlsClientIdentity {
@@ -188,7 +188,7 @@ pub mod metrics;
 pub mod metrics_otlp;
 #[cfg(all(feature = "web", feature = "proxy"))]
 mod native_http1_static;
-#[cfg(all(feature = "proxy", not(feature = "pingora-compat")))]
+#[cfg(all(feature = "proxy", not(any())))]
 pub mod native_proxy_shim;
 #[cfg(feature = "otel-otlp")]
 pub mod otel_otlp;
@@ -198,19 +198,16 @@ mod otlp_http;
 mod path_safety;
 #[cfg(feature = "php-fpm")]
 pub(crate) mod php_fpm;
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 pub mod proxy;
-#[cfg(all(feature = "proxy", not(feature = "pingora-compat")))]
+#[cfg(all(feature = "proxy", not(any())))]
 pub use native_proxy_shim as proxy;
-#[cfg(all(feature = "proxy", feature = "cache", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", feature = "cache", any()))]
 mod proxy_cache;
-#[cfg(all(
-    any(feature = "proxy", feature = "stream-proxy"),
-    feature = "pingora-compat"
-))]
+#[cfg(all(any(feature = "proxy", feature = "stream-proxy"), any()))]
 mod proxy_protocol;
 pub mod reload;
-#[cfg(all(feature = "proxy", feature = "pingora-compat"))]
+#[cfg(all(feature = "proxy", any()))]
 mod route_policy;
 #[cfg(feature = "security")]
 pub mod security;
@@ -230,7 +227,7 @@ mod stream_tls;
 pub mod tls;
 #[cfg(feature = "otel-tracing")]
 pub mod trace_context;
-#[cfg(all(feature = "traffic-mirror", feature = "pingora-compat"))]
+#[cfg(all(feature = "traffic-mirror", any()))]
 mod traffic_mirror;
 #[cfg(feature = "udp-proxy")]
 mod udp_proxy;
@@ -241,7 +238,7 @@ mod udp_proxy;
     ),
     all(
         feature = "proxy",
-        feature = "pingora-compat",
+        any(),
         any(feature = "tls-rustls-backend", feature = "tls-openssl")
     )
 ))]
