@@ -28,6 +28,8 @@ use pingora::cache::{CacheMeta, HitHandler, MissHandler, Storage};
 #[cfg(feature = "proxy")]
 use pingora::{Error, ErrorType};
 #[cfg(feature = "proxy")]
+use sanitization::SecretString;
+#[cfg(feature = "proxy")]
 use sha2::{Digest, Sha256};
 #[cfg(feature = "proxy")]
 use zeroize::Zeroizing;
@@ -226,7 +228,7 @@ enum DiskCacheEncryptionProvider {
         address: Arc<str>,
         mount: Arc<str>,
         key_name: Arc<str>,
-        token: Arc<Zeroizing<String>>,
+        token: Arc<SecretString>,
     },
 }
 
@@ -336,7 +338,7 @@ impl DiskCacheEncryption {
                         ));
                     }
                 };
-                let token = token.trim().to_owned();
+                let token = token.trim();
                 if token.is_empty() {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidInput,
@@ -372,7 +374,7 @@ impl DiskCacheEncryption {
                                 .unwrap_or_default()
                                 .trim(),
                         ),
-                        token: Arc::new(Zeroizing::new(token)),
+                        token: Arc::new(SecretString::from_secret_str(token)),
                     },
                 }))
             }
@@ -7545,14 +7547,11 @@ fn encrypt_disk_cache_object(
             key_name,
             token,
         } => {
-            let ciphertext = openbao_transit_encrypt(
-                address,
-                mount,
-                key_name,
-                token.as_ref().as_str(),
-                plaintext,
-                &aad,
-            )?;
+            let ciphertext = token
+                .try_with_secret(|token| {
+                    openbao_transit_encrypt(address, mount, key_name, token, plaintext, &aad)
+                })
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))??;
             (Vec::new(), ciphertext.into_bytes())
         }
     };
@@ -7781,14 +7780,11 @@ fn decrypt_disk_cache_object_if_needed(
                 ));
             }
             let ciphertext = cache_object_utf8(&bytes[nonce_end..], "openbao ciphertext")?;
-            openbao_transit_decrypt(
-                address,
-                mount,
-                key_name,
-                token.as_ref().as_str(),
-                &ciphertext,
-                &aad,
-            )
+            token
+                .try_with_secret(|token| {
+                    openbao_transit_decrypt(address, mount, key_name, token, &ciphertext, &aad)
+                })
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?
         }
     }
 }
@@ -11240,7 +11236,10 @@ mod tests {
                 assert_eq!(address.as_ref(), "https://openbao.internal.example");
                 assert_eq!(mount.as_ref(), "transit/cache");
                 assert_eq!(key_name.as_ref(), "fluxheim-cache");
-                assert_eq!(token.as_ref().as_str(), "test-token");
+                assert_eq!(
+                    token.try_with_secret(|token| token == "test-token"),
+                    Ok(true)
+                );
             }
             super::DiskCacheEncryptionProvider::Local { .. } => {
                 panic!("expected openbao transit provider")

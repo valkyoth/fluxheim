@@ -173,6 +173,8 @@ fi
   onto sanitization::SecretString.
 - Move native OpenBao disk-cache encryption token storage onto
   sanitization::SecretString.
+- Align the legacy cache OpenBao token holder with the native cache token
+  migration.
 - Keep RPM, container, dependency-policy, native-runtime, and smoke-test gates
   as blocking evidence during stabilization.
 

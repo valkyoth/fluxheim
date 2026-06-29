@@ -29,6 +29,8 @@ behavior when the change improves security or project direction.
   header assembly to `sanitization::SecretString`.
 - Move native OpenBao disk-cache encryption token storage to
   `sanitization::SecretString`.
+- Align the legacy cache OpenBao token holder with the native cache token
+  migration.
 
 ## 1.6.34 - 2026-06-29
 
