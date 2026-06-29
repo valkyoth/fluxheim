@@ -6,8 +6,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fluxheim_config::config_net::{normalize_host, normalize_host_pattern};
-use fluxheim_config::{Config, HeaderPolicyConfig, VhostConfig};
+use fluxheim_config::{Config, VhostConfig};
 
+#[cfg(feature = "load-balancer")]
+use crate::native_http1_route_proxy::NativeLoadBalancerCollectors;
+use crate::native_http1_route_proxy::NativeRouteProxyBuildContext;
 use crate::{
     DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler,
     NativeHttp1Request, NativeHttp1Response, NativeHttp1RouteProxy,
@@ -158,14 +161,18 @@ impl NativeHttp1HostRouter {
             let proxy = Arc::new(route_proxy_from_config(
                 config,
                 vhost,
-                &config.headers,
-                policy,
-                pool_max_idle,
-                &trusted_sources,
+                NativeRouteProxyBuildContext::new(
+                    &config.headers,
+                    Some(&config.compression),
+                    policy,
+                    pool_max_idle,
+                    &trusted_sources,
+                ),
                 #[cfg(feature = "load-balancer")]
-                collect_load_balancer_services.then_some(&mut load_balancer_services),
-                #[cfg(feature = "load-balancer")]
-                Some(&mut load_balancer_admin_pools),
+                NativeLoadBalancerCollectors::new(
+                    collect_load_balancer_services.then_some(&mut load_balancer_services),
+                    Some(&mut load_balancer_admin_pools),
+                ),
             )?);
             for host in &vhost.hosts {
                 let Some(normalized) = normalize_host_pattern(host) else {
@@ -294,47 +301,27 @@ impl NativeHttp1Handler for NativeHttp1HostRouter {
 fn route_proxy_from_config(
     config: &Config,
     vhost: &VhostConfig,
-    base_headers: &HeaderPolicyConfig,
-    policy: DownstreamHttp1Policy,
-    pool_max_idle: usize,
-    trusted_sources: &[ProxyProtocolTrustedSource],
-    #[cfg(feature = "load-balancer")] load_balancer_services: Option<
-        &mut Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
-    >,
-    #[cfg(feature = "load-balancer")] load_balancer_admin_pools: Option<
-        &mut Vec<crate::NativeLoadBalancerAdminPool>,
-    >,
+    context: NativeRouteProxyBuildContext<'_>,
+    #[cfg(feature = "load-balancer")] collectors: NativeLoadBalancerCollectors<'_>,
 ) -> Result<NativeHttp1RouteProxy, NativeHttp1RouteProxyConfigError> {
     let route_proxy = {
         #[cfg(feature = "acme")]
         {
-            NativeHttp1RouteProxy::from_config_with_trusted_sources_and_load_balancer_services(
+            NativeHttp1RouteProxy::from_config_with_build_context(
                 config,
                 vhost,
-                base_headers,
-                Some(&config.compression),
-                policy,
-                pool_max_idle,
-                trusted_sources,
+                context,
                 #[cfg(feature = "load-balancer")]
-                load_balancer_services,
-                #[cfg(feature = "load-balancer")]
-                load_balancer_admin_pools,
+                collectors,
             )
         }
         #[cfg(not(feature = "acme"))]
         {
             NativeHttp1RouteProxy::from_vhost_config_with_trusted_sources_and_load_balancer_services(
                 vhost,
-                base_headers,
-                Some(&config.compression),
-                policy,
-                pool_max_idle,
-                trusted_sources,
+                context,
                 #[cfg(feature = "load-balancer")]
-                load_balancer_services,
-                #[cfg(feature = "load-balancer")]
-                load_balancer_admin_pools,
+                collectors,
             )
         }
     }?;
