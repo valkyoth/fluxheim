@@ -2,9 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use fluxheim_cache::purge_index::{
+    CacheIndexedPurgeResult, CachePurgeIndexEntry, CacheStalePurgeResult,
+};
 use fluxheim_cache::{
     CacheObjectFreshnessState, CachePurgeIndex, DiskCacheObjectKey, DiskTierPlan,
     STORAGE_BIN_DATA_DIR, STORAGE_BIN_MANIFEST_FILENAME, SerializedCacheObject, StorageBinFileSet,
@@ -94,6 +98,16 @@ pub(crate) struct NativeDiskCacheStats {
     pub(crate) purge_index_entries: u64,
 }
 
+static NATIVE_DISK_CACHE_PURGE_REGISTRY: OnceLock<Mutex<Vec<NativeDiskCachePurgeHandle>>> =
+    OnceLock::new();
+
+#[derive(Clone, Debug)]
+struct NativeDiskCachePurgeHandle {
+    vhost: Arc<str>,
+    route: Option<Arc<str>>,
+    cache: Weak<NativeDiskCache>,
+}
+
 #[derive(Debug)]
 enum NativeDiskCacheBackend {
     Filesystem,
@@ -111,6 +125,7 @@ struct NativeStorageBinBackend {
 struct NativeDiskCacheEncryption {
     key_id: Arc<str>,
     provider: NativeDiskCacheEncryptionProvider,
+    local_nonce_invocations: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -133,6 +148,7 @@ enum NativeDiskCacheEncryptionProvider {
 struct NativeDiskCacheState {
     objects: HashMap<String, NativeDiskCacheRecord>,
     variants: HashMap<String, Vec<NativeMemoryCacheVariant>>,
+    purge_index: CachePurgeIndex,
     bytes: u64,
 }
 
@@ -335,6 +351,7 @@ impl NativeDiskCache {
             free_size_bytes: self.max_bytes.saturating_sub(size_bytes),
             largest_free_range_bytes: self.max_bytes.saturating_sub(size_bytes),
             max_size_bytes: self.max_bytes,
+            purge_index_entries: self.with_state(|state| state.purge_index.len() as u64),
             ..NativeDiskCacheStats::default()
         };
         if let NativeDiskCacheBackend::StorageBin(storage_bin) = &self.backend {
@@ -386,9 +403,9 @@ impl NativeDiskCache {
         let disk_key = DiskCacheObjectKey {
             combined: key.combined.clone(),
             primary: key.primary.clone(),
-            user_tag: key.user_tag,
-            index_path: key.index_path,
-            cache_tags: key.cache_tags,
+            user_tag: key.user_tag.clone(),
+            index_path: key.index_path.clone(),
+            cache_tags: key.cache_tags.clone(),
         };
         let encoded = encode_disk_cache_object(
             &disk_key,
@@ -410,6 +427,11 @@ impl NativeDiskCache {
             return Ok(());
         };
         self.with_state_mut(|state| {
+            let combined = key.combined.clone();
+            let primary = key.primary.clone();
+            let user_tag = key.user_tag.clone();
+            let index_path = key.index_path.clone();
+            let cache_tags = key.cache_tags.clone();
             state.objects.insert(
                 key.combined.clone(),
                 NativeDiskCacheRecord {
@@ -428,6 +450,9 @@ impl NativeDiskCache {
                     key: key.combined,
                 });
             }
+            state
+                .purge_index
+                .insert_with_path_and_tags(combined, primary, user_tag, index_path, cache_tags);
             state.bytes = state.bytes.saturating_add(encoded_len);
         });
         self.persist_storage_bin_index();
@@ -442,6 +467,7 @@ impl NativeDiskCache {
         if incoming_weight > self.max_bytes {
             return Ok(false);
         }
+        let mut evicted = false;
         loop {
             let admissible = self.with_state(|state| {
                 let existing = state
@@ -456,11 +482,15 @@ impl NativeDiskCache {
                     <= self.max_bytes
             });
             if admissible {
+                if evicted {
+                    self.persist_storage_bin_index();
+                }
                 return Ok(true);
             }
             if !self.evict_oldest()? {
                 return Ok(false);
             }
+            evicted = true;
         }
     }
 
@@ -570,7 +600,8 @@ impl NativeDiskCache {
     }
 
     fn rebuild_filesystem_index(&self, state: &mut NativeDiskCacheState) -> std::io::Result<()> {
-        for shard in std::fs::read_dir(&self.root)? {
+        let root = NativeSafeDiskCachePath::from_path(self.root.clone());
+        for shard in root.read_dir()? {
             let shard = shard?;
             let shard_path = shard.path();
             if !shard.file_type()?.is_dir()
@@ -578,7 +609,8 @@ impl NativeDiskCache {
             {
                 continue;
             }
-            for object in std::fs::read_dir(&shard_path)? {
+            let shard = NativeSafeDiskCachePath::from_path(shard_path);
+            for object in shard.read_dir()? {
                 let object = object?;
                 let path = object.path();
                 if object.file_type()?.is_dir()
@@ -587,7 +619,10 @@ impl NativeDiskCache {
                 {
                     continue;
                 }
-                let bytes = match read_native_disk_cache_file(&path) {
+                let bytes = match read_native_disk_cache_file(
+                    &path,
+                    native_disk_cache_read_limit(self.max_object_bytes),
+                ) {
                     Ok(bytes) => bytes,
                     Err(_) => continue,
                 };
@@ -622,14 +657,21 @@ impl NativeDiskCache {
                     },
                 );
                 if !meta.vary_fields.is_empty() {
-                    state
-                        .variants
-                        .entry(primary)
-                        .or_default()
-                        .push(NativeMemoryCacheVariant {
+                    state.variants.entry(primary.clone()).or_default().push(
+                        NativeMemoryCacheVariant {
                             fields: meta.vary_fields,
-                            key: combined,
-                        });
+                            key: combined.clone(),
+                        },
+                    );
+                }
+                if let Some(user_tag) = parsed.user_tag {
+                    state.purge_index.insert_with_path_and_tags(
+                        combined,
+                        primary,
+                        user_tag,
+                        parsed.index_path,
+                        parsed.cache_tags,
+                    );
                 }
             }
         }
@@ -681,12 +723,21 @@ impl NativeDiskCache {
             if !meta.vary_fields.is_empty() {
                 state
                     .variants
-                    .entry(primary)
+                    .entry(primary.clone())
                     .or_default()
                     .push(NativeMemoryCacheVariant {
                         fields: meta.vary_fields,
-                        key: combined,
+                        key: combined.clone(),
                     });
+            }
+            if let Some(user_tag) = parsed.user_tag {
+                state.purge_index.insert_with_path_and_tags(
+                    combined,
+                    primary,
+                    user_tag,
+                    parsed.index_path,
+                    parsed.cache_tags,
+                );
             }
             valid_entries.push(entry);
         }
@@ -705,7 +756,10 @@ impl NativeDiskCache {
                         "native disk cache object path crosses symlink",
                     ));
                 }
-                read_native_disk_cache_file(path)?
+                read_native_disk_cache_file(
+                    path,
+                    native_disk_cache_read_limit(self.max_object_bytes),
+                )?
             }
             (
                 NativeDiskCacheBackend::StorageBin(storage_bin),
@@ -722,7 +776,7 @@ impl NativeDiskCache {
         parse_disk_cache_object(&bytes, self.max_object_bytes)
     }
 
-    fn decrypt_if_needed(&self, bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+    fn decrypt_if_needed(&self, bytes: &[u8]) -> std::io::Result<Zeroizing<Vec<u8>>> {
         match &self.encryption {
             Some(encryption) => encryption.decrypt(bytes),
             None => {
@@ -734,7 +788,7 @@ impl NativeDiskCache {
                         "encrypted cache object found while native disk encryption is disabled",
                     ));
                 }
-                Ok(bytes.to_vec())
+                Ok(Zeroizing::new(bytes.to_vec()))
             }
         }
     }
@@ -835,6 +889,199 @@ impl NativeDiskCache {
         purged
     }
 
+    fn purge_user_tag(&self, user_tag: &str, limit: usize, soft: bool) -> CacheIndexedPurgeResult {
+        let entries =
+            self.with_state(|state| state.purge_index.entries_for_user_tag(user_tag, limit));
+        self.purge_indexed_entries(entries, soft)
+    }
+
+    fn purge_path_prefix(
+        &self,
+        user_tag: &str,
+        path_prefix: &str,
+        limit: usize,
+        soft: bool,
+    ) -> CacheIndexedPurgeResult {
+        let entries = self.with_state(|state| {
+            state
+                .purge_index
+                .entries_for_user_tag_path_prefix(user_tag, path_prefix, limit)
+        });
+        self.purge_indexed_entries(entries, soft)
+    }
+
+    fn purge_path_exact(
+        &self,
+        user_tag: &str,
+        path_exact: &str,
+        limit: usize,
+        soft: bool,
+    ) -> CacheIndexedPurgeResult {
+        let entries = self.with_state(|state| {
+            state
+                .purge_index
+                .entries_for_user_tag_path_exact(user_tag, path_exact, limit)
+        });
+        self.purge_indexed_entries(entries, soft)
+    }
+
+    fn purge_cache_tag(
+        &self,
+        user_tag: &str,
+        cache_tag: &str,
+        limit: usize,
+        soft: bool,
+    ) -> CacheIndexedPurgeResult {
+        let entries = self.with_state(|state| {
+            state
+                .purge_index
+                .entries_for_user_tag_cache_tag(user_tag, cache_tag, limit)
+        });
+        self.purge_indexed_entries(entries, soft)
+    }
+
+    fn purge_path_pattern(
+        &self,
+        user_tag: &str,
+        path_pattern: &str,
+        limit: usize,
+        soft: bool,
+    ) -> CacheIndexedPurgeResult {
+        let entries = self.with_state(|state| {
+            state
+                .purge_index
+                .entries_for_user_tag_path_pattern(user_tag, path_pattern, limit)
+        });
+        self.purge_indexed_entries(entries, soft)
+    }
+
+    fn purge_stale(&self, user_tag: &str, limit: usize, dry_run: bool) -> CacheStalePurgeResult {
+        let entries =
+            self.with_state(|state| state.purge_index.entries_for_user_tag(user_tag, limit));
+        self.purge_stale_entries(entries, dry_run)
+    }
+
+    fn purge_indexed_entries(
+        &self,
+        entries: Vec<CachePurgeIndexEntry>,
+        soft: bool,
+    ) -> CacheIndexedPurgeResult {
+        let now = Instant::now();
+        let mut purged = 0_usize;
+        for entry in &entries {
+            if soft {
+                let Some(record) =
+                    self.with_state(|state| state.objects.get(&entry.combined_key).cloned())
+                else {
+                    self.with_state(|state| {
+                        state.purge_index.remove_combined(&entry.combined_key);
+                    });
+                    continue;
+                };
+                if matches!(record.location, NativeDiskCacheLocation::StorageBin(_)) {
+                    if self.remove_combined(&entry.combined_key) {
+                        purged = purged.saturating_add(1);
+                    }
+                    continue;
+                }
+                let softened = self.soft_purge_filesystem_record(entry, &record, now);
+                if softened {
+                    purged = purged.saturating_add(1);
+                }
+                continue;
+            }
+            if self.remove_combined(&entry.combined_key) {
+                purged = purged.saturating_add(1);
+            }
+        }
+        CacheIndexedPurgeResult {
+            matched: entries.len(),
+            purged,
+            truncated: false,
+        }
+    }
+
+    fn soft_purge_filesystem_record(
+        &self,
+        entry: &CachePurgeIndexEntry,
+        record: &NativeDiskCacheRecord,
+        now: Instant,
+    ) -> bool {
+        let Ok(mut object) = self.read_record(record) else {
+            return false;
+        };
+        let Some(mut memory_entry) = native_memory_entry_from_disk_object(&object) else {
+            return false;
+        };
+        memory_entry.expires_at = now;
+        let meta = NativeDiskCacheMeta::from_entry(
+            &memory_entry,
+            NativeDiskCacheMeta::decode(&object.internal_meta)
+                .map(|meta| meta.vary_fields)
+                .unwrap_or_default(),
+        );
+        object.internal_meta = meta.encode();
+        let Ok(encoded) = encode_disk_cache_object(
+            &DiskCacheObjectKey {
+                combined: entry.combined_key.clone(),
+                primary: entry.primary_key.clone(),
+                user_tag: entry.user_tag.clone(),
+                index_path: entry.path.clone(),
+                cache_tags: entry.cache_tags.clone(),
+            },
+            &object.internal_meta,
+            &object.response_header,
+            &object.body,
+        ) else {
+            return false;
+        };
+        let encoded = if let Some(encryption) = &self.encryption {
+            match encryption.encrypt(&entry.combined_key, &encoded) {
+                Ok(encoded) => encoded,
+                Err(_) => return false,
+            }
+        } else {
+            encoded
+        };
+        let NativeDiskCacheLocation::Filesystem(path) = &record.location else {
+            return false;
+        };
+        self.write_object_atomically(path, &encoded).is_ok()
+    }
+
+    fn purge_stale_entries(
+        &self,
+        entries: Vec<CachePurgeIndexEntry>,
+        dry_run: bool,
+    ) -> CacheStalePurgeResult {
+        let now = Instant::now();
+        let mut scanned = 0_usize;
+        let mut stale = 0_usize;
+        let mut purged = 0_usize;
+        for entry in &entries {
+            let Some(object) = self.get_combined(&entry.combined_key) else {
+                self.with_state(|state| {
+                    state.purge_index.remove_combined(&entry.combined_key);
+                });
+                continue;
+            };
+            scanned = scanned.saturating_add(1);
+            if object.expires_at > now {
+                continue;
+            }
+            stale = stale.saturating_add(1);
+            if !dry_run && self.remove_combined(&entry.combined_key) {
+                purged = purged.saturating_add(1);
+            }
+        }
+        CacheStalePurgeResult {
+            scanned,
+            stale,
+            purged,
+            truncated: false,
+        }
+    }
+
     fn remove_combined(&self, combined_key: &str) -> bool {
         let removed = self.with_state_mut(|state| {
             let removed = state.objects.remove(combined_key);
@@ -848,6 +1095,9 @@ impl NativeDiskCache {
             removed
         });
         if let Some(record) = removed {
+            self.with_state(|state| {
+                state.purge_index.remove_combined(combined_key);
+            });
             let _ = self.remove_location(&record.location);
             self.persist_storage_bin_index();
             return true;
@@ -865,6 +1115,7 @@ impl NativeDiskCache {
             let removed = state.objects.remove(&key);
             if let Some(record) = &removed {
                 state.bytes = state.bytes.saturating_sub(record.weight);
+                state.purge_index.remove_combined(&key);
             }
             state.variants.retain(|_, variants| {
                 variants.retain(|variant| variant.key != key);
@@ -876,7 +1127,6 @@ impl NativeDiskCache {
             return Ok(false);
         };
         self.remove_location(&record.location)?;
-        self.persist_storage_bin_index();
         Ok(true)
     }
 
@@ -1047,15 +1297,217 @@ pub fn inspect_native_disk_cache_object(
     })
 }
 
+pub(crate) fn register_native_disk_cache_purge_handle(
+    vhost: Arc<str>,
+    route: Option<Arc<str>>,
+    cache: &Arc<NativeDiskCache>,
+) {
+    let registry = NATIVE_DISK_CACHE_PURGE_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let mut registry = match registry.lock() {
+        Ok(registry) => registry,
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::native_http1",
+                "native disk cache purge registry mutex poisoned: {error}"
+            );
+            std::process::abort();
+        }
+    };
+    registry.push(NativeDiskCachePurgeHandle {
+        vhost,
+        route,
+        cache: Arc::downgrade(cache),
+    });
+}
+
 pub fn purge_native_disk_cache_primary(
-    config: &CacheConfig,
+    vhost: &str,
+    route: Option<&str>,
     primary_key: &str,
     combined_key: &str,
 ) -> bool {
-    let Some(cache) = NativeDiskCache::from_config(config) else {
+    purge_native_disk_cache(vhost, route, |cache| {
+        cache.purge_primary(primary_key, combined_key)
+    })
+}
+
+pub fn purge_native_disk_cache_user_tag(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    limit: usize,
+    soft: bool,
+) -> CacheIndexedPurgeResult {
+    purge_native_disk_cache_indexed(vhost, route, |cache| {
+        cache.purge_user_tag(user_tag, limit, soft)
+    })
+}
+
+pub fn purge_native_disk_cache_path_prefix(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    path_prefix: &str,
+    limit: usize,
+    soft: bool,
+) -> CacheIndexedPurgeResult {
+    purge_native_disk_cache_indexed(vhost, route, |cache| {
+        cache.purge_path_prefix(user_tag, path_prefix, limit, soft)
+    })
+}
+
+pub fn purge_native_disk_cache_path_exact(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    path_exact: &str,
+    limit: usize,
+    soft: bool,
+) -> CacheIndexedPurgeResult {
+    purge_native_disk_cache_indexed(vhost, route, |cache| {
+        cache.purge_path_exact(user_tag, path_exact, limit, soft)
+    })
+}
+
+pub fn purge_native_disk_cache_tag(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    cache_tag: &str,
+    limit: usize,
+    soft: bool,
+) -> CacheIndexedPurgeResult {
+    purge_native_disk_cache_indexed(vhost, route, |cache| {
+        cache.purge_cache_tag(user_tag, cache_tag, limit, soft)
+    })
+}
+
+pub fn purge_native_disk_cache_path_pattern(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    path_pattern: &str,
+    limit: usize,
+    soft: bool,
+) -> CacheIndexedPurgeResult {
+    purge_native_disk_cache_indexed(vhost, route, |cache| {
+        cache.purge_path_pattern(user_tag, path_pattern, limit, soft)
+    })
+}
+
+pub fn purge_native_disk_cache_stale(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    limit: usize,
+    dry_run: bool,
+) -> CacheStalePurgeResult {
+    purge_native_disk_cache_stale_indexed(vhost, route, |cache| {
+        cache.purge_stale(user_tag, limit, dry_run)
+    })
+}
+
+fn purge_native_disk_cache(
+    vhost: &str,
+    route: Option<&str>,
+    mut purge: impl FnMut(&NativeDiskCache) -> bool,
+) -> bool {
+    let Some(registry) = NATIVE_DISK_CACHE_PURGE_REGISTRY.get() else {
         return false;
     };
-    cache.purge_primary(primary_key, combined_key)
+    let mut registry = match registry.lock() {
+        Ok(registry) => registry,
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::native_http1",
+                "native disk cache purge registry mutex poisoned: {error}"
+            );
+            std::process::abort();
+        }
+    };
+    let mut purged = false;
+    registry.retain(|handle| {
+        let Some(cache) = handle.cache.upgrade() else {
+            return false;
+        };
+        if handle.vhost.as_ref() != vhost || handle.route.as_deref() != route {
+            return true;
+        }
+        purged |= purge(&cache);
+        true
+    });
+    purged
+}
+
+fn purge_native_disk_cache_indexed(
+    vhost: &str,
+    route: Option<&str>,
+    mut purge: impl FnMut(&NativeDiskCache) -> CacheIndexedPurgeResult,
+) -> CacheIndexedPurgeResult {
+    let Some(registry) = NATIVE_DISK_CACHE_PURGE_REGISTRY.get() else {
+        return CacheIndexedPurgeResult::default();
+    };
+    let mut registry = match registry.lock() {
+        Ok(registry) => registry,
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::native_http1",
+                "native disk cache purge registry mutex poisoned: {error}"
+            );
+            std::process::abort();
+        }
+    };
+    let mut result = CacheIndexedPurgeResult::default();
+    registry.retain(|handle| {
+        let Some(cache) = handle.cache.upgrade() else {
+            return false;
+        };
+        if handle.vhost.as_ref() != vhost || handle.route.as_deref() != route {
+            return true;
+        }
+        let scoped = purge(&cache);
+        result.matched = result.matched.saturating_add(scoped.matched);
+        result.purged = result.purged.saturating_add(scoped.purged);
+        result.truncated |= scoped.truncated;
+        true
+    });
+    result
+}
+
+fn purge_native_disk_cache_stale_indexed(
+    vhost: &str,
+    route: Option<&str>,
+    mut purge: impl FnMut(&NativeDiskCache) -> CacheStalePurgeResult,
+) -> CacheStalePurgeResult {
+    let Some(registry) = NATIVE_DISK_CACHE_PURGE_REGISTRY.get() else {
+        return CacheStalePurgeResult::default();
+    };
+    let mut registry = match registry.lock() {
+        Ok(registry) => registry,
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::native_http1",
+                "native disk cache purge registry mutex poisoned: {error}"
+            );
+            std::process::abort();
+        }
+    };
+    let mut result = CacheStalePurgeResult::default();
+    registry.retain(|handle| {
+        let Some(cache) = handle.cache.upgrade() else {
+            return false;
+        };
+        if handle.vhost.as_ref() != vhost || handle.route.as_deref() != route {
+            return true;
+        }
+        let scoped = purge(&cache);
+        result.scanned = result.scanned.saturating_add(scoped.scanned);
+        result.stale = result.stale.saturating_add(scoped.stale);
+        result.purged = result.purged.saturating_add(scoped.purged);
+        result.truncated |= scoped.truncated;
+        true
+    });
+    result
 }
 
 fn native_inspection_vary_cache_key(
@@ -1101,6 +1553,10 @@ fn native_disk_cache_encryption_supported(cache: &CacheConfig) -> bool {
 }
 
 const NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-ENC-v1\n";
+const NATIVE_DISK_CACHE_READ_OVERHEAD_BYTES: u64 = 1024 * 1024;
+const NATIVE_DISK_CACHE_GCM_RANDOM_NONCE_INVOCATION_LIMIT: u64 = 1_u64 << 32;
+const NATIVE_DISK_CACHE_GCM_RANDOM_NONCE_WARNING_AT: u64 =
+    NATIVE_DISK_CACHE_GCM_RANDOM_NONCE_INVOCATION_LIMIT - 1_000_000;
 #[cfg(feature = "openbao-cache-encryption")]
 const OPENBAO_TRANSIT_RESPONSE_OVERHEAD_BYTES: u64 = 4096;
 #[cfg(feature = "openbao-cache-encryption")]
@@ -1139,13 +1595,18 @@ impl NativeDiskCacheEncryption {
             }
             CacheDiskEncryptionProvider::OpenbaoTransit => native_openbao_transit_provider(config)?,
         };
-        Ok(Some(Self { key_id, provider }))
+        Ok(Some(Self {
+            key_id,
+            provider,
+            local_nonce_invocations: AtomicU64::new(0),
+        }))
     }
 
     fn encrypt(&self, combined_key: &str, plaintext: &[u8]) -> std::io::Result<Vec<u8>> {
         let aad = native_cache_encryption_aad(&self.key_id, combined_key);
         let (nonce, ciphertext) = match &self.provider {
             NativeDiskCacheEncryptionProvider::Local { key } => {
+                self.record_local_nonce_invocation();
                 let mut nonce = [0_u8; 12];
                 getrandom::fill(&mut nonce).map_err(|error| {
                     std::io::Error::other(format!(
@@ -1207,7 +1668,27 @@ impl NativeDiskCacheEncryption {
         Ok(encoded)
     }
 
-    fn decrypt(&self, bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+    fn record_local_nonce_invocation(&self) {
+        let count = self
+            .local_nonce_invocations
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        if count == NATIVE_DISK_CACHE_GCM_RANDOM_NONCE_WARNING_AT {
+            log::warn!(
+                target: "fluxheim::security",
+                "native local disk-cache encryption key_id={} is approaching the AES-GCM random-nonce invocation limit; rotate the local cache encryption key",
+                self.key_id
+            );
+        } else if count == NATIVE_DISK_CACHE_GCM_RANDOM_NONCE_INVOCATION_LIMIT {
+            log::error!(
+                target: "fluxheim::security",
+                "native local disk-cache encryption key_id={} reached the AES-GCM random-nonce invocation limit; rotate the local cache encryption key immediately",
+                self.key_id
+            );
+        }
+    }
+
+    fn decrypt(&self, bytes: &[u8]) -> std::io::Result<Zeroizing<Vec<u8>>> {
         if bytes.get(..NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1.len())
             != Some(NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1)
         {
@@ -1284,7 +1765,7 @@ impl NativeDiskCacheEncryption {
                         )
                     })?;
                 plaintext.truncate(plaintext_len);
-                Ok(plaintext)
+                Ok(Zeroizing::new(plaintext))
             }
             #[cfg(feature = "openbao-cache-encryption")]
             NativeDiskCacheEncryptionProvider::OpenBaoTransit {
@@ -1467,7 +1948,7 @@ fn openbao_transit_decrypt(
     token: &str,
     ciphertext: &str,
     aad: &[u8],
-) -> std::io::Result<Vec<u8>> {
+) -> std::io::Result<Zeroizing<Vec<u8>>> {
     let associated_data = base64_standard_encode(aad)?;
     let request = serde_json::json!({
         "ciphertext": ciphertext,
@@ -1493,14 +1974,15 @@ fn openbao_transit_decrypt(
                 "OpenBao Transit decrypt response did not include plaintext",
             )
         })?;
-    base64_ng::STANDARD
+    let decoded = base64_ng::STANDARD
         .decode_vec(plaintext.as_bytes())
         .map_err(|_| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "OpenBao Transit decrypt response plaintext is not valid base64",
             )
-        })
+        })?;
+    Ok(Zeroizing::new(decoded))
 }
 
 #[cfg(feature = "openbao-cache-encryption")]
@@ -1526,12 +2008,14 @@ fn openbao_transit_read_json(
     operation: &str,
     max_response_bytes: u64,
 ) -> std::io::Result<serde_json::Value> {
-    let body = response
-        .body_mut()
-        .with_config()
-        .limit(max_response_bytes.saturating_add(1))
-        .read_to_vec()
-        .map_err(|error| openbao_io_error(operation, error))?;
+    let body = Zeroizing::new(
+        response
+            .body_mut()
+            .with_config()
+            .limit(max_response_bytes.saturating_add(1))
+            .read_to_vec()
+            .map_err(|error| openbao_io_error(operation, error))?,
+    );
     if body.len() as u64 > max_response_bytes {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -2016,8 +2500,21 @@ fn native_cache_path_contains_symlink(root: &Path, path: &Path) -> std::io::Resu
     Ok(false)
 }
 
-fn read_native_disk_cache_file(path: &Path) -> std::io::Result<Vec<u8>> {
+fn native_disk_cache_read_limit(max_object_bytes: fluxheim_config::ByteSize) -> u64 {
+    max_object_bytes
+        .as_u64()
+        .saturating_add(NATIVE_DISK_CACHE_READ_OVERHEAD_BYTES)
+}
+
+fn read_native_disk_cache_file(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
     let mut file = NativeSafeDiskCachePath::from_path(path.to_path_buf()).open_existing_file()?;
+    let len = file.metadata()?.len();
+    if len > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native disk cache object exceeds read limit",
+        ));
+    }
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
     Ok(bytes)
@@ -2090,6 +2587,17 @@ impl NativeSafeDiskCachePath {
         )
         .map_err(native_rustix_to_io_error)?;
         Ok(fd.into())
+    }
+
+    fn read_dir(&self) -> std::io::Result<std::fs::ReadDir> {
+        let canonical = self.path.canonicalize()?;
+        if canonical != self.path {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "native disk cache directory path is not canonical",
+            ));
+        }
+        std::fs::read_dir(canonical)
     }
 
     fn rename_from(&self, source: &Self) -> std::io::Result<()> {

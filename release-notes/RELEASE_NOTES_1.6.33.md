@@ -130,6 +130,30 @@ memory+disk tiering for ordinary HTTP/1 proxy responses.
   record proxy request counters, expose native cache memory/disk runtime gauges,
   and publish native cache lookup duration histograms through the existing
   Prometheus metrics surface.
+- Fixed native disk-cache purge parity so exact, bulk, prefix, tag, wildcard,
+  route-scope, stale, and slice path-exact purges operate on the live native
+  filesystem/storage-bin disk cache instead of a reconstructed throwaway cache.
+  Native disk cache now keeps its own purge index and reports non-zero disk
+  purge-index metrics when indexed disk objects are present.
+- Moved native disk-cache lookup and store work onto Tokio's blocking pool.
+  This covers filesystem I/O, storage-bin I/O, storage-bin index persistence,
+  and OpenBao Transit encrypt/decrypt HTTP calls so cache operations do not
+  pin async worker threads while external storage or OpenBao is slow.
+- Reduced storage-bin write amplification by batching index persistence for
+  multi-object eviction during one cache store, instead of rewriting the full
+  storage-bin index after every single evicted object.
+- Hardened native cache encryption and rebuild behavior by bounding
+  filesystem cache-object reads before startup rebuild parsing, zeroizing
+  transient decrypted OpenBao/native serialized-object buffers, and logging
+  local AES-GCM key-rotation warnings as a process approaches the random-nonce
+  invocation bound.
+- Native filesystem disk-cache startup scans now list root and shard
+  directories through the native safe disk-cache path wrapper, keeping the
+  symlink/canonical path boundary explicit at the directory traversal point.
+- Updated `arc-swap` to 1.9.2 and `env_logger` to 0.11.11.
+- Stale admin purges now log an explicit security warning if the system clock
+  regresses before the Unix epoch, instead of silently substituting timestamp
+  zero without operator visibility.
 
 ## Compatibility Notes
 
@@ -177,6 +201,7 @@ memory+disk tiering for ordinary HTTP/1 proxy responses.
 - `cargo test -p fluxheim-server --features openbao-cache-encryption native_route_proxy_caches_proxy_response_on_openbao_storage_bin_disk --locked`
 - `cargo test -p fluxheim-server native_route_proxy_tiered_cache_refills_memory_from_disk --locked`
 - `cargo test -p fluxheim-server native_route_proxy_peer_fills_and_stores_memory_cache_response --locked`
+- `cargo test -p fluxheim-server native_storage_bin_disk_purge_uses_live_cache_instance --locked`
 - `cargo test -p fluxheim-server static_cache_expiry_rejects_unrepresentable_ttl --locked`
 - `cargo test -p fluxheim-server native_route_proxy_regenerates_forwarded_traceparent_span_id --features otel-tracing --locked`
 - `cargo test -p fluxheim-server --features acme,tls-rustls-backend native_http1_proxy_runtime_accepts_default_vhost_acme_certificate_source --locked`

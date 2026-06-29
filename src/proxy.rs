@@ -1741,6 +1741,13 @@ impl ProxySnapshot {
                 )
             })?;
         let cache_key = key.combined();
+        let native_key = crate::cache::image_cache_key(cache_config, &cache_request)
+            .map(|key| key.as_str().to_owned())
+            .unwrap_or_else(|| {
+                key.primary_key_str()
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| key.primary())
+            });
         let mut memory_purged = route_cache
             .and_then(|cache| cache.pingora_memory_storage)
             .or(vhost
@@ -1754,9 +1761,17 @@ impl ProxySnapshot {
         memory_purged |= fluxheim_server::purge_native_memory_cache_primary(
             &vhost.name,
             route_cache.map(|cache| cache.name.as_str()),
-            &native_primary_key,
-            &native_primary_key,
+            &native_key,
+            &native_key,
         );
+        if native_primary_key != native_key || cache_key.as_str() != native_key {
+            memory_purged |= fluxheim_server::purge_native_memory_cache_primary(
+                &vhost.name,
+                route_cache.map(|cache| cache.name.as_str()),
+                &native_primary_key,
+                cache_key.as_str(),
+            );
+        }
         let mut disk_purged = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
@@ -1765,10 +1780,19 @@ impl ProxySnapshot {
             .unwrap_or(false);
         if !disk_purged {
             disk_purged |= fluxheim_server::purge_native_disk_cache_primary(
-                cache_config,
-                &native_primary_key,
-                &native_primary_key,
+                &vhost.name,
+                route_cache.map(|cache| cache.name.as_str()),
+                &native_key,
+                &native_key,
             );
+            if native_primary_key != native_key || cache_key.as_str() != native_key {
+                disk_purged |= fluxheim_server::purge_native_disk_cache_primary(
+                    &vhost.name,
+                    route_cache.map(|cache| cache.name.as_str()),
+                    &native_primary_key,
+                    cache_key.as_str(),
+                );
+            }
         }
         if cache_config.range.enabled && cache_config.range.slice.enabled {
             let slice_limit = usize::try_from(cache_config.range.slice.max_slices)
@@ -1785,6 +1809,15 @@ impl ProxySnapshot {
                     .purged
                     > 0;
             }
+            let native_memory = fluxheim_server::purge_native_memory_cache_path_exact(
+                &vhost.name,
+                route_cache.map(|cache| cache.name.as_str()),
+                user_tag,
+                request.path,
+                slice_limit,
+                false,
+            );
+            memory_purged |= native_memory.purged > 0;
             if let Some(storage) = route_cache
                 .and_then(|cache| cache.pingora_disk_storage)
                 .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
@@ -1794,6 +1827,15 @@ impl ProxySnapshot {
                     .purged
                     > 0;
             }
+            let native_disk = fluxheim_server::purge_native_disk_cache_path_exact(
+                &vhost.name,
+                route_cache.map(|cache| cache.name.as_str()),
+                user_tag,
+                request.path,
+                slice_limit,
+                false,
+            );
+            disk_purged |= native_disk.purged > 0;
         }
         Ok(CachePurgeResult {
             vhost: vhost.name.clone(),
@@ -1909,7 +1951,7 @@ impl ProxySnapshot {
         memory.matched = memory.matched.saturating_add(native_memory.matched);
         memory.purged = memory.purged.saturating_add(native_memory.purged);
         memory.truncated |= native_memory.truncated;
-        let disk = route_cache
+        let mut disk = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
             .map(|storage| {
@@ -1923,6 +1965,16 @@ impl ProxySnapshot {
             })
             .transpose()?
             .unwrap_or_default();
+        let native_disk = fluxheim_server::purge_native_disk_cache_user_tag(
+            &vhost.name,
+            route_cache.map(|cache| cache.name.as_str()),
+            &user_tag,
+            request.limit,
+            request.soft,
+        );
+        disk.matched = disk.matched.saturating_add(native_disk.matched);
+        disk.purged = disk.purged.saturating_add(native_disk.purged);
+        disk.truncated |= native_disk.truncated;
 
         Ok(CacheIndexedPurgeResult {
             vhost: vhost.name.clone(),
@@ -2022,7 +2074,7 @@ impl ProxySnapshot {
         memory.matched = memory.matched.saturating_add(native_memory.matched);
         memory.purged = memory.purged.saturating_add(native_memory.purged);
         memory.truncated |= native_memory.truncated;
-        let disk = route_cache
+        let mut disk = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
             .map(|storage| {
@@ -2040,6 +2092,17 @@ impl ProxySnapshot {
             })
             .transpose()?
             .unwrap_or_default();
+        let native_disk = fluxheim_server::purge_native_disk_cache_path_prefix(
+            &vhost.name,
+            route_cache.map(|cache| cache.name.as_str()),
+            &user_tag,
+            request.path_prefix,
+            request.limit,
+            request.soft,
+        );
+        disk.matched = disk.matched.saturating_add(native_disk.matched);
+        disk.purged = disk.purged.saturating_add(native_disk.purged);
+        disk.truncated |= native_disk.truncated;
 
         Ok(CacheIndexedPurgeResult {
             vhost: vhost.name.clone(),
@@ -2140,7 +2203,7 @@ impl ProxySnapshot {
         memory.matched = memory.matched.saturating_add(native_memory.matched);
         memory.purged = memory.purged.saturating_add(native_memory.purged);
         memory.truncated |= native_memory.truncated;
-        let disk = route_cache
+        let mut disk = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
             .map(|storage| {
@@ -2154,6 +2217,17 @@ impl ProxySnapshot {
             })
             .transpose()?
             .unwrap_or_default();
+        let native_disk = fluxheim_server::purge_native_disk_cache_tag(
+            &vhost.name,
+            route_cache.map(|cache| cache.name.as_str()),
+            &user_tag,
+            request.cache_tag,
+            request.limit,
+            request.soft,
+        );
+        disk.matched = disk.matched.saturating_add(native_disk.matched);
+        disk.purged = disk.purged.saturating_add(native_disk.purged);
+        disk.truncated |= native_disk.truncated;
 
         Ok(CacheIndexedPurgeResult {
             vhost: vhost.name.clone(),
@@ -2235,7 +2309,7 @@ impl ProxySnapshot {
         memory.stale = memory.stale.saturating_add(native_memory.stale);
         memory.purged = memory.purged.saturating_add(native_memory.purged);
         memory.truncated |= native_memory.truncated;
-        let disk = route_cache
+        let mut disk = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
             .map(|storage| {
@@ -2244,6 +2318,17 @@ impl ProxySnapshot {
             .transpose()
             .map_err(|error| io::Error::other(error.to_string()))?
             .unwrap_or_default();
+        let native_disk = fluxheim_server::purge_native_disk_cache_stale(
+            &vhost.name,
+            route_cache.map(|cache| cache.name.as_str()),
+            &user_tag,
+            request.limit,
+            request.dry_run,
+        );
+        disk.scanned = disk.scanned.saturating_add(native_disk.scanned);
+        disk.stale = disk.stale.saturating_add(native_disk.stale);
+        disk.purged = disk.purged.saturating_add(native_disk.purged);
+        disk.truncated |= native_disk.truncated;
 
         Ok(CacheStalePurgeResult {
             vhost: vhost.name.clone(),
@@ -2399,7 +2484,7 @@ impl ProxySnapshot {
         memory.matched = memory.matched.saturating_add(native_memory.matched);
         memory.purged = memory.purged.saturating_add(native_memory.purged);
         memory.truncated |= native_memory.truncated;
-        let disk = route_cache
+        let mut disk = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
             .map(|storage| {
@@ -2421,6 +2506,17 @@ impl ProxySnapshot {
             })
             .transpose()?
             .unwrap_or_default();
+        let native_disk = fluxheim_server::purge_native_disk_cache_path_pattern(
+            &vhost.name,
+            route_cache.map(|cache| cache.name.as_str()),
+            &user_tag,
+            request.path_pattern,
+            request.limit,
+            request.soft,
+        );
+        disk.matched = disk.matched.saturating_add(native_disk.matched);
+        disk.purged = disk.purged.saturating_add(native_disk.purged);
+        disk.truncated |= native_disk.truncated;
 
         Ok(CacheIndexedPurgeResult {
             vhost: vhost.name.clone(),

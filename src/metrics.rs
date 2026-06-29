@@ -1043,7 +1043,6 @@ fn set_gauge(gauge: Result<&'static IntGauge, prometheus::Error>, value: u64) {
     }
 }
 
-#[cfg(all(feature = "proxy", feature = "cache"))]
 fn ratio_per_mille(value: u64, max: u64) -> u64 {
     fluxheim_observability::metrics_ratio_per_mille(value, max)
 }

@@ -104,6 +104,22 @@ behavior when the change improves security or project direction.
   `traceparent` span IDs, recording native proxy request counters, exporting
   native cache memory/disk runtime gauges, and publishing native cache lookup
   duration histograms through the Prometheus metrics surface.
+- Fix native disk-cache purge parity by registering live disk-cache instances,
+  adding a native disk purge index, and wiring exact, path, tag, wildcard, and
+  stale admin purges through active filesystem and storage-bin state instead
+  of reconstructing throwaway cache instances.
+- Move native disk-cache lookup/store work, including OpenBao Transit calls and
+  storage-bin index writes, onto Tokio's blocking pool and batch storage-bin
+  eviction index persistence to avoid request-worker stalls under disk or
+  Transit latency.
+- Harden native cache encryption and purge edge cases by bounding filesystem
+  cache-object reads before startup rebuild parsing, zeroizing transient
+  decrypted OpenBao/native serialized-object buffers, warning on local
+  AES-GCM random-nonce invocation limits, and logging clock-regression stale
+  purge behavior.
+- Harden native filesystem disk-cache startup scans by routing root and shard
+  directory listing through the native safe disk-cache path wrapper, and update
+  `arc-swap` to 1.9.2 plus `env_logger` to 0.11.11.
 
 ## 1.6.32 - 2026-06-28
 

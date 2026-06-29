@@ -19,8 +19,9 @@ use crate::native_http1_cache::{
     NativeMemoryCacheEntry, NativeMemoryCacheFill, NativeMemoryCacheState,
     NativeMemoryCacheVariant, lock_native_memory_cache, native_cache_entry_weight,
     native_cache_ttl, native_disk_cache_supported, native_peer_fill_cache_ttl,
-    native_response_header_map, prune_native_memory_cache, remove_native_memory_cache_entry,
-    remove_native_memory_cache_variants, with_native_cache_status,
+    native_response_header_map, prune_native_memory_cache, register_native_disk_cache_purge_handle,
+    remove_native_memory_cache_entry, remove_native_memory_cache_variants,
+    with_native_cache_status,
 };
 #[cfg(any(
     feature = "compression-brotli",
@@ -271,6 +272,22 @@ pub fn purge_native_memory_cache_path_prefix(
             state
                 .purge_index
                 .entries_for_user_tag_path_prefix(user_tag, path_prefix, limit);
+        purge_native_memory_indexed_entries(state, entries, soft)
+    })
+}
+
+pub fn purge_native_memory_cache_path_exact(
+    vhost: &str,
+    route: Option<&str>,
+    user_tag: &str,
+    path_exact: &str,
+    limit: usize,
+    soft: bool,
+) -> CacheIndexedPurgeResult {
+    purge_native_memory_cache_indexed(vhost, route, |state| {
+        let entries = state
+            .purge_index
+            .entries_for_user_tag_path_exact(user_tag, path_exact, limit);
         purge_native_memory_indexed_entries(state, entries, soft)
     })
 }
@@ -1528,6 +1545,13 @@ impl NativeProxyMemoryCache {
                 &state,
             );
         }
+        if let Some(disk) = disk.as_ref() {
+            register_native_disk_cache_purge_handle(
+                metrics_vhost.clone(),
+                metrics_route.clone(),
+                disk,
+            );
+        }
         register_native_cache_stats_handle(
             config.memory.enabled,
             config.memory.max_size_bytes.as_u64(),
@@ -1601,7 +1625,7 @@ impl NativeProxyMemoryCache {
         }
     }
 
-    fn lookup(&self, request: &NativeHttp1Request) -> NativeProxyCacheLookup {
+    async fn lookup(&self, request: &NativeHttp1Request) -> NativeProxyCacheLookup {
         if cache_method_temporarily_bypassed(request.method()) {
             return NativeProxyCacheLookup::Bypass("method-head");
         }
@@ -1624,7 +1648,7 @@ impl NativeProxyMemoryCache {
             return NativeProxyCacheLookup::Bypass("range-unsupported");
         }
         let revalidation = request_cache_revalidation_requested(request, &self.config);
-        if !revalidation && let Some(hit) = self.get(&key, request) {
+        if !revalidation && let Some(hit) = self.get(&key, request).await {
             self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
             return NativeProxyCacheLookup::Hit { entry: hit, range };
         }
@@ -1632,7 +1656,7 @@ impl NativeProxyMemoryCache {
             range.map(|range| cache_key_with_component(&key, "range", &range.component()));
         if !revalidation
             && let Some(range_key) = range_key.as_deref()
-            && let Some(hit) = self.get(range_key, request)
+            && let Some(hit) = self.get(range_key, request).await
         {
             self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
             return NativeProxyCacheLookup::Hit {
@@ -1642,14 +1666,14 @@ impl NativeProxyMemoryCache {
         }
         if !revalidation
             && !range_requested
-            && let Some(stale) = self.get_stale_while_revalidate(&key, request)
+            && let Some(stale) = self.get_stale_while_revalidate(&key, request).await
         {
             self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
             return NativeProxyCacheLookup::StaleWhileRevalidate { key, entry: stale };
         }
         if !revalidation
             && !range_requested
-            && let Some(entry) = self.get_revalidatable(&key, request)
+            && let Some(entry) = self.get_revalidatable(&key, request).await
         {
             self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
             return NativeProxyCacheLookup::Revalidate { key, entry };
@@ -1728,7 +1752,7 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
     ) -> Option<NativeMemoryCacheEntry> {
         let _ = tokio::time::timeout(timeout, notify.notified()).await;
-        self.get(key, request)
+        self.get(key, request).await
     }
 
     async fn slice_response(
@@ -1965,7 +1989,7 @@ impl NativeProxyMemoryCache {
                     if response.status() != 200 {
                         continue;
                     }
-                    if self.store_peer_fill(key, request, &response).is_err() {
+                    if self.store_peer_fill(key, request, &response).await.is_err() {
                         self.record_policy_activity("peer_fill_error");
                         continue;
                     }
@@ -2008,7 +2032,7 @@ impl NativeProxyMemoryCache {
         .map(|key| key.as_str().to_owned())
     }
 
-    fn get(&self, key: &str, request: &NativeHttp1Request) -> Option<NativeMemoryCacheEntry> {
+    async fn get(&self, key: &str, request: &NativeHttp1Request) -> Option<NativeMemoryCacheEntry> {
         let now = std::time::Instant::now();
         if self.memory_enabled() {
             let mut state = lock_native_memory_cache(&self.state, "proxy");
@@ -2025,37 +2049,34 @@ impl NativeProxyMemoryCache {
                     match state.objects.get(&variant.key) {
                         Some(entry) if entry.expires_at > now => return Some(entry.clone()),
                         Some(entry) => {
-                            if native_cache_entry_has_stale_window(entry, now) {
-                                return self.get_disk_fresh(key, request);
+                            if !native_cache_entry_has_stale_window(entry, now) {
+                                let weight = entry.weight;
+                                remove_native_memory_cache_entry(&mut state, &variant.key);
+                                state.bytes = state.bytes.saturating_sub(weight);
                             }
-                            let weight = entry.weight;
-                            remove_native_memory_cache_entry(&mut state, &variant.key);
-                            state.bytes = state.bytes.saturating_sub(weight);
-                            return self.get_disk_fresh(key, request);
+                            break;
                         }
                         None => {}
                     }
                 }
-                return self.get_disk_fresh(key, request);
             }
 
-            match state.objects.get(key) {
-                Some(entry) if entry.expires_at > now => return Some(entry.clone()),
-                Some(entry) => {
-                    if native_cache_entry_has_stale_window(entry, now) {
-                        return self.get_disk_fresh(key, request);
+            if !state.variants.contains_key(key) {
+                match state.objects.get(key) {
+                    Some(entry) if entry.expires_at > now => return Some(entry.clone()),
+                    Some(entry) if !native_cache_entry_has_stale_window(entry, now) => {
+                        let weight = entry.weight;
+                        remove_native_memory_cache_entry(&mut state, key);
+                        state.bytes = state.bytes.saturating_sub(weight);
                     }
-                    let weight = entry.weight;
-                    remove_native_memory_cache_entry(&mut state, key);
-                    state.bytes = state.bytes.saturating_sub(weight);
+                    _ => {}
                 }
-                None => {}
             }
         }
-        self.get_disk_fresh(key, request)
+        self.get_disk_fresh(key, request).await
     }
 
-    fn get_stale_while_revalidate(
+    async fn get_stale_while_revalidate(
         &self,
         key: &str,
         request: &NativeHttp1Request,
@@ -2078,19 +2099,19 @@ impl NativeProxyMemoryCache {
                         return Some(entry.clone());
                     }
                 }
-                return self.get_disk_stale_while_revalidate(key, request);
             }
 
-            if let Some(entry) = state.objects.get(key)
+            if !state.variants.contains_key(key)
+                && let Some(entry) = state.objects.get(key)
                 && native_cache_entry_serve_stale_while_revalidate(entry, now)
             {
                 return Some(entry.clone());
             }
         }
-        self.get_disk_stale_while_revalidate(key, request)
+        self.get_disk_stale_while_revalidate(key, request).await
     }
 
-    fn get_stale(
+    async fn get_stale(
         &self,
         key: &str,
         request: &NativeHttp1Request,
@@ -2125,33 +2146,34 @@ impl NativeProxyMemoryCache {
                             let weight = entry.weight;
                             remove_native_memory_cache_entry(&mut state, &variant.key);
                             state.bytes = state.bytes.saturating_sub(weight);
-                            return self.get_disk_stale_if_error(key, request);
+                            break;
                         }
                         _ => {}
                     }
                 }
-                return self.get_disk_stale_if_error(key, request);
             }
 
-            match state.objects.get(key) {
-                Some(entry)
-                    if entry.expires_at <= now
-                        && entry.stale_if_error_until.is_some_and(|until| until > now) =>
-                {
-                    return Some(entry.clone());
+            if !state.variants.contains_key(key) {
+                match state.objects.get(key) {
+                    Some(entry)
+                        if entry.expires_at <= now
+                            && entry.stale_if_error_until.is_some_and(|until| until > now) =>
+                    {
+                        return Some(entry.clone());
+                    }
+                    Some(entry) if entry.stale_if_error_until.is_some_and(|until| until <= now) => {
+                        let weight = entry.weight;
+                        remove_native_memory_cache_entry(&mut state, key);
+                        state.bytes = state.bytes.saturating_sub(weight);
+                    }
+                    _ => {}
                 }
-                Some(entry) if entry.stale_if_error_until.is_some_and(|until| until <= now) => {
-                    let weight = entry.weight;
-                    remove_native_memory_cache_entry(&mut state, key);
-                    state.bytes = state.bytes.saturating_sub(weight);
-                }
-                _ => {}
             }
         }
-        self.get_disk_stale_if_error(key, request)
+        self.get_disk_stale_if_error(key, request).await
     }
 
-    fn get_revalidatable(
+    async fn get_revalidatable(
         &self,
         key: &str,
         request: &NativeHttp1Request,
@@ -2174,24 +2196,24 @@ impl NativeProxyMemoryCache {
                         return Some(entry.clone());
                     }
                 }
-                return self.get_disk_revalidatable(key, request);
             }
 
-            if let Some(entry) = state.objects.get(key)
+            if !state.variants.contains_key(key)
+                && let Some(entry) = state.objects.get(key)
                 && native_cache_entry_revalidatable(entry, now)
             {
                 return Some(entry.clone());
             }
         }
-        self.get_disk_revalidatable(key, request)
+        self.get_disk_revalidatable(key, request).await
     }
 
-    fn get_disk_fresh(
+    async fn get_disk_fresh(
         &self,
         key: &str,
         request: &NativeHttp1Request,
     ) -> Option<NativeMemoryCacheEntry> {
-        let entry = self.disk_entry(key, request)?;
+        let entry = self.disk_entry(key, request).await?;
         (entry.expires_at > std::time::Instant::now()).then(|| {
             self.record_activity("disk", "hit");
             self.record_activity_scope("disk", "hit");
@@ -2200,44 +2222,58 @@ impl NativeProxyMemoryCache {
         })
     }
 
-    fn get_disk_stale_while_revalidate(
+    async fn get_disk_stale_while_revalidate(
         &self,
         key: &str,
         request: &NativeHttp1Request,
     ) -> Option<NativeMemoryCacheEntry> {
-        let entry = self.disk_entry(key, request)?;
+        let entry = self.disk_entry(key, request).await?;
         native_cache_entry_serve_stale_while_revalidate(&entry, std::time::Instant::now())
             .then_some(entry)
     }
 
-    fn get_disk_stale_if_error(
+    async fn get_disk_stale_if_error(
         &self,
         key: &str,
         request: &NativeHttp1Request,
     ) -> Option<NativeMemoryCacheEntry> {
-        let entry = self.disk_entry(key, request)?;
+        let entry = self.disk_entry(key, request).await?;
         let now = std::time::Instant::now();
         (entry.expires_at <= now && entry.stale_if_error_until.is_some_and(|until| until > now))
             .then_some(entry)
     }
 
-    fn get_disk_revalidatable(
+    async fn get_disk_revalidatable(
         &self,
         key: &str,
         request: &NativeHttp1Request,
     ) -> Option<NativeMemoryCacheEntry> {
-        let entry = self.disk_entry(key, request)?;
+        let entry = self.disk_entry(key, request).await?;
         native_cache_entry_revalidatable(&entry, std::time::Instant::now()).then_some(entry)
     }
 
-    fn disk_entry(
+    async fn disk_entry(
         &self,
         key: &str,
         request: &NativeHttp1Request,
     ) -> Option<NativeMemoryCacheEntry> {
-        self.disk
-            .as_ref()?
-            .get(key, |fields| native_vary_cache_key(key, fields, request))
+        let disk = self.disk.as_ref()?.clone();
+        let key = key.to_owned();
+        let request = request.clone();
+        match tokio::task::spawn_blocking(move || {
+            disk.get(&key, |fields| native_vary_cache_key(&key, fields, &request))
+        })
+        .await
+        {
+            Ok(entry) => entry,
+            Err(error) => {
+                log::debug!(
+                    target: "fluxheim::native_http1",
+                    "native disk cache lookup task failed: {error}"
+                );
+                None
+            }
+        }
     }
 
     fn promote_disk_entry(
@@ -2285,13 +2321,15 @@ impl NativeProxyMemoryCache {
         }
     }
 
-    fn store(
+    async fn store(
         &self,
         key: &str,
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
-        let result = self.store_inner(key, request, response, NativeCacheStoreMode::Origin);
+        let result = self
+            .store_inner(key, request, response, NativeCacheStoreMode::Origin)
+            .await;
         if let Err(reason) = result
             && reason != "cache-min-uses"
         {
@@ -2300,13 +2338,15 @@ impl NativeProxyMemoryCache {
         result
     }
 
-    fn store_revalidated(
+    async fn store_revalidated(
         &self,
         key: &str,
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
-        let result = self.store_inner(key, request, response, NativeCacheStoreMode::Revalidated);
+        let result = self
+            .store_inner(key, request, response, NativeCacheStoreMode::Revalidated)
+            .await;
         if let Err(reason) = result
             && reason != "cache-min-uses"
         {
@@ -2315,7 +2355,7 @@ impl NativeProxyMemoryCache {
         result
     }
 
-    fn store_not_modified_revalidated(
+    async fn store_not_modified_revalidated(
         &self,
         key: &str,
         request: &NativeHttp1Request,
@@ -2368,17 +2408,20 @@ impl NativeProxyMemoryCache {
             request,
             &refreshed_entry.to_response(),
             NativeCacheStoreMode::Revalidated,
-        )?;
+        )
+        .await?;
         Ok(refreshed_entry)
     }
 
-    fn store_peer_fill(
+    async fn store_peer_fill(
         &self,
         key: &str,
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
-        let result = self.store_inner(key, request, response, NativeCacheStoreMode::PeerFill);
+        let result = self
+            .store_inner(key, request, response, NativeCacheStoreMode::PeerFill)
+            .await;
         if let Err(reason) = result
             && reason != "cache-min-uses"
         {
@@ -2387,7 +2430,7 @@ impl NativeProxyMemoryCache {
         result
     }
 
-    fn store_inner(
+    async fn store_inner(
         &self,
         key: &str,
         request: &NativeHttp1Request,
@@ -2538,13 +2581,24 @@ impl NativeProxyMemoryCache {
                 prune_native_memory_cache(&mut state, self.max_bytes);
             }
         }
-        if let Some(disk) = &self.disk
-            && let Err(error) = disk.store(disk_key, &entry)
-        {
-            log::debug!(
-                target: "fluxheim::native_http1",
-                "native disk cache store failed: {error}"
-            );
+        if let Some(disk) = &self.disk {
+            let disk = Arc::clone(disk);
+            let entry = entry.clone();
+            match tokio::task::spawn_blocking(move || disk.store(disk_key, &entry)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    log::debug!(
+                        target: "fluxheim::native_http1",
+                        "native disk cache store failed: {error}"
+                    );
+                }
+                Err(error) => {
+                    log::debug!(
+                        target: "fluxheim::native_http1",
+                        "native disk cache store task failed: {error}"
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -2881,7 +2935,7 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                         compression_request.as_ref(),
                     );
                 }
-                match cache.lookup(&request) {
+                match cache.lookup(&request).await {
                     NativeProxyCacheLookup::Hit { entry, range } => {
                         let response = native_cached_hit_response(&entry, &request, range);
                         return self.finish_response(
@@ -3067,11 +3121,14 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                         if let Some((cache, key, status, reason, stale_entry)) =
                             proxy_cache_fill.as_ref()
                         {
-                            if let Some(stale) = cache.get_stale(
-                                key,
-                                &request,
-                                CacheStaleEvent::UpstreamHttpStatus(response.status()),
-                            ) {
+                            if let Some(stale) = cache
+                                .get_stale(
+                                    key,
+                                    &request,
+                                    CacheStaleEvent::UpstreamHttpStatus(response.status()),
+                                )
+                                .await
+                            {
                                 cache.record_policy_activity("stale");
                                 return self.finish_response(
                                     &request,
@@ -3091,13 +3148,16 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                                 );
                             }
                             let revalidated = if response.status() == 304 {
-                                stale_entry.as_ref().and_then(|entry| {
+                                if let Some(entry) = stale_entry.as_ref() {
                                     cache
                                         .store_not_modified_revalidated(
                                             key, &request, entry, &response,
                                         )
+                                        .await
                                         .ok()
-                                })
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             };
@@ -3120,9 +3180,9 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                                 );
                             }
                             let store_result = if *status == "REVALIDATED" {
-                                cache.store_revalidated(key, &request, &response)
+                                cache.store_revalidated(key, &request, &response).await
                             } else {
-                                cache.store(key, &request, &response)
+                                cache.store(key, &request, &response).await
                             };
                             cache_status = Some(match store_result {
                                 Ok(()) => (&cache.config, *status, *reason, None),
@@ -3168,8 +3228,9 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
             };
             if let (Some((cache, key, _, _, _)), Some(error)) =
                 (proxy_cache_fill.as_ref(), last_error.as_ref())
-                && let Some(stale) =
-                    cache.get_stale(key, &request, native_cache_stale_event_for_error(error))
+                && let Some(stale) = cache
+                    .get_stale(key, &request, native_cache_stale_event_for_error(error))
+                    .await
             {
                 cache.record_policy_activity("stale");
                 return self.finish_response(
@@ -3294,9 +3355,10 @@ impl NativeHttp1Proxy {
                 let result = if response.status() == 304 {
                     cache
                         .store_not_modified_revalidated(&key, &request, &entry, &response)
+                        .await
                         .map(|_| ())
                 } else {
-                    cache.store_revalidated(&key, &request, &response)
+                    cache.store_revalidated(&key, &request, &response).await
                 };
                 if let Err(reason) = result {
                     log::debug!(
@@ -3583,7 +3645,7 @@ impl NativeHttp1Proxy {
                     compression_request,
                 );
             }
-            match cache.lookup(&request) {
+            match cache.lookup(&request).await {
                 NativeProxyCacheLookup::Hit { entry, range } => {
                     let response = native_cached_hit_response(&entry, &request, range);
                     return self.finish_response(
@@ -3754,11 +3816,13 @@ impl NativeHttp1Proxy {
                 if attempt == 0 {
                     let status = load_balancer.all_down_status();
                     if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref()
-                        && let Some(stale) = cache.get_stale(
-                            key,
-                            &request,
-                            CacheStaleEvent::UpstreamError(CacheStaleErrorKind::Connect),
-                        )
+                        && let Some(stale) = cache
+                            .get_stale(
+                                key,
+                                &request,
+                                CacheStaleEvent::UpstreamError(CacheStaleErrorKind::Connect),
+                            )
+                            .await
                     {
                         cache.record_policy_activity("stale");
                         return self.finish_response(
@@ -3833,11 +3897,14 @@ impl NativeHttp1Proxy {
                     if let Some((cache, key, status, reason, stale_entry)) =
                         proxy_cache_fill.as_ref()
                     {
-                        if let Some(stale) = cache.get_stale(
-                            key,
-                            &request,
-                            CacheStaleEvent::UpstreamHttpStatus(response.status()),
-                        ) {
+                        if let Some(stale) = cache
+                            .get_stale(
+                                key,
+                                &request,
+                                CacheStaleEvent::UpstreamHttpStatus(response.status()),
+                            )
+                            .await
+                        {
                             cache.record_policy_activity("stale");
                             return self.finish_response(
                                 &request,
@@ -3857,11 +3924,14 @@ impl NativeHttp1Proxy {
                             );
                         }
                         let revalidated = if response.status() == 304 {
-                            stale_entry.as_ref().and_then(|entry| {
+                            if let Some(entry) = stale_entry.as_ref() {
                                 cache
                                     .store_not_modified_revalidated(key, &request, entry, &response)
+                                    .await
                                     .ok()
-                            })
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         };
@@ -3884,9 +3954,9 @@ impl NativeHttp1Proxy {
                             );
                         }
                         let store_result = if *status == "REVALIDATED" {
-                            cache.store_revalidated(key, &request, &response)
+                            cache.store_revalidated(key, &request, &response).await
                         } else {
-                            cache.store(key, &request, &response)
+                            cache.store(key, &request, &response).await
                         };
                         cache_status = Some(match store_result {
                             Ok(()) => (&cache.config, *status, *reason, None),
@@ -3943,8 +4013,9 @@ impl NativeHttp1Proxy {
         };
         if let (Some((cache, key, _, _, _)), Some(error)) =
             (proxy_cache_fill.as_ref(), last_error.as_ref())
-            && let Some(stale) =
-                cache.get_stale(key, &request, native_cache_stale_event_for_error(error))
+            && let Some(stale) = cache
+                .get_stale(key, &request, native_cache_stale_event_for_error(error))
+                .await
         {
             cache.record_policy_activity("stale");
             return self.finish_response(
@@ -5571,7 +5642,12 @@ fn native_http1_static_failover_method_allowed(method: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::native_cache_expiry_times;
+    use super::{native_cache_expiry_times, register_native_disk_cache_purge_handle};
+    use crate::native_http1_cache::{
+        NativeDiskCache, NativeDiskCacheStoreKey, NativeMemoryCacheEntry,
+        purge_native_disk_cache_primary,
+    };
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -5615,5 +5691,68 @@ mod tests {
         assert!(!native_traffic_mirror_marker_signature_matches(
             &signature[..signature.len() - 1]
         ));
+    }
+
+    #[test]
+    fn native_storage_bin_disk_purge_uses_live_cache_instance() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = fluxheim_config::CacheConfig {
+            enabled: true,
+            memory: fluxheim_config::CacheMemoryConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            disk: fluxheim_config::CacheDiskConfig {
+                enabled: true,
+                path: Some(root.path().to_path_buf()),
+                backend: fluxheim_config::CacheDiskBackend::StorageBin,
+                max_size_bytes: fluxheim_config::ByteSize::from_bytes(1024 * 1024),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        config.disk.storage_bin.bin_size_bytes = fluxheim_config::ByteSize::from_bytes(64 * 1024);
+        let cache = Arc::new(NativeDiskCache::from_config(&config).unwrap());
+        let vhost = Arc::<str>::from("purge.test");
+        register_native_disk_cache_purge_handle(vhost.clone(), None, &cache);
+
+        let now = Instant::now();
+        let entry = NativeMemoryCacheEntry {
+            status: 200,
+            reason: "OK".to_owned(),
+            headers: vec![
+                ("content-type".to_owned(), "image/png".to_owned()),
+                ("cache-control".to_owned(), "max-age=60".to_owned()),
+                ("content-length".to_owned(), "11".to_owned()),
+                ("surrogate-key".to_owned(), "purge-live".to_owned()),
+            ],
+            content_length: Some(11),
+            body: Arc::from(&b"hello-cache"[..]),
+            expires_at: now + Duration::from_secs(60),
+            stale_while_revalidate_until: None,
+            stale_if_error_until: None,
+            stored_at: now,
+            weight: 128,
+        };
+        let key = NativeDiskCacheStoreKey {
+            combined: "combined-live".to_owned(),
+            primary: "primary-live".to_owned(),
+            user_tag: vhost.to_string(),
+            index_path: Some("/asset.png".to_owned()),
+            cache_tags: vec!["purge-live".to_owned()],
+            vary_fields: Vec::new(),
+        };
+        cache.store(key, &entry).unwrap();
+        assert!(cache.get("combined-live", |_| None).is_some());
+        assert_eq!(cache.stats().purge_index_entries, 1);
+
+        assert!(purge_native_disk_cache_primary(
+            "purge.test",
+            None,
+            "primary-live",
+            "combined-live"
+        ));
+        assert!(cache.get("combined-live", |_| None).is_none());
+        assert_eq!(cache.stats().purge_index_entries, 0);
     }
 }

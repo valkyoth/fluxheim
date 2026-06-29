@@ -288,6 +288,13 @@ either purge the disk cache or move to a new `cache.disk.path`. Existing cache
 objects encrypted with the old local key are intentionally unreadable once
 Fluxheim starts with only the new key.
 
+The local provider uses random 96-bit AES-256-GCM nonces. Rotate the local
+cache encryption key before roughly `2^32` object-encryption invocations with
+one key. Fluxheim tracks local-provider invocations inside each process and
+logs a security warning when a process approaches that bound, but operators
+should still rotate long-lived cache keys on a schedule that fits their write
+volume because restarts reset the in-process counter.
+
 For OpenBao Transit, the usual rotation path is to keep the same Fluxheim
 `key_id`, `mount`, and `key_name`, then rotate the Transit key inside OpenBao.
 OpenBao can decrypt older `vault:v...` ciphertext while retaining the necessary

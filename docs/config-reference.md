@@ -2089,6 +2089,11 @@ is stored with the encrypted object and is included with the combined cache key
 as authenticated data, so objects cannot be silently swapped between cache
 keys. Local cache encryption is intended for cache-at-rest protection; it does
 not encrypt memory cache contents.
+Because the local provider uses random AES-GCM nonces, rotate local cache keys
+before roughly `2^32` object-encryption invocations per key. Fluxheim logs a
+security warning when one process approaches that bound, but scheduled key
+rotation is still required for long-lived high-write deployments because the
+runtime counter resets on restart.
 Filesystem disk-cache fills with the local provider encrypt streamed objects in
 bounded AEAD chunks, so enabling local encryption does not require Fluxheim to
 copy a complete streamed origin response back into heap before committing it to

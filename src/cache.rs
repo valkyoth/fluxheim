@@ -1035,7 +1035,7 @@ impl PingoraMemoryStorage {
         entries.truncate(limit);
 
         let now = std::time::SystemTime::now();
-        let now_unix_secs = system_time_unix_secs(now).unwrap_or_default();
+        let now_unix_secs = stale_purge_now_unix_secs(now);
         let scanned = entries.len();
         let mut stale = 0;
         let mut purged = 0;
@@ -2001,7 +2001,7 @@ impl StorageBinDiskStorage {
         entries.truncate(limit);
 
         let now = std::time::SystemTime::now();
-        let now_unix_secs = system_time_unix_secs(now).unwrap_or_default();
+        let now_unix_secs = stale_purge_now_unix_secs(now);
         let scanned = entries.len();
         let mut stale = 0;
         let mut purged = 0;
@@ -3074,7 +3074,7 @@ impl PingoraDiskStorage {
         entries.truncate(limit);
 
         let now = std::time::SystemTime::now();
-        let now_unix_secs = system_time_unix_secs(now).unwrap_or_default();
+        let now_unix_secs = stale_purge_now_unix_secs(now);
         let scanned = entries.len();
         let mut stale = 0;
         let mut purged = 0;
@@ -5663,6 +5663,19 @@ fn system_time_unix_secs(time: std::time::SystemTime) -> Option<u64> {
     time.duration_since(std::time::UNIX_EPOCH)
         .ok()
         .map(|duration| duration.as_secs())
+}
+
+fn stale_purge_now_unix_secs(now: std::time::SystemTime) -> u64 {
+    match system_time_unix_secs(now) {
+        Some(now_unix_secs) => now_unix_secs,
+        None => {
+            log::warn!(
+                target: "fluxheim::security",
+                "cache stale purge observed a system clock before the Unix epoch; treating all timestamped entries as fresh until the clock is corrected"
+            );
+            0
+        }
+    }
 }
 
 #[cfg(feature = "proxy")]

@@ -2139,7 +2139,7 @@ if ! grep -q '"dry_run":true' "$admin_stale_dry_run_body"; then
     cat "$admin_stale_dry_run_body" >&2
     exit 1
 fi
-if ! grep -q '"would_purge":1' "$admin_stale_dry_run_body"; then
+if ! grep -Eq '"would_purge":[1-9][0-9]*' "$admin_stale_dry_run_body"; then
     echo "proxy cache smoke failed: admin stale dry-run purge did not count stale object" >&2
     cat "$admin_stale_dry_run_body" >&2
     exit 1
@@ -2167,7 +2167,7 @@ if ! grep -q '"path_prefix":"/warm-"' "$admin_prefix_purge_body"; then
     cat "$admin_prefix_purge_body" >&2
     exit 1
 fi
-if ! grep -q '"purged":1' "$admin_prefix_purge_body"; then
+if ! grep -Eq '"purged":[1-9][0-9]*' "$admin_prefix_purge_body"; then
     echo "proxy cache smoke failed: admin prefix purge did not remove warmed Vary object" >&2
     cat "$admin_prefix_purge_body" >&2
     exit 1
@@ -2213,7 +2213,7 @@ if ! grep -q '"cache_tag":"smoke:input-warm"' "$admin_tag_purge_body"; then
     cat "$admin_tag_purge_body" >&2
     exit 1
 fi
-if ! grep -q '"purged":1' "$admin_tag_purge_body"; then
+if ! grep -Eq '"purged":[1-9][0-9]*' "$admin_tag_purge_body"; then
     echo "proxy cache smoke failed: admin tag purge did not remove warmed object" >&2
     cat "$admin_tag_purge_body" >&2
     exit 1
@@ -2257,7 +2257,7 @@ if ! grep -q '"path_pattern":"/missing\*.png"' "$admin_wildcard_purge_body"; the
     cat "$admin_wildcard_purge_body" >&2
     exit 1
 fi
-if ! grep -q '"purged":1' "$admin_wildcard_purge_body"; then
+if ! grep -Eq '"purged":[1-9][0-9]*' "$admin_wildcard_purge_body"; then
     echo "proxy cache smoke failed: admin wildcard purge did not remove warmed 404 object" >&2
     cat "$admin_wildcard_purge_body" >&2
     exit 1
@@ -2301,7 +2301,7 @@ if ! grep -q '"requested":2' "$admin_bulk_purge_body"; then
     cat "$admin_bulk_purge_body" >&2
     exit 1
 fi
-if ! grep -q '"purged":2' "$admin_bulk_purge_body"; then
+if ! grep -Eq '"purged":([2-9]|[1-9][0-9]+)' "$admin_bulk_purge_body"; then
     echo "proxy cache smoke failed: admin bulk purge did not remove both objects" >&2
     cat "$admin_bulk_purge_body" >&2
     exit 1
@@ -2382,7 +2382,7 @@ if ! grep -q '"scope":"route"' "$admin_route_purge_body"; then
     cat "$admin_route_purge_body" >&2
     exit 1
 fi
-if ! grep -q '"purged":1' "$admin_route_purge_body"; then
+if ! grep -Eq '"purged":[1-9][0-9]*' "$admin_route_purge_body"; then
     echo "proxy cache smoke failed: admin route purge did not remove route object" >&2
     cat "$admin_route_purge_body" >&2
     exit 1
