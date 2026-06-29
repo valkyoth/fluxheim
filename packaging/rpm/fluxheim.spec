@@ -161,6 +161,8 @@ fi
   get interpreted as regex backreferences during workspace version updates.
 - Begin the first-party secret-memory migration audit from direct zeroize APIs
   toward Fluxheim's sanitization crate where practical.
+- Move legacy auth subrequest forwarded-header secret storage onto
+  sanitization::SecretString.
 - Keep RPM, container, dependency-policy, native-runtime, and smoke-test gates
   as blocking evidence during stabilization.
 

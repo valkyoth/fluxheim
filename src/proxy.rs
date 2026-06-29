@@ -13707,7 +13707,14 @@ mod tests {
         let headers = auth_request_input(&request, &auth, AuthRequestContext::default()).headers;
         let headers = headers
             .iter()
-            .map(|(name, value)| (name.clone(), value.as_str().to_owned()))
+            .map(|(name, value)| {
+                (
+                    name.clone(),
+                    value
+                        .try_with_secret(str::to_owned)
+                        .expect("auth header input remains UTF-8"),
+                )
+            })
             .collect::<Vec<_>>();
         assert_eq!(
             headers,
@@ -13752,7 +13759,14 @@ mod tests {
         )
         .headers
         .iter()
-        .map(|(name, value)| (name.clone(), value.as_str().to_owned()))
+        .map(|(name, value)| {
+            (
+                name.clone(),
+                value
+                    .try_with_secret(str::to_owned)
+                    .expect("auth header input remains UTF-8"),
+            )
+        })
         .collect::<Vec<_>>();
 
         assert_eq!(
@@ -13782,7 +13796,13 @@ mod tests {
 
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0].0, "cookie");
-        assert_eq!(headers[0].1.as_str(), "session=low; tenant=admin");
+        assert_eq!(
+            headers[0]
+                .1
+                .try_with_secret(str::to_owned)
+                .expect("auth header input remains UTF-8"),
+            "session=low; tenant=admin"
+        );
     }
 
     #[test]

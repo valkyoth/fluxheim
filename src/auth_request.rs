@@ -4,13 +4,13 @@ use std::time::Duration;
 use crate::http_types::PingoraRequestHeader as RequestHeader;
 use bytes::Bytes;
 use fluxheim_headers::join_header_values_with_separator;
-use zeroize::Zeroizing;
+use sanitization::SecretString;
 
 use crate::flux_error::{FluxError, FluxResult};
 
 #[derive(Debug)]
 pub(crate) struct AuthRequestInput {
-    pub(crate) headers: Vec<(String, Zeroizing<String>)>,
+    pub(crate) headers: Vec<(String, SecretString)>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -37,7 +37,7 @@ pub(crate) fn auth_request_input(
         if let Some(value) = trusted_context_header_value(name, context)
             .or_else(|| request_header_values_joined(request, name))
         {
-            headers.push((name.clone(), Zeroizing::new(value)));
+            headers.push((name.clone(), SecretString::from_string(value)));
         }
     }
     AuthRequestInput { headers }
@@ -63,7 +63,14 @@ pub(crate) fn fetch_auth_request_decision(
         .into();
     let mut builder = agent.get(url).header("cache-control", "no-store");
     for (name, value) in &input.headers {
-        builder = builder.header(name.as_str(), value.as_str());
+        builder = value
+            .try_with_secret(|value| builder.header(name.as_str(), value))
+            .map_err(|error| {
+                FluxError::io(
+                    "auth_request forwarded header secret",
+                    io::Error::new(io::ErrorKind::InvalidData, error),
+                )
+            })?;
     }
     let mut response = builder.call().map_err(auth_request_io_error)?;
     let status = response.status().as_u16();

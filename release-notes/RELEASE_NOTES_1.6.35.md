@@ -15,6 +15,8 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
 - Start the first-party secret-memory migration pass from direct `zeroize`
   calls toward Fluxheim's `sanitization` crate where the replacement is
   practical and testable.
+- Move the legacy root auth subrequest forwarded-header secret container from
+  direct `zeroize` wrappers to `sanitization::SecretString`.
 - Fix the release version-bump helper so package versions such as `1.6.35` are
   not interpreted as regex backreferences during automated metadata updates.
 - Keep dependency, metadata, container, RPM, and smoke-test gates as blocking

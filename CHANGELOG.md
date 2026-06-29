@@ -17,6 +17,8 @@ behavior when the change improves security or project direction.
   get interpreted as regex backreferences during package-version replacement.
 - Begin the first-party secret-memory cleanup pass by auditing direct
   `zeroize` usage for practical migration to Fluxheim's `sanitization` crate.
+- Move legacy root auth subrequest forwarded-header secrets from direct
+  `zeroize::Zeroizing<String>` wrappers to `sanitization::SecretString`.
 
 ## 1.6.34 - 2026-06-29
 
