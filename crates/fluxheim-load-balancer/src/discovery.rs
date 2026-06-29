@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::FutureExt;
+use sanitization::SecretString;
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
@@ -237,8 +238,10 @@ fn fetch_proxy_upstreams_http(
         None
     };
     if let Some(token) = bearer_token.as_ref() {
-        let header_value = Zeroizing::new(format!("Bearer {}", token.trim()));
-        request = request.header("authorization", header_value.as_str());
+        let header_value = http_discovery_bearer_authorization_value(token)?;
+        request = header_value
+            .try_with_secret(|value| request.header("authorization", value))
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     }
     let mut response = request
         .call()
@@ -273,7 +276,7 @@ fn fetch_proxy_upstreams_http(
     parse_proxy_upstreams_http_body(&body, allow_private_backends)
 }
 
-fn read_http_discovery_bearer_token(path: &Path) -> io::Result<Zeroizing<String>> {
+fn read_http_discovery_bearer_token(path: &Path) -> io::Result<SecretString> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(io::Error::new(
@@ -311,7 +314,19 @@ fn read_http_discovery_bearer_token(path: &Path) -> io::Result<Zeroizing<String>
         ));
     }
     validate_http_discovery_bearer_token(&token)?;
-    Ok(token)
+    Ok(SecretString::from_secret_str(token.trim()))
+}
+
+fn http_discovery_bearer_authorization_value(token: &SecretString) -> io::Result<SecretString> {
+    token
+        .try_with_secret(|token| {
+            let token = token.trim();
+            let mut header_value = SecretString::with_capacity("Bearer ".len() + token.len());
+            header_value.push_str("Bearer ");
+            header_value.push_str(token);
+            header_value
+        })
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 fn validate_http_discovery_bearer_token(token: &str) -> io::Result<()> {

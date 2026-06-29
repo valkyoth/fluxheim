@@ -25,6 +25,8 @@ behavior when the change improves security or project direction.
   `sanitization` secret containers.
 - Move managed load-balancer cookie HMAC key-ring clearing from direct
   `zeroize` calls to `sanitization::SecureSanitize`.
+- Move HTTP discovery bearer-token storage and Fluxheim-owned Authorization
+  header assembly to `sanitization::SecretString`.
 
 ## 1.6.34 - 2026-06-29
 

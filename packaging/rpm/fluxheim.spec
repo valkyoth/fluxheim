@@ -169,6 +169,8 @@ fi
   sanitization secret containers.
 - Move managed load-balancer cookie HMAC key-ring clearing onto
   sanitization::SecureSanitize.
+- Move HTTP discovery bearer-token storage and Authorization header assembly
+  onto sanitization::SecretString.
 - Keep RPM, container, dependency-policy, native-runtime, and smoke-test gates
   as blocking evidence during stabilization.
 
