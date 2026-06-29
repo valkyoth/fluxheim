@@ -21,7 +21,7 @@ pub mod cache;
 pub mod cache {
     pub use crate::cache_api::*;
 }
-#[cfg(all(feature = "proxy", feature = "cache"))]
+#[cfg(feature = "cache")]
 mod cache_api;
 pub mod cache_headers;
 pub mod cli;
