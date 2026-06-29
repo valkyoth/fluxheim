@@ -21,6 +21,8 @@ behavior when the change improves security or project direction.
   `zeroize::Zeroizing<String>` wrappers to `sanitization::SecretString`.
 - Move native auth-request forwarded and allowed response-header secrets to
   `sanitization::SecretString`.
+- Move native metrics bearer-token storage and candidate comparison buffers to
+  `sanitization` secret containers.
 
 ## 1.6.34 - 2026-06-29
 

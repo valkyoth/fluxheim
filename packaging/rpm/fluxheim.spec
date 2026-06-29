@@ -165,6 +165,8 @@ fi
   sanitization::SecretString.
 - Move native auth-request forwarded and allowed response-header secret storage
   onto sanitization::SecretString.
+- Move native metrics bearer-token storage and comparison candidates onto
+  sanitization secret containers.
 - Keep RPM, container, dependency-policy, native-runtime, and smoke-test gates
   as blocking evidence during stabilization.
 

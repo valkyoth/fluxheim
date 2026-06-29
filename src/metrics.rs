@@ -16,7 +16,7 @@ use fluxheim_server::NativeHttp1Response;
 use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
 };
-use sanitization::ct::ConstantTimeEq;
+use sanitization::{SecretString, SecretVec, ct::ConstantTimeEq};
 use sha2::{Digest, Sha256};
 #[cfg(feature = "proxy")]
 use tokio::net::TcpListener;
@@ -123,9 +123,9 @@ fn native_metrics_target_path(target: &str) -> &str {
     target
 }
 
-#[derive(Clone, Default, Eq, PartialEq)]
+#[derive(Default)]
 pub struct NativeMetricsApp {
-    bearer_token: Option<Zeroizing<String>>,
+    bearer_token: Option<SecretString>,
 }
 
 impl fmt::Debug for NativeMetricsApp {
@@ -143,7 +143,7 @@ impl NativeMetricsApp {
     }
 
     pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
-        self.bearer_token = Some(Zeroizing::new(token.into()));
+        self.bearer_token = Some(SecretString::from_string(token.into()));
         self
     }
 }
@@ -223,7 +223,7 @@ impl FluxBackgroundTask for NativeMetricsTask {
 
 fn load_native_metrics_token(
     config: &crate::config::MetricsConfig,
-) -> Result<Option<Zeroizing<String>>, Box<dyn Error + Send + Sync>> {
+) -> Result<Option<SecretString>, Box<dyn Error + Send + Sync>> {
     let raw = match (&config.token_env, &config.token_file) {
         (Some(_), None) => {
             return Err(
@@ -237,13 +237,13 @@ fn load_native_metrics_token(
     let Some(raw) = raw else {
         return Ok(None);
     };
-    let token = Zeroizing::new(raw.trim().to_owned());
+    let token = raw.trim();
     if token.is_empty() {
         Err("metrics token cannot be empty".into())
     } else if token.len() > MAX_METRICS_TOKEN_BYTES {
         Err(format!("metrics token cannot exceed {MAX_METRICS_TOKEN_BYTES} bytes").into())
     } else {
-        Ok(Some(token))
+        Ok(Some(SecretString::from_secret_str(token)))
     }
 }
 
@@ -396,20 +396,23 @@ fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error.raw_os_error())
 }
 
-fn native_metrics_authorized(request: &fluxheim_server::NativeHttp1Request, token: &str) -> bool {
+fn native_metrics_authorized(
+    request: &fluxheim_server::NativeHttp1Request,
+    token: &SecretString,
+) -> bool {
     request.headers.iter().any(|(name, value)| {
         name.eq_ignore_ascii_case("authorization")
             && native_metrics_bearer_token_matches(value, token)
     })
 }
 
-fn native_metrics_bearer_token_matches(value: &str, token: &str) -> bool {
+fn native_metrics_bearer_token_matches(value: &str, token: &SecretString) -> bool {
     let Some(candidate) = value.trim().strip_prefix("Bearer ") else {
         return false;
     };
-    let candidate = Zeroizing::new(candidate.as_bytes().to_vec());
-    let candidate_digest = metrics_bearer_token_digest(candidate.as_slice());
-    let token_digest = metrics_bearer_token_digest(token.as_bytes());
+    let candidate = SecretVec::from_slice(candidate.as_bytes());
+    let candidate_digest = candidate.with_secret(metrics_bearer_token_digest);
+    let token_digest = token.with_secret_bytes(metrics_bearer_token_digest);
     candidate_digest
         .ct_eq(&token_digest)
         .declassify("native metrics bearer-token comparison result is public")
