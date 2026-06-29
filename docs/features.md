@@ -126,13 +126,11 @@ feature aliases for common deployment shapes.
 | `profile-fips-rustls` | `proxy`, `security`, `tls-rustls-fips` | FIPS-capable rustls/AWS-LC candidate build. |
 | `profile-iso19790-rustls` | `profile-fips-rustls`, `tls-rustls-iso19790` | ISO/IEC 19790 terminology alias for the same rustls/AWS-LC candidate path. |
 
-The remaining Pingora compatibility runtime is selected through
-`pingora-compat`, which `proxy` still enables in the current release line.
-`1.6.20` adds release-gate dependency and compile proofs for
-`--no-default-features --features web,tls-rustls` and
-`--no-default-features --features web,tls-openssl`; those builds do not compile
-Pingora crates, but they are not yet the production static-site runtime
-profile.
+Starting in `1.6.34`, normal Fluxheim profiles no longer compile Pingora
+crates. The internal `pingora-compat` feature name remains as a historical
+compatibility boundary only; official release profiles use Fluxheim-owned
+runtime, listener, TLS, HTTP, cache, load-balancer, admin, metrics, stream, and
+background-service paths.
 
 Examples that match the official release artifacts:
 

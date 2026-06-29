@@ -6,9 +6,9 @@ document is retained as historical context for the `1.5.x` and earlier `1.6.x`
 compatibility-runtime line and should not be read as an active dependency
 policy for current release profiles.
 
-Fluxheim vendors `pingora-core 0.8.0` for a small set of narrow proxy/TLS
-compatibility fixes required by the default `tls-rustls` build and the `1.4`
-production proxy parity line.
+Before Fluxheim `1.6.34`, Fluxheim vendored `pingora-core 0.8.0` for a small
+set of narrow proxy/TLS compatibility fixes required by the old default
+`tls-rustls` build and the `1.4` production proxy parity line.
 
 ## Rustls Listener Certificate Resolver
 
@@ -20,36 +20,29 @@ The patch keeps Pingora's existing single-certificate path unchanged. It only
 allows Fluxheim to pass a rustls `ResolvesServerCert` implementation so
 per-vhost certificates can be selected by SNI in the default build.
 
-As of Fluxheim `1.6.20`, the resolver implementation itself lives in
+As of Fluxheim `1.6.20`, the resolver implementation itself moved to
 `fluxheim-tls`: Fluxheim owns wildcard/exact SNI lookup, the reloadable
 certificate table, PEM certificate/private-key parsing, and TLS-ALPN challenge
-certificate loading. The vendored Pingora patch is now only the temporary
-listener acceptor hook that lets the compatibility runtime pass that resolver
-into rustls. This keeps Pingora's `build()` panic behavior isolated until the
-native downstream listener replaces the compatibility acceptor.
+certificate loading. In the old compatibility runtime, the vendored Pingora
+patch was only the temporary listener acceptor hook that let that resolver pass
+into rustls. Normal `1.6.34` builds use the native downstream listener path
+instead.
 
 `fluxheim-tls` also owns the native rustls downstream `ServerConfig` builder.
 That builder applies Fluxheim TLS policy and returns typed errors for protocol,
-cipher, group, client-auth, and FIPS reporting failures. Until the native
-listener is wired into production profiles, the compatibility runtime still
-mirrors the same policy into Pingora's `TlsSettings` shim.
+cipher, group, client-auth, and FIPS reporting failures.
 
 For OpenSSL-only builds, `fluxheim-tls` owns the native downstream
 `SslAcceptor` builder for the fallback-certificate listener path. It applies
 certificate/key loading, ALPN, cipher, curve, minimum protocol, and client-auth
 CA policy with typed errors. It also owns OpenSSL SNI certificate storage,
 reload, pending managed-certificate handling, and certificate application. The
-remaining Pingora layer is a thin `TlsAccept` adapter until production listener
-cutover.
+old compatibility runtime used a thin `TlsAccept` adapter before production
+listener cutover.
 
-`fluxheim-server` has a native rustls HTTP/1 listener preview that accepts a
-ready `rustls::ServerConfig`, bounds the TLS handshake, and then hands the
-stream to the same native HTTP/1 parser/handler path used by plain listeners.
-OpenSSL-only builds also have a matching native HTTP/1 listener preview that
-accepts an `openssl::ssl::SslAcceptor`, bounds the handshake, and uses the same
-native parser/handler. These are the intended replacement paths for the
-compatibility listener patch once the runtime cutover wires them into official
-profiles.
+`fluxheim-server` now has native rustls and OpenSSL HTTP listeners that accept
+ready TLS server configuration, bound the TLS handshake, and then hand the
+stream to the same native HTTP parser/handler path used by plain listeners.
 
 ## Rustls Upstream Verification Policy
 
@@ -61,15 +54,13 @@ existed for ALPN or upstream mTLS. Fluxheim exposes explicit upstream TLS
 verification controls, so the connector must clone the config and install the
 custom verifier whenever verification is disabled or SNI is absent.
 
-This is a temporary compatibility patch, not a long-term fork. Keep it small,
-easy to audit, and limited to the rustls certificate resolver and upstream
-verification-policy gaps.
+This was a temporary compatibility patch, not a long-term fork.
 
 ## Listener PROXY Protocol Receive
 
-Fluxheim also patches Pingora listeners with an opt-in PROXY protocol receive
-hook that runs after the TCP accept and before downstream TLS or HTTP parsing.
-The patch adds:
+Fluxheim also patched Pingora listeners with an opt-in PROXY protocol receive
+hook that ran after the TCP accept and before downstream TLS or HTTP parsing.
+That patch added:
 
 - `ProxyProtocolConfig::v1(...)`, `ProxyProtocolConfig::v2(...)`, and
   `ProxyProtocolTrustedSource`;
@@ -81,21 +72,19 @@ The patch adds:
 - socket-digest peer-address replacement only after a trusted, valid v1/v2
   header.
 
-This is needed because Fluxheim must restore client identity before TLS and HTTP
-handling when it sits behind a trusted load balancer that speaks PROXY protocol.
-The v2 parser currently supports TCP4/TCP6 plus LOCAL/UNSPEC frames and skips
-bounded TLV payloads; TLV interpretation is intentionally not included.
+This was needed because Fluxheim must restore client identity before TLS and
+HTTP handling when it sits behind a trusted load balancer that speaks PROXY
+protocol. The native listener path now owns that behavior.
 
-## Removal Criteria
+## Historical Removal Criteria
 
-Remove `vendor/pingora-core` and the `[patch.crates-io]` entry in
-`Cargo.toml` when an upstream Pingora release exposes equivalent rustls server
-certificate resolver support and applies per-peer rustls upstream verification
-policy without requiring ALPN or mTLS to clone the client config first, and
-exposes an equivalent pre-TLS listener PROXY protocol receive hook with trusted
-peer enforcement.
+These criteria are satisfied for normal Fluxheim builds as of `1.6.34`:
+`Cargo.toml` no longer carries Pingora patch overrides and official release
+profiles no longer compile Pingora crates. The vendored source tree remains in
+the repository only as historical source context until a later repository
+cleanup removes it.
 
-Before removing the patch, verify:
+The old removal checklist was:
 
 - `cargo check --no-default-features --features proxy,tls-rustls`
 - `scripts/smoke_1_0_core.sh`
@@ -135,17 +124,16 @@ vendored Pingora source.
 
 ## Pingora OpenSSL Patch
 
-Fluxheim also vendors `pingora-openssl 0.8.0` for one dependency-policy change:
-the crates.io package forces `openssl = { features = ["vendored"] }`.
-Fluxheim's `tls-openssl-fips` path must be able to link against the
-operator-installed OpenSSL 3 FIPS provider, so the local patch removes only the
-`vendored` feature from `pingora-openssl`'s OpenSSL dependency.
+Before `1.6.34`, Fluxheim also vendored `pingora-openssl 0.8.0` for one
+dependency-policy change: the crates.io package forced
+`openssl = { features = ["vendored"] }`. Fluxheim's `tls-openssl-fips` path
+must be able to link against the operator-installed OpenSSL 3 FIPS provider, so
+the local patch removed only the `vendored` feature from `pingora-openssl`'s
+OpenSSL dependency.
 
-This patch does not change Pingora's OpenSSL API or runtime behavior. It only
-lets normal Cargo/OpenSSL discovery use the system OpenSSL selected by the
-operator. Remove `vendor/pingora-openssl` and its `[patch.crates-io]` entry
-when upstream makes OpenSSL vendoring optional or no longer enables it by
-default.
+This patch did not change Pingora's OpenSSL API or runtime behavior. It only
+let normal Cargo/OpenSSL discovery use the system OpenSSL selected by the
+operator.
 
 ## Proposed PR Steps
 

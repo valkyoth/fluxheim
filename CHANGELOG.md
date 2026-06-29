@@ -19,6 +19,8 @@ behavior when the change improves security or project direction.
 - Wire native admin cache purge, cache object lookup, stale disk-cache purge,
   and live load-balancer stats/mutation handlers to the Fluxheim-owned runtime
   handles used by traffic.
+- Centralize native cache user-tag formatting in `fluxheim-cache` so disk-cache
+  indexing and admin purge paths cannot drift.
 - Keep native-runtime compatibility reporting explicit for any configuration
   shape that still needs a future native feature instead of silently falling
   back to a Pingora adapter.
