@@ -1747,6 +1747,16 @@ impl ProxySnapshot {
                 .pingora_memory_storage
                 .filter(|_| route_cache.is_none()))
             .is_some_and(|storage| storage.purge_cache_key(&key));
+        let native_primary_key = key
+            .primary_key_str()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| key.primary());
+        memory_purged |= fluxheim_server::purge_native_memory_cache_primary(
+            &vhost.name,
+            route_cache.map(|cache| cache.name.as_str()),
+            &native_primary_key,
+            &native_primary_key,
+        );
         let mut disk_purged = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
@@ -1754,10 +1764,6 @@ impl ProxySnapshot {
             .transpose()?
             .unwrap_or(false);
         if !disk_purged {
-            let native_primary_key = key
-                .primary_key_str()
-                .map(ToOwned::to_owned)
-                .unwrap_or_else(|| key.primary());
             disk_purged |= fluxheim_server::purge_native_disk_cache_primary(
                 cache_config,
                 &native_primary_key,

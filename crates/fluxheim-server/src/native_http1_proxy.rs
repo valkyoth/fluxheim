@@ -4,6 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use std::sync::Weak;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -64,6 +65,8 @@ static NATIVE_PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUs
     OnceLock::new();
 static NATIVE_CACHE_METRICS_RECORDER: OnceLock<Arc<dyn NativeCacheMetricsRecorder>> =
     OnceLock::new();
+static NATIVE_MEMORY_CACHE_PURGE_REGISTRY: OnceLock<Mutex<Vec<NativeMemoryCachePurgeHandle>>> =
+    OnceLock::new();
 
 pub trait NativeCacheMetricsRecorder: Send + Sync + 'static {
     fn record_activity(&self, tier: &str, event: &str);
@@ -75,6 +78,98 @@ pub fn install_native_cache_metrics_recorder(
     recorder: Arc<dyn NativeCacheMetricsRecorder>,
 ) -> bool {
     NATIVE_CACHE_METRICS_RECORDER.set(recorder).is_ok()
+}
+
+#[derive(Clone, Debug)]
+struct NativeMemoryCachePurgeHandle {
+    vhost: Arc<str>,
+    route: Option<Arc<str>>,
+    state: Weak<Mutex<NativeMemoryCacheState>>,
+}
+
+pub fn purge_native_memory_cache_primary(
+    vhost: &str,
+    route: Option<&str>,
+    primary_key: &str,
+    combined_key: &str,
+) -> bool {
+    let Some(registry) = NATIVE_MEMORY_CACHE_PURGE_REGISTRY.get() else {
+        return false;
+    };
+    let mut registry = match registry.lock() {
+        Ok(registry) => registry,
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::native_http1",
+                "native memory cache purge registry mutex poisoned: {error}"
+            );
+            std::process::abort();
+        }
+    };
+    let mut purged = false;
+    registry.retain(|handle| {
+        let Some(state) = handle.state.upgrade() else {
+            return false;
+        };
+        if handle.vhost.as_ref() != vhost || handle.route.as_deref() != route {
+            return true;
+        }
+        let mut state = lock_native_memory_cache(&state, "proxy purge");
+        purged |= purge_native_memory_state_primary(&mut state, primary_key, combined_key);
+        true
+    });
+    purged
+}
+
+fn register_native_memory_cache_purge_handle(
+    vhost: Arc<str>,
+    route: Option<Arc<str>>,
+    state: &Arc<Mutex<NativeMemoryCacheState>>,
+) {
+    let registry = NATIVE_MEMORY_CACHE_PURGE_REGISTRY.get_or_init(|| Mutex::new(Vec::new()));
+    let mut registry = match registry.lock() {
+        Ok(registry) => registry,
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::native_http1",
+                "native memory cache purge registry mutex poisoned: {error}"
+            );
+            std::process::abort();
+        }
+    };
+    registry.push(NativeMemoryCachePurgeHandle {
+        vhost,
+        route,
+        state: Arc::downgrade(state),
+    });
+}
+
+fn purge_native_memory_state_primary(
+    state: &mut NativeMemoryCacheState,
+    primary_key: &str,
+    combined_key: &str,
+) -> bool {
+    let mut purged = false;
+    if let Some(entry) = remove_native_memory_cache_entry(state, combined_key) {
+        state.bytes = state.bytes.saturating_sub(entry.weight);
+        purged = true;
+    }
+    if primary_key != combined_key
+        && let Some(entry) = remove_native_memory_cache_entry(state, primary_key)
+    {
+        state.bytes = state.bytes.saturating_sub(entry.weight);
+        purged = true;
+    }
+    let removed_variant_bytes = remove_native_memory_cache_variants(state, primary_key);
+    if removed_variant_bytes > 0 {
+        state.bytes = state.bytes.saturating_sub(removed_variant_bytes);
+        purged = true;
+    }
+    state.filling.remove(primary_key);
+    if primary_key != combined_key {
+        state.filling.remove(combined_key);
+    }
+    purged
 }
 
 #[cfg(feature = "load-balancer")]
@@ -1038,6 +1133,16 @@ impl NativeProxyMemoryCache {
         if !config.memory.enabled && disk.is_none() {
             return None;
         }
+        let state = Arc::new(Mutex::new(NativeMemoryCacheState::default()));
+        let metrics_vhost = Arc::<str>::from(vhost);
+        let metrics_route = route.map(Arc::<str>::from);
+        if config.memory.enabled {
+            register_native_memory_cache_purge_handle(
+                metrics_vhost.clone(),
+                metrics_route.clone(),
+                &state,
+            );
+        }
         Some(Self {
             config: config.clone(),
             max_bytes: if config.memory.enabled {
@@ -1045,10 +1150,10 @@ impl NativeProxyMemoryCache {
             } else {
                 0
             },
-            state: Arc::new(Mutex::new(NativeMemoryCacheState::default())),
+            state,
             disk,
-            metrics_vhost: Arc::from(vhost),
-            metrics_route: route.map(Arc::from),
+            metrics_vhost,
+            metrics_route,
             origin_fill_key: Arc::from(format!("native-proxy-cache:{id}:origin")),
             peer_fill_key: Arc::from(format!("native-proxy-cache:{id}:peer-fill")),
             peer_fill_peers: native_peer_fill_peers(config),

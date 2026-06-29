@@ -819,6 +819,7 @@ swr_third_headers="$TMP_DIR/swr-third.headers"
 stale_error_first_headers="$TMP_DIR/stale-error-first.headers"
 stale_error_second_headers="$TMP_DIR/stale-error-second.headers"
 restart_headers="$TMP_DIR/restart.headers"
+post_exact_purge_headers="$TMP_DIR/post-exact-purge.headers"
 body="$TMP_DIR/body.bin"
 range_body="$TMP_DIR/range-body.bin"
 partial_range_body="$TMP_DIR/partial-range-body.bin"
@@ -2279,6 +2280,22 @@ fi
     --host cache.test \
     --path /asset.png \
     --expect-objects 0
+
+post_exact_purge_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$post_exact_purge_headers" -o "$body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/asset.png" 2>/dev/null || true
+)
+if grep -qi '^x-cache-status: HIT' "$post_exact_purge_headers"; then
+    echo "proxy cache smoke failed: admin exact purge left native memory cache HIT behind" >&2
+    cat "$post_exact_purge_headers" >&2
+    exit 1
+fi
+if [ "$post_exact_purge_status" = "200" ]; then
+    echo "proxy cache smoke failed: admin exact purge served asset while origin was stopped" >&2
+    cat "$post_exact_purge_headers" >&2
+    exit 1
+fi
 
 if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_route_purge_body" \
     -H "Authorization: Bearer secret-token" \
