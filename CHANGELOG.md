@@ -27,6 +27,8 @@ behavior when the change improves security or project direction.
   `zeroize` calls to `sanitization::SecureSanitize`.
 - Move HTTP discovery bearer-token storage and Fluxheim-owned Authorization
   header assembly to `sanitization::SecretString`.
+- Move native OpenBao disk-cache encryption token storage to
+  `sanitization::SecretString`.
 
 ## 1.6.34 - 2026-06-29
 

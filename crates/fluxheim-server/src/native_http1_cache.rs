@@ -24,6 +24,8 @@ use fluxheim_config::{
     CacheConfig, CacheDiskBackend, CacheDiskEncryptionConfig, CacheDiskEncryptionProvider,
 };
 use ring::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
+#[cfg(feature = "openbao-cache-encryption")]
+use sanitization::SecretString;
 use sha2::{Digest as _, Sha256};
 use tokio::sync::Notify;
 use zeroize::Zeroizing;
@@ -140,7 +142,7 @@ enum NativeDiskCacheEncryptionProvider {
         address: Arc<str>,
         mount: Arc<str>,
         key_name: Arc<str>,
-        token: Zeroizing<String>,
+        token: SecretString,
     },
     #[cfg(not(feature = "openbao-cache-encryption"))]
     OpenBaoTransitDisabled,
@@ -1687,14 +1689,13 @@ impl NativeDiskCacheEncryption {
                 key_name,
                 token,
             } => {
-                let ciphertext = openbao_transit_encrypt(
-                    address,
-                    mount,
-                    key_name,
-                    token.as_str(),
-                    plaintext,
-                    &aad,
-                )?;
+                let ciphertext = token
+                    .try_with_secret(|token| {
+                        openbao_transit_encrypt(address, mount, key_name, token, plaintext, &aad)
+                    })
+                    .map_err(|error| {
+                        std::io::Error::new(std::io::ErrorKind::InvalidData, error)
+                    })??;
                 (Vec::new(), ciphertext.into_bytes())
             }
             #[cfg(not(feature = "openbao-cache-encryption"))]
@@ -1839,7 +1840,11 @@ impl NativeDiskCacheEncryption {
                     ));
                 }
                 let ciphertext = native_cache_utf8(&bytes[nonce_end..], "openbao ciphertext")?;
-                openbao_transit_decrypt(address, mount, key_name, token.as_str(), &ciphertext, &aad)
+                token
+                    .try_with_secret(|token| {
+                        openbao_transit_decrypt(address, mount, key_name, token, &ciphertext, &aad)
+                    })
+                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?
             }
             #[cfg(not(feature = "openbao-cache-encryption"))]
             NativeDiskCacheEncryptionProvider::OpenBaoTransitDisabled => Err(std::io::Error::new(
@@ -1876,7 +1881,7 @@ fn native_openbao_transit_provider(
             "native disk cache OpenBao token must not be empty",
         ));
     }
-    let token = Zeroizing::new(token.trim().to_owned());
+    let token = SecretString::from_secret_str(token.trim());
     Ok(NativeDiskCacheEncryptionProvider::OpenBaoTransit {
         address: Arc::from(
             config
