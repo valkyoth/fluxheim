@@ -2904,6 +2904,22 @@ available for the stabilization/security-only follow-up.
   them. Keep this release behavior-preserving and cleanup-only except for
   fixes found by pentest/CI.
 
+  Required cleanup outcomes:
+
+  - Remove `src/native_proxy_shim.rs` or reduce it to an empty deleted
+    compatibility boundary with all still-used request/cache/admin DTOs moved
+    into their owning crates.
+  - Remove dead Pingora-era root modules and adapters that are no longer
+    compiled by any supported profile, including old proxy/cache/web/listener
+    compatibility surfaces where tests prove the native replacement owns the
+    behavior.
+  - Replace root imports of old `crate::proxy::*` compatibility symbols with
+    direct imports from `fluxheim-server`, `fluxheim-cache`,
+    `fluxheim-load-balancer`, `fluxheim-headers`, or other owning crates.
+  - Keep `scripts/validate-pingora-dependency-policy.sh check`,
+    `scripts/validate-modularity-policy.sh check`, release containers, RPM,
+    and representative smoke tests as blocking evidence for the cleanup.
+
   Crate-boundary follow-up for this cleanup:
 
   - `fluxheim-acme` is now a good extraction candidate. The root `src/acme.rs`
@@ -2928,6 +2944,19 @@ available for the stabilization/security-only follow-up.
     `fluxheim-headers`, and CLI subcommands into smaller root modules. Do
     these only where they reduce real coupling or remove dead compatibility
     imports; do not create tiny crates merely to move lines around.
+
+  Stretch outcomes, only if the required cleanup is already green:
+
+  - Start `fluxheim-acme` as a workspace crate with account/order/storage
+    primitives and keep root `fluxheim-acme` binary code as thin command wiring.
+  - Move observability helpers still living in root `metrics` into
+    `fluxheim-observability` where this does not change exported metrics names
+    or CodeQL path-safety annotations.
+  - Move any remaining root header-policy helpers into `fluxheim-headers`
+    without changing privacy-mode gates or trusted-proxy semantics.
+  - Split obvious CLI subcommand helpers into smaller root modules when that
+    reduces coupling for release/testing workflows; do not block the release on
+    full CLI extraction.
 
 Stable exit criteria:
 
