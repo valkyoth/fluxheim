@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
+use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -601,19 +603,14 @@ impl NativeDiskCache {
 
     fn rebuild_filesystem_index(&self, state: &mut NativeDiskCacheState) -> std::io::Result<()> {
         let root = NativeSafeDiskCachePath::from_path(self.root.clone());
-        for shard in root.read_dir()? {
-            let shard = shard?;
-            let shard_path = shard.path();
-            if !shard.file_type()?.is_dir()
-                || native_cache_path_contains_symlink(&self.root, &shard_path)?
+        for shard_path in root.child_paths()? {
+            if !shard_path.is_dir() || native_cache_path_contains_symlink(&self.root, &shard_path)?
             {
                 continue;
             }
             let shard = NativeSafeDiskCachePath::from_path(shard_path);
-            for object in shard.read_dir()? {
-                let object = object?;
-                let path = object.path();
-                if object.file_type()?.is_dir()
+            for path in shard.child_paths()? {
+                if path.is_dir()
                     || path.extension().and_then(|value| value.to_str()) != Some("fhc")
                     || native_cache_path_contains_symlink(&self.root, &path)?
                 {
@@ -2596,7 +2593,20 @@ impl NativeSafeDiskCachePath {
         Ok(fd.into())
     }
 
-    fn read_dir(&self) -> std::io::Result<std::fs::ReadDir> {
+    fn open_existing_dir(&self) -> std::io::Result<std::fs::File> {
+        let fd = rustix::fs::open(
+            &self.path,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(native_rustix_to_io_error)?;
+        Ok(fd.into())
+    }
+
+    fn child_paths(&self) -> std::io::Result<Vec<PathBuf>> {
         let canonical = self.path.canonicalize()?;
         if canonical != self.path {
             return Err(std::io::Error::new(
@@ -2604,7 +2614,18 @@ impl NativeSafeDiskCachePath {
                 "native disk cache directory path is not canonical",
             ));
         }
-        std::fs::read_dir(canonical)
+        let dir_file = self.open_existing_dir()?;
+        let mut dir = rustix::fs::Dir::read_from(&dir_file).map_err(native_rustix_to_io_error)?;
+        let mut paths = Vec::new();
+        for entry in &mut dir {
+            let entry = entry.map_err(native_rustix_to_io_error)?;
+            let name = entry.file_name().to_bytes();
+            if name == b"." || name == b".." {
+                continue;
+            }
+            paths.push(self.path.join(OsStr::from_bytes(name)));
+        }
+        Ok(paths)
     }
 
     fn rename_from(&self, source: &Self) -> std::io::Result<()> {
