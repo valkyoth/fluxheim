@@ -14,6 +14,7 @@ pub use crate::cache_api::{
 
 #[derive(Clone)]
 pub struct FluxProxy {
+    #[cfg(any(feature = "cache", feature = "load-balancer"))]
     config: crate::config::Config,
     live_config: Arc<Mutex<crate::config::Config>>,
     #[cfg(feature = "load-balancer")]
@@ -23,6 +24,7 @@ pub struct FluxProxy {
 impl FluxProxy {
     pub fn from_config(_config: &crate::config::Config) -> io::Result<Self> {
         Ok(Self {
+            #[cfg(any(feature = "cache", feature = "load-balancer"))]
             config: _config.clone(),
             live_config: Arc::new(Mutex::new(_config.clone())),
             #[cfg(feature = "load-balancer")]
@@ -37,6 +39,7 @@ impl FluxProxy {
         >,
     ) -> io::Result<Self> {
         Ok(Self {
+            #[cfg(any(feature = "cache", feature = "load-balancer"))]
             config: _config.clone(),
             live_config: Arc::new(Mutex::new(_config.clone())),
             #[cfg(feature = "load-balancer")]
