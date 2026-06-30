@@ -66,6 +66,8 @@ behavior when the change improves security or project direction.
   `fluxheim-snapshot/src/store.rs` into a focused metadata module.
 - Move `fluxheim-cache` request/key/range tests out of `src/request.rs`,
   leaving the production cache request helpers below the line-limit target.
+- Move `fluxheim-cache` object/envelope/index tests out of `src/object.rs`,
+  leaving the production disk object helpers below the line-limit target.
 
 ## 1.6.36 - 2026-06-30
 
