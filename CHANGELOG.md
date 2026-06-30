@@ -30,6 +30,9 @@ behavior when the change improves security or project direction.
 - Delete inert Pingora-era root source files that were permanently gated behind
   `cfg(any())`, including the old proxy, cache, header, auth-request, edge
   policy, PHP-FPM, traffic-mirror, and proxy-protocol adapters.
+- Remove stale disabled Pingora compatibility runner/test code from
+  `runtime.rs` so dead `cfg(any())` paths no longer reference non-existent
+  native proxy methods or Pingora traits.
 
 ## 1.6.35 - 2026-06-30
 

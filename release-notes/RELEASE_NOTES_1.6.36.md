@@ -27,6 +27,9 @@ longer use.
 - Delete inert Pingora-era root source files that were permanently gated behind
   `cfg(any())`, including the old proxy, cache, header, auth-request, edge
   policy, PHP-FPM, traffic-mirror, and proxy-protocol adapters.
+- Remove stale disabled Pingora compatibility runner/test code from
+  `runtime.rs` so dead `cfg(any())` paths no longer reference non-existent
+  native proxy methods or Pingora traits.
 - Keep normal Fluxheim builds on the Pingora-free runtime introduced in
   `1.6.34` and stabilized in `1.6.35`.
 - Keep release, dependency, native-runtime, RPM, container, and smoke gates as
