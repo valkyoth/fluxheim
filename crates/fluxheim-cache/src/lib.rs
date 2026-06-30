@@ -15,6 +15,9 @@ pub mod storage;
 pub mod storage_bin;
 pub mod tags;
 
+#[cfg(test)]
+mod request_tests;
+
 pub fn cache_user_tag(vhost: &str, route: Option<&str>) -> String {
     route
         .map(|route| format!("{vhost}:route:{route}"))
