@@ -498,7 +498,7 @@ where
         old_config.validate()?;
         let new_config = Config::load(cli.config.as_deref())?;
         new_config.validate()?;
-        let impact = crate::reload::classify_reload(&old_config, &new_config);
+        let impact = fluxheim_config::reload::classify_reload(&old_config, &new_config);
         println!("reload impact: {}", impact.kind());
         if !impact.reasons().is_empty() {
             println!("reasons:");
@@ -745,7 +745,7 @@ fn run_command(
     match command {
         CliCommand::Snapshot { store, message } => {
             let config = Config::load(config_path)?;
-            let store = crate::snapshot::SnapshotStore::new(store);
+            let store = fluxheim_snapshot::SnapshotStore::new(store);
             let snapshot = store.snapshot_config(&config, message.as_deref())?;
             println!("snapshot: {}", snapshot.id);
             println!("config: {}", snapshot.config_path.display());
@@ -753,7 +753,7 @@ fn run_command(
             Ok(())
         }
         CliCommand::Rollback { store, to } => {
-            let store = crate::snapshot::SnapshotStore::new(store);
+            let store = fluxheim_snapshot::SnapshotStore::new(store);
             let snapshot = store.rollback_target(to.as_deref())?;
             println!("rollback target: {}", snapshot.id);
             println!("config: {}", snapshot.config_path.display());
@@ -763,7 +763,7 @@ fn run_command(
             Ok(())
         }
         CliCommand::Snapshots { store } => {
-            let store = crate::snapshot::SnapshotStore::new(store);
+            let store = fluxheim_snapshot::SnapshotStore::new(store);
             let current = store.current_id()?;
             for snapshot in store.list()? {
                 let marker = if current.as_deref() == Some(snapshot.id.as_str()) {
@@ -4091,7 +4091,7 @@ mod tests {
         ])
         .unwrap();
 
-        let store = crate::snapshot::SnapshotStore::new(dir.path.join("store"));
+        let store = fluxheim_snapshot::SnapshotStore::new(dir.path.join("store"));
         assert_eq!(store.list().unwrap().len(), 1);
         assert!(store.current_id().unwrap().is_some());
     }
@@ -4100,7 +4100,7 @@ mod tests {
     fn rollback_command_selects_previous_snapshot() {
         let dir = TestDir::new("cli-rollback-command");
         let store_path = dir.path.join("store");
-        let store = crate::snapshot::SnapshotStore::new(&store_path);
+        let store = fluxheim_snapshot::SnapshotStore::new(&store_path);
         let first = store
             .snapshot_config(&crate::config::Config::default(), Some("first"))
             .unwrap();

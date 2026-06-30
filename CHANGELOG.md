@@ -24,6 +24,9 @@ behavior when the change improves security or project direction.
   `fluxheim-common` directly.
 - Remove the root cache-header shim; static response planning now calls
   `fluxheim-cache` header helpers directly.
+- Remove root reload, snapshot, and load-balancer re-export shims from active
+  code; admin and CLI paths now use `fluxheim-config`, `fluxheim-snapshot`, and
+  `fluxheim-load-balancer` directly.
 
 ## 1.6.36 - 2026-06-30
 

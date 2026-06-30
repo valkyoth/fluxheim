@@ -22,6 +22,9 @@ is clean.
   `fluxheim-common` directly.
 - Remove the root cache-header shim; static response planning now calls
   `fluxheim-cache` header helpers directly.
+- Remove root reload, snapshot, and load-balancer re-export shims from active
+  code; admin and CLI paths now use `fluxheim-config`, `fluxheim-snapshot`, and
+  `fluxheim-load-balancer` directly.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

@@ -158,8 +158,6 @@ pub mod headers {
 #[cfg(feature = "ingress")]
 mod http_types;
 pub mod internal_crypto;
-#[cfg(feature = "load-balancer")]
-pub mod load_balancer;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 #[cfg(feature = "metrics-otlp")]
@@ -170,10 +168,8 @@ mod native_http1_static;
 pub mod native_proxy;
 #[cfg(feature = "otel-otlp")]
 pub mod otel_otlp;
-pub mod reload;
 #[cfg(feature = "security")]
 pub mod security;
-pub mod snapshot;
 #[cfg(feature = "stream-proxy")]
 mod stream_proxy;
 #[cfg(all(

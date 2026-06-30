@@ -17,16 +17,16 @@ use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use crate::config::{AdminAuthThrottleConfig, AdminConfig, AdminHealthResponseMode, Config};
+use crate::native_proxy::FluxProxy;
+use fluxheim_config::reload::{ReloadReason, classify_reload};
 #[cfg(feature = "load-balancer")]
-use crate::load_balancer::{
+use fluxheim_load_balancer::{
     LoadBalancerMemberAddRequest, LoadBalancerMemberRemoveRequest,
     LoadBalancerMemberSetMutationResult, LoadBalancerMemberStateRequest,
     LoadBalancerMemberUpdateRequest, LoadBalancerMemberWeightRequest,
     LoadBalancerPersistenceClearRequest, LoadBalancerRuntimeBackendState,
 };
-use crate::native_proxy::FluxProxy;
-use crate::reload::{ReloadReason, classify_reload};
-use crate::snapshot::{
+use fluxheim_snapshot::{
     ConfigSnapshot, PendingValidation, SnapshotApplyMode, SnapshotError,
     SnapshotHealthSignalOutcome, SnapshotRuntimeState, SnapshotStore,
 };
@@ -3923,12 +3923,12 @@ fn query_params<'a>(query: Option<&'a str>, name: &str) -> Vec<&'a str> {
 
 #[cfg(feature = "load-balancer")]
 fn parse_load_balancer_runtime_weight(value: &str) -> Result<Option<usize>, &'static str> {
-    crate::load_balancer::parse_load_balancer_runtime_weight(value)
+    fluxheim_load_balancer::parse_load_balancer_runtime_weight(value)
 }
 
 #[cfg(feature = "load-balancer")]
 fn parse_load_balancer_member_weight(value: &str) -> Result<usize, &'static str> {
-    crate::load_balancer::parse_load_balancer_member_weight(value)
+    fluxheim_load_balancer::parse_load_balancer_member_weight(value)
 }
 
 fn cache_purge_paths<'a>(headers: &'a HeaderMap, query: Option<&'a str>) -> Vec<&'a str> {
@@ -4181,13 +4181,13 @@ mod tests {
     #[cfg(feature = "cache")]
     use crate::config_route::RouteConfig;
     use crate::native_proxy::FluxProxy;
-    use crate::snapshot::SnapshotStore;
-    use crate::snapshot::{PendingValidation, SnapshotRuntimeState};
     #[cfg(feature = "load-balancer")]
     use fluxheim_common::test_support::safe_child_path;
     use fluxheim_common::test_support::unique_temp_path;
     #[cfg(unix)]
     use fluxheim_common::test_support::{unique_group_writable_child, unique_world_writable_child};
+    use fluxheim_snapshot::SnapshotStore;
+    use fluxheim_snapshot::{PendingValidation, SnapshotRuntimeState};
 
     #[test]
     fn admin_json_response_is_size_bounded() {
@@ -5267,7 +5267,7 @@ mod tests {
         let mut headers = auth_headers();
         headers.insert(
             "x-fluxheim-message",
-            HeaderValue::from_str(&"a".repeat(crate::snapshot::MAX_SNAPSHOT_MESSAGE_BYTES + 1))
+            HeaderValue::from_str(&"a".repeat(fluxheim_snapshot::MAX_SNAPSHOT_MESSAGE_BYTES + 1))
                 .unwrap(),
         );
 
