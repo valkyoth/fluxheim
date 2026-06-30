@@ -33,6 +33,8 @@ is clean.
   native proxy code now use `fluxheim-cache` DTOs and helpers directly.
 - Move the remaining root header DTOs into `fluxheim-headers` and remove the
   inline root `headers` module.
+- Split access-log helper functions out of `fluxheim-observability/src/lib.rs`
+  into a focused crate module while preserving the public exports.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
