@@ -54,6 +54,23 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
   PHP-FPM plus proxy/TLS smoke coverage.
 - Fix the release version-bump helper so package versions such as `1.6.35` are
   not interpreted as regex backreferences during automated metadata updates.
+- Add `scripts/test_starter.py`, a human-facing selector for the maintained
+  live smoke scripts and release gates.
+- Add `scripts/check_smoke_images.sh` so maintainers can pull and record the
+  configured WordPress, OpenBao, MariaDB, PostgreSQL, and Valkey smoke images.
+- Add a privacy-mode live smoke that builds `profile-privacy`, verifies
+  client-IP headers are stripped before the upstream, and checks Fluxheim logs
+  do not retain the test IP, path, cookie, user-agent, or request ID.
+- Extend local and container load-balancer smokes with native
+  nginx-compatible Ketama coverage, and extend the container smoke with
+  backend failover, recovery, and all-down 503 checks.
+- Wire optional deep-gate flags for OpenBao cache encryption, database health
+  checks, WordPress, PHP Wolfi, RPM build, privacy mode, and smoke dependency
+  image freshness.
+- Make the observability smoke self-contained by starting disposable
+  Prometheus and Jaeger containers when external URLs are not configured,
+  requiring Prometheus scrape plus OTLP metrics ingestion and keeping Jaeger
+  trace ingestion opt-in until native span export is implemented.
 - Keep dependency, metadata, container, RPM, and smoke-test gates as blocking
   evidence for the stabilization line.
 
@@ -73,5 +90,14 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
 - `scripts/validate-native-runtime-cutover.sh`
 - `scripts/capture-runtime-baseline.sh release`
 - `scripts/stable_release_gate.sh check`
+- `scripts/smoke_privacy_mode.sh`
+- `scripts/check_smoke_images.sh`
+- `scripts/smoke_load_balancer.sh`
+- `scripts/smoke_load_balancer_container.sh`
+- `scripts/smoke_openbao_cache_encryption.sh`
+- `scripts/smoke_redis_health_check.sh`
+- `scripts/smoke_mysql_health_check.sh`
+- `scripts/smoke_postgres_health_check.sh`
+- `scripts/smoke_observability_local.sh`
 - `scripts/smoke_wordpress_php_fpm.sh both`
 - `scripts/smoke_wordpress_proxy_tls.sh`

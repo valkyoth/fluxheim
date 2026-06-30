@@ -106,6 +106,10 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
 class Handler(BaseHTTPRequestHandler):
     label = "origin"
 
@@ -126,7 +130,7 @@ if __name__ == "__main__":
     host = sys.argv[1]
     port = int(sys.argv[2])
     Handler.label = sys.argv[3]
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+    ReusableThreadingHTTPServer((host, port), Handler).serve_forever()
 PY
 
 cat > "$TMP_DIR/fluxheim.toml" <<EOF
@@ -199,6 +203,20 @@ mode = "header"
 header = "x-sticky-session"
 ttl_secs = 60
 table_max_entries = 16
+
+[[vhosts.routes]]
+name = "ketama"
+path_prefix = "/ketama/"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:$ORIGIN_ONE_PORT", "127.0.0.1:$ORIGIN_TWO_PORT"]
+upstream_aliases = ["origin-one", "origin-two"]
+upstream_tls = false
+
+[vhosts.routes.proxy.load_balance]
+selection = "ketama"
+all_down_status = 503
+max_iterations = 128
 EOF
 
 chmod 755 "$TMP_DIR"
@@ -268,6 +286,74 @@ if [ "$(sort -u "$STICKY_RESPONSES" | wc -l)" -ne 1 ]; then
     echo "containerized header persistence did not keep the same session pinned" >&2
     podman logs "$CONTAINER_NAME" >&2 || true
     cat "$STICKY_RESPONSES" >&2
+    exit 1
+fi
+
+KETAMA_RESPONSES="$TMP_DIR/ketama-responses.txt"
+: > "$KETAMA_RESPONSES"
+for _ in 1 2 3 4; do
+    curl -fsS --max-time "$CURL_MAX_TIME" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/ketama/same-key" >> "$KETAMA_RESPONSES"
+done
+if [ "$(sort -u "$KETAMA_RESPONSES" | wc -l)" -ne 1 ]; then
+    echo "containerized Ketama selection did not keep the same key pinned" >&2
+    podman logs "$CONTAINER_NAME" >&2 || true
+    cat "$KETAMA_RESPONSES" >&2
+    exit 1
+fi
+
+kill "$ORIGIN_TWO_PID" 2>/dev/null || true
+wait "$ORIGIN_TWO_PID" 2>/dev/null || true
+ORIGIN_TWO_PID=
+sleep 2
+
+FAILOVER_RESPONSES="$TMP_DIR/failover-responses.txt"
+: > "$FAILOVER_RESPONSES"
+for _ in 1 2 3 4 5 6; do
+    curl -fsS --max-time "$CURL_MAX_TIME" "http://127.0.0.1:$FLUXHEIM_PORT/failover" >> "$FAILOVER_RESPONSES"
+done
+if grep -q '^origin-two$' "$FAILOVER_RESPONSES" || ! grep -q '^origin-one$' "$FAILOVER_RESPONSES"; then
+    echo "containerized load balancer did not remove the failed origin from selection" >&2
+    podman logs "$CONTAINER_NAME" >&2 || true
+    cat "$FAILOVER_RESPONSES" >&2
+    exit 1
+fi
+
+python3 "$TMP_DIR/origin.py" 127.0.0.1 "$ORIGIN_TWO_PORT" origin-two >"$TMP_DIR/origin-two-recovered.log" 2>&1 &
+ORIGIN_TWO_PID=$!
+wait_http "http://127.0.0.1:$ORIGIN_TWO_PORT/"
+sleep 2
+
+RECOVERY_RESPONSES="$TMP_DIR/recovery-responses.txt"
+: > "$RECOVERY_RESPONSES"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -fsS --max-time "$CURL_MAX_TIME" "http://127.0.0.1:$FLUXHEIM_PORT/recovery" >> "$RECOVERY_RESPONSES"
+done
+if ! grep -q '^origin-two$' "$RECOVERY_RESPONSES"; then
+    echo "containerized load balancer did not return the recovered origin to selection" >&2
+    podman logs "$CONTAINER_NAME" >&2 || true
+    cat "$RECOVERY_RESPONSES" >&2
+    exit 1
+fi
+
+kill "$ORIGIN_ONE_PID" 2>/dev/null || true
+wait "$ORIGIN_ONE_PID" 2>/dev/null || true
+ORIGIN_ONE_PID=
+kill "$ORIGIN_TWO_PID" 2>/dev/null || true
+wait "$ORIGIN_TWO_PID" 2>/dev/null || true
+ORIGIN_TWO_PID=
+sleep 2
+
+all_down_status="$(
+    curl -sS --max-time "$CURL_MAX_TIME" \
+        -o "$TMP_DIR/all-down-body.txt" \
+        -w '%{http_code}' \
+        "http://127.0.0.1:$FLUXHEIM_PORT/all-down" 2>/dev/null || true
+)"
+if [ "$all_down_status" != "503" ]; then
+    echo "containerized load balancer did not return configured all-down status, got ${all_down_status:-none}" >&2
+    podman logs "$CONTAINER_NAME" >&2 || true
+    cat "$TMP_DIR/all-down-body.txt" >&2 2>/dev/null || true
     exit 1
 fi
 

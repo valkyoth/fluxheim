@@ -8,9 +8,19 @@ scripts/smoke_proxy_cache.sh	script	1.6.2-1.6.11	Proxy cache HIT/MISS/stale/purg
 scripts/smoke_storage_bin_cache.sh	script	1.6.2	Storage-bin cache backend parity.
 scripts/smoke_cache_encryption_local.sh	script	1.6.2	Encrypted local disk-cache parity.
 scripts/smoke_peer_fill_cache.sh	script	1.6.2	Peer-fill cache behavior parity.
-scripts/smoke_load_balancer.sh	script	1.6.1	Load-balancer selection, persistence, mutation, and metrics parity.
+scripts/smoke_openbao_cache_encryption.sh	script	1.6.35	OpenBao Transit cache-encryption parity with a containerized OpenBao dependency.
+scripts/smoke_load_balancer.sh	script	1.6.1-1.6.35	Load-balancer selection, nginx-compatible Ketama, persistence, mutation, health, failover, and metrics parity.
+scripts/smoke_load_balancer_container.sh	script	1.6.13-1.6.35	Focused load-balancer image parity with native Ketama, health failover, recovery, and all-down behavior.
 scripts/smoke_stream_proxy.sh	script	1.6.3	TCP stream listener, limits, PROXY protocol, and upstream TLS parity.
 scripts/smoke_observability_local.sh	script	1.6.4-1.6.12	Metrics/tracing/logging adapter parity.
+scripts/smoke_privacy_mode.sh	script	1.6.35	Zero-retention privacy-mode build and runtime proxy/header/log-retention parity.
+scripts/smoke_wordpress_php_fpm.sh	script	1.6.35	Native WordPress PHP-FPM install/login/admin parity for external and managed PHP-FPM.
+scripts/smoke_wordpress_proxy_tls.sh	script	1.6.35	Native WordPress reverse-proxy TLS parity with secure-cookie and redirect behavior.
+scripts/smoke_redis_health_check.sh	script	1.6.35	Redis/Valkey active health-check parity against a containerized backend.
+scripts/smoke_mysql_health_check.sh	script	1.6.35	MySQL/MariaDB active health-check parity against a containerized backend.
+scripts/smoke_postgres_health_check.sh	script	1.6.35	PostgreSQL active health-check parity against a containerized backend.
+scripts/check_smoke_images.sh	script	1.6.35	External smoke dependency image freshness and digest evidence for WordPress, OpenBao, and database smokes.
+scripts/test_starter.py	script	1.6.35	Human-facing selector for local, container, database, WordPress, privacy, and release-gate smokes.
 scripts/validate-1-0-core.sh	script	1.6.8-1.6.11	Representative stable-core config validation parity.
 scripts/validate-1-0-fixtures.sh	script	1.6.8-1.6.11	Gateway fixture validation parity.
 scripts/validate-tls-backends.sh	script	1.6.6	TLS backend build/config parity.

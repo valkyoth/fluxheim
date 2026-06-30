@@ -6,6 +6,8 @@ port_base="${FLUXHEIM_WORDPRESS_SMOKE_PORT:-18132}"
 fpm_port_base="${FLUXHEIM_WORDPRESS_SMOKE_FPM_PORT:-19000}"
 db_port_base="${FLUXHEIM_WORDPRESS_SMOKE_DB_PORT:-19100}"
 php_fpm_binary="${FLUXHEIM_WORDPRESS_SMOKE_PHP_FPM:-/usr/sbin/php-fpm}"
+wordpress_db_image="${FLUXHEIM_WORDPRESS_DB_IMAGE:-docker.io/library/mariadb:12.2}"
+wordpress_fpm_image="${FLUXHEIM_WORDPRESS_FPM_IMAGE:-docker.io/library/wordpress:php8.3-fpm-alpine}"
 run_id="$$"
 tmp="${TMPDIR:-/tmp}/fh-wp-$run_id"
 admin_password="FluxheimSmoke-12345!"
@@ -305,7 +307,7 @@ EOF
             -e MARIADB_DATABASE=fluxheim \
             -e MARIADB_USER=fluxheim \
             -e MARIADB_PASSWORD=fluxheim \
-            mariadb:12.2 >/dev/null
+            "$wordpress_db_image" >/dev/null
     else
         podman run -d \
             --name "$db_container" \
@@ -314,13 +316,13 @@ EOF
             -e MARIADB_DATABASE=fluxheim \
             -e MARIADB_USER=fluxheim \
             -e MARIADB_PASSWORD=fluxheim \
-            mariadb:12.2 >/dev/null
+            "$wordpress_db_image" >/dev/null
         podman run -d \
             --name "$fpm_container" \
             --network "$network" \
             -p "127.0.0.1:$fpm_port:9000" \
             -v "$site:$site:Z" \
-            docker.io/library/wordpress:php8.3-fpm-alpine >/dev/null
+            "$wordpress_fpm_image" >/dev/null
     fi
     wait_for_mariadb "$db_container"
 

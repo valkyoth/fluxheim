@@ -75,9 +75,15 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if [ ! -x "$ROOT_DIR/target/debug/fluxheim" ]; then
-    echo "target/debug/fluxheim is missing; run 'cargo build' first" >&2
-    exit 1
+if [ -n "${FLUXHEIM_BIN:-}" ]; then
+    fluxheim_bin="$FLUXHEIM_BIN"
+else
+    "$ROOT_DIR/scripts/validate-features.sh" profile-cache-server
+    (
+        cd "$ROOT_DIR"
+        cargo build --quiet --no-default-features --features profile-cache-server
+    )
+    fluxheim_bin="$ROOT_DIR/${CARGO_TARGET_DIR:-target}/debug/fluxheim"
 fi
 
 mkdir -p "$TMP_DIR/cache" "$TMP_DIR/run" "$TMP_DIR/secrets"
@@ -226,10 +232,10 @@ until curl -sSf --max-time "$CURL_MAX_TIME" "http://127.0.0.1:${ORIGIN_PORT}/__c
 done
 
 CREDENTIALS_DIRECTORY="$TMP_DIR/secrets" \
-    "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" --validate-config
+    "$fluxheim_bin" --config "$TMP_DIR/fluxheim.toml" --validate-config
 
 CREDENTIALS_DIRECTORY="$TMP_DIR/secrets" \
-    "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" >"$TMP_DIR/fluxheim.log" 2>&1 &
+    "$fluxheim_bin" --config "$TMP_DIR/fluxheim.toml" >"$TMP_DIR/fluxheim.log" 2>&1 &
 FLUXHEIM_PID=$!
 
 i=0

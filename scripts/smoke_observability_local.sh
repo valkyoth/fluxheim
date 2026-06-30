@@ -1,18 +1,6 @@
 #!/usr/bin/env sh
 set -eu
 
-fluxheim_port="${FLUXHEIM_OBSERVABILITY_PORT:-18180}"
-metrics_port="${FLUXHEIM_OBSERVABILITY_METRICS_PORT:-19191}"
-upstream_port="${FLUXHEIM_OBSERVABILITY_UPSTREAM_PORT:-18181}"
-prometheus_url="${FLUXHEIM_PROMETHEUS_URL:-http://127.0.0.1:9090}"
-jaeger_url="${FLUXHEIM_JAEGER_URL:-http://127.0.0.1:16686}"
-otlp_trace_endpoint="${FLUXHEIM_OTLP_TRACE_ENDPOINT:-http://127.0.0.1:4318/v1/traces}"
-otlp_metrics_endpoint="${FLUXHEIM_OTLP_METRICS_ENDPOINT:-http://127.0.0.1:9090/api/v1/otlp/v1/metrics}"
-require_prometheus="${FLUXHEIM_PROMETHEUS_REQUIRED:-0}"
-require_fluxheim_scrape="${FLUXHEIM_PROMETHEUS_REQUIRE_FLUXHEIM:-0}"
-require_prometheus_otlp="${FLUXHEIM_PROMETHEUS_REQUIRE_OTLP:-0}"
-require_prometheus_otlp_fluxheim="${FLUXHEIM_PROMETHEUS_REQUIRE_OTLP_FLUXHEIM:-0}"
-require_jaeger_trace="${FLUXHEIM_JAEGER_REQUIRE_TRACE:-0}"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-observability-smoke.XXXXXX")"
 config="$tmp/fluxheim.toml"
 body="$tmp/body.txt"
@@ -24,6 +12,61 @@ jaeger_body="$tmp/jaeger.json"
 trace_id="4bf92f3577b34da6a3ce929d0e0e4736"
 span_id="00f067aa0ba902b7"
 traceparent="00-$trace_id-$span_id-01"
+prometheus_name="fluxheim-observability-prometheus-$$"
+jaeger_name="fluxheim-observability-jaeger-$$"
+prometheus_image="${FLUXHEIM_PROMETHEUS_IMAGE:-docker.io/prom/prometheus:latest}"
+jaeger_image="${FLUXHEIM_JAEGER_IMAGE:-docker.io/jaegertracing/all-in-one:latest}"
+prometheus_started=0
+jaeger_started=0
+
+ports=$(python3 - <<'PY'
+import socket
+
+sockets = []
+try:
+    for _ in range(7):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        sockets.append(sock)
+    print(" ".join(str(sock.getsockname()[1]) for sock in sockets))
+finally:
+    for sock in sockets:
+        sock.close()
+PY
+)
+
+set -- $ports
+fluxheim_port="${FLUXHEIM_OBSERVABILITY_PORT:-$1}"
+metrics_port="${FLUXHEIM_OBSERVABILITY_METRICS_PORT:-$2}"
+upstream_port="${FLUXHEIM_OBSERVABILITY_UPSTREAM_PORT:-$3}"
+prometheus_port="${FLUXHEIM_PROMETHEUS_PORT:-$4}"
+jaeger_query_port="${FLUXHEIM_JAEGER_QUERY_PORT:-$5}"
+jaeger_otlp_http_port="${FLUXHEIM_JAEGER_OTLP_HTTP_PORT:-$6}"
+jaeger_otlp_grpc_port="${FLUXHEIM_JAEGER_OTLP_GRPC_PORT:-$7}"
+
+if [ -n "${FLUXHEIM_PROMETHEUS_URL+x}" ]; then
+    auto_prometheus=0
+    prometheus_url="$FLUXHEIM_PROMETHEUS_URL"
+else
+    auto_prometheus="${FLUXHEIM_OBSERVABILITY_START_PROMETHEUS:-1}"
+    prometheus_url="http://127.0.0.1:$prometheus_port"
+fi
+
+if [ -n "${FLUXHEIM_JAEGER_URL+x}" ]; then
+    auto_jaeger=0
+    jaeger_url="$FLUXHEIM_JAEGER_URL"
+else
+    auto_jaeger="${FLUXHEIM_OBSERVABILITY_START_JAEGER:-1}"
+    jaeger_url="http://127.0.0.1:$jaeger_query_port"
+fi
+
+otlp_trace_endpoint="${FLUXHEIM_OTLP_TRACE_ENDPOINT:-http://127.0.0.1:$jaeger_otlp_http_port/v1/traces}"
+otlp_metrics_endpoint="${FLUXHEIM_OTLP_METRICS_ENDPOINT:-http://127.0.0.1:$prometheus_port/api/v1/otlp/v1/metrics}"
+require_prometheus="${FLUXHEIM_PROMETHEUS_REQUIRED:-$auto_prometheus}"
+require_fluxheim_scrape="${FLUXHEIM_PROMETHEUS_REQUIRE_FLUXHEIM:-$auto_prometheus}"
+require_prometheus_otlp="${FLUXHEIM_PROMETHEUS_REQUIRE_OTLP:-$auto_prometheus}"
+require_prometheus_otlp_fluxheim="${FLUXHEIM_PROMETHEUS_REQUIRE_OTLP_FLUXHEIM:-$auto_prometheus}"
+require_jaeger_trace="${FLUXHEIM_JAEGER_REQUIRE_TRACE:-0}"
 
 cleanup() {
     if [ -n "${server_pid:-}" ]; then
@@ -42,6 +85,12 @@ cleanup() {
         fi
         wait "$upstream_pid" 2>/dev/null || true
     fi
+    if [ "$prometheus_started" = "1" ]; then
+        podman rm -f "$prometheus_name" >/dev/null 2>&1 || true
+    fi
+    if [ "$jaeger_started" = "1" ]; then
+        podman rm -f "$jaeger_name" >/dev/null 2>&1 || true
+    fi
     rm -rf "$tmp"
 }
 
@@ -49,6 +98,73 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$tmp/cache"
 mkdir -p "$tmp/run"
+
+require_command() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo "observability smoke failed: missing required command: $1" >&2
+        exit 1
+    fi
+}
+
+wait_http() {
+    url="$1"
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+        if curl -fsS "$url" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    return 1
+}
+
+if [ "$auto_prometheus" = "1" ]; then
+    require_command podman
+    cat > "$tmp/prometheus.yml" <<EOF
+global:
+  scrape_interval: 1s
+scrape_configs:
+  - job_name: fluxheim
+    static_configs:
+      - targets: ["127.0.0.1:$metrics_port"]
+EOF
+    podman rm -f "$prometheus_name" >/dev/null 2>&1 || true
+    podman run -d \
+        --name "$prometheus_name" \
+        --network host \
+        --security-opt no-new-privileges \
+        -v "$tmp/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z" \
+        "$prometheus_image" \
+        --config.file=/etc/prometheus/prometheus.yml \
+        --storage.tsdb.path=/tmp/prometheus \
+        --web.listen-address="127.0.0.1:$prometheus_port" \
+        --web.enable-otlp-receiver >/dev/null
+    prometheus_started=1
+    if ! wait_http "$prometheus_url/-/ready"; then
+        echo "observability smoke failed: timed out waiting for disposable Prometheus" >&2
+        podman logs "$prometheus_name" >&2 || true
+        exit 1
+    fi
+fi
+
+if [ "$auto_jaeger" = "1" ]; then
+    require_command podman
+    podman rm -f "$jaeger_name" >/dev/null 2>&1 || true
+    podman run -d \
+        --name "$jaeger_name" \
+        --network host \
+        --security-opt no-new-privileges \
+        -e COLLECTOR_OTLP_ENABLED=true \
+        "$jaeger_image" \
+        --query.http-server.host-port="127.0.0.1:$jaeger_query_port" \
+        --collector.otlp.http.host-port="127.0.0.1:$jaeger_otlp_http_port" \
+        --collector.otlp.grpc.host-port="127.0.0.1:$jaeger_otlp_grpc_port" >/dev/null
+    jaeger_started=1
+    if ! wait_http "$jaeger_url/api/services"; then
+        echo "observability smoke failed: timed out waiting for disposable Jaeger" >&2
+        podman logs "$jaeger_name" >&2 || true
+        exit 1
+    fi
+fi
 
 python3 - "$upstream_port" >"$tmp/upstream.log" 2>&1 <<'PY' &
 import http.server
@@ -205,17 +321,6 @@ EOF
 cargo build --quiet --no-default-features --features profile-observability
 target/debug/fluxheim --config "$config" >"$tmp/fluxheim.log" 2>&1 &
 server_pid="$!"
-
-wait_http() {
-    url="$1"
-    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-        if curl -fsS "$url" >/dev/null 2>&1; then
-            return 0
-        fi
-        sleep 0.2
-    done
-    return 1
-}
 
 if ! wait_http "http://127.0.0.1:$upstream_port/"; then
     echo "observability smoke failed: timed out waiting for upstream test server" >&2

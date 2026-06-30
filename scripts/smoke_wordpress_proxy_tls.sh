@@ -14,6 +14,8 @@ host="wp.test"
 base_url="https://$host:$tls_port"
 backend_url="http://127.0.0.1:$backend_port"
 admin_password="FluxheimSmoke-12345!"
+wordpress_db_image="${FLUXHEIM_WORDPRESS_DB_IMAGE:-docker.io/library/mariadb:12.2}"
+wordpress_apache_image="${FLUXHEIM_WORDPRESS_APACHE_IMAGE:-docker.io/library/wordpress:php8.3-apache}"
 
 cleanup() {
     status=$?
@@ -164,7 +166,7 @@ podman run -d \
     -e MARIADB_DATABASE=fluxheim \
     -e MARIADB_USER=fluxheim \
     -e MARIADB_PASSWORD=fluxheim \
-    mariadb:12.2 >/dev/null
+    "$wordpress_db_image" >/dev/null
 podman run -d \
     --name "$wp_container" \
     --network "$network" \
@@ -174,7 +176,7 @@ podman run -d \
     -e WORDPRESS_DB_USER=fluxheim \
     -e WORDPRESS_DB_PASSWORD=fluxheim \
     -e WORDPRESS_CONFIG_EXTRA="$wp_config_extra" \
-    docker.io/library/wordpress:php8.3-apache >/dev/null
+    "$wordpress_apache_image" >/dev/null
 
 "$fluxheim_bin" --config "$config" > "$tmp/fluxheim.log" 2>&1 &
 server_pid="$!"

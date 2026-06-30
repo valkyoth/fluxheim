@@ -176,6 +176,20 @@ ttl_secs = 60
 table_max_entries = 16
 
 [[vhosts.routes]]
+name = "ketama"
+path_prefix = "/ketama/"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:$ORIGIN_ONE_PORT", "127.0.0.1:$ORIGIN_TWO_PORT"]
+upstream_aliases = ["origin-one", "origin-two"]
+upstream_tls = false
+
+[vhosts.routes.proxy.load_balance]
+selection = "ketama"
+max_iterations = 256
+all_down_status = 503
+
+[[vhosts.routes]]
 name = "managed"
 path_prefix = "/managed/"
 
@@ -297,6 +311,11 @@ if ! grep -q 'fluxheim_load_balancer_pools{scope="route",selection="maglev_uri_h
     cat "$TMP_DIR/metrics-before-disable.txt" >&2
     exit 1
 fi
+if ! grep -q 'fluxheim_load_balancer_pools{scope="route",selection="nginx_consistent_source_hash"} 1' "$TMP_DIR/metrics-before-disable.txt"; then
+    echo "load balancer metrics did not report configured Ketama route pool" >&2
+    cat "$TMP_DIR/metrics-before-disable.txt" >&2
+    exit 1
+fi
 
 curl -fsS -X POST \
     -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
@@ -392,6 +411,18 @@ done
 if [ "$(sort -u "$MAGLEV_RESPONSES" | wc -l)" -ne 1 ]; then
     echo "Maglev route did not keep the same URI pinned to one selected origin" >&2
     cat "$MAGLEV_RESPONSES" >&2
+    exit 1
+fi
+
+KETAMA_RESPONSES="$TMP_DIR/ketama-responses.txt"
+: > "$KETAMA_RESPONSES"
+for _ in 1 2 3 4 5 6; do
+    curl -fsS "http://127.0.0.1:$FLUXHEIM_PORT/ketama/stable-key" >> "$KETAMA_RESPONSES"
+done
+
+if [ "$(sort -u "$KETAMA_RESPONSES" | wc -l)" -ne 1 ]; then
+    echo "Ketama route did not keep the same key pinned to one selected origin" >&2
+    cat "$KETAMA_RESPONSES" >&2
     exit 1
 fi
 

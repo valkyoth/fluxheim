@@ -49,6 +49,16 @@ scripts/smoke_load_balancer_container.sh
 FLUXHEIM_CONTAINER_VARIANTS="debian alpine" scripts/podman_smoke_variants.sh
 ```
 
+For humans doing focused local evidence collection, use the test starter to
+discover and run the available live smokes without memorizing every script name:
+
+```bash
+scripts/test_starter.py --list
+scripts/test_starter.py --category load-balancer
+scripts/test_starter.py --run privacy
+scripts/test_starter.py --run images
+```
+
 For PHP-FPM releases, also run:
 
 ```bash
@@ -83,6 +93,15 @@ equivalent image evidence has already been collected on another builder.
 Set `FLUXHEIM_GATE_LOAD_BALANCER_CONTAINER=1`, or use
 `scripts/stable_release_deep_gate.sh release`, to also build and run the
 focused load-balancer image against two local origins before tagging.
+The deep gate also enables the smoke dependency image check, OpenBao cache
+encryption, database health checks, WordPress, PHP Wolfi, RPM build, privacy
+mode, framing, and fuzz-target compile checks by default. The observability
+smoke starts disposable Prometheus and Jaeger containers unless external URLs
+are configured; Prometheus scrape and OTLP metrics ingestion are required in
+that self-contained mode, while Jaeger trace ingestion remains opt-in through
+`FLUXHEIM_JAEGER_REQUIRE_TRACE=1` until native span export is implemented.
+Disable an individual deep gate only when equivalent evidence has already been
+captured on another builder.
 
 For the `1.3` and later lines this stable gate includes the proxy cache and
 local observability smoke suites, plus compile and packaged-config checks for

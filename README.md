@@ -537,6 +537,20 @@ Before publishing or merging security-sensitive changes:
 scripts/release_checks.sh
 ```
 
+For focused live testing, `scripts/test_starter.py` provides a human-facing
+menu over the maintained smoke scripts. It can run categories such as
+load-balancer, cache, WordPress, database health checks, privacy mode,
+observability, containers, and RPM builds without memorizing every script name.
+The observability smoke starts disposable Prometheus and Jaeger containers by
+default unless `FLUXHEIM_PROMETHEUS_URL` or `FLUXHEIM_JAEGER_URL` point at
+already-running services:
+
+```bash
+scripts/test_starter.py --list
+scripts/test_starter.py --category load-balancer
+scripts/test_starter.py --run privacy
+```
+
 See [SECURITY.md](SECURITY.md) for vulnerability reporting and
 [Rust Supply-Chain Security](docs/supply-chain-security.md) for dependency
 review policy.

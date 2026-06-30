@@ -2894,6 +2894,13 @@ available for the stabilization/security-only follow-up.
   where practical, using crate-scoped patches and tests. Keep third-party
   transitive `zeroize` use inside crates such as rustls/AWS-LC untouched, and
   avoid mixing this secret-container migration into the runtime cutover slices.
+  Expand release evidence after the Pingora removal by making optional live
+  smokes easy to run through a single test starter, adding a smoke dependency
+  image freshness check for WordPress/OpenBao/database images, and proving
+  privacy mode, nginx-compatible Ketama, load-balancer container
+  failover/recovery/all-down behavior, database health checks, OpenBao cache
+  encryption, and WordPress PHP-FPM/proxy-TLS behavior with real local or
+  containerized services.
 - `v1.6.36`: post-cutover structural cleanup release before the `1.7` Wasm
   line. Turn the temporary native proxy shim into proper crate APIs by moving
   any still-needed DTOs/helpers out of `src/native_proxy_shim.rs` and into
@@ -2921,6 +2928,11 @@ available for the stabilization/security-only follow-up.
     compiles regex routes on demand for authenticated admin cache-preview
     calls; this is bounded and off the hot path, but deleting the shim should
     remove that duplicate matcher entirely.
+  - Add a true ACME live-issuance smoke against a disposable local ACME CA such
+    as Pebble or another bounded test CA. Existing `1.6.35` coverage validates
+    native TLS planning, managed certificate loading, ACME storage safety, and
+    renewal logic, but it does not yet perform a complete HTTP-01/TLS-ALPN-01
+    issuance cycle against a live CA in one script.
   - Keep `scripts/validate-pingora-dependency-policy.sh check`,
     `scripts/validate-modularity-policy.sh check`, release containers, RPM,
     and representative smoke tests as blocking evidence for the cleanup.

@@ -96,6 +96,58 @@ scripts/smoke_peer_fill_cache.sh
 echo "stable release gate: 1.2 observability smoke"
 scripts/smoke_observability_local.sh
 
+if [ "${FLUXHEIM_GATE_SMOKE_IMAGES:-0}" = "1" ]; then
+    echo "stable release gate: smoke dependency image check"
+    scripts/check_smoke_images.sh
+else
+    echo "stable release gate: skipping smoke dependency image check; set FLUXHEIM_GATE_SMOKE_IMAGES=1 to enable"
+fi
+
+if [ "${FLUXHEIM_GATE_OPENBAO:-0}" = "1" ]; then
+    echo "stable release gate: OpenBao cache encryption smoke"
+    scripts/smoke_openbao_cache_encryption.sh
+else
+    echo "stable release gate: skipping OpenBao cache encryption smoke; set FLUXHEIM_GATE_OPENBAO=1 to enable"
+fi
+
+if [ "${FLUXHEIM_GATE_DB_HEALTH:-0}" = "1" ]; then
+    echo "stable release gate: database health-check smokes"
+    scripts/smoke_redis_health_check.sh
+    scripts/smoke_mysql_health_check.sh
+    scripts/smoke_postgres_health_check.sh
+else
+    echo "stable release gate: skipping database health-check smokes; set FLUXHEIM_GATE_DB_HEALTH=1 to enable"
+fi
+
+if [ "${FLUXHEIM_GATE_WORDPRESS:-0}" = "1" ]; then
+    echo "stable release gate: WordPress live smokes"
+    scripts/smoke_wordpress_php_fpm.sh both
+    scripts/smoke_wordpress_proxy_tls.sh
+else
+    echo "stable release gate: skipping WordPress live smokes; set FLUXHEIM_GATE_WORDPRESS=1 to enable"
+fi
+
+if [ "${FLUXHEIM_GATE_PHP_WOLFI:-0}" = "1" ]; then
+    echo "stable release gate: PHP Wolfi image smoke"
+    scripts/smoke_fluxheim_php_wolfi.sh
+else
+    echo "stable release gate: skipping PHP Wolfi image smoke; set FLUXHEIM_GATE_PHP_WOLFI=1 to enable"
+fi
+
+if [ "${FLUXHEIM_GATE_RPM_BUILD:-0}" = "1" ]; then
+    echo "stable release gate: RPM build smoke"
+    scripts/build_fluxheim_rpm.py latest native --target "${FLUXHEIM_GATE_RPM_TARGET:-fedora-44}"
+else
+    echo "stable release gate: skipping RPM build smoke; set FLUXHEIM_GATE_RPM_BUILD=1 to enable"
+fi
+
+if [ "${FLUXHEIM_GATE_PRIVACY:-0}" = "1" ]; then
+    echo "stable release gate: privacy-mode smoke"
+    scripts/smoke_privacy_mode.sh
+else
+    echo "stable release gate: skipping privacy-mode smoke; set FLUXHEIM_GATE_PRIVACY=1 to enable"
+fi
+
 echo "stable release gate: dependency and license policy"
 cargo deny check
 cargo audit
