@@ -7,7 +7,19 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.6.35 - Unreleased
+## 1.6.36 - Unreleased
+
+### Changed
+
+- Start the post-cutover structural cleanup release with release metadata bumped
+  through the workspace and RPM spec.
+- Begin replacing the temporary native proxy shim with direct crate-owned APIs
+  now that normal Fluxheim builds are Pingora-free.
+- Rename the temporary native proxy shim module to `native_proxy`, keeping the
+  historical `crate::proxy` re-export stable while the owning crate APIs are
+  split out.
+
+## 1.6.35 - 2026-06-30
 
 ### Changed
 

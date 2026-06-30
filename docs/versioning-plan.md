@@ -2908,8 +2908,8 @@ available for the stabilization/security-only follow-up.
   shared secret for non-loopback `http://` peer-fill URLs so cross-host
   plaintext peer fill cannot remain silently unauthenticated.
 - `v1.6.36`: post-cutover structural cleanup release before the `1.7` Wasm
-  line. Turn the temporary native proxy shim into proper crate APIs by moving
-  any still-needed DTOs/helpers out of `src/native_proxy_shim.rs` and into
+  line. Turn the temporary native proxy boundary into proper crate APIs by moving
+  any still-needed DTOs/helpers out of `src/native_proxy.rs` and into
   their owning crates, updating root callers to import `fluxheim-server`,
   `fluxheim-cache`, `fluxheim-load-balancer`, and related crate APIs directly,
   then deleting the shim. Delete disabled Pingora-era root modules and inert
@@ -2919,7 +2919,7 @@ available for the stabilization/security-only follow-up.
 
   Required cleanup outcomes:
 
-  - Remove `src/native_proxy_shim.rs` or reduce it to an empty deleted
+  - Remove `src/native_proxy.rs` or reduce it to an empty deleted
     compatibility boundary with all still-used request/cache/admin DTOs moved
     into their owning crates.
   - Remove dead Pingora-era root modules and adapters that are no longer

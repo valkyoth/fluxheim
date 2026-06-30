@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.35
+Version:        1.6.36
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue Jun 30 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.36-1
+- Start the post-cutover structural cleanup release after the Pingora-free
+  stabilization checkpoint.
+- Begin replacing the temporary native proxy shim with direct crate-owned APIs.
+
 * Mon Jun 29 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.35-1
 - Start the Pingora-free runtime stabilization release after the 1.6.34 proof
   release.

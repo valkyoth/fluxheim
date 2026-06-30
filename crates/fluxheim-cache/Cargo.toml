@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-cache"
-version = "1.6.35"
+version = "1.6.36"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"

@@ -189,7 +189,7 @@ pub mod metrics_otlp;
 #[cfg(all(feature = "web", feature = "proxy"))]
 mod native_http1_static;
 #[cfg(all(feature = "proxy", not(any())))]
-pub mod native_proxy_shim;
+pub mod native_proxy;
 #[cfg(feature = "otel-otlp")]
 pub mod otel_otlp;
 #[cfg(feature = "metrics-otlp")]
@@ -201,7 +201,7 @@ pub(crate) mod php_fpm;
 #[cfg(all(feature = "proxy", any()))]
 pub mod proxy;
 #[cfg(all(feature = "proxy", not(any())))]
-pub use native_proxy_shim as proxy;
+pub use native_proxy as proxy;
 #[cfg(all(feature = "proxy", feature = "cache", any()))]
 mod proxy_cache;
 #[cfg(all(any(feature = "proxy", feature = "stream-proxy"), any()))]
