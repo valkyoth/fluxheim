@@ -86,6 +86,8 @@ behavior when the change improves security or project direction.
 - Split cache request-side header policy, cookie/query bypass matching, and
   range/slice request selection into a focused private module while preserving
   the existing `fluxheim-cache::headers` exports.
+- Split cache Vary header policy and request-hash material helpers into a
+  focused private module while preserving the existing `headers` exports.
 - Split load-balancer selected-upstream and queue/persistence outcome DTOs out
   of `fluxheim-load-balancer/src/api.rs`, leaving the load-balancer API DTO
   module below the line-limit target.

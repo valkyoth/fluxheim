@@ -9,6 +9,7 @@ mod api_summary;
 pub mod headers;
 mod headers_directives;
 mod headers_request;
+mod headers_vary;
 pub mod metrics;
 pub mod object;
 pub mod plan;
