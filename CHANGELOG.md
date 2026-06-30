@@ -21,6 +21,8 @@ behavior when the change improves security or project direction.
 - Stop re-exporting cache admin DTOs through the native proxy compatibility
   boundary; admin and CLI code now use the dedicated `cache_api` module
   directly.
+- Replace active root/admin/CLI/runtime imports of the historical `crate::proxy`
+  compatibility alias with direct `crate::native_proxy` imports.
 
 ## 1.6.35 - 2026-06-30
 

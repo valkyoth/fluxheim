@@ -125,10 +125,10 @@ fn run_pingora_compat_runtime(
 
     #[cfg(feature = "load-balancer")]
     let (proxy, load_balancer_services) =
-        crate::proxy::FluxProxy::from_config_with_background_services(&config)?;
+        crate::native_proxy::FluxProxy::from_config_with_background_services(&config)?;
 
     #[cfg(not(feature = "load-balancer"))]
-    let proxy = crate::proxy::FluxProxy::from_config(&config)?;
+    let proxy = crate::native_proxy::FluxProxy::from_config(&config)?;
 
     let admin_proxy = proxy.clone();
     #[cfg(all(feature = "cache", feature = "metrics"))]
@@ -1590,7 +1590,7 @@ mod tests {
         let _ = crate::tls::install_rustls_crypto_provider();
 
         let config = crate::config::Config::default();
-        let proxy = crate::proxy::FluxProxy::from_config(&config).unwrap();
+        let proxy = crate::native_proxy::FluxProxy::from_config(&config).unwrap();
         let plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
         let pingora_conf = std::sync::Arc::new(pingora_server_conf(&plan));
         let mut service = pingora::proxy::http_proxy_service(&pingora_conf, proxy);

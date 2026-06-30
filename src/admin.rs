@@ -29,9 +29,9 @@ use zeroize::Zeroizing;
 use crate::config::{AdminAuthThrottleConfig, AdminConfig, AdminHealthResponseMode, Config};
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::LoadBalancerRuntimeBackendState;
-use crate::proxy::FluxProxy;
+use crate::native_proxy::FluxProxy;
 #[cfg(feature = "load-balancer")]
-use crate::proxy::{
+use crate::native_proxy::{
     LoadBalancerMemberAddRequest, LoadBalancerMemberRemoveRequest,
     LoadBalancerMemberSetMutationResult, LoadBalancerMemberStateRequest,
     LoadBalancerMemberUpdateRequest, LoadBalancerMemberWeightRequest,
@@ -4338,7 +4338,7 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use crate::config_route::RouteConfig;
-    use crate::proxy::FluxProxy;
+    use crate::native_proxy::FluxProxy;
     use crate::snapshot::SnapshotStore;
     use crate::snapshot::{PendingValidation, SnapshotRuntimeState};
     #[cfg(feature = "load-balancer")]

@@ -1501,7 +1501,7 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         options.expect_reason.as_ref(),
     )?;
     let (config, request) = cache_key_command_request(&options)?;
-    let proxy = crate::proxy::FluxProxy::from_config(&config)?;
+    let proxy = crate::native_proxy::FluxProxy::from_config(&config)?;
     let preview = proxy
         .snapshot()
         .pingora_image_cache_key_preview_for_request_header(&request);
@@ -1826,7 +1826,7 @@ fn run_cache_lookup_command(
     validate_cache_lookup_expected_objects(options.expect_objects)?;
     validate_cache_lookup_expected_storage_tiers(options.expect_storage_tiers)?;
     let (config, request) = cache_key_command_request(&cache_key_options)?;
-    let proxy = crate::proxy::FluxProxy::from_config(&config)?;
+    let proxy = crate::native_proxy::FluxProxy::from_config(&config)?;
     let lookup = proxy
         .snapshot()
         .pingora_image_cache_object_lookup_for_request_header(&request)?;

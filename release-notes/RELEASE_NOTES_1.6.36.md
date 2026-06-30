@@ -18,6 +18,8 @@ longer use.
 - Stop re-exporting cache admin DTOs through the native proxy compatibility
   boundary; admin and CLI code now use the dedicated `cache_api` module
   directly.
+- Replace active root/admin/CLI/runtime imports of the historical `crate::proxy`
+  compatibility alias with direct `crate::native_proxy` imports.
 - Keep normal Fluxheim builds on the Pingora-free runtime introduced in
   `1.6.34` and stabilized in `1.6.35`.
 - Keep release, dependency, native-runtime, RPM, container, and smoke gates as
