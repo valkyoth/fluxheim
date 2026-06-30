@@ -19,6 +19,8 @@ pub mod tags;
 mod object_tests;
 #[cfg(test)]
 mod request_tests;
+#[cfg(test)]
+mod storage_bin_tests;
 
 pub fn cache_user_tag(vhost: &str, route: Option<&str>) -> String {
     route

@@ -66,6 +66,8 @@ is clean.
   leaving the production cache request helpers below the line-limit target.
 - Move `fluxheim-cache` object/envelope/index tests out of `src/object.rs`,
   leaving the production disk object helpers below the line-limit target.
+- Move `fluxheim-cache` storage-bin tests out of `src/storage_bin.rs` as the
+  first step toward splitting manifest/layout, allocator, and index helpers.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
