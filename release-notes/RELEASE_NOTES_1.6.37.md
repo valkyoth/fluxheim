@@ -86,6 +86,9 @@ is clean.
   the existing `fluxheim-cache::headers` exports.
 - Split cache Vary header policy and request-hash material helpers into a
   focused private module while preserving the existing `headers` exports.
+- Split cache response header policy, freshness helpers, content-type checks,
+  and range response admission into a focused private module while preserving
+  the existing `headers` exports.
 - Split load-balancer selected-upstream and queue/persistence outcome DTOs out
   of `fluxheim-load-balancer/src/api.rs`, leaving the load-balancer API DTO
   module below the line-limit target.
