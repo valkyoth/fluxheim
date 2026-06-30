@@ -24,6 +24,8 @@ use rustls::{
     CertificateError, ClientConfig as RustlsClientConfig, DigitallySignedStruct,
     Error as RustlsError, RootCertStore, SignatureScheme,
 };
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
+use sanitization::SecretVec;
 #[cfg(feature = "tls-rustls-backend")]
 use tokio_rustls::TlsConnector as RustlsTlsConnector;
 
@@ -287,16 +289,18 @@ fn rustls_client_cert_key(
     key_path: &Path,
 ) -> FluxResult<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)> {
     let certs = rustls_certificates_from_file(cert_path, "upstream client certificate")?;
-    let key_contents = zeroize::Zeroizing::new(
+    let key_contents = SecretVec::from_vec(
         read_upstream_tls_file(key_path)
             .map_err(|error| FluxError::io("read stream upstream TLS private key", error))?,
     );
-    let key = PrivateKeyDer::from_pem_slice(&key_contents).map_err(|error| {
-        FluxError::invalid_input(format!(
-            "failed to parse upstream client private key {}: {error}",
-            key_path.display()
-        ))
-    })?;
+    let key = key_contents
+        .with_secret(PrivateKeyDer::from_pem_slice)
+        .map_err(|error| {
+            FluxError::invalid_input(format!(
+                "failed to parse upstream client private key {}: {error}",
+                key_path.display()
+            ))
+        })?;
     Ok((certs, key))
 }
 
@@ -478,7 +482,7 @@ fn build_openssl_connector(route: &StreamRouteConfig) -> FluxResult<SslConnector
     ) {
         let cert_contents = read_upstream_tls_file(cert_path)
             .map_err(|error| FluxError::io("read stream upstream TLS client certificate", error))?;
-        let key_contents = zeroize::Zeroizing::new(
+        let key_contents = SecretVec::from_vec(
             read_upstream_tls_file(key_path)
                 .map_err(|error| FluxError::io("read stream upstream TLS private key", error))?,
         );
@@ -494,12 +498,14 @@ fn build_openssl_connector(route: &StreamRouteConfig) -> FluxResult<SslConnector
                 cert_path.display()
             )));
         };
-        let key = PKey::private_key_from_pem(&key_contents).map_err(|error| {
-            FluxError::invalid_input(format!(
-                "failed to parse upstream client private key {}: {error}",
-                key_path.display()
-            ))
-        })?;
+        let key = key_contents
+            .with_secret(PKey::private_key_from_pem)
+            .map_err(|error| {
+                FluxError::invalid_input(format!(
+                    "failed to parse upstream client private key {}: {error}",
+                    key_path.display()
+                ))
+            })?;
         builder.set_certificate(leaf).map_err(|error| {
             FluxError::invalid_input(format!(
                 "failed to configure upstream client certificate {}: {error}",

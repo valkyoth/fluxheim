@@ -182,6 +182,8 @@ fi
   load-balancer crate.
 - Move native upstream TLS client private-key PEM buffers for rustls and
   OpenSSL backends onto sanitization::SecretVec.
+- Move stream-proxy upstream TLS client private-key PEM buffers for rustls and
+  OpenSSL backends onto sanitization::SecretVec.
 - Keep RPM, container, dependency-policy, native-runtime, and smoke-test gates
   as blocking evidence during stabilization.
 
