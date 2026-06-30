@@ -30,6 +30,42 @@ pub const SPOOFABLE_CLIENT_IP_HEADERS: &[&str] = &[
 
 pub const DEFAULT_SERVER_HEADER: &str = "fluxheim";
 
+#[derive(Clone, Debug, Default)]
+pub struct RequestTlsClientIdentity {
+    pub cipher: Option<String>,
+    pub version: Option<String>,
+    pub organization: Option<String>,
+    pub serial_number: Option<String>,
+    pub cert_sha256: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RouteRegexCaptures {
+    numbered: Vec<Option<String>>,
+    named: std::collections::BTreeMap<String, String>,
+}
+
+impl RouteRegexCaptures {
+    pub fn new(
+        numbered: Vec<Option<String>>,
+        named: std::collections::BTreeMap<String, String>,
+    ) -> Self {
+        Self { numbered, named }
+    }
+
+    pub fn variable(&self, variable: &str) -> Option<&str> {
+        let key = variable.strip_prefix("route.regex.")?;
+        if key.bytes().all(|byte| byte.is_ascii_digit()) {
+            return key
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| self.numbered.get(index))
+                .and_then(Option::as_deref);
+        }
+        self.named.get(key).map(String::as_str)
+    }
+}
+
 pub fn join_header_values<'a>(values: impl IntoIterator<Item = &'a str>) -> Option<String> {
     join_header_values_with_separator(values, ", ")
 }
@@ -338,12 +374,12 @@ mod tests {
 
     use fluxheim_config::{ResponseHeaderRewriteConfig, ResponseHeaderRewriteRuleConfig};
 
+    use super::{
+        RouteRegexCaptures, join_header_values, join_header_values_with_separator,
+        rewrite_header_prefix, rewrite_refresh_url, rewrite_set_cookie_value,
+    };
     #[cfg(not(feature = "privacy-mode"))]
     use super::{build_forwarded_header, effective_client_ip, parse_x_forwarded_for_ip};
-    use super::{
-        join_header_values, join_header_values_with_separator, rewrite_header_prefix,
-        rewrite_refresh_url, rewrite_set_cookie_value,
-    };
 
     #[test]
     fn rewrites_header_prefix_with_authority_boundary() {
@@ -501,5 +537,19 @@ mod tests {
             join_header_values_with_separator(["a=1", "b=2"], "; "),
             Some("a=1; b=2".to_owned())
         );
+    }
+
+    #[test]
+    fn route_regex_captures_resolve_numbered_and_named_variables() {
+        let captures = RouteRegexCaptures::new(
+            vec![Some("whole".to_owned()), Some("42".to_owned()), None],
+            std::collections::BTreeMap::from([("slug".to_owned(), "article".to_owned())]),
+        );
+
+        assert_eq!(captures.variable("route.regex.0"), Some("whole"));
+        assert_eq!(captures.variable("route.regex.1"), Some("42"));
+        assert_eq!(captures.variable("route.regex.2"), None);
+        assert_eq!(captures.variable("route.regex.slug"), Some("article"));
+        assert_eq!(captures.variable("host"), None);
     }
 }

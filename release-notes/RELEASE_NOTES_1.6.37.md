@@ -31,6 +31,8 @@ is clean.
   the owning `fluxheim-config` modules directly.
 - Remove root cache API compatibility shims; admin, CLI, metrics, runtime, and
   native proxy code now use `fluxheim-cache` DTOs and helpers directly.
+- Move the remaining root header DTOs into `fluxheim-headers` and remove the
+  inline root `headers` module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

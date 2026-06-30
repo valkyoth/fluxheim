@@ -33,6 +33,8 @@ behavior when the change improves security or project direction.
   the owning `fluxheim-config` modules directly.
 - Remove root cache API compatibility shims; admin, CLI, metrics, runtime, and
   native proxy code now use `fluxheim-cache` DTOs and helpers directly.
+- Move the remaining root header DTOs into `fluxheim-headers` and remove the
+  inline root `headers` module.
 
 ## 1.6.36 - 2026-06-30
 

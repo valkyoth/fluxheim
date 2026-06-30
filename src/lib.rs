@@ -17,44 +17,6 @@ pub mod config {
     pub use fluxheim_config::*;
 }
 pub mod config_tester;
-#[cfg(feature = "proxy")]
-pub mod headers {
-    #[derive(Clone, Debug, Default)]
-    pub struct RequestTlsClientIdentity {
-        pub cipher: Option<String>,
-        pub version: Option<String>,
-        pub organization: Option<String>,
-        pub serial_number: Option<String>,
-        pub cert_sha256: Option<String>,
-    }
-
-    #[derive(Clone, Debug, Default)]
-    pub struct RouteRegexCaptures {
-        numbered: Vec<Option<String>>,
-        named: std::collections::BTreeMap<String, String>,
-    }
-
-    impl RouteRegexCaptures {
-        pub fn new(
-            numbered: Vec<Option<String>>,
-            named: std::collections::BTreeMap<String, String>,
-        ) -> Self {
-            Self { numbered, named }
-        }
-
-        pub fn variable(&self, variable: &str) -> Option<&str> {
-            let key = variable.strip_prefix("route.regex.")?;
-            if key.bytes().all(|byte| byte.is_ascii_digit()) {
-                return key
-                    .parse::<usize>()
-                    .ok()
-                    .and_then(|index| self.numbered.get(index))
-                    .and_then(Option::as_deref);
-            }
-            self.named.get(key).map(String::as_str)
-        }
-    }
-}
 #[cfg(feature = "ingress")]
 mod http_types;
 pub mod internal_crypto;
