@@ -25,21 +25,7 @@ require_command() {
     fi
 }
 
-ports=$(python3 - <<'PY'
-import socket
-
-sockets = []
-try:
-    for _ in range(3):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(("127.0.0.1", 0))
-        sockets.append(sock)
-    print(" ".join(str(sock.getsockname()[1]) for sock in sockets))
-finally:
-    for sock in sockets:
-        sock.close()
-PY
-)
+ports=$(python3 "$ROOT_DIR/scripts/smoke_ports.py" 3)
 
 set -- $ports
 FLUXHEIM_PORT=$1

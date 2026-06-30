@@ -39,16 +39,17 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
   OpenSSL backends to `sanitization::SecretVec`.
 - Move stream-proxy upstream TLS client private-key PEM buffers for both rustls
   and OpenSSL backends to `sanitization::SecretVec`.
-- Fail closed if native `auth_request` response-header application cannot
-  access its secret container, preventing requests from reaching the upstream
-  with silently dropped identity or authorization headers.
+- Abort if native `auth_request` response-header application cannot access its
+  secret container, matching other poisoned security-control locks and avoiding
+  a repeated inconsistent 502 path.
 - Clear both the admin token digest and stored token length through
   `sanitization::SecureSanitize` during drop.
 - Align runtime performance baseline capture with its load-balancer fixture by
   building the `profile-load-balancer` release profile by default.
-- Make native vhost-level PHP-FPM take precedence over static web fallback for
-  PHP-resolvable paths, preventing `.php` source exposure when a vhost enables
-  both `[vhosts.web]` and `[vhosts.php]`.
+- Tighten native vhost-level PHP-FPM/static fallback routing so executable PHP,
+  PHP directory redirects, denied PHP paths, and fail-closed resolution errors
+  stay on the PHP-FPM path, while non-PHP static files can still be served by
+  `[vhosts.web]`.
 - Harden the WordPress PHP-FPM smoke fixture with explicit private TCP upstream
   opt-in and MariaDB readiness waiting, and verify full native WordPress
   PHP-FPM plus proxy/TLS smoke coverage.
@@ -71,6 +72,17 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
   Prometheus and Jaeger containers when external URLs are not configured,
   requiring Prometheus scrape plus OTLP metrics ingestion and keeping Jaeger
   trace ingestion opt-in until native span export is implemented.
+- Clarify the peer-fill security guidance so `allow_insecure_http = true` on
+  non-loopback peers is explicitly documented as cache-poisonable by a
+  network-path attacker unless another layer provides peer-hop integrity.
+- Add `cache.peer_fill.shared_secret_file` so peer-fill clusters can require
+  response-bound HMAC verification: outbound peer-fill requests include a
+  nonce/request signature, peers sign the status, canonical response headers,
+  and body digest, and unsigned or tampered peer responses are discarded before
+  cache storage.
+- Add `scripts/smoke_ports.py` and wire the newer privacy, observability, and
+  load-balancer container smokes through the shared randomized localhost port
+  allocator instead of repeating ad-hoc allocation snippets.
 - Keep dependency, metadata, container, RPM, and smoke-test gates as blocking
   evidence for the stabilization line.
 

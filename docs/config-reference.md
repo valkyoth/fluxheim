@@ -2201,6 +2201,7 @@ read_timeout_secs = 10
 max_object_bytes = "32MiB"
 max_concurrent_requests = 64
 allow_insecure_http = false
+shared_secret_file = "/run/secrets/fluxheim-peer-fill"
 fail_open = true
 
 [[cache.peer_fill.peers]]
@@ -2216,13 +2217,22 @@ base_url = "https://edge-b.internal.example:8443"
 Peer names are short ASCII identifiers. Peer `base_url` values must be
 HTTP(S) origins with an explicit `host:port`, no userinfo, no query or
 fragment, and no path beyond `/`. Plain HTTP is accepted only for loopback
-peers unless `allow_insecure_http = true`, which is intended for private test
-networks or trusted in-cluster transport. Security note: enabling
-`allow_insecure_http` exposes peer-fill traffic to network-path modification;
-an attacker who can intercept that traffic can inject a cacheable `200`
-response that is served to users until its freshness expires. Use it only with
-loopback peers, an encrypted overlay, mTLS sidecars, or an otherwise trusted
-private network. `max_concurrent_requests` is bounded to 1-1024 and
+peers unless `allow_insecure_http = true`, which is intended for private tests
+or deployments where another layer already authenticates and encrypts the peer
+hop. Security warning: enabling `allow_insecure_http` for non-loopback peers
+means the peer-fill response has no transport integrity. Any network-path
+attacker between Fluxheim nodes can inject a cacheable `200` response and
+poison the local cache for that URL until the accepted freshness expires.
+Production cross-host peer fill should use `https://` peer URLs with valid
+certificate verification, or a local TLS/mTLS sidecar or encrypted overlay that
+provides the same integrity guarantee. `shared_secret_file` enables Fluxheim's
+application-level peer-fill authenticity check: outbound peer-fill requests are
+signed with a nonce, peers sign the status, canonical response headers, and body
+digest, and unsigned or tampered peer responses are discarded before cache
+storage. Configure the same high-entropy secret file on every node in the peer
+fill cluster. This HMAC layer is defense in depth and a sidecar/overlay
+fallback; HTTPS with verified peer identity remains the preferred production
+transport. `max_concurrent_requests` is bounded to 1-1024 and
 `fail_open = true` means peer-fill failure should fall back to the normal
 origin path rather than failing the user request. `max_concurrent_requests` is
 enforced per vhost or route cache policy for active outbound peer-fill fetches.

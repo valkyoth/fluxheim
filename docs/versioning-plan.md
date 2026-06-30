@@ -2900,7 +2900,11 @@ available for the stabilization/security-only follow-up.
   privacy mode, nginx-compatible Ketama, load-balancer container
   failover/recovery/all-down behavior, database health checks, OpenBao cache
   encryption, and WordPress PHP-FPM/proxy-TLS behavior with real local or
-  containerized services.
+  containerized services. Close the peer-fill MITM cache-poisoning gap in this
+  stabilization release by adding a `cache.peer_fill.shared_secret_file`
+  response-bound HMAC mode: outbound peer-fill requests carry a nonce/request
+  signature, peers sign status/canonical headers/body digest, and receivers
+  discard unsigned or tampered peer responses before cache storage.
 - `v1.6.36`: post-cutover structural cleanup release before the `1.7` Wasm
   line. Turn the temporary native proxy shim into proper crate APIs by moving
   any still-needed DTOs/helpers out of `src/native_proxy_shim.rs` and into
@@ -2928,6 +2932,10 @@ available for the stabilization/security-only follow-up.
     compiles regex routes on demand for authenticated admin cache-preview
     calls; this is bounded and off the hot path, but deleting the shim should
     remove that duplicate matcher entirely.
+  - Keep peer-fill authenticity follow-ups behavior-preserving: improve secret
+    source ergonomics, add optional certificate pinning/mTLS-specific examples,
+    and retain live tamper tests proving forged peer-fill responses are
+    discarded.
   - Add a true ACME live-issuance smoke against a disposable local ACME CA such
     as Pebble or another bounded test CA. Existing `1.6.35` coverage validates
     native TLS planning, managed certificate loading, ACME storage safety, and

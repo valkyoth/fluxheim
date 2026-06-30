@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
+use std::io::Read as _;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -64,6 +66,11 @@ const NATIVE_TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
 const NATIVE_ORIGIN_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
 const NATIVE_PEER_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
 const NATIVE_PEER_FILL_MARKER_HEADER: &str = "x-fluxheim-peer-fill";
+const NATIVE_PEER_FILL_NONCE_HEADER: &str = "x-fluxheim-peer-fill-nonce";
+const NATIVE_PEER_FILL_REQUEST_SIGNATURE_HEADER: &str = "x-fluxheim-peer-fill-request-signature";
+const NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER: &str = "x-fluxheim-peer-fill-response-signature";
+const NATIVE_PEER_FILL_AUTH_MIN_BYTES: usize = 32;
+const NATIVE_PEER_FILL_AUTH_MAX_BYTES: usize = 4096;
 const NATIVE_CACHE_PREDICTOR_COUNTER_TTL: Duration = Duration::from_secs(600);
 const MAX_NATIVE_UPSTREAM_H2_STREAMS: usize = 1024;
 static NATIVE_PROXY_CACHE_ID: AtomicUsize = AtomicUsize::new(0);
@@ -621,6 +628,7 @@ struct NativeProxyMemoryCache {
     origin_fill_key: Arc<str>,
     peer_fill_key: Arc<str>,
     peer_fill_peers: Vec<NativePeerFillPeer>,
+    peer_fill_auth: Option<Arc<NativePeerFillAuth>>,
 }
 
 impl Eq for NativeProxyMemoryCache {}
@@ -692,6 +700,20 @@ struct NativePeerFillPeer {
     name: String,
     base_path: String,
     upstream: NativeHttp1Upstream,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+struct NativePeerFillAuth {
+    secret: Arc<zeroize::Zeroizing<Vec<u8>>>,
+}
+
+impl std::fmt::Debug for NativePeerFillAuth {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NativePeerFillAuth")
+            .field("secret", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -1434,6 +1456,78 @@ fn native_peer_fill_peers(cache: &CacheConfig) -> Vec<NativePeerFillPeer> {
         .collect()
 }
 
+fn native_peer_fill_auth_from_config(
+    cache: &CacheConfig,
+) -> std::io::Result<Option<Arc<NativePeerFillAuth>>> {
+    let Some(path) = cache.peer_fill.shared_secret_file.as_deref() else {
+        return Ok(None);
+    };
+    let secret = read_native_peer_fill_shared_secret_file(path)?;
+    Ok(Some(Arc::new(NativePeerFillAuth { secret })))
+}
+
+fn read_native_peer_fill_shared_secret_file(
+    path: &Path,
+) -> std::io::Result<Arc<zeroize::Zeroizing<Vec<u8>>>> {
+    let mut file = open_regular_native_peer_fill_shared_secret_file(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.file_type().is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "peer-fill shared secret file must be a regular file",
+        ));
+    }
+    if metadata.len() > NATIVE_PEER_FILL_AUTH_MAX_BYTES as u64 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "peer-fill shared secret file exceeds 4096 bytes",
+        ));
+    }
+    let mut secret = zeroize::Zeroizing::new(Vec::with_capacity(NATIVE_PEER_FILL_AUTH_MIN_BYTES));
+    file.by_ref()
+        .take((NATIVE_PEER_FILL_AUTH_MAX_BYTES + 1) as u64)
+        .read_to_end(&mut secret)?;
+    while matches!(secret.last(), Some(b'\n' | b'\r')) {
+        secret.pop();
+    }
+    if secret.len() < NATIVE_PEER_FILL_AUTH_MIN_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "peer-fill shared secret must be at least 32 bytes",
+        ));
+    }
+    if secret.len() > NATIVE_PEER_FILL_AUTH_MAX_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "peer-fill shared secret exceeds 4096 bytes",
+        ));
+    }
+    Ok(Arc::new(secret))
+}
+
+#[cfg(unix)]
+fn open_regular_native_peer_fill_shared_secret_file(path: &Path) -> std::io::Result<std::fs::File> {
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))?;
+    Ok(fd.into())
+}
+
+#[cfg(not(unix))]
+fn open_regular_native_peer_fill_shared_secret_file(path: &Path) -> std::io::Result<std::fs::File> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "peer-fill shared secret file must not be a symlink",
+        ));
+    }
+    std::fs::File::open(path)
+}
+
 fn native_peer_fill_peer_from_config(
     peer: &fluxheim_config::CachePeerConfig,
     peer_fill: &fluxheim_config::CachePeerFillConfig,
@@ -1556,6 +1650,16 @@ impl NativeProxyMemoryCache {
         if !NativeHttp1Proxy::proxy_cache_supported(config) {
             return None;
         }
+        let peer_fill_auth = match native_peer_fill_auth_from_config(config) {
+            Ok(auth) => auth,
+            Err(error) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "native peer-fill shared secret could not be loaded; disabling native proxy cache for this policy: {error}"
+                );
+                return None;
+            }
+        };
         let disk = NativeDiskCache::from_config(config).map(Arc::new);
         if !config.memory.enabled && disk.is_none() {
             return None;
@@ -1597,6 +1701,7 @@ impl NativeProxyMemoryCache {
             origin_fill_key: Arc::from(format!("native-proxy-cache:{id}:origin")),
             peer_fill_key: Arc::from(format!("native-proxy-cache:{id}:peer-fill")),
             peer_fill_peers: native_peer_fill_peers(config),
+            peer_fill_auth,
         })
     }
 
@@ -2009,7 +2114,15 @@ impl NativeProxyMemoryCache {
             .min(self.config.max_object_bytes.as_u64());
 
         for peer in &self.peer_fill_peers {
-            match native_peer_fill_fetch(peer, &self.config, request, max_body_bytes).await {
+            match native_peer_fill_fetch(
+                peer,
+                &self.config,
+                self.peer_fill_auth.as_deref(),
+                request,
+                max_body_bytes,
+            )
+            .await
+            {
                 Ok(Some(response)) => {
                     if response.status() != 200 {
                         continue;
@@ -2875,20 +2988,7 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
             if let Some(auth_request) = &self.auth_request {
                 match auth_request.authorize(&request).await {
                     Ok(NativeAuthRequestDecision::Allow { headers }) => {
-                        if let Err(error) =
-                            apply_native_auth_request_headers(&mut request, &headers)
-                        {
-                            log::debug!(
-                                target: "fluxheim::auth_request",
-                                "native auth_request failed: {error}"
-                            );
-                            return NativeHttp1Response::new(
-                                502,
-                                "Bad Gateway",
-                                b"auth_request failed\n".as_slice(),
-                            )
-                            .close_connection();
-                        }
+                        apply_native_auth_request_headers(&mut request, &headers);
                     }
                     Ok(NativeAuthRequestDecision::Deny { status, body }) => {
                         return NativeHttp1Response::new(
@@ -2919,6 +3019,14 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 if !already_mirrored && let Some(mirror) = &self.mirror {
                     mirror.spawn_if_selected(&request);
                 }
+            }
+            if self.rejects_invalid_authenticated_peer_fill(&request) {
+                return NativeHttp1Response::new(
+                    403,
+                    "Forbidden",
+                    b"invalid peer-fill authentication\n".as_slice(),
+                )
+                .close_connection();
             }
             strip_native_peer_fill_header(&mut request);
             #[cfg(any(
@@ -4162,7 +4270,25 @@ impl NativeHttp1Proxy {
                 apply_native_response_compression(compression_request, &mut response, compression);
             }
         }
+        if let Some(cache) = &self.cache
+            && let Some(auth) = cache.peer_fill_auth.as_deref()
+        {
+            native_peer_fill_sign_response(auth, request, &mut response);
+        }
         response
+    }
+
+    fn rejects_invalid_authenticated_peer_fill(&self, request: &NativeHttp1Request) -> bool {
+        if !native_request_is_peer_fill(request) {
+            return false;
+        }
+        let Some(cache) = &self.cache else {
+            return false;
+        };
+        let Some(auth) = cache.peer_fill_auth.as_deref() else {
+            return false;
+        };
+        !native_peer_fill_request_signature_matches(auth, request)
     }
 }
 
@@ -4370,19 +4496,18 @@ fn native_auth_context_header_value(name: &str, request: &NativeHttp1Request) ->
 fn apply_native_auth_request_headers(
     request: &mut NativeHttp1Request,
     headers: &[(String, SecretString)],
-) -> std::io::Result<()> {
+) {
     for (name, value) in headers {
         value
             .try_with_secret(|value| native_request_replace_header(request, name, value))
-            .map_err(|error| {
+            .unwrap_or_else(|error| {
                 log::error!(
                 target: "fluxheim::auth_request",
-                "auth_request response header application failed; internal secret lock poisoned, terminating request: {error}"
+                "auth_request response header application failed; internal secret lock poisoned, aborting to avoid inconsistent forwarded identity state: {error}"
             );
-                std::io::Error::other(error.to_string())
-            })?;
+                std::process::abort();
+            });
     }
-    Ok(())
 }
 
 #[cfg(feature = "auth-request")]
@@ -4870,10 +4995,11 @@ fn native_request_cache_only_if_cached(request: &NativeHttp1Request) -> bool {
 async fn native_peer_fill_fetch(
     peer: &NativePeerFillPeer,
     cache: &CacheConfig,
+    auth: Option<&NativePeerFillAuth>,
     request: &NativeHttp1Request,
     max_body_bytes: u64,
 ) -> Result<Option<NativeHttp1Response>, crate::NativeHttp1Error> {
-    let Some(peer_request) = native_peer_fill_request(peer, request) else {
+    let Some(peer_request) = native_peer_fill_request(peer, request, auth) else {
         return Ok(None);
     };
     let max_body_bytes = usize::try_from(max_body_bytes.saturating_add(1)).unwrap_or(usize::MAX);
@@ -4893,6 +5019,16 @@ async fn native_peer_fill_fetch(
         )
         .into());
     }
+    if let Some(auth) = auth
+        && !native_peer_fill_response_signature_matches(auth, &peer_request, &response)
+    {
+        log::warn!(
+            target: "fluxheim::security",
+            "native peer-fill response from {} failed authenticity verification; discarding peer response",
+            peer.name
+        );
+        return Ok(None);
+    }
     Ok(Some(native_peer_fill_response_without_cache_status(
         response, cache,
     )))
@@ -4901,6 +5037,7 @@ async fn native_peer_fill_fetch(
 fn native_peer_fill_request(
     peer: &NativePeerFillPeer,
     request: &NativeHttp1Request,
+    auth: Option<&NativePeerFillAuth>,
 ) -> Option<NativeHttp1Request> {
     if !fluxheim_common::path_safety::safe_forward_path_and_query(&request.target) {
         return None;
@@ -4924,6 +5061,15 @@ fn native_peer_fill_request(
     }
     headers.push(("cache-control".to_owned(), "only-if-cached".to_owned()));
     headers.push((NATIVE_PEER_FILL_MARKER_HEADER.to_owned(), "1".to_owned()));
+    if let Some(auth) = auth {
+        let nonce = native_peer_fill_nonce();
+        let signature = native_peer_fill_request_signature(auth, &target, &headers, &nonce);
+        headers.push((NATIVE_PEER_FILL_NONCE_HEADER.to_owned(), nonce));
+        headers.push((
+            NATIVE_PEER_FILL_REQUEST_SIGNATURE_HEADER.to_owned(),
+            signature,
+        ));
+    }
     Some(NativeHttp1Request {
         method: "GET".to_owned(),
         peer_addr: request.peer_addr,
@@ -4940,10 +5086,226 @@ fn native_peer_fill_request(
     })
 }
 
+fn native_peer_fill_nonce() -> String {
+    let mut nonce = [0_u8; 16];
+    if let Err(error) = getrandom::fill(&mut nonce) {
+        log::error!(
+            target: "fluxheim::security",
+            "native peer-fill nonce generation failed: {error}; aborting"
+        );
+        std::process::abort();
+    }
+    base64_ng::URL_SAFE_NO_PAD.encode_string_infallible(&nonce)
+}
+
+fn native_peer_fill_request_signature(
+    auth: &NativePeerFillAuth,
+    target: &str,
+    headers: &[(String, String)],
+    nonce: &str,
+) -> String {
+    let host = headers
+        .iter()
+        .find_map(|(name, value)| name.eq_ignore_ascii_case("host").then_some(value.as_str()))
+        .unwrap_or_default();
+    let mut context = native_peer_fill_hmac_context(auth, b"fluxheim-peer-fill-request-v1");
+    native_peer_fill_hmac_field(&mut context, b"GET");
+    native_peer_fill_hmac_field(&mut context, target.as_bytes());
+    native_peer_fill_hmac_field(&mut context, host.as_bytes());
+    native_peer_fill_hmac_field(&mut context, nonce.as_bytes());
+    native_peer_fill_hmac_hex(context.sign().as_ref())
+}
+
+fn native_peer_fill_request_signature_matches(
+    auth: &NativePeerFillAuth,
+    request: &NativeHttp1Request,
+) -> bool {
+    let Some(nonce) = native_request_single_header_value(request, NATIVE_PEER_FILL_NONCE_HEADER)
+    else {
+        return false;
+    };
+    let Some(candidate) =
+        native_request_single_header_value(request, NATIVE_PEER_FILL_REQUEST_SIGNATURE_HEADER)
+    else {
+        return false;
+    };
+    let mut context = native_peer_fill_hmac_context(auth, b"fluxheim-peer-fill-request-v1");
+    native_peer_fill_hmac_field(&mut context, request.method.as_bytes());
+    native_peer_fill_hmac_field(&mut context, request.target.as_bytes());
+    native_peer_fill_hmac_field(
+        &mut context,
+        native_request_header(request, "host")
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    native_peer_fill_hmac_field(&mut context, nonce.as_bytes());
+    native_peer_fill_signature_matches(
+        candidate,
+        &native_peer_fill_hmac_hex(context.sign().as_ref()),
+    )
+}
+
+fn native_peer_fill_sign_response(
+    auth: &NativePeerFillAuth,
+    request: &NativeHttp1Request,
+    response: &mut NativeHttp1Response,
+) {
+    if !native_peer_fill_request_signature_matches(auth, request) {
+        return;
+    }
+    let Some(nonce) = native_request_single_header_value(request, NATIVE_PEER_FILL_NONCE_HEADER)
+    else {
+        return;
+    };
+    response.remove_header(NATIVE_PEER_FILL_NONCE_HEADER);
+    response.remove_header(NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER);
+    let signature = native_peer_fill_response_signature(auth, request, response, nonce);
+    response.push_header(NATIVE_PEER_FILL_NONCE_HEADER, nonce.to_owned());
+    response.push_header(NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER, signature);
+}
+
+fn native_peer_fill_response_signature_matches(
+    auth: &NativePeerFillAuth,
+    request: &NativeHttp1Request,
+    response: &NativeHttp1Response,
+) -> bool {
+    let Some(request_nonce) =
+        native_request_single_header_value(request, NATIVE_PEER_FILL_NONCE_HEADER)
+    else {
+        return false;
+    };
+    let Some(response_nonce) =
+        native_response_single_header_value(response, NATIVE_PEER_FILL_NONCE_HEADER)
+    else {
+        return false;
+    };
+    if request_nonce != response_nonce {
+        return false;
+    }
+    let Some(candidate) =
+        native_response_single_header_value(response, NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER)
+    else {
+        return false;
+    };
+    native_peer_fill_signature_matches(
+        candidate,
+        &native_peer_fill_response_signature(auth, request, response, request_nonce),
+    )
+}
+
+fn native_peer_fill_response_signature(
+    auth: &NativePeerFillAuth,
+    request: &NativeHttp1Request,
+    response: &NativeHttp1Response,
+    nonce: &str,
+) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut body_hash = Sha256::new();
+    body_hash.update(response.body());
+    let body_digest = body_hash.finalize();
+
+    let mut context = native_peer_fill_hmac_context(auth, b"fluxheim-peer-fill-response-v1");
+    native_peer_fill_hmac_field(&mut context, request.method.as_bytes());
+    native_peer_fill_hmac_field(&mut context, request.target.as_bytes());
+    native_peer_fill_hmac_field(
+        &mut context,
+        native_request_header(request, "host")
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    native_peer_fill_hmac_field(&mut context, nonce.as_bytes());
+    native_peer_fill_hmac_field(&mut context, response.status().to_string().as_bytes());
+    for (name, value) in native_peer_fill_canonical_response_headers(response) {
+        native_peer_fill_hmac_field(&mut context, name.as_bytes());
+        native_peer_fill_hmac_field(&mut context, value.as_bytes());
+    }
+    native_peer_fill_hmac_field(&mut context, &body_digest);
+    native_peer_fill_hmac_hex(context.sign().as_ref())
+}
+
+fn native_peer_fill_canonical_response_headers(
+    response: &NativeHttp1Response,
+) -> Vec<(String, String)> {
+    let mut headers = response
+        .headers()
+        .iter()
+        .filter(|(name, _)| {
+            !name.eq_ignore_ascii_case(NATIVE_PEER_FILL_NONCE_HEADER)
+                && !name.eq_ignore_ascii_case(NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER)
+        })
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.clone()))
+        .collect::<Vec<_>>();
+    headers.sort();
+    headers
+}
+
+fn native_peer_fill_hmac_context(
+    auth: &NativePeerFillAuth,
+    label: &'static [u8],
+) -> ring::hmac::Context {
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, auth.secret.as_slice());
+    let mut context = ring::hmac::Context::with_key(&key);
+    native_peer_fill_hmac_field(&mut context, label);
+    context
+}
+
+fn native_peer_fill_hmac_field(context: &mut ring::hmac::Context, bytes: &[u8]) {
+    context.update(&(bytes.len() as u64).to_be_bytes());
+    context.update(bytes);
+}
+
+fn native_peer_fill_hmac_hex(bytes: &[u8]) -> String {
+    let mut value = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut value, "{byte:02x}");
+    }
+    value
+}
+
+fn native_peer_fill_signature_matches(candidate: &str, expected: &str) -> bool {
+    let candidate = candidate.trim().as_bytes();
+    if candidate.len() != expected.len() {
+        return false;
+    }
+    let diff = candidate
+        .iter()
+        .zip(expected.as_bytes())
+        .fold(0_u8, |diff, (left, right)| diff | (left ^ right));
+    diff == 0
+}
+
+fn native_request_single_header_value<'a>(
+    request: &'a NativeHttp1Request,
+    name: &str,
+) -> Option<&'a str> {
+    let mut values = request
+        .headers
+        .iter()
+        .filter_map(|(header_name, value)| header_name.eq_ignore_ascii_case(name).then_some(value));
+    let first = values.next()?;
+    values.next().is_none().then_some(first.trim())
+}
+
+fn native_response_single_header_value<'a>(
+    response: &'a NativeHttp1Response,
+    name: &str,
+) -> Option<&'a str> {
+    let mut values = response
+        .headers()
+        .iter()
+        .filter_map(|(header_name, value)| header_name.eq_ignore_ascii_case(name).then_some(value));
+    let first = values.next()?;
+    values.next().is_none().then_some(first.trim())
+}
+
 fn native_peer_fill_response_without_cache_status(
     mut response: NativeHttp1Response,
     cache: &CacheConfig,
 ) -> NativeHttp1Response {
+    response.remove_header(NATIVE_PEER_FILL_NONCE_HEADER);
+    response.remove_header(NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER);
     if let Some(header) = cache.status_header.as_deref() {
         response.remove_header(header);
     }
@@ -5701,14 +6063,20 @@ mod tests {
     #[cfg(feature = "auth-request")]
     use super::apply_native_auth_request_headers;
     use super::{
-        NATIVE_PEER_FILL_MARKER_HEADER, native_cache_expiry_times, native_request_is_peer_fill,
+        NATIVE_PEER_FILL_MARKER_HEADER, NATIVE_PEER_FILL_NONCE_HEADER,
+        NATIVE_PEER_FILL_REQUEST_SIGNATURE_HEADER, NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER,
+        NativePeerFillAuth, native_cache_expiry_times, native_peer_fill_fetch,
+        native_peer_fill_request_signature, native_peer_fill_request_signature_matches,
+        native_peer_fill_response_signature_matches,
+        native_peer_fill_response_without_cache_status, native_peer_fill_sign_response,
+        native_request_is_peer_fill, native_response_single_header_value,
         register_native_disk_cache_purge_handle, strip_native_peer_fill_header,
     };
-    use crate::NativeHttp1Request;
     use crate::native_http1_cache::{
         NativeDiskCache, NativeDiskCacheStoreKey, NativeMemoryCacheEntry,
         purge_native_disk_cache_primary,
     };
+    use crate::{NativeHttp1Request, NativeHttp1Response};
     use fluxheim_protocol::Http1Version;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -5739,7 +6107,7 @@ mod tests {
             sanitization::SecretString::from_secret_str("user-123"),
         )];
 
-        assert!(apply_native_auth_request_headers(&mut request, &headers).is_ok());
+        apply_native_auth_request_headers(&mut request, &headers);
 
         assert_eq!(
             request
@@ -5801,6 +6169,168 @@ mod tests {
         assert_eq!(
             request.headers,
             vec![("host".to_owned(), "cache.test".to_owned())]
+        );
+    }
+
+    #[test]
+    fn native_peer_fill_auth_binds_response_body_and_headers() {
+        let auth = NativePeerFillAuth {
+            secret: Arc::new(Zeroizing::new(b"0123456789abcdef0123456789abcdef".to_vec())),
+        };
+        let nonce = "peer-fill-test-nonce";
+        let mut request = NativeHttp1Request {
+            method: "GET".to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: false,
+            tls_identity: None,
+            geo_context: None,
+            target: "/asset.css?b=1".to_owned(),
+            version: Http1Version::Http11,
+            headers: vec![
+                ("host".to_owned(), "cache.test".to_owned()),
+                (NATIVE_PEER_FILL_MARKER_HEADER.to_owned(), "1".to_owned()),
+                ("cache-control".to_owned(), "only-if-cached".to_owned()),
+                (NATIVE_PEER_FILL_NONCE_HEADER.to_owned(), nonce.to_owned()),
+            ],
+            body: Zeroizing::new(Vec::new()),
+            trailers: Vec::new(),
+        };
+        let signature =
+            native_peer_fill_request_signature(&auth, &request.target, &request.headers, nonce);
+        request.headers.push((
+            NATIVE_PEER_FILL_REQUEST_SIGNATURE_HEADER.to_owned(),
+            signature,
+        ));
+        assert!(native_peer_fill_request_signature_matches(&auth, &request));
+
+        let mut response = NativeHttp1Response::new(200, "OK", b"safe-body".to_vec())
+            .with_header("cache-control", "max-age=60")
+            .with_header("content-type", "text/css");
+        native_peer_fill_sign_response(&auth, &request, &mut response);
+
+        assert!(native_peer_fill_response_signature_matches(
+            &auth, &request, &response
+        ));
+
+        let tampered_body = NativeHttp1Response::new(200, "OK", b"evil-body".to_vec())
+            .with_header("cache-control", "max-age=60")
+            .with_header("content-type", "text/css")
+            .with_header(
+                NATIVE_PEER_FILL_NONCE_HEADER,
+                native_response_single_header_value(&response, NATIVE_PEER_FILL_NONCE_HEADER)
+                    .unwrap()
+                    .to_owned(),
+            )
+            .with_header(
+                NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER,
+                native_response_single_header_value(
+                    &response,
+                    NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER,
+                )
+                .unwrap()
+                .to_owned(),
+            );
+        assert!(!native_peer_fill_response_signature_matches(
+            &auth,
+            &request,
+            &tampered_body
+        ));
+
+        let unsigned = NativeHttp1Response::new(200, "OK", b"safe-body".to_vec())
+            .with_header("cache-control", "max-age=60")
+            .with_header("content-type", "text/css");
+        assert!(!native_peer_fill_response_signature_matches(
+            &auth, &request, &unsigned
+        ));
+    }
+
+    #[tokio::test]
+    async fn native_peer_fill_fetch_discards_unsigned_authenticated_peer_response() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let authority = listener.local_addr().unwrap().to_string();
+        let peer_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 256];
+            loop {
+                let read = stream.read(&mut buffer).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            assert!(String::from_utf8_lossy(&request).contains("x-fluxheim-peer-fill-nonce: "));
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncache-control: max-age=60\r\ncontent-length: 12\r\n\r\npoison-body!",
+                )
+                .await
+                .unwrap();
+        });
+        let auth = NativePeerFillAuth {
+            secret: Arc::new(Zeroizing::new(b"0123456789abcdef0123456789abcdef".to_vec())),
+        };
+        let peer = super::NativePeerFillPeer {
+            name: "forged-peer".to_owned(),
+            base_path: String::new(),
+            upstream: crate::NativeHttp1Upstream::new(authority),
+        };
+        let request = NativeHttp1Request {
+            method: "GET".to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: false,
+            tls_identity: None,
+            geo_context: None,
+            target: "/poison.txt".to_owned(),
+            version: Http1Version::Http11,
+            headers: vec![("host".to_owned(), "cache.test".to_owned())],
+            body: Zeroizing::new(Vec::new()),
+            trailers: Vec::new(),
+        };
+        let cache = fluxheim_config::CacheConfig::default();
+
+        let result = native_peer_fill_fetch(&peer, &cache, Some(&auth), &request, 1024)
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
+        peer_task.await.unwrap();
+    }
+
+    #[test]
+    fn native_peer_fill_response_without_cache_status_strips_internal_auth_headers() {
+        let cache = fluxheim_config::CacheConfig::default();
+        let response = NativeHttp1Response::new(200, "OK", b"safe-body".to_vec())
+            .with_header(NATIVE_PEER_FILL_NONCE_HEADER, "nonce")
+            .with_header(NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER, "signature")
+            .with_header("content-type", "text/plain");
+
+        let response = native_peer_fill_response_without_cache_status(response, &cache);
+
+        assert!(
+            native_response_single_header_value(&response, NATIVE_PEER_FILL_NONCE_HEADER).is_none()
+        );
+        assert!(
+            native_response_single_header_value(
+                &response,
+                NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER
+            )
+            .is_none()
+        );
+        assert_eq!(
+            native_response_single_header_value(&response, "content-type"),
+            Some("text/plain")
         );
     }
 

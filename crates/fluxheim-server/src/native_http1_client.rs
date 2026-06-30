@@ -1394,7 +1394,9 @@ where
     }
     let connection_tokens = connection_tokens(request);
     for (name, value) in &request.headers {
-        if upstream_hop_by_hop_header(name, &connection_tokens) || upstream_owned_header(name) {
+        if upstream_hop_by_hop_header(name, &connection_tokens)
+            || upstream_owned_header_for_request(name, request)
+        {
             continue;
         }
         if !valid_upstream_request_header(name, value) {
@@ -1437,7 +1439,7 @@ where
     let connection_tokens = connection_tokens(request);
     for (name, value) in &request.headers {
         if upstream_hop_by_hop_header(name, &connection_tokens)
-            || upstream_websocket_owned_header(name)
+            || upstream_websocket_owned_header_for_request(name, request)
         {
             continue;
         }
@@ -1530,7 +1532,9 @@ fn native_http2_upstream_request(
     let mut headers = HeaderMap::new();
     let connection_tokens = connection_tokens(request);
     for (name, value) in &request.headers {
-        if upstream_hop_by_hop_header(name, &connection_tokens) || upstream_owned_header(name) {
+        if upstream_hop_by_hop_header(name, &connection_tokens)
+            || upstream_owned_header_for_request(name, request)
+        {
             continue;
         }
         if !valid_upstream_request_header(name, value) {
@@ -1574,7 +1578,8 @@ fn native_http2_upstream_trailers(
     }
     let mut trailers = HeaderMap::new();
     for (name, value) in &request.trailers {
-        if upstream_hop_by_hop_header(name, &[]) || upstream_owned_header(name) {
+        if upstream_hop_by_hop_header(name, &[]) || upstream_owned_header_for_request(name, request)
+        {
             continue;
         }
         if !valid_upstream_request_header(name, value) {
@@ -1674,11 +1679,34 @@ fn upstream_owned_header(name: &str) -> bool {
         || name.eq_ignore_ascii_case("via")
 }
 
+fn upstream_owned_header_for_request(name: &str, request: &NativeHttp1Request) -> bool {
+    upstream_owned_header(name)
+        || (!native_client_request_is_peer_fill(request) && native_peer_fill_internal_header(name))
+}
+
 fn upstream_websocket_owned_header(name: &str) -> bool {
     upstream_owned_header(name)
         || name.eq_ignore_ascii_case("connection")
         || name.eq_ignore_ascii_case("upgrade")
         || name.eq_ignore_ascii_case("proxy-connection")
+}
+
+fn upstream_websocket_owned_header_for_request(name: &str, request: &NativeHttp1Request) -> bool {
+    upstream_websocket_owned_header(name)
+        || (!native_client_request_is_peer_fill(request) && native_peer_fill_internal_header(name))
+}
+
+fn native_peer_fill_internal_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("x-fluxheim-peer-fill")
+        || name.eq_ignore_ascii_case("x-fluxheim-peer-fill-nonce")
+        || name.eq_ignore_ascii_case("x-fluxheim-peer-fill-request-signature")
+        || name.eq_ignore_ascii_case("x-fluxheim-peer-fill-response-signature")
+}
+
+fn native_client_request_is_peer_fill(request: &NativeHttp1Request) -> bool {
+    request.headers.iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("x-fluxheim-peer-fill") && value.trim() == "1"
+    })
 }
 
 fn request_host(request: &NativeHttp1Request) -> Option<&str> {
@@ -1738,8 +1766,8 @@ mod tests {
     use super::{
         h2c_upgrade_error_can_fallback, h2c_upgrade_settings_header, native_http2_error,
         native_http2_response_to_http1, native_http2_upstream_request,
-        validate_switching_protocols_response, websocket_downstream_upgrade_response_head,
-        write_websocket_upgrade_request,
+        upstream_owned_header_for_request, validate_switching_protocols_response,
+        websocket_downstream_upgrade_response_head, write_websocket_upgrade_request,
     };
     use crate::native_http1_upstream_response::parsed_upstream_response_head;
     use crate::{
@@ -1758,6 +1786,38 @@ mod tests {
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
         );
+    }
+
+    #[test]
+    fn upstream_request_filter_strips_peer_fill_internal_headers_only_for_normal_requests() {
+        let normal = NativeHttp1Request {
+            method: "GET".to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: false,
+            tls_identity: None,
+            geo_context: None,
+            target: "/".to_owned(),
+            version: fluxheim_protocol::Http1Version::Http11,
+            headers: Vec::new(),
+            body: zeroize::Zeroizing::new(Vec::new()),
+            trailers: Vec::new(),
+        };
+        let peer_fill = NativeHttp1Request {
+            headers: vec![("x-fluxheim-peer-fill".to_owned(), "1".to_owned())],
+            ..normal.clone()
+        };
+
+        for name in [
+            "x-fluxheim-peer-fill",
+            "x-fluxheim-peer-fill-nonce",
+            "x-fluxheim-peer-fill-request-signature",
+            "x-fluxheim-peer-fill-response-signature",
+        ] {
+            assert!(upstream_owned_header_for_request(name, &normal));
+            assert!(!upstream_owned_header_for_request(name, &peer_fill));
+        }
     }
 
     #[test]

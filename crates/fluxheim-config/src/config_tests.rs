@@ -9216,6 +9216,7 @@ fn parses_cache_peer_fill_config() {
             read_timeout_secs = 12
             max_object_bytes = "64MiB"
             max_concurrent_requests = 32
+            shared_secret_file = "/run/secrets/fluxheim-peer-fill"
             fail_open = false
 
             [[cache.peer_fill.peers]]
@@ -9248,6 +9249,7 @@ fn parses_cache_peer_fill_config() {
             max_object_bytes: Some(ByteSize(64 * 1024 * 1024)),
             max_concurrent_requests: 32,
             allow_insecure_http: false,
+            shared_secret_file: Some("/run/secrets/fluxheim-peer-fill".into()),
             fail_open: false,
         }
     );

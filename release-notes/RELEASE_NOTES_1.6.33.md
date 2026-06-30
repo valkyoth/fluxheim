@@ -183,8 +183,8 @@ memory+disk tiering for ordinary HTTP/1 proxy responses.
 - Security note: native HTTP peer-fill is intentionally available only when
   the peer is loopback or `allow_insecure_http = true`. Plaintext HTTP has no
   transport integrity and can be cache-poisoned by a network-path attacker; use
-  HTTPS peers, loopback peers, encrypted overlays, mTLS sidecars, or trusted
-  private networks.
+  HTTPS peers, loopback peers, encrypted overlays, mTLS sidecars, certificate
+  pinning, or trusted private networks.
 - The compatibility runtime remains available for unsupported cache policy
   shapes while operators migrate route layouts to the native-supported subset.
 

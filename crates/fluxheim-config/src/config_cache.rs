@@ -523,6 +523,7 @@ impl CacheConfig {
             *path = base_dir.join(&path);
         }
         self.disk.encryption.resolve_relative_paths(base_dir);
+        self.peer_fill.resolve_relative_paths(base_dir);
     }
 
     pub fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
@@ -864,6 +865,9 @@ impl CacheConfigFragment {
     pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(disk) = &mut self.disk {
             disk.resolve_relative_paths(base_dir);
+        }
+        if let Some(peer_fill) = &mut self.peer_fill {
+            peer_fill.resolve_relative_paths(base_dir);
         }
     }
 }
@@ -1483,6 +1487,8 @@ pub struct CachePeerFillConfig {
     pub max_concurrent_requests: usize,
     #[serde(default)]
     pub allow_insecure_http: bool,
+    #[serde(default)]
+    pub shared_secret_file: Option<PathBuf>,
     #[serde(default = "default_true")]
     pub fail_open: bool,
 }
@@ -1497,6 +1503,7 @@ pub struct CachePeerFillConfigFragment {
     max_object_bytes: Option<ByteSize>,
     max_concurrent_requests: Option<usize>,
     allow_insecure_http: Option<bool>,
+    shared_secret_file: Option<PathBuf>,
     fail_open: Option<bool>,
 }
 
@@ -1510,6 +1517,7 @@ impl Default for CachePeerFillConfig {
             max_object_bytes: None,
             max_concurrent_requests: default_cache_peer_fill_max_concurrent_requests(),
             allow_insecure_http: false,
+            shared_secret_file: None,
             fail_open: true,
         }
     }
@@ -1538,8 +1546,19 @@ impl CachePeerFillConfig {
         if let Some(allow_insecure_http) = fragment.allow_insecure_http {
             self.allow_insecure_http = allow_insecure_http;
         }
+        if let Some(shared_secret_file) = fragment.shared_secret_file {
+            self.shared_secret_file = Some(shared_secret_file);
+        }
         if let Some(fail_open) = fragment.fail_open {
             self.fail_open = fail_open;
+        }
+    }
+
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.shared_secret_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
         }
     }
 
@@ -1590,6 +1609,15 @@ impl CachePeerFillConfig {
                 reason: "max concurrent requests must be between 1 and 1024",
             });
         }
+        let shared_secret_file_field = format!("{scope}.peer_fill.shared_secret_file");
+        validate_path(
+            shared_secret_file_field.clone(),
+            self.shared_secret_file.as_deref(),
+        )?;
+        validate_non_world_writable_parent(
+            shared_secret_file_field,
+            self.shared_secret_file.as_deref(),
+        )?;
 
         let mut seen_names = BTreeSet::new();
         let mut seen_urls = BTreeSet::new();
@@ -1610,6 +1638,16 @@ impl CachePeerFillConfig {
         }
 
         Ok(())
+    }
+}
+
+impl CachePeerFillConfigFragment {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.shared_secret_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
     }
 }
 

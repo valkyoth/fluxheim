@@ -2054,10 +2054,19 @@ impl NativePhpFpmRoute {
     }
 
     fn should_handle_path(&self, path: &str) -> bool {
-        !matches!(
-            self.files.resolve_php_script(&self.config, path, true),
-            Ok(NativePhpScriptResolve::Decline)
-        )
+        match self.files.resolve_php_script(&self.config, path, true) {
+            Ok(NativePhpScriptResolve::Execute(_))
+            | Ok(NativePhpScriptResolve::RedirectDirectorySlash)
+            | Ok(NativePhpScriptResolve::Forbidden) => true,
+            Ok(NativePhpScriptResolve::Decline | NativePhpScriptResolve::NotFound) => false,
+            Err(error) => {
+                log::warn!(
+                    target: "fluxheim::native_http1",
+                    "native php-fpm script pre-resolution failed; routing to php-fpm fail-closed path: {error}"
+                );
+                true
+            }
+        }
     }
 
     fn error_page_response(
