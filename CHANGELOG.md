@@ -72,6 +72,8 @@ behavior when the change improves security or project direction.
   first step toward splitting manifest/layout, allocator, and index helpers.
 - Split the storage-bin free-range allocator into a focused
   `storage_bin_alloc` module while re-exporting the existing public API.
+- Split storage-bin layout, manifest, and object-location validation into a
+  focused manifest module while keeping the `storage_bin` public exports stable.
 
 ## 1.6.36 - 2026-06-30
 

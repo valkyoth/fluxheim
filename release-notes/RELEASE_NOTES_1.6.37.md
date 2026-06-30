@@ -70,6 +70,8 @@ is clean.
   first step toward splitting manifest/layout, allocator, and index helpers.
 - Split the storage-bin free-range allocator into a focused
   `storage_bin_alloc` module while re-exporting the existing public API.
+- Split storage-bin layout, manifest, and object-location validation into a
+  focused manifest module while keeping the `storage_bin` public exports stable.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
