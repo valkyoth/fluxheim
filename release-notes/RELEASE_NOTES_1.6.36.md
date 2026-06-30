@@ -20,6 +20,8 @@ longer use.
   directly.
 - Replace active root/admin/CLI/runtime imports of the historical `crate::proxy`
   compatibility alias with direct `crate::native_proxy` imports.
+- Move load-balancer admin request/result DTOs from the native proxy boundary
+  into the `fluxheim-load-balancer` crate.
 - Keep normal Fluxheim builds on the Pingora-free runtime introduced in
   `1.6.34` and stabilized in `1.6.35`.
 - Keep release, dependency, native-runtime, RPM, container, and smoke gates as

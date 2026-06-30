@@ -23,6 +23,8 @@ behavior when the change improves security or project direction.
   directly.
 - Replace active root/admin/CLI/runtime imports of the historical `crate::proxy`
   compatibility alias with direct `crate::native_proxy` imports.
+- Move load-balancer admin request/result DTOs from the native proxy boundary
+  into the `fluxheim-load-balancer` crate.
 
 ## 1.6.35 - 2026-06-30
 

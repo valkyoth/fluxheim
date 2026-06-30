@@ -28,15 +28,13 @@ use zeroize::Zeroizing;
 
 use crate::config::{AdminAuthThrottleConfig, AdminConfig, AdminHealthResponseMode, Config};
 #[cfg(feature = "load-balancer")]
-use crate::load_balancer::LoadBalancerRuntimeBackendState;
-use crate::native_proxy::FluxProxy;
-#[cfg(feature = "load-balancer")]
-use crate::native_proxy::{
+use crate::load_balancer::{
     LoadBalancerMemberAddRequest, LoadBalancerMemberRemoveRequest,
     LoadBalancerMemberSetMutationResult, LoadBalancerMemberStateRequest,
     LoadBalancerMemberUpdateRequest, LoadBalancerMemberWeightRequest,
-    LoadBalancerPersistenceClearRequest,
+    LoadBalancerPersistenceClearRequest, LoadBalancerRuntimeBackendState,
 };
+use crate::native_proxy::FluxProxy;
 use crate::reload::{ReloadReason, classify_reload};
 use crate::snapshot::{
     ConfigSnapshot, PendingValidation, SnapshotApplyMode, SnapshotError,

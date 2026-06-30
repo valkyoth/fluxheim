@@ -1,6 +1,16 @@
 use std::io;
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "load-balancer")]
+use fluxheim_load_balancer::{
+    LoadBalancerMemberAddRequest, LoadBalancerMemberRemoveRequest,
+    LoadBalancerMemberSetMutationResult, LoadBalancerMemberStateRequest,
+    LoadBalancerMemberStateResult, LoadBalancerMemberUpdateRequest,
+    LoadBalancerMemberWeightRequest, LoadBalancerMemberWeightResult,
+    LoadBalancerPersistenceClearRequest, LoadBalancerPersistenceClearResult,
+    LoadBalancerRouteRuntimeStats, LoadBalancerRuntimeStats, LoadBalancerVhostRuntimeStats,
+};
+
 #[cfg(feature = "cache")]
 use crate::cache_api::{
     CacheActivityResetResult, CacheActivityStats, CacheBulkPurgeRequest, CacheBulkPurgeResult,
@@ -1391,131 +1401,4 @@ mod tests {
         assert_eq!(preview.route.as_deref(), Some("images"));
         assert_eq!(preview.scope, CacheKeyPreviewScope::Route);
     }
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, serde::Serialize)]
-pub struct LoadBalancerRuntimeStats {
-    pub vhosts: Vec<LoadBalancerVhostRuntimeStats>,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, serde::Serialize)]
-pub struct LoadBalancerVhostRuntimeStats {
-    pub name: String,
-    pub pool: Option<fluxheim_load_balancer::LoadBalancerPoolRuntimeStats>,
-    pub routes: Vec<LoadBalancerRouteRuntimeStats>,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, serde::Serialize)]
-pub struct LoadBalancerRouteRuntimeStats {
-    pub name: String,
-    pub pool: fluxheim_load_balancer::LoadBalancerPoolRuntimeStats,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LoadBalancerMemberStateRequest<'a> {
-    pub vhost: &'a str,
-    pub route: Option<&'a str>,
-    pub member: &'a str,
-    pub state: crate::load_balancer::LoadBalancerRuntimeBackendState,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct LoadBalancerMemberStateResult {
-    pub vhost: String,
-    pub route: Option<String>,
-    pub member: String,
-    pub state: crate::load_balancer::LoadBalancerRuntimeBackendState,
-    pub persistent: bool,
-    #[cfg(not(feature = "privacy-mode"))]
-    pub address: String,
-    pub alias: Option<String>,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LoadBalancerMemberWeightRequest<'a> {
-    pub vhost: &'a str,
-    pub route: Option<&'a str>,
-    pub member: &'a str,
-    pub weight: Option<usize>,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct LoadBalancerMemberWeightResult {
-    pub vhost: String,
-    pub route: Option<String>,
-    pub member: String,
-    pub configured_weight: usize,
-    pub effective_weight: usize,
-    pub runtime_weight_override: Option<usize>,
-    pub persistent: bool,
-    #[cfg(not(feature = "privacy-mode"))]
-    pub address: String,
-    pub alias: Option<String>,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LoadBalancerMemberAddRequest<'a> {
-    pub vhost: &'a str,
-    pub route: Option<&'a str>,
-    pub member: &'a str,
-    pub weight: usize,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LoadBalancerMemberRemoveRequest<'a> {
-    pub vhost: &'a str,
-    pub route: Option<&'a str>,
-    pub member: &'a str,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LoadBalancerMemberUpdateRequest<'a> {
-    pub vhost: &'a str,
-    pub route: Option<&'a str>,
-    pub member: &'a str,
-    pub updated_member: Option<&'a str>,
-    pub weight: Option<usize>,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct LoadBalancerMemberSetMutationResult {
-    pub vhost: String,
-    pub route: Option<String>,
-    pub member: String,
-    pub operation: crate::load_balancer::LoadBalancerRuntimeBackendSetOperation,
-    pub configured_weight: usize,
-    pub backend_count: usize,
-    pub persistent: bool,
-    #[cfg(not(feature = "privacy-mode"))]
-    pub address: String,
-    #[cfg(not(feature = "privacy-mode"))]
-    pub previous_address: Option<String>,
-    pub alias: Option<String>,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LoadBalancerPersistenceClearRequest<'a> {
-    pub vhost: &'a str,
-    pub route: Option<&'a str>,
-}
-
-#[cfg(feature = "load-balancer")]
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct LoadBalancerPersistenceClearResult {
-    pub vhost: String,
-    pub route: Option<String>,
-    pub cleared_entries: usize,
-    pub persistent: bool,
 }

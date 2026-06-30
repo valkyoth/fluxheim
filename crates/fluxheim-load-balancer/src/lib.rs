@@ -41,14 +41,20 @@ fn install_test_crypto_provider() {
 use self::api::LoadBalancerMetricLabels;
 pub use self::api::{
     LoadBalancedUpstreamOutcome, LoadBalancerBackendRuntimeStats, LoadBalancerCircuitState,
-    LoadBalancerDiscoveryMode, LoadBalancerDiscoveryRuntimeStats, LoadBalancerPersistenceOutcome,
-    LoadBalancerPersistenceRuntimeStats, LoadBalancerPoolRuntimeStats, LoadBalancerQueueOutcome,
-    LoadBalancerQueueRuntimeStats, LoadBalancerRetryRuntimeStats,
+    LoadBalancerDiscoveryMode, LoadBalancerDiscoveryRuntimeStats, LoadBalancerMemberAddRequest,
+    LoadBalancerMemberRemoveRequest, LoadBalancerMemberSetMutationResult,
+    LoadBalancerMemberStateRequest, LoadBalancerMemberStateResult, LoadBalancerMemberUpdateRequest,
+    LoadBalancerMemberWeightRequest, LoadBalancerMemberWeightResult,
+    LoadBalancerPersistenceClearRequest, LoadBalancerPersistenceClearResult,
+    LoadBalancerPersistenceOutcome, LoadBalancerPersistenceRuntimeStats,
+    LoadBalancerPoolRuntimeStats, LoadBalancerQueueOutcome, LoadBalancerQueueRuntimeStats,
+    LoadBalancerRetryRuntimeStats, LoadBalancerRouteRuntimeStats,
     LoadBalancerRuntimeBackendMutation, LoadBalancerRuntimeBackendSetMutation,
     LoadBalancerRuntimeBackendSetOperation, LoadBalancerRuntimeBackendState,
     LoadBalancerRuntimeBackendWeightMutation, LoadBalancerRuntimeStateRestore,
-    LoadBalancerRuntimeStateSnapshot, LoadBalancerSelectionResult, SelectedUpstream,
-    parse_load_balancer_member_weight, parse_load_balancer_runtime_weight,
+    LoadBalancerRuntimeStateSnapshot, LoadBalancerRuntimeStats, LoadBalancerSelectionResult,
+    LoadBalancerVhostRuntimeStats, SelectedUpstream, parse_load_balancer_member_weight,
+    parse_load_balancer_runtime_weight,
 };
 #[cfg(test)]
 use self::backend::BackendIdentity;
