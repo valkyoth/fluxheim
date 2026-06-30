@@ -565,8 +565,8 @@ mod tests {
         validate_profile_config,
     };
     use crate::config::Config;
-    use crate::test_support::unique_temp_path;
     use clap::Parser;
+    use fluxheim_common::test_support::unique_temp_path;
     use std::fs;
 
     fn config_from_toml(input: &str) -> Config {

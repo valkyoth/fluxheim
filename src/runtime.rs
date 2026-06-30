@@ -1127,7 +1127,7 @@ fn log_record_json(timestamp: &str, level: &str, target: &str, message: &str) ->
 #[cfg(all(test, feature = "proxy"))]
 mod tests {
     use super::{log_record_json, open_log_file};
-    use crate::test_support::unique_temp_path;
+    use fluxheim_common::test_support::unique_temp_path;
 
     #[test]
     fn json_log_record_escapes_fields() {

@@ -4184,10 +4184,10 @@ mod tests {
     use crate::snapshot::SnapshotStore;
     use crate::snapshot::{PendingValidation, SnapshotRuntimeState};
     #[cfg(feature = "load-balancer")]
-    use crate::test_support::safe_child_path;
-    use crate::test_support::unique_temp_path;
+    use fluxheim_common::test_support::safe_child_path;
+    use fluxheim_common::test_support::unique_temp_path;
     #[cfg(unix)]
-    use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
+    use fluxheim_common::test_support::{unique_group_writable_child, unique_world_writable_child};
 
     #[test]
     fn admin_json_response_is_size_bounded() {

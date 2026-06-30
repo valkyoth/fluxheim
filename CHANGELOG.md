@@ -20,6 +20,8 @@ behavior when the change improves security or project direction.
   directly.
 - Remove the single-use root path-safety shim; admin validation now calls the
   `fluxheim-common` path-safety helper directly.
+- Remove the root test-support shim; root tests now import shared helpers from
+  `fluxheim-common` directly.
 
 ## 1.6.36 - 2026-06-30
 

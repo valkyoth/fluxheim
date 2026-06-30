@@ -18,6 +18,8 @@ is clean.
   `fluxheim-common`, `fluxheim-config`, and `fluxheim-observability` directly.
 - Remove the single-use root path-safety shim; admin validation now calls the
   `fluxheim-common` path-safety helper directly.
+- Remove the root test-support shim; root tests now import shared helpers from
+  `fluxheim-common` directly.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

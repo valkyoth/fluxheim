@@ -3067,8 +3067,8 @@ mod tests {
 
     #[test]
     fn loads_certificate_not_after_from_leaf_pem() {
-        let cert_path =
-            crate::test_support::unique_temp_path("acme-cert-observation").with_extension("pem");
+        let cert_path = fluxheim_common::test_support::unique_temp_path("acme-cert-observation")
+            .with_extension("pem");
         std::fs::write(&cert_path, valid_leaf_certificate_pem()).unwrap();
 
         let not_after = load_certificate_not_after(&cert_path).unwrap().unwrap();
@@ -3078,7 +3078,7 @@ mod tests {
 
     #[test]
     fn observes_configured_managed_certificates() {
-        let storage = crate::test_support::unique_temp_path("acme-observe-configured");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-observe-configured");
         let mut config = acme_config_with_vhosts(vec![managed_vhost("example")]);
         config.tls.acme.storage = Some(storage.clone());
         let paths = managed_certificate_paths(&storage, "example");
@@ -3108,7 +3108,7 @@ mod tests {
     #[test]
     fn selected_renewal_skips_not_due_target_without_network() {
         let now = UNIX_EPOCH + Duration::from_secs(1_000);
-        let storage = crate::test_support::unique_temp_path("acme-selected-renewal");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-selected-renewal");
         let mut config =
             acme_config_with_vhosts(vec![managed_vhost("example"), managed_vhost("other")]);
         config.tls.acme.storage = Some(storage.clone());
@@ -3232,7 +3232,7 @@ mod tests {
     #[cfg(feature = "acme-client")]
     #[test]
     fn tls_alpn_01_challenge_store_writes_and_removes_safe_files() {
-        let storage = crate::test_support::unique_temp_path("acme-tls-alpn-store");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-tls-alpn-store");
         let store = super::AcmeTlsAlpn01ChallengeStore::new(&storage);
         let digest = [42_u8; 32];
         let (cert_pem, key_pem) = super::tls_alpn_01_certificate("Example.TEST", &digest).unwrap();
@@ -3257,7 +3257,7 @@ mod tests {
 
     #[test]
     fn account_credentials_store_round_trips_secure_file() {
-        let storage = crate::test_support::unique_temp_path("acme-account-store");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-account-store");
         let credentials = test_account_credentials();
 
         let path = store_account_credentials(&storage, "letsencrypt", &credentials).unwrap();
@@ -3287,7 +3287,7 @@ mod tests {
 
     #[test]
     fn account_credentials_store_rejects_invalid_json_and_oversized_files() {
-        let storage = crate::test_support::unique_temp_path("acme-account-invalid");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-account-invalid");
         let path = account_credentials_path(&storage, "letsencrypt").path;
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "{not-json").unwrap();
@@ -3314,7 +3314,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn account_credentials_store_rejects_symlinked_file() {
-        let storage = crate::test_support::unique_temp_path("acme-account-symlink");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-account-symlink");
         let path = account_credentials_path(&storage, "letsencrypt").path;
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let outside = storage.with_extension("outside");
@@ -3333,7 +3333,7 @@ mod tests {
 
     #[test]
     fn install_managed_certificate_writes_safe_files() {
-        let storage = crate::test_support::unique_temp_path("acme-install-cert");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-install-cert");
         let paths = super::install_managed_certificate(
             &storage,
             "Example Site",
@@ -3368,7 +3368,7 @@ mod tests {
 
     #[test]
     fn install_managed_certificate_rejects_invalid_pem_without_touching_previous_files() {
-        let storage = crate::test_support::unique_temp_path("acme-install-invalid");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-install-invalid");
         let paths = super::install_managed_certificate(
             &storage,
             "example",
@@ -3398,7 +3398,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn install_managed_certificate_rejects_symlinked_destination() {
-        let storage = crate::test_support::unique_temp_path("acme-install-symlink");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-install-symlink");
         let paths = managed_certificate_paths(&storage, "example");
         std::fs::create_dir_all(paths.cert_path.parent().unwrap()).unwrap();
         let outside = storage.with_extension("outside");
@@ -3422,7 +3422,7 @@ mod tests {
 
     #[test]
     fn install_managed_certificate_stale_backup_does_not_replace_previous_files() {
-        let storage = crate::test_support::unique_temp_path("acme-install-stale-backup");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-install-stale-backup");
         let paths = super::install_managed_certificate(
             &storage,
             "example",
@@ -3481,7 +3481,7 @@ mod tests {
 
     #[test]
     fn http_01_store_loads_only_safe_token_files() {
-        let root = crate::test_support::unique_temp_path("acme-http-01-store");
+        let root = fluxheim_common::test_support::unique_temp_path("acme-http-01-store");
         let store = AcmeHttp01ChallengeStore::new(&root, "Example Site");
         std::fs::create_dir_all(&store.root).unwrap();
 
@@ -3498,7 +3498,7 @@ mod tests {
 
     #[test]
     fn http_01_store_installs_and_removes_challenge_files() {
-        let root = crate::test_support::unique_temp_path("acme-http-01-install");
+        let root = fluxheim_common::test_support::unique_temp_path("acme-http-01-install");
         let store = AcmeHttp01ChallengeStore::new(&root, "Example Site");
 
         store
@@ -3516,7 +3516,7 @@ mod tests {
 
     #[test]
     fn http_01_store_rejects_invalid_install_inputs() {
-        let root = crate::test_support::unique_temp_path("acme-http-01-invalid-install");
+        let root = fluxheim_common::test_support::unique_temp_path("acme-http-01-invalid-install");
         let store = AcmeHttp01ChallengeStore::new(&root, "Example Site");
 
         assert!(
@@ -3535,7 +3535,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn http_01_store_rejects_symlinked_destination_on_install() {
-        let root = crate::test_support::unique_temp_path("acme-http-01-symlink-install");
+        let root = fluxheim_common::test_support::unique_temp_path("acme-http-01-symlink-install");
         let store = AcmeHttp01ChallengeStore::new(&root, "Example Site");
         std::fs::create_dir_all(&store.root).unwrap();
         let outside = root.with_extension("outside");
@@ -3552,7 +3552,7 @@ mod tests {
 
     #[test]
     fn execute_renewal_publishes_finalizes_installs_and_cleans_http_01() {
-        let storage = crate::test_support::unique_temp_path("acme-execute-renewal");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-execute-renewal");
         let mut config = acme_config_with_vhosts(vec![managed_vhost("example")]);
         config.tls.acme.storage = Some(storage.clone());
         config.tls.acme.challenge = crate::config::AcmeChallenge::Http01;
@@ -3583,7 +3583,7 @@ mod tests {
 
     #[test]
     fn execute_renewal_cleans_challenge_when_finalize_fails() {
-        let storage = crate::test_support::unique_temp_path("acme-execute-finalize-fail");
+        let storage = fluxheim_common::test_support::unique_temp_path("acme-execute-finalize-fail");
         let mut config = acme_config_with_vhosts(vec![managed_vhost("example")]);
         config.tls.acme.storage = Some(storage.clone());
         config.tls.acme.challenge = crate::config::AcmeChallenge::Http01;
@@ -3626,7 +3626,7 @@ mod tests {
 
     #[test]
     fn eab_file_secrets_are_trimmed_bounded_and_redacted() {
-        let root = crate::test_support::unique_temp_path("acme-eab-file-secrets");
+        let root = fluxheim_common::test_support::unique_temp_path("acme-eab-file-secrets");
         std::fs::create_dir_all(&root).unwrap();
         let key_id = root.join("kid");
         let hmac_key = root.join("hmac");
@@ -3649,7 +3649,7 @@ mod tests {
 
     #[test]
     fn eab_file_secret_rejects_empty_value() {
-        let root = crate::test_support::unique_temp_path("acme-eab-empty-secret");
+        let root = fluxheim_common::test_support::unique_temp_path("acme-eab-empty-secret");
         std::fs::create_dir_all(&root).unwrap();
         let key_id = root.join("kid");
         let hmac_key = root.join("hmac");
@@ -3669,7 +3669,7 @@ mod tests {
 
     #[test]
     fn eab_file_secret_rejects_oversized_value() {
-        let root = crate::test_support::unique_temp_path("acme-eab-oversized-secret");
+        let root = fluxheim_common::test_support::unique_temp_path("acme-eab-oversized-secret");
         std::fs::create_dir_all(&root).unwrap();
         let key_id = root.join("kid");
         let hmac_key = root.join("hmac");
@@ -3695,7 +3695,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn eab_file_secret_rejects_symlinked_file() {
-        let root = crate::test_support::unique_temp_path("acme-eab-symlink-secret");
+        let root = fluxheim_common::test_support::unique_temp_path("acme-eab-symlink-secret");
         std::fs::create_dir_all(&root).unwrap();
         let real_key_id = root.join("real-kid");
         let key_id = root.join("kid");

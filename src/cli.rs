@@ -3826,7 +3826,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::run_from_args;
-    use crate::test_support::{safe_child_path, unique_temp_path};
+    use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
 
     #[test]
     fn cache_keygen_hex_encoder_is_lowercase() {

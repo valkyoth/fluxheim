@@ -783,9 +783,9 @@ mod tests {
         ProxyConfig, ServerConfig, StaticCertificateConfig, TlsConfig, VhostConfig,
         VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
     };
-    use crate::test_support::{safe_child_path, unique_temp_path};
+    use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
     #[cfg(unix)]
-    use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
+    use fluxheim_common::test_support::{unique_group_writable_child, unique_world_writable_child};
 
     use super::{
         TlsStorageIssue, downstream_certificate_selector, recommended_acme_storage_mode,

@@ -202,9 +202,6 @@ pub mod web;
 
 pub mod runtime;
 
-#[cfg(test)]
-pub(crate) mod test_support;
-
 #[cfg(any(
     all(feature = "tls-rustls", feature = "tls-rustls-fips"),
     all(feature = "tls-rustls-backend", feature = "tls-openssl"),

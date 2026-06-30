@@ -158,8 +158,8 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
 
     use crate::config::{DirectoryListingConfig, WebConfig};
-    use crate::test_support::{safe_relative_path, unique_temp_path};
     use crate::web::StaticFileServer;
+    use fluxheim_common::test_support::{safe_relative_path, unique_temp_path};
 
     use super::native_static_response;
 
