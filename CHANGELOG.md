@@ -37,6 +37,9 @@ behavior when the change improves security or project direction.
   inline root `headers` module.
 - Split access-log helper functions out of `fluxheim-observability/src/lib.rs`
   into a focused crate module while preserving the public exports.
+- Split metrics label and bounded numeric helpers out of
+  `fluxheim-observability/src/lib.rs` into a focused crate module while
+  preserving the public exports.
 
 ## 1.6.36 - 2026-06-30
 
