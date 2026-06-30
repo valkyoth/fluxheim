@@ -15,7 +15,7 @@ use zeroize::Zeroizing;
 
 use crate::config::Config;
 #[cfg(all(feature = "cache", feature = "proxy"))]
-use crate::http_types::PingoraRequestHeader;
+use crate::http_types::NativeCachePreviewRequest;
 
 #[derive(Debug, Parser)]
 #[command(version = env!("FLUXHEIM_VERSION"), about = "Fluxheim reverse proxy")]
@@ -509,7 +509,7 @@ where
         if impact.is_snapshot_safe() {
             println!("action: snapshot reload is safe");
         } else {
-            println!("action: use Pingora process upgrade");
+            println!("action: use process restart or unsupported-runtime remediation");
         }
         return Ok(());
     }
@@ -1504,7 +1504,7 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
     let proxy = crate::native_proxy::FluxProxy::from_config(&config)?;
     let preview = proxy
         .snapshot()
-        .pingora_image_cache_key_preview_for_request_header(&request);
+        .native_image_cache_key_preview_for_request(&request);
     validate_cache_key_preview_expectations(
         &preview,
         CacheKeyPreviewExpectations {
@@ -1829,7 +1829,7 @@ fn run_cache_lookup_command(
     let proxy = crate::native_proxy::FluxProxy::from_config(&config)?;
     let lookup = proxy
         .snapshot()
-        .pingora_image_cache_object_lookup_for_request_header(&request)?;
+        .native_image_cache_object_lookup_for_request(&request)?;
     let expectations = CacheLookupExpectations {
         require_object,
         expected_states: &expected_states,
@@ -2673,7 +2673,7 @@ fn run_cache_lookup_command(
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn cache_key_command_request(
     options: &CacheKeyOptions<'_>,
-) -> Result<(Config, PingoraRequestHeader), Box<dyn Error + Send + Sync>> {
+) -> Result<(Config, NativeCachePreviewRequest), Box<dyn Error + Send + Sync>> {
     let config = Config::load(options.config_path)?;
     config.validate()?;
 
@@ -2688,7 +2688,8 @@ fn cache_key_command_request(
     let uri = cache_key_uri(&options.path, options.query.as_deref())?;
     validate_cache_key_method(&options.method)?;
 
-    let mut request = PingoraRequestHeader::build(options.method.as_str(), uri.as_bytes(), None)?;
+    let mut request =
+        NativeCachePreviewRequest::build(options.method.as_str(), uri.as_bytes(), None)?;
     request.insert_header("host", host.as_str())?;
     if options.headers.len() > 32 {
         return Err("cache-key accepts at most 32 --header values".into());

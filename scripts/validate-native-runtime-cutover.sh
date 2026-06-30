@@ -14,8 +14,8 @@ fi
     echo "Fluxheim native runtime cutover evidence"
     echo
     echo "This gate proves the current native runtime blocker inventory is"
-    echo "compiled and tested. It does not claim production traffic has cut over"
-    echo "until the Pingora dependency policy is empty for normal profiles."
+    echo "compiled and tested, and that the Pingora dependency policy remains"
+    echo "empty for normal production profiles."
     echo
     echo "Version: $(sed -n 's/^version = \"\([^\"]*\)\"/\1/p' Cargo.toml | sed -n '1p')"
     echo "Generated: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -104,7 +104,7 @@ awk -F '\t' '
         target[$1] = $2 "\t" $3
         next
     }
-    /^native-runtime-compat-adapter:/ || /^native-runtime-target-adapter:/ { next }
+    /^native-runtime-plan-adapter:/ || /^native-runtime-target-adapter:/ { next }
     /^config tester: ok$/ { next }
     $1 == "native-http1-proxy-candidate" {
         if (NF != 4) {
@@ -193,7 +193,7 @@ awk -F '\t' '
         expected[$1] = $2 "\t" $3
         next
     }
-    /^native-runtime-compat-adapter:/ || /^native-runtime-target-adapter:/ { next }
+    /^native-runtime-plan-adapter:/ || /^native-runtime-target-adapter:/ { next }
     /^config tester: ok$/ { next }
     $1 == "native-http1-proxy-candidate" {
         if (NF != 4) {
@@ -295,7 +295,7 @@ if grep -q '^native-runtime-launch-plan-error	' "$out_dir/representative-runtime
 fi
 
 awk -F '\t' '
-    /^native-runtime-compat-adapter:/ || /^native-runtime-target-adapter:/ { next }
+    /^native-runtime-plan-adapter:/ || /^native-runtime-target-adapter:/ { next }
     /^config tester: ok$/ { next }
     $1 == "native-http1-proxy-candidate" {
         if (NF != 4) {

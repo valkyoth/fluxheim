@@ -7,12 +7,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-#[cfg(all(any(), unix))]
-use pingora::server::ListenFds;
-#[cfg(any())]
-use pingora::server::ShutdownWatch;
-#[cfg(any())]
-use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 use tokio::net::UdpSocket;
 
 use crate::background::{FluxBackgroundReady, FluxBackgroundTask, FluxShutdown};
@@ -26,20 +20,6 @@ const UDP_RESPONSE_RATE_TRACKED_SOURCES_FLOOR: usize = 4_096;
 
 type UdpSourceSessions = Arc<Mutex<HashMap<IpAddr, usize>>>;
 type UdpResponseRateWindows = Arc<Mutex<UdpResponseRateState>>;
-
-#[cfg(any())]
-pub(crate) fn udp_services_from_config(config: &Config) -> io::Result<Vec<UdpProxyService>> {
-    if !config.udp.enabled {
-        return Ok(Vec::new());
-    }
-
-    config
-        .udp
-        .routes
-        .iter()
-        .map(UdpProxyService::from_config)
-        .collect()
-}
 
 pub(crate) fn udp_background_services_from_config(
     config: &Config,
@@ -218,36 +198,6 @@ impl FluxBackgroundTask for UdpProxyTask {
             task.abort();
             let _ = task.await;
         }
-    }
-}
-
-#[cfg(any())]
-#[async_trait]
-impl ServiceWithDependents for UdpProxyService {
-    async fn start_service(
-        &mut self,
-        #[cfg(unix)] _fds: Option<ListenFds>,
-        shutdown: ShutdownWatch,
-        _listeners_per_fd: usize,
-        ready_notifier: ServiceReadyNotifier,
-    ) {
-        let task = UdpProxyTask {
-            listen: self.listen.clone(),
-            app: self.app.clone(),
-        };
-        task.start(
-            fluxheim_runtime::FluxShutdown::new(shutdown),
-            fluxheim_runtime::FluxBackgroundReady::new(move || ready_notifier.notify_ready()),
-        )
-        .await;
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn threads(&self) -> Option<usize> {
-        Some(1)
     }
 }
 

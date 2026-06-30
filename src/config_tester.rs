@@ -140,7 +140,7 @@ fn runtime_cutover_report(config: &Config) -> Result<String, Box<dyn Error + Sen
     let plan = fluxheim_server::ServerPlan::from_config(config)?;
     let summary = plan.native_runtime_cutover_summary();
     let mut report = format!(
-        "native-runtime-compat-adapter: {:?}\n",
+        "native-runtime-plan-adapter: {:?}\n",
         plan.runtime_adapter()
     );
     report.push_str(&format!(
@@ -810,7 +810,7 @@ mod tests {
 
         let report = runtime_cutover_report(&config).unwrap();
 
-        assert!(report.contains("native-runtime-compat-adapter: PingoraCompatibility\n"));
+        assert!(report.contains("native-runtime-plan-adapter: NativeRuntimeBlocked\n"));
         assert!(report.contains("native-runtime-target-adapter: NativeRuntime\n"));
         assert!(report.contains("native-runtime-launch-plan\tready\t3\t3\t0\toff\n"));
         assert!(report.contains(
@@ -844,7 +844,7 @@ mod tests {
 
         let report = runtime_cutover_report(&config).unwrap();
 
-        assert!(report.contains("native-runtime-target-adapter: PingoraCompatibility\n"));
+        assert!(report.contains("native-runtime-target-adapter: NativeRuntimeBlocked\n"));
         assert!(report.contains(
             "native-runtime-launch-plan-error\tduplicate-listener\tnative runtime launch plan has duplicate TCP listener 127.0.0.1:8080 for ProxyHttp and AdminControlPlane\n"
         ));

@@ -7,20 +7,10 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-#[cfg(all(unix, any()))]
-use std::{fs::Permissions, os::unix::fs::PermissionsExt};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-#[cfg(any())]
-use http::Response;
 use http::{HeaderMap, StatusCode, header};
-#[cfg(any())]
-use pingora::apps::http_app::{HttpServer, ServeHttp};
-#[cfg(any())]
-use pingora::protocols::http::ServerSession;
-#[cfg(any())]
-use pingora::services::listening::Service;
 use sanitization::{SecureSanitize, ct::ConstantTimeEq};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -371,14 +361,6 @@ fn auth_source_label(source: Option<IpAddr>) -> String {
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
-#[cfg(any())]
-pub(crate) struct AdminServices {
-    pub(crate) control_plane: Service<HttpServer<AdminApp>>,
-    #[cfg(unix)]
-    pub(crate) ops_socket: Option<Service<HttpServer<AdminOpsApp>>>,
-    pub(crate) watchdog: Option<crate::background::FluxBackgroundService<AdminApp>>,
-}
-
 pub(crate) struct NativeAdminServices {
     pub(crate) control_plane: AdminApp,
     #[cfg(unix)]
@@ -437,83 +419,6 @@ pub(crate) fn native_admin_services_from_config(
     };
     Ok(Some(NativeAdminServices {
         control_plane: app,
-        #[cfg(unix)]
-        ops_socket,
-        watchdog,
-    }))
-}
-
-#[cfg(any())]
-pub(crate) fn admin_services_from_config(
-    config: &Config,
-    proxy: FluxProxy,
-    server_plan: &fluxheim_server::ServerPlan,
-) -> Result<Option<AdminServices>, Box<dyn Error + Send + Sync>> {
-    if !config.admin.enabled {
-        return Ok(None);
-    }
-    let Some(admin_listener) =
-        server_plan.first_service_listener_addr(fluxheim_server::ServiceKind::AdminControlPlane)
-    else {
-        return Err("admin.enabled requires an admin listener in the server plan".into());
-    };
-    let admin_service_name = server_plan
-        .service(fluxheim_server::ServiceKind::AdminControlPlane)
-        .map(fluxheim_server::ServiceSpec::name)
-        .ok_or("admin.enabled requires an admin service in the server plan")?;
-
-    let app = AdminApp::from_config(config, proxy)?;
-    let watchdog = if app.self_healing_enabled {
-        let Some(task) =
-            server_plan.background_task(crate::background::BackgroundTaskKind::RuntimeWatchdog)
-        else {
-            return Err(
-                "admin.self_healing.enabled requires a watchdog task in the server plan".into(),
-            );
-        };
-        Some(crate::background::background_service_for_spec(
-            task,
-            app.clone(),
-        ))
-    } else {
-        None
-    };
-    let mut service = Service::new(
-        admin_service_name.to_owned(),
-        HttpServer::new_app(app.clone()),
-    );
-    service.add_tcp(&admin_listener);
-    #[cfg(unix)]
-    let ops_socket = if config.admin.ops_socket.enabled {
-        let Some(ops_socket_plan) = server_plan.admin_ops_socket() else {
-            return Err(
-                "admin.ops_socket.enabled requires an ops socket plan in the server plan".into(),
-            );
-        };
-        let ops_service_name = server_plan
-            .service(fluxheim_server::ServiceKind::AdminOpsSocket)
-            .map(fluxheim_server::ServiceSpec::name)
-            .ok_or("admin.ops_socket.enabled requires an ops socket service in the server plan")?;
-        let Some(path) = ops_socket_plan.path().to_str() else {
-            return Err("admin.ops_socket.path must be valid UTF-8".into());
-        };
-        let mut ops_service = Service::new(
-            ops_service_name.to_owned(),
-            HttpServer::new_app(AdminOpsApp {
-                app: app.clone(),
-                require_bearer_token: config.admin.ops_socket.require_bearer_token,
-            }),
-        );
-        ops_service.add_uds(
-            path,
-            Some(Permissions::from_mode(ops_socket_plan.mode_bits())),
-        );
-        Some(ops_service)
-    } else {
-        None
-    };
-    Ok(Some(AdminServices {
-        control_plane: service,
         #[cfg(unix)]
         ops_socket,
         watchdog,
@@ -2823,27 +2728,6 @@ impl crate::background::FluxBackgroundTask for AdminApp {
     }
 }
 
-#[cfg(any())]
-#[async_trait]
-impl ServeHttp for AdminApp {
-    async fn response(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
-        let request = session.req_header();
-        let source = session
-            .client_addr()
-            .and_then(|addr| addr.as_inet())
-            .map(|addr| addr.ip());
-        let response = self.handle_with_source(
-            request.method.as_str(),
-            request.uri.path(),
-            request.uri.query(),
-            &request.headers,
-            source,
-        );
-
-        admin_http_response(response)
-    }
-}
-
 impl fluxheim_server::NativeHttp1Handler for AdminApp {
     fn handle<'a>(
         &'a self,
@@ -2868,22 +2752,6 @@ impl AdminApp {
             query,
             &headers,
             request.peer_addr.map(|peer| peer.ip()),
-        ))
-    }
-}
-
-#[cfg(unix)]
-#[cfg(any())]
-#[async_trait]
-impl ServeHttp for AdminOpsApp {
-    async fn response(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
-        let request = session.req_header();
-        admin_http_response(self.app.handle_ops_socket(
-            request.method.as_str(),
-            request.uri.path(),
-            request.uri.query(),
-            Some(&request.headers),
-            self.require_bearer_token,
         ))
     }
 }
@@ -2915,30 +2783,6 @@ impl AdminOpsApp {
             Some(&headers),
             self.require_bearer_token,
         ))
-    }
-}
-
-#[cfg(any())]
-fn admin_http_response(response: AdminResponse) -> Response<Vec<u8>> {
-    let body_len = response.body.len();
-    match Response::builder()
-        .status(response.status)
-        .header(header::CONTENT_TYPE, response.content_type)
-        .header(header::CONTENT_LENGTH, body_len)
-        .header(header::CACHE_CONTROL, "no-store")
-        .body(response.body)
-    {
-        Ok(response) => response,
-        Err(error) => {
-            log::error!("failed to build admin response: {error}");
-            let mut fallback = Response::new(br#"{"error":"internal_server_error"}"#.to_vec());
-            *fallback.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            fallback.headers_mut().insert(
-                header::CONTENT_TYPE,
-                http::HeaderValue::from_static("application/json"),
-            );
-            fallback
-        }
     }
 }
 
@@ -4318,8 +4162,6 @@ mod tests {
     #[cfg(any(feature = "load-balancer", feature = "udp-proxy"))]
     use serde_json::Value;
 
-    #[cfg(any())]
-    use super::admin_services_from_config;
     use super::{
         AdminApp, AdminAuthThrottle, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
         admin_fingerprint_list_contains, authorized, constant_time_eq, error_response,
@@ -7215,35 +7057,6 @@ mod tests {
         );
 
         assert_eq!(response.status, StatusCode::BAD_REQUEST);
-    }
-
-    #[cfg(any())]
-    #[test]
-    fn admin_services_enable_watchdog_only_when_self_healing_is_enabled() {
-        let dir = TestDir::new("admin-services-watchdog");
-        let token_file = dir.path.join("admin-token");
-        std::fs::write(&token_file, "secret-token\n").unwrap();
-        let config = Config {
-            admin: AdminConfig {
-                enabled: true,
-                token_file: Some(token_file),
-                snapshot_store: Some(dir.path.join("snapshots")),
-                self_healing: AdminSelfHealingConfig {
-                    enabled: true,
-                    ..AdminSelfHealingConfig::default()
-                },
-                ..AdminConfig::default()
-            },
-            ..Config::default()
-        };
-        let proxy = FluxProxy::from_config(&config).unwrap();
-
-        let server_plan = fluxheim_server::ServerPlan::from_config(&config).unwrap();
-        let services = admin_services_from_config(&config, proxy, &server_plan)
-            .unwrap()
-            .unwrap();
-
-        assert!(services.watchdog.is_some());
     }
 
     #[test]

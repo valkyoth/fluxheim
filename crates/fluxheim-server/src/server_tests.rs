@@ -194,7 +194,7 @@ fn native_runtime_manifest_rejects_blocked_plans() {
 
     assert_eq!(
         plan.native_runtime_target_adapter(),
-        RuntimeAdapterKind::PingoraCompatibility
+        RuntimeAdapterKind::NativeRuntimeBlocked
     );
     assert!(matches!(
         plan.native_runtime_manifest(),
@@ -253,7 +253,7 @@ fn native_runtime_manifest_exports_service_listener_bindings() {
 
     assert_eq!(
         plan.runtime_adapter(),
-        RuntimeAdapterKind::PingoraCompatibility
+        RuntimeAdapterKind::NativeRuntimeBlocked
     );
     assert_eq!(
         plan.native_runtime_target_adapter(),
@@ -399,7 +399,7 @@ fn native_runtime_launch_plan_rejects_duplicate_tcp_listener_bindings() {
     assert!(plan.native_runtime_cutover_summary().is_ready());
     assert_eq!(
         plan.native_runtime_target_adapter(),
-        RuntimeAdapterKind::PingoraCompatibility
+        RuntimeAdapterKind::NativeRuntimeBlocked
     );
     assert!(matches!(
         plan.native_runtime_launch_plan(),
@@ -734,7 +734,7 @@ fn server_plan_from_config_collects_listener_inventory() {
     let plan = ServerPlan::from_config(&config).expect("valid server plan");
     assert_eq!(
         plan.runtime_adapter(),
-        RuntimeAdapterKind::PingoraCompatibility
+        RuntimeAdapterKind::NativeRuntimeBlocked
     );
     let protocols = plan
         .listeners()

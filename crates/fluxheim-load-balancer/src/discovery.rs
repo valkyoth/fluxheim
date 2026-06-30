@@ -181,9 +181,9 @@ async fn read_proxy_upstreams_file_for_discovery(path: PathBuf) -> FluxResult<Ve
                 )
             })?
     } else {
-        // Pingora performs the initial load-balancer update synchronously during
-        // construction. There is no Tokio reactor yet in that path, so this
-        // bootstrap read must stay immediately ready for now_or_never().
+        // Some bootstrap callers perform the initial load-balancer update
+        // synchronously before a Tokio reactor is available, so this read must
+        // stay immediately ready for now_or_never().
         fluxheim_config::read_proxy_upstreams_file(&path)
     };
 

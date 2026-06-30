@@ -1,26 +1,22 @@
 //! Fluxheim-owned HTTP type boundary.
 //!
 //! Internal modules should prefer these standard `http` crate types for plain
-//! HTTP values. Pingora request/response header wrappers remain narrow runtime
-//! adapter types at service/proxy boundaries until the HTTP runtime is owned by
-//! Fluxheim.
+//! HTTP values.
 
 #[cfg(any(feature = "cache", feature = "compression", feature = "php-fpm"))]
 #[allow(unused_imports)]
 pub(crate) use http::StatusCode;
 
-#[cfg(all(feature = "proxy", any()))]
-pub(crate) type PingoraRequestHeader = pingora::http::RequestHeader;
-#[cfg(all(feature = "proxy", feature = "cache", not(any())))]
+#[cfg(all(feature = "proxy", feature = "cache"))]
 #[derive(Clone, Debug)]
-pub(crate) struct PingoraRequestHeader {
+pub(crate) struct NativeCachePreviewRequest {
     pub method: http::Method,
     pub uri: http::Uri,
     pub headers: http::HeaderMap,
 }
 
-#[cfg(all(feature = "proxy", feature = "cache", not(any())))]
-impl PingoraRequestHeader {
+#[cfg(all(feature = "proxy", feature = "cache"))]
+impl NativeCachePreviewRequest {
     pub(crate) fn build(
         method: &str,
         uri: &[u8],
@@ -46,5 +42,3 @@ impl PingoraRequestHeader {
         Ok(())
     }
 }
-#[cfg(all(feature = "proxy", any()))]
-pub(crate) type PingoraResponseHeader = pingora::http::ResponseHeader;

@@ -558,6 +558,39 @@ async fn native_http1_reads_chunked_body() {
 }
 
 #[tokio::test]
+async fn native_http1_rejects_overflow_sized_chunk_header() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (result_tx, result_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let (stream, peer_addr) = listener.accept().await.unwrap();
+        let handler = Arc::new(|_| async { NativeHttp1Response::new(200, "OK", b"unexpected") });
+        let result =
+            serve_native_http1_connection(stream, Some(peer_addr), Default::default(), handler)
+                .await;
+        let _ = result_tx.send(result);
+    });
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+
+    stream
+        .write_all(
+            b"POST /upload HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\nffffffffffffffff\r\n",
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    let result = result_rx.await.unwrap();
+
+    assert!(matches!(
+        result,
+        Err(NativeHttp1Error::Parse(
+            fluxheim_protocol::Http1ParseError::ChunkTooLarge
+        ))
+    ));
+}
+
+#[tokio::test]
 async fn native_http1_enforces_configured_body_limit() {
     let policy = DownstreamHttp1Policy::from_server_limits(fluxheim_config::ServerLimitsConfig {
         max_request_header_bytes: fluxheim_config::ByteSize::from_bytes(4096),

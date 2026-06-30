@@ -12,7 +12,7 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeAdapterKind {
-    PingoraCompatibility,
+    NativeRuntimeBlocked,
     NativeRuntime,
 }
 
@@ -175,7 +175,7 @@ pub struct ServerPlan {
 impl ServerPlan {
     pub fn new(listeners: Vec<ListenerSpec>, background_tasks: Vec<BackgroundTaskSpec>) -> Self {
         Self {
-            runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
+            runtime_adapter: RuntimeAdapterKind::NativeRuntimeBlocked,
             process: ProcessSpec::default(),
             proxy_protocol: ProxyProtocolPolicy::Off,
             downstream_http1: DownstreamHttp1Policy::default(),
@@ -206,7 +206,7 @@ impl ServerPlan {
         background_tasks: Vec<BackgroundTaskSpec>,
     ) -> Self {
         Self {
-            runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
+            runtime_adapter: RuntimeAdapterKind::NativeRuntimeBlocked,
             process,
             proxy_protocol: ProxyProtocolPolicy::Off,
             downstream_http1: DownstreamHttp1Policy::default(),
@@ -244,7 +244,7 @@ impl ServerPlan {
         {
             RuntimeAdapterKind::NativeRuntime
         } else {
-            RuntimeAdapterKind::PingoraCompatibility
+            RuntimeAdapterKind::NativeRuntimeBlocked
         }
     }
 
@@ -436,7 +436,7 @@ impl ServerPlan {
         let downstream_http2 = DownstreamHttp2Policy::from_server_limits(config.server.limits);
 
         Ok(Self {
-            runtime_adapter: RuntimeAdapterKind::PingoraCompatibility,
+            runtime_adapter: RuntimeAdapterKind::NativeRuntimeBlocked,
             process,
             proxy_protocol: proxy_protocol::proxy_protocol_policy_from_config(config)?,
             downstream_http1,

@@ -481,4 +481,12 @@ fn chunked_decoder_rejects_invalid_chunk_shapes() {
         ),
         Err(Http1ParseError::ChunkTooLarge)
     );
+    assert_eq!(
+        decode_http1_chunked_body(
+            b"ffffffffffffffff\r\n",
+            &mut output,
+            Http1ChunkLimits::default()
+        ),
+        Err(Http1ParseError::ChunkTooLarge)
+    );
 }

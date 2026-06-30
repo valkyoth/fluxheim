@@ -30,6 +30,14 @@ longer use.
 - Remove stale disabled Pingora compatibility runner/test code from
   `runtime.rs` so dead `cfg(any())` paths no longer reference non-existent
   native proxy methods or Pingora traits.
+- Remove the stale Pingora HTTP boundary exception rows now that normal source
+  no longer carries quarantined Pingora HTTP adapter code.
+- Consolidate native proxy config storage so hot reload refreshes the same
+  config snapshot used by cache purge, cache preview, cache stats, activity
+  reset, and load-balancer stats paths.
+- Add native HTTP/1 chunked-body regression coverage for the historical
+  overflow-sized chunk header crash class; the native parser rejects the
+  `ffffffffffffffff` chunk size before routing reaches the proxy handler.
 - Keep normal Fluxheim builds on the Pingora-free runtime introduced in
   `1.6.34` and stabilized in `1.6.35`.
 - Keep release, dependency, native-runtime, RPM, container, and smoke gates as

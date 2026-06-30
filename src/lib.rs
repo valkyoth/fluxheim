@@ -11,21 +11,14 @@ pub mod acme_companion;
 pub mod admin;
 #[cfg(feature = "proxy")]
 mod background;
-#[cfg(all(feature = "cache", not(any())))]
+#[cfg(feature = "cache")]
+mod cache_api;
+#[cfg(feature = "cache")]
 pub mod cache {
     pub use crate::cache_api::*;
 }
-#[cfg(feature = "cache")]
-mod cache_api;
 pub mod cache_headers;
 pub mod cli;
-#[cfg(any(
-    feature = "compression-brotli",
-    feature = "compression-gzip",
-    feature = "compression-zstd"
-))]
-#[cfg(any())]
-mod compression;
 pub mod config {
     #[allow(unused_imports)]
     pub use fluxheim_config::*;
@@ -127,7 +120,7 @@ mod flux_error;
 mod fs_trust;
 #[cfg(feature = "geoip")]
 pub mod geoip;
-#[cfg(all(feature = "proxy", not(any())))]
+#[cfg(feature = "proxy")]
 pub mod headers {
     #[derive(Clone, Debug, Default)]
     pub struct RequestTlsClientIdentity {
@@ -176,7 +169,7 @@ pub mod metrics;
 pub mod metrics_otlp;
 #[cfg(all(feature = "web", feature = "proxy"))]
 mod native_http1_static;
-#[cfg(all(feature = "proxy", not(any())))]
+#[cfg(feature = "proxy")]
 pub mod native_proxy;
 #[cfg(feature = "otel-otlp")]
 pub mod otel_otlp;

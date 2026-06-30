@@ -1,5 +1,5 @@
 use std::io;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 #[cfg(feature = "load-balancer")]
 use fluxheim_load_balancer::{
@@ -24,19 +24,22 @@ use crate::cache_api::{
 
 #[derive(Clone)]
 pub struct FluxProxy {
-    #[cfg(any(feature = "cache", feature = "load-balancer"))]
-    config: crate::config::Config,
-    live_config: Arc<Mutex<crate::config::Config>>,
+    config: Arc<Mutex<crate::config::Config>>,
     #[cfg(feature = "load-balancer")]
     load_balancer_admin_pools: Vec<fluxheim_server::NativeLoadBalancerAdminPool>,
+}
+
+#[cfg(feature = "cache")]
+struct CacheConfigSelection {
+    vhost_name: String,
+    route_name: Option<String>,
+    cache: crate::config::CacheConfig,
 }
 
 impl FluxProxy {
     pub fn from_config(_config: &crate::config::Config) -> io::Result<Self> {
         Ok(Self {
-            #[cfg(any(feature = "cache", feature = "load-balancer"))]
-            config: _config.clone(),
-            live_config: Arc::new(Mutex::new(_config.clone())),
+            config: Arc::new(Mutex::new(_config.clone())),
             #[cfg(feature = "load-balancer")]
             load_balancer_admin_pools: Vec::new(),
         })
@@ -49,20 +52,37 @@ impl FluxProxy {
         >,
     ) -> io::Result<Self> {
         Ok(Self {
-            #[cfg(any(feature = "cache", feature = "load-balancer"))]
-            config: _config.clone(),
-            live_config: Arc::new(Mutex::new(_config.clone())),
+            config: Arc::new(Mutex::new(_config.clone())),
             #[cfg(feature = "load-balancer")]
             load_balancer_admin_pools,
         })
     }
 
     pub fn reload_from_config(&self, _config: &crate::config::Config) -> io::Result<()> {
-        let mut live_config = self.live_config.lock().map_err(|_| {
-            io::Error::other("native proxy live configuration lock poisoned during reload")
-        })?;
-        *live_config = _config.clone();
+        let mut config = self.lock_config("reload")?;
+        *config = _config.clone();
         Ok(())
+    }
+
+    fn lock_config(
+        &self,
+        context: &'static str,
+    ) -> io::Result<MutexGuard<'_, crate::config::Config>> {
+        self.config.lock().map_err(|_| {
+            io::Error::other(format!(
+                "native proxy configuration lock poisoned during {context}"
+            ))
+        })
+    }
+
+    fn lock_config_or_abort(&self, context: &'static str) -> MutexGuard<'_, crate::config::Config> {
+        self.config.lock().unwrap_or_else(|error| {
+            log::error!(
+                target: "fluxheim::native_proxy",
+                "native proxy configuration mutex poisoned during {context}: {error}"
+            );
+            std::process::abort();
+        })
     }
 
     pub fn has_health_reporter(&self) -> bool {
@@ -70,13 +90,7 @@ impl FluxProxy {
     }
 
     pub fn route_host(&self, host: Option<&str>) -> String {
-        let config = self.live_config.lock().unwrap_or_else(|error| {
-            log::error!(
-                target: "fluxheim::native_proxy",
-                "native proxy live configuration mutex poisoned in route_host: {error}"
-            );
-            std::process::abort();
-        });
+        let config = self.lock_config_or_abort("route_host");
         let normalized = host
             .and_then(fluxheim_config::config_net::normalize_host)
             .unwrap_or_default();
@@ -144,15 +158,17 @@ impl FluxProxy {
 
     #[cfg(feature = "cache")]
     pub fn snapshot(&self) -> NativeProxySnapshot {
+        let config = self.lock_config_or_abort("cache snapshot");
         NativeProxySnapshot {
-            config: self.config.clone(),
+            config: config.clone(),
         }
     }
 
     #[cfg(feature = "load-balancer")]
     pub fn load_balancer_runtime_stats(&self) -> LoadBalancerRuntimeStats {
+        let config = self.lock_config_or_abort("load balancer runtime stats");
         let mut vhosts = Vec::new();
-        for vhost in &self.config.vhosts {
+        for vhost in &config.vhosts {
             let pool = self
                 .native_load_balancer_pool(&vhost.name, None)
                 .ok()
@@ -178,8 +194,7 @@ impl FluxProxy {
             }
         }
         for pool in &self.load_balancer_admin_pools {
-            if self
-                .config
+            if config
                 .vhosts
                 .iter()
                 .any(|vhost| vhost.name == pool.vhost.as_ref())
@@ -305,7 +320,8 @@ impl FluxProxy {
 
     #[cfg(feature = "cache")]
     pub fn cache_runtime_stats(&self) -> io::Result<CacheRuntimeStats> {
-        let mut stats = native_cache_runtime_stats_from_config(&self.config);
+        let config = self.lock_config("cache runtime stats")?;
+        let mut stats = native_cache_runtime_stats_from_config(&config);
         let native = fluxheim_server::native_cache_runtime_totals();
         overlay_native_cache_runtime_totals(&mut stats.totals, &native);
         Ok(stats)
@@ -313,22 +329,20 @@ impl FluxProxy {
 
     #[cfg(feature = "cache")]
     pub fn reset_cache_activity(&self) -> CacheActivityResetResult {
-        native_cache_activity_reset_result_from_config(&self.config)
+        let config = self.lock_config_or_abort("cache activity reset");
+        native_cache_activity_reset_result_from_config(&config)
     }
 
     #[cfg(feature = "cache")]
-    fn cache_config_for_request<'a>(
-        &'a self,
+    fn cache_config_for_request(
+        &self,
         requested_vhost: Option<&str>,
         requested_route: Option<&str>,
         host: &str,
-    ) -> io::Result<(
-        &'a crate::config::VhostConfig,
-        Option<String>,
-        &'a crate::config::CacheConfig,
-    )> {
+    ) -> io::Result<CacheConfigSelection> {
+        let config = self.lock_config("cache config selection")?;
         let vhost = if let Some(vhost_name) = requested_vhost {
-            self.config
+            config
                 .vhosts
                 .iter()
                 .find(|vhost| vhost.name == vhost_name)
@@ -339,18 +353,18 @@ impl FluxProxy {
                     )
                 })?
         } else {
-            self.config
+            config
                 .vhosts
                 .iter()
                 .find(|vhost| native_vhost_matches_host(vhost, host))
                 .or_else(|| {
-                    self.config
+                    config
                         .server
                         .default_vhost
                         .as_deref()
-                        .and_then(|name| self.config.vhosts.iter().find(|vhost| vhost.name == name))
+                        .and_then(|name| config.vhosts.iter().find(|vhost| vhost.name == name))
                 })
-                .or_else(|| self.config.vhosts.first())
+                .or_else(|| config.vhosts.first())
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no vhost configured"))?
         };
         if let Some(route_name) = requested_route {
@@ -370,9 +384,17 @@ impl FluxProxy {
                     format!("route cache not found: {}/{route_name}", vhost.name),
                 )
             })?;
-            Ok((vhost, Some(route.name.clone()), cache))
+            Ok(CacheConfigSelection {
+                vhost_name: vhost.name.clone(),
+                route_name: Some(route.name.clone()),
+                cache: cache.clone(),
+            })
         } else {
-            Ok((vhost, None, &vhost.cache))
+            Ok(CacheConfigSelection {
+                vhost_name: vhost.name.clone(),
+                route_name: None,
+                cache: vhost.cache.clone(),
+            })
         }
     }
 
@@ -389,8 +411,8 @@ impl FluxProxy {
                 "cache indexed purge limit must be greater than zero",
             ));
         }
-        let vhost = self
-            .config
+        let config = self.lock_config("indexed cache purge validation")?;
+        let vhost = config
             .vhosts
             .iter()
             .find(|vhost| vhost.name == vhost_name)
@@ -426,7 +448,7 @@ impl FluxProxy {
         &self,
         request: CachePurgeRequest<'_>,
     ) -> io::Result<CachePurgeResult> {
-        let (vhost, route_name, cache_config) =
+        let selection =
             self.cache_config_for_request(request.vhost, request.route, request.host)?;
         let cache_request = fluxheim_cache::CacheRequest {
             method: request.method,
@@ -434,11 +456,11 @@ impl FluxProxy {
             path: request.path,
             query: request.query,
         };
-        let cache_key =
-            fluxheim_cache::image_cache_key(cache_config, &cache_request).ok_or_else(|| {
+        let cache_key = fluxheim_cache::image_cache_key(&selection.cache, &cache_request)
+            .ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    if route_name.is_some() {
+                    if selection.route_name.is_some() {
                         "request is not eligible for this route cache policy"
                     } else {
                         "request is not eligible for this vhost cache policy"
@@ -447,20 +469,20 @@ impl FluxProxy {
             })?;
         let key = cache_key.as_str();
         let memory_purged = fluxheim_server::purge_native_memory_cache_primary(
-            &vhost.name,
-            route_name.as_deref(),
+            &selection.vhost_name,
+            selection.route_name.as_deref(),
             key,
             key,
         );
         let disk_purged = fluxheim_server::purge_native_disk_cache_primary(
-            &vhost.name,
-            route_name.as_deref(),
+            &selection.vhost_name,
+            selection.route_name.as_deref(),
             key,
             key,
         );
         let mut result = CachePurgeResult {
-            vhost: vhost.name.clone(),
-            route: route_name,
+            vhost: selection.vhost_name.clone(),
+            route: selection.route_name.clone(),
             host: request.host.to_owned(),
             method: request.method.to_owned(),
             path: request.path.to_owned(),
@@ -469,8 +491,8 @@ impl FluxProxy {
             memory_purged,
             disk_purged,
         };
-        if cache_config.range.enabled && cache_config.range.slice.enabled {
-            let slice_limit = usize::try_from(cache_config.range.slice.max_slices)
+        if selection.cache.range.enabled && selection.cache.range.slice.enabled {
+            let slice_limit = usize::try_from(selection.cache.range.slice.max_slices)
                 .unwrap_or(usize::MAX.saturating_sub(4))
                 .saturating_add(4);
             let user_tag = fluxheim_cache::cache_user_tag(&result.vhost, result.route.as_deref());
@@ -792,7 +814,7 @@ fn native_cache_object_metadata(
 
 #[cfg(feature = "cache")]
 fn native_cache_lookup_request_headers(
-    request: &crate::http_types::PingoraRequestHeader,
+    request: &crate::http_types::NativeCachePreviewRequest,
 ) -> Vec<(String, String)> {
     request
         .headers
@@ -1104,9 +1126,9 @@ pub struct NativeProxySnapshot {
 #[cfg(feature = "cache")]
 impl NativeProxySnapshot {
     #[cfg(feature = "cache")]
-    pub(crate) fn pingora_image_cache_key_preview_for_request_header(
+    pub(crate) fn native_image_cache_key_preview_for_request(
         &self,
-        request: &crate::http_types::PingoraRequestHeader,
+        request: &crate::http_types::NativeCachePreviewRequest,
     ) -> CacheKeyPreview {
         let host = request
             .headers
@@ -1224,11 +1246,11 @@ impl NativeProxySnapshot {
     }
 
     #[cfg(feature = "cache")]
-    pub(crate) fn pingora_image_cache_object_lookup_for_request_header(
+    pub(crate) fn native_image_cache_object_lookup_for_request(
         &self,
-        request: &crate::http_types::PingoraRequestHeader,
+        request: &crate::http_types::NativeCachePreviewRequest,
     ) -> io::Result<CacheObjectLookup> {
-        let preview = self.pingora_image_cache_key_preview_for_request_header(request);
+        let preview = self.native_image_cache_key_preview_for_request(request);
         let mut objects = Vec::new();
         if let Some(primary_key) = preview.primary_key.as_deref()
             && let Some(vhost) = self
@@ -1359,12 +1381,84 @@ mod tests {
         );
         let proxy = FluxProxy::from_config(&config).unwrap();
 
-        let (vhost, route, _cache) = proxy
+        let selection = proxy
             .cache_config_for_request(None, None, "EXAMPLE.COM:80")
             .unwrap();
 
-        assert_eq!(vhost.name, "example");
-        assert_eq!(route, None);
+        assert_eq!(selection.vhost_name, "example");
+        assert_eq!(selection.route_name, None);
+    }
+
+    #[test]
+    fn reload_updates_route_cache_stats_and_snapshot_config() {
+        let initial = test_config(
+            r#"
+            [server]
+            default_vhost = "old"
+
+            [[vhosts]]
+            name = "old"
+            hosts = ["old.example"]
+
+            [vhosts.cache]
+            enabled = true
+            "#,
+        );
+        let reloaded = test_config(
+            r#"
+            [server]
+            default_vhost = "new"
+
+            [[vhosts]]
+            name = "new"
+            hosts = ["new.example"]
+
+            [vhosts.cache]
+            enabled = true
+            key_namespace = "new-vhost-cache"
+
+            [[vhosts.routes]]
+            name = "images"
+            path_regex = "^/images/[0-9]+[.]png$"
+
+            [vhosts.routes.cache]
+            enabled = true
+            key_namespace = "new-route-cache"
+            "#,
+        );
+        let proxy = FluxProxy::from_config(&initial).unwrap();
+
+        proxy.reload_from_config(&reloaded).unwrap();
+
+        assert_eq!(proxy.route_host(Some("NEW.EXAMPLE:80")), "new");
+        let selection = proxy
+            .cache_config_for_request(None, None, "NEW.EXAMPLE:80")
+            .unwrap();
+        assert_eq!(selection.vhost_name, "new");
+        assert_eq!(
+            selection.cache.key_namespace.as_deref(),
+            Some("new-vhost-cache")
+        );
+        assert!(
+            proxy
+                .cache_config_for_request(Some("old"), None, "old.example")
+                .is_err()
+        );
+
+        let stats = proxy.cache_runtime_stats().unwrap();
+        assert_eq!(stats.vhosts.len(), 1);
+        assert_eq!(stats.vhosts[0].name, "new");
+        assert_eq!(stats.vhosts[0].routes[0].name, "images");
+
+        let mut request =
+            crate::http_types::NativeCachePreviewRequest::build("GET", b"/images/42.png", None)
+                .unwrap();
+        request.insert_header("host", "NEW.EXAMPLE:80").unwrap();
+        let preview = proxy
+            .snapshot()
+            .native_image_cache_key_preview_for_request(&request);
+        assert_eq!(preview.vhost, "new");
+        assert_eq!(preview.route.as_deref(), Some("images"));
     }
 
     #[test]
@@ -1390,12 +1484,13 @@ mod tests {
         );
         let proxy = FluxProxy::from_config(&config).unwrap();
         let mut request =
-            crate::http_types::PingoraRequestHeader::build("GET", b"/images/42.png", None).unwrap();
+            crate::http_types::NativeCachePreviewRequest::build("GET", b"/images/42.png", None)
+                .unwrap();
         request.insert_header("host", "EXAMPLE.COM:80").unwrap();
 
         let preview = proxy
             .snapshot()
-            .pingora_image_cache_key_preview_for_request_header(&request);
+            .native_image_cache_key_preview_for_request(&request);
 
         assert_eq!(preview.vhost, "example");
         assert_eq!(preview.route.as_deref(), Some("images"));

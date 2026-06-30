@@ -449,12 +449,11 @@ impl<T> FluxBackgroundService<T> {
         self.critical
     }
 
-    /// Pingora compatibility only. The native `NativeBackgroundSupervisor`
-    /// ignores this value; remove in v1.7.0 with the final
-    /// PingoraCompatibility adapter.
+    /// Legacy runtime compatibility only. The native `NativeBackgroundSupervisor`
+    /// ignores this value; remove after the native runtime cleanup is complete.
     #[deprecated(
         since = "1.6.21",
-        note = "Pingora compatibility only; native supervisor ignores thread count; remove in v1.7.0"
+        note = "Legacy runtime compatibility only; native supervisor ignores thread count"
     )]
     pub fn threads(&self) -> Option<usize> {
         Some(1)

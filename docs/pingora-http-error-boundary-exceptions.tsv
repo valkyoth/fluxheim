@@ -1,13 +1,2 @@
 # path	reason
 # crates/fluxheim-tls intentionally has no entry: TLS policy/planning must stay Pingora-free.
-src/admin.rs	Quarantined legacy Pingora admin adapter source; not compiled by supported profiles.
-src/background.rs	Quarantined legacy Pingora background-service adapter source; not compiled by supported profiles.
-src/compression.rs	Quarantined legacy Pingora compression response adapter source; not compiled by supported profiles.
-src/flux_error.rs	Quarantined legacy Fluxheim-to-Pingora error conversion source; not compiled by supported profiles.
-src/http_types.rs	Quarantined legacy Pingora request/response header aliases; not compiled by supported profiles.
-src/load_balancer.rs	Quarantined legacy Pingora request-view/background-service adapter source; not compiled by supported profiles.
-src/runtime.rs	Quarantined legacy Pingora server/listener/TLS bootstrap adapter source; not compiled by supported profiles.
-src/stream_proxy.rs	Quarantined legacy Pingora service wrapper source; not compiled by supported profiles.
-src/udp_proxy.rs	Quarantined legacy Pingora service wrapper source; not compiled by supported profiles.
-src/upstream_tls.rs	Quarantined legacy Pingora upstream TLS material adapter source; not compiled by supported profiles.
-src/web.rs	Quarantined legacy Pingora session adapter source; not compiled by supported profiles.

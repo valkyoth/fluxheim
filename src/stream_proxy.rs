@@ -6,13 +6,6 @@ use std::sync::atomic::AtomicUsize;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-#[cfg(unix)]
-#[cfg(any())]
-use pingora::server::ListenFds;
-#[cfg(any())]
-use pingora::server::ShutdownWatch;
-#[cfg(any())]
-use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -210,38 +203,6 @@ impl FluxBackgroundTask for StreamProxyTask {
             task.abort();
             let _ = task.await;
         }
-    }
-}
-
-#[async_trait]
-#[cfg(any())]
-impl ServiceWithDependents for StreamProxyService {
-    async fn start_service(
-        &mut self,
-        #[cfg(unix)] _fds: Option<ListenFds>,
-        shutdown: ShutdownWatch,
-        _listeners_per_fd: usize,
-        ready_notifier: ServiceReadyNotifier,
-    ) {
-        let task = StreamProxyTask {
-            listen: self.listen.clone(),
-            app: self.app.clone(),
-            downstream_proxy_protocol: self.downstream_proxy_protocol,
-            trusted_sources: self.trusted_sources.clone(),
-        };
-        task.start(
-            fluxheim_runtime::FluxShutdown::new(shutdown),
-            fluxheim_runtime::FluxBackgroundReady::new(move || ready_notifier.notify_ready()),
-        )
-        .await;
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn threads(&self) -> Option<usize> {
-        Some(1)
     }
 }
 
