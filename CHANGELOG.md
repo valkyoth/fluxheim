@@ -74,6 +74,9 @@ behavior when the change improves security or project direction.
   `storage_bin_alloc` module while re-exporting the existing public API.
 - Split storage-bin layout, manifest, and object-location validation into a
   focused manifest module while keeping the `storage_bin` public exports stable.
+- Split storage-bin symlink-safe filesystem helpers into a focused private
+  module, bringing `fluxheim-cache/src/storage_bin.rs` below the line-limit
+  target.
 
 ## 1.6.36 - 2026-06-30
 
