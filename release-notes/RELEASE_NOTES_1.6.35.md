@@ -32,6 +32,9 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
   migration so both cache code paths use `sanitization::SecretString`.
 - Move admin bearer-token digest clearing from the `zeroize` derive path to an
   explicit `sanitization::SecureSanitize` drop implementation.
+- Update the release checklist to prefer `sanitization::ct` for future
+  constant-time secret comparisons, and drop an unused `zeroize` derive feature
+  from the load-balancer crate.
 - Fix the release version-bump helper so package versions such as `1.6.35` are
   not interpreted as regex backreferences during automated metadata updates.
 - Keep dependency, metadata, container, RPM, and smoke-test gates as blocking

@@ -288,7 +288,7 @@ scripts/smoke_1_0_core.sh
 - Secret handling policy. Admin bearer tokens are read into zeroing buffers,
   hashed, and compared through a vetted constant-time equality primitive.
   Keep new long-lived credentials in `sanitization` secret containers or
-  existing audited `zeroize`/`ZeroizeOnDrop` types, and use `subtle` for any
+  existing audited zeroing buffer types, and use `sanitization::ct` for any
   equality check involving authentication tokens, signing secrets, or derived
   verifiers. Disk cache encryption keys and OpenBao tokens are long-lived
   credentials and must follow this policy. Do not classify normal cache object

@@ -39,7 +39,7 @@ tokio = { version = "1.52.3", default-features = false, features = ["io-util", "
 tokio-openssl = { version = "0.6.5", optional = true }
 tokio-rustls = { version = "0.26.4", optional = true }
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"] }
-zeroize = { version = "1.8.2", features = ["derive"] }
+zeroize = "1.8.2"
 
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }

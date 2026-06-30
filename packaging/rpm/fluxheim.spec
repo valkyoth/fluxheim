@@ -177,6 +177,9 @@ fi
   migration.
 - Move admin bearer-token digest clearing onto an explicit
   sanitization::SecureSanitize drop implementation.
+- Update release guidance to prefer sanitization::ct for constant-time secret
+  comparisons and remove an unused zeroize derive feature from the
+  load-balancer crate.
 - Keep RPM, container, dependency-policy, native-runtime, and smoke-test gates
   as blocking evidence during stabilization.
 

@@ -33,6 +33,9 @@ behavior when the change improves security or project direction.
   migration.
 - Move admin bearer-token digest clearing from `ZeroizeOnDrop` to an explicit
   `sanitization::SecureSanitize` drop implementation.
+- Update the release checklist to prefer `sanitization::ct` for constant-time
+  secret comparisons and remove an unused `zeroize` derive feature from the
+  load-balancer crate.
 
 ## 1.6.34 - 2026-06-29
 
