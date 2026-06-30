@@ -7,7 +7,16 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.6.36 - Unreleased
+## 1.6.37 - Unreleased
+
+### Changed
+
+- Start the final pre-Wasm crate-boundary cleanup release with release metadata
+  bumped through the workspace and RPM spec.
+- Prepare ACME, observability, header-policy, TLS helper, native proxy, and CLI
+  boundaries for smaller crate-owned APIs while keeping runtime behavior stable.
+
+## 1.6.36 - 2026-06-30
 
 ### Changed
 

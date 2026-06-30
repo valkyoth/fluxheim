@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-headers"
-version = "1.6.36"
+version = "1.6.37"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
