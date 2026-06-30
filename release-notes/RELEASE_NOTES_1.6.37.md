@@ -75,6 +75,9 @@ is clean.
 - Split storage-bin symlink-safe filesystem helpers into a focused private
   module, bringing `fluxheim-cache/src/storage_bin.rs` below the line-limit
   target.
+- Split cache admin math, warm summaries, object-lookup summaries, and tests
+  out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
+  line-limit target.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

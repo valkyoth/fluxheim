@@ -5,6 +5,7 @@
 )]
 
 pub mod api;
+mod api_summary;
 pub mod headers;
 pub mod metrics;
 pub mod object;
@@ -18,6 +19,8 @@ mod storage_bin_fs;
 mod storage_bin_manifest;
 pub mod tags;
 
+#[cfg(test)]
+mod api_tests;
 #[cfg(test)]
 mod object_tests;
 #[cfg(test)]

@@ -41,7 +41,6 @@ documents why the exception is temporary and how it will be removed.
 | `crates/fluxheim-config/src/config_stream.rs` | 947 | Stream proxy config and TLS validation. | Split with stream runtime cutover. |
 | `crates/fluxheim-load-balancer/src/backend.rs` | 848 | Backend snapshots and runtime mutation surface. | Split backend set, health snapshot, and mutation helpers. |
 | `crates/fluxheim-load-balancer/src/discovery.rs` | 876 | File/DNS/HTTP discovery and validation. | Split discovery backends. |
-| `crates/fluxheim-cache/src/api.rs` | 819 | Cache admin/status DTOs. | Split status, lookup, purge, and preview DTOs. |
 | `crates/fluxheim-config/src/reload.rs` | 809 | Reload classification and diff behavior. | Move snapshot/reload-safe classification into dedicated modules. |
 | `crates/fluxheim-php-fpm/src/lib.rs` | 778 | PHP-FPM crate root still holds several pure domains. | Split params, response, retry, and managed runtime helpers. |
 | `crates/fluxheim-config/src/config_admin.rs` | 755 | Admin config and validation. | Split ops socket, snapshots, auth, and status config. |

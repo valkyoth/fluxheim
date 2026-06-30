@@ -77,6 +77,9 @@ behavior when the change improves security or project direction.
 - Split storage-bin symlink-safe filesystem helpers into a focused private
   module, bringing `fluxheim-cache/src/storage_bin.rs` below the line-limit
   target.
+- Split cache admin math, warm summaries, object-lookup summaries, and tests
+  out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
+  line-limit target.
 
 ## 1.6.36 - 2026-06-30
 
