@@ -2947,43 +2947,74 @@ available for the stabilization/security-only follow-up.
     `scripts/validate-modularity-policy.sh check`, release containers, RPM,
     and representative smoke tests as blocking evidence for the cleanup.
 
-  Crate-boundary follow-up for this cleanup:
+- `v1.6.37`: final pre-Wasm crate-boundary cleanup release. Use this release to
+  finish the obvious post-Pingora crate moves that make future work easier,
+  while keeping runtime behavior stable and avoiding a giant `1.6.36` release.
+  New substantial code after this line should default to a focused workspace
+  crate or an existing domain crate, with the root `fluxheim` crate acting as
+  binary/orchestration glue.
 
-  - `fluxheim-acme` is now a good extraction candidate. The root `src/acme.rs`
-    and `src/acme_companion.rs` still hold account/order/renewal/storage logic
-    plus the companion binary wiring, while TLS certificate loading and native
-    listener planning already live in `fluxheim-tls`/`fluxheim-server`. Split
-    ACME as a domain crate with typed renewal/install/reload APIs, and keep the
-    root binary responsible only for CLI/runtime wiring.
-  - `fluxheim-proxy` is possible, but should not be a single mechanical move.
-    Native HTTP proxy logic currently spans `fluxheim-server` routing,
-    upstream clients, cache adapter, PHP/static route adapters, WebSocket,
-    HTTP/2, and admin-visible runtime handles. First extract stable DTOs and
-    policy/result types from the shim; then move route proxy/upstream-client
-    pieces behind a `fluxheim-proxy` crate only after tests prove no circular
-    dependency back to `fluxheim-server`, `fluxheim-cache`, or root admin code.
-  - `fluxheim-admin` remains later than ACME/proxy DTO cleanup. `src/admin.rs`
-    is large, but it depends on nearly every domain. Move admin only after
-    cache, ACME, load-balancer, metrics, and runtime crates expose stable
-    request/result APIs.
-  - Smaller realistic cleanup candidates are root `metrics` into
-    `fluxheim-observability`, root `headers` leftovers into
-    `fluxheim-headers`, and CLI subcommands into smaller root modules. Do
-    these only where they reduce real coupling or remove dead compatibility
-    imports; do not create tiny crates merely to move lines around.
+  Primary extraction targets:
 
-  Stretch outcomes, only if the required cleanup is already green:
+  - Start `fluxheim-acme` as a workspace crate. The root `src/acme.rs` and
+    `src/acme_companion.rs` still hold account/order/renewal/storage logic plus
+    companion binary wiring, while TLS certificate loading and native listener
+    planning already live in `fluxheim-tls`/`fluxheim-server`. Split ACME as a
+    domain crate with typed account, order, storage, renewal, install, and
+    reload APIs. Keep `src/bin/fluxheim-acme.rs`, CLI commands, and runtime
+    orchestration as thin root wiring.
+  - Move observability helpers still living in root `metrics`, `metrics_otlp`,
+    `otel_otlp`, `otlp_http`, and `trace_context` into
+    `fluxheim-observability` where this does not change exported metric names,
+    log schemas, trace context behavior, or CodeQL path-safety annotations. The
+    root modules should remain only as registry/exporter/runtime adapters.
+  - Move remaining root header-policy helpers into `fluxheim-headers` without
+    changing privacy-mode gates, trusted-proxy semantics, hop-by-hop stripping,
+    or forwarding-header behavior. Header security tests must move with the
+    logic.
+  - Continue reducing `src/native_proxy.rs` and root cache/admin DTO shims by
+    moving stable request/result/policy types into `fluxheim-server`,
+    `fluxheim-cache`, `fluxheim-load-balancer`, or `fluxheim-headers`. Delete
+    root compatibility wrappers once callers use the owning crates directly.
+  - Review `src/tls.rs`, `src/upstream_tls.rs`, and `src/stream_tls.rs` for
+    small remaining TLS helper moves into `fluxheim-tls` or `fluxheim-stream`.
+    Do this only when dependency direction stays domain-crate-only and the root
+    runtime remains the orchestrator.
+  - Split obvious CLI/config-tester subcommand helpers into smaller root modules
+    when it reduces coupling for release/testing workflows. Do not create a
+    separate CLI crate unless the dependency graph is clean and the binary
+    wiring stays straightforward.
 
-  - Start `fluxheim-acme` as a workspace crate with account/order/storage
-    primitives and keep root `fluxheim-acme` binary code as thin command wiring.
-  - Move observability helpers still living in root `metrics` into
-    `fluxheim-observability` where this does not change exported metrics names
-    or CodeQL path-safety annotations.
-  - Move any remaining root header-policy helpers into `fluxheim-headers`
-    without changing privacy-mode gates or trusted-proxy semantics.
-  - Split obvious CLI subcommand helpers into smaller root modules when that
-    reduces coupling for release/testing workflows; do not block the release on
-    full CLI extraction.
+  Deliberate deferrals:
+
+  - Do not attempt a single mechanical `fluxheim-proxy` extraction. Native HTTP
+    proxy logic still spans `fluxheim-server` routing, upstream clients, cache,
+    PHP/static route adapters, WebSocket, HTTP/2, and admin-visible runtime
+    handles. Extract stable DTOs and policy/result types first; move route
+    proxy/upstream-client pieces behind a future `fluxheim-proxy` crate only
+    after tests prove no circular dependency back to `fluxheim-server`,
+    `fluxheim-cache`, or root admin code.
+  - Do not move `src/admin.rs` into `fluxheim-admin` yet unless the dependency
+    graph has clearly inverted. Admin depends on nearly every domain; it should
+    move only after cache, ACME, load-balancer, metrics, TLS, runtime, and
+    snapshot crates expose stable request/result APIs.
+  - Do not create tiny crates merely to move lines around. Prefer stronger
+    existing domain crates and smaller root modules when the extraction does
+    not reduce coupling or review risk.
+
+  Required evidence:
+
+  - `scripts/validate-modularity-policy.sh check` remains green or any new
+    exception has a documented split target.
+  - `cargo test --locked --workspace` and focused crate tests cover every moved
+    policy or DTO boundary.
+  - Release metadata, RPM, container, native-runtime, Pingora dependency, and
+    Pingora boundary gates remain green.
+  - Existing smoke tests for ACME/TLS planning, observability, headers,
+    cache/admin status, and native proxy behavior still pass without config
+    changes.
+  - The release notes explicitly list moved crates/modules so reviewers and
+    pentest can focus on dependency-boundary and behavior-preservation checks.
 
 Stable exit criteria:
 

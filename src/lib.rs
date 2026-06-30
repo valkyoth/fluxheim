@@ -198,16 +198,9 @@ pub mod tls;
 pub mod trace_context;
 #[cfg(feature = "udp-proxy")]
 mod udp_proxy;
-#[cfg(any(
-    all(
-        feature = "stream-proxy",
-        any(feature = "tls-rustls-backend", feature = "tls-openssl")
-    ),
-    all(
-        feature = "proxy",
-        any(),
-        any(feature = "tls-rustls-backend", feature = "tls-openssl")
-    )
+#[cfg(all(
+    feature = "stream-proxy",
+    any(feature = "tls-rustls-backend", feature = "tls-openssl")
 ))]
 mod upstream_tls;
 #[cfg(feature = "web")]
