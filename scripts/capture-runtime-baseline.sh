@@ -100,8 +100,9 @@ done
 } >"$out_dir/pingora-dependency-surface.tsv"
 
 if [ "$mode" = "release" ] || [ "${FLUXHEIM_RUNTIME_BASELINE_BUILD:-0}" = "1" ]; then
-    echo "runtime baseline: building default release binary"
-    cargo build --release --locked --bin fluxheim
+    runtime_baseline_features="${FLUXHEIM_RUNTIME_BASELINE_FEATURES:-profile-load-balancer}"
+    echo "runtime baseline: building $runtime_baseline_features release binary"
+    cargo build --release --locked --no-default-features --features "$runtime_baseline_features" --bin fluxheim
 
     binary="target/release/fluxheim"
     if [ ! -x "$binary" ]; then
@@ -112,7 +113,7 @@ if [ "$mode" = "release" ] || [ "${FLUXHEIM_RUNTIME_BASELINE_BUILD:-0}" = "1" ];
     {
         printf 'profile\tpath\tbytes\n'
         bytes="$(wc -c <"$binary" | tr -d ' ')"
-        printf 'default\t%s\t%s\n' "$binary" "$bytes"
+        printf '%s\t%s\t%s\n' "$runtime_baseline_features" "$binary" "$bytes"
     } >"$out_dir/binary-size.tsv"
 
     if [ "${FLUXHEIM_RUNTIME_BASELINE_PERFORMANCE:-1}" = "1" ]; then

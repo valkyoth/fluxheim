@@ -45,6 +45,8 @@ behavior when the change improves security or project direction.
   without expected identity or authorization headers.
 - Clear the admin token digest and stored token length through
   `sanitization::SecureSanitize` during drop.
+- Align runtime performance baseline capture with its load-balancer fixture by
+  building the `profile-load-balancer` release profile by default.
 
 ## 1.6.34 - 2026-06-29
 

@@ -369,6 +369,7 @@ This is a lightweight local baseline, not a full load test. Compare future
 
 Samples: $sample_count
 Keepalive requests: $keepalive_count
+Release features: ${FLUXHEIM_RUNTIME_BASELINE_FEATURES:-profile-load-balancer}
 Temporary config: $tmp_dir/fluxheim.toml
 EOF
 
