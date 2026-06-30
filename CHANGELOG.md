@@ -83,6 +83,9 @@ behavior when the change improves security or project direction.
 - Split cache header Cache-Control and Pragma directive parsing into a focused
   private module as the first step toward request/response header policy
   modules.
+- Split load-balancer selected-upstream and queue/persistence outcome DTOs out
+  of `fluxheim-load-balancer/src/api.rs`, leaving the load-balancer API DTO
+  module below the line-limit target.
 
 ## 1.6.36 - 2026-06-30
 

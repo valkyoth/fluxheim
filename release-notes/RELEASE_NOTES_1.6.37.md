@@ -81,6 +81,9 @@ is clean.
 - Split cache header Cache-Control and Pragma directive parsing into a focused
   private module as the first step toward request/response header policy
   modules.
+- Split load-balancer selected-upstream and queue/persistence outcome DTOs out
+  of `fluxheim-load-balancer/src/api.rs`, leaving the load-balancer API DTO
+  module below the line-limit target.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
