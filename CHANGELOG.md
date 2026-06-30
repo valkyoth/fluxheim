@@ -60,6 +60,8 @@ behavior when the change improves security or project direction.
   line-limit target while preserving public exports.
 - Split snapshot runtime validation state from snapshot-store persistence and
   turn `fluxheim-snapshot/src/lib.rs` into a small crate re-export surface.
+- Split snapshot symlink-safe filesystem helpers and atomic write logic out of
+  `fluxheim-snapshot/src/store.rs` into a focused `store_fs` module.
 
 ## 1.6.36 - 2026-06-30
 

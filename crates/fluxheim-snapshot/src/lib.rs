@@ -6,6 +6,7 @@
 
 mod state;
 mod store;
+mod store_fs;
 
 pub use state::{
     PendingValidation, SnapshotApplyMode, SnapshotHealthSignalOutcome, SnapshotRollbackReason,

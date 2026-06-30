@@ -58,6 +58,8 @@ is clean.
   line-limit target while preserving public exports.
 - Split snapshot runtime validation state from snapshot-store persistence and
   turn `fluxheim-snapshot/src/lib.rs` into a small crate re-export surface.
+- Split snapshot symlink-safe filesystem helpers and atomic write logic out of
+  `fluxheim-snapshot/src/store.rs` into a focused `store_fs` module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
