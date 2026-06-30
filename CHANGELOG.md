@@ -55,6 +55,9 @@ behavior when the change improves security or project direction.
 - Move `fluxheim-web` crate tests out of `src/lib.rs` so the production static
   response and directory-listing implementation stays below the line-limit
   target.
+- Split stream upstream selection and stream tests out of
+  `fluxheim-stream/src/lib.rs`, leaving the stream crate root below the
+  line-limit target while preserving public exports.
 
 ## 1.6.36 - 2026-06-30
 

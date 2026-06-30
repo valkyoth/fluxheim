@@ -53,6 +53,9 @@ is clean.
 - Move `fluxheim-web` crate tests out of `src/lib.rs` so the production static
   response and directory-listing implementation stays below the line-limit
   target.
+- Split stream upstream selection and stream tests out of
+  `fluxheim-stream/src/lib.rs`, leaving the stream crate root below the
+  line-limit target while preserving public exports.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
