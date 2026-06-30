@@ -6062,8 +6062,8 @@ mod tests {
         NATIVE_PEER_FILL_MARKER_HEADER, NATIVE_PEER_FILL_NONCE_HEADER,
         NATIVE_PEER_FILL_REQUEST_SIGNATURE_HEADER, NATIVE_PEER_FILL_RESPONSE_SIGNATURE_HEADER,
         NativePeerFillAuth, native_cache_expiry_times, native_peer_fill_fetch,
-        native_peer_fill_request_signature, native_peer_fill_request_signature_matches,
-        native_peer_fill_response_signature_matches,
+        native_peer_fill_nonce, native_peer_fill_request_signature,
+        native_peer_fill_request_signature_matches, native_peer_fill_response_signature_matches,
         native_peer_fill_response_without_cache_status, native_peer_fill_sign_response,
         native_request_is_peer_fill, native_response_single_header_value,
         register_native_disk_cache_purge_handle, strip_native_peer_fill_header,
@@ -6176,7 +6176,7 @@ mod tests {
                 b"0123456789abcdef0123456789abcdef".to_vec(),
             )),
         };
-        let nonce = "peer-fill-test-nonce";
+        let nonce = native_peer_fill_nonce();
         let mut request = NativeHttp1Request {
             method: "GET".to_owned(),
             peer_addr: None,
@@ -6191,13 +6191,13 @@ mod tests {
                 ("host".to_owned(), "cache.test".to_owned()),
                 (NATIVE_PEER_FILL_MARKER_HEADER.to_owned(), "1".to_owned()),
                 ("cache-control".to_owned(), "only-if-cached".to_owned()),
-                (NATIVE_PEER_FILL_NONCE_HEADER.to_owned(), nonce.to_owned()),
+                (NATIVE_PEER_FILL_NONCE_HEADER.to_owned(), nonce.clone()),
             ],
             body: Zeroizing::new(Vec::new()),
             trailers: Vec::new(),
         };
         let signature =
-            native_peer_fill_request_signature(&auth, &request.target, &request.headers, nonce);
+            native_peer_fill_request_signature(&auth, &request.target, &request.headers, &nonce);
         request.headers.push((
             NATIVE_PEER_FILL_REQUEST_SIGNATURE_HEADER.to_owned(),
             signature,
