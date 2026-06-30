@@ -20,6 +20,8 @@ is clean.
   `fluxheim-common` path-safety helper directly.
 - Remove the root test-support shim; root tests now import shared helpers from
   `fluxheim-common` directly.
+- Remove the root cache-header shim; static response planning now calls
+  `fluxheim-cache` header helpers directly.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

@@ -408,7 +408,7 @@ pub fn plan_static_response(
             if_unmodified_since: conditions.if_unmodified_since,
             if_none_match: conditions.if_none_match,
             if_modified_since: conditions.if_modified_since,
-            cache_refresh_forced: crate::cache_headers::request_forces_cache_refresh(
+            cache_refresh_forced: fluxheim_cache::headers::request_forces_cache_refresh(
                 conditions.cache_control,
                 conditions.pragma,
             ),

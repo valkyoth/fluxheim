@@ -22,6 +22,8 @@ behavior when the change improves security or project direction.
   `fluxheim-common` path-safety helper directly.
 - Remove the root test-support shim; root tests now import shared helpers from
   `fluxheim-common` directly.
+- Remove the root cache-header shim; static response planning now calls
+  `fluxheim-cache` header helpers directly.
 
 ## 1.6.36 - 2026-06-30
 

@@ -17,7 +17,6 @@ mod cache_api;
 pub mod cache {
     pub use crate::cache_api::*;
 }
-pub mod cache_headers;
 pub mod cli;
 pub mod config {
     #[allow(unused_imports)]
