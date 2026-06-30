@@ -70,10 +70,7 @@ async fn h2_upstream(requests: usize) -> (std::net::SocketAddr, Arc<AtomicUsize>
                 request.uri().path_and_query().unwrap().as_str(),
                 "/h2-origin"
             );
-            assert_eq!(
-                request.uri().authority().unwrap().as_str(),
-                addr.to_string()
-            );
+            assert_eq!(request.uri().authority().unwrap().as_str(), "proxy.test");
             assert_eq!(request.headers().get("x-test").unwrap(), "h2");
             assert!(request.headers().get("host").is_none());
             assert!(request.headers().get("connection").is_none());
