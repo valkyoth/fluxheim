@@ -56,6 +56,8 @@ is clean.
 - Split stream upstream selection and stream tests out of
   `fluxheim-stream/src/lib.rs`, leaving the stream crate root below the
   line-limit target while preserving public exports.
+- Split snapshot runtime validation state from snapshot-store persistence and
+  turn `fluxheim-snapshot/src/lib.rs` into a small crate re-export surface.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

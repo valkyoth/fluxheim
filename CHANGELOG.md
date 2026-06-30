@@ -58,6 +58,8 @@ behavior when the change improves security or project direction.
 - Split stream upstream selection and stream tests out of
   `fluxheim-stream/src/lib.rs`, leaving the stream crate root below the
   line-limit target while preserving public exports.
+- Split snapshot runtime validation state from snapshot-store persistence and
+  turn `fluxheim-snapshot/src/lib.rs` into a small crate re-export surface.
 
 ## 1.6.36 - 2026-06-30
 

@@ -24,10 +24,8 @@ documents why the exception is temporary and how it will be removed.
 | `src/native_proxy.rs` | 1404 | Native runtime admin/cache/load-balancer boundary used by root admin, CLI, metrics, and reload code after the Pingora adapter stopped compiling in normal builds. | Split admin handle, cache runtime handle, load-balancer admin handle, and live-config reload glue into focused native modules during the `1.6.36` structural cleanup. |
 | `crates/fluxheim-config/src/config.rs` | 2514 | Config root, validation helpers, and shared parsing glue. | Split by shared config primitives. |
 | `crates/fluxheim-config/src/config_cache.rs` | 2495 | Cache config, validation, and merge behavior. | Split cache config primitives when `fluxheim-cache` owns more runtime. |
-| `crates/fluxheim-headers/src/lib.rs` | 505 | Header-policy helper crate root temporarily groups forwarded-header synthesis, trusted-chain parsing, hop-by-hop stripping, response security headers, and tests while native and compatibility callers converge on the shared API. | Split forwarded-chain parsing, request forwarding headers, response security headers, and tests before final native runtime cutover. |
 | `src/runtime.rs` | 2013 | Pingora server/bootstrap/listener orchestration; TLS listener planning and server process/listener inventory now come from focused crates while this file remains the compatibility adapter. | Continue replacing through `fluxheim-runtime`/`fluxheim-server` during the remaining `1.6` runtime cutover. |
 | `src/tls.rs` | 1456 | Root TLS storage, ACME path resolution, and compatibility glue after `fluxheim-tls` extracted listener planning, provider, ALPN, cipher, and SNI selector policy. | Move remaining ACME/storage helpers to focused crates after native listener cutover. |
-| `crates/fluxheim-runtime/src/lib.rs` | 619 | Native background supervisor, shutdown view, readiness callback, task spec, policy facts, and tests are grouped during the `1.6.21` supervisor proof. | Split supervisor/watchdog code, shutdown/readiness primitives, policy facts, and tests into focused runtime modules before the `1.6.24` Pingora-free proof. |
 | `crates/fluxheim-config/src/config_proxy.rs` | 1807 | Proxy config and validation. | Split proxy/load-balancer subdomains as native proxy APIs land. |
 | `crates/fluxheim-config/src/config_load_balance.rs` | 1796 | Load-balancer config and validation. | Split with `fluxheim-load-balancer` independence in `1.6.1`. |
 | `crates/fluxheim-load-balancer/src/health.rs` | 1425 | Load-balancer health-check orchestration plus remaining HTTP response validation and shared health-weight validators after the 1.6.18 HTTP/1, gRPC, Redis, MySQL, PostgreSQL, exec, and TCP/TLS transport helper splits. | Continue splitting shared HTTP validation and health-weight helpers into focused modules during the remaining load-balancer/runtime cutover. |
@@ -35,12 +33,10 @@ documents why the exception is temporary and how it will be removed.
 | `crates/fluxheim-config/src/config_php.rs` | 1641 | PHP-FPM config and validation. | Split managed/runtime/path validation helpers. |
 | `src/web.rs` | 1507 | Root static web adapter over `fluxheim-web`. | Reduce to adapter glue after native HTTP runtime lands. |
 | `crates/fluxheim-cache/src/headers.rs` | 1482 | Cache directive parsing and policy helpers. | Split request/response directive modules. |
-| `crates/fluxheim-snapshot/src/lib.rs` | 1570 | Snapshot store implementation plus self-healing snapshot runtime state in crate root. | Split into store, id, metadata, runtime state, rollback, and fs modules. |
-| `crates/fluxheim-observability/src/lib.rs` | 1139 | Observability crate root still hosts multiple exporters/helpers. | Split metrics, tracing, OTLP, and access-log modules. |
+| `crates/fluxheim-snapshot/src/store.rs` | 1387 | Snapshot store persistence still groups layout, rollback, atomic writes, metadata, filesystem safety, and store tests after the `1.6.37` crate-root/runtime-state split. | Split snapshot metadata/id validation, atomic file writes, filesystem safety, and store tests into focused modules. |
 | `crates/fluxheim-config/src/config_header.rs` | 1060 | Header policy config and validation. | Move with header-policy crate work. |
 | `crates/fluxheim-load-balancer/src/selection.rs` | 1050 | Selection algorithms grouped in one reviewed module. | Keep grouped until algorithm API stabilizes, then split tests/helpers. |
 | `src/udp_proxy.rs` | 1038 | UDP beta runtime. | Split before beta promotion. |
-| `crates/fluxheim-stream/src/lib.rs` | 948 | Stream upstream selection, source policy, copy-loop limits, DNS guards, and PROXY protocol helpers grouped during the 1.6.3 extraction. | Split selector, source policy, copy loop, and PROXY protocol modules after the stream crate boundary stabilizes. |
 | `crates/fluxheim-load-balancer/src/policy.rs` | 977 | Runtime backend policy overrides and keys. | Split keys, snapshots, and mutation policy. |
 | `crates/fluxheim-config/src/config_stream.rs` | 947 | Stream proxy config and TLS validation. | Split with stream runtime cutover. |
 | `crates/fluxheim-load-balancer/src/backend.rs` | 848 | Backend snapshots and runtime mutation surface. | Split backend set, health snapshot, and mutation helpers. |
@@ -52,7 +48,6 @@ documents why the exception is temporary and how it will be removed.
 | `crates/fluxheim-load-balancer/src/persistence.rs` | 769 | Persistence, cookies, constant-time managed-cookie checks, and request-view helpers. | Split cookie, header, source-IP, and state table helpers. |
 | `crates/fluxheim-config/src/config_acme.rs` | 719 | ACME config and validation. | Move with `fluxheim-acme`. |
 | `src/config_tester.rs` | 716 | Config tester CLI and profile logic. | Split profile checks from CLI output. |
-| `crates/fluxheim-web/src/lib.rs` | 708 | Static web crate root. | Split range, directory listing, path safety, and response planning. |
 | `crates/fluxheim-config/src/config_tls.rs` | 677 | TLS config and validation. | Split downstream/upstream TLS config helpers. |
 | `src/stream_tls.rs` | 657 | Stream upstream TLS adapter. | Move with stream runtime cutover. |
 | `crates/fluxheim-config/src/config_route.rs` | 641 | Route config and validation. | Split redirect, methods, cache, and path policy helpers. |
