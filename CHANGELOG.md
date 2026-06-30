@@ -70,6 +70,8 @@ behavior when the change improves security or project direction.
   leaving the production disk object helpers below the line-limit target.
 - Move `fluxheim-cache` storage-bin tests out of `src/storage_bin.rs` as the
   first step toward splitting manifest/layout, allocator, and index helpers.
+- Split the storage-bin free-range allocator into a focused
+  `storage_bin_alloc` module while re-exporting the existing public API.
 
 ## 1.6.36 - 2026-06-30
 

@@ -68,6 +68,8 @@ is clean.
   leaving the production disk object helpers below the line-limit target.
 - Move `fluxheim-cache` storage-bin tests out of `src/storage_bin.rs` as the
   first step toward splitting manifest/layout, allocator, and index helpers.
+- Split the storage-bin free-range allocator into a focused
+  `storage_bin_alloc` module while re-exporting the existing public API.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
