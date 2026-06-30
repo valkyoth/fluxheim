@@ -131,8 +131,8 @@ impl AdminToken {
 
 impl Drop for AdminToken {
     fn drop(&mut self) {
-        self.len = 0;
         self.digest.secure_sanitize();
+        self.len.secure_sanitize();
     }
 }
 

@@ -39,6 +39,11 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
   OpenSSL backends to `sanitization::SecretVec`.
 - Move stream-proxy upstream TLS client private-key PEM buffers for both rustls
   and OpenSSL backends to `sanitization::SecretVec`.
+- Fail closed if native `auth_request` response-header application cannot
+  access its secret container, preventing requests from reaching the upstream
+  with silently dropped identity or authorization headers.
+- Clear both the admin token digest and stored token length through
+  `sanitization::SecureSanitize` during drop.
 - Fix the release version-bump helper so package versions such as `1.6.35` are
   not interpreted as regex backreferences during automated metadata updates.
 - Keep dependency, metadata, container, RPM, and smoke-test gates as blocking

@@ -2875,7 +2875,20 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
             if let Some(auth_request) = &self.auth_request {
                 match auth_request.authorize(&request).await {
                     Ok(NativeAuthRequestDecision::Allow { headers }) => {
-                        apply_native_auth_request_headers(&mut request, &headers);
+                        if let Err(error) =
+                            apply_native_auth_request_headers(&mut request, &headers)
+                        {
+                            log::debug!(
+                                target: "fluxheim::auth_request",
+                                "native auth_request failed: {error}"
+                            );
+                            return NativeHttp1Response::new(
+                                502,
+                                "Bad Gateway",
+                                b"auth_request failed\n".as_slice(),
+                            )
+                            .close_connection();
+                        }
                     }
                     Ok(NativeAuthRequestDecision::Deny { status, body }) => {
                         return NativeHttp1Response::new(
@@ -4357,17 +4370,19 @@ fn native_auth_context_header_value(name: &str, request: &NativeHttp1Request) ->
 fn apply_native_auth_request_headers(
     request: &mut NativeHttp1Request,
     headers: &[(String, SecretString)],
-) {
+) -> std::io::Result<()> {
     for (name, value) in headers {
-        if let Err(error) =
-            value.try_with_secret(|value| native_request_replace_header(request, name, value))
-        {
-            log::warn!(
+        value
+            .try_with_secret(|value| native_request_replace_header(request, name, value))
+            .map_err(|error| {
+                log::error!(
                 target: "fluxheim::auth_request",
-                "skipping invalid UTF-8 auth_request response header value: {error}"
+                "auth_request response header application failed; internal secret lock poisoned, terminating request: {error}"
             );
-        }
+                std::io::Error::other(error.to_string())
+            })?;
     }
+    Ok(())
 }
 
 #[cfg(feature = "auth-request")]
@@ -5683,6 +5698,8 @@ fn native_http1_static_failover_method_allowed(method: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "auth-request")]
+    use super::apply_native_auth_request_headers;
     use super::{
         NATIVE_PEER_FILL_MARKER_HEADER, native_cache_expiry_times, native_request_is_peer_fill,
         register_native_disk_cache_purge_handle, strip_native_peer_fill_header,
@@ -5696,6 +5713,43 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
     use zeroize::Zeroizing;
+
+    #[cfg(feature = "auth-request")]
+    #[test]
+    fn native_auth_request_headers_replace_existing_values() {
+        let mut request = NativeHttp1Request {
+            method: "GET".to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: false,
+            tls_identity: None,
+            geo_context: None,
+            target: "/asset.png".to_owned(),
+            version: Http1Version::Http11,
+            headers: vec![
+                ("host".to_owned(), "auth.test".to_owned()),
+                ("x-user-id".to_owned(), "attacker".to_owned()),
+            ],
+            body: Zeroizing::new(Vec::new()),
+            trailers: Vec::new(),
+        };
+        let headers = vec![(
+            "x-user-id".to_owned(),
+            sanitization::SecretString::from_secret_str("user-123"),
+        )];
+
+        assert!(apply_native_auth_request_headers(&mut request, &headers).is_ok());
+
+        assert_eq!(
+            request
+                .headers
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("x-user-id"))
+                .collect::<Vec<_>>(),
+            vec![&("x-user-id".to_owned(), "user-123".to_owned())]
+        );
+    }
 
     #[test]
     fn native_cache_expiry_times_rejects_unrepresentable_ttl() {

@@ -40,6 +40,11 @@ behavior when the change improves security or project direction.
   OpenSSL backends to `sanitization::SecretVec`.
 - Move stream-proxy upstream TLS client private-key PEM buffers for rustls and
   OpenSSL backends to `sanitization::SecretVec`.
+- Fail closed if native `auth_request` response-header application cannot
+  access its secret container, preventing upstream requests from continuing
+  without expected identity or authorization headers.
+- Clear the admin token digest and stored token length through
+  `sanitization::SecureSanitize` during drop.
 
 ## 1.6.34 - 2026-06-29
 
