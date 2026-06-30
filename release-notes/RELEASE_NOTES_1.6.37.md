@@ -60,6 +60,8 @@ is clean.
   turn `fluxheim-snapshot/src/lib.rs` into a small crate re-export surface.
 - Split snapshot symlink-safe filesystem helpers and atomic write logic out of
   `fluxheim-snapshot/src/store.rs` into a focused `store_fs` module.
+- Split snapshot metadata, message, and ID validation helpers out of
+  `fluxheim-snapshot/src/store.rs` into a focused metadata module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

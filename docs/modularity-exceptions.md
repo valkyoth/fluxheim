@@ -33,7 +33,7 @@ documents why the exception is temporary and how it will be removed.
 | `crates/fluxheim-config/src/config_php.rs` | 1641 | PHP-FPM config and validation. | Split managed/runtime/path validation helpers. |
 | `src/web.rs` | 1507 | Root static web adapter over `fluxheim-web`. | Reduce to adapter glue after native HTTP runtime lands. |
 | `crates/fluxheim-cache/src/headers.rs` | 1482 | Cache directive parsing and policy helpers. | Split request/response directive modules. |
-| `crates/fluxheim-snapshot/src/store.rs` | 1115 | Snapshot store persistence still groups layout, rollback, metadata, and store tests after the `1.6.37` crate-root/runtime-state/filesystem split. | Split snapshot metadata/id validation and store tests into focused modules. |
+| `crates/fluxheim-snapshot/src/store.rs` | 1059 | Snapshot store persistence still groups layout, rollback, and store tests after the `1.6.37` crate-root/runtime-state/filesystem/metadata split. | Split store tests and rollback/layout helpers into focused modules. |
 | `crates/fluxheim-config/src/config_header.rs` | 1060 | Header policy config and validation. | Move with header-policy crate work. |
 | `crates/fluxheim-load-balancer/src/selection.rs` | 1050 | Selection algorithms grouped in one reviewed module. | Keep grouped until algorithm API stabilizes, then split tests/helpers. |
 | `src/udp_proxy.rs` | 1038 | UDP beta runtime. | Split before beta promotion. |
