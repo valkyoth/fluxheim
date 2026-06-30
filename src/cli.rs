@@ -1622,7 +1622,7 @@ struct CacheKeyPreviewExpectations<'a> {
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn validate_cache_key_preview_expectations(
-    preview: &crate::proxy::CacheKeyPreview,
+    preview: &crate::cache_api::CacheKeyPreview,
     expectations: CacheKeyPreviewExpectations<'_>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if expectations.expect_eligible && !preview.eligible {
@@ -2120,7 +2120,7 @@ struct CacheLookupExpectations<'a> {
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn validate_cache_lookup_expectations(
-    lookup: &crate::proxy::CacheObjectLookup,
+    lookup: &crate::cache_api::CacheObjectLookup,
     expectations: &CacheLookupExpectations<'_>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let CacheLookupExpectations {
@@ -5503,7 +5503,7 @@ mod tests {
     #[cfg(all(feature = "cache", feature = "proxy"))]
     fn cache_lookup_with_state(
         state: crate::cache::CacheObjectFreshnessState,
-    ) -> crate::proxy::CacheObjectLookup {
+    ) -> crate::cache_api::CacheObjectLookup {
         let mut lookup = cache_lookup_without_objects();
         lookup.objects.push(crate::cache::CacheObjectMetadata {
             tier: crate::cache::CacheObjectTier::Memory,
@@ -5543,12 +5543,12 @@ mod tests {
     }
 
     #[cfg(all(feature = "cache", feature = "proxy"))]
-    fn cache_lookup_without_objects() -> crate::proxy::CacheObjectLookup {
-        crate::proxy::CacheObjectLookup {
-            preview: crate::proxy::CacheKeyPreview {
+    fn cache_lookup_without_objects() -> crate::cache_api::CacheObjectLookup {
+        crate::cache_api::CacheObjectLookup {
+            preview: crate::cache_api::CacheKeyPreview {
                 vhost: "cached".to_owned(),
                 route: Some("assets".to_owned()),
-                scope: crate::proxy::CacheKeyPreviewScope::Route,
+                scope: crate::cache_api::CacheKeyPreviewScope::Route,
                 eligible: true,
                 cache_lock_enabled: true,
                 cache_lock_wait_timeout_secs: 30,

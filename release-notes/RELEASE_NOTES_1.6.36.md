@@ -15,6 +15,9 @@ longer use.
 - Rename the temporary native proxy shim module to `native_proxy`, keeping the
   historical `crate::proxy` re-export stable while the owning crate APIs are
   split out.
+- Stop re-exporting cache admin DTOs through the native proxy compatibility
+  boundary; admin and CLI code now use the dedicated `cache_api` module
+  directly.
 - Keep normal Fluxheim builds on the Pingora-free runtime introduced in
   `1.6.34` and stabilized in `1.6.35`.
 - Keep release, dependency, native-runtime, RPM, container, and smoke gates as

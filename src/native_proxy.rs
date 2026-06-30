@@ -2,14 +2,14 @@ use std::io;
 use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "cache")]
-pub use crate::cache_api::{
-    CacheActivityResetResult, CacheActivityStats, CacheBackgroundPurgeResult,
-    CacheBulkPurgeRequest, CacheBulkPurgeResult, CacheIndexedPathPatternPurgeRequest,
-    CacheIndexedPathPrefixPurgeRequest, CacheIndexedPurgeRequest, CacheIndexedPurgeResult,
-    CacheIndexedTagPurgeRequest, CacheKeyPreview, CacheKeyPreviewScope, CacheObjectHeaderValue,
-    CacheObjectLookup, CacheObjectMetadata, CacheObjectTier, CachePurgeRequest, CachePurgeResult,
-    CacheRouteStats, CacheRuntimeStats, CacheRuntimeTotals, CacheStalePurgeRequest,
-    CacheStalePurgeResult, CacheVhostStats, DiskCacheStats, MemoryCacheStats,
+use crate::cache_api::{
+    CacheActivityResetResult, CacheActivityStats, CacheBulkPurgeRequest, CacheBulkPurgeResult,
+    CacheIndexedPathPatternPurgeRequest, CacheIndexedPathPrefixPurgeRequest,
+    CacheIndexedPurgeRequest, CacheIndexedPurgeResult, CacheIndexedTagPurgeRequest,
+    CacheKeyPreview, CacheKeyPreviewScope, CacheObjectHeaderValue, CacheObjectLookup,
+    CacheObjectMetadata, CacheObjectTier, CachePurgeRequest, CachePurgeResult, CacheRouteStats,
+    CacheRuntimeStats, CacheRuntimeTotals, CacheStalePurgeRequest, CacheStalePurgeResult,
+    CacheVhostStats, DiskCacheStats, MemoryCacheStats,
 };
 
 #[derive(Clone)]

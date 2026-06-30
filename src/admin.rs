@@ -1993,7 +1993,7 @@ impl AdminApp {
 
         match self
             .proxy
-            .purge_image_cache(crate::proxy::CachePurgeRequest {
+            .purge_image_cache(crate::cache_api::CachePurgeRequest {
                 vhost: vhost.filter(|vhost| !vhost.trim().is_empty()),
                 route: route.filter(|route| !route.trim().is_empty()),
                 host,
@@ -2086,7 +2086,7 @@ impl AdminApp {
 
         match self
             .proxy
-            .purge_image_cache_bulk(crate::proxy::CacheBulkPurgeRequest {
+            .purge_image_cache_bulk(crate::cache_api::CacheBulkPurgeRequest {
                 vhost: vhost.filter(|vhost| !vhost.trim().is_empty()),
                 route: route.filter(|route| !route.trim().is_empty()),
                 host,
@@ -2157,7 +2157,7 @@ impl AdminApp {
 
         match repeat_cache_indexed_purge(batches, || {
             self.proxy
-                .purge_indexed_image_cache(crate::proxy::CacheIndexedPurgeRequest {
+                .purge_indexed_image_cache(crate::cache_api::CacheIndexedPurgeRequest {
                     vhost,
                     route,
                     limit,
@@ -2218,7 +2218,7 @@ impl AdminApp {
 
         match repeat_cache_indexed_purge(batches, || {
             self.proxy.purge_indexed_image_cache_path_prefix(
-                crate::proxy::CacheIndexedPathPrefixPurgeRequest {
+                crate::cache_api::CacheIndexedPathPrefixPurgeRequest {
                     vhost,
                     route,
                     path_prefix,
@@ -2285,14 +2285,15 @@ impl AdminApp {
         let route = route.filter(|route| !route.trim().is_empty());
 
         match repeat_cache_indexed_purge(batches, || {
-            self.proxy
-                .purge_indexed_image_cache_tag(crate::proxy::CacheIndexedTagPurgeRequest {
+            self.proxy.purge_indexed_image_cache_tag(
+                crate::cache_api::CacheIndexedTagPurgeRequest {
                     vhost,
                     route,
                     cache_tag,
                     limit,
                     soft,
-                })
+                },
+            )
         }) {
             Ok(result) => {
                 record_cache_purge_metric(
@@ -2351,7 +2352,7 @@ impl AdminApp {
 
         match repeat_cache_stale_purge(batches, dry_run, || {
             self.proxy
-                .purge_stale_image_cache(crate::proxy::CacheStalePurgeRequest {
+                .purge_stale_image_cache(crate::cache_api::CacheStalePurgeRequest {
                     vhost,
                     route,
                     limit,
@@ -2447,7 +2448,7 @@ impl AdminApp {
 
         match repeat_cache_indexed_purge(batches, || {
             self.proxy.purge_indexed_image_cache_path_pattern(
-                crate::proxy::CacheIndexedPathPatternPurgeRequest {
+                crate::cache_api::CacheIndexedPathPatternPurgeRequest {
                     vhost,
                     route,
                     path_pattern,
@@ -3509,7 +3510,7 @@ fn cache_stale_purge_mode(dry_run: bool) -> &'static str {
 }
 
 #[cfg(feature = "cache")]
-fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Vec<Value> {
+fn cache_purge_results_json(results: &[crate::cache_api::CachePurgeResult]) -> Vec<Value> {
     results
         .iter()
         .map(|result| {
@@ -3533,7 +3534,7 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Vec<V
 }
 
 #[cfg(feature = "cache")]
-fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> Value {
+fn cache_totals_json(totals: &crate::cache_api::CacheRuntimeTotals) -> Value {
     let mut object = serde_json::Map::new();
     object.insert("vhosts".to_owned(), json!(totals.vhosts));
     object.insert("enabled_vhosts".to_owned(), json!(totals.enabled_vhosts));
@@ -3721,7 +3722,7 @@ fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> Value {
 }
 
 #[cfg(feature = "cache")]
-fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> Vec<Value> {
+fn cache_vhost_stats_json(vhosts: &[crate::cache_api::CacheVhostStats]) -> Vec<Value> {
     vhosts
         .iter()
         .map(|vhost| {
@@ -3754,7 +3755,7 @@ fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> Vec<Value
 }
 
 #[cfg(feature = "cache")]
-fn cache_route_stats_json(routes: &[crate::proxy::CacheRouteStats]) -> Vec<Value> {
+fn cache_route_stats_json(routes: &[crate::cache_api::CacheRouteStats]) -> Vec<Value> {
     routes
         .iter()
         .map(|route| {
@@ -3939,20 +3940,20 @@ fn cache_indexed_purge_json(
 
 #[cfg(feature = "cache")]
 struct CacheIndexedPurgeBatchResult {
-    result: crate::proxy::CacheIndexedPurgeResult,
+    result: crate::cache_api::CacheIndexedPurgeResult,
     batches: usize,
 }
 
 #[cfg(feature = "cache")]
 struct CacheStalePurgeBatchResult {
-    result: crate::proxy::CacheStalePurgeResult,
+    result: crate::cache_api::CacheStalePurgeResult,
     batches: usize,
     increase_limit_required: bool,
 }
 
 #[cfg(feature = "cache")]
 impl std::ops::Deref for CacheIndexedPurgeBatchResult {
-    type Target = crate::proxy::CacheIndexedPurgeResult;
+    type Target = crate::cache_api::CacheIndexedPurgeResult;
 
     fn deref(&self) -> &Self::Target {
         &self.result
@@ -3961,7 +3962,7 @@ impl std::ops::Deref for CacheIndexedPurgeBatchResult {
 
 #[cfg(feature = "cache")]
 impl std::ops::Deref for CacheStalePurgeBatchResult {
-    type Target = crate::proxy::CacheStalePurgeResult;
+    type Target = crate::cache_api::CacheStalePurgeResult;
 
     fn deref(&self) -> &Self::Target {
         &self.result
@@ -3971,9 +3972,9 @@ impl std::ops::Deref for CacheStalePurgeBatchResult {
 #[cfg(feature = "cache")]
 fn repeat_cache_indexed_purge(
     batches: usize,
-    mut purge: impl FnMut() -> std::io::Result<crate::proxy::CacheIndexedPurgeResult>,
+    mut purge: impl FnMut() -> std::io::Result<crate::cache_api::CacheIndexedPurgeResult>,
 ) -> std::io::Result<CacheIndexedPurgeBatchResult> {
-    let mut total: Option<crate::proxy::CacheIndexedPurgeResult> = None;
+    let mut total: Option<crate::cache_api::CacheIndexedPurgeResult> = None;
     let mut batches_run = 0;
     for _ in 0..batches {
         let result = purge()?;
@@ -4012,9 +4013,9 @@ fn repeat_cache_indexed_purge(
 fn repeat_cache_stale_purge(
     batches: usize,
     dry_run: bool,
-    mut purge: impl FnMut() -> std::io::Result<crate::proxy::CacheStalePurgeResult>,
+    mut purge: impl FnMut() -> std::io::Result<crate::cache_api::CacheStalePurgeResult>,
 ) -> std::io::Result<CacheStalePurgeBatchResult> {
-    let mut total: Option<crate::proxy::CacheStalePurgeResult> = None;
+    let mut total: Option<crate::cache_api::CacheStalePurgeResult> = None;
     let mut batches_run = 0;
     let mut increase_limit_required = false;
 
@@ -6586,7 +6587,7 @@ mod tests {
         let mut calls = 0;
         let result = super::repeat_cache_stale_purge(4, false, || {
             calls += 1;
-            Ok(crate::proxy::CacheStalePurgeResult {
+            Ok(crate::cache_api::CacheStalePurgeResult {
                 vhost: "cached".to_owned(),
                 route: None,
                 memory_scanned: 1,
@@ -6616,7 +6617,7 @@ mod tests {
         let mut calls = 0;
         let result = super::repeat_cache_stale_purge(4, true, || {
             calls += 1;
-            Ok(crate::proxy::CacheStalePurgeResult {
+            Ok(crate::cache_api::CacheStalePurgeResult {
                 vhost: "cached".to_owned(),
                 route: None,
                 memory_scanned: 1,

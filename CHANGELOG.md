@@ -18,6 +18,9 @@ behavior when the change improves security or project direction.
 - Rename the temporary native proxy shim module to `native_proxy`, keeping the
   historical `crate::proxy` re-export stable while the owning crate APIs are
   split out.
+- Stop re-exporting cache admin DTOs through the native proxy compatibility
+  boundary; admin and CLI code now use the dedicated `cache_api` module
+  directly.
 
 ## 1.6.35 - 2026-06-30
 

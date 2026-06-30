@@ -1181,7 +1181,7 @@ fn native_stale_disk_cache_purge_once(
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
 fn record_cache_stale_purge_metrics(
     outcome: &str,
-    result: &crate::proxy::CacheBackgroundPurgeResult,
+    result: &crate::cache_api::CacheBackgroundPurgeResult,
     duration: std::time::Duration,
 ) {
     crate::metrics::record_cache_purger_run(outcome);
