@@ -78,6 +78,9 @@ is clean.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.
+- Split cache header Cache-Control and Pragma directive parsing into a focused
+  private module as the first step toward request/response header policy
+  modules.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

@@ -7,6 +7,7 @@
 pub mod api;
 mod api_summary;
 pub mod headers;
+mod headers_directives;
 pub mod metrics;
 pub mod object;
 pub mod plan;
