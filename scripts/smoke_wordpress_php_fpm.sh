@@ -55,6 +55,24 @@ stop_server() {
     fi
 }
 
+wait_for_mariadb() {
+    container="$1"
+    for _ in $(seq 1 90); do
+        if podman exec "$container" mariadb-admin ping \
+            -h127.0.0.1 \
+            -ufluxheim \
+            -pfluxheim \
+            --silent >/dev/null 2>&1
+        then
+            return 0
+        fi
+        sleep 1
+    done
+    echo "wordpress php-fpm smoke failed: MariaDB did not become ready" >&2
+    podman logs "$container" >&2 2>/dev/null || true
+    exit 1
+}
+
 is_managed_smoke() {
     case "$1" in
         managed|managed-static|managed-dynamic|managed-ondemand|managed-respawn) return 0 ;;
@@ -260,6 +278,7 @@ EOF
         cat >> "$config" <<EOF
 mode = "external"
 tcp = "127.0.0.1:$fpm_port"
+allow_private_tcp_upstreams = true
 EOF
     fi
 
@@ -303,6 +322,7 @@ EOF
             -v "$site:$site:Z" \
             docker.io/library/wordpress:php8.3-fpm-alpine >/dev/null
     fi
+    wait_for_mariadb "$db_container"
 
     "$fluxheim_bin" --config "$config" &
     server_pid="$!"

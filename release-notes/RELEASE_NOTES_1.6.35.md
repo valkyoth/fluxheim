@@ -46,6 +46,12 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
   `sanitization::SecureSanitize` during drop.
 - Align runtime performance baseline capture with its load-balancer fixture by
   building the `profile-load-balancer` release profile by default.
+- Make native vhost-level PHP-FPM take precedence over static web fallback for
+  PHP-resolvable paths, preventing `.php` source exposure when a vhost enables
+  both `[vhosts.web]` and `[vhosts.php]`.
+- Harden the WordPress PHP-FPM smoke fixture with explicit private TCP upstream
+  opt-in and MariaDB readiness waiting, and verify full native WordPress
+  PHP-FPM plus proxy/TLS smoke coverage.
 - Fix the release version-bump helper so package versions such as `1.6.35` are
   not interpreted as regex backreferences during automated metadata updates.
 - Keep dependency, metadata, container, RPM, and smoke-test gates as blocking
@@ -67,3 +73,5 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
 - `scripts/validate-native-runtime-cutover.sh`
 - `scripts/capture-runtime-baseline.sh release`
 - `scripts/stable_release_gate.sh check`
+- `scripts/smoke_wordpress_php_fpm.sh both`
+- `scripts/smoke_wordpress_proxy_tls.sh`

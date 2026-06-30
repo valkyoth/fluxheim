@@ -4703,6 +4703,59 @@ async fn native_route_proxy_php_route_executes_fastcgi_responder() {
     assert!(response.ends_with("php-ok"));
 }
 
+#[cfg(feature = "php-fpm")]
+#[tokio::test]
+async fn native_route_proxy_vhost_php_takes_precedence_over_static_web_for_php_paths() {
+    let fpm = fastcgi_responder(b"Status: 200 OK\r\nContent-Type: text/plain\r\n\r\nphp-ok").await;
+    let root = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        root.path().join("wp-login.php"),
+        b"<?php echo 'do not leak';",
+    )
+    .unwrap();
+    std::fs::write(root.path().join("style.css"), b"body{}").unwrap();
+    let mut vhost = native_route_proxy_test_vhost();
+    vhost.web = fluxheim_config::WebConfig {
+        root: Some(root.path().to_path_buf()),
+        ..Default::default()
+    };
+    vhost.php = fluxheim_config::PhpConfig {
+        enabled: true,
+        root: Some(root.path().to_path_buf()),
+        fpm: fluxheim_config::PhpFpmConfig {
+            tcp: Some(fpm.to_string()),
+            allow_private_tcp_upstreams: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let route_proxy = NativeHttp1RouteProxy::from_vhost_config(
+        &vhost,
+        &fluxheim_config::HeaderPolicyConfig::default(),
+        None,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(route_proxy).await;
+
+    let php_response = downstream_get(proxy, "/wp-login.php").await;
+    let static_response = downstream_get(proxy, "/style.css").await;
+
+    assert!(
+        php_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected php response: {php_response:?}"
+    );
+    assert!(php_response.ends_with("php-ok"));
+    assert!(!php_response.contains("<?php"));
+    assert!(
+        static_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected static response: {static_response:?}"
+    );
+    assert!(static_response.ends_with("body{}"));
+}
+
 fn native_route_proxy_test_vhost() -> fluxheim_config::VhostConfig {
     fluxheim_config::VhostConfig {
         name: "route.test".to_owned(),

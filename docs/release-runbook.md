@@ -53,6 +53,7 @@ For PHP-FPM releases, also run:
 
 ```bash
 scripts/smoke_wordpress_php_fpm.sh both
+scripts/smoke_wordpress_proxy_tls.sh
 scripts/smoke_fluxheim_php_wolfi.sh
 ```
 

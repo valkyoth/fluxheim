@@ -2053,6 +2053,13 @@ impl NativePhpFpmRoute {
         }
     }
 
+    fn should_handle_path(&self, path: &str) -> bool {
+        !matches!(
+            self.files.resolve_php_script(&self.config, path, true),
+            Ok(NativePhpScriptResolve::Decline)
+        )
+    }
+
     fn error_page_response(
         &self,
         request: &NativeHttp1Request,
@@ -2348,6 +2355,12 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .request_headers
                     .apply(&mut request, Some(&header_context));
                 return route.handle(request).await;
+            }
+            #[cfg(feature = "php-fpm")]
+            if let Some(php) = &self.fallback_php
+                && php.should_handle_path(&path)
+            {
+                return php.handle(request).await;
             }
             if let Some(response) = self.fallback_web_response(&request, &path) {
                 return response;

@@ -47,6 +47,12 @@ behavior when the change improves security or project direction.
   `sanitization::SecureSanitize` during drop.
 - Align runtime performance baseline capture with its load-balancer fixture by
   building the `profile-load-balancer` release profile by default.
+- Make native vhost-level PHP-FPM take precedence over static web fallback for
+  PHP-resolvable paths, preventing `.php` source exposure when a vhost enables
+  both `[vhosts.web]` and `[vhosts.php]`.
+- Harden the WordPress PHP-FPM smoke fixture with explicit private TCP upstream
+  opt-in and MariaDB readiness waiting, and verify the full native WordPress
+  PHP-FPM plus proxy/TLS smoke coverage.
 
 ## 1.6.34 - 2026-06-29
 
