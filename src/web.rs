@@ -9,12 +9,8 @@ use std::time::SystemTime;
 use percent_encoding::percent_decode_str;
 
 use crate::config::WebConfig;
-#[cfg(all(feature = "proxy", any()))]
-use crate::flux_error::FluxErrorPingoraExt;
 #[cfg(feature = "proxy")]
 use crate::flux_error::{FluxError, FluxResult};
-#[cfg(all(feature = "proxy", any()))]
-use crate::http_types::PingoraResponseHeader as ResponseHeader;
 use fluxheim_web::SafeRelativePath;
 #[cfg(feature = "proxy")]
 use fluxheim_web::StaticCacheIdentity;
@@ -384,16 +380,6 @@ impl StaticFile {
     }
 }
 
-#[cfg(all(feature = "web", feature = "proxy", any()))]
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
-pub struct StaticCacheHeaders<'a> {
-    pub status_header: Option<&'a str>,
-    pub status: Option<&'a str>,
-    pub reason_header: Option<&'a str>,
-    pub reason: Option<&'a str>,
-    pub age_secs: Option<u64>,
-}
-
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct StaticRequestConditions<'a> {
     pub if_match: Option<&'a str>,
@@ -430,176 +416,6 @@ pub fn plan_static_response(
             if_range: conditions.if_range,
         },
     )
-}
-
-#[cfg(all(feature = "web", feature = "proxy", any()))]
-pub async fn serve_static_file(
-    session: &mut pingora::proxy::Session,
-    server: &StaticFileServer,
-    file: &StaticFile,
-    plan: &StaticResponsePlan,
-    response_policy: &crate::config::ResponseHeaderPolicyConfig,
-) -> pingora::Result<()> {
-    serve_static_file_with_status(session, server, file, plan, response_policy, plan.status).await
-}
-
-#[cfg(all(feature = "web", feature = "proxy", any()))]
-pub async fn serve_static_file_with_status(
-    session: &mut pingora::proxy::Session,
-    server: &StaticFileServer,
-    file: &StaticFile,
-    plan: &StaticResponsePlan,
-    response_policy: &crate::config::ResponseHeaderPolicyConfig,
-    status: u16,
-) -> pingora::Result<()> {
-    serve_static_file_with_cache_headers(
-        session,
-        server,
-        file,
-        plan,
-        response_policy,
-        status,
-        StaticCacheHeaders::default(),
-    )
-    .await
-}
-
-#[cfg(all(feature = "web", feature = "proxy", any()))]
-pub async fn serve_static_file_with_cache_headers(
-    session: &mut pingora::proxy::Session,
-    server: &StaticFileServer,
-    file: &StaticFile,
-    plan: &StaticResponsePlan,
-    response_policy: &crate::config::ResponseHeaderPolicyConfig,
-    status: u16,
-    cache_headers: StaticCacheHeaders<'_>,
-) -> pingora::Result<()> {
-    use pingora::prelude::InternalError;
-
-    let mut plan = plan.clone();
-    plan.status = status;
-    let response =
-        build_static_response_header(server, file, &plan, response_policy, cache_headers)?;
-
-    if matches!(plan.body, StaticResponseBody::None) {
-        session
-            .write_response_header(Box::new(response), true)
-            .await?;
-    } else {
-        session
-            .write_response_header(Box::new(response), false)
-            .await?;
-        let body = read_static_response_body(file, plan.body)
-            .map_err(|error| error.into_pingora(InternalError))?;
-        session.write_response_body(Some(body), true).await?;
-    }
-
-    Ok(())
-}
-
-#[cfg(all(feature = "web", feature = "proxy", any()))]
-pub async fn serve_static_file_with_body_and_cache_headers(
-    session: &mut pingora::proxy::Session,
-    server: &StaticFileServer,
-    file: &StaticFile,
-    plan: &StaticResponsePlan,
-    response_policy: &crate::config::ResponseHeaderPolicyConfig,
-    cache_headers: StaticCacheHeaders<'_>,
-    body: bytes::Bytes,
-) -> pingora::Result<()> {
-    let response =
-        build_static_response_header(server, file, plan, response_policy, cache_headers)?;
-    if matches!(plan.body, StaticResponseBody::None) {
-        session
-            .write_response_header(Box::new(response), true)
-            .await?;
-    } else {
-        session
-            .write_response_header(Box::new(response), false)
-            .await?;
-        session.write_response_body(Some(body), true).await?;
-    }
-
-    Ok(())
-}
-
-#[cfg(all(feature = "web", feature = "proxy", any()))]
-pub async fn serve_directory_listing(
-    session: &mut pingora::proxy::Session,
-    listing: &DirectoryListing,
-    method: &str,
-    response_policy: &crate::config::ResponseHeaderPolicyConfig,
-) -> pingora::Result<u64> {
-    let body = render_directory_listing(listing);
-    let response_body_bytes = if method == "HEAD" {
-        0
-    } else {
-        body.len() as u64
-    };
-    let mut response = ResponseHeader::build(200, Some(4))?;
-    response.insert_header("content-type", "text/html; charset=utf-8")?;
-    response.insert_header("content-length", body.len())?;
-    response.insert_header("cache-control", "private, no-store")?;
-    crate::headers::apply_response_policy(&mut response, response_policy)?;
-
-    if method == "HEAD" {
-        session
-            .write_response_header(Box::new(response), true)
-            .await?;
-    } else {
-        session
-            .write_response_header(Box::new(response), false)
-            .await?;
-        session
-            .write_response_body(Some(bytes::Bytes::from(body)), true)
-            .await?;
-    }
-
-    Ok(response_body_bytes)
-}
-
-#[cfg(all(feature = "web", feature = "proxy", any()))]
-pub fn build_static_response_header(
-    server: &StaticFileServer,
-    file: &StaticFile,
-    plan: &StaticResponsePlan,
-    response_policy: &crate::config::ResponseHeaderPolicyConfig,
-    cache_headers: StaticCacheHeaders<'_>,
-) -> pingora::Result<ResponseHeader> {
-    let mut response = ResponseHeader::build(plan.status, Some(9))?;
-    response.insert_header("content-type", file.mime.as_str())?;
-    if let Some(content_length) = plan.content_length {
-        response.insert_header("content-length", content_length)?;
-    }
-    response.insert_header("cache-control", server.cache_control.as_str())?;
-    response.insert_header("etag", plan.etag.as_str())?;
-    response.insert_header("accept-ranges", "bytes")?;
-    if let Some(expires) = server.expires.as_deref() {
-        response.insert_header("expires", expires)?;
-    }
-
-    if let Some(modified) = file.modified {
-        response.insert_header("last-modified", httpdate::fmt_http_date(modified))?;
-    }
-    if let Some(content_range) = plan.content_range.as_deref() {
-        response.insert_header("content-range", content_range)?;
-    }
-    if let Some(header) = cache_headers.status_header
-        && let Some(status) = cache_headers.status
-    {
-        response.insert_header(header.to_owned(), status.to_owned())?;
-    }
-    if let Some(header) = cache_headers.reason_header
-        && let Some(reason) = cache_headers.reason
-    {
-        response.insert_header(header.to_owned(), reason.to_owned())?;
-    }
-    if let Some(age_secs) = cache_headers.age_secs {
-        response.insert_header("age", age_secs)?;
-    }
-    crate::headers::apply_response_policy(&mut response, response_policy)?;
-
-    Ok(response)
 }
 
 #[cfg(feature = "proxy")]
@@ -771,8 +587,6 @@ mod tests {
     use crate::config::WebConfig;
     use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
 
-    #[cfg(all(feature = "proxy", any()))]
-    use super::StaticCacheHeaders;
     use super::{
         ByteRangeParse, ResolveResult, StaticFile, StaticFileServer, StaticRequestConditions,
         StaticResponseBody, parse_single_byte_range, plan_static_response,
@@ -920,98 +734,6 @@ mod tests {
         assert_eq!(
             server.expires.as_deref(),
             Some("Wed, 21 Oct 2030 07:28:00 GMT")
-        );
-    }
-
-    #[cfg(all(feature = "proxy", any()))]
-    #[test]
-    fn builds_static_response_headers_from_config() {
-        let root = TestDir::new("static-response-headers");
-        fs::write(root.child("index.html"), "ok").unwrap();
-        let server = StaticFileServer::from_config(&WebConfig {
-            root: Some(root.path().to_owned()),
-            cache_control: "public, max-age=31536000, immutable".to_owned(),
-            expires: Some("Wed, 21 Oct 2030 07:28:00 GMT".to_owned()),
-            ..WebConfig::default()
-        })
-        .unwrap()
-        .unwrap();
-        let modified = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-        let file = static_file(2, Some(modified));
-        let plan = plan_static_response(&file, "GET", StaticRequestConditions::default());
-
-        let response = super::build_static_response_header(
-            &server,
-            &file,
-            &plan,
-            &crate::config::ResponseHeaderPolicyConfig::default(),
-            StaticCacheHeaders {
-                status_header: Some("x-cache-status"),
-                status: Some("HIT"),
-                reason_header: Some("x-cache-reason"),
-                reason: Some("fresh"),
-                age_secs: Some(12),
-            },
-        )
-        .unwrap();
-
-        assert_eq!(
-            response
-                .headers
-                .get("server")
-                .and_then(|value| value.to_str().ok()),
-            Some("fluxheim")
-        );
-        assert_eq!(
-            response
-                .headers
-                .get("cache-control")
-                .and_then(|value| value.to_str().ok()),
-            Some("public, max-age=31536000, immutable")
-        );
-        assert_eq!(
-            response
-                .headers
-                .get("expires")
-                .and_then(|value| value.to_str().ok()),
-            Some("Wed, 21 Oct 2030 07:28:00 GMT")
-        );
-        assert_eq!(
-            response
-                .headers
-                .get("content-length")
-                .and_then(|value| value.to_str().ok()),
-            Some("2")
-        );
-        assert!(response.headers.get("etag").is_some());
-        assert!(response.headers.get("last-modified").is_some());
-        assert_eq!(
-            response
-                .headers
-                .get("accept-ranges")
-                .and_then(|value| value.to_str().ok()),
-            Some("bytes")
-        );
-        assert_eq!(
-            response
-                .headers
-                .get("x-cache-status")
-                .and_then(|value| value.to_str().ok()),
-            Some("HIT")
-        );
-        assert_eq!(
-            response
-                .headers
-                .get("x-cache-reason")
-                .and_then(|value| value.to_str().ok()),
-            Some("fresh")
-        );
-        assert_eq!(
-            response
-                .headers
-                .get("age")
-                .and_then(|value| value.to_str().ok()),
-            Some("12")
         );
     }
 

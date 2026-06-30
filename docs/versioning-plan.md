@@ -4362,8 +4362,8 @@ the exception while the cache server is being completed as a focused sequence:
   `Content-Range`/`Content-Length` validation, cache-key component formatting,
   temporary HEAD cache bypass detection, and multipart slice range policy
   sizing now also live in
-  `crates/fluxheim-cache::request`, while root `crate::proxy_cache` keeps
-  Pingora request/response-header and cache-key adaptation. Pure remaining-TTL and
+  `crates/fluxheim-cache::request`, with native request/response-header and
+  cache-key adaptation now handled by `fluxheim-server`. Pure remaining-TTL and
   synthesized Cache-Control freshness helpers now live in
   `crates/fluxheim-cache::headers`, alongside Vary header parsing and
   configured request-header variance policy, Vary request hash material
@@ -4389,7 +4389,8 @@ the exception while the cache server is being completed as a focused sequence:
   config-value validators plus PHP-FPM timeout/retry policy and endpoint
   selection plus PHP-FPM response-header safety guards plus response split,
   `Status` parsing, ASCII trimming, header colon splitting, and managed
-  instance-name generation moved behind the existing `crate::php_fpm` surface.
+  instance-name generation moved behind the native PHP-FPM route adapter and
+  `fluxheim-php-fpm` crate surface.
   The `crates/fluxheim-geoip` boundary now owns `GeoContext` and the optional
   local MMDB runtime behind root compatibility re-exports. The
   `crates/fluxheim-compression` boundary now owns response compression encoder
@@ -4425,11 +4426,9 @@ the exception while the cache server is being completed as a focused sequence:
   `crates/fluxheim-observability` `otlp-trace` feature while root
   `crate::otel_otlp` remains a compatibility re-export.
   The `crates/fluxheim-protocol` boundary now
-  owns PROXY protocol v1/v2 upstream header framing while the root
-  `crate::proxy_protocol` adapter keeps Pingora L4 connector wiring. It also
-  owns route method matching and prefix-boundary helpers while root
-  `crate::route_policy` keeps config, regex-capture, and Pingora request
-  adaptation. The
+  owns PROXY protocol v1/v2 upstream header framing used by the native HTTP and
+  stream runtimes. It also owns route method matching and prefix-boundary
+  helpers consumed by native route selection. The
   `crates/fluxheim-snapshot` boundary now owns durable config snapshot storage,
   metadata validation, rollback pointer handling, and symlink-safe filesystem
   writes while root `crate::snapshot` remains a compatibility re-export.

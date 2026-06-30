@@ -27,6 +27,9 @@ behavior when the change improves security or project direction.
   into the `fluxheim-load-balancer` crate.
 - Remove the historical `crate::proxy` re-export from normal builds; active
   code now uses `crate::native_proxy` and crate-owned APIs directly.
+- Delete inert Pingora-era root source files that were permanently gated behind
+  `cfg(any())`, including the old proxy, cache, header, auth-request, edge
+  policy, PHP-FPM, traffic-mirror, and proxy-protocol adapters.
 
 ## 1.6.35 - 2026-06-30
 
