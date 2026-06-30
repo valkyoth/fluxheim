@@ -96,6 +96,8 @@ is clean.
   module below the line-limit target.
 - Split load-balancer FNV hashing, random selection seeds, and per-process route
   secrets into a focused private selection-hash module.
+- Split the nginx-compatible Ketama continuum builder and backend-key iterator
+  into a focused private load-balancer selection module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

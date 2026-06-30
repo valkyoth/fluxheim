@@ -98,6 +98,8 @@ behavior when the change improves security or project direction.
   module below the line-limit target.
 - Split load-balancer FNV hashing, random selection seeds, and per-process route
   secrets into a focused private selection-hash module.
+- Split the nginx-compatible Ketama continuum builder and backend-key iterator
+  into a focused private load-balancer selection module.
 
 ## 1.6.36 - 2026-06-30
 
