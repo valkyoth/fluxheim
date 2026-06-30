@@ -5,7 +5,7 @@ use std::io::{Read as _, Write as _};
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fluxheim_cache::purge_index::{
@@ -87,6 +87,7 @@ pub(crate) struct NativeDiskCache {
     backend: NativeDiskCacheBackend,
     encryption: Option<NativeDiskCacheEncryption>,
     state: Mutex<NativeDiskCacheState>,
+    mutation_locks: Box<[Mutex<()>]>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -333,6 +334,7 @@ impl NativeDiskCache {
             backend,
             encryption,
             state: Mutex::new(NativeDiskCacheState::default()),
+            mutation_locks: native_disk_cache_mutation_locks(),
         };
         if let Err(error) = cache.rebuild_index() {
             log::warn!(
@@ -430,42 +432,49 @@ impl NativeDiskCache {
             encoded
         };
         let encoded_len = encoded.len() as u64;
-        if !self.evict_until_admissible(&key.combined, encoded_len)? {
-            return Ok(());
-        }
-        self.remove_combined(&key.combined);
-        let Some(location) = self.write_encoded_object(&key.combined, &encoded)? else {
-            return Ok(());
-        };
-        self.with_state_mut(|state| {
-            let combined = key.combined.clone();
-            let primary = key.primary.clone();
-            let user_tag = key.user_tag.clone();
-            let index_path = key.index_path.clone();
-            let cache_tags = key.cache_tags.clone();
-            state.objects.insert(
-                key.combined.clone(),
-                NativeDiskCacheRecord {
-                    location,
-                    weight: encoded_len,
-                    accessed_at: SystemTime::now(),
-                },
-            );
-            if key.vary_fields.is_empty() {
-                state.variants.remove(&key.primary);
-            } else {
-                let variants = state.variants.entry(key.primary).or_default();
-                variants.retain(|variant| variant.key != key.combined);
-                variants.push(NativeMemoryCacheVariant {
-                    fields: key.vary_fields,
-                    key: key.combined,
-                });
+        loop {
+            if !self.evict_until_admissible(&key.combined, encoded_len)? {
+                return Ok(());
             }
-            state
-                .purge_index
-                .insert_with_path_and_tags(combined, primary, user_tag, index_path, cache_tags);
-            state.bytes = state.bytes.saturating_add(encoded_len);
-        });
+            let _mutation = self.lock_key_mutation(&key.combined);
+            if !self.key_admissible(&key.combined, encoded_len) {
+                continue;
+            }
+            self.remove_combined_locked(&key.combined);
+            let Some(location) = self.write_encoded_object(&key.combined, &encoded)? else {
+                return Ok(());
+            };
+            self.with_state_mut(|state| {
+                let combined = key.combined.clone();
+                let primary = key.primary.clone();
+                let user_tag = key.user_tag.clone();
+                let index_path = key.index_path.clone();
+                let cache_tags = key.cache_tags.clone();
+                state.objects.insert(
+                    key.combined.clone(),
+                    NativeDiskCacheRecord {
+                        location,
+                        weight: encoded_len,
+                        accessed_at: SystemTime::now(),
+                    },
+                );
+                if key.vary_fields.is_empty() {
+                    state.variants.remove(&key.primary);
+                } else {
+                    let variants = state.variants.entry(key.primary).or_default();
+                    variants.retain(|variant| variant.key != key.combined);
+                    variants.push(NativeMemoryCacheVariant {
+                        fields: key.vary_fields.clone(),
+                        key: key.combined.clone(),
+                    });
+                }
+                state
+                    .purge_index
+                    .insert_with_path_and_tags(combined, primary, user_tag, index_path, cache_tags);
+                state.bytes = state.bytes.saturating_add(encoded_len);
+            });
+            break;
+        }
         self.persist_storage_bin_index();
         Ok(())
     }
@@ -480,19 +489,7 @@ impl NativeDiskCache {
         }
         let mut evicted = false;
         loop {
-            let admissible = self.with_state(|state| {
-                let existing = state
-                    .objects
-                    .get(incoming_key)
-                    .map(|record| record.weight)
-                    .unwrap_or(0);
-                state
-                    .bytes
-                    .saturating_sub(existing)
-                    .saturating_add(incoming_weight)
-                    <= self.max_bytes
-            });
-            if admissible {
+            if self.key_admissible(incoming_key, incoming_weight) {
                 if evicted {
                     self.persist_storage_bin_index();
                 }
@@ -503,6 +500,21 @@ impl NativeDiskCache {
             }
             evicted = true;
         }
+    }
+
+    fn key_admissible(&self, incoming_key: &str, incoming_weight: u64) -> bool {
+        self.with_state(|state| {
+            let existing = state
+                .objects
+                .get(incoming_key)
+                .map(|record| record.weight)
+                .unwrap_or(0);
+            state
+                .bytes
+                .saturating_sub(existing)
+                .saturating_add(incoming_weight)
+                <= self.max_bytes
+        })
     }
 
     fn write_encoded_object(
@@ -1089,6 +1101,11 @@ impl NativeDiskCache {
     }
 
     fn remove_combined(&self, combined_key: &str) -> bool {
+        let _mutation = self.lock_key_mutation(combined_key);
+        self.remove_combined_locked(combined_key)
+    }
+
+    fn remove_combined_locked(&self, combined_key: &str) -> bool {
         let removed = self.with_state_mut(|state| {
             let removed = state.objects.remove(combined_key);
             if let Some(record) = &removed {
@@ -1110,28 +1127,16 @@ impl NativeDiskCache {
     }
 
     fn evict_oldest(&self) -> std::io::Result<bool> {
-        let removed = self.with_state_mut(|state| {
-            let key = state
+        let Some(key) = self.with_state(|state| {
+            state
                 .objects
                 .iter()
                 .min_by_key(|(key, record)| (record.accessed_at, (*key).clone()))
-                .map(|(key, _)| key.clone())?;
-            let removed = state.objects.remove(&key);
-            if let Some(record) = &removed {
-                state.bytes = state.bytes.saturating_sub(record.weight);
-                state.purge_index.remove_combined(&key);
-            }
-            state.variants.retain(|_, variants| {
-                variants.retain(|variant| variant.key != key);
-                !variants.is_empty()
-            });
-            removed
-        });
-        let Some(record) = removed else {
+                .map(|(key, _)| key.clone())
+        }) else {
             return Ok(false);
         };
-        self.remove_location(&record.location)?;
-        Ok(true)
+        Ok(self.remove_combined(&key))
     }
 
     fn remove_location(&self, location: &NativeDiskCacheLocation) -> std::io::Result<()> {
@@ -1205,6 +1210,20 @@ impl NativeDiskCache {
         }
     }
 
+    fn lock_key_mutation(&self, combined_key: &str) -> MutexGuard<'_, ()> {
+        let stripe = native_disk_cache_mutation_lock_stripe(combined_key);
+        match self.mutation_locks[stripe].lock() {
+            Ok(guard) => guard,
+            Err(error) => {
+                log::error!(
+                    target: "fluxheim::native_http1",
+                    "native disk cache mutation lock poisoned: {error}"
+                );
+                std::process::abort();
+            }
+        }
+    }
+
     fn with_state<R>(&self, f: impl FnOnce(&NativeDiskCacheState) -> R) -> R {
         match self.state.lock() {
             Ok(state) => f(&state),
@@ -1230,6 +1249,22 @@ impl NativeDiskCache {
             }
         }
     }
+}
+
+fn native_disk_cache_mutation_locks() -> Box<[Mutex<()>]> {
+    (0..NATIVE_DISK_CACHE_MUTATION_LOCKS)
+        .map(|_| Mutex::new(()))
+        .collect::<Vec<_>>()
+        .into_boxed_slice()
+}
+
+fn native_disk_cache_mutation_lock_stripe(combined_key: &str) -> usize {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in combined_key.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    (hash as usize) % NATIVE_DISK_CACHE_MUTATION_LOCKS
 }
 
 pub fn inspect_native_disk_cache_object(
@@ -1574,6 +1609,7 @@ const NATIVE_DISK_CACHE_READ_OVERHEAD_BYTES: u64 = 1024 * 1024;
 const NATIVE_DISK_CACHE_GCM_RANDOM_NONCE_INVOCATION_LIMIT: u64 = 1_u64 << 32;
 const NATIVE_DISK_CACHE_GCM_RANDOM_NONCE_WARNING_AT: u64 =
     NATIVE_DISK_CACHE_GCM_RANDOM_NONCE_INVOCATION_LIMIT - 1_000_000;
+const NATIVE_DISK_CACHE_MUTATION_LOCKS: usize = 128;
 #[cfg(feature = "openbao-cache-encryption")]
 const OPENBAO_TRANSIT_RESPONSE_OVERHEAD_BYTES: u64 = 4096;
 #[cfg(feature = "openbao-cache-encryption")]
@@ -2857,13 +2893,14 @@ pub(crate) fn with_native_cache_status(
 mod tests {
     use super::{
         NATIVE_DISK_CACHE_PURGE_REGISTRY, NativeDiskCache, NativeDiskCacheBackend,
-        NativeDiskCacheState, native_peer_fill_cache_ttl, purge_native_disk_cache,
+        NativeDiskCacheLocation, NativeDiskCacheRecord, NativeDiskCacheState,
+        native_disk_cache_mutation_locks, native_peer_fill_cache_ttl, purge_native_disk_cache,
         register_native_disk_cache_purge_handle,
     };
     use fluxheim_config::{ByteSize, CacheConfig};
     use http::HeaderMap;
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     fn headers(values: &[(&str, &str)]) -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -2909,6 +2946,7 @@ mod tests {
             backend: NativeDiskCacheBackend::Filesystem,
             encryption: None,
             state: Mutex::new(NativeDiskCacheState::default()),
+            mutation_locks: native_disk_cache_mutation_locks(),
         });
         let vhost: Arc<str> = Arc::from(format!("purge-lock-test-{}", std::process::id()));
         register_native_disk_cache_purge_handle(vhost.clone(), None, &cache);
@@ -2924,5 +2962,46 @@ mod tests {
 
         assert!(purged);
         assert!(callback_saw_unlocked_registry);
+    }
+
+    #[test]
+    fn disk_cache_remove_combined_waits_for_key_mutation_lock() {
+        let cache = Arc::new(NativeDiskCache {
+            root: std::env::temp_dir().join(format!(
+                "fluxheim-native-cache-key-lock-{}",
+                std::process::id()
+            )),
+            max_bytes: 1024,
+            max_object_bytes: ByteSize::from_bytes(1024),
+            backend: NativeDiskCacheBackend::Filesystem,
+            encryption: None,
+            state: Mutex::new(NativeDiskCacheState::default()),
+            mutation_locks: native_disk_cache_mutation_locks(),
+        });
+        let combined = "same-key-race";
+        cache.with_state_mut(|state| {
+            state.objects.insert(
+                combined.to_owned(),
+                NativeDiskCacheRecord {
+                    location: NativeDiskCacheLocation::Filesystem(cache.root.join("object.fhc")),
+                    weight: 8,
+                    accessed_at: SystemTime::now(),
+                },
+            );
+            state.bytes = 8;
+        });
+
+        let guard = cache.lock_key_mutation(combined);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let cache_for_thread = cache.clone();
+        let handle = std::thread::spawn(move || {
+            let removed = cache_for_thread.remove_combined(combined);
+            sender.send(removed).expect("send removal result");
+        });
+
+        assert!(receiver.recv_timeout(Duration::from_millis(50)).is_err());
+        drop(guard);
+        assert_eq!(receiver.recv_timeout(Duration::from_secs(5)), Ok(true));
+        handle.join().expect("join removal thread");
     }
 }

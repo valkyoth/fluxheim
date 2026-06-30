@@ -59,6 +59,9 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
 - Snapshot native disk-cache purge targets before running purge callbacks, so
   stale and indexed maintenance batches no longer hold the global purge
   registry mutex while deleting cache objects.
+- Serialize native disk-cache same-key mutations with bounded lock stripes so
+  store, purge, and eviction cannot interleave state updates with filesystem
+  object removal for the same combined cache key.
 - Preserve the client request `Host` as the HTTP/2 upstream `:authority`,
   matching the documented upstream virtual-hosting behavior already used by the
   native HTTP/1 and WebSocket paths.
