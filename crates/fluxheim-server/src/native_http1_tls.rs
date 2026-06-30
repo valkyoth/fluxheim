@@ -13,10 +13,11 @@ use rustls::{
     CertificateError, ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore,
     SignatureScheme,
 };
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
+use sanitization::SecretVec;
 use tokio::net::TcpStream;
 #[cfg(feature = "tls-rustls-backend")]
 use tokio_rustls::TlsConnector;
-use zeroize::Zeroizing;
 
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
 use openssl::pkey::PKey;
@@ -440,16 +441,18 @@ fn configure_openssl_client_cert(
             ),
         )));
     };
-    let key_contents = Zeroizing::new(read_upstream_tls_file(key_path)?);
-    let key = PKey::private_key_from_pem(&key_contents).map_err(|error| {
-        NativeHttp1Error::Io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "failed to parse upstream client private key {}: {error}",
-                key_path.display()
-            ),
-        ))
-    })?;
+    let key_contents = SecretVec::from_vec(read_upstream_tls_file(key_path)?);
+    let key = key_contents
+        .with_secret(PKey::private_key_from_pem)
+        .map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "failed to parse upstream client private key {}: {error}",
+                    key_path.display()
+                ),
+            ))
+        })?;
     builder.set_certificate(leaf).map_err(|error| {
         NativeHttp1Error::Io(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -587,16 +590,18 @@ fn client_cert_key(
     key_path: &Path,
 ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), NativeHttp1Error> {
     let certs = certificates_from_file(cert_path, "upstream client certificate")?;
-    let key_contents = Zeroizing::new(read_upstream_tls_file(key_path)?);
-    let key = PrivateKeyDer::from_pem_slice(&key_contents).map_err(|error| {
-        NativeHttp1Error::Io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "failed to parse upstream client private key {}: {error}",
-                key_path.display()
-            ),
-        ))
-    })?;
+    let key_contents = SecretVec::from_vec(read_upstream_tls_file(key_path)?);
+    let key = key_contents
+        .with_secret(PrivateKeyDer::from_pem_slice)
+        .map_err(|error| {
+            NativeHttp1Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "failed to parse upstream client private key {}: {error}",
+                    key_path.display()
+                ),
+            ))
+        })?;
     Ok((certs, key))
 }
 

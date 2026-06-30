@@ -36,6 +36,8 @@ behavior when the change improves security or project direction.
 - Update the release checklist to prefer `sanitization::ct` for constant-time
   secret comparisons and remove an unused `zeroize` derive feature from the
   load-balancer crate.
+- Move native upstream TLS client private-key PEM buffers for rustls and
+  OpenSSL backends to `sanitization::SecretVec`.
 
 ## 1.6.34 - 2026-06-29
 

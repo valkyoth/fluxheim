@@ -35,6 +35,8 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
 - Update the release checklist to prefer `sanitization::ct` for future
   constant-time secret comparisons, and drop an unused `zeroize` derive feature
   from the load-balancer crate.
+- Move native upstream TLS client private-key PEM buffers for both rustls and
+  OpenSSL backends to `sanitization::SecretVec`.
 - Fix the release version-bump helper so package versions such as `1.6.35` are
   not interpreted as regex backreferences during automated metadata updates.
 - Keep dependency, metadata, container, RPM, and smoke-test gates as blocking
