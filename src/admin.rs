@@ -4015,7 +4015,7 @@ fn validate_cache_purge_path_value(path: &str) -> Result<(), &'static str> {
         return Err("cache purge path is invalid");
     }
     if path_contains_traversal_segment(path)
-        || !crate::path_safety::safe_forward_path_and_query(path)
+        || !fluxheim_common::path_safety::safe_forward_path_and_query(path)
     {
         return Err("cache purge path must not contain traversal segments");
     }

@@ -171,8 +171,6 @@ mod native_http1_static;
 pub mod native_proxy;
 #[cfg(feature = "otel-otlp")]
 pub mod otel_otlp;
-#[cfg(feature = "proxy")]
-mod path_safety;
 pub mod reload;
 #[cfg(feature = "security")]
 pub mod security;

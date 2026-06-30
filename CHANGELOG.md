@@ -18,6 +18,8 @@ behavior when the change improves security or project direction.
 - Remove private root compatibility shims for common errors, filesystem trust
   checks, and OTLP HTTP agents; callers now use the owning workspace crates
   directly.
+- Remove the single-use root path-safety shim; admin validation now calls the
+  `fluxheim-common` path-safety helper directly.
 
 ## 1.6.36 - 2026-06-30
 

@@ -16,6 +16,8 @@ is clean.
 - Remove private root compatibility shims for common errors, filesystem trust
   checks, and OTLP HTTP agents; affected call sites now use
   `fluxheim-common`, `fluxheim-config`, and `fluxheim-observability` directly.
+- Remove the single-use root path-safety shim; admin validation now calls the
+  `fluxheim-common` path-safety helper directly.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
