@@ -12,7 +12,7 @@ use fluxheim_load_balancer::{
 };
 
 #[cfg(feature = "cache")]
-use crate::cache_api::{
+use fluxheim_cache::{
     CacheActivityResetResult, CacheActivityStats, CacheBulkPurgeRequest, CacheBulkPurgeResult,
     CacheIndexedPathPatternPurgeRequest, CacheIndexedPathPrefixPurgeRequest,
     CacheIndexedPurgeRequest, CacheIndexedPurgeResult, CacheIndexedTagPurgeRequest,

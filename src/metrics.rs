@@ -574,7 +574,7 @@ pub fn record_config(config: &crate::config::Config) {
 }
 
 #[cfg(all(feature = "proxy", feature = "cache"))]
-pub fn record_cache_runtime_totals(totals: &crate::cache_api::CacheRuntimeTotals) {
+pub fn record_cache_runtime_totals(totals: &fluxheim_cache::CacheRuntimeTotals) {
     set_gauge(cache_memory_entries(), totals.memory_entries);
     set_gauge(
         cache_memory_weighted_size_bytes(),
@@ -3114,7 +3114,7 @@ mod tests {
         let _guard = metrics_test_lock();
         init().unwrap();
 
-        record_cache_runtime_totals(&crate::cache_api::CacheRuntimeTotals {
+        record_cache_runtime_totals(&fluxheim_cache::CacheRuntimeTotals {
             memory_entries: 3,
             memory_weighted_size_bytes: 512,
             memory_max_size_bytes: 1024,
@@ -3128,7 +3128,7 @@ mod tests {
             disk_bin_files: 3,
             disk_max_size_bytes: 4096,
             disk_purge_index_entries: 6,
-            ..crate::cache_api::CacheRuntimeTotals::default()
+            ..fluxheim_cache::CacheRuntimeTotals::default()
         });
 
         let metric_families = prometheus::gather();

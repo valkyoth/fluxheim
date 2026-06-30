@@ -1896,7 +1896,7 @@ impl AdminApp {
 
         match self
             .proxy
-            .purge_image_cache(crate::cache_api::CachePurgeRequest {
+            .purge_image_cache(fluxheim_cache::CachePurgeRequest {
                 vhost: vhost.filter(|vhost| !vhost.trim().is_empty()),
                 route: route.filter(|route| !route.trim().is_empty()),
                 host,
@@ -1989,7 +1989,7 @@ impl AdminApp {
 
         match self
             .proxy
-            .purge_image_cache_bulk(crate::cache_api::CacheBulkPurgeRequest {
+            .purge_image_cache_bulk(fluxheim_cache::CacheBulkPurgeRequest {
                 vhost: vhost.filter(|vhost| !vhost.trim().is_empty()),
                 route: route.filter(|route| !route.trim().is_empty()),
                 host,
@@ -2060,7 +2060,7 @@ impl AdminApp {
 
         match repeat_cache_indexed_purge(batches, || {
             self.proxy
-                .purge_indexed_image_cache(crate::cache_api::CacheIndexedPurgeRequest {
+                .purge_indexed_image_cache(fluxheim_cache::CacheIndexedPurgeRequest {
                     vhost,
                     route,
                     limit,
@@ -2121,7 +2121,7 @@ impl AdminApp {
 
         match repeat_cache_indexed_purge(batches, || {
             self.proxy.purge_indexed_image_cache_path_prefix(
-                crate::cache_api::CacheIndexedPathPrefixPurgeRequest {
+                fluxheim_cache::CacheIndexedPathPrefixPurgeRequest {
                     vhost,
                     route,
                     path_prefix,
@@ -2188,15 +2188,14 @@ impl AdminApp {
         let route = route.filter(|route| !route.trim().is_empty());
 
         match repeat_cache_indexed_purge(batches, || {
-            self.proxy.purge_indexed_image_cache_tag(
-                crate::cache_api::CacheIndexedTagPurgeRequest {
+            self.proxy
+                .purge_indexed_image_cache_tag(fluxheim_cache::CacheIndexedTagPurgeRequest {
                     vhost,
                     route,
                     cache_tag,
                     limit,
                     soft,
-                },
-            )
+                })
         }) {
             Ok(result) => {
                 record_cache_purge_metric(
@@ -2255,7 +2254,7 @@ impl AdminApp {
 
         match repeat_cache_stale_purge(batches, dry_run, || {
             self.proxy
-                .purge_stale_image_cache(crate::cache_api::CacheStalePurgeRequest {
+                .purge_stale_image_cache(fluxheim_cache::CacheStalePurgeRequest {
                     vhost,
                     route,
                     limit,
@@ -2351,7 +2350,7 @@ impl AdminApp {
 
         match repeat_cache_indexed_purge(batches, || {
             self.proxy.purge_indexed_image_cache_path_pattern(
-                crate::cache_api::CacheIndexedPathPatternPurgeRequest {
+                fluxheim_cache::CacheIndexedPathPatternPurgeRequest {
                     vhost,
                     route,
                     path_pattern,
@@ -3354,7 +3353,7 @@ fn cache_stale_purge_mode(dry_run: bool) -> &'static str {
 }
 
 #[cfg(feature = "cache")]
-fn cache_purge_results_json(results: &[crate::cache_api::CachePurgeResult]) -> Vec<Value> {
+fn cache_purge_results_json(results: &[fluxheim_cache::CachePurgeResult]) -> Vec<Value> {
     results
         .iter()
         .map(|result| {
@@ -3378,7 +3377,7 @@ fn cache_purge_results_json(results: &[crate::cache_api::CachePurgeResult]) -> V
 }
 
 #[cfg(feature = "cache")]
-fn cache_totals_json(totals: &crate::cache_api::CacheRuntimeTotals) -> Value {
+fn cache_totals_json(totals: &fluxheim_cache::CacheRuntimeTotals) -> Value {
     let mut object = serde_json::Map::new();
     object.insert("vhosts".to_owned(), json!(totals.vhosts));
     object.insert("enabled_vhosts".to_owned(), json!(totals.enabled_vhosts));
@@ -3553,7 +3552,7 @@ fn cache_totals_json(totals: &crate::cache_api::CacheRuntimeTotals) -> Value {
     );
     object.insert(
         "activity".to_owned(),
-        cache_activity_json(&crate::cache::CacheActivityStats {
+        cache_activity_json(&fluxheim_cache::CacheActivityStats {
             hits: totals.hits,
             misses: totals.misses,
             stores: totals.stores,
@@ -3566,7 +3565,7 @@ fn cache_totals_json(totals: &crate::cache_api::CacheRuntimeTotals) -> Value {
 }
 
 #[cfg(feature = "cache")]
-fn cache_vhost_stats_json(vhosts: &[crate::cache_api::CacheVhostStats]) -> Vec<Value> {
+fn cache_vhost_stats_json(vhosts: &[fluxheim_cache::CacheVhostStats]) -> Vec<Value> {
     vhosts
         .iter()
         .map(|vhost| {
@@ -3582,7 +3581,7 @@ fn cache_vhost_stats_json(vhosts: &[crate::cache_api::CacheVhostStats]) -> Vec<V
                 "peer_fill_peers": vhost.peer_fill_peers,
                 "peer_fill_max_concurrent_requests": vhost.peer_fill_max_concurrent_requests,
                 "peer_fill_fail_open": vhost.peer_fill_fail_open,
-                "storage_tiers": crate::cache::cache_storage_tiers(vhost.memory.is_some(), vhost.disk.is_some()),
+                "storage_tiers": fluxheim_cache::cache_storage_tiers(vhost.memory.is_some(), vhost.disk.is_some()),
                 "configured_routes": vhost.configured_routes,
                 "routes_total": vhost.routes_total,
                 "cache_route_coverage_ratio_per_mille": ratio_per_mille(vhost.routes_total, vhost.configured_routes),
@@ -3599,7 +3598,7 @@ fn cache_vhost_stats_json(vhosts: &[crate::cache_api::CacheVhostStats]) -> Vec<V
 }
 
 #[cfg(feature = "cache")]
-fn cache_route_stats_json(routes: &[crate::cache_api::CacheRouteStats]) -> Vec<Value> {
+fn cache_route_stats_json(routes: &[fluxheim_cache::CacheRouteStats]) -> Vec<Value> {
     routes
         .iter()
         .map(|route| {
@@ -3615,7 +3614,7 @@ fn cache_route_stats_json(routes: &[crate::cache_api::CacheRouteStats]) -> Vec<V
                 "peer_fill_peers": route.peer_fill_peers,
                 "peer_fill_max_concurrent_requests": route.peer_fill_max_concurrent_requests,
                 "peer_fill_fail_open": route.peer_fill_fail_open,
-                "storage_tiers": crate::cache::cache_storage_tiers(route.memory.is_some(), route.disk.is_some()),
+                "storage_tiers": fluxheim_cache::cache_storage_tiers(route.memory.is_some(), route.disk.is_some()),
                 "memory": memory_cache_stats_json(route.memory.as_ref()),
                 "disk": disk_cache_stats_json(route.disk.as_ref()),
             })
@@ -3624,7 +3623,7 @@ fn cache_route_stats_json(routes: &[crate::cache_api::CacheRouteStats]) -> Vec<V
 }
 
 #[cfg(feature = "cache")]
-fn memory_cache_stats_json(stats: Option<&crate::cache::MemoryCacheStats>) -> Value {
+fn memory_cache_stats_json(stats: Option<&fluxheim_cache::MemoryCacheStats>) -> Value {
     let Some(stats) = stats else {
         return Value::Null;
     };
@@ -3644,7 +3643,7 @@ fn memory_cache_stats_json(stats: Option<&crate::cache::MemoryCacheStats>) -> Va
 }
 
 #[cfg(feature = "cache")]
-fn disk_cache_stats_json(stats: Option<&crate::cache::DiskCacheStats>) -> Value {
+fn disk_cache_stats_json(stats: Option<&fluxheim_cache::DiskCacheStats>) -> Value {
     let Some(stats) = stats else {
         return Value::Null;
     };
@@ -3672,26 +3671,26 @@ fn disk_cache_stats_json(stats: Option<&crate::cache::DiskCacheStats>) -> Value 
 
 #[cfg(feature = "cache")]
 fn ratio_per_mille(numerator: u64, denominator: u64) -> u64 {
-    crate::cache::cache_ratio_per_mille(numerator, denominator)
+    fluxheim_cache::cache_ratio_per_mille(numerator, denominator)
 }
 
 #[cfg(feature = "cache")]
 fn ratio_per_mille_usize(numerator: usize, denominator: usize) -> u64 {
-    crate::cache::cache_ratio_per_mille_usize(numerator, denominator)
+    fluxheim_cache::cache_ratio_per_mille_usize(numerator, denominator)
 }
 
 #[cfg(feature = "cache")]
 fn stale_would_purge(dry_run: bool, stale: usize) -> usize {
-    crate::cache::cache_stale_would_purge(dry_run, stale)
+    fluxheim_cache::cache_stale_would_purge(dry_run, stale)
 }
 
 #[cfg(feature = "cache")]
 fn average_bytes(total_bytes: u64, entries: u64) -> u64 {
-    crate::cache::cache_average_bytes(total_bytes, entries)
+    fluxheim_cache::cache_average_bytes(total_bytes, entries)
 }
 
 #[cfg(feature = "cache")]
-fn cache_activity_json(activity: &crate::cache::CacheActivityStats) -> Value {
+fn cache_activity_json(activity: &fluxheim_cache::CacheActivityStats) -> Value {
     let requests = activity.hits.saturating_add(activity.misses);
     let hit_ratio_per_mille = activity
         .hits
@@ -3784,20 +3783,20 @@ fn cache_indexed_purge_json(
 
 #[cfg(feature = "cache")]
 struct CacheIndexedPurgeBatchResult {
-    result: crate::cache_api::CacheIndexedPurgeResult,
+    result: fluxheim_cache::CacheIndexedPurgeResult,
     batches: usize,
 }
 
 #[cfg(feature = "cache")]
 struct CacheStalePurgeBatchResult {
-    result: crate::cache_api::CacheStalePurgeResult,
+    result: fluxheim_cache::CacheStalePurgeResult,
     batches: usize,
     increase_limit_required: bool,
 }
 
 #[cfg(feature = "cache")]
 impl std::ops::Deref for CacheIndexedPurgeBatchResult {
-    type Target = crate::cache_api::CacheIndexedPurgeResult;
+    type Target = fluxheim_cache::CacheIndexedPurgeResult;
 
     fn deref(&self) -> &Self::Target {
         &self.result
@@ -3806,7 +3805,7 @@ impl std::ops::Deref for CacheIndexedPurgeBatchResult {
 
 #[cfg(feature = "cache")]
 impl std::ops::Deref for CacheStalePurgeBatchResult {
-    type Target = crate::cache_api::CacheStalePurgeResult;
+    type Target = fluxheim_cache::CacheStalePurgeResult;
 
     fn deref(&self) -> &Self::Target {
         &self.result
@@ -3816,9 +3815,9 @@ impl std::ops::Deref for CacheStalePurgeBatchResult {
 #[cfg(feature = "cache")]
 fn repeat_cache_indexed_purge(
     batches: usize,
-    mut purge: impl FnMut() -> std::io::Result<crate::cache_api::CacheIndexedPurgeResult>,
+    mut purge: impl FnMut() -> std::io::Result<fluxheim_cache::CacheIndexedPurgeResult>,
 ) -> std::io::Result<CacheIndexedPurgeBatchResult> {
-    let mut total: Option<crate::cache_api::CacheIndexedPurgeResult> = None;
+    let mut total: Option<fluxheim_cache::CacheIndexedPurgeResult> = None;
     let mut batches_run = 0;
     for _ in 0..batches {
         let result = purge()?;
@@ -3857,9 +3856,9 @@ fn repeat_cache_indexed_purge(
 fn repeat_cache_stale_purge(
     batches: usize,
     dry_run: bool,
-    mut purge: impl FnMut() -> std::io::Result<crate::cache_api::CacheStalePurgeResult>,
+    mut purge: impl FnMut() -> std::io::Result<fluxheim_cache::CacheStalePurgeResult>,
 ) -> std::io::Result<CacheStalePurgeBatchResult> {
-    let mut total: Option<crate::cache_api::CacheStalePurgeResult> = None;
+    let mut total: Option<fluxheim_cache::CacheStalePurgeResult> = None;
     let mut batches_run = 0;
     let mut increase_limit_required = false;
 
@@ -6374,7 +6373,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn cache_activity_json_reports_request_count_and_hit_ratio() {
-        let body = super::cache_activity_json(&crate::cache::CacheActivityStats {
+        let body = super::cache_activity_json(&fluxheim_cache::CacheActivityStats {
             hits: 7,
             misses: 3,
             stores: 4,
@@ -6429,7 +6428,7 @@ mod tests {
         let mut calls = 0;
         let result = super::repeat_cache_stale_purge(4, false, || {
             calls += 1;
-            Ok(crate::cache_api::CacheStalePurgeResult {
+            Ok(fluxheim_cache::CacheStalePurgeResult {
                 vhost: "cached".to_owned(),
                 route: None,
                 memory_scanned: 1,
@@ -6459,7 +6458,7 @@ mod tests {
         let mut calls = 0;
         let result = super::repeat_cache_stale_purge(4, true, || {
             calls += 1;
-            Ok(crate::cache_api::CacheStalePurgeResult {
+            Ok(fluxheim_cache::CacheStalePurgeResult {
                 vhost: "cached".to_owned(),
                 route: None,
                 memory_scanned: 1,

@@ -29,6 +29,8 @@ is clean.
   callers should use `fluxheim-geoip` and `fluxheim-observability` directly.
 - Remove unused root `config_*` compatibility modules; remaining callers use
   the owning `fluxheim-config` modules directly.
+- Remove root cache API compatibility shims; admin, CLI, metrics, runtime, and
+  native proxy code now use `fluxheim-cache` DTOs and helpers directly.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

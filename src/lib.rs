@@ -11,12 +11,6 @@ pub mod acme_companion;
 pub mod admin;
 #[cfg(feature = "proxy")]
 mod background;
-#[cfg(feature = "cache")]
-mod cache_api;
-#[cfg(feature = "cache")]
-pub mod cache {
-    pub use crate::cache_api::*;
-}
 pub mod cli;
 pub mod config {
     #[allow(unused_imports)]

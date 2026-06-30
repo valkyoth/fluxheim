@@ -1320,10 +1320,13 @@ fn run_cache_warm_command(
                 &request_headers,
             ) {
                 Ok(result) => {
-                    crate::cache::cache_warm_increment_count(&mut response_statuses, result.status);
+                    fluxheim_cache::cache_warm_increment_count(
+                        &mut response_statuses,
+                        result.status,
+                    );
                     let cache_status =
-                        crate::cache::cache_warm_safe_label(result.cache_status.as_deref());
-                    crate::cache::cache_warm_increment_count(
+                        fluxheim_cache::cache_warm_safe_label(result.cache_status.as_deref());
+                    fluxheim_cache::cache_warm_increment_count(
                         &mut cache_statuses,
                         cache_status.clone(),
                     );
@@ -1352,7 +1355,7 @@ fn run_cache_warm_command(
                             }
                             Err(error) => {
                                 failed = failed.saturating_add(1);
-                                crate::cache::cache_warm_increment_count(
+                                fluxheim_cache::cache_warm_increment_count(
                                     &mut failure_reasons,
                                     "unexpected_cache_status",
                                 );
@@ -1374,7 +1377,7 @@ fn run_cache_warm_command(
                         }
                     } else {
                         failed = failed.saturating_add(1);
-                        crate::cache::cache_warm_increment_count(
+                        fluxheim_cache::cache_warm_increment_count(
                             &mut failure_reasons,
                             "unexpected_status",
                         );
@@ -1395,7 +1398,10 @@ fn run_cache_warm_command(
                 }
                 Err(error) => {
                     failed = failed.saturating_add(1);
-                    crate::cache::cache_warm_increment_count(&mut failure_reasons, "request_error");
+                    fluxheim_cache::cache_warm_increment_count(
+                        &mut failure_reasons,
+                        "request_error",
+                    );
                     eprintln!(
                         "failed: host={} path={} attempt={}/{} error={}",
                         target.host,
@@ -1427,7 +1433,7 @@ fn print_cache_warm_counts<K: std::fmt::Display>(
     label: &str,
     counts: &std::collections::BTreeMap<K, usize>,
 ) {
-    if let Some(summary) = crate::cache::cache_warm_counts_summary(counts) {
+    if let Some(summary) = fluxheim_cache::cache_warm_counts_summary(counts) {
         println!("{label}: {summary}");
     }
 }
@@ -1622,7 +1628,7 @@ struct CacheKeyPreviewExpectations<'a> {
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn validate_cache_key_preview_expectations(
-    preview: &crate::cache_api::CacheKeyPreview,
+    preview: &fluxheim_cache::CacheKeyPreview,
     expectations: CacheKeyPreviewExpectations<'_>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if expectations.expect_eligible && !preview.eligible {
@@ -1958,13 +1964,13 @@ fn run_cache_lookup_command(
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn parse_cache_lookup_freshness_states(
     states: &[String],
-) -> Result<Vec<crate::cache::CacheObjectFreshnessState>, Box<dyn Error + Send + Sync>> {
+) -> Result<Vec<fluxheim_cache::CacheObjectFreshnessState>, Box<dyn Error + Send + Sync>> {
     states
         .iter()
         .map(|state| match state.trim().to_ascii_lowercase().as_str() {
-            "fresh" => Ok(crate::cache::CacheObjectFreshnessState::Fresh),
-            "stale" => Ok(crate::cache::CacheObjectFreshnessState::Stale),
-            "expired" => Ok(crate::cache::CacheObjectFreshnessState::Expired),
+            "fresh" => Ok(fluxheim_cache::CacheObjectFreshnessState::Fresh),
+            "stale" => Ok(fluxheim_cache::CacheObjectFreshnessState::Stale),
+            "expired" => Ok(fluxheim_cache::CacheObjectFreshnessState::Expired),
             other => Err(format!(
                 "cache-lookup --expect-freshness-state must be fresh, stale, or expired; got {other:?}"
             )
@@ -1976,12 +1982,12 @@ fn parse_cache_lookup_freshness_states(
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn parse_cache_lookup_tiers(
     tiers: &[String],
-) -> Result<Vec<crate::cache::CacheObjectTier>, Box<dyn Error + Send + Sync>> {
+) -> Result<Vec<fluxheim_cache::CacheObjectTier>, Box<dyn Error + Send + Sync>> {
     tiers
         .iter()
         .map(|tier| match tier.trim().to_ascii_lowercase().as_str() {
-            "memory" => Ok(crate::cache::CacheObjectTier::Memory),
-            "disk" => Ok(crate::cache::CacheObjectTier::Disk),
+            "memory" => Ok(fluxheim_cache::CacheObjectTier::Memory),
+            "disk" => Ok(fluxheim_cache::CacheObjectTier::Disk),
             other => Err(format!(
                 "cache-lookup --expect-tier must be memory or disk; got {other:?}"
             )
@@ -2085,9 +2091,9 @@ fn is_cache_lookup_tag(tag: &str) -> bool {
 #[derive(Clone, Copy)]
 struct CacheLookupExpectations<'a> {
     require_object: bool,
-    expected_states: &'a [crate::cache::CacheObjectFreshnessState],
+    expected_states: &'a [fluxheim_cache::CacheObjectFreshnessState],
     expected_statuses: &'a [u16],
-    expected_tiers: &'a [crate::cache::CacheObjectTier],
+    expected_tiers: &'a [fluxheim_cache::CacheObjectTier],
     expected_fresh_ttl_secs: &'a [u64],
     expected_body_bytes: &'a [u64],
     expected_header_names: &'a [String],
@@ -2120,7 +2126,7 @@ struct CacheLookupExpectations<'a> {
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn validate_cache_lookup_expectations(
-    lookup: &crate::cache_api::CacheObjectLookup,
+    lookup: &fluxheim_cache::CacheObjectLookup,
     expectations: &CacheLookupExpectations<'_>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let CacheLookupExpectations {
@@ -2289,7 +2295,7 @@ fn validate_cache_lookup_expectations(
                 .map(u64::to_string)
                 .collect::<Vec<_>>()
                 .join(",");
-            let found = crate::cache::cache_object_lookup_fresh_ttl_summary(lookup);
+            let found = fluxheim_cache::cache_object_lookup_fresh_ttl_summary(lookup);
             return Err(format!(
                 "cache-lookup expected fresh TTL seconds {expected}, found {found}"
             )
@@ -2307,7 +2313,7 @@ fn validate_cache_lookup_expectations(
                 .map(u64::to_string)
                 .collect::<Vec<_>>()
                 .join(",");
-            let found = crate::cache::cache_object_lookup_body_bytes_summary(lookup);
+            let found = fluxheim_cache::cache_object_lookup_body_bytes_summary(lookup);
             return Err(
                 format!("cache-lookup expected body bytes {expected}, found {found}").into(),
             );
@@ -2321,7 +2327,7 @@ fn validate_cache_lookup_expectations(
                 .any(|header| header.eq_ignore_ascii_case(expected))
         });
         if !matched {
-            let found = crate::cache::cache_object_lookup_header_names_summary(lookup);
+            let found = fluxheim_cache::cache_object_lookup_header_names_summary(lookup);
             return Err(format!(
                 "cache-lookup expected stored header name {expected}, found {found}"
             )
@@ -2336,7 +2342,7 @@ fn validate_cache_lookup_expectations(
         });
         if !matched {
             let found =
-                crate::cache::cache_object_lookup_header_values_summary(lookup, expected_name);
+                fluxheim_cache::cache_object_lookup_header_values_summary(lookup, expected_name);
             return Err(format!(
                 "cache-lookup expected stored header {expected_name}: {expected_value}, found {found}"
             )
@@ -2351,7 +2357,7 @@ fn validate_cache_lookup_expectations(
                 .any(|cache_tag| cache_tag == expected)
         });
         if !matched {
-            let found = crate::cache::cache_object_lookup_cache_tags_summary(lookup);
+            let found = fluxheim_cache::cache_object_lookup_cache_tags_summary(lookup);
             return Err(
                 format!("cache-lookup expected cache tag {expected}, found {found}").into(),
             );
@@ -2366,7 +2372,7 @@ fn validate_cache_lookup_expectations(
             .iter()
             .any(|object| object.serve_stale_if_error)
     {
-        let found = crate::cache::cache_object_lookup_bool_summary(lookup, |object| {
+        let found = fluxheim_cache::cache_object_lookup_bool_summary(lookup, |object| {
             object.serve_stale_if_error
         });
         return Err(
@@ -2379,7 +2385,7 @@ fn validate_cache_lookup_expectations(
             .iter()
             .any(|object| object.serve_stale_while_revalidate)
     {
-        let found = crate::cache::cache_object_lookup_bool_summary(lookup, |object| {
+        let found = fluxheim_cache::cache_object_lookup_bool_summary(lookup, |object| {
             object.serve_stale_while_revalidate
         });
         return Err(format!(
@@ -4318,12 +4324,12 @@ mod tests {
     #[cfg(all(feature = "cache", feature = "proxy"))]
     #[test]
     fn cache_lookup_expectations_validate_object_and_freshness_state() {
-        let lookup = cache_lookup_with_state(crate::cache::CacheObjectFreshnessState::Stale);
+        let lookup = cache_lookup_with_state(fluxheim_cache::CacheObjectFreshnessState::Stale);
         let states = super::parse_cache_lookup_freshness_states(&[" Stale ".to_owned()]).unwrap();
         let tiers = super::parse_cache_lookup_tiers(&[" Memory ".to_owned()]).unwrap();
-        let no_states = &[] as &[crate::cache::CacheObjectFreshnessState];
+        let no_states = &[] as &[fluxheim_cache::CacheObjectFreshnessState];
         let no_statuses = &[] as &[u16];
-        let no_tiers = &[] as &[crate::cache::CacheObjectTier];
+        let no_tiers = &[] as &[fluxheim_cache::CacheObjectTier];
         let no_ttls = &[] as &[u64];
         let no_strings = &[] as &[String];
         let no_headers = &[] as &[(String, String)];
@@ -4395,7 +4401,7 @@ mod tests {
             super::validate_cache_lookup_expectations(
                 &lookup,
                 &super::CacheLookupExpectations {
-                    expected_states: &[crate::cache::CacheObjectFreshnessState::Fresh],
+                    expected_states: &[fluxheim_cache::CacheObjectFreshnessState::Fresh],
                     ..default_expectations
                 }
             )
@@ -4419,7 +4425,7 @@ mod tests {
             super::validate_cache_lookup_expectations(
                 &lookup,
                 &super::CacheLookupExpectations {
-                    expected_tiers: &[crate::cache::CacheObjectTier::Disk],
+                    expected_tiers: &[fluxheim_cache::CacheObjectTier::Disk],
                     ..default_expectations
                 }
             )
@@ -5503,16 +5509,16 @@ mod tests {
 
     #[cfg(all(feature = "cache", feature = "proxy"))]
     fn cache_lookup_with_state(
-        state: crate::cache::CacheObjectFreshnessState,
-    ) -> crate::cache_api::CacheObjectLookup {
+        state: fluxheim_cache::CacheObjectFreshnessState,
+    ) -> fluxheim_cache::CacheObjectLookup {
         let mut lookup = cache_lookup_without_objects();
-        lookup.objects.push(crate::cache::CacheObjectMetadata {
-            tier: crate::cache::CacheObjectTier::Memory,
+        lookup.objects.push(fluxheim_cache::CacheObjectMetadata {
+            tier: fluxheim_cache::CacheObjectTier::Memory,
             purge_indexed: true,
             status: 200,
-            fresh: state == crate::cache::CacheObjectFreshnessState::Fresh,
+            fresh: state == fluxheim_cache::CacheObjectFreshnessState::Fresh,
             freshness_state: state,
-            serve_stale_while_revalidate: state == crate::cache::CacheObjectFreshnessState::Stale,
+            serve_stale_while_revalidate: state == fluxheim_cache::CacheObjectFreshnessState::Stale,
             serve_stale_if_error: false,
             body_bytes: 4,
             weight_bytes: 4,
@@ -5530,11 +5536,11 @@ mod tests {
                 "vary".to_owned(),
             ],
             header_values: vec![
-                crate::cache::CacheObjectHeaderValue {
+                fluxheim_cache::CacheObjectHeaderValue {
                     name: "cache-control".to_owned(),
                     value: "public, max-age=60".to_owned(),
                 },
-                crate::cache::CacheObjectHeaderValue {
+                fluxheim_cache::CacheObjectHeaderValue {
                     name: "etag".to_owned(),
                     value: "\"cached\"".to_owned(),
                 },
@@ -5544,12 +5550,12 @@ mod tests {
     }
 
     #[cfg(all(feature = "cache", feature = "proxy"))]
-    fn cache_lookup_without_objects() -> crate::cache_api::CacheObjectLookup {
-        crate::cache_api::CacheObjectLookup {
-            preview: crate::cache_api::CacheKeyPreview {
+    fn cache_lookup_without_objects() -> fluxheim_cache::CacheObjectLookup {
+        fluxheim_cache::CacheObjectLookup {
+            preview: fluxheim_cache::CacheKeyPreview {
                 vhost: "cached".to_owned(),
                 route: Some("assets".to_owned()),
-                scope: crate::cache_api::CacheKeyPreviewScope::Route,
+                scope: fluxheim_cache::CacheKeyPreviewScope::Route,
                 eligible: true,
                 cache_lock_enabled: true,
                 cache_lock_wait_timeout_secs: 30,
