@@ -1623,6 +1623,15 @@ impl CachePeerFillConfig {
         let mut seen_urls = BTreeSet::new();
         for peer in &self.peers {
             peer.validate(scope, self.allow_insecure_http)?;
+            if self.shared_secret_file.is_none()
+                && cache_peer_base_url_is_non_loopback_http(&peer.base_url)
+            {
+                return Err(ConfigError::InvalidCachePeerFillPeer {
+                    scope,
+                    peer: peer.name.clone(),
+                    reason: "non-loopback http peer base_url requires peer_fill.shared_secret_file",
+                });
+            }
             if !seen_names.insert(peer.name.to_ascii_lowercase()) {
                 return Err(ConfigError::DuplicateCachePeerFillPeerName {
                     scope,
@@ -1746,6 +1755,14 @@ fn validate_cache_peer_base_url(
     }
 
     Ok(())
+}
+
+fn cache_peer_base_url_is_non_loopback_http(base_url: &str) -> bool {
+    let Some(rest) = base_url.trim().strip_prefix("http://") else {
+        return false;
+    };
+    let (authority, _) = rest.split_once('/').unwrap_or((rest, ""));
+    !cache_peer_authority_is_loopback(authority)
 }
 
 fn valid_cache_peer_authority(authority: &str) -> bool {

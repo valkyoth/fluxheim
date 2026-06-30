@@ -281,17 +281,18 @@ internal cache implementation.
   fetch, fail-open origin fallback, and peer-fill metrics. The configured
   `peer_fill.max_concurrent_requests` budget is enforced per vhost or route
   cache policy for active outbound peer fetches. Plain HTTP peer-fill is safe
-  for loopback development and explicit trusted overlays only; cross-host
-  plaintext peer-fill has no response authenticity. A network-path attacker can
-  inject a cacheable response and poison the receiving node's cache until the
-  accepted freshness expires. Production clusters should use HTTPS peers with
-  certificate verification, mTLS sidecars, certificate pinning, or an encrypted
-  overlay that provides equivalent integrity. Configure
-  `peer_fill.shared_secret_file` on every cluster node to enable Fluxheim's
-  response-bound HMAC check: peer-fill requests carry a nonce and signature, and
-  peer responses must sign the same nonce, status, canonical response headers,
-  and body digest before the receiver stores the object locally. Unsigned or
-  tampered peer responses are treated as peer misses.
+  for loopback development only unless a shared secret is configured; Fluxheim
+  rejects non-loopback `http://` peer URLs without `peer_fill.shared_secret_file`.
+  Unauthenticated cross-host plaintext peer-fill has no response authenticity:
+  a network-path attacker can inject a cacheable response and poison the
+  receiving node's cache until the accepted freshness expires. Production
+  clusters should use HTTPS peers with certificate verification, mTLS sidecars,
+  certificate pinning, or an encrypted overlay that provides equivalent
+  integrity. Configure `peer_fill.shared_secret_file` on every cluster node to
+  enable Fluxheim's response-bound HMAC check: peer-fill requests carry a nonce
+  and signature, and peer responses must sign the same nonce, status, canonical
+  response headers, and body digest before the receiver stores the object
+  locally. Unsigned or tampered peer responses are treated as peer misses.
   Peer response `Age` is preserved during admission, so a peer-filled object
   stores only its remaining freshness instead of extending the origin TTL.
   Peer-filled responses with `Vary` are stored under the matching variant key,

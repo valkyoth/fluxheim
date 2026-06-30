@@ -50,6 +50,21 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
   PHP directory redirects, denied PHP paths, and fail-closed resolution errors
   stay on the PHP-FPM path, while non-PHP static files can still be served by
   `[vhosts.web]`.
+- Carry the native PHP-FPM fallback script-resolution result into the handler
+  so vhost PHP/static routing does not resolve the same path twice across a
+  deployment race window.
+- Make `validate_runtime_config()` run the central structural
+  `Config::validate()` checks itself, so standalone runtime validation catches
+  cross-field invariants such as peer-fill policy shape before startup.
+- Snapshot native disk-cache purge targets before running purge callbacks, so
+  stale and indexed maintenance batches no longer hold the global purge
+  registry mutex while deleting cache objects.
+- Preserve the client request `Host` as the HTTP/2 upstream `:authority`,
+  matching the documented upstream virtual-hosting behavior already used by the
+  native HTTP/1 and WebSocket paths.
+- Narrow native PHP-FPM fallback fail-closed routing so resolver errors for
+  explicit or protected PHP targets still avoid static source exposure, while
+  ordinary non-PHP front-controller probe errors defer to static fallback first.
 - Harden the WordPress PHP-FPM smoke fixture with explicit private TCP upstream
   opt-in and MariaDB readiness waiting, and verify full native WordPress
   PHP-FPM plus proxy/TLS smoke coverage.
@@ -72,9 +87,9 @@ before the 1.6.36 structural cleanup removes the temporary native proxy shim.
   Prometheus and Jaeger containers when external URLs are not configured,
   requiring Prometheus scrape plus OTLP metrics ingestion and keeping Jaeger
   trace ingestion opt-in until native span export is implemented.
-- Clarify the peer-fill security guidance so `allow_insecure_http = true` on
-  non-loopback peers is explicitly documented as cache-poisonable by a
-  network-path attacker unless another layer provides peer-hop integrity.
+- Require `cache.peer_fill.shared_secret_file` for non-loopback `http://`
+  peer-fill URLs, closing the remaining unauthenticated cross-host plaintext
+  peer-fill cache-poisoning configuration.
 - Add `cache.peer_fill.shared_secret_file` so peer-fill clusters can require
   response-bound HMAC verification: outbound peer-fill requests include a
   nonce/request signature, peers sign the status, canonical response headers,

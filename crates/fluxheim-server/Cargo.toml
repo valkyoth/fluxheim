@@ -10,8 +10,8 @@ description = "Internal Fluxheim listener and server boundary types."
 [features]
 default = []
 acme = []
-auth-request = ["dep:sanitization", "dep:ureq", "sanitization/alloc"]
-openbao-cache-encryption = ["dep:sanitization", "dep:serde_json", "dep:ureq", "sanitization/alloc", "ureq/json"]
+auth-request = ["dep:ureq", "sanitization/alloc"]
+openbao-cache-encryption = ["dep:serde_json", "dep:ureq", "sanitization/alloc", "ureq/json"]
 privacy-mode = []
 compression = ["dep:fluxheim-compression"]
 compression-brotli = ["compression", "fluxheim-compression/brotli"]
@@ -20,13 +20,13 @@ compression-zstd = ["compression", "fluxheim-compression/zstd"]
 load-balancer = ["dep:fluxheim-load-balancer"]
 otel-tracing = ["dep:fluxheim-observability", "fluxheim-config/otel-tracing"]
 php-fpm = ["dep:fastcgi-client", "dep:fluxheim-php-fpm", "tokio/fs"]
-tls-rustls-backend = ["dep:fluxheim-tls", "dep:rustls", "dep:rustls-native-certs", "dep:sanitization", "dep:tokio-rustls", "fluxheim-tls/tls-rustls-backend", "rustls/ring", "sanitization/alloc"]
+tls-rustls-backend = ["dep:fluxheim-tls", "dep:rustls", "dep:rustls-native-certs", "dep:tokio-rustls", "fluxheim-tls/tls-rustls-backend", "rustls/ring", "sanitization/alloc"]
 tls-rustls = ["tls-rustls-backend", "fluxheim-tls/tls-rustls", "rustls/ring"]
 tls-rustls-fips = ["tls-rustls-backend", "fluxheim-tls/tls-rustls-fips", "rustls/fips"]
-tls-openssl-backend = ["dep:fluxheim-tls", "dep:openssl", "dep:sanitization", "dep:tokio-openssl", "fluxheim-tls/tls-openssl", "sanitization/alloc"]
+tls-openssl-backend = ["dep:fluxheim-tls", "dep:openssl", "dep:tokio-openssl", "fluxheim-tls/tls-openssl", "sanitization/alloc"]
 tls-openssl = ["tls-openssl-backend"]
 tls-openssl-fips = ["tls-openssl"]
-traffic-mirror = ["dep:sanitization", "dep:ureq"]
+traffic-mirror = ["dep:ureq"]
 
 [dependencies]
 bytes = "1.11.1"
@@ -58,7 +58,7 @@ regex = "1.12.4"
 ring = "0.17.14"
 rustls = { version = "0.23.41", optional = true }
 rustls-native-certs = { version = "0.8.4", optional = true }
-sanitization = { version = "1.2.2", optional = true }
+sanitization = { version = "1.2.2", features = ["alloc"] }
 serde_json = { version = "1.0.150", optional = true }
 sha2 = "0.11.0"
 socket2 = { version = "0.6.3", features = ["all"] }

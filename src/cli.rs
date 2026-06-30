@@ -649,6 +649,7 @@ fn validate_php_module_absent(config: &Config) -> Result<(), Box<dyn Error + Sen
 
 #[cfg(feature = "proxy")]
 pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    config.validate()?;
     validate_compiled_module_config(config)?;
     validate_fips_runtime_config(config)?;
     #[cfg(feature = "web")]
@@ -683,6 +684,7 @@ fn validate_web_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Se
 
 #[cfg(all(feature = "web", not(feature = "proxy")))]
 pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    config.validate()?;
     validate_compiled_module_config(config)?;
     validate_fips_runtime_config(config)?;
     validate_web_runtime_config(config)?;
@@ -701,6 +703,7 @@ fn validate_web_runtime_scope(
 
 #[cfg(not(any(feature = "proxy", feature = "web")))]
 pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    config.validate()?;
     validate_compiled_module_config(config)?;
     validate_fips_runtime_config(config)?;
     Ok(())
@@ -3921,6 +3924,39 @@ mod tests {
             "--validate-config",
         ])
         .unwrap();
+    }
+
+    #[cfg(all(feature = "proxy", feature = "cache"))]
+    #[test]
+    fn runtime_validation_runs_structural_config_validation() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.memory]
+            enabled = true
+
+            [cache.peer_fill]
+            enabled = true
+
+            [[vhosts]]
+            name = "example"
+            hosts = ["example.test"]
+
+            [vhosts.proxy]
+            upstreams = ["127.0.0.1:8081"]
+            "#,
+        )
+        .unwrap();
+
+        let error = super::validate_runtime_config(&config).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("peer fill requires between 1 and 32 peers")
+        );
     }
 
     #[cfg(feature = "web")]

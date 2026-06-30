@@ -2904,7 +2904,9 @@ available for the stabilization/security-only follow-up.
   stabilization release by adding a `cache.peer_fill.shared_secret_file`
   response-bound HMAC mode: outbound peer-fill requests carry a nonce/request
   signature, peers sign status/canonical headers/body digest, and receivers
-  discard unsigned or tampered peer responses before cache storage.
+  discard unsigned or tampered peer responses before cache storage. Require that
+  shared secret for non-loopback `http://` peer-fill URLs so cross-host
+  plaintext peer fill cannot remain silently unauthenticated.
 - `v1.6.36`: post-cutover structural cleanup release before the `1.7` Wasm
   line. Turn the temporary native proxy shim into proper crate APIs by moving
   any still-needed DTOs/helpers out of `src/native_proxy_shim.rs` and into

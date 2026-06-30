@@ -9321,6 +9321,7 @@ fn rejects_unsafe_cache_peer_fill_peers() {
             [cache.peer_fill]
             enabled = true
             allow_insecure_http = true
+            shared_secret_file = "/run/secrets/fluxheim-peer-fill"
 
             [[cache.peer_fill.peers]]
             name = "node-a"
@@ -9338,6 +9339,38 @@ fn rejects_unsafe_cache_peer_fill_peers() {
         Err(ConfigError::DuplicateCachePeerFillPeerName {
             scope: "cache",
             name: "node-a".to_owned(),
+        })
+    );
+}
+
+#[test]
+#[cfg(feature = "cache")]
+fn rejects_non_loopback_http_cache_peer_fill_without_shared_secret() {
+    let config: Config = toml::from_str(
+        r#"
+            [cache]
+            enabled = true
+
+            [cache.memory]
+            enabled = true
+
+            [cache.peer_fill]
+            enabled = true
+            allow_insecure_http = true
+
+            [[cache.peer_fill.peers]]
+            name = "node-a"
+            base_url = "http://node-a.example.internal:8080"
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidCachePeerFillPeer {
+            scope: "cache",
+            peer: "node-a".to_owned(),
+            reason: "non-loopback http peer base_url requires peer_fill.shared_secret_file",
         })
     );
 }

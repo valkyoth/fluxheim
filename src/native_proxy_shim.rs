@@ -1332,7 +1332,7 @@ mod tests {
         );
         let proxy = FluxProxy::from_config(&config).unwrap();
 
-        assert_eq!(proxy.route_host(Some("EXAMPLE.COM")), "example");
+        assert_eq!(proxy.route_host(Some("EXAMPLE.COM:80")), "example");
     }
 
     #[test]
@@ -1350,7 +1350,7 @@ mod tests {
         let proxy = FluxProxy::from_config(&config).unwrap();
 
         let (vhost, route, _cache) = proxy
-            .cache_config_for_request(None, None, "EXAMPLE.COM")
+            .cache_config_for_request(None, None, "EXAMPLE.COM:80")
             .unwrap();
 
         assert_eq!(vhost.name, "example");
@@ -1381,7 +1381,7 @@ mod tests {
         let proxy = FluxProxy::from_config(&config).unwrap();
         let mut request =
             crate::http_types::PingoraRequestHeader::build("GET", b"/images/42.png", None).unwrap();
-        request.insert_header("host", "EXAMPLE.COM").unwrap();
+        request.insert_header("host", "EXAMPLE.COM:80").unwrap();
 
         let preview = proxy
             .snapshot()

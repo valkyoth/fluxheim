@@ -1963,7 +1963,17 @@ impl NativePhpFpmRoute {
             return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
                 .close_connection();
         };
-        let script = match self.files.resolve_php_script(&self.config, &path, true) {
+        let resolved = self.files.resolve_php_script(&self.config, &path, true);
+        self.handle_resolved(request, path, resolved).await
+    }
+
+    async fn handle_resolved(
+        &self,
+        request: NativeHttp1Request,
+        path: String,
+        resolved: io::Result<NativePhpScriptResolve>,
+    ) -> NativeHttp1Response {
+        let script = match resolved {
             Ok(NativePhpScriptResolve::Execute(script)) => script,
             Ok(NativePhpScriptResolve::RedirectDirectorySlash) => {
                 return NativeHttp1Response::new(308, "Permanent Redirect", Vec::new())
@@ -2053,20 +2063,46 @@ impl NativePhpFpmRoute {
         }
     }
 
-    fn should_handle_path(&self, path: &str) -> bool {
-        match self.files.resolve_php_script(&self.config, path, true) {
-            Ok(NativePhpScriptResolve::Execute(_))
-            | Ok(NativePhpScriptResolve::RedirectDirectorySlash)
-            | Ok(NativePhpScriptResolve::Forbidden) => true,
-            Ok(NativePhpScriptResolve::Decline | NativePhpScriptResolve::NotFound) => false,
-            Err(error) => {
+    fn resolve_for_fallback(&self, path: &str) -> Option<io::Result<NativePhpScriptResolve>> {
+        let resolved = self.files.resolve_php_script(&self.config, path, true);
+        match &resolved {
+            Ok(
+                NativePhpScriptResolve::Execute(_)
+                | NativePhpScriptResolve::RedirectDirectorySlash
+                | NativePhpScriptResolve::Forbidden,
+            ) => Some(resolved),
+            Ok(NativePhpScriptResolve::Decline | NativePhpScriptResolve::NotFound) => None,
+            Err(error) if self.resolution_error_requires_php_fail_closed(path) => {
                 log::warn!(
                     target: "fluxheim::native_http1",
                     "native php-fpm script pre-resolution failed; routing to php-fpm fail-closed path: {error}"
                 );
-                true
+                Some(resolved)
+            }
+            Err(error) => {
+                log::warn!(
+                    target: "fluxheim::native_http1",
+                    "native php-fpm front-controller pre-resolution failed; deferring to static fallback before php-fpm: {error}"
+                );
+                None
             }
         }
+    }
+
+    fn resolution_error_requires_php_fail_closed(&self, path: &str) -> bool {
+        let Some(parsed_script) = fluxheim_php_fpm::php_script_name_for_request(
+            path,
+            &self.config.index,
+            self.config.path_info,
+            &self.config.allowed_extensions,
+        ) else {
+            return true;
+        };
+        parsed_script.explicit_php
+            || fluxheim_php_fpm::php_script_name_denied(
+                &self.config.deny_path_prefixes,
+                &parsed_script.script_name,
+            )
     }
 
     fn error_page_response(
@@ -2367,9 +2403,9 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             }
             #[cfg(feature = "php-fpm")]
             if let Some(php) = &self.fallback_php
-                && php.should_handle_path(&path)
+                && let Some(resolved) = php.resolve_for_fallback(&path)
             {
-                return php.handle(request).await;
+                return php.handle_resolved(request, path, resolved).await;
             }
             if let Some(response) = self.fallback_web_response(&request, &path) {
                 return response;
@@ -4246,6 +4282,112 @@ mod tests {
 
         assert!(buckets.entries.contains_key(&key));
         assert_eq!(buckets.prune_queue, VecDeque::from([key]));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[tokio::test]
+    async fn php_fallback_handle_uses_pre_resolved_script_result() {
+        let root = tempfile::TempDir::new().expect("create php root");
+        let script = root.path().join("index.php");
+        std::fs::write(&script, b"<?php echo 'ok';").expect("write php script");
+        let php = test_php_route(root.path());
+        let request = NativeHttp1Request {
+            method: "GET".to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: false,
+            tls_identity: None,
+            geo_context: None,
+            target: "/index.php".to_owned(),
+            version: fluxheim_protocol::Http1Version::Http11,
+            headers: vec![("host".to_owned(), "test.local".to_owned())],
+            body: zeroize::Zeroizing::new(Vec::new()),
+            trailers: Vec::new(),
+        };
+
+        let response = php
+            .handle_resolved(
+                request,
+                "/index.php".to_owned(),
+                Ok(NativePhpScriptResolve::Forbidden),
+            )
+            .await;
+
+        assert_eq!(response.status(), 403);
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
+    fn php_fallback_defers_non_php_resolution_errors_to_static() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = tempfile::TempDir::new().expect("create php root");
+        std::fs::write(root.path().join("index.php"), b"<?php echo 'ok';")
+            .expect("write index script");
+        let locked = root.path().join("locked");
+        std::fs::create_dir(&locked).expect("create locked dir");
+        std::fs::write(locked.join("asset.txt"), b"asset").expect("write static asset");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
+            .expect("lock dir");
+        let php = test_php_route(root.path());
+
+        let resolved = php.resolve_for_fallback("/locked/asset.txt");
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700))
+            .expect("unlock dir");
+        assert!(resolved.is_none());
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
+    fn php_fallback_routes_explicit_php_resolution_errors_fail_closed() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = tempfile::TempDir::new().expect("create php root");
+        let locked = root.path().join("locked");
+        std::fs::create_dir(&locked).expect("create locked dir");
+        std::fs::write(locked.join("secret.php"), b"<?php echo 'secret';")
+            .expect("write php script");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
+            .expect("lock dir");
+        let php = test_php_route(root.path());
+
+        let resolved = php.resolve_for_fallback("/locked/secret.php");
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700))
+            .expect("unlock dir");
+        assert!(matches!(resolved, Some(Err(_))));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    fn test_php_route(root: &Path) -> NativePhpFpmRoute {
+        let files = NativeHttp1StaticWeb::from_config(&fluxheim_config::WebConfig {
+            root: Some(root.to_path_buf()),
+            index_files: vec!["index.php".to_owned()],
+            deny_dotfiles: true,
+            directory_listing: fluxheim_config::DirectoryListingConfig::default(),
+            cache_control: "private, no-store".to_owned(),
+            expires: None,
+        })
+        .expect("build static resolver")
+        .expect("static resolver enabled");
+        NativePhpFpmRoute {
+            config: fluxheim_config::PhpConfig {
+                enabled: true,
+                root: Some(root.to_path_buf()),
+                ..Default::default()
+            },
+            root: root.to_path_buf(),
+            fpm_root: root.to_path_buf(),
+            files,
+            error_pages: Vec::new(),
+            vhost_name: "test.local".to_owned(),
+            _managed_fpm: None,
+            pools: Vec::new(),
+            next_endpoint: Arc::new(AtomicUsize::new(0)),
+            in_flight: Arc::new(Semaphore::new(1)),
+        }
     }
 
     #[test]

@@ -1527,7 +1527,8 @@ fn native_http2_upstream_request(
     let method = Method::from_bytes(request.method.as_bytes())
         .map_err(|_| Http1ParseError::InvalidRequestLine)?;
     let target = upstream_origin_target(request)?;
-    let uri = Uri::try_from(format!("{scheme}://{authority}{target}"))
+    let request_authority = valid_request_host(request, authority)?;
+    let uri = Uri::try_from(format!("{scheme}://{request_authority}{target}"))
         .map_err(|_| Http1ParseError::InvalidRequestTarget)?;
     let mut headers = HeaderMap::new();
     let connection_tokens = connection_tokens(request);
@@ -1912,6 +1913,8 @@ mod tests {
         writer.await.unwrap();
         let request = String::from_utf8(bytes).unwrap();
 
+        assert!(request.contains("host: client.test\r\n"));
+        assert!(!request.contains("host: origin.test\r\n"));
         assert!(request.contains("connection: Upgrade\r\n"));
         assert!(request.contains("upgrade: websocket\r\n"));
         assert!(request.contains("sec-websocket-key: abc\r\n"));
@@ -1985,6 +1988,36 @@ mod tests {
         assert!(!header_names.contains(&"proxy-connection"));
         assert!(!header_names.contains(&"te"));
         assert!(!header_names.contains(&"trailer"));
+    }
+
+    #[test]
+    fn h2_upstream_request_preserves_client_host_as_authority() {
+        let request = NativeHttp1Request {
+            method: "GET".to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: true,
+            tls_identity: None,
+            geo_context: None,
+            target: "/resource?x=1".to_owned(),
+            version: fluxheim_protocol::Http1Version::Http11,
+            headers: vec![("host".to_owned(), "client.example".to_owned())],
+            body: zeroize::Zeroizing::new(Vec::new()),
+            trailers: Vec::new(),
+        };
+
+        let request =
+            native_http2_upstream_request(&request, "origin.internal:8443", "https").unwrap();
+
+        assert_eq!(
+            request.uri.authority().map(|authority| authority.as_str()),
+            Some("client.example")
+        );
+        assert_eq!(
+            request.uri.path_and_query().map(|target| target.as_str()),
+            Some("/resource?x=1")
+        );
     }
 
     #[test]

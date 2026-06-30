@@ -57,7 +57,7 @@ use fluxheim_cache::{
 use fluxheim_config::{CacheConfig, CacheStaleErrorKind};
 #[cfg(feature = "auth-request")]
 use sanitization::SecretString;
-#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+use sanitization::SecretVec;
 use sanitization::ct::ConstantTimeEq;
 use tokio::sync::Notify;
 
@@ -702,9 +702,9 @@ struct NativePeerFillPeer {
     upstream: NativeHttp1Upstream,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 struct NativePeerFillAuth {
-    secret: Arc<zeroize::Zeroizing<Vec<u8>>>,
+    secret: Arc<SecretVec>,
 }
 
 impl std::fmt::Debug for NativePeerFillAuth {
@@ -1466,9 +1466,7 @@ fn native_peer_fill_auth_from_config(
     Ok(Some(Arc::new(NativePeerFillAuth { secret })))
 }
 
-fn read_native_peer_fill_shared_secret_file(
-    path: &Path,
-) -> std::io::Result<Arc<zeroize::Zeroizing<Vec<u8>>>> {
+fn read_native_peer_fill_shared_secret_file(path: &Path) -> std::io::Result<Arc<SecretVec>> {
     let mut file = open_regular_native_peer_fill_shared_secret_file(path)?;
     let metadata = file.metadata()?;
     if !metadata.file_type().is_file() {
@@ -1483,7 +1481,7 @@ fn read_native_peer_fill_shared_secret_file(
             "peer-fill shared secret file exceeds 4096 bytes",
         ));
     }
-    let mut secret = zeroize::Zeroizing::new(Vec::with_capacity(NATIVE_PEER_FILL_AUTH_MIN_BYTES));
+    let mut secret = Vec::with_capacity(NATIVE_PEER_FILL_AUTH_MIN_BYTES);
     file.by_ref()
         .take((NATIVE_PEER_FILL_AUTH_MAX_BYTES + 1) as u64)
         .read_to_end(&mut secret)?;
@@ -1502,7 +1500,7 @@ fn read_native_peer_fill_shared_secret_file(
             "peer-fill shared secret exceeds 4096 bytes",
         ));
     }
-    Ok(Arc::new(secret))
+    Ok(Arc::new(SecretVec::from_vec(secret)))
 }
 
 #[cfg(unix)]
@@ -5244,10 +5242,12 @@ fn native_peer_fill_hmac_context(
     auth: &NativePeerFillAuth,
     label: &'static [u8],
 ) -> ring::hmac::Context {
-    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, auth.secret.as_slice());
-    let mut context = ring::hmac::Context::with_key(&key);
-    native_peer_fill_hmac_field(&mut context, label);
-    context
+    auth.secret.with_secret(|secret| {
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret);
+        let mut context = ring::hmac::Context::with_key(&key);
+        native_peer_fill_hmac_field(&mut context, label);
+        context
+    })
 }
 
 fn native_peer_fill_hmac_field(context: &mut ring::hmac::Context, bytes: &[u8]) {
@@ -5265,15 +5265,11 @@ fn native_peer_fill_hmac_hex(bytes: &[u8]) -> String {
 }
 
 fn native_peer_fill_signature_matches(candidate: &str, expected: &str) -> bool {
-    let candidate = candidate.trim().as_bytes();
-    if candidate.len() != expected.len() {
-        return false;
-    }
-    let diff = candidate
-        .iter()
-        .zip(expected.as_bytes())
-        .fold(0_u8, |diff, (left, right)| diff | (left ^ right));
-    diff == 0
+    candidate
+        .trim()
+        .as_bytes()
+        .ct_eq(expected.as_bytes())
+        .declassify("native peer-fill HMAC match result is public")
 }
 
 fn native_request_single_header_value<'a>(
@@ -6078,6 +6074,7 @@ mod tests {
     };
     use crate::{NativeHttp1Request, NativeHttp1Response};
     use fluxheim_protocol::Http1Version;
+    use sanitization::SecretVec;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
     use zeroize::Zeroizing;
@@ -6175,7 +6172,9 @@ mod tests {
     #[test]
     fn native_peer_fill_auth_binds_response_body_and_headers() {
         let auth = NativePeerFillAuth {
-            secret: Arc::new(Zeroizing::new(b"0123456789abcdef0123456789abcdef".to_vec())),
+            secret: Arc::new(SecretVec::from_vec(
+                b"0123456789abcdef0123456789abcdef".to_vec(),
+            )),
         };
         let nonce = "peer-fill-test-nonce";
         let mut request = NativeHttp1Request {
@@ -6277,7 +6276,9 @@ mod tests {
                 .unwrap();
         });
         let auth = NativePeerFillAuth {
-            secret: Arc::new(Zeroizing::new(b"0123456789abcdef0123456789abcdef".to_vec())),
+            secret: Arc::new(SecretVec::from_vec(
+                b"0123456789abcdef0123456789abcdef".to_vec(),
+            )),
         };
         let peer = super::NativePeerFillPeer {
             name: "forged-peer".to_owned(),

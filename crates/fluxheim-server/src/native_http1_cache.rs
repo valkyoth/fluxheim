@@ -112,6 +112,13 @@ struct NativeDiskCachePurgeHandle {
     cache: Weak<NativeDiskCache>,
 }
 
+#[derive(Clone, Debug)]
+struct NativeDiskCachePurgeTarget {
+    vhost: Arc<str>,
+    route: Option<Arc<str>>,
+    cache: Arc<NativeDiskCache>,
+}
+
 #[derive(Debug)]
 enum NativeDiskCacheBackend {
     Filesystem,
@@ -1420,41 +1427,13 @@ pub fn purge_native_disk_cache_stale_all(
             "cache stale disk purge batches must be greater than zero",
         ));
     }
-    let Some(registry) = NATIVE_DISK_CACHE_PURGE_REGISTRY.get() else {
-        return Ok(CacheBackgroundPurgeResult::default());
-    };
-    let handles: Vec<_> = {
-        let mut registry = match registry.lock() {
-            Ok(registry) => registry,
-            Err(error) => {
-                log::error!(
-                    target: "fluxheim::native_http1",
-                    "native disk cache purge registry mutex poisoned: {error}"
-                );
-                std::process::abort();
-            }
-        };
-        registry.retain(|handle| handle.cache.upgrade().is_some());
-        registry
-            .iter()
-            .map(|handle| {
-                (
-                    handle.cache.clone(),
-                    handle.vhost.clone(),
-                    handle.route.clone(),
-                )
-            })
-            .collect()
-    };
     let mut result = CacheBackgroundPurgeResult::default();
-    for (cache, vhost, route) in handles {
-        let Some(cache) = cache.upgrade() else {
-            continue;
-        };
+    for target in native_disk_cache_purge_targets() {
         result.targets = result.targets.saturating_add(1);
-        let user_tag = fluxheim_cache::cache_user_tag(vhost.as_ref(), route.as_deref());
+        let user_tag =
+            fluxheim_cache::cache_user_tag(target.vhost.as_ref(), target.route.as_deref());
         for _ in 0..batches {
-            let batch = cache.purge_stale(&user_tag, limit, false);
+            let batch = target.cache.purge_stale(&user_tag, limit, false);
             result.scanned = result.scanned.saturating_add(batch.scanned);
             result.stale = result.stale.saturating_add(batch.stale);
             result.purged = result.purged.saturating_add(batch.purged);
@@ -1472,30 +1451,10 @@ fn purge_native_disk_cache(
     route: Option<&str>,
     mut purge: impl FnMut(&NativeDiskCache) -> bool,
 ) -> bool {
-    let Some(registry) = NATIVE_DISK_CACHE_PURGE_REGISTRY.get() else {
-        return false;
-    };
-    let mut registry = match registry.lock() {
-        Ok(registry) => registry,
-        Err(error) => {
-            log::error!(
-                target: "fluxheim::native_http1",
-                "native disk cache purge registry mutex poisoned: {error}"
-            );
-            std::process::abort();
-        }
-    };
     let mut purged = false;
-    registry.retain(|handle| {
-        let Some(cache) = handle.cache.upgrade() else {
-            return false;
-        };
-        if handle.vhost.as_ref() != vhost || handle.route.as_deref() != route {
-            return true;
-        }
-        purged |= purge(&cache);
-        true
-    });
+    for target in native_disk_cache_purge_targets_for(vhost, route) {
+        purged |= purge(&target.cache);
+    }
     purged
 }
 
@@ -1504,33 +1463,13 @@ fn purge_native_disk_cache_indexed(
     route: Option<&str>,
     mut purge: impl FnMut(&NativeDiskCache) -> CacheIndexedPurgeResult,
 ) -> CacheIndexedPurgeResult {
-    let Some(registry) = NATIVE_DISK_CACHE_PURGE_REGISTRY.get() else {
-        return CacheIndexedPurgeResult::default();
-    };
-    let mut registry = match registry.lock() {
-        Ok(registry) => registry,
-        Err(error) => {
-            log::error!(
-                target: "fluxheim::native_http1",
-                "native disk cache purge registry mutex poisoned: {error}"
-            );
-            std::process::abort();
-        }
-    };
     let mut result = CacheIndexedPurgeResult::default();
-    registry.retain(|handle| {
-        let Some(cache) = handle.cache.upgrade() else {
-            return false;
-        };
-        if handle.vhost.as_ref() != vhost || handle.route.as_deref() != route {
-            return true;
-        }
-        let scoped = purge(&cache);
+    for target in native_disk_cache_purge_targets_for(vhost, route) {
+        let scoped = purge(&target.cache);
         result.matched = result.matched.saturating_add(scoped.matched);
         result.purged = result.purged.saturating_add(scoped.purged);
         result.truncated |= scoped.truncated;
-        true
-    });
+    }
     result
 }
 
@@ -1539,8 +1478,30 @@ fn purge_native_disk_cache_stale_indexed(
     route: Option<&str>,
     mut purge: impl FnMut(&NativeDiskCache) -> CacheStalePurgeResult,
 ) -> CacheStalePurgeResult {
+    let mut result = CacheStalePurgeResult::default();
+    for target in native_disk_cache_purge_targets_for(vhost, route) {
+        let scoped = purge(&target.cache);
+        result.scanned = result.scanned.saturating_add(scoped.scanned);
+        result.stale = result.stale.saturating_add(scoped.stale);
+        result.purged = result.purged.saturating_add(scoped.purged);
+        result.truncated |= scoped.truncated;
+    }
+    result
+}
+
+fn native_disk_cache_purge_targets_for(
+    vhost: &str,
+    route: Option<&str>,
+) -> Vec<NativeDiskCachePurgeTarget> {
+    native_disk_cache_purge_targets()
+        .into_iter()
+        .filter(|target| target.vhost.as_ref() == vhost && target.route.as_deref() == route)
+        .collect()
+}
+
+fn native_disk_cache_purge_targets() -> Vec<NativeDiskCachePurgeTarget> {
     let Some(registry) = NATIVE_DISK_CACHE_PURGE_REGISTRY.get() else {
-        return CacheStalePurgeResult::default();
+        return Vec::new();
     };
     let mut registry = match registry.lock() {
         Ok(registry) => registry,
@@ -1552,22 +1513,18 @@ fn purge_native_disk_cache_stale_indexed(
             std::process::abort();
         }
     };
-    let mut result = CacheStalePurgeResult::default();
-    registry.retain(|handle| {
-        let Some(cache) = handle.cache.upgrade() else {
-            return false;
-        };
-        if handle.vhost.as_ref() != vhost || handle.route.as_deref() != route {
-            return true;
-        }
-        let scoped = purge(&cache);
-        result.scanned = result.scanned.saturating_add(scoped.scanned);
-        result.stale = result.stale.saturating_add(scoped.stale);
-        result.purged = result.purged.saturating_add(scoped.purged);
-        result.truncated |= scoped.truncated;
-        true
-    });
-    result
+    registry.retain(|handle| handle.cache.upgrade().is_some());
+    registry
+        .iter()
+        .filter_map(|handle| {
+            let cache = handle.cache.upgrade()?;
+            Some(NativeDiskCachePurgeTarget {
+                vhost: handle.vhost.clone(),
+                route: handle.route.clone(),
+                cache,
+            })
+        })
+        .collect()
 }
 
 fn native_inspection_vary_cache_key(
@@ -2898,9 +2855,14 @@ pub(crate) fn with_native_cache_status(
 
 #[cfg(test)]
 mod tests {
-    use super::native_peer_fill_cache_ttl;
-    use fluxheim_config::CacheConfig;
+    use super::{
+        NATIVE_DISK_CACHE_PURGE_REGISTRY, NativeDiskCache, NativeDiskCacheBackend,
+        NativeDiskCacheState, native_peer_fill_cache_ttl, purge_native_disk_cache,
+        register_native_disk_cache_purge_handle,
+    };
+    use fluxheim_config::{ByteSize, CacheConfig};
     use http::HeaderMap;
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     fn headers(values: &[(&str, &str)]) -> HeaderMap {
@@ -2933,5 +2895,34 @@ mod tests {
         let headers = headers(&[("cache-control", "max-age=60"), ("age", "60")]);
 
         assert_eq!(native_peer_fill_cache_ttl(200, &headers, &cache), None);
+    }
+
+    #[test]
+    fn disk_cache_purge_callback_runs_outside_registry_lock() {
+        let cache = Arc::new(NativeDiskCache {
+            root: std::env::temp_dir().join(format!(
+                "fluxheim-native-cache-purge-lock-{}",
+                std::process::id()
+            )),
+            max_bytes: 1024,
+            max_object_bytes: ByteSize::from_bytes(1024),
+            backend: NativeDiskCacheBackend::Filesystem,
+            encryption: None,
+            state: Mutex::new(NativeDiskCacheState::default()),
+        });
+        let vhost: Arc<str> = Arc::from(format!("purge-lock-test-{}", std::process::id()));
+        register_native_disk_cache_purge_handle(vhost.clone(), None, &cache);
+
+        let mut callback_saw_unlocked_registry = false;
+        let purged = purge_native_disk_cache(vhost.as_ref(), None, |_| {
+            callback_saw_unlocked_registry = NATIVE_DISK_CACHE_PURGE_REGISTRY
+                .get()
+                .and_then(|registry| registry.try_lock().ok())
+                .is_some();
+            true
+        });
+
+        assert!(purged);
+        assert!(callback_saw_unlocked_registry);
     }
 }
