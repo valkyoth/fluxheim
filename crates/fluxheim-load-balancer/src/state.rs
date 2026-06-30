@@ -12,7 +12,7 @@ use fluxheim_config::{
 use super::LoadBalancedUpstreamOutcome;
 use super::backend::BackendIdentity;
 use super::key::backend_key;
-use super::selection::fnv1a64_with_seed;
+use super::selection_hash::fnv1a64_with_seed;
 
 #[derive(Debug)]
 pub struct LoadBalancedConnectionPermit {

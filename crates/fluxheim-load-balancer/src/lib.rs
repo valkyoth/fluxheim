@@ -31,6 +31,7 @@ mod metrics;
 mod persistence;
 mod policy;
 mod selection;
+mod selection_hash;
 mod state;
 mod state_file;
 
@@ -1583,7 +1584,8 @@ mod tests {
     use super::LoadBalancerCircuitState;
     use super::backend::{BackendIdentity, FluxBackend};
     use super::persistence::{MAX_PERSISTENCE_KEY_BYTES, cookie_key, request_header_key};
-    use super::selection::{fnv1a64_with_seed, least_connections_score_is_lower};
+    use super::selection::least_connections_score_is_lower;
+    use super::selection_hash::fnv1a64_with_seed;
     use super::state::PassiveBackendHealth;
     use super::{
         LoadBalancedUpstreamReporter, LoadBalancerDiscoveryMode, LoadBalancerPersistenceOutcome,

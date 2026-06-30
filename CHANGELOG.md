@@ -96,6 +96,8 @@ behavior when the change improves security or project direction.
 - Split load-balancer selected-upstream and queue/persistence outcome DTOs out
   of `fluxheim-load-balancer/src/api.rs`, leaving the load-balancer API DTO
   module below the line-limit target.
+- Split load-balancer FNV hashing, random selection seeds, and per-process route
+  secrets into a focused private selection-hash module.
 
 ## 1.6.36 - 2026-06-30
 

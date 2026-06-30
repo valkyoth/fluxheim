@@ -94,6 +94,8 @@ is clean.
 - Split load-balancer selected-upstream and queue/persistence outcome DTOs out
   of `fluxheim-load-balancer/src/api.rs`, leaving the load-balancer API DTO
   module below the line-limit target.
+- Split load-balancer FNV hashing, random selection seeds, and per-process route
+  secrets into a focused private selection-hash module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
