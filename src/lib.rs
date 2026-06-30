@@ -200,8 +200,6 @@ mod path_safety;
 pub(crate) mod php_fpm;
 #[cfg(all(feature = "proxy", any()))]
 pub mod proxy;
-#[cfg(all(feature = "proxy", not(any())))]
-pub use native_proxy as proxy;
 #[cfg(all(feature = "proxy", feature = "cache", any()))]
 mod proxy_cache;
 #[cfg(all(any(feature = "proxy", feature = "stream-proxy"), any()))]
