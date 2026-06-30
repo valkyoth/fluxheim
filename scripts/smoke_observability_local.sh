@@ -15,8 +15,8 @@ span_id="00f067aa0ba902b7"
 traceparent="00-$trace_id-$span_id-01"
 prometheus_name="fluxheim-observability-prometheus-$$"
 jaeger_name="fluxheim-observability-jaeger-$$"
-prometheus_image="${FLUXHEIM_PROMETHEUS_IMAGE:-docker.io/prom/prometheus:latest}"
-jaeger_image="${FLUXHEIM_JAEGER_IMAGE:-docker.io/jaegertracing/all-in-one:latest}"
+prometheus_image="${FLUXHEIM_PROMETHEUS_IMAGE:-docker.io/prom/prometheus:v3.12.0}"
+jaeger_image="${FLUXHEIM_JAEGER_IMAGE:-docker.io/jaegertracing/all-in-one:1.76.0}"
 prometheus_started=0
 jaeger_started=0
 

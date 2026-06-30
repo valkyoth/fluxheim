@@ -38,6 +38,8 @@ longer use.
 - Add native HTTP/1 chunked-body regression coverage for the historical
   overflow-sized chunk header crash class; the native parser rejects the
   `ffffffffffffffff` chunk size before routing reaches the proxy handler.
+- Pin observability smoke images to stable Prometheus and Jaeger tags instead
+  of `latest` so CI pulls deterministic container versions.
 - Keep normal Fluxheim builds on the Pingora-free runtime introduced in
   `1.6.34` and stabilized in `1.6.35`.
 - Keep release, dependency, native-runtime, RPM, container, and smoke gates as
