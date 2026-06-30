@@ -13,6 +13,9 @@ is clean.
 - Start the final pre-Wasm crate-boundary cleanup pass.
 - Prepare ACME, observability, header-policy, TLS helper, native proxy, and CLI
   boundaries for smaller crate-owned APIs.
+- Remove private root compatibility shims for common errors, filesystem trust
+  checks, and OTLP HTTP agents; affected call sites now use
+  `fluxheim-common`, `fluxheim-config`, and `fluxheim-observability` directly.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

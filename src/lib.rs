@@ -116,8 +116,6 @@ pub(crate) mod config_web {
     #[allow(unused_imports)]
     pub(crate) use fluxheim_config::config_web::*;
 }
-mod flux_error;
-mod fs_trust;
 #[cfg(feature = "geoip")]
 pub mod geoip;
 #[cfg(feature = "proxy")]
@@ -173,8 +171,6 @@ mod native_http1_static;
 pub mod native_proxy;
 #[cfg(feature = "otel-otlp")]
 pub mod otel_otlp;
-#[cfg(feature = "metrics-otlp")]
-mod otlp_http;
 #[cfg(feature = "proxy")]
 mod path_safety;
 pub mod reload;

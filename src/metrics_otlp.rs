@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use fluxheim_observability::{OtlpHttpEndpoint, build_metrics_payload};
+use fluxheim_observability::{OtlpHttpEndpoint, agent, build_metrics_payload};
 
 use crate::config::MetricsOtlpExportConfig;
 
@@ -21,7 +21,7 @@ impl MetricsOtlpExporter {
         let service_name = config.service_name.clone();
         let interval = Duration::from_secs(config.interval_secs);
         let timeout = Duration::from_secs(config.timeout_secs);
-        let agent = crate::otlp_http::agent(timeout, config.tls_ca_cert_path.as_deref())?;
+        let agent = agent(timeout, config.tls_ca_cert_path.as_deref())?;
 
         Ok(Some(Self {
             endpoint,

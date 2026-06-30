@@ -664,7 +664,7 @@ fn push_acme_eab_world_writable_parent_issue(
 }
 
 fn path_has_insecure_writable_parent(path: &Path) -> io::Result<bool> {
-    crate::fs_trust::existing_parent_has_insecure_write_permissions(path)
+    fluxheim_config::fs_trust::existing_parent_has_insecure_write_permissions(path)
 }
 
 fn symlink_inspection_error(error: io::Error) -> String {

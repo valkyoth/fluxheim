@@ -10,7 +10,7 @@ use percent_encoding::percent_decode_str;
 
 use crate::config::WebConfig;
 #[cfg(feature = "proxy")]
-use crate::flux_error::{FluxError, FluxResult};
+use fluxheim_common::{FluxError, FluxResult};
 use fluxheim_web::SafeRelativePath;
 #[cfg(feature = "proxy")]
 use fluxheim_web::StaticCacheIdentity;

@@ -2981,12 +2981,14 @@ fn read_secret_file(path: &Path) -> Result<Zeroizing<String>, Box<dyn Error + Se
     }
 
     #[cfg(unix)]
-    if crate::fs_trust::existing_parent_has_insecure_write_permissions(path).map_err(|error| {
-        format!(
-            "failed to inspect admin token parent path {}: {error}",
-            path.display()
-        )
-    })? {
+    if fluxheim_config::fs_trust::existing_parent_has_insecure_write_permissions(path).map_err(
+        |error| {
+            format!(
+                "failed to inspect admin token parent path {}: {error}",
+                path.display()
+            )
+        },
+    )? {
         return Err(format!(
             "admin token file {} must not be below a group- or world-writable directory",
             path.display()

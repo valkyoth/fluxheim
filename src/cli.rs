@@ -3763,7 +3763,7 @@ fn existing_prefix_contains_symlink(
 fn existing_parent_has_insecure_write_permissions(
     path: &Path,
 ) -> Result<bool, Box<dyn Error + Send + Sync>> {
-    crate::fs_trust::existing_parent_has_insecure_write_permissions(path)
+    fluxheim_config::fs_trust::existing_parent_has_insecure_write_permissions(path)
         .map_err(|error| error.into())
 }
 

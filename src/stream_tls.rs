@@ -9,9 +9,9 @@ use std::sync::Arc;
 use crate::config::StreamRouteConfig;
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use crate::config_net::upstream_host;
-use crate::flux_error::{FluxError, FluxResult};
 use crate::stream_proxy::FluxStream;
 use crate::upstream_tls::read_upstream_tls_file;
+use fluxheim_common::{FluxError, FluxResult};
 
 #[cfg(feature = "tls-rustls-backend")]
 use rustls::client::WebPkiServerVerifier;

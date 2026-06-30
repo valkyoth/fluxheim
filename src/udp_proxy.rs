@@ -11,7 +11,7 @@ use tokio::net::UdpSocket;
 
 use crate::background::{FluxBackgroundReady, FluxBackgroundTask, FluxShutdown};
 use crate::config::{Config, UdpRouteConfig, UdpRouteMode};
-use crate::flux_error::{FluxError, FluxResult};
+use fluxheim_common::{FluxError, FluxResult};
 
 const UDP_RECEIVE_BUFFER_BYTES: usize = 65_507;
 const UDP_DROP_LOG_INTERVAL_MILLIS: u64 = 1_000;

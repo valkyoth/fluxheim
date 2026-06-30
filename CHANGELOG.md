@@ -15,6 +15,9 @@ behavior when the change improves security or project direction.
   bumped through the workspace and RPM spec.
 - Prepare ACME, observability, header-policy, TLS helper, native proxy, and CLI
   boundaries for smaller crate-owned APIs while keeping runtime behavior stable.
+- Remove private root compatibility shims for common errors, filesystem trust
+  checks, and OTLP HTTP agents; callers now use the owning workspace crates
+  directly.
 
 ## 1.6.36 - 2026-06-30
 
