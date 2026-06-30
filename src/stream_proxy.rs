@@ -11,10 +11,10 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::background::{FluxBackgroundReady, FluxBackgroundTask, FluxShutdown};
 use crate::config::{Config, DownstreamProxyProtocol, StreamRouteConfig, UpstreamProxyProtocol};
-use crate::config_stream::{StreamConnectionSlot, acquire_stream_connection_slot};
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use crate::stream_tls::StreamUpstreamTlsConnector;
 use fluxheim_common::{FluxError, FluxResult};
+use fluxheim_config::config_stream::{StreamConnectionSlot, acquire_stream_connection_slot};
 use fluxheim_stream::{
     StreamSelectedUpstream, StreamSourcePolicy, StreamTrustedSource, StreamUpstreamSelector,
     apply_downstream_proxy_protocol_to_stream, copy_bidirectional_with_limits,

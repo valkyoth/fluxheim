@@ -4178,14 +4178,14 @@ mod tests {
         AdminHealthResponseMode, AdminSelfHealingConfig, Config, ProxyConfig, ServerConfig,
         VhostConfig, WebConfig,
     };
-    #[cfg(feature = "cache")]
-    use crate::config_route::RouteConfig;
     use crate::native_proxy::FluxProxy;
     #[cfg(feature = "load-balancer")]
     use fluxheim_common::test_support::safe_child_path;
     use fluxheim_common::test_support::unique_temp_path;
     #[cfg(unix)]
     use fluxheim_common::test_support::{unique_group_writable_child, unique_world_writable_child};
+    #[cfg(feature = "cache")]
+    use fluxheim_config::config_route::RouteConfig;
     use fluxheim_snapshot::SnapshotStore;
     use fluxheim_snapshot::{PendingValidation, SnapshotRuntimeState};
 

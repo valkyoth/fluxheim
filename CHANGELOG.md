@@ -29,6 +29,8 @@ behavior when the change improves security or project direction.
   `fluxheim-load-balancer` directly.
 - Remove root GeoIP, OTLP trace-exporter, and trace-context re-export shims;
   callers should use `fluxheim-geoip` and `fluxheim-observability` directly.
+- Remove unused root `config_*` compatibility modules; remaining callers use
+  the owning `fluxheim-config` modules directly.
 
 ## 1.6.36 - 2026-06-30
 
