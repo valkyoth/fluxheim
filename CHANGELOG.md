@@ -91,6 +91,8 @@ behavior when the change improves security or project direction.
 - Split cache response header policy, freshness helpers, content-type checks,
   and range response admission into a focused private module while preserving
   the existing `headers` exports.
+- Split cache stale-if-error and stale-while-revalidate policy helpers into a
+  focused private module while preserving the existing `headers` exports.
 - Split load-balancer selected-upstream and queue/persistence outcome DTOs out
   of `fluxheim-load-balancer/src/api.rs`, leaving the load-balancer API DTO
   module below the line-limit target.

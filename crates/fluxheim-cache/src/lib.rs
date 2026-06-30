@@ -10,6 +10,7 @@ pub mod headers;
 mod headers_directives;
 mod headers_request;
 mod headers_response;
+mod headers_stale;
 mod headers_vary;
 pub mod metrics;
 pub mod object;

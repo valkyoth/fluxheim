@@ -13,44 +13,13 @@ pub use crate::headers_response::{
     response_range_cache_admission_rejection, response_values_forbid_shared_cache,
     sanitize_multipart_content_type,
 };
+pub use crate::headers_stale::{
+    CacheStaleEvent, cache_should_serve_stale, cache_stale_status_allows,
+};
 pub use crate::headers_vary::{
     MAX_VARY_FIELDS, VaryCachePolicy, VaryRequestHashField, cache_vary_policy, vary_cache_policy,
     vary_request_hash_material,
 };
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CacheStaleEvent {
-    Updating,
-    UpstreamError(fluxheim_config::CacheStaleErrorKind),
-    UpstreamHttpStatus(u16),
-    OtherError,
-}
-
-pub fn cache_should_serve_stale(
-    cache: &fluxheim_config::CacheConfig,
-    event: CacheStaleEvent,
-) -> bool {
-    match event {
-        CacheStaleEvent::UpstreamError(kind) => {
-            cache.stale_if_error_secs.is_some() && cache.stale_if_error_on.contains(&kind)
-        }
-        CacheStaleEvent::UpstreamHttpStatus(status) => {
-            cache.stale_if_error_secs.is_some()
-                && cache
-                    .stale_if_error_on
-                    .contains(&fluxheim_config::CacheStaleErrorKind::HttpStatus)
-                && cache_stale_status_allows(cache, status)
-        }
-        CacheStaleEvent::OtherError => false,
-        CacheStaleEvent::Updating => cache.stale_while_revalidate_secs.is_some(),
-    }
-}
-
-pub fn cache_stale_status_allows(cache: &fluxheim_config::CacheConfig, status: u16) -> bool {
-    (500..=599).contains(&status)
-        && (cache.stale_if_error_statuses.is_empty()
-            || cache.stale_if_error_statuses.contains(&status))
-}
 
 #[cfg(test)]
 mod tests {
