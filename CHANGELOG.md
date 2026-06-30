@@ -27,6 +27,8 @@ behavior when the change improves security or project direction.
 - Remove root reload, snapshot, and load-balancer re-export shims from active
   code; admin and CLI paths now use `fluxheim-config`, `fluxheim-snapshot`, and
   `fluxheim-load-balancer` directly.
+- Remove root GeoIP, OTLP trace-exporter, and trace-context re-export shims;
+  callers should use `fluxheim-geoip` and `fluxheim-observability` directly.
 
 ## 1.6.36 - 2026-06-30
 

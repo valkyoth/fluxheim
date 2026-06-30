@@ -4423,7 +4423,7 @@ the exception while the cache server is being completed as a focused sequence:
   instance-name generation moved behind the native PHP-FPM route adapter and
   `fluxheim-php-fpm` crate surface.
   The `crates/fluxheim-geoip` boundary now owns `GeoContext` and the optional
-  local MMDB runtime behind root compatibility re-exports. The
+  local MMDB runtime. The
   `crates/fluxheim-compression` boundary now owns response compression encoder
   lifecycle, output-limit accounting, Accept-Encoding token/qvalue parsing, and
   response policy string matching for Cache-Control directives and Content-Type
@@ -4431,8 +4431,7 @@ the exception while the cache server is being completed as a focused sequence:
   while the root adapter keeps Pingora-specific header selection, header
   iteration, config extraction, and response mutation. The
   `crates/fluxheim-observability` boundary now owns W3C Trace Context parsing,
-  generation, and traceparent normalization behind the existing
-  `crate::trace_context` surface, and the shared OTLP HTTP agent plus
+  generation, traceparent normalization, and the shared OTLP HTTP agent plus
   symlink-safe custom CA bundle loader and OTLP HTTP endpoint parser behind an
   `otlp-http` crate feature. It also owns the Prometheus-to-OTLP metrics payload
   builder behind an `otlp-metrics` crate feature while the root metrics OTLP
@@ -4454,17 +4453,16 @@ the exception while the cache server is being completed as a focused sequence:
   lives in `fluxheim-config`, leaving root `crate::metrics` as the
   compatibility wrapper for selection labels and Prometheus gauge publishing.
   The OTLP trace exporter and trace-span payload builder also live behind the
-  `crates/fluxheim-observability` `otlp-trace` feature while root
-  `crate::otel_otlp` remains a compatibility re-export.
+  `crates/fluxheim-observability` `otlp-trace` feature.
   The `crates/fluxheim-protocol` boundary now
   owns PROXY protocol v1/v2 upstream header framing used by the native HTTP and
   stream runtimes. It also owns route method matching and prefix-boundary
   helpers consumed by native route selection. The
   `crates/fluxheim-snapshot` boundary now owns durable config snapshot storage,
   metadata validation, rollback pointer handling, and symlink-safe filesystem
-  writes while root `crate::snapshot` remains a compatibility re-export.
-  reload-impact classification in `crates/fluxheim-config`, with root
-  `crate::reload` as a compatibility re-export for admin and CLI reporting.
+  writes.
+  reload-impact classification in `crates/fluxheim-config`, with root admin
+  and CLI code calling the owning crate directly.
   Runtime/member weight parsing now also lives in
   `crates/fluxheim-load-balancer`, with root admin kept as the HTTP/query
   endpoint adapter.

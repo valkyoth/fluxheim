@@ -115,8 +115,6 @@ pub(crate) mod config_web {
     #[allow(unused_imports)]
     pub(crate) use fluxheim_config::config_web::*;
 }
-#[cfg(feature = "geoip")]
-pub mod geoip;
 #[cfg(feature = "proxy")]
 pub mod headers {
     #[derive(Clone, Debug, Default)]
@@ -166,8 +164,6 @@ pub mod metrics_otlp;
 mod native_http1_static;
 #[cfg(feature = "proxy")]
 pub mod native_proxy;
-#[cfg(feature = "otel-otlp")]
-pub mod otel_otlp;
 #[cfg(feature = "security")]
 pub mod security;
 #[cfg(feature = "stream-proxy")]
@@ -183,8 +179,6 @@ mod stream_tls;
     feature = "tls-openssl"
 ))]
 pub mod tls;
-#[cfg(feature = "otel-tracing")]
-pub mod trace_context;
 #[cfg(feature = "udp-proxy")]
 mod udp_proxy;
 #[cfg(all(
