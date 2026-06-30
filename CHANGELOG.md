@@ -46,6 +46,9 @@ behavior when the change improves security or project direction.
 - Split OTLP HTTP agent and OTLP metrics payload helpers out of
   `fluxheim-observability/src/lib.rs` into focused crate modules while
   preserving the public exports.
+- Split trusted client-IP restoration and Forwarded header helpers out of
+  `fluxheim-headers/src/lib.rs` into a focused crate module while preserving
+  the public exports and privacy-mode gating.
 
 ## 1.6.36 - 2026-06-30
 
