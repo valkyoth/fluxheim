@@ -50,6 +50,9 @@ is clean.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
+- Move `fluxheim-web` crate tests out of `src/lib.rs` so the production static
+  response and directory-listing implementation stays below the line-limit
+  target.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

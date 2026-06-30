@@ -52,6 +52,9 @@ behavior when the change improves security or project direction.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
+- Move `fluxheim-web` crate tests out of `src/lib.rs` so the production static
+  response and directory-listing implementation stays below the line-limit
+  target.
 
 ## 1.6.36 - 2026-06-30
 
