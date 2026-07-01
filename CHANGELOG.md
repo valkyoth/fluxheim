@@ -166,6 +166,9 @@ behavior when the change improves security or project direction.
 - Split native downstream HTTP/1 plain TCP/Unix listener accept loops and
   Rustls/OpenSSL TLS listener accept loops into focused child modules, bringing
   `native_http1.rs` below the modularity target.
+- Split native upstream HTTP/1 client socket setup and HTTP/2 request/response
+  conversion helpers into focused child modules while preserving upstream
+  pooling, h2c, and fallback behavior.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
