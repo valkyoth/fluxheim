@@ -137,6 +137,8 @@ behavior when the change improves security or project direction.
   a focused child test module.
 - Split native HTTP/1 plan route header-policy, forwarded-header, and
   path-rewrite candidate tests into a focused child test module.
+- Split native HTTP/1 plan access-policy, rate-limit, and concurrency
+  candidate tests into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
