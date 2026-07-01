@@ -127,6 +127,11 @@ behavior when the change improves security or project direction.
 - Split native route proxy upstream/load-balancer construction into a focused
   server module so route dispatch keeps shrinking without changing serving
   behavior.
+- Split native route proxy type, error, and build-context definitions into a
+  focused server module while preserving the existing public re-exports.
+- Split native route proxy managed ACME HTTP-01 route ownership into an
+  ACME-gated server module, bringing the route-proxy construction file below
+  the modularity target.
 - Split native route redirect hardening tests into a focused server test module
   while preserving the existing live-listener coverage.
 - Split native route traceparent propagation into a focused server module while
