@@ -93,6 +93,8 @@ behavior when the change improves security or project direction.
   server module.
 - Split native proxy request/timeout helper functions into a focused server
   module.
+- Split native proxy peer-fill/cache unit tests into a focused server test
+  module.
 - Split native route proxy upstream/load-balancer construction into a focused
   server module so route dispatch keeps shrinking without changing serving
   behavior.
