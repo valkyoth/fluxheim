@@ -24,6 +24,12 @@ mod native_http1_plan;
 mod native_http1_proxy;
 mod native_http1_proxy_metrics;
 mod native_http1_proxy_runtime;
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+mod native_http1_route_compression;
 mod native_http1_route_proxy;
 mod native_http1_static_web;
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
