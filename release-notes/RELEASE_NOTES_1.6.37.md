@@ -127,6 +127,9 @@ is clean.
   helpers out of the runtime module as a focused private module.
 - Split load-balancer HTTP discovery, DNS discovery, and discovery tests into
   focused modules, bringing `discovery.rs` below the line-limit target.
+- Split load-balancer HTTP/gRPC health-check construction and response
+  validation into a focused health submodule, bringing the production
+  `health.rs` dispatcher below the line-limit target.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

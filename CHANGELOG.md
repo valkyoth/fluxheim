@@ -129,6 +129,9 @@ behavior when the change improves security or project direction.
   helpers out of the runtime module as a focused private module.
 - Split load-balancer HTTP discovery, DNS discovery, and discovery tests into
   focused modules, bringing `discovery.rs` below the line-limit target.
+- Split load-balancer HTTP/gRPC health-check construction and response
+  validation into a focused health submodule, bringing the production
+  `health.rs` dispatcher below the line-limit target.
 
 ## 1.6.36 - 2026-06-30
 
