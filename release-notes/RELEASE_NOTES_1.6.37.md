@@ -100,6 +100,8 @@ is clean.
   into a focused private load-balancer selection module.
 - Split the Maglev table builder, candidate iterator, and modular-arithmetic
   helper into a focused private load-balancer selection module.
+- Split load-balancer candidate filtering, passive-health ejection floor, and
+  slow-start permit checks into a focused private selection module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

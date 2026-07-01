@@ -102,6 +102,8 @@ behavior when the change improves security or project direction.
   into a focused private load-balancer selection module.
 - Split the Maglev table builder, candidate iterator, and modular-arithmetic
   helper into a focused private load-balancer selection module.
+- Split load-balancer candidate filtering, passive-health ejection floor, and
+  slow-start permit checks into a focused private selection module.
 
 ## 1.6.36 - 2026-06-30
 

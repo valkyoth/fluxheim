@@ -5,6 +5,9 @@ use super::backend::{BackendContainer, BackendContainerSnapshot, backend_contain
 use super::backend::{BackendIdentity, RuntimeBackend as Backend};
 use super::key::backend_key;
 use super::policy::BackendSelectionPolicy;
+use super::selection_candidate::{
+    SelectionContext, backend_candidate_allowed, backend_candidate_allowed_read_only,
+};
 use super::selection_hash::{
     consistent_route_secret, fnv_route_secret, fnv1a64_with_seed, random_u64,
 };
@@ -36,14 +39,6 @@ pub(super) struct SelectionPass {
     pub(super) allow_backup: bool,
     pub(super) ignore_slow_start: bool,
     pub(super) ignore_locality: bool,
-}
-
-#[derive(Clone, Copy)]
-struct SelectionContext<'a> {
-    passive_health: Option<&'a PassiveHealthState>,
-    slow_start: Option<&'a SlowStartState>,
-    counters: &'a BackendConnectionCounters,
-    backend_policy: &'a BackendSelectionPolicy,
 }
 
 fn selection_priority_groups(backend_policy: &BackendSelectionPolicy) -> Vec<Option<u16>> {
@@ -590,87 +585,6 @@ fn weighted_backend_indices(backends: &[Backend]) -> Vec<usize> {
         weighted.extend(std::iter::repeat_n(index, backend.weight().max(1)));
     }
     weighted
-}
-
-fn backend_candidate_allowed(
-    snapshot: &BackendContainerSnapshot,
-    backend: &Backend,
-    context: SelectionContext<'_>,
-    pass: SelectionPass,
-) -> bool {
-    backend_candidate_base_allowed(snapshot, backend, context, pass, false)
-        && passive_health_candidate_allowed(snapshot, backend, context)
-}
-
-fn backend_candidate_allowed_read_only(
-    snapshot: &BackendContainerSnapshot,
-    backend: &Backend,
-    context: SelectionContext<'_>,
-    pass: SelectionPass,
-) -> bool {
-    backend_candidate_base_allowed(snapshot, backend, context, pass, true)
-        && passive_health_candidate_allowed(snapshot, backend, context)
-}
-
-fn backend_candidate_base_allowed(
-    snapshot: &BackendContainerSnapshot,
-    backend: &Backend,
-    context: SelectionContext<'_>,
-    pass: SelectionPass,
-    slow_start_read_only: bool,
-) -> bool {
-    snapshot.ready(backend)
-        && context
-            .backend_policy
-            .permits(backend, pass, context.counters)
-        && (pass.ignore_slow_start
-            || context.slow_start.is_none_or(|state| {
-                if slow_start_read_only {
-                    state.permits_read_only(backend)
-                } else {
-                    state.permits(backend)
-                }
-            }))
-}
-
-fn passive_health_candidate_allowed(
-    snapshot: &BackendContainerSnapshot,
-    backend: &Backend,
-    context: SelectionContext<'_>,
-) -> bool {
-    let Some(health) = context.passive_health else {
-        return true;
-    };
-    if !health.is_ejected(backend) {
-        return true;
-    }
-    let floor = health.min_healthy_backends();
-    floor > 0 && non_ejected_candidate_count(snapshot, context, floor) < floor
-}
-
-fn non_ejected_candidate_count(
-    snapshot: &BackendContainerSnapshot,
-    context: SelectionContext<'_>,
-    limit: usize,
-) -> usize {
-    let Some(health) = context.passive_health else {
-        return limit;
-    };
-    let floor_pass = SelectionPass {
-        minimum_priority_group: None,
-        allow_backup: true,
-        ignore_slow_start: true,
-        ignore_locality: true,
-    };
-    snapshot
-        .backends()
-        .iter()
-        .filter(|backend| {
-            backend_candidate_base_allowed(snapshot, backend, context, floor_pass, true)
-                && !health.is_ejected(backend)
-        })
-        .take(limit)
-        .count()
 }
 
 pub(super) fn select_consistent_hash(

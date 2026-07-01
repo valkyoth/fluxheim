@@ -31,6 +31,7 @@ mod metrics;
 mod persistence;
 mod policy;
 mod selection;
+mod selection_candidate;
 mod selection_hash;
 mod selection_ketama;
 mod selection_maglev;
