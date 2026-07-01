@@ -128,6 +128,9 @@ behavior when the change improves security or project direction.
 - Split root native-proxy cache selection, exact/bulk/indexed/stale purge
   handlers, and purge activity accounting into a focused cache-purge child
   module.
+- Split root native-proxy cache snapshot, cache-key preview, disk-object lookup,
+  and cache-preview route matching into a focused cache-snapshot child module,
+  bringing `src/native_proxy.rs` below the modularity target.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
