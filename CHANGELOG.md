@@ -136,6 +136,9 @@ behavior when the change improves security or project direction.
   resolution and response planning.
 - Split root static-web resolution and response tests into focused child test
   modules, bringing `src/web.rs` below the modularity target.
+- Split root stream-proxy connection dialing/proxying helpers and stream tests
+  into child modules, bringing `src/stream_proxy.rs` below the modularity
+  target.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
