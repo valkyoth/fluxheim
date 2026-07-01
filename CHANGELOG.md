@@ -127,6 +127,8 @@ behavior when the change improves security or project direction.
   below the line-limit target.
 - Split the pure load-balancer backend model, backend identity, and backend-set
   helpers out of the runtime module as a focused private module.
+- Split load-balancer HTTP discovery, DNS discovery, and discovery tests into
+  focused modules, bringing `discovery.rs` below the line-limit target.
 
 ## 1.6.36 - 2026-06-30
 

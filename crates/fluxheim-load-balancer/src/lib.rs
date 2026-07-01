@@ -25,6 +25,10 @@ mod backend_model;
 mod background;
 mod crypto;
 mod discovery;
+mod discovery_dns;
+mod discovery_http;
+#[cfg(test)]
+mod discovery_tests;
 mod health;
 mod key;
 #[cfg(feature = "metrics")]
