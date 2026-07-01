@@ -136,6 +136,8 @@ behavior when the change improves security or project direction.
   `health.rs` dispatcher below the line-limit target.
 - Split load-balancer health-check regression tests by transport/protocol
   family, removing the temporary oversized health test exception.
+- Split the load-balancer crate-root regression suite into focused test modules,
+  reducing `fluxheim-load-balancer/src/lib.rs` to orchestration/facade code.
 
 ## 1.6.36 - 2026-06-30
 

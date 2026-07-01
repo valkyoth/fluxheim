@@ -134,6 +134,8 @@ is clean.
   `health.rs` dispatcher below the line-limit target.
 - Split load-balancer health-check regression tests by transport/protocol
   family, removing the temporary oversized health test exception.
+- Split the load-balancer crate-root regression suite into focused test modules,
+  reducing `fluxheim-load-balancer/src/lib.rs` to orchestration/facade code.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
