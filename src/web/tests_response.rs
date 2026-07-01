@@ -1,12 +1,17 @@
-use std::fs;
-use std::io;
 use std::time::UNIX_EPOCH;
 
-use super::tests_support::{TestDir, server, static_file};
+#[cfg(feature = "proxy")]
+use std::{fs, io};
+
+use super::tests_support::static_file;
+#[cfg(feature = "proxy")]
+use super::tests_support::{TestDir, server};
 use super::{
-    ByteRangeParse, ResolveResult, StaticFile, StaticRequestConditions, StaticResponseBody,
-    parse_single_byte_range, plan_static_response,
+    ByteRangeParse, StaticRequestConditions, StaticResponseBody, parse_single_byte_range,
+    plan_static_response,
 };
+#[cfg(feature = "proxy")]
+use super::{ResolveResult, StaticFile};
 
 #[test]
 fn plans_static_etag_revalidation() {
