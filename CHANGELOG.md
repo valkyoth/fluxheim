@@ -159,6 +159,8 @@ behavior when the change improves security or project direction.
 - Split native downstream HTTP/1 request metadata, TLS/Geo context DTOs, cache
   request view, and load-balancer request view into a focused child module
   while preserving the public request API.
+- Split native downstream HTTP/1 PROXY protocol v1/v2 source parsing and trust
+  checks into a focused child module while preserving listener behavior.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
