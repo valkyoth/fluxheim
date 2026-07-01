@@ -150,6 +150,8 @@ behavior when the change improves security or project direction.
 - Split load-balancer runtime backend mutation and persistence-clear methods
   into a focused private module, leaving the crate root closer to construction,
   selection, and stats orchestration.
+- Split load-balancer queue wait/timeout handling into a focused private module,
+  leaving the crate root below 800 lines.
 
 ## 1.6.36 - 2026-06-30
 

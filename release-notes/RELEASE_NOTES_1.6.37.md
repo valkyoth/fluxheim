@@ -148,6 +148,8 @@ is clean.
 - Split load-balancer runtime backend mutation and persistence-clear methods
   into a focused private module, leaving the crate root closer to construction,
   selection, and stats orchestration.
+- Split load-balancer queue wait/timeout handling into a focused private module,
+  leaving the crate root below 800 lines.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
