@@ -109,6 +109,9 @@ behavior when the change improves security or project direction.
   `LoadBalanceHealthCheck*` exports.
 - Split load-balancer passive-health config and validation into a focused
   `fluxheim-config` module while preserving the public config exports.
+- Split load-balancer retry config, defaults, and validation into a focused
+  `fluxheim-config` module while preserving the public config exports and safe
+  retry method constant.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.

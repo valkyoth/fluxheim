@@ -24,6 +24,7 @@ pub mod config_load_balance;
 pub mod config_load_balance_health;
 mod config_load_balance_health_validate;
 pub mod config_load_balance_passive_health;
+pub mod config_load_balance_retry;
 pub mod config_loader;
 pub mod config_logging;
 pub mod config_metrics_summary;
