@@ -40,9 +40,7 @@ use crate::native_http1_route_proxy_upstream::NativeLoadBalancerCollectors;
 use crate::native_http1_route_proxy_upstream::{
     NativeProxyBuildRequest, native_proxy_from_config_collecting_load_balancer,
 };
-use crate::native_http1_route_redirect::{
-    NativeHttp1RouteRedirect, https_redirect_location, redirect_reason,
-};
+use crate::native_http1_route_redirect::{NativeHttp1RouteRedirect, https_redirect_response};
 #[cfg(not(feature = "privacy-mode"))]
 use crate::native_http1_route_request_headers::joined_header_value;
 use crate::native_http1_route_request_headers::{
@@ -1092,7 +1090,14 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
                     .close_connection();
             }
-            if let Some(response) = self.https_redirect_response(&request, selected_route) {
+            if !selected_route
+                .is_some_and(NativeHttp1RouteProxyRoute::https_redirect_exempt_or_redirect)
+                && let Some(response) = https_redirect_response(
+                    &request,
+                    &self.https_redirect,
+                    &self.fallback_response_headers,
+                )
+            {
                 return response;
             }
             let concurrency_route = decoded_policy_route.or(selected_route);
@@ -1221,37 +1226,6 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             self.handle_connection_takeover_inner(request, prebuffered, stream)
                 .await
         })
-    }
-}
-
-impl NativeHttp1RouteProxy {
-    fn https_redirect_response(
-        &self,
-        request: &NativeHttp1Request,
-        selected_route: Option<&NativeHttp1RouteProxyRoute>,
-    ) -> Option<NativeHttp1Response> {
-        if !self.https_redirect.enabled || request.downstream_tls {
-            return None;
-        }
-        if selected_route.is_some_and(NativeHttp1RouteProxyRoute::https_redirect_exempt_or_redirect)
-        {
-            return None;
-        }
-        let Some(location) = https_redirect_location(request, &self.https_redirect) else {
-            return Some(
-                NativeHttp1Response::new(400, "Bad Request", b"missing or invalid host\n")
-                    .close_connection(),
-            );
-        };
-        let mut response = NativeHttp1Response::new(
-            self.https_redirect.status,
-            redirect_reason(self.https_redirect.status),
-            Vec::new(),
-        )
-        .with_header("location", location)
-        .with_header("content-length", "0");
-        self.fallback_response_headers.apply(&mut response);
-        Some(response)
     }
 }
 

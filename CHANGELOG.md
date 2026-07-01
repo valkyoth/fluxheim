@@ -75,6 +75,8 @@ behavior when the change improves security or project direction.
   while preserving the existing live-listener coverage.
 - Split native route traceparent propagation into a focused server module while
   preserving the existing trusted-peer behavior.
+- Move native HTTPS redirect response assembly into the route redirect module
+  beside the existing redirect target validation helpers.
 - Split pure PHP config validators and public PHP validation limits into a
   focused `fluxheim-config` module while preserving the existing `config_php`
   and root `config` re-exports.

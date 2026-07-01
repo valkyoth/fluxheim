@@ -4,6 +4,7 @@ use fluxheim_common::path_safety::safe_forward_path;
 use fluxheim_config::{HttpsRedirectConfig, normalize_host};
 use fluxheim_protocol::{Http1RequestTarget, http1_request_target};
 
+use crate::native_http1_route_response_headers::NativeRouteResponseHeaderPolicy;
 use crate::{NativeHttp1Request, NativeHttp1Response};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,6 +27,28 @@ pub(crate) fn redirect_response(
         Vec::new(),
     )
     .with_header("location", location)
+}
+
+pub(crate) fn https_redirect_response(
+    request: &NativeHttp1Request,
+    config: &HttpsRedirectConfig,
+    response_headers: &NativeRouteResponseHeaderPolicy,
+) -> Option<NativeHttp1Response> {
+    if !config.enabled || request.downstream_tls {
+        return None;
+    }
+    let Some(location) = https_redirect_location(request, config) else {
+        return Some(
+            NativeHttp1Response::new(400, "Bad Request", b"missing or invalid host\n")
+                .close_connection(),
+        );
+    };
+    let mut response =
+        NativeHttp1Response::new(config.status, redirect_reason(config.status), Vec::new())
+            .with_header("location", location)
+            .with_header("content-length", "0");
+    response_headers.apply(&mut response);
+    Some(response)
 }
 
 pub(crate) fn redirect_reason(status: u16) -> &'static str {
