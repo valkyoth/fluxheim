@@ -1,26 +1,33 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::io;
 use std::process;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
+pub(super) use self::state::{
+    BackendContainer, BackendContainerSnapshot, FluxBackendDiscoveryRuntimeStatus,
+    backend_container_snapshot,
+};
+use self::state::{
+    FluxBackendDiscoveryRuntimeState, FluxBackendHealth, FluxBackendSnapshot,
+    bounded_discovery_error, unix_timestamp_secs,
+};
 use super::LoadBalancerMetricLabels;
 pub(crate) use super::backend_model::BackendIdentity;
 pub(super) use super::backend_model::{FluxBackend, FluxBackendSet};
 use super::key::backend_key;
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use fluxheim_common::{FluxError, FluxResult};
+use fluxheim_common::FluxResult;
 use futures::future;
 
 pub type RuntimeBackend = FluxBackend;
 
 pub(super) const MAX_RUNTIME_BACKEND_COUNT: usize = 256;
-const MAX_DISCOVERY_ERROR_BYTES: usize = 256;
+
+mod state;
 
 #[async_trait]
 pub(super) trait FluxBackendDiscovery: Send + Sync + 'static {
@@ -38,81 +45,6 @@ pub(super) trait FluxHealthCheck: Send + Sync + 'static {
     fn backend_summary(&self, target: &RuntimeBackend) -> String {
         format!("{target:?}")
     }
-}
-
-struct FluxBackendHealthInner {
-    healthy: bool,
-    enabled: bool,
-    consecutive_counter: usize,
-}
-
-#[derive(Clone)]
-struct FluxBackendHealth(Arc<Mutex<FluxBackendHealthInner>>);
-
-impl Default for FluxBackendHealth {
-    fn default() -> Self {
-        Self(Arc::new(Mutex::new(FluxBackendHealthInner {
-            healthy: true,
-            enabled: true,
-            consecutive_counter: 0,
-        })))
-    }
-}
-
-impl FluxBackendHealth {
-    fn lock(&self) -> std::sync::MutexGuard<'_, FluxBackendHealthInner> {
-        self.0.lock().unwrap_or_else(|_| process::abort())
-    }
-
-    fn ready(&self) -> bool {
-        let health = self.lock();
-        health.healthy && health.enabled
-    }
-
-    fn enable(&self, enabled: bool) {
-        self.lock().enabled = enabled;
-    }
-
-    fn observe(&self, healthy: bool, flip_threshold: usize) -> bool {
-        let mut health = self.lock();
-        if health.healthy != healthy {
-            health.consecutive_counter = health.consecutive_counter.saturating_add(1);
-            if health.consecutive_counter >= flip_threshold {
-                health.healthy = healthy;
-                health.consecutive_counter = 0;
-                return true;
-            }
-        } else {
-            health.consecutive_counter = 0;
-        }
-        false
-    }
-}
-
-#[derive(Default)]
-struct FluxBackendSnapshot {
-    backends: Arc<BTreeSet<RuntimeBackend>>,
-    health: Arc<HashMap<u64, FluxBackendHealth>>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub(super) struct FluxBackendDiscoveryRuntimeStatus {
-    pub(super) refresh_enabled: bool,
-    pub(super) update_frequency_secs: Option<u64>,
-    pub(super) success_count: u64,
-    pub(super) failure_count: u64,
-    pub(super) last_success_unix_secs: Option<u64>,
-    pub(super) last_failure_unix_secs: Option<u64>,
-    pub(super) last_error: Option<String>,
-}
-
-#[derive(Default)]
-struct FluxBackendDiscoveryRuntimeState {
-    success_count: u64,
-    failure_count: u64,
-    last_success_unix_secs: Option<u64>,
-    last_failure_unix_secs: Option<u64>,
-    last_error: Option<String>,
 }
 
 pub struct FluxLoadBalancerRuntime {
@@ -516,222 +448,5 @@ fn checked_next_wake(now: Instant, delay: Duration) -> Instant {
         .unwrap_or_else(|| now + Duration::from_secs(3600))
 }
 
-fn bounded_discovery_error(error: &FluxError) -> String {
-    let mut message = error.to_string();
-    if message.len() <= MAX_DISCOVERY_ERROR_BYTES {
-        return message;
-    }
-    let mut truncate_at = MAX_DISCOVERY_ERROR_BYTES;
-    while !message.is_char_boundary(truncate_at) {
-        truncate_at -= 1;
-    }
-    message.truncate(truncate_at);
-    message
-}
-
-fn unix_timestamp_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
-pub(super) trait BackendContainer {
-    fn backend_snapshot(&self) -> BackendContainerSnapshot;
-}
-
-impl BackendContainer for FluxLoadBalancerRuntime {
-    fn backend_snapshot(&self) -> BackendContainerSnapshot {
-        BackendContainerSnapshot {
-            snapshot: self.snapshot.load_full(),
-            health_check_enabled: self.health_check.is_some(),
-        }
-    }
-}
-
-impl<T> BackendContainer for Arc<T>
-where
-    T: BackendContainer + ?Sized,
-{
-    fn backend_snapshot(&self) -> BackendContainerSnapshot {
-        (**self).backend_snapshot()
-    }
-}
-
-pub(super) struct BackendContainerSnapshot {
-    snapshot: Arc<FluxBackendSnapshot>,
-    health_check_enabled: bool,
-}
-
-impl BackendContainerSnapshot {
-    pub(super) fn backends(&self) -> &BTreeSet<RuntimeBackend> {
-        &self.snapshot.backends
-    }
-
-    pub(super) fn ready(&self, backend: &RuntimeBackend) -> bool {
-        self.snapshot
-            .health
-            .get(&backend_key(backend))
-            .map_or(!self.health_check_enabled, FluxBackendHealth::ready)
-    }
-}
-
-pub(super) fn backend_container_snapshot(
-    container: &impl BackendContainer,
-) -> BackendContainerSnapshot {
-    container.backend_snapshot()
-}
-
 #[cfg(test)]
-mod tests {
-    use std::io;
-    use std::sync::Arc;
-    use std::sync::Mutex;
-
-    use async_trait::async_trait;
-
-    use super::{
-        FluxBackend, FluxBackendDiscovery, FluxBackendSet, FluxLoadBalancerRuntime,
-        MAX_RUNTIME_BACKEND_COUNT,
-    };
-    use crate::key::backend_key;
-    use fluxheim_common::{FluxError, FluxResult};
-
-    struct TestDiscovery {
-        backends: Mutex<FluxBackendSet>,
-        fail: Arc<Mutex<bool>>,
-    }
-
-    impl TestDiscovery {
-        fn new(backends: FluxBackendSet) -> Self {
-            Self {
-                backends: Mutex::new(backends),
-                fail: Arc::new(Mutex::new(false)),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl FluxBackendDiscovery for TestDiscovery {
-        async fn discover_flux_backends(&self) -> FluxResult<FluxBackendSet> {
-            if *self
-                .fail
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-            {
-                return Err(FluxError::invalid_input("test discovery failure"));
-            }
-            Ok(self
-                .backends
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .clone())
-        }
-    }
-
-    #[tokio::test]
-    async fn update_publishes_backend_and_health_as_one_snapshot() {
-        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
-        let mut set = FluxBackendSet::default();
-        set.insert(backend.clone());
-        set.set_ready(&backend, false);
-        let runtime = FluxLoadBalancerRuntime::new(Box::new(TestDiscovery::new(set)));
-
-        runtime.update().await.unwrap();
-
-        let snapshot = runtime.snapshot.load();
-        let key = backend_key(&backend);
-        assert!(snapshot.backends.contains(&backend));
-        assert!(snapshot.health.contains_key(&key));
-        assert!(!snapshot.health.get(&key).unwrap().ready());
-    }
-
-    #[tokio::test]
-    async fn runtime_retarget_starts_with_fresh_health_state() {
-        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
-        let updated = FluxBackend::new("127.0.0.1:3001").unwrap();
-        let mut set = FluxBackendSet::default();
-        set.insert(backend.clone());
-        let runtime = FluxLoadBalancerRuntime::new(Box::new(TestDiscovery::new(set)));
-
-        runtime.update().await.unwrap();
-        runtime.set_enable(&backend, false);
-
-        runtime
-            .update_runtime_backend(&backend, updated.clone())
-            .unwrap();
-
-        let snapshot = runtime.snapshot.load();
-        let current_key = backend_key(&backend);
-        let updated_key = backend_key(&updated);
-        assert!(!snapshot.backends.contains(&backend));
-        assert!(snapshot.backends.contains(&updated));
-        assert!(!snapshot.health.contains_key(&current_key));
-        assert!(snapshot.health.get(&updated_key).unwrap().ready());
-    }
-
-    #[tokio::test]
-    async fn update_records_discovery_success_and_failure_status() {
-        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
-        let mut set = FluxBackendSet::default();
-        set.insert(backend);
-        let discovery = TestDiscovery::new(set);
-        let fail = discovery.fail.clone();
-        let runtime = FluxLoadBalancerRuntime::new(Box::new(discovery));
-
-        runtime.update().await.unwrap();
-        let success = runtime.discovery_runtime_status();
-        assert!(!success.refresh_enabled);
-        assert_eq!(success.success_count, 1);
-        assert_eq!(success.failure_count, 0);
-        assert!(success.last_success_unix_secs.is_some());
-        assert!(success.last_error.is_none());
-
-        *fail.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
-        let error = runtime.update().await.unwrap_err();
-        assert!(error.to_string().contains("test discovery failure"));
-        let failure = runtime.discovery_runtime_status();
-        assert_eq!(failure.success_count, 1);
-        assert_eq!(failure.failure_count, 1);
-        assert!(failure.last_failure_unix_secs.is_some());
-        assert_eq!(
-            failure.last_error.as_deref(),
-            Some("test discovery failure")
-        );
-    }
-
-    #[tokio::test]
-    async fn runtime_remove_rejects_last_backend_inside_mutation_lock() {
-        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
-        let mut set = FluxBackendSet::default();
-        set.insert(backend.clone());
-        let runtime = FluxLoadBalancerRuntime::new(Box::new(TestDiscovery::new(set)));
-
-        runtime.update().await.unwrap();
-        let error = runtime.remove_runtime_backend(&backend).unwrap_err();
-
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-        assert!(error.to_string().contains("at least one backend"));
-        assert_eq!(runtime.snapshot.load().backends.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn runtime_add_rejects_backend_set_over_limit() {
-        let mut set = FluxBackendSet::default();
-        for port in 10_000..10_000 + MAX_RUNTIME_BACKEND_COUNT {
-            set.insert(FluxBackend::new(&format!("127.0.0.1:{port}")).unwrap());
-        }
-        let runtime = FluxLoadBalancerRuntime::new(Box::new(TestDiscovery::new(set)));
-
-        runtime.update().await.unwrap();
-        let extra = FluxBackend::new("127.0.0.1:20000").unwrap();
-        let error = runtime.add_runtime_backend(extra).unwrap_err();
-
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-        assert!(error.to_string().contains("size limit"));
-        assert_eq!(
-            runtime.snapshot.load().backends.len(),
-            MAX_RUNTIME_BACKEND_COUNT
-        );
-    }
-}
+mod tests;

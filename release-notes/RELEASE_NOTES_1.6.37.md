@@ -125,6 +125,8 @@ is clean.
   below the line-limit target.
 - Split the pure load-balancer backend model, backend identity, and backend-set
   helpers out of the runtime module as a focused private module.
+- Split load-balancer backend health/discovery state and backend runtime tests
+  into focused child modules, bringing `backend.rs` below the line-limit target.
 - Split load-balancer HTTP discovery, DNS discovery, and discovery tests into
   focused modules, bringing `discovery.rs` below the line-limit target.
 - Split load-balancer HTTP/gRPC health-check construction and response
