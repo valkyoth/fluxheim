@@ -23,20 +23,24 @@ pub use crate::config_admin::{
 };
 use crate::config_cache::CacheConfigFragment;
 pub use crate::config_cache::{
-    CacheConfig, CacheDiskBackend, CacheDiskConfig, CacheDiskEncryptionAlgorithm,
-    CacheDiskEncryptionConfig, CacheDiskEncryptionOpenBaoConfig, CacheDiskEncryptionProvider,
-    CacheKeyPart, CachePreset, CacheStaleErrorKind,
+    CacheConfig, CacheDiskBackend, CacheDiskConfig, CacheKeyPart, CachePreset, CacheStaleErrorKind,
 };
 #[cfg(test)]
 pub use crate::config_cache::{
     MAX_CACHE_BYPASS_COOKIES, MAX_CACHE_BYPASS_PATHS, MAX_CACHE_CONTENT_TYPES,
     MAX_CACHE_IMAGE_EXTENSIONS, MAX_CACHE_METHODS, MAX_CACHE_STATUS_TTLS,
-    MAX_CACHE_VARY_REQUEST_HEADERS, fips_allowed_local_openbao_endpoint,
+    MAX_CACHE_VARY_REQUEST_HEADERS,
 };
 pub use crate::config_cache::{extend_unique, validate_cache_compliance_internal_crypto};
 pub use crate::config_cache_controls::CACHE_PREDICTOR_MAX_CAPACITY;
 pub use crate::config_cache_controls::{
     CacheLockConfig, CacheOriginProtectionConfig, CachePredictorConfig,
+};
+#[cfg(test)]
+pub use crate::config_cache_encryption::fips_allowed_local_openbao_endpoint;
+pub use crate::config_cache_encryption::{
+    CacheDiskEncryptionAlgorithm, CacheDiskEncryptionConfig, CacheDiskEncryptionOpenBaoConfig,
+    CacheDiskEncryptionProvider,
 };
 pub use crate::config_cache_memory::CacheMemoryConfig;
 pub use crate::config_cache_peer::{CachePeerConfig, CachePeerFillConfig};
