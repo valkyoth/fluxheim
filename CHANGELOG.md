@@ -131,6 +131,8 @@ behavior when the change improves security or project direction.
 - Split native proxy pooling, upstream PROXY protocol, upstream timeout, and
   request-body timeout runtime tests into a focused child test module, bringing
   `native_http1_proxy_tests.rs` below the modularity target.
+- Split native HTTP/1 plan root/protocol, WebSocket, auth-request, and
+  traffic-mirror candidate tests into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
