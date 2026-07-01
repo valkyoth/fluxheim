@@ -147,6 +147,9 @@ behavior when the change improves security or project direction.
   public facade and orchestration glue.
 - Split load-balancer runtime-state snapshot/load/save glue into a focused
   private module while preserving the public runtime-state methods.
+- Split load-balancer runtime backend mutation and persistence-clear methods
+  into a focused private module, leaving the crate root closer to construction,
+  selection, and stats orchestration.
 
 ## 1.6.36 - 2026-06-30
 
