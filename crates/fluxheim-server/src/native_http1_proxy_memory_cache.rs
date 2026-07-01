@@ -1,22 +1,17 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::native_http1_cache::{
     NativeDiskCache, NativeMemoryCacheCounter, NativeMemoryCacheEntry, NativeMemoryCacheFill,
     NativeMemoryCacheState, lock_native_memory_cache, register_native_disk_cache_purge_handle,
-    remove_native_memory_cache_entry,
 };
 use crate::native_http1_proxy::NativeHttp1Proxy;
 use crate::native_http1_proxy_cache_fill::{
     NativeCacheFillGate, NativeCacheFillPermit, NativeOriginFillPermit,
     acquire_native_origin_fill_permit,
 };
-use crate::native_http1_proxy_cache_headers::{
-    native_cache_entry_revalidatable, native_vary_cache_key,
-};
 use crate::native_http1_proxy_cache_policy::{
-    native_cache_entry_has_stale_window, native_cache_entry_serve_stale_while_revalidate,
     native_predictor_counter_uses, prune_native_predictor_counters,
 };
 use crate::native_http1_proxy_metrics::{
@@ -27,21 +22,16 @@ use crate::native_http1_proxy_peer_fill::{NativePeerFillPeer, native_peer_fill_p
 use crate::native_http1_proxy_peer_fill_auth::{
     NativePeerFillAuth, native_peer_fill_auth_from_config,
 };
-use crate::native_http1_proxy_request::native_request_header;
 use crate::native_http1_proxy_runtime::{
     register_native_cache_stats_handle, register_native_memory_cache_purge_handle,
 };
 use crate::{NativeHttp1Request, NativeHttp1Response};
-use fluxheim_cache::{
-    CacheRangeRequest, CacheRequest, CacheRequestView, CacheStaleEvent, cache_key_with_component,
-    cache_method_temporarily_bypassed, cache_should_serve_stale, image_cache_key,
-    request_cache_bypass_reason, request_cache_revalidation_requested,
-    selected_cache_range_request,
-};
+use fluxheim_cache::CacheRangeRequest;
 use fluxheim_config::CacheConfig;
 use tokio::sync::Notify;
 
 mod disk;
+mod lookup;
 mod peer_fill;
 mod slice;
 mod store;
@@ -212,79 +202,6 @@ impl NativeProxyMemoryCache {
         );
     }
 
-    pub(crate) async fn lookup(&self, request: &NativeHttp1Request) -> NativeProxyCacheLookup {
-        if cache_method_temporarily_bypassed(request.method()) {
-            return NativeProxyCacheLookup::Bypass("method-head");
-        }
-        if let Some(reason) = request_cache_bypass_reason(request, &self.config) {
-            return NativeProxyCacheLookup::Bypass(reason);
-        }
-        if request.contains_header("authorization") {
-            return NativeProxyCacheLookup::Bypass("request-authorization");
-        }
-        let Some(key) = self.key(request) else {
-            return NativeProxyCacheLookup::Bypass("proxy-ineligible");
-        };
-        if self.cache_pass_should_bypass(&key) {
-            return NativeProxyCacheLookup::Bypass("cache-pass");
-        }
-        let lookup_started_at = Instant::now();
-        let range = selected_cache_range_request(request, &self.config);
-        let range_requested = self.config.range.enabled && request.contains_header("range");
-        if range_requested && range.is_none() {
-            return NativeProxyCacheLookup::Bypass("range-unsupported");
-        }
-        let revalidation = request_cache_revalidation_requested(request, &self.config);
-        if !revalidation && let Some(hit) = self.get(&key, request).await {
-            self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
-            return NativeProxyCacheLookup::Hit { entry: hit, range };
-        }
-        let range_key =
-            range.map(|range| cache_key_with_component(&key, "range", &range.component()));
-        if !revalidation
-            && let Some(range_key) = range_key.as_deref()
-            && let Some(hit) = self.get(range_key, request).await
-        {
-            self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
-            return NativeProxyCacheLookup::Hit {
-                entry: hit,
-                range: None,
-            };
-        }
-        if !revalidation
-            && !range_requested
-            && let Some(stale) = self.get_stale_while_revalidate(&key, request).await
-        {
-            self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
-            return NativeProxyCacheLookup::StaleWhileRevalidate { key, entry: stale };
-        }
-        if !revalidation
-            && !range_requested
-            && let Some(entry) = self.get_revalidatable(&key, request).await
-        {
-            self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
-            return NativeProxyCacheLookup::Revalidate { key, entry };
-        }
-        if range_key.is_some() && !self.config.range.slice.enabled {
-            self.record_operation_duration("miss", "lookup", lookup_started_at.elapsed());
-            return NativeProxyCacheLookup::Bypass("range-miss");
-        }
-        if let Some(range_key) = range_key {
-            self.record_operation_duration("miss", "lookup", lookup_started_at.elapsed());
-            return NativeProxyCacheLookup::Miss {
-                key: range_key,
-                status: "MISS",
-                reason: Some("range-miss"),
-            };
-        }
-        self.record_operation_duration("miss", "lookup", lookup_started_at.elapsed());
-        NativeProxyCacheLookup::Miss {
-            key,
-            status: if revalidation { "REVALIDATED" } else { "MISS" },
-            reason: revalidation.then_some("request-refresh"),
-        }
-    }
-
     pub(crate) fn acquire_origin_fill_permit(&self) -> Option<Option<NativeOriginFillPermit>> {
         if !self.config.origin_protection.enabled {
             return Some(None);
@@ -340,195 +257,6 @@ impl NativeProxyMemoryCache {
     ) -> Option<NativeMemoryCacheEntry> {
         let _ = tokio::time::timeout(timeout, notify.notified()).await;
         self.get(key, request).await
-    }
-
-    fn key(&self, request: &NativeHttp1Request) -> Option<String> {
-        image_cache_key(
-            &self.config,
-            &CacheRequest {
-                method: request.method(),
-                host: native_request_header(request, "host"),
-                path: request.path(),
-                query: request.query(),
-            },
-        )
-        .map(|key| key.as_str().to_owned())
-    }
-
-    async fn get(&self, key: &str, request: &NativeHttp1Request) -> Option<NativeMemoryCacheEntry> {
-        let now = std::time::Instant::now();
-        if self.memory_enabled() {
-            let mut state = lock_native_memory_cache(&self.state, "proxy");
-
-            if let Some(variants) = state.variants.get(key).cloned() {
-                for variant in variants {
-                    let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request)
-                    else {
-                        continue;
-                    };
-                    if variant_key != variant.key {
-                        continue;
-                    }
-                    match state.objects.get(&variant.key) {
-                        Some(entry) if entry.expires_at > now => return Some(entry.clone()),
-                        Some(entry) => {
-                            if !native_cache_entry_has_stale_window(entry, now) {
-                                let weight = entry.weight;
-                                remove_native_memory_cache_entry(&mut state, &variant.key);
-                                state.bytes = state.bytes.saturating_sub(weight);
-                            }
-                            break;
-                        }
-                        None => {}
-                    }
-                }
-            }
-
-            if !state.variants.contains_key(key) {
-                match state.objects.get(key) {
-                    Some(entry) if entry.expires_at > now => return Some(entry.clone()),
-                    Some(entry) if !native_cache_entry_has_stale_window(entry, now) => {
-                        let weight = entry.weight;
-                        remove_native_memory_cache_entry(&mut state, key);
-                        state.bytes = state.bytes.saturating_sub(weight);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        self.get_disk_fresh(key, request).await
-    }
-
-    async fn get_stale_while_revalidate(
-        &self,
-        key: &str,
-        request: &NativeHttp1Request,
-    ) -> Option<NativeMemoryCacheEntry> {
-        let now = std::time::Instant::now();
-        if self.memory_enabled() {
-            let state = lock_native_memory_cache(&self.state, "proxy");
-            if let Some(variants) = state.variants.get(key).cloned() {
-                for variant in variants {
-                    let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request)
-                    else {
-                        continue;
-                    };
-                    if variant_key != variant.key {
-                        continue;
-                    }
-                    if let Some(entry) = state.objects.get(&variant.key)
-                        && native_cache_entry_serve_stale_while_revalidate(entry, now)
-                    {
-                        return Some(entry.clone());
-                    }
-                }
-            }
-
-            if !state.variants.contains_key(key)
-                && let Some(entry) = state.objects.get(key)
-                && native_cache_entry_serve_stale_while_revalidate(entry, now)
-            {
-                return Some(entry.clone());
-            }
-        }
-        self.get_disk_stale_while_revalidate(key, request).await
-    }
-
-    pub(crate) async fn get_stale(
-        &self,
-        key: &str,
-        request: &NativeHttp1Request,
-        event: CacheStaleEvent,
-    ) -> Option<NativeMemoryCacheEntry> {
-        if !cache_should_serve_stale(&self.config, event) {
-            return None;
-        }
-
-        let now = std::time::Instant::now();
-        if self.memory_enabled() {
-            let mut state = lock_native_memory_cache(&self.state, "proxy");
-            if let Some(variants) = state.variants.get(key).cloned() {
-                for variant in variants {
-                    let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request)
-                    else {
-                        continue;
-                    };
-                    if variant_key != variant.key {
-                        continue;
-                    }
-                    match state.objects.get(&variant.key) {
-                        Some(entry)
-                            if entry.expires_at <= now
-                                && entry.stale_if_error_until.is_some_and(|until| until > now) =>
-                        {
-                            return Some(entry.clone());
-                        }
-                        Some(entry)
-                            if entry.stale_if_error_until.is_some_and(|until| until <= now) =>
-                        {
-                            let weight = entry.weight;
-                            remove_native_memory_cache_entry(&mut state, &variant.key);
-                            state.bytes = state.bytes.saturating_sub(weight);
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            if !state.variants.contains_key(key) {
-                match state.objects.get(key) {
-                    Some(entry)
-                        if entry.expires_at <= now
-                            && entry.stale_if_error_until.is_some_and(|until| until > now) =>
-                    {
-                        return Some(entry.clone());
-                    }
-                    Some(entry) if entry.stale_if_error_until.is_some_and(|until| until <= now) => {
-                        let weight = entry.weight;
-                        remove_native_memory_cache_entry(&mut state, key);
-                        state.bytes = state.bytes.saturating_sub(weight);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        self.get_disk_stale_if_error(key, request).await
-    }
-
-    async fn get_revalidatable(
-        &self,
-        key: &str,
-        request: &NativeHttp1Request,
-    ) -> Option<NativeMemoryCacheEntry> {
-        let now = std::time::Instant::now();
-        if self.memory_enabled() {
-            let state = lock_native_memory_cache(&self.state, "proxy");
-            if let Some(variants) = state.variants.get(key).cloned() {
-                for variant in variants {
-                    let Some(variant_key) = native_vary_cache_key(key, &variant.fields, request)
-                    else {
-                        continue;
-                    };
-                    if variant_key != variant.key {
-                        continue;
-                    }
-                    if let Some(entry) = state.objects.get(&variant.key)
-                        && native_cache_entry_revalidatable(entry, now)
-                    {
-                        return Some(entry.clone());
-                    }
-                }
-            }
-
-            if !state.variants.contains_key(key)
-                && let Some(entry) = state.objects.get(key)
-                && native_cache_entry_revalidatable(entry, now)
-            {
-                return Some(entry.clone());
-            }
-        }
-        self.get_disk_revalidatable(key, request).await
     }
 
     fn cache_pass_should_bypass(&self, key: &str) -> bool {
