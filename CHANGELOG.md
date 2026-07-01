@@ -113,6 +113,9 @@ behavior when the change improves security or project direction.
   focused `fluxheim-config` module.
 - Split root config loading, preset application, `conf.d` merge, and fragment
   merge behavior into a focused `fluxheim-config` module.
+- Split root config validation orchestration and cross-domain compliance checks
+  into a focused `fluxheim-config` module, bringing `config.rs` below the
+  line-limit target.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
