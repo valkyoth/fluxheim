@@ -33,7 +33,7 @@ documents why the exception is temporary and how it will be removed.
 | `src/udp_proxy.rs` | 1038 | UDP beta runtime. | Split before beta promotion. |
 | `crates/fluxheim-config/src/config_stream.rs` | 947 | Stream proxy config and TLS validation. | Split with stream runtime cutover. |
 | `crates/fluxheim-config/src/reload.rs` | 809 | Reload classification and diff behavior. | Move snapshot/reload-safe classification into dedicated modules. |
-| `crates/fluxheim-php-fpm/src/lib.rs` | 1907 | PHP-FPM crate root still holds managed runtime, keepalive pool, and test helpers after params, script/path, response policy, response stream collection, managed config, endpoint, timeout, retry, and request-body/spool helpers moved to focused modules in the `1.6.37` cleanup. | Split managed runtime, keepalive pool, and tests into focused modules. |
+| `crates/fluxheim-php-fpm/src/lib.rs` | 937 | PHP-FPM crate root now mostly hosts the public facade and regression suite after params, script/path, response policy, response stream collection, managed config, managed process, managed spawn, endpoint, timeout, retry, keepalive pool, and request-body/spool helpers moved to focused modules in the `1.6.37` cleanup. | Split the remaining regression tests into focused modules. |
 | `crates/fluxheim-config/src/config_admin.rs` | 755 | Admin config and validation. | Split ops socket, snapshots, auth, and status config. |
 | `crates/fluxheim-config/src/config_acme.rs` | 719 | ACME config and validation. | Move with `fluxheim-acme`. |
 | `src/config_tester.rs` | 716 | Config tester CLI and profile logic. | Split profile checks from CLI output. |

@@ -169,6 +169,9 @@ is clean.
 - Split managed PHP-FPM spawn safety, private config-file creation, managed
   directory validation, and socket readiness waits into a focused private
   module.
+- Split managed PHP-FPM process lifecycle, child cleanup, restart watchdog, and
+  process start handling into a focused private module below the line-limit
+  target.
 - Split PHP-FPM keepalive pool management and one-shot FastCGI execution into a
   focused private module while preserving the public crate exports.
 - Split PHP-FPM endpoint selection, timeout classification, retry policy, and

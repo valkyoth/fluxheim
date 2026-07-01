@@ -171,6 +171,9 @@ behavior when the change improves security or project direction.
 - Split managed PHP-FPM spawn safety, private config-file creation, managed
   directory validation, and socket readiness waits into a focused private
   module.
+- Split managed PHP-FPM process lifecycle, child cleanup, restart watchdog, and
+  process start handling into a focused private module below the line-limit
+  target.
 - Split PHP-FPM endpoint selection, timeout classification, retry policy, and
   retry deadline helpers into a focused private module.
 - Split PHP-FPM request-body replay, zeroized memory body ownership, spool-file
