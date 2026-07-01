@@ -205,6 +205,8 @@ behavior when the change improves security or project direction.
 - Split native downstream HTTP/1 tests into base listener/framing, request-view,
   body/limit/timeout, and TLS-listener modules, removing the oversized
   downstream HTTP/1 test exception.
+- Split server-plan tests into base policy, native-runtime cutover, manifest,
+  and listener-inventory modules, removing the oversized server test exception.
 
 ## 1.6.36 - 2026-06-30
 

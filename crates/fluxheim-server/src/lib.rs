@@ -155,6 +155,18 @@ impl std::error::Error for ServerPlanError {}
 mod tests;
 
 #[cfg(test)]
+#[path = "server_cutover_tests.rs"]
+mod server_cutover_tests;
+
+#[cfg(test)]
+#[path = "server_manifest_tests.rs"]
+mod server_manifest_tests;
+
+#[cfg(test)]
+#[path = "server_inventory_tests.rs"]
+mod server_inventory_tests;
+
+#[cfg(test)]
 mod native_http1_test_utils;
 
 #[cfg(test)]

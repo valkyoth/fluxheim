@@ -203,6 +203,8 @@ is clean.
 - Split native downstream HTTP/1 tests into base listener/framing, request-view,
   body/limit/timeout, and TLS-listener modules, removing the oversized
   downstream HTTP/1 test exception.
+- Split server-plan tests into base policy, native-runtime cutover, manifest,
+  and listener-inventory modules, removing the oversized server test exception.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
