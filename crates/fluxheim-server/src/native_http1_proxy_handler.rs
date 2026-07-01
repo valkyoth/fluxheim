@@ -3,6 +3,8 @@ use std::pin::Pin;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+#[cfg(feature = "load-balancer")]
+use crate::NativeHttp1Upstream;
 use crate::native_http1_cache::{
     NativeMemoryCacheEntry, lock_native_memory_cache, with_native_cache_status,
 };
@@ -48,8 +50,6 @@ use crate::native_http1_route_compression::apply_native_response_compression;
 use crate::{
     NativeHttp1ConnectionStream, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
 };
-#[cfg(feature = "load-balancer")]
-use crate::NativeHttp1Upstream;
 use fluxheim_cache::{CacheSliceBounds, CacheStaleEvent};
 use fluxheim_config::CacheConfig;
 

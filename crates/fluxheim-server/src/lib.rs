@@ -24,6 +24,7 @@ mod native_http1_plan;
 mod native_http1_proxy;
 #[cfg(feature = "auth-request")]
 mod native_http1_proxy_auth;
+mod native_http1_proxy_builder;
 mod native_http1_proxy_cache_fill;
 mod native_http1_proxy_cache_headers;
 mod native_http1_proxy_cache_policy;
