@@ -117,6 +117,8 @@ behavior when the change improves security or project direction.
   child test module.
 - Split native proxy static upstream failover, round-robin, weighted
   round-robin, and unsafe-method retry tests into a focused child test module.
+- Split native proxy request/response header policy and forwarded-header tests
+  into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
