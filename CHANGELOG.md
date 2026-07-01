@@ -113,6 +113,8 @@ behavior when the change improves security or project direction.
   line-limit target.
 - Move `fluxheim-cache` header policy tests out of `src/headers.rs`, leaving
   the cache header facade below the line-limit target.
+- Move load-balancer policy override tests out of `src/policy.rs` as a
+  preparatory split for the remaining policy key/snapshot/mutation modules.
 
 ## 1.6.36 - 2026-06-30
 

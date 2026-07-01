@@ -22,5 +22,11 @@ pub use crate::headers_vary::{
 };
 
 #[cfg(test)]
-#[path = "headers_tests.rs"]
-mod headers_tests;
+#[path = "headers_request_tests.rs"]
+mod headers_request_tests;
+#[cfg(test)]
+#[path = "headers_response_tests.rs"]
+mod headers_response_tests;
+#[cfg(test)]
+#[path = "headers_vary_tests.rs"]
+mod headers_vary_tests;
