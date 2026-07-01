@@ -29,7 +29,6 @@ documents why the exception is temporary and how it will be removed.
 | `src/stream_proxy.rs` | 1026 | Current Pingora service-registration, listener, socket connect, and TLS adapter for stream routes after the 1.6.3 stream crate extraction. | Keep shrinking as background/runtime supervision and TLS connector abstractions move during the remaining `1.6` runtime cutover. |
 | `crates/fluxheim-config/src/config_php.rs` | 1641 | PHP-FPM config and validation. | Split managed/runtime/path validation helpers. |
 | `src/web.rs` | 1507 | Root static web adapter over `fluxheim-web`. | Reduce to adapter glue after native HTTP runtime lands. |
-| `crates/fluxheim-config/src/config_header.rs` | 1060 | Header policy config and validation. | Move with header-policy crate work. |
 | `src/udp_proxy.rs` | 1038 | UDP beta runtime. | Split before beta promotion. |
 | `crates/fluxheim-config/src/config_stream.rs` | 947 | Stream proxy config and TLS validation. | Split with stream runtime cutover. |
 | `crates/fluxheim-config/src/reload.rs` | 809 | Reload classification and diff behavior. | Move snapshot/reload-safe classification into dedicated modules. |

@@ -17,6 +17,8 @@ pub mod config_cache;
 pub mod config_compression;
 pub mod config_geoip;
 pub mod config_header;
+pub mod config_header_response;
+pub mod config_header_validation;
 pub mod config_http;
 pub mod config_load_balance;
 pub mod config_loader;

@@ -95,6 +95,9 @@ behavior when the change improves security or project direction.
 - Split config-tester profile validation, native-runtime cutover reporting, and
   upstream resolution helpers into focused root modules, leaving the config
   tester entry point below the modularity target.
+- Split header response-policy structs and header validation helpers into
+  focused `fluxheim-config` modules, leaving the header config facade below the
+  modularity target while preserving existing re-exports.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.
