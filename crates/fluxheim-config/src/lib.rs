@@ -27,6 +27,7 @@ pub mod config_load_balance_passive_health;
 pub mod config_load_balance_persistence;
 pub mod config_load_balance_queue;
 pub mod config_load_balance_retry;
+pub mod config_load_balance_slow_start;
 pub mod config_loader;
 pub mod config_logging;
 pub mod config_metrics_summary;

@@ -117,6 +117,9 @@ behavior when the change improves security or project direction.
 - Split load-balancer persistence config, managed-cookie settings, defaults,
   and validation into a focused `fluxheim-config` module while preserving the
   public config exports.
+- Split load-balancer slow-start config, defaults, and validation into a
+  focused `fluxheim-config` module, bringing the load-balancer config facade
+  below the line-limit target.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.

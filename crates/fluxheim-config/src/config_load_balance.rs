@@ -24,6 +24,9 @@ pub use crate::config_load_balance_queue::{
 pub use crate::config_load_balance_retry::{
     LB_SAFE_RETRY_METHODS, LoadBalanceRetryConfig, LoadBalanceRetryConfigFragment,
 };
+pub use crate::config_load_balance_slow_start::{
+    LoadBalanceSlowStartConfig, LoadBalanceSlowStartConfigFragment,
+};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 
 const MIN_BOUNDED_LOAD_FACTOR_PER_MILLE: u16 = 1000;
@@ -394,55 +397,6 @@ impl LoadBalanceSelection {
             Self::RoundRobin | Self::LeastConnections | Self::LeastSessions | Self::LeastTime
         )
     }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct LoadBalanceSlowStartConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_lb_slow_start_duration_secs")]
-    pub duration_secs: u64,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct LoadBalanceSlowStartConfigFragment {
-    enabled: Option<bool>,
-    duration_secs: Option<u64>,
-}
-
-impl Default for LoadBalanceSlowStartConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            duration_secs: default_lb_slow_start_duration_secs(),
-        }
-    }
-}
-
-impl LoadBalanceSlowStartConfig {
-    fn merge(&mut self, fragment: LoadBalanceSlowStartConfigFragment) {
-        if let Some(enabled) = fragment.enabled {
-            self.enabled = enabled;
-        }
-        if let Some(duration_secs) = fragment.duration_secs {
-            self.duration_secs = duration_secs;
-        }
-    }
-
-    fn validate(&self) -> Result<(), ConfigError> {
-        if self.duration_secs == 0 || self.duration_secs > 3600 {
-            return Err(ConfigError::InvalidLoadBalanceSlowStart {
-                field: "proxy.load_balance.slow_start.duration_secs",
-            });
-        }
-        Ok(())
-    }
-}
-
-fn default_lb_slow_start_duration_secs() -> u64 {
-    30
 }
 
 fn default_lb_max_iterations() -> usize {
