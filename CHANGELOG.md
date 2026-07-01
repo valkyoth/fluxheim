@@ -122,6 +122,8 @@ behavior when the change improves security or project direction.
 - Split native route-proxy response-compression negotiation and response
   mutation helpers into a focused server module while preserving compression
   behavior.
+- Split native route redirect response construction and safe redirect URL
+  expansion into a focused server module while preserving redirect validation.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

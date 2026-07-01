@@ -31,6 +31,7 @@ mod native_http1_proxy_runtime;
 ))]
 mod native_http1_route_compression;
 mod native_http1_route_proxy;
+mod native_http1_route_redirect;
 mod native_http1_static_web;
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 mod native_http1_tls;
