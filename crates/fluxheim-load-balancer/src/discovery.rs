@@ -23,8 +23,8 @@ use fluxheim_config::ProxyConfig;
 use super::backend::{FluxBackend, FluxBackendDiscovery, FluxBackendSet, FluxLoadBalancerRuntime};
 use super::health::configured_health_check;
 use super::policy::BackendSelectionPolicy;
-use super::selection::MaglevTable;
 use super::selection_ketama::NginxKetamaTable;
+use super::selection_maglev::MaglevTable;
 use super::{
     LoadBalancerMetricLabels, UpstreamLoadBalancer, UpstreamLoadBalancerInner,
     UpstreamLoadBalancerService,

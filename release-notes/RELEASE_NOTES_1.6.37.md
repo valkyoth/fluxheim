@@ -98,6 +98,8 @@ is clean.
   secrets into a focused private selection-hash module.
 - Split the nginx-compatible Ketama continuum builder and backend-key iterator
   into a focused private load-balancer selection module.
+- Split the Maglev table builder, candidate iterator, and modular-arithmetic
+  helper into a focused private load-balancer selection module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
