@@ -77,6 +77,8 @@ behavior when the change improves security or project direction.
   preserving the existing trusted-peer behavior.
 - Move native HTTPS redirect response assembly into the route redirect module
   beside the existing redirect target validation helpers.
+- Split native proxy auth-request handling into a focused server module while
+  preserving secret redaction, response header replacement, and denial mapping.
 - Split pure PHP config validators and public PHP validation limits into a
   focused `fluxheim-config` module while preserving the existing `config_php`
   and root `config` re-exports.
