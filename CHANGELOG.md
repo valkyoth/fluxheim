@@ -119,6 +119,9 @@ behavior when the change improves security or project direction.
   focused private policy-config module.
 - Split load-balancer backend runtime stats assembly into a focused private
   policy-stats module.
+- Split load-balancer runtime override and snapshot state into a focused
+  private policy-runtime module, bringing `policy.rs` below the line-limit
+  target.
 
 ## 1.6.36 - 2026-06-30
 

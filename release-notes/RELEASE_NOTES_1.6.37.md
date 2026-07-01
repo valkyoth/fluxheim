@@ -117,6 +117,9 @@ is clean.
   focused private policy-config module.
 - Split load-balancer backend runtime stats assembly into a focused private
   policy-stats module.
+- Split load-balancer runtime override and snapshot state into a focused
+  private policy-runtime module, bringing `policy.rs` below the line-limit
+  target.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
