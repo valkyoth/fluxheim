@@ -200,6 +200,9 @@ is clean.
   the oversized client-test exception.
 - Split native HTTP/1 runtime proxy tests into plain/PROXY, Rustls TLS, and
   OpenSSL TLS modules, removing the oversized runtime-proxy test exception.
+- Split native downstream HTTP/1 tests into base listener/framing, request-view,
+  body/limit/timeout, and TLS-listener modules, removing the oversized
+  downstream HTTP/1 test exception.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

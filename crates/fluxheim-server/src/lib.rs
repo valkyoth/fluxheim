@@ -162,6 +162,21 @@ mod native_http1_test_utils;
 mod native_http1_tests;
 
 #[cfg(test)]
+#[path = "native_http1_body_policy_tests.rs"]
+mod native_http1_body_policy_tests;
+
+#[cfg(test)]
+#[path = "native_http1_request_view_tests.rs"]
+mod native_http1_request_view_tests;
+
+#[cfg(all(
+    test,
+    any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")
+))]
+#[path = "native_http1_tls_listener_tests.rs"]
+mod native_http1_tls_listener_tests;
+
+#[cfg(test)]
 #[path = "native_http1_client_tests.rs"]
 mod native_http1_client_tests;
 

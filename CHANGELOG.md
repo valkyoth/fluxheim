@@ -202,6 +202,9 @@ behavior when the change improves security or project direction.
   the oversized client-test exception.
 - Split native HTTP/1 runtime proxy tests into plain/PROXY, Rustls TLS, and
   OpenSSL TLS modules, removing the oversized runtime-proxy test exception.
+- Split native downstream HTTP/1 tests into base listener/framing, request-view,
+  body/limit/timeout, and TLS-listener modules, removing the oversized
+  downstream HTTP/1 test exception.
 
 ## 1.6.36 - 2026-06-30
 
