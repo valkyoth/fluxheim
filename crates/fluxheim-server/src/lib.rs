@@ -46,6 +46,7 @@ mod native_http1_proxy_request;
 mod native_http1_proxy_response_finish;
 mod native_http1_proxy_revalidation;
 mod native_http1_proxy_runtime;
+mod native_http1_proxy_static_dispatch;
 #[cfg(feature = "acme")]
 mod native_http1_route_acme;
 mod native_http1_route_action;

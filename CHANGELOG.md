@@ -108,6 +108,10 @@ behavior when the change improves security or project direction.
 - Split native proxy load-balanced dispatch, selected-upstream health reporting,
   managed-affinity cookie injection, cache-aware retry, and WebSocket takeover
   handling into a focused feature-gated server module.
+- Split native proxy static-upstream cache-aware dispatch, retry/failover,
+  stale fallback, peer-fill, cache-lock waiting, and origin-fill budget handling
+  into a focused server module, bringing the proxy handler under the 500-line
+  modularity target.
 - Split native proxy construction, config mapping, weighted upstream setup, and
   equality handling into a focused builder module, leaving the core proxy type
   definition small.

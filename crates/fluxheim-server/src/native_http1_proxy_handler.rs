@@ -3,36 +3,20 @@ use std::pin::Pin;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::native_http1_cache::NativeMemoryCacheEntry;
 use crate::native_http1_proxy::NativeHttp1Proxy;
 #[cfg(feature = "auth-request")]
 use crate::native_http1_proxy_auth::{
     NativeAuthRequestDecision, apply_native_auth_request_headers, native_auth_status_reason,
-};
-use crate::native_http1_proxy_cache_fill::NativeCacheFillGate;
-use crate::native_http1_proxy_cache_headers::{
-    native_cache_revalidation_request, native_request_cache_only_if_cached,
-};
-use crate::native_http1_proxy_cache_policy::native_cache_stale_event_for_error;
-use crate::native_http1_proxy_cache_response::native_cached_hit_response;
-use crate::native_http1_proxy_config::native_http1_static_failover_method_allowed;
-use crate::native_http1_proxy_error_page::native_error_page_response;
-use crate::native_http1_proxy_memory_cache::{
-    NativePeerFillDecision, NativeProxyCacheLookup, NativeProxyMemoryCache,
 };
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 use crate::native_http1_proxy_mirror::{
     native_request_has_valid_mirror_marker, strip_native_traffic_mirror_headers,
 };
 use crate::native_http1_proxy_peer_fill::strip_native_peer_fill_header;
-use crate::native_http1_proxy_request::{
-    native_proxy_error_is_timeout, native_request_is_websocket_upgrade,
-};
+use crate::native_http1_proxy_request::native_request_is_websocket_upgrade;
 use crate::{
     NativeHttp1ConnectionStream, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
 };
-use fluxheim_cache::CacheStaleEvent;
-use fluxheim_config::CacheConfig;
 
 impl NativeHttp1Handler for NativeHttp1Proxy {
     fn handle<'a>(
@@ -40,7 +24,6 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
         request: NativeHttp1Request,
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>> {
         Box::pin(async move {
-            let retry_allowed = native_http1_static_failover_method_allowed(&request.method);
             let mut request = request;
             #[cfg(feature = "auth-request")]
             if let Some(auth_request) = &self.auth_request {
@@ -108,372 +91,8 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     )
                     .await;
             }
-            let mut proxy_cache_fill = None::<(
-                NativeProxyMemoryCache,
-                String,
-                &'static str,
-                Option<&'static str>,
-                Option<NativeMemoryCacheEntry>,
-            )>;
-            let mut proxy_cache_status = None::<(
-                &CacheConfig,
-                &'static str,
-                Option<&'static str>,
-                Option<u64>,
-            )>;
-            if let Some(cache) = &self.cache {
-                if let Some(slice) = cache.slice_response(&request, self).await {
-                    return self.finish_response(
-                        &request,
-                        slice.response,
-                        Some((
-                            &cache.config,
-                            if slice.filled { "MISS" } else { "HIT" },
-                            Some(if slice.filled { "slice-fill" } else { "slice" }),
-                            None,
-                        )),
-                        #[cfg(any(
-                            feature = "compression-brotli",
-                            feature = "compression-gzip",
-                            feature = "compression-zstd"
-                        ))]
-                        compression_request.as_ref(),
-                    );
-                }
-                match cache.lookup(&request).await {
-                    NativeProxyCacheLookup::Hit { entry, range } => {
-                        let response = native_cached_hit_response(&entry, &request, range);
-                        return self.finish_response(
-                            &request,
-                            response,
-                            Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
-                            #[cfg(any(
-                                feature = "compression-brotli",
-                                feature = "compression-gzip",
-                                feature = "compression-zstd"
-                            ))]
-                            compression_request.as_ref(),
-                        );
-                    }
-                    NativeProxyCacheLookup::StaleWhileRevalidate { key, entry } => {
-                        cache.record_policy_activity("stale");
-                        self.spawn_cache_revalidation(
-                            cache.clone(),
-                            key,
-                            request.clone(),
-                            entry.clone(),
-                        );
-                        return self.finish_response(
-                            &request,
-                            entry.to_response(),
-                            Some((
-                                &cache.config,
-                                "STALE-UPDATING",
-                                Some("stale-while-revalidate"),
-                                Some(entry.age_secs()),
-                            )),
-                            #[cfg(any(
-                                feature = "compression-brotli",
-                                feature = "compression-gzip",
-                                feature = "compression-zstd"
-                            ))]
-                            compression_request.as_ref(),
-                        );
-                    }
-                    NativeProxyCacheLookup::Miss {
-                        key,
-                        status,
-                        reason,
-                    } => {
-                        if status == "REVALIDATED" {
-                            cache.record_policy_activity("revalidate");
-                        }
-                        proxy_cache_fill = Some((cache.clone(), key, status, reason, None));
-                    }
-                    NativeProxyCacheLookup::Revalidate { key, entry } => {
-                        cache.record_policy_activity("revalidate");
-                        request = native_cache_revalidation_request(request, &entry);
-                        proxy_cache_fill = Some((cache.clone(), key, "EXPIRED", None, Some(entry)));
-                    }
-                    NativeProxyCacheLookup::Bypass(reason) => {
-                        cache.record_policy_activity("bypass");
-                        proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
-                    }
-                }
-            }
-            if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref() {
-                if native_request_cache_only_if_cached(&request) {
-                    let response =
-                        NativeHttp1Response::new(504, "Gateway Timeout", b"cache miss\n")
-                            .close_connection();
-                    return self.finish_response(
-                        &request,
-                        response,
-                        Some((&cache.config, "MISS", Some("only-if-cached-miss"), None)),
-                        #[cfg(any(
-                            feature = "compression-brotli",
-                            feature = "compression-gzip",
-                            feature = "compression-zstd"
-                        ))]
-                        compression_request.as_ref(),
-                    );
-                }
-                match cache.peer_fill(key, &request).await {
-                    NativePeerFillDecision::Skip => {}
-                    NativePeerFillDecision::Hit(response) => {
-                        return self.finish_response(
-                            &request,
-                            response,
-                            Some((&cache.config, "PEER-HIT", None, None)),
-                            #[cfg(any(
-                                feature = "compression-brotli",
-                                feature = "compression-gzip",
-                                feature = "compression-zstd"
-                            ))]
-                            compression_request.as_ref(),
-                        );
-                    }
-                    NativePeerFillDecision::FailClosed(reason) => {
-                        let response =
-                            NativeHttp1Response::new(504, "Gateway Timeout", b"cache miss\n")
-                                .close_connection();
-                        return self.finish_response(
-                            &request,
-                            response,
-                            Some((&cache.config, "MISS", Some(reason), None)),
-                            #[cfg(any(
-                                feature = "compression-brotli",
-                                feature = "compression-gzip",
-                                feature = "compression-zstd"
-                            ))]
-                            compression_request.as_ref(),
-                        );
-                    }
-                }
-            }
-            let _cache_fill_permit = if let Some((cache, key, _, _, _)) = proxy_cache_fill.as_ref()
-            {
-                loop {
-                    match cache.cache_fill_gate(key) {
-                        NativeCacheFillGate::Disabled => break None,
-                        NativeCacheFillGate::Writer(permit) => break Some(permit),
-                        NativeCacheFillGate::Waiter { notify, timeout } => {
-                            if let Some(entry) = cache
-                                .wait_for_cache_fill(notify, timeout, key, &request)
-                                .await
-                            {
-                                return self.finish_response(
-                                    &request,
-                                    entry.to_response(),
-                                    Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
-                                    #[cfg(any(
-                                        feature = "compression-brotli",
-                                        feature = "compression-gzip",
-                                        feature = "compression-zstd"
-                                    ))]
-                                    compression_request.as_ref(),
-                                );
-                            }
-                        }
-                    }
-                }
-            } else {
-                None
-            };
-            let _origin_fill_permit = if let Some((cache, _, _, _, _)) = proxy_cache_fill.as_ref() {
-                match cache.acquire_origin_fill_permit() {
-                    Some(permit) => permit,
-                    None => {
-                        let response = NativeHttp1Response::new(
-                            503,
-                            "Service Unavailable",
-                            b"cache origin fill budget exhausted\n",
-                        )
-                        .close_connection();
-                        return self.finish_response(
-                            &request,
-                            response,
-                            Some((&cache.config, "BYPASS", Some("origin-protected"), None)),
-                            #[cfg(any(
-                                feature = "compression-brotli",
-                                feature = "compression-gzip",
-                                feature = "compression-zstd"
-                            ))]
-                            compression_request.as_ref(),
-                        );
-                    }
-                }
-            } else {
-                None
-            };
-            let mut last_error = None;
-            let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
-            let total = self.upstream_slots.len();
-            let mut attempted = vec![false; self.upstreams.len()];
-            let mut unique_attempts = 0usize;
-            for attempt in 0..total {
-                let slot = start.wrapping_add(attempt) % total;
-                let index = self.upstream_slots[slot];
-                if attempted[index] {
-                    continue;
-                }
-                attempted[index] = true;
-                unique_attempts += 1;
-                let upstream = &self.upstreams[index];
-                match upstream.send(&request).await {
-                    Ok(response) => {
-                        let mut cache_status = proxy_cache_status;
-                        if let Some((cache, key, status, reason, stale_entry)) =
-                            proxy_cache_fill.as_ref()
-                        {
-                            if let Some(stale) = cache
-                                .get_stale(
-                                    key,
-                                    &request,
-                                    CacheStaleEvent::UpstreamHttpStatus(response.status()),
-                                )
-                                .await
-                            {
-                                cache.record_policy_activity("stale");
-                                return self.finish_response(
-                                    &request,
-                                    stale.to_response(),
-                                    Some((
-                                        &cache.config,
-                                        "STALE",
-                                        Some("upstream-status"),
-                                        Some(stale.age_secs()),
-                                    )),
-                                    #[cfg(any(
-                                        feature = "compression-brotli",
-                                        feature = "compression-gzip",
-                                        feature = "compression-zstd"
-                                    ))]
-                                    compression_request.as_ref(),
-                                );
-                            }
-                            let revalidated = if response.status() == 304 {
-                                if let Some(entry) = stale_entry.as_ref() {
-                                    cache
-                                        .store_not_modified_revalidated(
-                                            key, &request, entry, &response,
-                                        )
-                                        .await
-                                        .ok()
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
-                            if let Some(revalidated) = revalidated {
-                                return self.finish_response(
-                                    &request,
-                                    revalidated.to_response(),
-                                    Some((
-                                        &cache.config,
-                                        "REVALIDATED",
-                                        None,
-                                        Some(revalidated.age_secs()),
-                                    )),
-                                    #[cfg(any(
-                                        feature = "compression-brotli",
-                                        feature = "compression-gzip",
-                                        feature = "compression-zstd"
-                                    ))]
-                                    compression_request.as_ref(),
-                                );
-                            }
-                            let store_result = if *status == "REVALIDATED" {
-                                cache.store_revalidated(key, &request, &response).await
-                            } else {
-                                cache.store(key, &request, &response).await
-                            };
-                            cache_status = Some(match store_result {
-                                Ok(()) => (&cache.config, *status, *reason, None),
-                                Err(reason) => (&cache.config, "BYPASS", Some(reason), None),
-                            });
-                        }
-                        return self.finish_response(
-                            &request,
-                            response,
-                            cache_status,
-                            #[cfg(any(
-                                feature = "compression-brotli",
-                                feature = "compression-gzip",
-                                feature = "compression-zstd"
-                            ))]
-                            compression_request.as_ref(),
-                        );
-                    }
-                    Err(error) if retry_allowed && unique_attempts < self.upstreams.len() => {
-                        log::debug!(
-                            target: "fluxheim::native_http1",
-                            "native HTTP/1 upstream attempt failed before retry: {error:?}"
-                        );
-                        last_error = Some(error);
-                    }
-                    Err(error) => {
-                        log::debug!(
-                            target: "fluxheim::native_http1",
-                            "native HTTP/1 upstream attempt failed: {error:?}"
-                        );
-                        last_error = Some(error);
-                        break;
-                    }
-                }
-            }
-            let status = if last_error
-                .as_ref()
-                .is_some_and(native_proxy_error_is_timeout)
-            {
-                504
-            } else {
-                502
-            };
-            if let (Some((cache, key, _, _, _)), Some(error)) =
-                (proxy_cache_fill.as_ref(), last_error.as_ref())
-                && let Some(stale) = cache
-                    .get_stale(key, &request, native_cache_stale_event_for_error(error))
-                    .await
-            {
-                cache.record_policy_activity("stale");
-                return self.finish_response(
-                    &request,
-                    stale.to_response(),
-                    Some((
-                        &cache.config,
-                        "STALE",
-                        Some("upstream-error"),
-                        Some(stale.age_secs()),
-                    )),
-                    #[cfg(any(
-                        feature = "compression-brotli",
-                        feature = "compression-gzip",
-                        feature = "compression-zstd"
-                    ))]
-                    compression_request.as_ref(),
-                );
-            }
-            let error_response = native_error_page_response(
-                &self.error_pages,
-                self.response_write_policy,
-                &request,
-                status,
-            )
-            .unwrap_or_else(|| {
-                if status == 504 {
-                    NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
-                        .close_connection()
-                } else {
-                    NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
-                        .close_connection()
-                }
-            });
-            self.finish_response(
-                &request,
-                error_response,
-                proxy_cache_status,
+            self.handle_static_upstreams(
+                request,
                 #[cfg(any(
                     feature = "compression-brotli",
                     feature = "compression-gzip",
@@ -481,6 +100,7 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                 ))]
                 compression_request.as_ref(),
             )
+            .await
         })
     }
 
@@ -522,5 +142,3 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
         })
     }
 }
-
-impl NativeHttp1Proxy {}
