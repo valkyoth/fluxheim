@@ -65,6 +65,9 @@ behavior when the change improves security or project direction.
   focused `fluxheim-config` module.
 - Split proxy config fragments into a focused `fluxheim-config` module while
   preserving the existing `config_proxy` re-export and merge behavior.
+- Split final proxy config validation orchestration into a focused
+  `fluxheim-config` module so `config_proxy.rs` can stay below the 500-line
+  modularity target.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

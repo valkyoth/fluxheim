@@ -2,22 +2,17 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{ByteSize, ConfigError, LoadBalanceConfig, validate_optional_timeout_secs};
-use crate::config_net::{upstream_host, valid_authority};
+use crate::config::{ByteSize, ConfigError, LoadBalanceConfig};
+use crate::config_net::upstream_host;
 pub use crate::config_proxy_auth::{AuthRequestConfig, AuthRequestConfigFragment};
 use crate::config_proxy_discovery::{
     default_proxy_upstreams_file_refresh_secs, default_proxy_upstreams_http_refresh_secs,
-    validate_proxy_upstream_discovery,
 };
 pub use crate::config_proxy_error_page::ProxyErrorPageConfig;
 pub use crate::config_proxy_fragment::ProxyConfigFragment;
 pub use crate::config_proxy_protocol::{UpstreamHttpVersion, UpstreamProxyProtocol};
 pub use crate::config_proxy_traffic_mirror::{TrafficMirrorConfig, TrafficMirrorConfigFragment};
-use crate::config_proxy_transport::validate_proxy_upstream_transport;
-use crate::config_proxy_upstream_attributes::validate_static_upstream_attributes;
-#[cfg(feature = "load-balancer")]
-use crate::config_proxy_upstream_policy::validate_load_balancer_backend_keys;
-use crate::config_proxy_upstream_policy::validate_upstream_policy;
+use crate::config_proxy_validate::validate_proxy_config;
 
 const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
 
@@ -464,91 +459,7 @@ impl ProxyConfig {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
-        validate_proxy_upstream_discovery(self)?;
-        if self.upstreams.len() > MAX_PROXY_UPSTREAMS {
-            return Err(ConfigError::TooManyProxyUpstreams {
-                max: MAX_PROXY_UPSTREAMS,
-            });
-        }
-        validate_static_upstream_attributes(self)?;
-        if self.error_pages.len() > MAX_PROXY_ERROR_PAGES {
-            return Err(ConfigError::TooManyProxyErrorPages {
-                max: MAX_PROXY_ERROR_PAGES,
-            });
-        }
-
-        if let Some(upstream) = &self.upstream
-            && !valid_authority(upstream)
-        {
-            return Err(ConfigError::InvalidUpstream {
-                address: upstream.clone(),
-            });
-        }
-
-        let mut seen_upstreams = std::collections::HashSet::new();
-        for upstream in &self.upstreams {
-            if !valid_authority(upstream) {
-                return Err(ConfigError::InvalidUpstream {
-                    address: upstream.clone(),
-                });
-            }
-            if !seen_upstreams.insert(upstream.to_ascii_lowercase()) {
-                return Err(ConfigError::DuplicateProxyUpstream {
-                    upstream: upstream.clone(),
-                });
-            }
-        }
-        #[cfg(feature = "load-balancer")]
-        validate_load_balancer_backend_keys(&self.upstreams)?;
-        validate_upstream_policy(self)?;
-
-        validate_proxy_upstream_transport(self, DEFAULT_UPSTREAM)?;
-        self.auth_request.validate("proxy.auth_request")?;
-        self.mirror.validate("proxy.mirror")?;
-        validate_optional_timeout_secs("proxy.read_timeout_secs", self.read_timeout_secs)?;
-        validate_optional_timeout_secs("proxy.send_timeout_secs", self.send_timeout_secs)?;
-        validate_optional_timeout_secs(
-            "proxy.downstream_read_timeout_secs",
-            self.downstream_read_timeout_secs,
-        )?;
-        validate_optional_timeout_secs(
-            "proxy.downstream_write_timeout_secs",
-            self.downstream_write_timeout_secs,
-        )?;
-        validate_optional_timeout_secs(
-            "proxy.downstream_total_response_timeout_secs",
-            self.downstream_total_response_timeout_secs,
-        )?;
-        if self
-            .downstream_min_send_rate_bytes_per_sec
-            .is_some_and(|rate| rate == 0)
-        {
-            return Err(ConfigError::InvalidProxyTimeout {
-                field: "proxy.downstream_min_send_rate_bytes_per_sec",
-            });
-        }
-
-        let mut statuses = std::collections::HashSet::new();
-        for error_page in &self.error_pages {
-            error_page.validate()?;
-            if !statuses.insert(error_page.status) {
-                return Err(ConfigError::DuplicateProxyErrorPageStatus {
-                    status: error_page.status,
-                });
-            }
-        }
-
-        self.load_balance.validate()?;
-        if self.load_balance.selection.uses_static_ring()
-            && (self.upstreams_file.is_some()
-                || self.upstreams_http_url.is_some()
-                || self.upstream_dns_refresh_secs.is_some())
-        {
-            return Err(ConfigError::InvalidLoadBalanceSelection {
-                reason: "static-ring selections require a static proxy.upstreams pool; file, HTTP, and DNS discovery pools rebuild membership dynamically",
-            });
-        }
-        Ok(())
+        validate_proxy_config(self, DEFAULT_UPSTREAM)
     }
 }
 
