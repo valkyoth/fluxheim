@@ -103,6 +103,9 @@ behavior when the change improves security or project direction.
   focused `fluxheim-config` policy module while preserving public re-exports.
 - Split cache validation into a focused `fluxheim-config` module, bringing
   `config_cache.rs` down to the 500-line modularity target.
+- Split the public `ConfigError` enum and formatting implementation out of
+  `config.rs` into a focused error module while preserving the existing
+  `fluxheim_config::ConfigError` re-export.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
