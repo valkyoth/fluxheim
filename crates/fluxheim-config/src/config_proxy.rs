@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{ByteSize, ConfigError, LoadBalanceConfig, validate_optional_timeout_secs};
 use crate::config_load_balance::LoadBalanceConfigFragment;
-use crate::config_net::{normalize_host, upstream_host, valid_authority};
-use crate::config_path::{validate_non_world_writable_parent, validate_path};
+use crate::config_net::{upstream_host, valid_authority};
 pub use crate::config_proxy_auth::{AuthRequestConfig, AuthRequestConfigFragment};
 use crate::config_proxy_discovery::{
     default_proxy_upstreams_file_refresh_secs, default_proxy_upstreams_http_refresh_secs,
@@ -14,12 +13,11 @@ use crate::config_proxy_discovery::{
 pub use crate::config_proxy_error_page::ProxyErrorPageConfig;
 pub use crate::config_proxy_protocol::{UpstreamHttpVersion, UpstreamProxyProtocol};
 pub use crate::config_proxy_traffic_mirror::{TrafficMirrorConfig, TrafficMirrorConfigFragment};
+use crate::config_proxy_transport::validate_proxy_upstream_transport;
 use crate::config_proxy_upstream_attributes::validate_static_upstream_attributes;
 #[cfg(feature = "load-balancer")]
 use crate::config_proxy_upstream_policy::validate_load_balancer_backend_keys;
-use crate::config_proxy_upstream_policy::{
-    static_upstreams_include_ip_address, validate_upstream_policy,
-};
+use crate::config_proxy_upstream_policy::validate_upstream_policy;
 
 const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
 
@@ -208,10 +206,6 @@ pub struct ProxyConfigFragment {
 
 pub const MAX_PROXY_UPSTREAMS: usize = 64;
 pub const MAX_PROXY_ERROR_PAGES: usize = 64;
-const MAX_PROXY_UPSTREAM_H2_STREAMS: usize = 1024;
-const MAX_PROXY_UPSTREAM_TCP_KEEPALIVE_COUNT: usize = 128;
-const MAX_PROXY_UPSTREAM_TCP_RECV_BUFFER_BYTES: u64 = 256 * 1024 * 1024;
-const MAX_PROXY_UPSTREAM_DSCP: u8 = 63;
 pub const DEFAULT_PROXY_DOWNSTREAM_READ_TIMEOUT_SECS: u64 = 60;
 pub const DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS: u64 = 30;
 pub const DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS: u64 = 300;
@@ -568,213 +562,11 @@ impl ProxyConfig {
         validate_load_balancer_backend_keys(&self.upstreams)?;
         validate_upstream_policy(self)?;
 
-        if let Some(sni) = &self.upstream_sni
-            && sni.trim().is_empty()
-        {
-            return Err(ConfigError::EmptyUpstreamSni);
-        }
-        if self.upstream_tls
-            && self.upstream_verify_cert
-            && self.upstream_sni.is_none()
-            && static_upstreams_include_ip_address(self, DEFAULT_UPSTREAM)
-        {
-            return Err(ConfigError::InvalidProxyTlsPolicy {
-                reason: "IP-addressed upstreams with upstream_tls and upstream_verify_cert require explicit upstream_sni",
-            });
-        }
-        if !self.upstream_verify_cert && self.upstream_verify_hostname {
-            return Err(ConfigError::InvalidProxyTlsPolicy {
-                reason: "upstream_verify_hostname must be false when upstream_verify_cert = false",
-            });
-        }
-        if !self.upstream_tls
-            && (self.upstream_ca_path.is_some()
-                || self.upstream_client_cert_path.is_some()
-                || self.upstream_client_key_path.is_some())
-        {
-            return Err(ConfigError::InvalidProxyTlsPolicy {
-                reason: "upstream TLS trust roots or client certificates require upstream_tls = true",
-            });
-        }
-        if !self.upstream_verify_cert && self.upstream_ca_path.is_some() {
-            return Err(ConfigError::InvalidProxyTlsPolicy {
-                reason: "upstream_ca_path requires upstream_verify_cert = true",
-            });
-        }
-        match (
-            &self.upstream_client_cert_path,
-            &self.upstream_client_key_path,
-        ) {
-            (Some(_), Some(_)) | (None, None) => {}
-            _ => {
-                return Err(ConfigError::InvalidProxyTlsPolicy {
-                    reason: "upstream_client_cert_path and upstream_client_key_path must be configured together",
-                });
-            }
-        }
-        for (field, path) in [
-            ("proxy.upstream_ca_path", self.upstream_ca_path.as_deref()),
-            (
-                "proxy.upstream_client_cert_path",
-                self.upstream_client_cert_path.as_deref(),
-            ),
-            (
-                "proxy.upstream_client_key_path",
-                self.upstream_client_key_path.as_deref(),
-            ),
-        ] {
-            validate_path(field, path)?;
-            validate_non_world_writable_parent(field, path)?;
-        }
-        if self.upstream_proxy_protocol != UpstreamProxyProtocol::Off
-            && !self.has_configured_upstream()
-        {
-            return Err(ConfigError::InvalidProxyTlsPolicy {
-                reason: "upstream_proxy_protocol requires a configured proxy upstream",
-            });
-        }
-        if self.upstream_http_version != UpstreamHttpVersion::Http1
-            && !self.has_configured_upstream()
-        {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.upstream_http_version",
-                reason: "requires a configured proxy upstream",
-            });
-        }
-        if self.upstream_h2c_upgrade {
-            if !self.has_configured_upstream() {
-                return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                    field: "proxy.upstream_h2c_upgrade",
-                    reason: "requires a configured proxy upstream",
-                });
-            }
-            if self.upstream_tls {
-                return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                    field: "proxy.upstream_h2c_upgrade",
-                    reason: "is only valid for plaintext upstreams",
-                });
-            }
-            if self.upstream_http_version != UpstreamHttpVersion::Http1AndHttp2 {
-                return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                    field: "proxy.upstream_h2c_upgrade",
-                    reason: "requires upstream_http_version = \"http1-and-http2\"",
-                });
-            }
-        }
-        if self.websocket && self.upstream_http_version != UpstreamHttpVersion::Http1 {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.websocket",
-                reason: "HTTP/1.1 upgrade proxying requires upstream_http_version = \"http1\"",
-            });
-        }
+        validate_proxy_upstream_transport(self, DEFAULT_UPSTREAM)?;
         self.auth_request.validate("proxy.auth_request")?;
         self.mirror.validate("proxy.mirror")?;
-        if self.upstream_h2_max_streams.is_some()
-            && self.upstream_http_version == UpstreamHttpVersion::Http1
-        {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.upstream_h2_max_streams",
-                reason: "requires upstream_http_version to allow http2",
-            });
-        }
-        if self.upstream_h2_ping_interval_secs.is_some()
-            && self.upstream_http_version == UpstreamHttpVersion::Http1
-        {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.upstream_h2_ping_interval_secs",
-                reason: "requires upstream_http_version to allow http2",
-            });
-        }
-        if self
-            .upstream_h2_max_streams
-            .is_some_and(|streams| streams == 0 || streams > MAX_PROXY_UPSTREAM_H2_STREAMS)
-        {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.upstream_h2_max_streams",
-                reason: "must be between 1 and 1024",
-            });
-        }
-        if let Some(alternative_cn) = &self.upstream_alternative_cn {
-            if alternative_cn.contains('*') {
-                return Err(ConfigError::InvalidProxyTlsPolicy {
-                    reason: "upstream_alternative_cn must not contain wildcards",
-                });
-            }
-            if normalize_host(alternative_cn).is_none() {
-                return Err(ConfigError::InvalidProxyTlsPolicy {
-                    reason: "upstream_alternative_cn must be a valid hostname",
-                });
-            }
-        }
-
-        validate_optional_timeout_secs("proxy.connect_timeout_secs", self.connect_timeout_secs)?;
-        validate_optional_timeout_secs(
-            "proxy.upstream_total_connection_timeout_secs",
-            self.upstream_total_connection_timeout_secs,
-        )?;
-        validate_optional_timeout_secs(
-            "proxy.upstream_idle_timeout_secs",
-            self.upstream_idle_timeout_secs,
-        )?;
-        validate_optional_timeout_secs(
-            "proxy.upstream_tcp_keepalive_idle_secs",
-            self.upstream_tcp_keepalive_idle_secs,
-        )?;
-        validate_optional_timeout_secs(
-            "proxy.upstream_tcp_keepalive_interval_secs",
-            self.upstream_tcp_keepalive_interval_secs,
-        )?;
-        if self.upstream_tcp_keepalive_count.is_some()
-            || self.upstream_tcp_keepalive_idle_secs.is_some()
-            || self.upstream_tcp_keepalive_interval_secs.is_some()
-            || self.upstream_tcp_user_timeout_ms.is_some()
-        {
-            match (
-                self.upstream_tcp_keepalive_idle_secs,
-                self.upstream_tcp_keepalive_interval_secs,
-                self.upstream_tcp_keepalive_count,
-            ) {
-                (Some(_), Some(_), Some(count))
-                    if (1..=MAX_PROXY_UPSTREAM_TCP_KEEPALIVE_COUNT).contains(&count) => {}
-                _ => {
-                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                        field: "proxy.upstream_tcp_keepalive_count",
-                        reason: "TCP keepalive requires idle_secs, interval_secs, and count, with count between 1 and 128",
-                    });
-                }
-            }
-        }
-        if self
-            .upstream_tcp_user_timeout_ms
-            .is_some_and(|milliseconds| milliseconds == 0)
-        {
-            return Err(ConfigError::InvalidProxyTimeout {
-                field: "proxy.upstream_tcp_user_timeout_ms",
-            });
-        }
-        if self.upstream_tcp_recv_buffer_bytes.is_some_and(|bytes| {
-            bytes.as_u64() == 0 || bytes.as_u64() > MAX_PROXY_UPSTREAM_TCP_RECV_BUFFER_BYTES
-        }) {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.upstream_tcp_recv_buffer_bytes",
-                reason: "must be between 1 byte and 256MiB",
-            });
-        }
-        if self
-            .upstream_dscp
-            .is_some_and(|dscp| dscp > MAX_PROXY_UPSTREAM_DSCP)
-        {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.upstream_dscp",
-                reason: "must be a DSCP value between 0 and 63",
-            });
-        }
         validate_optional_timeout_secs("proxy.read_timeout_secs", self.read_timeout_secs)?;
         validate_optional_timeout_secs("proxy.send_timeout_secs", self.send_timeout_secs)?;
-        validate_optional_timeout_secs(
-            "proxy.upstream_h2_ping_interval_secs",
-            self.upstream_h2_ping_interval_secs,
-        )?;
         validate_optional_timeout_secs(
             "proxy.downstream_read_timeout_secs",
             self.downstream_read_timeout_secs,

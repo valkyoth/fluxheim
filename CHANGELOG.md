@@ -60,6 +60,9 @@ behavior when the change improves security or project direction.
 - Split proxy static upstream attribute validation for weights, priority
   groups, locality, aliases, max-in-flight, and tags into a focused
   `fluxheim-config` module.
+- Split proxy upstream transport validation for TLS material, SNI, upstream
+  protocol selection, H2 knobs, socket options, and upstream timeouts into a
+  focused `fluxheim-config` module.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
