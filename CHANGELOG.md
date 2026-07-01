@@ -99,6 +99,8 @@ behavior when the change improves security or project direction.
   `fluxheim-config` module while preserving existing public re-exports.
 - Split cache disk-tier config into a focused `fluxheim-config` module while
   preserving the existing public re-exports and merge behavior.
+- Split cache key, stale-error, default, and preset helper primitives into a
+  focused `fluxheim-config` policy module while preserving public re-exports.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

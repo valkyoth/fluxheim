@@ -19,6 +19,7 @@ pub mod config_cache_disk;
 pub mod config_cache_encryption;
 pub mod config_cache_memory;
 pub mod config_cache_peer;
+pub mod config_cache_policy;
 pub mod config_cache_purger;
 pub mod config_cache_range;
 pub mod config_cache_storage_bin;

@@ -22,14 +22,14 @@ pub use crate::config_admin::{
     AdminSelfHealingConfig, AdminTransportConfig,
 };
 use crate::config_cache::CacheConfigFragment;
-pub use crate::config_cache::{CacheConfig, CacheKeyPart, CachePreset, CacheStaleErrorKind};
+pub use crate::config_cache::validate_cache_compliance_internal_crypto;
+pub use crate::config_cache::{CacheConfig, CachePreset};
 #[cfg(test)]
 pub use crate::config_cache::{
     MAX_CACHE_BYPASS_COOKIES, MAX_CACHE_BYPASS_PATHS, MAX_CACHE_CONTENT_TYPES,
     MAX_CACHE_IMAGE_EXTENSIONS, MAX_CACHE_METHODS, MAX_CACHE_STATUS_TTLS,
     MAX_CACHE_VARY_REQUEST_HEADERS,
 };
-pub use crate::config_cache::{extend_unique, validate_cache_compliance_internal_crypto};
 pub use crate::config_cache_controls::CACHE_PREDICTOR_MAX_CAPACITY;
 pub use crate::config_cache_controls::{
     CacheLockConfig, CacheOriginProtectionConfig, CachePredictorConfig,
@@ -43,6 +43,7 @@ pub use crate::config_cache_encryption::{
 };
 pub use crate::config_cache_memory::CacheMemoryConfig;
 pub use crate::config_cache_peer::{CachePeerConfig, CachePeerFillConfig};
+pub use crate::config_cache_policy::{CacheKeyPart, CacheStaleErrorKind, extend_unique};
 pub use crate::config_cache_purger::CachePurgerConfig;
 use crate::config_cache_purger::CachePurgerConfigFragment;
 pub use crate::config_cache_range::{CacheRangeConfig, CacheRangeSliceConfig};
