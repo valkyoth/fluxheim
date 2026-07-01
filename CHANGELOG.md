@@ -95,6 +95,8 @@ behavior when the change improves security or project direction.
   module.
 - Split native proxy peer-fill/cache unit tests into a focused server test
   module.
+- Split native proxy memory-cache lookup, slice-fill, peer-fill, store, and
+  predictor runtime into a focused server module.
 - Split native route proxy upstream/load-balancer construction into a focused
   server module so route dispatch keeps shrinking without changing serving
   behavior.
