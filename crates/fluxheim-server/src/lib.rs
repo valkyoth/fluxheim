@@ -67,6 +67,7 @@ mod native_http1_route_proxy;
 #[cfg(feature = "acme")]
 mod native_http1_route_proxy_acme;
 mod native_http1_route_proxy_handler;
+mod native_http1_route_proxy_policy;
 mod native_http1_route_proxy_route;
 mod native_http1_route_proxy_types;
 mod native_http1_route_proxy_upstream;

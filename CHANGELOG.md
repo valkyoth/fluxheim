@@ -121,6 +121,10 @@ behavior when the change improves security or project direction.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
+- Split native route proxy route selection, decoded-policy selection,
+  trusted-client-IP restoration, traceparent application, rate-limit decisions,
+  concurrency permits, and route action wrappers into a focused policy module,
+  bringing the route-proxy handler below the modularity target.
 - Split native route proxy route builders, redirect/static/PHP/proxy action
   construction, inherited route config mapping, and route helper accessors into
   a focused route module.

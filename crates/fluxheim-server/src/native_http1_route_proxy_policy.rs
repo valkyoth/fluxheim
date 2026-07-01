@@ -1,0 +1,229 @@
+use std::net::IpAddr;
+use std::time::Duration;
+
+#[cfg(not(feature = "privacy-mode"))]
+use fluxheim_headers::effective_client_ip;
+use fluxheim_protocol::route_method_matches;
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+use crate::native_http1_route_compression::apply_route_compression;
+use crate::native_http1_route_limits::{
+    NativeConcurrencyPermit, NativeRateLimitDecision, decoded_route_policy_path,
+};
+use crate::native_http1_route_matcher::NativeHttp1RouteMatcher;
+use crate::native_http1_route_proxy::{NativeHttp1RouteProxy, NativeHttp1RouteProxyRoute};
+#[cfg(not(feature = "privacy-mode"))]
+use crate::native_http1_route_request_headers::joined_header_value;
+#[cfg(feature = "otel-tracing")]
+use crate::native_http1_route_trace::apply_native_route_traceparent;
+use crate::{
+    NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Request, NativeHttp1Response,
+};
+
+impl NativeHttp1RouteProxy {
+    pub(crate) fn select_route(
+        &self,
+        method: &str,
+        path: &str,
+    ) -> Option<&NativeHttp1RouteProxyRoute> {
+        self.select_route_with_fallback(method, path, true)
+    }
+
+    pub(crate) fn select_decoded_policy_route(
+        &self,
+        method: &str,
+        path: &str,
+    ) -> Option<&NativeHttp1RouteProxyRoute> {
+        decoded_route_policy_path(path)
+            .as_deref()
+            .and_then(|decoded_path| self.select_route_with_fallback(method, decoded_path, false))
+    }
+
+    fn select_route_with_fallback(
+        &self,
+        method: &str,
+        path: &str,
+        include_fallback: bool,
+    ) -> Option<&NativeHttp1RouteProxyRoute> {
+        let mut fallback = None;
+        let mut best_prefix = None;
+        let mut first_regex = None;
+        for route in &self.routes {
+            if !route_method_matches(&route.methods, method) {
+                continue;
+            }
+            match &route.matcher {
+                NativeHttp1RouteMatcher::Exact(exact) if path == exact => return Some(route),
+                NativeHttp1RouteMatcher::Prefix(_) if route.matcher.is_match(path) => {
+                    if best_prefix
+                        .map(|best: &NativeHttp1RouteProxyRoute| {
+                            route.prefix_len() > best.prefix_len()
+                        })
+                        .unwrap_or(true)
+                    {
+                        best_prefix = Some(route);
+                    }
+                }
+                NativeHttp1RouteMatcher::Regex(_)
+                    if first_regex.is_none() && route.matcher.is_match(path) =>
+                {
+                    first_regex = Some(route);
+                }
+                NativeHttp1RouteMatcher::Fallback if include_fallback => fallback = Some(route),
+                _ => {}
+            }
+        }
+        best_prefix.or(first_regex).or(fallback)
+    }
+
+    pub(crate) fn access_client_ip(&self, request: &NativeHttp1Request) -> Option<IpAddr> {
+        if let Some(addr) = request.effective_client_addr {
+            return Some(addr.ip());
+        }
+        let direct_ip = request.peer_addr.map(|addr| addr.ip());
+        #[cfg(not(feature = "privacy-mode"))]
+        {
+            let original_x_forwarded_for = joined_header_value(request, "x-forwarded-for");
+            let trusted_direct_peer = direct_ip.is_some_and(|ip| self.trusted_source_contains(ip));
+            let trusted_proxy_matcher = |ip| self.trusted_source_contains(ip);
+            direct_ip.map(|ip| {
+                effective_client_ip(
+                    ip,
+                    trusted_direct_peer,
+                    original_x_forwarded_for.as_deref(),
+                    Some(&trusted_proxy_matcher),
+                )
+            })
+        }
+        #[cfg(feature = "privacy-mode")]
+        {
+            direct_ip
+        }
+    }
+
+    #[cfg(feature = "otel-tracing")]
+    pub(crate) fn apply_traceparent(&self, request: &mut NativeHttp1Request) {
+        let trusted_peer = self.trace_trusted_peer(request);
+        apply_native_route_traceparent(request, self.trace_propagation, trusted_peer);
+    }
+
+    #[cfg(feature = "otel-tracing")]
+    fn trace_trusted_peer(&self, request: &NativeHttp1Request) -> bool {
+        #[cfg(not(feature = "privacy-mode"))]
+        {
+            request
+                .peer_addr
+                .is_some_and(|addr| self.trusted_source_contains(addr.ip()))
+        }
+        #[cfg(feature = "privacy-mode")]
+        {
+            let _ = request;
+            false
+        }
+    }
+
+    #[cfg(not(feature = "otel-tracing"))]
+    pub(crate) fn apply_traceparent(&self, _request: &mut NativeHttp1Request) {}
+
+    #[cfg(not(feature = "privacy-mode"))]
+    fn trusted_source_contains(&self, address: IpAddr) -> bool {
+        self.trusted_sources
+            .iter()
+            .any(|source| source.contains(address))
+    }
+
+    pub(crate) fn check_rate_limits(
+        &self,
+        route: Option<&NativeHttp1RouteProxyRoute>,
+        client_ip: Option<IpAddr>,
+    ) -> NativeRateLimitDecision {
+        let mut delay = None;
+        match self.rate_limit.check(client_ip) {
+            NativeRateLimitDecision::Allow => {}
+            NativeRateLimitDecision::Delay(vhost_delay) => delay = Some(vhost_delay),
+            decision => return decision,
+        }
+        if let Some(route) = route {
+            match route.rate_limit.check(client_ip) {
+                NativeRateLimitDecision::Allow => {}
+                NativeRateLimitDecision::Delay(route_delay) => {
+                    delay = Some(
+                        delay.map_or(route_delay, |current: Duration| current.max(route_delay)),
+                    );
+                }
+                decision => return decision,
+            }
+        }
+
+        delay
+            .map(NativeRateLimitDecision::Delay)
+            .unwrap_or(NativeRateLimitDecision::Allow)
+    }
+
+    pub(crate) async fn acquire_concurrency_permits(
+        &self,
+        route: Option<&NativeHttp1RouteProxyRoute>,
+    ) -> Result<Vec<NativeConcurrencyPermit>, u16> {
+        let mut permits = Vec::with_capacity(2);
+        if let Some(permit) = self.concurrency.acquire().await? {
+            permits.push(permit);
+        }
+        if let Some(route) = route
+            && let Some(permit) = route.concurrency.acquire().await?
+        {
+            permits.push(permit);
+        }
+        Ok(permits)
+    }
+}
+
+impl NativeHttp1RouteProxyRoute {
+    pub(crate) fn request_body_timeout(&self) -> Option<Duration> {
+        self.action.request_body_timeout()
+    }
+
+    fn prefix_len(&self) -> usize {
+        self.matcher.prefix_len()
+    }
+
+    pub(crate) async fn handle(&self, request: NativeHttp1Request) -> NativeHttp1Response {
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        let compression_request = self.compression.as_ref().map(|_| request.clone());
+        let mut response = self.action.handle(request).await;
+        self.response_headers.apply(&mut response);
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        if let Some(compression) = &self.compression
+            && let Some(compression_request) = compression_request.as_ref()
+        {
+            apply_route_compression(compression_request, &mut response, compression);
+        }
+        response
+    }
+
+    pub(crate) fn handles_connection_takeover(&self, request: &NativeHttp1Request) -> bool {
+        self.action.handles_connection_takeover(request)
+    }
+
+    pub(crate) async fn handle_connection_takeover(
+        &self,
+        request: NativeHttp1Request,
+        prebuffered: Vec<u8>,
+        stream: NativeHttp1ConnectionStream,
+    ) -> Result<(), NativeHttp1Error> {
+        self.action
+            .handle_connection_takeover(request, prebuffered, stream)
+            .await
+    }
+}
