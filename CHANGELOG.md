@@ -121,6 +121,9 @@ behavior when the change improves security or project direction.
   into a focused child test module.
 - Split native proxy compression and configured error-page tests into a focused
   child test module.
+- Split native proxy static and load-balanced WebSocket takeover tests into a
+  focused child test module with distinct upstreams for the native load-balancer
+  path.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
