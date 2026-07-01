@@ -14,6 +14,7 @@ pub mod config_admin_health;
 pub mod config_admin_socket;
 pub mod config_admin_transport;
 pub mod config_cache;
+pub mod config_cache_purger;
 pub mod config_compression;
 pub mod config_geoip;
 pub mod config_header;

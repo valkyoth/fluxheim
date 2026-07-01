@@ -83,6 +83,8 @@ behavior when the change improves security or project direction.
   into a focused `fluxheim-config` limit module.
 - Split PHP default and preset helper logic into focused `fluxheim-config`
   modules, bringing `config_php.rs` under the 500-line modularity target.
+- Split cache purger config and validation into a focused `fluxheim-config`
+  module while preserving the top-level config API.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

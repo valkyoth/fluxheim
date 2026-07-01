@@ -21,6 +21,7 @@ pub use crate::config_admin::{
     AdminHealthResponseMode, AdminOpsSocketConfig, AdminRemoteTransportMode,
     AdminSelfHealingConfig, AdminTransportConfig,
 };
+use crate::config_cache::CacheConfigFragment;
 pub use crate::config_cache::{
     CACHE_PREDICTOR_MAX_CAPACITY, extend_unique, validate_cache_compliance_internal_crypto,
 };
@@ -29,15 +30,16 @@ pub use crate::config_cache::{
     CacheDiskEncryptionConfig, CacheDiskEncryptionOpenBaoConfig, CacheDiskEncryptionProvider,
     CacheDiskStorageBinConfig, CacheKeyPart, CacheLockConfig, CacheMemoryConfig,
     CacheOriginProtectionConfig, CachePeerConfig, CachePeerFillConfig, CachePredictorConfig,
-    CachePreset, CachePurgerConfig, CacheRangeConfig, CacheRangeSliceConfig, CacheStaleErrorKind,
+    CachePreset, CacheRangeConfig, CacheRangeSliceConfig, CacheStaleErrorKind,
 };
-use crate::config_cache::{CacheConfigFragment, CachePurgerConfigFragment};
 #[cfg(test)]
 pub use crate::config_cache::{
     MAX_CACHE_BYPASS_COOKIES, MAX_CACHE_BYPASS_PATHS, MAX_CACHE_CONTENT_TYPES,
     MAX_CACHE_IMAGE_EXTENSIONS, MAX_CACHE_METHODS, MAX_CACHE_STATUS_TTLS,
     MAX_CACHE_VARY_REQUEST_HEADERS, fips_allowed_local_openbao_endpoint,
 };
+pub use crate::config_cache_purger::CachePurgerConfig;
+use crate::config_cache_purger::CachePurgerConfigFragment;
 pub use crate::config_compression::CompressionConfig;
 use crate::config_compression::CompressionConfigFragment;
 #[cfg(test)]
