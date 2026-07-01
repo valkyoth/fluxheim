@@ -15,6 +15,7 @@ pub mod config_admin_socket;
 pub mod config_admin_transport;
 pub mod config_cache;
 pub mod config_cache_controls;
+pub mod config_cache_memory;
 pub mod config_cache_purger;
 pub mod config_cache_range;
 pub mod config_compression;

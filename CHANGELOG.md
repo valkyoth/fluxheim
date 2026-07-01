@@ -89,6 +89,8 @@ behavior when the change improves security or project direction.
   while preserving the existing public re-exports.
 - Split cache lock, predictor, and origin-protection config into a focused
   `fluxheim-config` controls module.
+- Split cache memory-tier config into a focused `fluxheim-config` module while
+  preserving the existing public re-export.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

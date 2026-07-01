@@ -10,6 +10,7 @@ use crate::config_cache_controls::{
     CacheLockConfig, CacheLockConfigFragment, CacheOriginProtectionConfig,
     CacheOriginProtectionConfigFragment, CachePredictorConfig, CachePredictorConfigFragment,
 };
+use crate::config_cache_memory::{CacheMemoryConfig, CacheMemoryConfigFragment};
 use crate::config_cache_range::{CacheRangeConfig, CacheRangeConfigFragment};
 use crate::config_header::validate_header_name;
 use crate::config_net::{http_authority_is_loopback, http_authority_is_numeric_loopback};
@@ -1381,62 +1382,6 @@ fn cache_peer_authority_is_loopback(authority: &str) -> bool {
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CacheMemoryConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_cache_memory_max_size_bytes")]
-    pub max_size_bytes: ByteSize,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct CacheMemoryConfigFragment {
-    enabled: Option<bool>,
-    max_size_bytes: Option<ByteSize>,
-}
-
-impl Default for CacheMemoryConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            max_size_bytes: default_cache_memory_max_size_bytes(),
-        }
-    }
-}
-
-impl CacheMemoryConfig {
-    fn merge(&mut self, fragment: CacheMemoryConfigFragment) {
-        if let Some(enabled) = fragment.enabled {
-            self.enabled = enabled;
-        }
-        if let Some(max_size_bytes) = fragment.max_size_bytes {
-            self.max_size_bytes = max_size_bytes;
-        }
-    }
-
-    fn validate(&self, scope: &'static str, max_object_bytes: ByteSize) -> Result<(), ConfigError> {
-        if !self.enabled {
-            return Ok(());
-        }
-
-        if self.max_size_bytes.as_u64() == 0 {
-            return Err(ConfigError::InvalidCacheTierMaxSize {
-                field: format!("{scope}.memory.max_size_bytes"),
-            });
-        }
-
-        if self.max_size_bytes < max_object_bytes {
-            return Err(ConfigError::CacheTierSmallerThanMaxObject {
-                tier: format!("{scope}.memory"),
-            });
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct CacheDiskConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -2081,10 +2026,6 @@ fn default_cache_methods() -> Vec<String> {
 
 fn default_cache_max_object_bytes() -> ByteSize {
     ByteSize::from_bytes(32 * 1024 * 1024)
-}
-
-fn default_cache_memory_max_size_bytes() -> ByteSize {
-    ByteSize::from_bytes(1024 * 1024 * 1024)
 }
 
 fn default_cache_disk_max_size_bytes() -> ByteSize {
