@@ -3,7 +3,6 @@ use std::net::IpAddr;
 use std::pin::Pin;
 use std::time::Duration;
 
-use fluxheim_common::path_safety::safe_forward_path;
 #[cfg(feature = "acme")]
 use fluxheim_config::{AcmeChallenge, Config};
 use fluxheim_config::{
@@ -11,9 +10,7 @@ use fluxheim_config::{
 };
 #[cfg(not(feature = "privacy-mode"))]
 use fluxheim_headers::effective_client_ip;
-use fluxheim_protocol::{
-    Http1RequestTarget, http1_request_target, route_method_matches, route_strip_prefix_suffix,
-};
+use fluxheim_protocol::route_method_matches;
 
 #[cfg(any(
     feature = "compression-brotli",
@@ -41,6 +38,9 @@ use crate::native_http1_route_request_headers::{
     default_native_request_header_policy,
 };
 use crate::native_http1_route_response_headers::NativeRouteResponseHeaderPolicy;
+use crate::native_http1_route_rewrite::{
+    NativeRouteRewritePolicy, request_path_and_query, rewrite_route_request,
+};
 use crate::{
     DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler,
     NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1Request, NativeHttp1Response,
@@ -1307,8 +1307,14 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 if let Some(response) = native_grpc_rejection_response(&route.grpc, &request) {
                     return response;
                 }
+                let rewrite_policy = NativeRouteRewritePolicy::new(
+                    &route.matcher,
+                    route.strip_prefix.as_deref(),
+                    route.rewrite_prefix.as_deref(),
+                    route.rewrite_template.as_deref(),
+                );
                 let mut request =
-                    match rewrite_route_request(request, route, &path, query.as_deref()) {
+                    match rewrite_route_request(request, rewrite_policy, &path, query.as_deref()) {
                         Some(request) => request,
                         None => {
                             return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
@@ -1491,18 +1497,25 @@ impl NativeHttp1RouteProxy {
         }
         drop(concurrency_permits);
         if let Some(route) = selected_route {
-            let mut request = match rewrite_route_request(request, route, &path, query.as_deref()) {
-                Some(request) => request,
-                None => {
-                    return write_takeover_rejection(
-                        &mut stream,
-                        400,
-                        "Bad Request",
-                        b"bad request\n",
-                    )
-                    .await;
-                }
-            };
+            let rewrite_policy = NativeRouteRewritePolicy::new(
+                &route.matcher,
+                route.strip_prefix.as_deref(),
+                route.rewrite_prefix.as_deref(),
+                route.rewrite_template.as_deref(),
+            );
+            let mut request =
+                match rewrite_route_request(request, rewrite_policy, &path, query.as_deref()) {
+                    Some(request) => request,
+                    None => {
+                        return write_takeover_rejection(
+                            &mut stream,
+                            400,
+                            "Bad Request",
+                            b"bad request\n",
+                        )
+                        .await;
+                    }
+                };
             if route
                 .max_request_body_bytes
                 .or(self.max_request_body_bytes)
@@ -1950,118 +1963,4 @@ async fn native_acme_http_01_response(
         .with_header("content-type", "text/plain")
         .with_header("cache-control", "no-store")
         .with_content_length(content_length)
-}
-
-pub(crate) fn request_path_and_query(
-    request: &NativeHttp1Request,
-) -> Option<(String, Option<String>)> {
-    match http1_request_target(&request.method, &request.target).ok()? {
-        Http1RequestTarget::Origin { path, query, .. } => {
-            Some((path.to_owned(), query.map(str::to_owned)))
-        }
-        Http1RequestTarget::AbsoluteUri { path, query, .. } => {
-            Some((path.unwrap_or("/").to_owned(), query.map(str::to_owned)))
-        }
-        Http1RequestTarget::Authority { .. } | Http1RequestTarget::Asterisk => None,
-    }
-}
-
-fn rewrite_route_request(
-    mut request: NativeHttp1Request,
-    route: &NativeHttp1RouteProxyRoute,
-    path: &str,
-    query: Option<&str>,
-) -> Option<NativeHttp1Request> {
-    if let Some(template) = route.rewrite_template.as_deref() {
-        let rewritten_path = route_rewrite_template_path(path, &route.matcher, template)?;
-        if !safe_forward_path(&rewritten_path) {
-            return None;
-        }
-        request.target = query
-            .map(|query| format!("{rewritten_path}?{query}"))
-            .unwrap_or(rewritten_path);
-        return Some(request);
-    }
-
-    let Some(strip_prefix) = route.strip_prefix.as_deref() else {
-        return Some(request);
-    };
-    let suffix = route_strip_prefix_suffix(strip_prefix, path)?;
-    let rewritten_path = if let Some(rewrite_prefix) = route.rewrite_prefix.as_deref() {
-        join_route_rewrite_prefix(rewrite_prefix, suffix)?
-    } else if suffix.is_empty() {
-        "/".to_owned()
-    } else if suffix.starts_with('/') {
-        suffix.to_owned()
-    } else {
-        format!("/{suffix}")
-    };
-    if !safe_forward_path(&rewritten_path) {
-        return None;
-    }
-    request.target = query
-        .map(|query| format!("{rewritten_path}?{query}"))
-        .unwrap_or(rewritten_path);
-    Some(request)
-}
-
-fn route_rewrite_template_path(
-    path: &str,
-    matcher: &NativeHttp1RouteMatcher,
-    template: &str,
-) -> Option<String> {
-    let mut rewritten = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        rewritten.push_str(&rest[..open]);
-        let after_open = &rest[open + 1..];
-        let close = after_open.find('}')?;
-        let variable = &after_open[..close];
-        if let Some(value) = matcher.capture_value(path, variable) {
-            append_route_regex_capture_value(&mut rewritten, value);
-        }
-        rest = &after_open[close + 1..];
-    }
-    rewritten.push_str(rest);
-    if rewritten.contains('{') || rewritten.contains('}') {
-        return None;
-    }
-    Some(rewritten)
-}
-
-fn append_route_regex_capture_value(rewritten: &mut String, value: &str) {
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            rewritten.push(char::from(byte));
-        } else {
-            static HEX: &[u8; 16] = b"0123456789ABCDEF";
-            rewritten.push('%');
-            rewritten.push(char::from(HEX[usize::from(byte >> 4)]));
-            rewritten.push(char::from(HEX[usize::from(byte & 0x0f)]));
-        }
-    }
-}
-
-fn join_route_rewrite_prefix(rewrite_prefix: &str, suffix: &str) -> Option<String> {
-    if rewrite_prefix == "/" {
-        return Some(if suffix.is_empty() {
-            "/".to_owned()
-        } else if suffix.starts_with('/') {
-            suffix.to_owned()
-        } else {
-            format!("/{suffix}")
-        });
-    }
-
-    let rewritten_path = if suffix.is_empty() {
-        rewrite_prefix.to_owned()
-    } else if rewrite_prefix.ends_with('/') && suffix.starts_with('/') {
-        format!("{}{}", rewrite_prefix, &suffix[1..])
-    } else if rewrite_prefix.ends_with('/') || suffix.starts_with('/') {
-        format!("{rewrite_prefix}{suffix}")
-    } else {
-        format!("{rewrite_prefix}/{suffix}")
-    };
-
-    safe_forward_path(&rewritten_path).then_some(rewritten_path)
 }

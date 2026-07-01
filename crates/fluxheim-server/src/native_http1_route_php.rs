@@ -11,7 +11,8 @@ use crate::native_http1_php::{
     NativePhpResponsePlan, NativePhpScriptResolve, native_php_execute_fpm, native_php_request_body,
     native_php_request_plan,
 };
-use crate::native_http1_route_proxy::{NativeHttp1RouteProxyConfigError, request_path_and_query};
+use crate::native_http1_route_proxy::NativeHttp1RouteProxyConfigError;
+use crate::native_http1_route_rewrite::request_path_and_query;
 use crate::{
     NativeHttp1ProxyConfigError, NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb,
 };
