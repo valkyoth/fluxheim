@@ -99,6 +99,8 @@ behavior when the change improves security or project direction.
   predictor runtime into a focused server module.
 - Split native proxy memory-cache range/slice response lookup, origin-slice
   fill, and slice storage into a focused child module.
+- Split native proxy memory-cache origin, peer-fill, revalidation, Vary,
+  memory-store, and disk-store admission into a focused child module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
