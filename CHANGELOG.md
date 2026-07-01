@@ -76,6 +76,9 @@ behavior when the change improves security or project direction.
 - Split native proxy range/slice cache response composition, bounded range
   parsing, multipart assembly, and origin-slice request construction into a
   focused server module.
+- Split native proxy upstream construction, static/dynamic load-balancer
+  eligibility checks, HTTP/2 upstream policy mapping, and TCP socket option
+  builders into a focused server module.
 - Split native route proxy upstream/load-balancer construction into a focused
   server module so route dispatch keeps shrinking without changing serving
   behavior.
