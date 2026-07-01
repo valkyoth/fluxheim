@@ -162,6 +162,9 @@ is clean.
   PATH fallback, and restart backoff helpers into a focused private module.
 - Split PHP-FPM endpoint selection, timeout classification, retry policy, and
   retry deadline helpers into a focused private module.
+- Split PHP-FPM request-body replay, zeroized memory body ownership, spool-file
+  allocation, cleanup, and spool-directory validation into a focused private
+  module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
