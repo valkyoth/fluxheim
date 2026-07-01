@@ -107,6 +107,8 @@ behavior when the change improves security or project direction.
 - Split load-balancer health-check schema and validation into focused
   `fluxheim-config` modules while preserving the existing public
   `LoadBalanceHealthCheck*` exports.
+- Split load-balancer passive-health config and validation into a focused
+  `fluxheim-config` module while preserving the public config exports.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.
