@@ -105,6 +105,9 @@ behavior when the change improves security or project direction.
   peer-fill response signing into a focused server module.
 - Split native proxy stale-while-revalidate refresh, cache revalidation request
   dispatch, and origin slice-fill fetches into a focused server module.
+- Split native proxy load-balanced dispatch, selected-upstream health reporting,
+  managed-affinity cookie injection, cache-aware retry, and WebSocket takeover
+  handling into a focused feature-gated server module.
 - Split native proxy construction, config mapping, weighted upstream setup, and
   equality handling into a focused builder module, leaving the core proxy type
   definition small.
