@@ -36,7 +36,6 @@ documents why the exception is temporary and how it will be removed.
 | `crates/fluxheim-config/src/config_admin.rs` | 755 | Admin config and validation. | Split ops socket, snapshots, auth, and status config. |
 | `crates/fluxheim-config/src/config_acme.rs` | 719 | ACME config and validation. | Move with `fluxheim-acme`. |
 | `src/config_tester.rs` | 716 | Config tester CLI and profile logic. | Split profile checks from CLI output. |
-| `crates/fluxheim-config/src/config_tls.rs` | 677 | TLS config and validation. | Split downstream/upstream TLS config helpers. |
 | `src/stream_tls.rs` | 657 | Stream upstream TLS adapter. | Move with stream runtime cutover. |
 | `crates/fluxheim-server/src/native_http1_proxy_tests.rs` | 805 | Native HTTP/1 proxy parity tests temporarily group plain, TLS, mTLS, failover, pooling, round-robin, weighted round-robin, config-gate, compression, error-page, and forwarded-header fixtures for the native upstream cutover slices. | Split plain failover/round-robin, TLS/mTLS, pooling, compression/error-page, forwarded-header, and config-gate tests after the native proxy API stabilizes. |
 | `crates/fluxheim-server/src/native_http1_proxy.rs` | 509 | Native HTTP/1 proxy temporarily groups static upstream selection, pooling, compression, header policy, and error-page handling during the rich-proxy parity slices. | Split upstream selection, request policy, response policy/compression, and error-page handling before final native runtime cutover. |

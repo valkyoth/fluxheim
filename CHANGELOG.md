@@ -215,6 +215,9 @@ behavior when the change improves security or project direction.
   exception.
 - Split route redirect config and redirect-template validation into a focused
   config module, bringing `config_route.rs` to the line-limit target.
+- Split TLS policy enums/defaults, client-auth config, and static certificate
+  path validation into focused TLS config modules, removing the oversized TLS
+  config exception.
 
 ## 1.6.36 - 2026-06-30
 

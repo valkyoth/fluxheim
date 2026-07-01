@@ -1,10 +1,24 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ConfigError, validate_config_list_len};
 use crate::config_acme::{AcmeConfig, AcmeConfigFragment, VhostAcmeConfig};
-use crate::config_path::{validate_non_world_writable_parent, validate_path};
+
+#[path = "config_tls_certificate.rs"]
+mod config_tls_certificate;
+#[path = "config_tls_client_auth.rs"]
+mod config_tls_client_auth;
+#[path = "config_tls_policy.rs"]
+mod config_tls_policy;
+
+pub use config_tls_certificate::StaticCertificateConfig;
+use config_tls_client_auth::TlsClientAuthConfigFragment;
+pub use config_tls_client_auth::{TlsClientAuthConfig, TlsClientAuthMode};
+pub use config_tls_policy::{
+    TlsAlpnPolicy, TlsBackend, TlsCipherSuite, TlsCurvePreference, TlsPolicyProfile,
+    TlsProtocolVersion,
+};
 
 pub const MAX_TLS_CURVE_PREFERENCES: usize = 16;
 pub const MAX_TLS_CIPHER_SUITES: usize = 32;
@@ -303,77 +317,6 @@ impl TlsConfigFragment {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct TlsClientAuthConfig {
-    #[serde(default)]
-    pub mode: TlsClientAuthMode,
-    #[serde(default)]
-    pub ca_path: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct TlsClientAuthConfigFragment {
-    mode: Option<TlsClientAuthMode>,
-    ca_path: Option<PathBuf>,
-}
-
-impl TlsClientAuthConfig {
-    fn merge(&mut self, fragment: TlsClientAuthConfigFragment) {
-        if let Some(mode) = fragment.mode {
-            self.mode = mode;
-        }
-        if let Some(ca_path) = fragment.ca_path {
-            self.ca_path = Some(ca_path);
-        }
-    }
-
-    fn validate(&self) -> Result<(), ConfigError> {
-        match (self.mode, &self.ca_path) {
-            (TlsClientAuthMode::Off, None) => return Ok(()),
-            (TlsClientAuthMode::Optional | TlsClientAuthMode::Required, None) => {
-                return Err(ConfigError::InvalidTlsPolicy {
-                    field: "tls.client_auth.ca_path",
-                    reason: "tls.client_auth.mode requires a client CA bundle path",
-                });
-            }
-            (_, Some(_)) => {}
-        }
-        let Some(ca_path) = &self.ca_path else {
-            return Ok(());
-        };
-        if ca_path.as_os_str().is_empty() {
-            return Err(ConfigError::InvalidTlsPolicy {
-                field: "tls.client_auth.ca_path",
-                reason: "tls.client_auth.ca_path cannot be empty",
-            });
-        }
-        validate_path("tls.client_auth.ca_path", Some(ca_path))?;
-        validate_non_world_writable_parent("tls.client_auth.ca_path", Some(ca_path))?;
-        Ok(())
-    }
-}
-
-impl TlsClientAuthConfigFragment {
-    fn resolve_relative_paths(&mut self, base_dir: &Path) {
-        if let Some(path) = &mut self.ca_path
-            && path.is_relative()
-        {
-            *path = base_dir.join(&path);
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum TlsClientAuthMode {
-    #[default]
-    Off,
-    Optional,
-    Required,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct TlsFipsConfig {
     #[serde(default)]
     pub required: bool,
@@ -499,179 +442,5 @@ impl TlsComplianceMode {
                 "tls.fips.required requires a configured backend supported by this FIPS-capable build"
             }
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum TlsBackend {
-    #[default]
-    Rustls,
-    Openssl,
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum TlsPolicyProfile {
-    Modern,
-    #[default]
-    Intermediate,
-    Compat,
-}
-
-impl TlsPolicyProfile {
-    const fn default_min_protocol(self) -> TlsProtocolVersion {
-        match self {
-            Self::Modern => TlsProtocolVersion::Tls13,
-            Self::Intermediate | Self::Compat => TlsProtocolVersion::Tls12,
-        }
-    }
-
-    fn default_curve_preferences(self) -> Vec<TlsCurvePreference> {
-        vec![
-            TlsCurvePreference::X25519,
-            TlsCurvePreference::P256,
-            TlsCurvePreference::P384,
-        ]
-    }
-
-    fn default_cipher_suites(self) -> Vec<TlsCipherSuite> {
-        match self {
-            Self::Modern => vec![
-                TlsCipherSuite::Tls13Aes256GcmSha384,
-                TlsCipherSuite::Tls13Chacha20Poly1305Sha256,
-                TlsCipherSuite::Tls13Aes128GcmSha256,
-            ],
-            Self::Intermediate | Self::Compat => vec![
-                TlsCipherSuite::Tls13Aes256GcmSha384,
-                TlsCipherSuite::Tls13Chacha20Poly1305Sha256,
-                TlsCipherSuite::Tls13Aes128GcmSha256,
-                TlsCipherSuite::TlsEcdheEcdsaWithAes128GcmSha256,
-                TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256,
-                TlsCipherSuite::TlsEcdheEcdsaWithAes256GcmSha384,
-                TlsCipherSuite::TlsEcdheRsaWithAes256GcmSha384,
-                TlsCipherSuite::TlsEcdheEcdsaWithChacha20Poly1305Sha256,
-                TlsCipherSuite::TlsEcdheRsaWithChacha20Poly1305Sha256,
-            ],
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
-pub enum TlsProtocolVersion {
-    #[serde(rename = "tls1.2", alias = "TLS1.2", alias = "VersionTLS12")]
-    Tls12,
-    #[serde(rename = "tls1.3", alias = "TLS1.3", alias = "VersionTLS13")]
-    Tls13,
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum TlsAlpnPolicy {
-    Http1,
-    Http2,
-    #[default]
-    Http1AndHttp2,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
-pub enum TlsCurvePreference {
-    #[serde(rename = "x25519", alias = "X25519")]
-    X25519,
-    #[serde(rename = "p256", alias = "P-256", alias = "CurveP256")]
-    P256,
-    #[serde(rename = "p384", alias = "P-384", alias = "CurveP384")]
-    P384,
-    #[serde(
-        rename = "x25519-mlkem768",
-        alias = "X25519MLKEM768",
-        alias = "X25519-MLKEM768"
-    )]
-    X25519MlKem768,
-}
-
-impl TlsCurvePreference {
-    const fn is_fips_approved(self) -> bool {
-        matches!(self, Self::P256 | Self::P384)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
-pub enum TlsCipherSuite {
-    #[serde(rename = "TLS_AES_256_GCM_SHA384")]
-    Tls13Aes256GcmSha384,
-    #[serde(rename = "TLS_CHACHA20_POLY1305_SHA256")]
-    Tls13Chacha20Poly1305Sha256,
-    #[serde(rename = "TLS_AES_128_GCM_SHA256")]
-    Tls13Aes128GcmSha256,
-    #[serde(rename = "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256")]
-    TlsEcdheEcdsaWithAes128GcmSha256,
-    #[serde(rename = "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256")]
-    TlsEcdheRsaWithAes128GcmSha256,
-    #[serde(rename = "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384")]
-    TlsEcdheEcdsaWithAes256GcmSha384,
-    #[serde(rename = "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384")]
-    TlsEcdheRsaWithAes256GcmSha384,
-    #[serde(rename = "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256")]
-    TlsEcdheEcdsaWithChacha20Poly1305Sha256,
-    #[serde(rename = "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256")]
-    TlsEcdheRsaWithChacha20Poly1305Sha256,
-}
-
-impl TlsCipherSuite {
-    const fn is_tls12(&self) -> bool {
-        !matches!(
-            self,
-            Self::Tls13Aes256GcmSha384
-                | Self::Tls13Chacha20Poly1305Sha256
-                | Self::Tls13Aes128GcmSha256
-        )
-    }
-
-    const fn is_fips_approved(self) -> bool {
-        matches!(
-            self,
-            Self::Tls13Aes256GcmSha384
-                | Self::Tls13Aes128GcmSha256
-                | Self::TlsEcdheEcdsaWithAes128GcmSha256
-                | Self::TlsEcdheRsaWithAes128GcmSha256
-                | Self::TlsEcdheEcdsaWithAes256GcmSha384
-                | Self::TlsEcdheRsaWithAes256GcmSha384
-        )
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct StaticCertificateConfig {
-    pub cert_path: PathBuf,
-    pub key_path: PathBuf,
-}
-
-impl StaticCertificateConfig {
-    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
-        if self.cert_path.is_relative() {
-            self.cert_path = base_dir.join(&self.cert_path);
-        }
-        if self.key_path.is_relative() {
-            self.key_path = base_dir.join(&self.key_path);
-        }
-    }
-
-    pub fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
-        if self.cert_path.as_os_str().is_empty() {
-            return Err(ConfigError::EmptyTlsCertificatePath { scope });
-        }
-        if self.key_path.as_os_str().is_empty() {
-            return Err(ConfigError::EmptyTlsKeyPath { scope });
-        }
-        let cert_field = format!("{scope}.cert_path");
-        let key_field = format!("{scope}.key_path");
-        validate_path(cert_field.clone(), Some(&self.cert_path))?;
-        validate_path(key_field.clone(), Some(&self.key_path))?;
-        validate_non_world_writable_parent(cert_field, Some(&self.cert_path))?;
-        validate_non_world_writable_parent(key_field, Some(&self.key_path))?;
-
-        Ok(())
     }
 }

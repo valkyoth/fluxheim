@@ -213,6 +213,9 @@ is clean.
   exception.
 - Split route redirect config and redirect-template validation into a focused
   config module, bringing `config_route.rs` to the line-limit target.
+- Split TLS policy enums/defaults, client-auth config, and static certificate
+  path validation into focused TLS config modules, removing the oversized TLS
+  config exception.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
