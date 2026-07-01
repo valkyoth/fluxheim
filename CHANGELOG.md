@@ -169,6 +169,8 @@ behavior when the change improves security or project direction.
 - Split native upstream HTTP/1 client socket setup and HTTP/2 request/response
   conversion helpers into focused child modules while preserving upstream
   pooling, h2c, and fallback behavior.
+- Split native upstream HTTP/1 h2c/WebSocket upgrade response validation and
+  downstream WebSocket upgrade head assembly into a focused child module.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.

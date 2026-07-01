@@ -4,8 +4,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use fluxheim_config::UpstreamProxyProtocol;
 use fluxheim_protocol::{
-    Http1HeadLimits, Http1Header, Http1ParseError, Http1ResponseHead, http1_request_target,
-    proxy_protocol_v1_header, proxy_protocol_v2_header,
+    Http1ParseError, http1_request_target, proxy_protocol_v1_header, proxy_protocol_v2_header,
 };
 use h2::client::SendRequest;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -33,6 +32,7 @@ use crate::{
 
 mod http2;
 mod socket;
+mod upgrade;
 
 use http2::{
     h2c_upgrade_error_can_fallback, h2c_upgrade_settings_header, native_http2_error,
@@ -40,6 +40,13 @@ use http2::{
     native_http2_response_to_http1, native_http2_upstream_request, upstream_h2_scheme,
 };
 use socket::connect_upstream;
+#[cfg(test)]
+use upgrade::validate_switching_protocols_response;
+use upgrade::{
+    h2c_upgrade_response_head_limits, validate_h2c_upgrade_response,
+    validate_websocket_upgrade_response, websocket_downstream_upgrade_response_head,
+    websocket_upgrade_response_head_limits,
+};
 
 pub(crate) trait NativeHttp1Io: AsyncRead + AsyncWrite + Unpin + Send {}
 
@@ -1062,91 +1069,6 @@ impl NativeHttp1Upstream {
     }
 }
 
-const MAX_H2C_UPGRADE_RESPONSE_HEAD_BYTES: usize = 8192;
-
-fn h2c_upgrade_response_head_limits() -> Http1HeadLimits {
-    Http1HeadLimits {
-        max_head_bytes: MAX_H2C_UPGRADE_RESPONSE_HEAD_BYTES,
-        ..Http1HeadLimits::default()
-    }
-}
-
-fn validate_h2c_upgrade_response(
-    head: &[u8],
-    limits: Http1HeadLimits,
-) -> Result<(), NativeHttp1Error> {
-    validate_switching_protocols_response(
-        head,
-        limits,
-        "h2c",
-        "native h2c upgrade was not accepted",
-        "native h2c upgrade response did not confirm h2c",
-    )
-}
-
-fn websocket_upgrade_response_head_limits(max_head_bytes: usize) -> Http1HeadLimits {
-    Http1HeadLimits {
-        max_head_bytes,
-        ..Http1HeadLimits::default()
-    }
-}
-
-fn validate_websocket_upgrade_response(
-    head: &[u8],
-    limits: Http1HeadLimits,
-) -> Result<(), NativeHttp1Error> {
-    validate_switching_protocols_response(
-        head,
-        limits,
-        "websocket",
-        "native WebSocket upgrade was not accepted",
-        "native WebSocket upgrade response did not confirm websocket",
-    )?;
-    let head = parsed_upstream_response_head(head, limits)?;
-    if !http1_headers_contain_token(&head.headers, "connection", "upgrade") {
-        return Err(NativeHttp1Error::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "native WebSocket upgrade response did not confirm connection upgrade",
-        )));
-    }
-    Ok(())
-}
-
-fn validate_switching_protocols_response(
-    head: &[u8],
-    limits: Http1HeadLimits,
-    upgrade_token: &str,
-    rejected_message: &'static str,
-    missing_upgrade_message: &'static str,
-) -> Result<(), NativeHttp1Error> {
-    let head = parsed_upstream_response_head(head, limits)?;
-    if head.status != 101 {
-        return Err(NativeHttp1Error::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            rejected_message,
-        )));
-    }
-    if !http1_headers_contain_token(&head.headers, "upgrade", upgrade_token) {
-        return Err(NativeHttp1Error::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            missing_upgrade_message,
-        )));
-    }
-    Ok(())
-}
-
-fn http1_headers_contain_token(headers: &[Http1Header<'_>], name: &str, token: &str) -> bool {
-    headers
-        .iter()
-        .filter(|header| header.name.eq_ignore_ascii_case(name))
-        .any(|header| {
-            header
-                .value
-                .split(',')
-                .any(|candidate| candidate.trim().eq_ignore_ascii_case(token))
-        })
-}
-
 fn pooled_connection_error_can_retry(error: &NativeHttp1Error) -> bool {
     matches!(
         error,
@@ -1253,51 +1175,6 @@ where
     stream.write_all(b"\r\n").await?;
     stream.flush().await?;
     Ok(())
-}
-
-fn websocket_downstream_upgrade_response_head(
-    head: &Http1ResponseHead<'_>,
-) -> Result<Vec<u8>, NativeHttp1Error> {
-    let mut response = Vec::new();
-    response.extend_from_slice(b"HTTP/1.1 101 Switching Protocols\r\n");
-    response.extend_from_slice(b"connection: Upgrade\r\n");
-    response.extend_from_slice(b"upgrade: websocket\r\n");
-    let mut accept_seen = false;
-    for header in &head.headers {
-        let Some(name) = websocket_downstream_response_header_name(header.name) else {
-            continue;
-        };
-        if !valid_upstream_header_value(header.value) {
-            return Err(Http1ParseError::InvalidHeaderValue.into());
-        }
-        if name.eq_ignore_ascii_case("sec-websocket-accept") {
-            accept_seen = true;
-        }
-        response.extend_from_slice(name.as_bytes());
-        response.extend_from_slice(b": ");
-        response.extend_from_slice(header.value.as_bytes());
-        response.extend_from_slice(b"\r\n");
-    }
-    if !accept_seen {
-        return Err(NativeHttp1Error::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "native WebSocket upgrade response missing Sec-WebSocket-Accept",
-        )));
-    }
-    response.extend_from_slice(b"\r\n");
-    Ok(response)
-}
-
-fn websocket_downstream_response_header_name(name: &str) -> Option<&'static str> {
-    if name.eq_ignore_ascii_case("sec-websocket-accept") {
-        Some("sec-websocket-accept")
-    } else if name.eq_ignore_ascii_case("sec-websocket-protocol") {
-        Some("sec-websocket-protocol")
-    } else if name.eq_ignore_ascii_case("sec-websocket-extensions") {
-        Some("sec-websocket-extensions")
-    } else {
-        None
-    }
 }
 
 fn upstream_origin_target(request: &NativeHttp1Request) -> Result<String, NativeHttp1Error> {
