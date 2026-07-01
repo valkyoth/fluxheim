@@ -29,6 +29,7 @@ mod native_http1_tls;
 mod native_http1_upstream_response;
 mod native_http2;
 mod native_http2_client;
+mod native_http2_response;
 mod native_http2_route_adapter;
 mod native_http2_stack;
 mod native_runtime_http1_proxy;

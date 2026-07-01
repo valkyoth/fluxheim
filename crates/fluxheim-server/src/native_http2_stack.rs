@@ -1,7 +1,6 @@
-use std::future::{Future, poll_fn};
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::Poll;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -11,6 +10,10 @@ use tokio::task::JoinSet;
 use zeroize::Zeroizing;
 
 use crate::DownstreamHttp2Policy;
+use crate::native_http2_response::send_native_http2_response;
+pub(crate) use crate::native_http2_response::{
+    prohibited_http2_response_header, send_data_bounded, validate_response_headers,
+};
 
 const BODY_PREALLOC_HINT_BYTES: usize = 64 * 1024;
 const PROBE_IDLE_TIMEOUT: Duration = Duration::from_millis(50);
@@ -116,10 +119,10 @@ pub struct NativeHttp2Request {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp2Response {
-    status: StatusCode,
-    headers: HeaderMap,
-    body: Bytes,
-    trailers: Option<HeaderMap>,
+    pub(crate) status: StatusCode,
+    pub(crate) headers: HeaderMap,
+    pub(crate) body: Bytes,
+    pub(crate) trailers: Option<HeaderMap>,
 }
 
 impl NativeHttp2Response {
@@ -492,83 +495,4 @@ fn request_body_capacity_hint(headers: &HeaderMap, max_body_bytes: usize) -> usi
         .map_or(max_body_bytes.min(BODY_PREALLOC_HINT_BYTES), |length| {
             length.min(BODY_PREALLOC_HINT_BYTES)
         })
-}
-
-async fn send_native_http2_response(
-    respond: &mut h2::server::SendResponse<Bytes>,
-    response: NativeHttp2Response,
-) -> Result<(), NativeHttp2StackError> {
-    validate_response_headers(&response.headers)?;
-    if let Some(trailers) = &response.trailers {
-        validate_response_headers(trailers)?;
-    }
-    let end_on_headers = response.body.is_empty() && response.trailers.is_none();
-    let mut builder = http::Response::builder().status(response.status);
-    for (name, value) in &response.headers {
-        builder = builder.header(name, value);
-    }
-    let head = builder
-        .body(())
-        .map_err(NativeHttp2StackError::ResponseBuild)?;
-    let mut send_stream = respond
-        .send_response(head, end_on_headers)
-        .map_err(NativeHttp2StackError::SendResponse)?;
-    if !response.body.is_empty() {
-        send_data_bounded(&mut send_stream, response.body, response.trailers.is_none()).await?;
-    }
-    if let Some(trailers) = response.trailers {
-        send_stream
-            .send_trailers(trailers)
-            .map_err(NativeHttp2StackError::SendResponse)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_response_headers(headers: &HeaderMap) -> Result<(), NativeHttp2StackError> {
-    for name in headers.keys() {
-        if prohibited_http2_response_header(name) {
-            return Err(NativeHttp2StackError::ProhibitedResponseHeader {
-                name: name.as_str().to_owned(),
-            });
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn prohibited_http2_response_header(name: &HeaderName) -> bool {
-    matches!(
-        name.as_str(),
-        "connection" | "keep-alive" | "proxy-connection" | "transfer-encoding" | "upgrade"
-    )
-}
-
-pub(crate) async fn send_data_bounded(
-    send_stream: &mut h2::SendStream<Bytes>,
-    body: Bytes,
-    end_of_stream: bool,
-) -> Result<(), NativeHttp2StackError> {
-    let mut offset = 0usize;
-    while offset < body.len() {
-        send_stream.reserve_capacity(body.len() - offset);
-        let capacity = poll_fn(|context| match send_stream.poll_capacity(context) {
-            Poll::Ready(Some(Ok(capacity))) => Poll::Ready(Ok(capacity)),
-            Poll::Ready(Some(Err(error))) => {
-                Poll::Ready(Err(NativeHttp2StackError::SendResponse(error)))
-            }
-            Poll::Ready(None) => Poll::Ready(Err(NativeHttp2StackError::ResponseCapacityClosed)),
-            Poll::Pending => Poll::Pending,
-        })
-        .await?;
-        if capacity == 0 {
-            return Err(NativeHttp2StackError::ResponseCapacityClosed);
-        }
-        let available = capacity.min(body.len() - offset);
-        let next_offset = offset + available;
-        let chunk = body.slice(offset..next_offset);
-        offset = next_offset;
-        send_stream
-            .send_data(chunk, end_of_stream && offset == body.len())
-            .map_err(NativeHttp2StackError::SendResponse)?;
-    }
-    Ok(())
 }

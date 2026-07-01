@@ -185,6 +185,9 @@ behavior when the change improves security or project direction.
   focused private module while preserving the public crate exports.
 - Split native runtime launch-plan TSV report rendering into a focused module,
   bringing the launch-plan assembly file below the line-limit target.
+- Split native HTTP/2 response validation and bounded response-data writes into
+  a focused private module, bringing the downstream H2 stack below the
+  line-limit target.
 
 ## 1.6.36 - 2026-06-30
 
