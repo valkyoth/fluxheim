@@ -123,6 +123,8 @@ behavior when the change improves security or project direction.
   modularity target.
 - Split root native-proxy load-balancer admin statistics and mutation handlers
   into a focused child module while preserving the existing admin API surface.
+- Split root native-proxy cache runtime statistics, activity-reset summaries,
+  and native totals overlay logic into a focused cache-stats child module.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
