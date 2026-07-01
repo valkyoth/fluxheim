@@ -21,6 +21,7 @@ use fluxheim_config::{
 mod api;
 mod api_selection;
 mod backend;
+mod backend_model;
 mod background;
 mod crypto;
 mod discovery;

@@ -125,6 +125,8 @@ behavior when the change improves security or project direction.
 - Split load-balancer persistence request-key helpers and managed-cookie
   HMAC/token handling into focused private modules, bringing `persistence.rs`
   below the line-limit target.
+- Split the pure load-balancer backend model, backend identity, and backend-set
+  helpers out of the runtime module as a focused private module.
 
 ## 1.6.36 - 2026-06-30
 

@@ -123,6 +123,8 @@ is clean.
 - Split load-balancer persistence request-key helpers and managed-cookie
   HMAC/token handling into focused private modules, bringing `persistence.rs`
   below the line-limit target.
+- Split the pure load-balancer backend model, backend identity, and backend-set
+  helpers out of the runtime module as a focused private module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
