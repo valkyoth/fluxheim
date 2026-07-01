@@ -30,6 +30,7 @@ mod native_http1_proxy_runtime;
     feature = "compression-zstd"
 ))]
 mod native_http1_route_compression;
+mod native_http1_route_limits;
 mod native_http1_route_proxy;
 mod native_http1_route_redirect;
 mod native_http1_route_request_headers;
