@@ -17,6 +17,9 @@ behavior when the change improves security or project direction.
   container builder images to Rust 1.96.1.
 - Prepare ACME, observability, header-policy, TLS helper, native proxy, and CLI
   boundaries for smaller crate-owned APIs while keeping runtime behavior stable.
+- Retry disposable Prometheus and Jaeger startup with freshly allocated ports in
+  the local observability smoke when auto-allocated host-network ports race with
+  other runner processes.
 - Remove private root compatibility shims for common errors, filesystem trust
   checks, and OTLP HTTP agents; callers now use the owning workspace crates
   directly.

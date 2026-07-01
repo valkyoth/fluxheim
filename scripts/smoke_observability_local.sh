@@ -19,6 +19,8 @@ prometheus_image="${FLUXHEIM_PROMETHEUS_IMAGE:-docker.io/prom/prometheus:v3.12.0
 jaeger_image="${FLUXHEIM_JAEGER_IMAGE:-docker.io/jaegertracing/all-in-one:1.76.0}"
 prometheus_started=0
 jaeger_started=0
+prometheus_port_fixed=0
+jaeger_ports_fixed=0
 
 ports=$(python3 "$ROOT_DIR/scripts/smoke_ports.py" 7)
 
@@ -26,7 +28,17 @@ set -- $ports
 fluxheim_port="${FLUXHEIM_OBSERVABILITY_PORT:-$1}"
 metrics_port="${FLUXHEIM_OBSERVABILITY_METRICS_PORT:-$2}"
 upstream_port="${FLUXHEIM_OBSERVABILITY_UPSTREAM_PORT:-$3}"
-prometheus_port="${FLUXHEIM_PROMETHEUS_PORT:-$4}"
+if [ -n "${FLUXHEIM_PROMETHEUS_PORT+x}" ]; then
+    prometheus_port="$FLUXHEIM_PROMETHEUS_PORT"
+    prometheus_port_fixed=1
+else
+    prometheus_port="$4"
+fi
+if [ -n "${FLUXHEIM_JAEGER_QUERY_PORT+x}" ] \
+    || [ -n "${FLUXHEIM_JAEGER_OTLP_HTTP_PORT+x}" ] \
+    || [ -n "${FLUXHEIM_JAEGER_OTLP_GRPC_PORT+x}" ]; then
+    jaeger_ports_fixed=1
+fi
 jaeger_query_port="${FLUXHEIM_JAEGER_QUERY_PORT:-$5}"
 jaeger_otlp_http_port="${FLUXHEIM_JAEGER_OTLP_HTTP_PORT:-$6}"
 jaeger_otlp_grpc_port="${FLUXHEIM_JAEGER_OTLP_GRPC_PORT:-$7}"
@@ -36,7 +48,6 @@ if [ -n "${FLUXHEIM_PROMETHEUS_URL+x}" ]; then
     prometheus_url="$FLUXHEIM_PROMETHEUS_URL"
 else
     auto_prometheus="${FLUXHEIM_OBSERVABILITY_START_PROMETHEUS:-1}"
-    prometheus_url="http://127.0.0.1:$prometheus_port"
 fi
 
 if [ -n "${FLUXHEIM_JAEGER_URL+x}" ]; then
@@ -44,11 +55,32 @@ if [ -n "${FLUXHEIM_JAEGER_URL+x}" ]; then
     jaeger_url="$FLUXHEIM_JAEGER_URL"
 else
     auto_jaeger="${FLUXHEIM_OBSERVABILITY_START_JAEGER:-1}"
-    jaeger_url="http://127.0.0.1:$jaeger_query_port"
 fi
 
-otlp_trace_endpoint="${FLUXHEIM_OTLP_TRACE_ENDPOINT:-http://127.0.0.1:$jaeger_otlp_http_port/v1/traces}"
-otlp_metrics_endpoint="${FLUXHEIM_OTLP_METRICS_ENDPOINT:-http://127.0.0.1:$prometheus_port/api/v1/otlp/v1/metrics}"
+refresh_observability_urls() {
+    if [ -z "${FLUXHEIM_PROMETHEUS_URL+x}" ]; then
+        prometheus_url="http://127.0.0.1:$prometheus_port"
+    fi
+    if [ -z "${FLUXHEIM_JAEGER_URL+x}" ]; then
+        jaeger_url="http://127.0.0.1:$jaeger_query_port"
+    fi
+    if [ -z "${FLUXHEIM_OTLP_TRACE_ENDPOINT+x}" ]; then
+        otlp_trace_endpoint="http://127.0.0.1:$jaeger_otlp_http_port/v1/traces"
+    else
+        otlp_trace_endpoint="$FLUXHEIM_OTLP_TRACE_ENDPOINT"
+    fi
+    if [ -z "${FLUXHEIM_OTLP_METRICS_ENDPOINT+x}" ]; then
+        otlp_metrics_endpoint="http://127.0.0.1:$prometheus_port/api/v1/otlp/v1/metrics"
+    else
+        otlp_metrics_endpoint="$FLUXHEIM_OTLP_METRICS_ENDPOINT"
+    fi
+}
+
+allocate_smoke_ports() {
+    python3 "$ROOT_DIR/scripts/smoke_ports.py" "$1"
+}
+
+refresh_observability_urls
 require_prometheus="${FLUXHEIM_PROMETHEUS_REQUIRED:-$auto_prometheus}"
 require_fluxheim_scrape="${FLUXHEIM_PROMETHEUS_REQUIRE_FLUXHEIM:-$auto_prometheus}"
 require_prometheus_otlp="${FLUXHEIM_PROMETHEUS_REQUIRE_OTLP:-$auto_prometheus}"
@@ -114,43 +146,80 @@ scrape_configs:
     static_configs:
       - targets: ["127.0.0.1:$metrics_port"]
 EOF
-    podman rm -f "$prometheus_name" >/dev/null 2>&1 || true
-    podman run -d \
-        --name "$prometheus_name" \
-        --network host \
-        --security-opt no-new-privileges \
-        -v "$tmp/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z" \
-        "$prometheus_image" \
-        --config.file=/etc/prometheus/prometheus.yml \
-        --storage.tsdb.path=/tmp/prometheus \
-        --web.listen-address="127.0.0.1:$prometheus_port" \
-        --web.enable-otlp-receiver >/dev/null
-    prometheus_started=1
-    if ! wait_http "$prometheus_url/-/ready"; then
-        echo "observability smoke failed: timed out waiting for disposable Prometheus" >&2
-        podman logs "$prometheus_name" >&2 || true
-        exit 1
+    prometheus_attempt=1
+    prometheus_attempts=3
+    if [ "$prometheus_port_fixed" = "1" ]; then
+        prometheus_attempts=1
     fi
+    while [ "$prometheus_attempt" -le "$prometheus_attempts" ]; do
+        podman rm -f "$prometheus_name" >/dev/null 2>&1 || true
+        if podman run -d \
+            --name "$prometheus_name" \
+            --network host \
+            --security-opt no-new-privileges \
+            -v "$tmp/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z" \
+            "$prometheus_image" \
+            --config.file=/etc/prometheus/prometheus.yml \
+            --storage.tsdb.path=/tmp/prometheus \
+            --web.listen-address="127.0.0.1:$prometheus_port" \
+            --web.enable-otlp-receiver >/dev/null; then
+            prometheus_started=1
+            if wait_http "$prometheus_url/-/ready"; then
+                break
+            fi
+        fi
+        if [ "$prometheus_attempt" -ge "$prometheus_attempts" ]; then
+            echo "observability smoke failed: timed out waiting for disposable Prometheus" >&2
+            podman logs "$prometheus_name" >&2 || true
+            exit 1
+        fi
+        echo "observability smoke: retrying disposable Prometheus with a new port" >&2
+        podman rm -f "$prometheus_name" >/dev/null 2>&1 || true
+        prometheus_started=0
+        prometheus_port="$(allocate_smoke_ports 1)"
+        refresh_observability_urls
+        prometheus_attempt=$((prometheus_attempt + 1))
+    done
 fi
 
 if [ "$auto_jaeger" = "1" ]; then
     require_command podman
-    podman rm -f "$jaeger_name" >/dev/null 2>&1 || true
-    podman run -d \
-        --name "$jaeger_name" \
-        --network host \
-        --security-opt no-new-privileges \
-        -e COLLECTOR_OTLP_ENABLED=true \
-        "$jaeger_image" \
-        --query.http-server.host-port="127.0.0.1:$jaeger_query_port" \
-        --collector.otlp.http.host-port="127.0.0.1:$jaeger_otlp_http_port" \
-        --collector.otlp.grpc.host-port="127.0.0.1:$jaeger_otlp_grpc_port" >/dev/null
-    jaeger_started=1
-    if ! wait_http "$jaeger_url/api/services"; then
-        echo "observability smoke failed: timed out waiting for disposable Jaeger" >&2
-        podman logs "$jaeger_name" >&2 || true
-        exit 1
+    jaeger_attempt=1
+    jaeger_attempts=3
+    if [ "$jaeger_ports_fixed" = "1" ]; then
+        jaeger_attempts=1
     fi
+    while [ "$jaeger_attempt" -le "$jaeger_attempts" ]; do
+        podman rm -f "$jaeger_name" >/dev/null 2>&1 || true
+        if podman run -d \
+            --name "$jaeger_name" \
+            --network host \
+            --security-opt no-new-privileges \
+            -e COLLECTOR_OTLP_ENABLED=true \
+            "$jaeger_image" \
+            --query.http-server.host-port="127.0.0.1:$jaeger_query_port" \
+            --collector.otlp.http.host-port="127.0.0.1:$jaeger_otlp_http_port" \
+            --collector.otlp.grpc.host-port="127.0.0.1:$jaeger_otlp_grpc_port" >/dev/null; then
+            jaeger_started=1
+            if wait_http "$jaeger_url/api/services"; then
+                break
+            fi
+        fi
+        if [ "$jaeger_attempt" -ge "$jaeger_attempts" ]; then
+            echo "observability smoke failed: timed out waiting for disposable Jaeger" >&2
+            podman logs "$jaeger_name" >&2 || true
+            exit 1
+        fi
+        echo "observability smoke: retrying disposable Jaeger with new ports" >&2
+        podman rm -f "$jaeger_name" >/dev/null 2>&1 || true
+        jaeger_started=0
+        set -- $(allocate_smoke_ports 3)
+        jaeger_query_port="$1"
+        jaeger_otlp_http_port="$2"
+        jaeger_otlp_grpc_port="$3"
+        refresh_observability_urls
+        jaeger_attempt=$((jaeger_attempt + 1))
+    done
 fi
 
 python3 - "$upstream_port" >"$tmp/upstream.log" 2>&1 <<'PY' &
