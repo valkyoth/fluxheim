@@ -2,19 +2,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use std::net::SocketAddr;
-
-use bytes::Bytes;
-use fluxheim_config::UpstreamProxyProtocol;
-use fluxheim_protocol::PROXY_PROTOCOL_V2_SIGNATURE;
-use http::Response;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::native_http1_test_utils::read_request_head;
-use crate::{DownstreamHttp2Policy, NativeHttp1Error, NativeHttp1Request, NativeHttp1Upstream};
+use crate::{NativeHttp1Error, NativeHttp1Request, NativeHttp1Upstream};
 
-async fn upstream<F, Fut>(handler: F) -> std::net::SocketAddr
+pub(crate) async fn upstream<F, Fut>(handler: F) -> std::net::SocketAddr
 where
     F: Fn(Vec<u8>, TcpStream) -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = ()> + Send + 'static,
@@ -41,7 +35,7 @@ where
     addr
 }
 
-fn request() -> NativeHttp1Request {
+pub(crate) fn request() -> NativeHttp1Request {
     NativeHttp1Request {
         method: "GET".to_owned(),
         peer_addr: None,
@@ -61,7 +55,7 @@ fn request() -> NativeHttp1Request {
     }
 }
 
-fn proxy_protocol_request() -> NativeHttp1Request {
+pub(crate) fn proxy_protocol_request() -> NativeHttp1Request {
     NativeHttp1Request {
         peer_addr: Some("127.0.0.1:4321".parse().unwrap()),
         local_addr: Some("127.0.0.1:8443".parse().unwrap()),
@@ -99,62 +93,6 @@ async fn native_upstream_forwards_request_and_reads_content_length_response() {
             .iter()
             .any(|(name, value)| name == "x-test" && value == "yes")
     );
-}
-
-#[tokio::test]
-async fn native_upstream_writes_proxy_protocol_v1_before_http_request() {
-    let addr = upstream(|request, mut stream| async move {
-        let request = String::from_utf8(request).unwrap();
-        assert!(request.starts_with(
-            "PROXY TCP4 198.51.100.10 127.0.0.1 0 8443\r\nGET /hello?name=fluxheim HTTP/1.1\r\n"
-        ));
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")
-            .await
-            .unwrap();
-    })
-    .await;
-
-    let response = NativeHttp1Upstream::new(addr.to_string())
-        .with_proxy_protocol(UpstreamProxyProtocol::V1)
-        .send(&proxy_protocol_request())
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), 200);
-    assert_eq!(response.body(), b"ok");
-}
-
-#[tokio::test]
-async fn native_upstream_writes_proxy_protocol_v2_before_http_request() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let mut header = [0u8; 28];
-        stream.read_exact(&mut header).await.unwrap();
-        assert_eq!(&header[..12], &PROXY_PROTOCOL_V2_SIGNATURE[..]);
-        assert_eq!(&header[12..16], &[0x21, 0x11, 0x00, 0x0c]);
-        assert_eq!(&header[16..20], &[198, 51, 100, 10]);
-        assert_eq!(&header[20..24], &[127, 0, 0, 1]);
-        assert_eq!(&header[24..26], &0u16.to_be_bytes());
-        assert_eq!(&header[26..28], &8443u16.to_be_bytes());
-        let http = String::from_utf8(read_request_head(&mut stream).await).unwrap();
-        assert!(http.starts_with("GET /hello?name=fluxheim HTTP/1.1\r\n"));
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")
-            .await
-            .unwrap();
-    });
-
-    let response = NativeHttp1Upstream::new(addr.to_string())
-        .with_proxy_protocol(UpstreamProxyProtocol::V2)
-        .send(&proxy_protocol_request())
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), 200);
-    assert_eq!(response.body(), b"ok");
 }
 
 #[tokio::test]
@@ -481,254 +419,4 @@ async fn native_upstream_strips_request_hop_by_hop_headers() {
 
     assert_eq!(response.status(), 204);
     assert_eq!(response.body(), b"");
-}
-
-#[tokio::test]
-async fn native_upstream_uses_explicit_h2c_upgrade_for_mixed_plaintext_origin() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let upgrade = String::from_utf8(read_request_head(&mut stream).await).unwrap();
-        assert!(upgrade.starts_with("OPTIONS * HTTP/1.1\r\n"));
-        assert!(upgrade.contains("Upgrade: h2c\r\n"));
-        assert!(upgrade.contains("HTTP2-Settings: "));
-        stream
-            .write_all(
-                b"HTTP/1.1 101 Switching Protocols\r\n\
-                  Connection: Upgrade\r\n\
-                  Upgrade: h2c\r\n\
-                  \r\n",
-            )
-            .await
-            .unwrap();
-
-        let mut h2 = h2::server::handshake(stream).await.unwrap();
-        let (request, mut respond) = h2.accept().await.unwrap().unwrap();
-        assert_eq!(request.method(), http::Method::GET);
-        assert_eq!(request.uri().path(), "/hello");
-        assert_eq!(request.uri().query(), Some("name=fluxheim"));
-        let response = Response::builder()
-            .status(200)
-            .header("x-upstream-protocol", "h2c")
-            .body(())
-            .unwrap();
-        let mut send = respond.send_response(response, false).unwrap();
-        send.send_data(Bytes::from_static(b"native h2c"), true)
-            .unwrap();
-        h2.graceful_shutdown();
-        let _ = tokio::time::timeout(
-            Duration::from_secs(1),
-            std::future::poll_fn(|context| h2.poll_closed(context)),
-        )
-        .await;
-    });
-
-    let response = NativeHttp1Upstream::new(addr.to_string())
-        .with_http1_and_http2_policy(DownstreamHttp2Policy::default())
-        .with_h2c_upgrade(true)
-        .send(&request())
-        .await;
-    server.await.unwrap();
-    let response = response.unwrap();
-
-    assert_eq!(response.status(), 200);
-    assert_eq!(response.body(), b"native h2c");
-    assert!(response.headers().iter().any(|(name, value)| {
-        name.eq_ignore_ascii_case("x-upstream-protocol") && value == "h2c"
-    }));
-}
-
-#[tokio::test]
-async fn native_upstream_falls_back_when_explicit_h2c_upgrade_is_not_accepted() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let (mut probe, _) = listener.accept().await.unwrap();
-        let upgrade = String::from_utf8(read_request_head(&mut probe).await).unwrap();
-        assert!(upgrade.starts_with("OPTIONS * HTTP/1.1\r\n"));
-        probe
-            .write_all(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n")
-            .await
-            .unwrap();
-        drop(probe);
-
-        let (mut fallback, _) = listener.accept().await.unwrap();
-        let request = String::from_utf8(read_request_head(&mut fallback).await).unwrap();
-        assert!(request.starts_with("GET /hello?name=fluxheim HTTP/1.1\r\n"));
-        fallback
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 14\r\n\r\nhttp1 fallback")
-            .await
-            .unwrap();
-    });
-
-    let response = NativeHttp1Upstream::new(addr.to_string())
-        .with_http1_and_http2_policy(DownstreamHttp2Policy::default())
-        .with_h2c_upgrade(true)
-        .send(&request())
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), 200);
-    assert_eq!(response.body(), b"http1 fallback");
-}
-
-#[tokio::test]
-async fn native_upstream_falls_back_when_explicit_h2c_upgrade_connection_closes() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let (mut probe, _) = listener.accept().await.unwrap();
-        let upgrade = String::from_utf8(read_request_head(&mut probe).await).unwrap();
-        assert!(upgrade.starts_with("OPTIONS * HTTP/1.1\r\n"));
-        drop(probe);
-
-        let (mut fallback, _) = listener.accept().await.unwrap();
-        let request = String::from_utf8(read_request_head(&mut fallback).await).unwrap();
-        assert!(request.starts_with("GET /hello?name=fluxheim HTTP/1.1\r\n"));
-        fallback
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 17\r\n\r\nclosed then http1")
-            .await
-            .unwrap();
-    });
-
-    let response = NativeHttp1Upstream::new(addr.to_string())
-        .with_http1_and_http2_policy(DownstreamHttp2Policy::default())
-        .with_h2c_upgrade(true)
-        .send(&request())
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), 200);
-    assert_eq!(response.body(), b"closed then http1");
-}
-
-#[cfg(not(feature = "privacy-mode"))]
-#[tokio::test]
-async fn native_upstream_appends_owned_via_header() {
-    let addr = upstream(|request, mut stream| async move {
-        let request = String::from_utf8(request).unwrap();
-        assert!(request.contains("via: 1.0 prior, 1.1 fluxheim\r\n"));
-        assert!(!request.contains("x-forwarded-for: 192.0.2.9\r\n"));
-        stream
-            .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
-            .await
-            .unwrap();
-    })
-    .await;
-
-    let mut request = request();
-    request.peer_addr = Some(SocketAddr::from(([198, 51, 100, 17], 49000)));
-    request
-        .headers
-        .push(("Via".to_owned(), "1.0 prior".to_owned()));
-    request
-        .headers
-        .push(("X-Forwarded-For".to_owned(), "192.0.2.9".to_owned()));
-
-    let response = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request)
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), 204);
-}
-
-#[cfg(feature = "privacy-mode")]
-#[tokio::test]
-async fn privacy_mode_native_upstream_does_not_add_forwarded_for() {
-    let addr = upstream(|request, mut stream| async move {
-        let request = String::from_utf8(request).unwrap();
-        assert!(!request.to_ascii_lowercase().contains("x-forwarded-for:"));
-        stream
-            .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
-            .await
-            .unwrap();
-    })
-    .await;
-
-    let mut request = request();
-    request.peer_addr = Some(SocketAddr::from(([198, 51, 100, 17], 49000)));
-
-    let response = NativeHttp1Upstream::new(addr.to_string())
-        .send(&request)
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), 204);
-}
-
-#[tokio::test]
-async fn native_upstream_rejects_invalid_forwarded_request_header() {
-    let (client, _peer) = tokio::io::duplex(4096);
-    let mut request = request();
-    request
-        .headers
-        .push(("X-Bad".to_owned(), "bad\u{7f}".to_owned()));
-
-    let error = NativeHttp1Upstream::new("127.0.0.1:3000")
-        .send_on_stream(client, &request)
-        .await
-        .unwrap_err();
-
-    assert!(matches!(
-        error,
-        NativeHttp1Error::Parse(fluxheim_protocol::Http1ParseError::InvalidHeaderValue)
-    ));
-}
-
-#[tokio::test]
-async fn native_upstream_rejects_invalid_forwarded_host_header() {
-    let (client, _peer) = tokio::io::duplex(4096);
-    let mut request = request();
-    request.headers[0] = ("Host".to_owned(), "bad\u{7f}".to_owned());
-
-    let error = NativeHttp1Upstream::new("127.0.0.1:3000")
-        .send_on_stream(client, &request)
-        .await
-        .unwrap_err();
-
-    assert!(matches!(
-        error,
-        NativeHttp1Error::Parse(fluxheim_protocol::Http1ParseError::InvalidHeaderValue)
-    ));
-}
-
-#[tokio::test]
-async fn native_upstream_read_timeout_is_bounded() {
-    let addr = upstream(|_, stream| async move {
-        let _hold_open = stream;
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    })
-    .await;
-
-    let error = NativeHttp1Upstream::new(addr.to_string())
-        .with_read_timeout(Duration::from_millis(25))
-        .send(&request())
-        .await
-        .unwrap_err();
-
-    assert!(matches!(
-        error,
-        NativeHttp1Error::Io(error) if error.kind() == std::io::ErrorKind::TimedOut
-    ));
-}
-
-#[tokio::test]
-async fn native_upstream_write_timeout_is_bounded() {
-    let (client, _blocked_peer) = tokio::io::duplex(1);
-    let mut request = request();
-    request.method = "POST".to_owned();
-    request.body = zeroize::Zeroizing::new(vec![b'a'; 1024 * 1024]);
-
-    let error = NativeHttp1Upstream::new("127.0.0.1:3000")
-        .with_write_timeout(Duration::from_millis(25))
-        .send_on_stream(client, &request)
-        .await
-        .unwrap_err();
-
-    assert!(matches!(
-        error,
-        NativeHttp1Error::Io(error) if error.kind() == std::io::ErrorKind::TimedOut
-    ));
 }

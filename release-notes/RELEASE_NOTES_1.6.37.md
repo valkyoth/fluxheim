@@ -195,6 +195,9 @@ is clean.
   regression tests into a focused response test module.
 - Split native upstream TLS proxy regression tests into base TLS, Rustls H2
   ALPN, and mTLS modules, removing the oversized TLS test exception.
+- Split native upstream HTTP/1 client regression tests into base response,
+  h2c-upgrade, forwarded-header/timeout, and PROXY protocol modules, removing
+  the oversized client-test exception.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

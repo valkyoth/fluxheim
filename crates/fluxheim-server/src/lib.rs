@@ -166,6 +166,18 @@ mod native_http1_tests;
 mod native_http1_client_tests;
 
 #[cfg(test)]
+#[path = "native_http1_client_h2c_tests.rs"]
+mod native_http1_client_h2c_tests;
+
+#[cfg(test)]
+#[path = "native_http1_client_header_timeout_tests.rs"]
+mod native_http1_client_header_timeout_tests;
+
+#[cfg(test)]
+#[path = "native_http1_client_proxy_protocol_tests.rs"]
+mod native_http1_client_proxy_protocol_tests;
+
+#[cfg(test)]
 #[path = "native_http1_host_router_tests.rs"]
 mod native_http1_host_router_tests;
 
