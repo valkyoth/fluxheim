@@ -210,6 +210,9 @@ behavior when the change improves security or project direction.
 - Split native static-web path resolution, directory listing, response planning,
   and rooted body-opening helpers into focused child modules, removing the
   oversized static-web exception.
+- Split native HTTP/1 proxy runtime TLS listener planning and runtime error
+  formatting into focused child modules, removing the oversized runtime proxy
+  exception.
 
 ## 1.6.36 - 2026-06-30
 

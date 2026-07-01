@@ -208,6 +208,9 @@ is clean.
 - Split native static-web path resolution, directory listing, response planning,
   and rooted body-opening helpers into focused child modules, removing the
   oversized static-web exception.
+- Split native HTTP/1 proxy runtime TLS listener planning and runtime error
+  formatting into focused child modules, removing the oversized runtime proxy
+  exception.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
