@@ -66,6 +66,9 @@ behavior when the change improves security or project direction.
   `fluxheim-snapshot/src/store.rs` into a focused `store_fs` module.
 - Split snapshot metadata, message, and ID validation helpers out of
   `fluxheim-snapshot/src/store.rs` into a focused metadata module.
+- Move snapshot store regression tests into focused functional and path-safety
+  test modules, bringing `fluxheim-snapshot/src/store.rs` below the line-limit
+  target.
 - Move `fluxheim-cache` request/key/range tests out of `src/request.rs`,
   leaving the production cache request helpers below the line-limit target.
 - Move `fluxheim-cache` object/envelope/index tests out of `src/object.rs`,
