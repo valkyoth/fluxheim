@@ -139,6 +139,9 @@ behavior when the change improves security or project direction.
   path-rewrite candidate tests into a focused child test module.
 - Split native HTTP/1 plan access-policy, rate-limit, and concurrency
   candidate tests into a focused child test module.
+- Split native HTTP/1 plan load-balancer, cutover-summary, and compression
+  candidate tests into focused child test modules, bringing
+  `native_http1_plan_tests.rs` below the modularity target.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
