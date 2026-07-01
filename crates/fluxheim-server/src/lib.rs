@@ -24,6 +24,7 @@ mod native_http1_plan;
 mod native_http1_proxy;
 #[cfg(feature = "auth-request")]
 mod native_http1_proxy_auth;
+mod native_http1_proxy_cache_slice;
 mod native_http1_proxy_metrics;
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 mod native_http1_proxy_mirror;
