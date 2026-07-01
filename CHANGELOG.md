@@ -13,6 +13,8 @@ behavior when the change improves security or project direction.
 
 - Start the final pre-Wasm crate-boundary cleanup release with release metadata
   bumped through the workspace and RPM spec.
+- Update the pinned Rust toolchain, workspace `rust-version` fields, and
+  container builder images to Rust 1.96.1.
 - Prepare ACME, observability, header-policy, TLS helper, native proxy, and CLI
   boundaries for smaller crate-owned APIs while keeping runtime behavior stable.
 - Remove private root compatibility shims for common errors, filesystem trust

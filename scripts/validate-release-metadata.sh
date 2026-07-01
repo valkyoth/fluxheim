@@ -24,7 +24,20 @@ if [ -z "$cargo_rust_version" ]; then
     exit 1
 fi
 
-if [ "$toolchain_version" != "$cargo_rust_version.0" ]; then
+case "$cargo_rust_version" in
+    *.*.*)
+        expected_toolchain_version="$cargo_rust_version"
+        ;;
+    *.*)
+        expected_toolchain_version="$cargo_rust_version.0"
+        ;;
+    *)
+        echo "release metadata: Cargo.toml rust-version $cargo_rust_version is not a supported version shape" >&2
+        exit 1
+        ;;
+esac
+
+if [ "$toolchain_version" != "$expected_toolchain_version" ]; then
     echo "release metadata: rust-toolchain.toml channel $toolchain_version does not match Cargo.toml rust-version $cargo_rust_version" >&2
     exit 1
 fi

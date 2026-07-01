@@ -11,6 +11,8 @@ is clean.
 ## Highlights
 
 - Start the final pre-Wasm crate-boundary cleanup pass.
+- Update the pinned Rust toolchain, workspace `rust-version` fields, and
+  container builder images to Rust 1.96.1.
 - Prepare ACME, observability, header-policy, TLS helper, native proxy, and CLI
   boundaries for smaller crate-owned APIs.
 - Remove private root compatibility shims for common errors, filesystem trust
