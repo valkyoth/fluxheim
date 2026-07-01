@@ -71,6 +71,8 @@ behavior when the change improves security or project direction.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
+- Split native proxy peer-fill transport, shared-secret loading, nonce/HMAC
+  authentication, and internal marker stripping into focused server modules.
 - Split native route proxy upstream/load-balancer construction into a focused
   server module so route dispatch keeps shrinking without changing serving
   behavior.
