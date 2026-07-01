@@ -133,6 +133,8 @@ behavior when the change improves security or project direction.
   `native_http1_proxy_tests.rs` below the modularity target.
 - Split native HTTP/1 plan root/protocol, WebSocket, auth-request, and
   traffic-mirror candidate tests into a focused child test module.
+- Split native HTTP/1 plan cache, static-web, and PHP-FPM candidate tests into
+  a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
