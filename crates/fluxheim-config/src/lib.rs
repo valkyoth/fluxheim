@@ -75,6 +75,7 @@ pub mod config_stream_tls;
 pub mod config_tls;
 pub mod config_types;
 pub mod config_udp;
+pub mod config_vhost;
 pub mod config_web;
 pub mod fs_trust;
 pub mod internal_crypto;

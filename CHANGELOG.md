@@ -106,6 +106,9 @@ behavior when the change improves security or project direction.
 - Split the public `ConfigError` enum and formatting implementation out of
   `config.rs` into a focused error module while preserving the existing
   `fluxheim_config::ConfigError` re-export.
+- Split `VhostConfig` and its validation/path-resolution behavior into a
+  focused `fluxheim-config` module while preserving the existing public
+  re-export.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
