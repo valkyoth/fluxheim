@@ -152,6 +152,12 @@ is clean.
   leaving the crate root below 800 lines.
 - Split load-balancer runtime stats assembly into a focused private stats
   facade module.
+- Split PHP-FPM FastCGI request parameter translation into a focused private
+  module while preserving the existing crate exports.
+- Split PHP-FPM script-name, path-translation, deny-prefix, and static-file
+  script mapping helpers into a focused private module.
+- Split PHP-FPM response parsing, static-offload target validation, cache-policy
+  checks, and response-header strip policy into a focused private module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
