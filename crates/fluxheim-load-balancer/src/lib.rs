@@ -49,6 +49,7 @@ mod selection_ketama;
 mod selection_maglev;
 mod selection_power;
 mod selection_weight;
+mod service;
 mod state;
 mod state_file;
 
@@ -113,64 +114,7 @@ pub use self::crypto::set_admin_hmac_sha256;
 #[cfg(feature = "metrics")]
 pub use self::metrics::set_load_balancer_event_recorder;
 pub use self::persistence::LoadBalancerRequestView;
-
-pub struct UpstreamLoadBalancerService {
-    inner: background::FluxBackgroundService<backend::FluxLoadBalancerRuntime>,
-    load_balancer: UpstreamLoadBalancer,
-}
-
-impl UpstreamLoadBalancerService {
-    fn new(
-        inner: background::FluxBackgroundService<backend::FluxLoadBalancerRuntime>,
-        load_balancer: UpstreamLoadBalancer,
-    ) -> Self {
-        Self {
-            inner,
-            load_balancer,
-        }
-    }
-
-    pub async fn start(
-        &self,
-        shutdown: background::FluxShutdown,
-        ready: background::FluxBackgroundReady,
-    ) {
-        self.inner.task().run(shutdown, ready).await;
-    }
-
-    pub fn into_native_service(self) -> fluxheim_runtime::FluxBackgroundService<Self> {
-        let name = self.name().to_owned();
-        fluxheim_runtime::FluxBackgroundService::with_kind(
-            name,
-            fluxheim_runtime::BackgroundTaskKind::LoadBalancerRefresh,
-            self,
-        )
-    }
-
-    pub fn name(&self) -> &str {
-        self.inner.name()
-    }
-
-    pub fn load_balancer(&self) -> UpstreamLoadBalancer {
-        self.load_balancer.clone()
-    }
-
-    #[allow(deprecated)]
-    pub fn threads(&self) -> Option<usize> {
-        self.inner.threads()
-    }
-}
-
-#[async_trait::async_trait]
-impl fluxheim_runtime::FluxBackgroundTask for UpstreamLoadBalancerService {
-    async fn start(
-        &self,
-        shutdown: background::FluxShutdown,
-        ready: background::FluxBackgroundReady,
-    ) {
-        self.inner.task().run(shutdown, ready).await;
-    }
-}
+pub use self::service::UpstreamLoadBalancerService;
 
 const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
 pub const MAX_RUNTIME_BACKEND_WEIGHT: usize = 1000;
