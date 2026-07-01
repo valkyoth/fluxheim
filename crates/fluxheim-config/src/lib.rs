@@ -21,6 +21,8 @@ pub mod config_header_response;
 pub mod config_header_validation;
 pub mod config_http;
 pub mod config_load_balance;
+pub mod config_load_balance_health;
+mod config_load_balance_health_validate;
 pub mod config_loader;
 pub mod config_logging;
 pub mod config_metrics_summary;

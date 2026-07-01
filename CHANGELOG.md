@@ -104,6 +104,9 @@ behavior when the change improves security or project direction.
 - Move reload-classification tests into focused base and load-balancer test
   modules, leaving `fluxheim-config/src/reload.rs` as the small runtime reload
   classifier.
+- Split load-balancer health-check schema and validation into focused
+  `fluxheim-config` modules while preserving the existing public
+  `LoadBalanceHealthCheck*` exports.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.
