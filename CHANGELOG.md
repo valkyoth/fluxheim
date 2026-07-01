@@ -213,6 +213,8 @@ behavior when the change improves security or project direction.
 - Split native HTTP/1 proxy runtime TLS listener planning and runtime error
   formatting into focused child modules, removing the oversized runtime proxy
   exception.
+- Split route redirect config and redirect-template validation into a focused
+  config module, bringing `config_route.rs` to the line-limit target.
 
 ## 1.6.36 - 2026-06-30
 

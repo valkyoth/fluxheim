@@ -211,6 +211,8 @@ is clean.
 - Split native HTTP/1 proxy runtime TLS listener planning and runtime error
   formatting into focused child modules, removing the oversized runtime proxy
   exception.
+- Split route redirect config and redirect-template validation into a focused
+  config module, bringing `config_route.rs` to the line-limit target.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
