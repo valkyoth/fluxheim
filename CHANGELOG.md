@@ -101,6 +101,8 @@ behavior when the change improves security or project direction.
   preserving the existing public re-exports and merge behavior.
 - Split cache key, stale-error, default, and preset helper primitives into a
   focused `fluxheim-config` policy module while preserving public re-exports.
+- Split cache validation into a focused `fluxheim-config` module, bringing
+  `config_cache.rs` down to the 500-line modularity target.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

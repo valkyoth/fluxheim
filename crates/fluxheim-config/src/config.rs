@@ -24,12 +24,6 @@ pub use crate::config_admin::{
 use crate::config_cache::CacheConfigFragment;
 pub use crate::config_cache::validate_cache_compliance_internal_crypto;
 pub use crate::config_cache::{CacheConfig, CachePreset};
-#[cfg(test)]
-pub use crate::config_cache::{
-    MAX_CACHE_BYPASS_COOKIES, MAX_CACHE_BYPASS_PATHS, MAX_CACHE_CONTENT_TYPES,
-    MAX_CACHE_IMAGE_EXTENSIONS, MAX_CACHE_METHODS, MAX_CACHE_STATUS_TTLS,
-    MAX_CACHE_VARY_REQUEST_HEADERS,
-};
 pub use crate::config_cache_controls::CACHE_PREDICTOR_MAX_CAPACITY;
 pub use crate::config_cache_controls::{
     CacheLockConfig, CacheOriginProtectionConfig, CachePredictorConfig,
@@ -48,6 +42,12 @@ pub use crate::config_cache_purger::CachePurgerConfig;
 use crate::config_cache_purger::CachePurgerConfigFragment;
 pub use crate::config_cache_range::{CacheRangeConfig, CacheRangeSliceConfig};
 pub use crate::config_cache_storage_bin::CacheDiskStorageBinConfig;
+#[cfg(test)]
+pub use crate::config_cache_validate::{
+    MAX_CACHE_BYPASS_COOKIES, MAX_CACHE_BYPASS_PATHS, MAX_CACHE_CONTENT_TYPES,
+    MAX_CACHE_IMAGE_EXTENSIONS, MAX_CACHE_METHODS, MAX_CACHE_STATUS_TTLS,
+    MAX_CACHE_VARY_REQUEST_HEADERS,
+};
 pub use crate::config_compression::CompressionConfig;
 use crate::config_compression::CompressionConfigFragment;
 #[cfg(test)]
