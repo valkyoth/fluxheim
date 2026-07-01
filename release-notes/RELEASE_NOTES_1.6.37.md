@@ -120,6 +120,9 @@ is clean.
 - Split load-balancer runtime override and snapshot state into a focused
   private policy-runtime module, bringing `policy.rs` below the line-limit
   target.
+- Split load-balancer persistence request-key helpers and managed-cookie
+  HMAC/token handling into focused private modules, bringing `persistence.rs`
+  below the line-limit target.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

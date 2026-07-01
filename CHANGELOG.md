@@ -122,6 +122,9 @@ behavior when the change improves security or project direction.
 - Split load-balancer runtime override and snapshot state into a focused
   private policy-runtime module, bringing `policy.rs` below the line-limit
   target.
+- Split load-balancer persistence request-key helpers and managed-cookie
+  HMAC/token handling into focused private modules, bringing `persistence.rs`
+  below the line-limit target.
 
 ## 1.6.36 - 2026-06-30
 

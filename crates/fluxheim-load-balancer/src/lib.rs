@@ -29,6 +29,8 @@ mod key;
 #[cfg(feature = "metrics")]
 mod metrics;
 mod persistence;
+mod persistence_cookie;
+mod persistence_request;
 mod policy;
 mod policy_config;
 mod policy_runtime;
