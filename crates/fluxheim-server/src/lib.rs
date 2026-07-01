@@ -59,6 +59,7 @@ mod native_http1_route_matcher;
 mod native_http1_route_php;
 mod native_http1_route_proxy;
 mod native_http1_route_proxy_handler;
+mod native_http1_route_proxy_route;
 mod native_http1_route_proxy_upstream;
 mod native_http1_route_redirect;
 mod native_http1_route_request_headers;

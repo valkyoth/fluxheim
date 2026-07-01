@@ -106,6 +106,9 @@ behavior when the change improves security or project direction.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
+- Split native route proxy route builders, redirect/static/PHP/proxy action
+  construction, inherited route config mapping, and route helper accessors into
+  a focused route module.
 - Split native route proxy upstream/load-balancer construction into a focused
   server module so route dispatch keeps shrinking without changing serving
   behavior.
