@@ -15,9 +15,8 @@ use crate::config_net::http_authority_is_numeric_loopback;
 use crate::config_net::{normalize_host, upstream_host, valid_authority, valid_upstream_alias};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 pub use crate::config_proxy_auth::{AuthRequestConfig, AuthRequestConfigFragment};
+pub use crate::config_proxy_error_page::ProxyErrorPageConfig;
 pub use crate::config_proxy_traffic_mirror::{TrafficMirrorConfig, TrafficMirrorConfigFragment};
-use crate::config_route::validate_route_path;
-use crate::config_web::WebConfig;
 
 const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
 
@@ -1409,40 +1408,6 @@ fn backend_authority_key(authority: &str) -> u64 {
     hasher.finish()
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProxyErrorPageConfig {
-    pub status: u16,
-    pub path: String,
-    #[serde(default)]
-    pub web: WebConfig,
-}
-
-impl ProxyErrorPageConfig {
-    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
-        self.web.resolve_relative_paths(base_dir);
-    }
-
-    fn validate(&self) -> Result<(), ConfigError> {
-        if !(400..=599).contains(&self.status) {
-            return Err(ConfigError::InvalidProxyErrorPageStatus {
-                status: self.status,
-            });
-        }
-        validate_route_path("proxy.error_pages.path", &self.path, false).map_err(|_| {
-            ConfigError::InvalidProxyErrorPagePath {
-                path: self.path.clone(),
-            }
-        })?;
-        self.web.validate()?;
-        if !self.web.enabled() {
-            return Err(ConfigError::MissingProxyErrorPageRoot {
-                status: self.status,
-            });
-        }
-        Ok(())
-    }
-}
 fn default_proxy_upstreams_file_refresh_secs() -> u64 {
     5
 }
