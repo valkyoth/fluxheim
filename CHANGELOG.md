@@ -92,6 +92,9 @@ behavior when the change improves security or project direction.
 - Split root stream upstream TLS backend helpers into rustls and OpenSSL
   modules, leaving `stream_tls.rs` as the shared connector orchestration and
   warning-policy surface.
+- Split config-tester profile validation, native-runtime cutover reporting, and
+  upstream resolution helpers into focused root modules, leaving the config
+  tester entry point below the modularity target.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.

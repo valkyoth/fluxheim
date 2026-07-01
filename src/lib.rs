@@ -17,6 +17,9 @@ pub mod config {
     pub use fluxheim_config::*;
 }
 pub mod config_tester;
+mod config_tester_profiles;
+mod config_tester_runtime;
+mod config_tester_upstreams;
 #[cfg(feature = "ingress")]
 mod http_types;
 pub mod internal_crypto;
