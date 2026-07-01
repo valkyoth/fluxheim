@@ -89,6 +89,9 @@ behavior when the change improves security or project direction.
 - Split ACME vhost challenge routing and issuer/EAB validation into focused
   `fluxheim-config` modules, leaving `config_acme.rs` below the modularity
   target without changing the public config exports.
+- Split root stream upstream TLS backend helpers into rustls and OpenSSL
+  modules, leaving `stream_tls.rs` as the shared connector orchestration and
+  warning-policy surface.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.

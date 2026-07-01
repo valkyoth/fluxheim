@@ -37,6 +37,10 @@ mod stream_proxy;
     any(feature = "tls-rustls-backend", feature = "tls-openssl")
 ))]
 mod stream_tls;
+#[cfg(all(feature = "stream-proxy", feature = "tls-openssl"))]
+mod stream_tls_openssl;
+#[cfg(all(feature = "stream-proxy", feature = "tls-rustls-backend"))]
+mod stream_tls_rustls;
 #[cfg(any(
     feature = "tls",
     feature = "tls-rustls-backend",
