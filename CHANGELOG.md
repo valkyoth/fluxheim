@@ -149,6 +149,10 @@ behavior when the change improves security or project direction.
 - Split native upstream TLS file loading and symlink-safety tests into a child
   module so certificate/key/CA bundle file handling is isolated from backend
   connector setup.
+- Split native upstream TLS Rustls connector setup, trust-store loading,
+  client-certificate parsing, ALPN mapping, SNI validation, and verifier policy
+  into a focused backend module, bringing `native_http1_tls.rs` below the
+  modularity target.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
