@@ -163,6 +163,8 @@ is clean.
   checks, and response-header strip policy into a focused private module.
 - Split managed PHP-FPM config rendering, instance-name generation, sanitized
   PATH fallback, and restart backoff helpers into a focused private module.
+- Split PHP-FPM keepalive pool management and one-shot FastCGI execution into a
+  focused private module while preserving the public crate exports.
 - Split PHP-FPM endpoint selection, timeout classification, retry policy, and
   retry deadline helpers into a focused private module.
 - Split PHP-FPM request-body replay, zeroized memory body ownership, spool-file

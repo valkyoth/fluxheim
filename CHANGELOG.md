@@ -172,6 +172,8 @@ behavior when the change improves security or project direction.
   module.
 - Split PHP-FPM streamed FastCGI response collection and bounded chunk
   accounting into a focused private module.
+- Split PHP-FPM keepalive pool management and one-shot FastCGI execution into a
+  focused private module while preserving the public crate exports.
 - Split native runtime launch-plan TSV report rendering into a focused module,
   bringing the launch-plan assembly file below the line-limit target.
 
