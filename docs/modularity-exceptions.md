@@ -34,7 +34,7 @@ documents why the exception is temporary and how it will be removed.
 | `crates/fluxheim-snapshot/src/store.rs` | 1059 | Snapshot store persistence still groups layout, rollback, and store tests after the `1.6.37` crate-root/runtime-state/filesystem/metadata split. | Split store tests and rollback/layout helpers into focused modules. |
 | `crates/fluxheim-config/src/config_header.rs` | 1060 | Header policy config and validation. | Move with header-policy crate work. |
 | `src/udp_proxy.rs` | 1038 | UDP beta runtime. | Split before beta promotion. |
-| `crates/fluxheim-load-balancer/src/policy.rs` | 795 | Runtime backend policy overrides, config-derived backend policy maps, runtime snapshots, and stats assembly remain grouped after tests moved to a focused module during the `1.6.37` cleanup. | Split keys, snapshots, mutation policy, and stats assembly. |
+| `crates/fluxheim-load-balancer/src/policy.rs` | 725 | Runtime backend policy overrides, runtime snapshots, and stats assembly remain grouped after tests and config-derived backend policy maps moved to focused modules during the `1.6.37` cleanup. | Split runtime snapshot/mutation policy and stats assembly. |
 | `crates/fluxheim-config/src/config_stream.rs` | 947 | Stream proxy config and TLS validation. | Split with stream runtime cutover. |
 | `crates/fluxheim-load-balancer/src/backend.rs` | 848 | Backend snapshots and runtime mutation surface. | Split backend set, health snapshot, and mutation helpers. |
 | `crates/fluxheim-load-balancer/src/discovery.rs` | 906 | File/DNS/HTTP discovery and validation. | Split discovery backends. |

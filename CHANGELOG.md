@@ -115,6 +115,8 @@ behavior when the change improves security or project direction.
   the cache header facade below the line-limit target.
 - Move load-balancer policy override tests out of `src/policy.rs` as a
   preparatory split for the remaining policy key/snapshot/mutation modules.
+- Split load-balancer config-derived backend policy maps and aliases into a
+  focused private policy-config module.
 
 ## 1.6.36 - 2026-06-30
 
