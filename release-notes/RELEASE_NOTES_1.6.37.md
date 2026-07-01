@@ -104,6 +104,8 @@ is clean.
   slow-start permit checks into a focused private selection module.
 - Split power-of-two choice selection and weighted random candidate selection
   into a focused private load-balancer selection module.
+- Split consistent-hash, nginx-compatible Ketama selection, and bounded-load
+  consistent selection into a focused private load-balancer selection module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

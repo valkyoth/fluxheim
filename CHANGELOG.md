@@ -106,6 +106,8 @@ behavior when the change improves security or project direction.
   slow-start permit checks into a focused private selection module.
 - Split power-of-two choice selection and weighted random candidate selection
   into a focused private load-balancer selection module.
+- Split consistent-hash, nginx-compatible Ketama selection, and bounded-load
+  consistent selection into a focused private load-balancer selection module.
 
 ## 1.6.36 - 2026-06-30
 
