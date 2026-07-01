@@ -131,6 +131,9 @@ behavior when the change improves security or project direction.
 - Split root native-proxy cache snapshot, cache-key preview, disk-object lookup,
   and cache-preview route matching into a focused cache-snapshot child module,
   bringing `src/native_proxy.rs` below the modularity target.
+- Split the root static-web proxy body reader into a focused child module so
+  symlink-safe static body opening and buffering limits are isolated from route
+  resolution and response planning.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
