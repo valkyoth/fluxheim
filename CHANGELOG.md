@@ -156,6 +156,9 @@ behavior when the change improves security or project direction.
 - Split native downstream HTTP/1 response type, framing, header validation,
   timeout wrapping, and minimum send-rate enforcement into a focused child
   module while preserving the public response API.
+- Split native downstream HTTP/1 request metadata, TLS/Geo context DTOs, cache
+  request view, and load-balancer request view into a focused child module
+  while preserving the public request API.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
