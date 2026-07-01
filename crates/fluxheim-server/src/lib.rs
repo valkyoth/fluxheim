@@ -32,6 +32,7 @@ mod native_http1_proxy_runtime;
 mod native_http1_route_compression;
 mod native_http1_route_grpc;
 mod native_http1_route_limits;
+mod native_http1_route_matcher;
 #[cfg(feature = "php-fpm")]
 mod native_http1_route_php;
 mod native_http1_route_proxy;

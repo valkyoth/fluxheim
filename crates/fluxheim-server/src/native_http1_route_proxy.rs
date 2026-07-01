@@ -12,8 +12,7 @@ use fluxheim_config::{
 #[cfg(not(feature = "privacy-mode"))]
 use fluxheim_headers::effective_client_ip;
 use fluxheim_protocol::{
-    Http1RequestTarget, http1_request_target, route_method_matches, route_prefix_matches_path,
-    route_strip_prefix_suffix,
+    Http1RequestTarget, http1_request_target, route_method_matches, route_strip_prefix_suffix,
 };
 
 #[cfg(any(
@@ -29,6 +28,7 @@ use crate::native_http1_route_limits::{
     NativeConcurrencyLimit, NativeConcurrencyPermit, NativeIpAccessPolicy, NativeRateLimit,
     NativeRateLimitDecision,
 };
+use crate::native_http1_route_matcher::{NativeHttp1RouteMatcher, NativeRegexRouteMatcher};
 #[cfg(feature = "php-fpm")]
 use crate::native_http1_route_php::NativePhpFpmRoute;
 use crate::native_http1_route_redirect::{
@@ -49,9 +49,6 @@ use crate::{
 #[cfg(feature = "acme")]
 use crate::{NativeHttp1AcmeHttp01Store, native_http1_acme::http_01_token_from_path};
 use tokio::io::AsyncWriteExt;
-
-const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
-const MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES: usize = 256;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1RouteProxy {
@@ -170,53 +167,6 @@ pub struct NativeHttp1RouteProxyRoute {
     concurrency: NativeConcurrencyLimit,
     grpc: GrpcRouteConfig,
     action: NativeHttp1RouteAction,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum NativeHttp1RouteMatcher {
-    Exact(String),
-    Prefix(String),
-    Regex(NativeRegexRouteMatcher),
-    Fallback,
-}
-
-#[derive(Clone)]
-struct NativeRegexRouteMatcher {
-    pattern: String,
-    regex: regex::Regex,
-}
-
-impl std::fmt::Debug for NativeRegexRouteMatcher {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("NativeRegexRouteMatcher")
-            .field("pattern", &self.pattern)
-            .finish_non_exhaustive()
-    }
-}
-
-impl PartialEq for NativeRegexRouteMatcher {
-    fn eq(&self, other: &Self) -> bool {
-        self.pattern == other.pattern
-    }
-}
-
-impl Eq for NativeRegexRouteMatcher {}
-
-impl NativeRegexRouteMatcher {
-    fn from_pattern(pattern: &str) -> Result<Self, regex::Error> {
-        Ok(Self {
-            pattern: pattern.to_owned(),
-            regex: regex::RegexBuilder::new(pattern)
-                .size_limit(fluxheim_config::MAX_ROUTE_REGEX_PROGRAM_BYTES)
-                .dfa_size_limit(fluxheim_config::MAX_ROUTE_REGEX_PROGRAM_BYTES)
-                .build()?,
-        })
-    }
-
-    fn is_match(&self, path: &str) -> bool {
-        self.regex.is_match(path)
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1378,7 +1328,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .close_connection();
                 }
                 let header_context = NativeRequestHeaderTemplateContext::from_captures(
-                    route_regex_header_captures(&path, &route.matcher),
+                    route.matcher.header_captures(&path),
                 );
                 self.apply_traceparent(&mut request);
                 route
@@ -1567,7 +1517,7 @@ impl NativeHttp1RouteProxy {
                 .await;
             }
             let header_context = NativeRequestHeaderTemplateContext::from_captures(
-                route_regex_header_captures(&path, &route.matcher),
+                route.matcher.header_captures(&path),
             );
             route
                 .request_headers
@@ -1644,9 +1594,7 @@ impl NativeHttp1RouteProxy {
             }
             match &route.matcher {
                 NativeHttp1RouteMatcher::Exact(exact) if path == exact => return Some(route),
-                NativeHttp1RouteMatcher::Prefix(prefix)
-                    if route_prefix_matches_path(prefix, path) =>
-                {
+                NativeHttp1RouteMatcher::Prefix(_) if route.matcher.is_match(path) => {
                     if best_prefix
                         .map(|best: &NativeHttp1RouteProxyRoute| {
                             route.prefix_len() > best.prefix_len()
@@ -1656,8 +1604,8 @@ impl NativeHttp1RouteProxy {
                         best_prefix = Some(route);
                     }
                 }
-                NativeHttp1RouteMatcher::Regex(regex)
-                    if first_regex.is_none() && regex.is_match(path) =>
+                NativeHttp1RouteMatcher::Regex(_)
+                    if first_regex.is_none() && route.matcher.is_match(path) =>
                 {
                     first_regex = Some(route);
                 }
@@ -1819,10 +1767,7 @@ impl NativeHttp1RouteProxyRoute {
     }
 
     fn prefix_len(&self) -> usize {
-        match &self.matcher {
-            NativeHttp1RouteMatcher::Prefix(prefix) => prefix.len(),
-            _ => 0,
-        }
+        self.matcher.prefix_len()
     }
 
     async fn handle(&self, request: NativeHttp1Request) -> NativeHttp1Response {
@@ -2065,10 +2010,6 @@ fn route_rewrite_template_path(
     matcher: &NativeHttp1RouteMatcher,
     template: &str,
 ) -> Option<String> {
-    let NativeHttp1RouteMatcher::Regex(regex_matcher) = matcher else {
-        return None;
-    };
-    let captures = regex_matcher.regex.captures(path)?;
     let mut rewritten = String::with_capacity(template.len());
     let mut rest = template;
     while let Some(open) = rest.find('{') {
@@ -2076,7 +2017,7 @@ fn route_rewrite_template_path(
         let after_open = &rest[open + 1..];
         let close = after_open.find('}')?;
         let variable = &after_open[..close];
-        if let Some(value) = route_regex_capture_value(&regex_matcher.regex, &captures, variable) {
+        if let Some(value) = matcher.capture_value(path, variable) {
             append_route_regex_capture_value(&mut rewritten, value);
         }
         rest = &after_open[close + 1..];
@@ -2086,53 +2027,6 @@ fn route_rewrite_template_path(
         return None;
     }
     Some(rewritten)
-}
-
-fn route_regex_header_captures(
-    path: &str,
-    matcher: &NativeHttp1RouteMatcher,
-) -> Vec<(String, String)> {
-    let NativeHttp1RouteMatcher::Regex(regex_matcher) = matcher else {
-        return Vec::new();
-    };
-    let Some(captures) = regex_matcher.regex.captures(path) else {
-        return Vec::new();
-    };
-    let mut values = Vec::new();
-    for index in 1..captures.len() {
-        if let Some(value) = captures.get(index) {
-            values.push((format!("route.regex.{index}"), value.as_str().to_owned()));
-        }
-    }
-    for name in regex_matcher.regex.capture_names().flatten() {
-        if let Some(value) = captures.name(name) {
-            values.push((format!("route.regex.{name}"), value.as_str().to_owned()));
-        }
-    }
-    values
-}
-
-fn route_regex_capture_value<'a>(
-    regex: &regex::Regex,
-    captures: &'a regex::Captures<'a>,
-    variable: &str,
-) -> Option<&'a str> {
-    let key = variable.strip_prefix("route.regex.")?;
-    let value = if key.bytes().all(|byte| byte.is_ascii_digit()) {
-        let index = key.parse::<usize>().ok()?;
-        if index >= MAX_ROUTE_REGEX_CAPTURE_VALUES {
-            return None;
-        }
-        captures.get(index)?.as_str()
-    } else {
-        let index = regex
-            .capture_names()
-            .enumerate()
-            .take(MAX_ROUTE_REGEX_CAPTURE_VALUES)
-            .find_map(|(index, name)| (name == Some(key)).then_some(index))?;
-        captures.get(index)?.as_str()
-    };
-    (value.len() <= MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES).then_some(value)
 }
 
 fn append_route_regex_capture_value(rewritten: &mut String, value: &str) {

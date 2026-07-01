@@ -135,6 +135,8 @@ behavior when the change improves security or project direction.
   focused server modules while preserving PHP fallback behavior.
 - Split native gRPC route rejection checks into a focused server module while
   preserving method and content-type enforcement.
+- Split native route matcher and regex-capture helpers into a focused server
+  module while preserving route priority and rewrite capture behavior.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
