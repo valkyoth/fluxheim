@@ -8,9 +8,7 @@ use super::policy::BackendSelectionPolicy;
 use super::selection_candidate::{
     SelectionContext, backend_candidate_allowed, backend_candidate_allowed_read_only,
 };
-use super::selection_hash::{
-    consistent_route_secret, fnv_route_secret, fnv1a64_with_seed, random_u64,
-};
+use super::selection_hash::{consistent_route_secret, fnv_route_secret, fnv1a64_with_seed};
 #[cfg(test)]
 use super::selection_ketama::NginxKetamaPoint;
 use super::selection_ketama::NginxKetamaTable;
@@ -53,7 +51,7 @@ fn selection_priority_groups(backend_policy: &BackendSelectionPolicy) -> Vec<Opt
         .collect()
 }
 
-fn selection_passes(backend_policy: &BackendSelectionPolicy) -> Vec<SelectionPass> {
+pub(super) fn selection_passes(backend_policy: &BackendSelectionPolicy) -> Vec<SelectionPass> {
     let mut passes = Vec::new();
     for ignore_locality in [false, true] {
         if ignore_locality && backend_policy.preferred_localities().is_empty() {
@@ -73,7 +71,7 @@ fn selection_passes(backend_policy: &BackendSelectionPolicy) -> Vec<SelectionPas
     passes
 }
 
-fn priority_activation_satisfied(
+pub(super) fn priority_activation_satisfied(
     snapshot: &BackendContainerSnapshot,
     context: SelectionContext<'_>,
     pass: SelectionPass,
@@ -409,112 +407,6 @@ fn least_time_score_is_lower(
             ))
 }
 
-pub(super) fn select_power_of_two(
-    inner: &impl BackendContainer,
-    counters: &BackendConnectionCounters,
-    max_iterations: usize,
-    passive_health: Option<&PassiveHealthState>,
-    slow_start: Option<&SlowStartState>,
-    backend_policy: &BackendSelectionPolicy,
-) -> Option<SelectedUpstream> {
-    let snapshot = backend_container_snapshot(inner);
-    let context = SelectionContext {
-        passive_health,
-        slow_start,
-        counters,
-        backend_policy,
-    };
-    for pass in selection_passes(backend_policy) {
-        if !priority_activation_satisfied(&snapshot, context, pass) {
-            continue;
-        }
-        if let Some(selected) =
-            select_power_of_two_with_backup_policy(&snapshot, max_iterations, context, pass)
-        {
-            return Some(selected);
-        }
-    }
-    None
-}
-
-fn select_power_of_two_with_backup_policy(
-    snapshot: &BackendContainerSnapshot,
-    max_iterations: usize,
-    context: SelectionContext<'_>,
-    pass: SelectionPass,
-) -> Option<SelectedUpstream> {
-    let first = select_weighted_random_candidate(snapshot, max_iterations, context, pass, None)?;
-    let first_key = backend_key(&first);
-    let second =
-        select_weighted_random_candidate(snapshot, max_iterations, context, pass, Some(first_key))
-            .unwrap_or_else(|| first.clone());
-    let selected = if least_connections_score_is_lower(
-        context.counters.count(&second),
-        context.backend_policy.effective_weight(&second),
-        context.counters.count(&first),
-        context.backend_policy.effective_weight(&first),
-    ) {
-        second
-    } else {
-        first
-    };
-    Some(SelectedUpstream::new(selected))
-}
-
-fn select_weighted_random_candidate(
-    snapshot: &BackendContainerSnapshot,
-    max_iterations: usize,
-    context: SelectionContext<'_>,
-    pass: SelectionPass,
-    excluded_key: Option<u64>,
-) -> Option<Backend> {
-    let backends: Vec<Backend> = snapshot.backends().iter().cloned().collect();
-    if backends.is_empty() {
-        return None;
-    }
-    let weighted = weighted_backend_indices(&backends);
-    if weighted.is_empty() {
-        return None;
-    }
-    let mut seen = std::collections::HashSet::new();
-
-    let weighted_candidate = &backends[weighted[random_u64() as usize % weighted.len()]];
-    if random_candidate_allowed(
-        snapshot,
-        weighted_candidate,
-        context,
-        pass,
-        excluded_key,
-        &mut seen,
-    ) {
-        return Some(weighted_candidate.clone());
-    }
-
-    let start = random_u64() as usize % backends.len();
-    for offset in 0..max_iterations.max(1).min(backends.len()) {
-        let candidate = &backends[(start + offset) % backends.len()];
-        if random_candidate_allowed(snapshot, candidate, context, pass, excluded_key, &mut seen) {
-            return Some(candidate.clone());
-        }
-    }
-    None
-}
-
-fn random_candidate_allowed(
-    snapshot: &BackendContainerSnapshot,
-    candidate: &Backend,
-    context: SelectionContext<'_>,
-    pass: SelectionPass,
-    excluded_key: Option<u64>,
-    seen: &mut std::collections::HashSet<u64>,
-) -> bool {
-    let candidate_key = backend_key(candidate);
-    if excluded_key == Some(candidate_key) || !seen.insert(candidate_key) {
-        return false;
-    }
-    backend_candidate_allowed(snapshot, candidate, context, pass)
-}
-
 pub(super) fn select_fnv_hash(
     inner: &impl BackendContainer,
     inputs: LoadBalancerSelectInputs<'_>,
@@ -579,7 +471,7 @@ fn select_fnv_hash_with_backup_policy(
     None
 }
 
-fn weighted_backend_indices(backends: &[Backend]) -> Vec<usize> {
+pub(super) fn weighted_backend_indices(backends: &[Backend]) -> Vec<usize> {
     let mut weighted = Vec::new();
     for (index, backend) in backends.iter().enumerate() {
         weighted.extend(std::iter::repeat_n(index, backend.weight().max(1)));

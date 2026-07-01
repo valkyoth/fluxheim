@@ -104,6 +104,8 @@ behavior when the change improves security or project direction.
   helper into a focused private load-balancer selection module.
 - Split load-balancer candidate filtering, passive-health ejection floor, and
   slow-start permit checks into a focused private selection module.
+- Split power-of-two choice selection and weighted random candidate selection
+  into a focused private load-balancer selection module.
 
 ## 1.6.36 - 2026-06-30
 

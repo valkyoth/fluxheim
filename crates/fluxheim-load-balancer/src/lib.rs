@@ -35,6 +35,7 @@ mod selection_candidate;
 mod selection_hash;
 mod selection_ketama;
 mod selection_maglev;
+mod selection_power;
 mod state;
 mod state_file;
 
@@ -80,11 +81,11 @@ use self::policy::{
 use self::selection::{
     LoadBalancerSelectInputs, SelectionPass, select_bounded_load_consistent,
     select_consistent_hash, select_fnv_hash, select_least_connections, select_least_sessions,
-    select_least_time, select_maglev, select_nginx_consistent_hash, select_power_of_two,
-    select_weighted_round_robin,
+    select_least_time, select_maglev, select_nginx_consistent_hash, select_weighted_round_robin,
 };
 use self::selection_ketama::NginxKetamaTable;
 use self::selection_maglev::MaglevTable;
+use self::selection_power::select_power_of_two;
 use self::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
 };
