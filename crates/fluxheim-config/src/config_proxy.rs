@@ -1,7 +1,3 @@
-use std::collections::HashSet;
-#[cfg(feature = "load-balancer")]
-use std::hash::Hasher;
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +13,11 @@ use crate::config_path::{validate_non_world_writable_parent, validate_path};
 pub use crate::config_proxy_auth::{AuthRequestConfig, AuthRequestConfigFragment};
 pub use crate::config_proxy_error_page::ProxyErrorPageConfig;
 pub use crate::config_proxy_traffic_mirror::{TrafficMirrorConfig, TrafficMirrorConfigFragment};
+#[cfg(feature = "load-balancer")]
+use crate::config_proxy_upstream_policy::validate_load_balancer_backend_keys;
+use crate::config_proxy_upstream_policy::{
+    static_upstreams_include_ip_address, validate_upstream_policy,
+};
 
 const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
 
@@ -963,7 +964,7 @@ impl ProxyConfig {
         }
         #[cfg(feature = "load-balancer")]
         validate_load_balancer_backend_keys(&self.upstreams)?;
-        self.validate_upstream_policy()?;
+        validate_upstream_policy(self)?;
 
         if let Some(sni) = &self.upstream_sni
             && sni.trim().is_empty()
@@ -973,7 +974,7 @@ impl ProxyConfig {
         if self.upstream_tls
             && self.upstream_verify_cert
             && self.upstream_sni.is_none()
-            && self.static_upstreams_include_ip_address()
+            && static_upstreams_include_ip_address(self, DEFAULT_UPSTREAM)
         {
             return Err(ConfigError::InvalidProxyTlsPolicy {
                 reason: "IP-addressed upstreams with upstream_tls and upstream_verify_cert require explicit upstream_sni",
@@ -1215,74 +1216,6 @@ impl ProxyConfig {
         }
         Ok(())
     }
-
-    fn static_upstreams_include_ip_address(&self) -> bool {
-        let mut upstreams = self.upstreams.iter().map(String::as_str);
-        if let Some(upstream) = self.upstream.as_deref() {
-            return upstream_authority_host_is_ip(upstream);
-        }
-        if self.upstreams.is_empty()
-            && self.upstreams_file.is_none()
-            && self.upstreams_http_url.is_none()
-        {
-            return upstream_authority_host_is_ip(DEFAULT_UPSTREAM);
-        }
-        upstreams.any(upstream_authority_host_is_ip)
-    }
-
-    fn validate_upstream_policy(&self) -> Result<(), ConfigError> {
-        if self.backup_upstreams.is_empty()
-            && self.drain_upstreams.is_empty()
-            && self.disabled_upstreams.is_empty()
-        {
-            return Ok(());
-        }
-        if self.upstreams.len() < 2 || self.upstream.is_some() {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.upstreams",
-                reason: "backup_upstreams, drain_upstreams, and disabled_upstreams require proxy.upstreams with at least two entries",
-            });
-        }
-        let configured = self
-            .upstreams
-            .iter()
-            .map(|upstream| upstream.to_ascii_lowercase())
-            .collect::<HashSet<_>>();
-        let backup = validate_proxy_upstream_subset(
-            "proxy.backup_upstreams",
-            &self.backup_upstreams,
-            &configured,
-        )?;
-        let drain = validate_proxy_upstream_subset(
-            "proxy.drain_upstreams",
-            &self.drain_upstreams,
-            &configured,
-        )?;
-        let disabled = validate_proxy_upstream_subset(
-            "proxy.disabled_upstreams",
-            &self.disabled_upstreams,
-            &configured,
-        )?;
-        if !backup.is_disjoint(&drain)
-            || !backup.is_disjoint(&disabled)
-            || !drain.is_disjoint(&disabled)
-        {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.backup_upstreams",
-                reason: "backup_upstreams, drain_upstreams, and disabled_upstreams must not overlap",
-            });
-        }
-        let primary_count = configured
-            .len()
-            .saturating_sub(backup.len() + drain.len() + disabled.len());
-        if primary_count == 0 {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.upstreams",
-                reason: "at least one upstream must remain primary and selectable",
-            });
-        }
-        Ok(())
-    }
 }
 
 impl ProxyConfigFragment {
@@ -1335,79 +1268,6 @@ impl ProxyConfigFragment {
     }
 }
 
-fn validate_proxy_upstream_subset(
-    field: &'static str,
-    values: &[String],
-    configured: &HashSet<String>,
-) -> Result<HashSet<String>, ConfigError> {
-    let mut seen = HashSet::new();
-    for upstream in values {
-        if !valid_authority(upstream) {
-            return Err(ConfigError::InvalidUpstream {
-                address: upstream.clone(),
-            });
-        }
-        let normalized = upstream.to_ascii_lowercase();
-        if !configured.contains(&normalized) {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field,
-                reason: "each entry must also be present in proxy.upstreams",
-            });
-        }
-        if !seen.insert(normalized) {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field,
-                reason: "duplicate upstream policy entries are not allowed",
-            });
-        }
-    }
-    Ok(seen)
-}
-
-fn upstream_authority_host_is_ip(upstream: &str) -> bool {
-    upstream_host(upstream).is_some_and(|host| host.parse::<IpAddr>().is_ok())
-}
-
-#[cfg(feature = "load-balancer")]
-fn validate_load_balancer_backend_keys(upstreams: &[String]) -> Result<(), ConfigError> {
-    let mut seen = HashSet::new();
-    for upstream in upstreams {
-        let normalized = upstream.to_ascii_lowercase();
-        if !seen.insert(backend_authority_key(&normalized)) {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.upstreams",
-                reason: "load-balancer backend key collision detected; use distinct upstream addresses",
-            });
-        }
-    }
-    Ok(())
-}
-
-#[cfg(feature = "load-balancer")]
-fn backend_authority_key(authority: &str) -> u64 {
-    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-
-    struct Fnv1a64(u64);
-
-    impl Hasher for Fnv1a64 {
-        fn finish(&self) -> u64 {
-            self.0
-        }
-
-        fn write(&mut self, bytes: &[u8]) {
-            for byte in bytes {
-                self.0 ^= u64::from(*byte);
-                self.0 = self.0.wrapping_mul(FNV_PRIME);
-            }
-        }
-    }
-
-    let mut hasher = Fnv1a64(FNV_OFFSET);
-    hasher.write(authority.as_bytes());
-    hasher.finish()
-}
-
 fn default_proxy_upstreams_file_refresh_secs() -> u64 {
     5
 }
@@ -1434,7 +1294,8 @@ fn default_upstream_priority_group_min_active() -> usize {
 
 #[cfg(all(test, feature = "load-balancer"))]
 mod tests {
-    use super::*;
+    use crate::config::ConfigError;
+    use crate::config_proxy_upstream_policy::validate_load_balancer_backend_keys;
 
     #[test]
     fn load_balancer_backend_keys_reject_collisions() {

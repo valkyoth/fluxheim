@@ -129,6 +129,9 @@ behavior when the change improves security or project direction.
   `fluxheim-config` module while preserving the public proxy config exports.
 - Split proxy error-page config, path resolution, and validation into a focused
   `fluxheim-config` module while preserving the public proxy config export.
+- Split proxy upstream subset validation, static IP-upstream detection, and
+  load-balancer backend-key collision checks into a focused private
+  `fluxheim-config` module.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.
