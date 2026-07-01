@@ -1,6 +1,5 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::native_http1_proxy::NativeHttp1Proxy;
@@ -126,18 +125,7 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     .handle_load_balanced_connection_takeover(request, prebuffered, stream)
                     .await;
             }
-            let start = self.next_upstream.fetch_add(1, Ordering::Relaxed);
-            let total = self.upstream_slots.len();
-            if total == 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::NotConnected,
-                    "native WebSocket proxy has no upstream",
-                )
-                .into());
-            }
-            let index = self.upstream_slots[start % total];
-            self.upstreams[index]
-                .websocket_tunnel(&request, prebuffered, stream)
+            self.handle_static_connection_takeover(request, prebuffered, stream)
                 .await
         })
     }

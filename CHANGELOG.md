@@ -112,6 +112,9 @@ behavior when the change improves security or project direction.
   stale fallback, peer-fill, cache-lock waiting, and origin-fill budget handling
   into a focused server module, bringing the proxy handler under the 500-line
   modularity target.
+- Split native proxy static and load-balanced WebSocket connection takeover
+  into a focused server module, bringing the load-balanced dispatch module
+  under the 500-line modularity target.
 - Split native proxy construction, config mapping, weighted upstream setup, and
   equality handling into a focused builder module, leaving the core proxy type
   definition small.
