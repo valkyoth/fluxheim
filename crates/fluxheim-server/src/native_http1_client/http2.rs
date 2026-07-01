@@ -41,15 +41,15 @@ pub(super) fn native_http2_upstream_request(
 ) -> Result<NativeHttp2UpstreamRequest, NativeHttp1Error> {
     let method = Method::from_bytes(request.method.as_bytes())
         .map_err(|_| fluxheim_protocol::Http1ParseError::InvalidRequestLine)?;
-    let target = super::upstream_origin_target(request)?;
-    let request_authority = super::valid_request_host(request, authority)?;
+    let target = super::request::upstream_origin_target(request)?;
+    let request_authority = super::request::valid_request_host(request, authority)?;
     let uri = Uri::try_from(format!("{scheme}://{request_authority}{target}"))
         .map_err(|_| fluxheim_protocol::Http1ParseError::InvalidRequestTarget)?;
     let mut headers = HeaderMap::new();
-    let connection_tokens = super::connection_tokens(request);
+    let connection_tokens = super::request::connection_tokens(request);
     for (name, value) in &request.headers {
-        if super::upstream_hop_by_hop_header(name, &connection_tokens)
-            || super::upstream_owned_header_for_request(name, request)
+        if super::request::upstream_hop_by_hop_header(name, &connection_tokens)
+            || super::request::upstream_owned_header_for_request(name, request)
         {
             continue;
         }
@@ -95,8 +95,8 @@ fn native_http2_upstream_trailers(
     }
     let mut trailers = HeaderMap::new();
     for (name, value) in &request.trailers {
-        if super::upstream_hop_by_hop_header(name, &[])
-            || super::upstream_owned_header_for_request(name, request)
+        if super::request::upstream_hop_by_hop_header(name, &[])
+            || super::request::upstream_owned_header_for_request(name, request)
         {
             continue;
         }
