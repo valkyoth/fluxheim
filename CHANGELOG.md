@@ -82,6 +82,10 @@ behavior when the change improves security or project direction.
 - Split storage-bin symlink-safe filesystem helpers into a focused private
   module, bringing `fluxheim-cache/src/storage_bin.rs` below the line-limit
   target.
+- Split admin ops-socket, remote transport/client-certificate, and
+  health/throttle/self-healing config sections into focused
+  `fluxheim-config` modules, leaving `config_admin.rs` as the schema entry
+  point and re-export surface.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.
