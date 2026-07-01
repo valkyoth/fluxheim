@@ -207,6 +207,9 @@ behavior when the change improves security or project direction.
   downstream HTTP/1 test exception.
 - Split server-plan tests into base policy, native-runtime cutover, manifest,
   and listener-inventory modules, removing the oversized server test exception.
+- Split native static-web path resolution, directory listing, response planning,
+  and rooted body-opening helpers into focused child modules, removing the
+  oversized static-web exception.
 
 ## 1.6.36 - 2026-06-30
 

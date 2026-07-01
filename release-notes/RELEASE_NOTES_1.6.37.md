@@ -205,6 +205,9 @@ is clean.
   downstream HTTP/1 test exception.
 - Split server-plan tests into base policy, native-runtime cutover, manifest,
   and listener-inventory modules, removing the oversized server test exception.
+- Split native static-web path resolution, directory listing, response planning,
+  and rooted body-opening helpers into focused child modules, removing the
+  oversized static-web exception.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
