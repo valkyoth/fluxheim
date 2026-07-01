@@ -99,4 +99,12 @@ pub(super) fn configured_health_check(
 }
 
 #[cfg(test)]
-mod tests;
+mod tests_database;
+#[cfg(test)]
+mod tests_exec;
+#[cfg(test)]
+mod tests_grpc;
+#[cfg(test)]
+mod tests_http;
+#[cfg(test)]
+mod tests_tcp;

@@ -132,6 +132,8 @@ behavior when the change improves security or project direction.
 - Split load-balancer HTTP/gRPC health-check construction and response
   validation into a focused health submodule, bringing the production
   `health.rs` dispatcher below the line-limit target.
+- Split load-balancer health-check regression tests by transport/protocol
+  family, removing the temporary oversized health test exception.
 
 ## 1.6.36 - 2026-06-30
 
