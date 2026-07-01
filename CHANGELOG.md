@@ -139,6 +139,10 @@ behavior when the change improves security or project direction.
 - Split root stream-proxy connection dialing/proxying helpers and stream tests
   into child modules, bringing `src/stream_proxy.rs` below the modularity
   target.
+- Split native PHP-FPM response conversion and tests into focused modules,
+  bringing `native_http1_php.rs` below the modularity target.
+- Removed an unused import from the native traffic-mirror module that failed
+  warning-as-error CI profiles.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.

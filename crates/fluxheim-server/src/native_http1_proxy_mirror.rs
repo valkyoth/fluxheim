@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::io::Read as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
