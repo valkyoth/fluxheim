@@ -157,6 +157,9 @@ behavior when the change improves security or project direction.
   leaving the crate root below 800 lines.
 - Split load-balancer runtime stats assembly into a focused private stats
   facade module.
+- Split load-balancer public construction and background-service factory methods
+  into a focused private construction module, bringing the crate root below the
+  line-limit target.
 - Split PHP-FPM FastCGI request parameter translation into a focused private
   module while preserving the existing crate exports.
 - Split PHP-FPM script-name, path-translation, deny-prefix, and static-file
