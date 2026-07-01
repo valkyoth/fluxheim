@@ -139,6 +139,8 @@ behavior when the change improves security or project direction.
   module while preserving route priority and rewrite capture behavior.
 - Split native route request-target parsing and rewrite expansion into a
   focused server module while preserving prefix and regex rewrite behavior.
+- Split native ACME HTTP-01 route responses into a focused server module while
+  preserving challenge method, lookup, and response handling.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
