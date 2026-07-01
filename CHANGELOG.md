@@ -143,6 +143,9 @@ behavior when the change improves security or project direction.
   bringing `native_http1_php.rs` below the modularity target.
 - Removed an unused import from the native traffic-mirror module that failed
   warning-as-error CI profiles.
+- Split the UDP beta proxy listener bootstrap, runtime state/session helpers,
+  and tests into child modules, bringing `src/udp_proxy.rs` below the
+  modularity target.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
