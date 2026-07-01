@@ -147,6 +147,9 @@ behavior when the change improves security or project direction.
   eligibility into a focused child test module.
 - Split native route-proxy routing selection, request-body timeout, gRPC
   policy, and rewritten-path safety tests into a focused child test module.
+- Split native route-proxy response-header overlay/rewrite, request-header
+  mutation/template, inherited-header, disabled-header, and forwarded-header
+  ownership tests into focused child test modules.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
