@@ -170,6 +170,8 @@ is clean.
   module.
 - Split PHP-FPM streamed FastCGI response collection and bounded chunk
   accounting into a focused private module.
+- Split native runtime launch-plan TSV report rendering into a focused module,
+  bringing the launch-plan assembly file below the line-limit target.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

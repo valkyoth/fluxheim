@@ -172,6 +172,8 @@ behavior when the change improves security or project direction.
   module.
 - Split PHP-FPM streamed FastCGI response collection and bounded chunk
   accounting into a focused private module.
+- Split native runtime launch-plan TSV report rendering into a focused module,
+  bringing the launch-plan assembly file below the line-limit target.
 
 ## 1.6.36 - 2026-06-30
 
