@@ -68,6 +68,9 @@ behavior when the change improves security or project direction.
 - Split final proxy config validation orchestration into a focused
   `fluxheim-config` module so `config_proxy.rs` can stay below the 500-line
   modularity target.
+- Split pure PHP config validators and public PHP validation limits into a
+  focused `fluxheim-config` module while preserving the existing `config_php`
+  and root `config` re-exports.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

@@ -35,6 +35,7 @@ pub mod config_net;
 pub mod config_observability;
 pub mod config_path;
 pub mod config_php;
+pub mod config_php_validation;
 pub mod config_proxy;
 pub mod config_proxy_auth;
 pub mod config_proxy_discovery;
