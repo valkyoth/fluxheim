@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{ByteSize, ConfigError, LoadBalanceConfig, validate_optional_timeout_secs};
 use crate::config_load_balance::LoadBalanceConfigFragment;
-use crate::config_net::{normalize_host, upstream_host, valid_authority, valid_upstream_alias};
+use crate::config_net::{normalize_host, upstream_host, valid_authority};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 pub use crate::config_proxy_auth::{AuthRequestConfig, AuthRequestConfigFragment};
 use crate::config_proxy_discovery::{
@@ -14,6 +14,7 @@ use crate::config_proxy_discovery::{
 pub use crate::config_proxy_error_page::ProxyErrorPageConfig;
 pub use crate::config_proxy_protocol::{UpstreamHttpVersion, UpstreamProxyProtocol};
 pub use crate::config_proxy_traffic_mirror::{TrafficMirrorConfig, TrafficMirrorConfigFragment};
+use crate::config_proxy_upstream_attributes::validate_static_upstream_attributes;
 #[cfg(feature = "load-balancer")]
 use crate::config_proxy_upstream_policy::validate_load_balancer_backend_keys;
 use crate::config_proxy_upstream_policy::{
@@ -206,11 +207,6 @@ pub struct ProxyConfigFragment {
 }
 
 pub const MAX_PROXY_UPSTREAMS: usize = 64;
-const MAX_PROXY_UPSTREAM_WEIGHT: usize = 1000;
-const MAX_PROXY_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
-const MAX_PROXY_UPSTREAM_PRIORITY_GROUP: u16 = 1000;
-const MAX_PROXY_UPSTREAM_MAX_IN_FLIGHT: usize = 1_000_000;
-const MAX_PROXY_UPSTREAM_TAGS_PER_BACKEND: usize = 16;
 pub const MAX_PROXY_ERROR_PAGES: usize = 64;
 const MAX_PROXY_UPSTREAM_H2_STREAMS: usize = 1024;
 const MAX_PROXY_UPSTREAM_TCP_KEEPALIVE_COUNT: usize = 128;
@@ -540,183 +536,7 @@ impl ProxyConfig {
                 max: MAX_PROXY_UPSTREAMS,
             });
         }
-        if !self.upstream_weights.is_empty() {
-            if self.upstream.is_some() || self.upstream_weights.len() != self.upstreams.len() {
-                return Err(ConfigError::InvalidProxyUpstreamWeights {
-                    reason: "upstream_weights must match proxy.upstreams and cannot be used with proxy.upstream",
-                });
-            }
-            let mut total_weight = 0usize;
-            for weight in &self.upstream_weights {
-                if *weight == 0 {
-                    return Err(ConfigError::InvalidProxyUpstreamWeights {
-                        reason: "weights must be greater than zero",
-                    });
-                }
-                if *weight > MAX_PROXY_UPSTREAM_WEIGHT {
-                    return Err(ConfigError::InvalidProxyUpstreamWeights {
-                        reason: "each weight must be at most 1000",
-                    });
-                }
-                total_weight = total_weight.saturating_add(*weight);
-            }
-            if total_weight > MAX_PROXY_UPSTREAM_TOTAL_WEIGHT {
-                return Err(ConfigError::InvalidProxyUpstreamWeights {
-                    reason: "total upstream weight is too large",
-                });
-            }
-        }
-        if !self.upstream_priority_groups.is_empty() {
-            if self.upstream.is_some()
-                || self.upstream_priority_groups.len() != self.upstreams.len()
-            {
-                return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                    field: "proxy.upstream_priority_groups",
-                    reason: "upstream_priority_groups must match proxy.upstreams and cannot be used with proxy.upstream",
-                });
-            }
-            if self.upstream_priority_group_min_active == 0
-                || self.upstream_priority_group_min_active > self.upstreams.len()
-            {
-                return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                    field: "proxy.upstream_priority_group_min_active",
-                    reason: "priority group activation threshold must be between 1 and the number of upstreams",
-                });
-            }
-            for priority in &self.upstream_priority_groups {
-                if *priority > MAX_PROXY_UPSTREAM_PRIORITY_GROUP {
-                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                        field: "proxy.upstream_priority_groups",
-                        reason: "priority groups must be at most 1000",
-                    });
-                }
-            }
-        }
-        if self.upstream_priority_groups.is_empty()
-            && self.upstream_priority_group_min_active
-                != default_upstream_priority_group_min_active()
-        {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.upstream_priority_group_min_active",
-                reason: "requires proxy.upstream_priority_groups",
-            });
-        }
-        if !self.upstream_localities.is_empty() {
-            if self.upstream.is_some() || self.upstream_localities.len() != self.upstreams.len() {
-                return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                    field: "proxy.upstream_localities",
-                    reason: "upstream_localities must match proxy.upstreams and cannot be used with proxy.upstream",
-                });
-            }
-            let mut configured_localities = std::collections::HashSet::new();
-            for locality in &self.upstream_localities {
-                if !valid_upstream_alias(locality) {
-                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                        field: "proxy.upstream_localities",
-                        reason: "localities must be 1-64 ASCII letters, digits, dots, dashes, or underscores",
-                    });
-                }
-                configured_localities.insert(locality.to_ascii_lowercase());
-            }
-            let mut seen_preferred = std::collections::HashSet::new();
-            for locality in &self.preferred_upstream_localities {
-                if !valid_upstream_alias(locality) {
-                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                        field: "proxy.preferred_upstream_localities",
-                        reason: "preferred localities must be 1-64 ASCII letters, digits, dots, dashes, or underscores",
-                    });
-                }
-                let normalized = locality.to_ascii_lowercase();
-                if !configured_localities.contains(&normalized) {
-                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                        field: "proxy.preferred_upstream_localities",
-                        reason: "preferred localities must be present in proxy.upstream_localities",
-                    });
-                }
-                if !seen_preferred.insert(normalized) {
-                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                        field: "proxy.preferred_upstream_localities",
-                        reason: "preferred localities must be unique case-insensitively",
-                    });
-                }
-            }
-        } else if !self.preferred_upstream_localities.is_empty() {
-            return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                field: "proxy.preferred_upstream_localities",
-                reason: "requires proxy.upstream_localities",
-            });
-        }
-        if !self.upstream_max_in_flight.is_empty() {
-            if self.upstream.is_some() || self.upstream_max_in_flight.len() != self.upstreams.len()
-            {
-                return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                    field: "proxy.upstream_max_in_flight",
-                    reason: "upstream_max_in_flight must match proxy.upstreams and cannot be used with proxy.upstream",
-                });
-            }
-            for max_in_flight in &self.upstream_max_in_flight {
-                if *max_in_flight == 0 || *max_in_flight > MAX_PROXY_UPSTREAM_MAX_IN_FLIGHT {
-                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                        field: "proxy.upstream_max_in_flight",
-                        reason: "max in-flight values must be between 1 and 1000000",
-                    });
-                }
-            }
-        }
-        if !self.upstream_aliases.is_empty() {
-            if self.upstream.is_some() || self.upstream_aliases.len() != self.upstreams.len() {
-                return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                    field: "proxy.upstream_aliases",
-                    reason: "upstream_aliases must match proxy.upstreams and cannot be used with proxy.upstream",
-                });
-            }
-            let mut seen_aliases = std::collections::HashSet::new();
-            for alias in &self.upstream_aliases {
-                if !valid_upstream_alias(alias) {
-                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                        field: "proxy.upstream_aliases",
-                        reason: "aliases must be 1-64 ASCII letters, digits, dots, dashes, or underscores",
-                    });
-                }
-                if !seen_aliases.insert(alias.to_ascii_lowercase()) {
-                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                        field: "proxy.upstream_aliases",
-                        reason: "aliases must be unique case-insensitively",
-                    });
-                }
-            }
-        }
-        if !self.upstream_tags.is_empty() {
-            if self.upstream.is_some() || self.upstream_tags.len() != self.upstreams.len() {
-                return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                    field: "proxy.upstream_tags",
-                    reason: "upstream_tags must match proxy.upstreams and cannot be used with proxy.upstream",
-                });
-            }
-            for tags in &self.upstream_tags {
-                if tags.len() > MAX_PROXY_UPSTREAM_TAGS_PER_BACKEND {
-                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                        field: "proxy.upstream_tags",
-                        reason: "each upstream may have at most 16 tags",
-                    });
-                }
-                let mut seen_tags = std::collections::HashSet::new();
-                for tag in tags {
-                    if !valid_upstream_alias(tag) {
-                        return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                            field: "proxy.upstream_tags",
-                            reason: "tags must be 1-64 ASCII letters, digits, dots, dashes, or underscores",
-                        });
-                    }
-                    if !seen_tags.insert(tag.to_ascii_lowercase()) {
-                        return Err(ConfigError::InvalidProxyUpstreamPolicy {
-                            field: "proxy.upstream_tags",
-                            reason: "tags must be unique per upstream case-insensitively",
-                        });
-                    }
-                }
-            }
-        }
+        validate_static_upstream_attributes(self)?;
         if self.error_pages.len() > MAX_PROXY_ERROR_PAGES {
             return Err(ConfigError::TooManyProxyErrorPages {
                 max: MAX_PROXY_ERROR_PAGES,
