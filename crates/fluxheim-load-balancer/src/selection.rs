@@ -1,14 +1,13 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::SelectedUpstream;
+use super::backend::RuntimeBackend as Backend;
 use super::backend::{BackendContainer, BackendContainerSnapshot, backend_container_snapshot};
-use super::backend::{BackendIdentity, RuntimeBackend as Backend};
 use super::key::backend_key;
 use super::policy::BackendSelectionPolicy;
 use super::selection_candidate::{
     SelectionContext, backend_candidate_allowed, backend_candidate_allowed_read_only,
 };
-use super::selection_hash::{fnv_route_secret, fnv1a64_with_seed};
 #[cfg(test)]
 use super::selection_ketama::NginxKetamaPoint;
 #[cfg(test)]
@@ -406,78 +405,6 @@ fn least_time_score_is_lower(
                 selected_connections,
                 selected_weight,
             ))
-}
-
-pub(super) fn select_fnv_hash(
-    inner: &impl BackendContainer,
-    inputs: LoadBalancerSelectInputs<'_>,
-) -> Option<SelectedUpstream> {
-    let snapshot = backend_container_snapshot(inner);
-    let context = SelectionContext {
-        passive_health: inputs.passive_health,
-        slow_start: inputs.slow_start,
-        counters: inputs.counters,
-        backend_policy: inputs.backend_policy,
-    };
-    for pass in selection_passes(inputs.backend_policy) {
-        if !priority_activation_satisfied(&snapshot, context, pass) {
-            continue;
-        }
-        if let Some(backend) = select_fnv_hash_with_backup_policy(
-            &snapshot,
-            inputs.key.unwrap_or_default(),
-            inputs.max_iterations,
-            context,
-            pass,
-        ) {
-            return Some(SelectedUpstream::new(backend));
-        }
-    }
-    None
-}
-
-fn select_fnv_hash_with_backup_policy(
-    snapshot: &BackendContainerSnapshot,
-    key: &[u8],
-    max_iterations: usize,
-    context: SelectionContext<'_>,
-    pass: SelectionPass,
-) -> Option<Backend> {
-    let backends: Vec<Backend> = snapshot.backends().iter().cloned().collect();
-    if backends.is_empty() {
-        return None;
-    }
-    let weighted = weighted_backend_indices(&backends);
-    if weighted.is_empty() {
-        return None;
-    }
-
-    let mut seen = std::collections::HashSet::new();
-    let mut index = fnv1a64_with_seed(key, fnv_route_secret());
-    for step in 0..max_iterations.max(1) {
-        let candidate_index = if step == 0 {
-            weighted[index as usize % weighted.len()]
-        } else {
-            index = fnv1a64_with_seed(&index.to_le_bytes(), fnv_route_secret());
-            index as usize % backends.len()
-        };
-        let candidate = &backends[candidate_index];
-        if !seen.insert(backend_key(candidate)) {
-            continue;
-        }
-        if backend_candidate_allowed(snapshot, candidate, context, pass) {
-            return Some(candidate.clone());
-        }
-    }
-    None
-}
-
-pub(super) fn weighted_backend_indices(backends: &[Backend]) -> Vec<usize> {
-    let mut weighted = Vec::new();
-    for (index, backend) in backends.iter().enumerate() {
-        weighted.extend(std::iter::repeat_n(index, backend.weight().max(1)));
-    }
-    weighted
 }
 
 pub(super) fn select_maglev(

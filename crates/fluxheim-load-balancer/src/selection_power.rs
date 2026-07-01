@@ -5,10 +5,11 @@ use super::key::backend_key;
 use super::policy::BackendSelectionPolicy;
 use super::selection::{
     SelectionPass, least_connections_score_is_lower, priority_activation_satisfied,
-    selection_passes, weighted_backend_indices,
+    selection_passes,
 };
 use super::selection_candidate::{SelectionContext, backend_candidate_allowed};
 use super::selection_hash::random_u64;
+use super::selection_weight::weighted_backend_indices;
 use super::state::{BackendConnectionCounters, PassiveHealthState, SlowStartState};
 
 pub(super) fn select_power_of_two(

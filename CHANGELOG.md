@@ -108,6 +108,9 @@ behavior when the change improves security or project direction.
   into a focused private load-balancer selection module.
 - Split consistent-hash, nginx-compatible Ketama selection, and bounded-load
   consistent selection into a focused private load-balancer selection module.
+- Split FNV hash selection and shared weighted-index expansion into focused
+  private load-balancer selection modules, bringing `selection.rs` below the
+  line-limit target.
 
 ## 1.6.36 - 2026-06-30
 

@@ -33,10 +33,12 @@ mod policy;
 mod selection;
 mod selection_candidate;
 mod selection_consistent;
+mod selection_fnv;
 mod selection_hash;
 mod selection_ketama;
 mod selection_maglev;
 mod selection_power;
+mod selection_weight;
 mod state;
 mod state_file;
 
@@ -80,12 +82,13 @@ use self::policy::{
     BackendSelectionPolicy, BackendStatsInputs, backend_aliases, load_balancer_backend_stats,
 };
 use self::selection::{
-    LoadBalancerSelectInputs, SelectionPass, select_fnv_hash, select_least_connections,
-    select_least_sessions, select_least_time, select_maglev, select_weighted_round_robin,
+    LoadBalancerSelectInputs, SelectionPass, select_least_connections, select_least_sessions,
+    select_least_time, select_maglev, select_weighted_round_robin,
 };
 use self::selection_consistent::{
     select_bounded_load_consistent, select_consistent_hash, select_nginx_consistent_hash,
 };
+use self::selection_fnv::select_fnv_hash;
 use self::selection_ketama::NginxKetamaTable;
 use self::selection_maglev::MaglevTable;
 use self::selection_power::select_power_of_two;
