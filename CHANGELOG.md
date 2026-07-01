@@ -152,6 +152,8 @@ behavior when the change improves security or project direction.
   selection, and stats orchestration.
 - Split load-balancer queue wait/timeout handling into a focused private module,
   leaving the crate root below 800 lines.
+- Split load-balancer runtime stats assembly into a focused private stats
+  facade module.
 
 ## 1.6.36 - 2026-06-30
 
