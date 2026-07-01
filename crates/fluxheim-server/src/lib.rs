@@ -22,6 +22,8 @@ mod native_http1_host_router;
 mod native_http1_php;
 mod native_http1_plan;
 mod native_http1_proxy;
+mod native_http1_proxy_metrics;
+mod native_http1_proxy_runtime;
 mod native_http1_route_proxy;
 mod native_http1_static_web;
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -74,14 +76,16 @@ pub use native_http1_plan::{
 };
 #[cfg(feature = "load-balancer")]
 pub use native_http1_proxy::NativeLoadBalancerAdminPool;
-pub use native_http1_proxy::{
-    NativeCacheMetricsRecorder, NativeCacheRuntimeTotals, NativeHttp1Proxy,
-    NativeHttp1ProxyConfigError, NativeProxyMetricsRecorder, install_native_cache_metrics_recorder,
-    install_native_proxy_metrics_recorder, native_cache_runtime_totals,
-    purge_native_memory_cache_path_exact, purge_native_memory_cache_path_pattern,
-    purge_native_memory_cache_path_prefix, purge_native_memory_cache_primary,
-    purge_native_memory_cache_stale, purge_native_memory_cache_tag,
-    purge_native_memory_cache_user_tag,
+pub use native_http1_proxy::{NativeHttp1Proxy, NativeHttp1ProxyConfigError};
+pub use native_http1_proxy_metrics::{
+    NativeCacheMetricsRecorder, NativeProxyMetricsRecorder, install_native_cache_metrics_recorder,
+    install_native_proxy_metrics_recorder,
+};
+pub use native_http1_proxy_runtime::{
+    NativeCacheRuntimeTotals, native_cache_runtime_totals, purge_native_memory_cache_path_exact,
+    purge_native_memory_cache_path_pattern, purge_native_memory_cache_path_prefix,
+    purge_native_memory_cache_primary, purge_native_memory_cache_stale,
+    purge_native_memory_cache_tag, purge_native_memory_cache_user_tag,
 };
 pub use native_http1_route_proxy::{
     NativeHttp1RouteProxy, NativeHttp1RouteProxyConfigError, NativeHttp1RouteProxyRoute,

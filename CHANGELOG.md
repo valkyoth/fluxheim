@@ -116,6 +116,9 @@ behavior when the change improves security or project direction.
 - Split root config validation orchestration and cross-domain compliance checks
   into a focused `fluxheim-config` module, bringing `config.rs` below the
   line-limit target.
+- Split native HTTP/1 proxy cache runtime stats, memory purge registries, and
+  Prometheus recorder hooks into focused server modules while preserving the
+  existing public exports.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
