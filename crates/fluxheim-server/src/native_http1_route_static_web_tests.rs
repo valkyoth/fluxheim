@@ -6,14 +6,14 @@ use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-#[cfg(feature = "php-fpm")]
-use crate::native_http1_php::NativePhpScriptResolve;
 use crate::{
     DownstreamHttp1Policy, NativeHttp1RouteProxy, NativeHttp1RouteProxyRoute, NativeHttp1StaticWeb,
     serve_native_http1_listener,
 };
 
-async fn route_proxy_listener(route_proxy: NativeHttp1RouteProxy) -> std::net::SocketAddr {
+pub(crate) async fn route_proxy_listener(
+    route_proxy: NativeHttp1RouteProxy,
+) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -36,7 +36,7 @@ async fn route_proxy_listener(route_proxy: NativeHttp1RouteProxy) -> std::net::S
     addr
 }
 
-async fn downstream_get(proxy: std::net::SocketAddr, path: &str) -> String {
+pub(crate) async fn downstream_get(proxy: std::net::SocketAddr, path: &str) -> String {
     downstream_request(
         proxy,
         &format!("GET {path} HTTP/1.1\r\nHost: route.test\r\nConnection: close\r\n\r\n"),
@@ -52,7 +52,7 @@ async fn downstream_post(proxy: std::net::SocketAddr, path: &str) -> String {
     .await
 }
 
-async fn downstream_request(proxy: std::net::SocketAddr, request: &str) -> String {
+pub(crate) async fn downstream_request(proxy: std::net::SocketAddr, request: &str) -> String {
     let mut client = TcpStream::connect(proxy).await.unwrap();
     client.write_all(request.as_bytes()).await.unwrap();
     let mut response = Vec::new();
@@ -60,7 +60,7 @@ async fn downstream_request(proxy: std::net::SocketAddr, request: &str) -> Strin
     String::from_utf8(response).unwrap()
 }
 
-fn response_header(response: &str, name: &str) -> Option<String> {
+pub(crate) fn response_header(response: &str, name: &str) -> Option<String> {
     response.lines().find_map(|line| {
         let (header_name, value) = line.split_once(':')?;
         header_name
@@ -69,7 +69,7 @@ fn response_header(response: &str, name: &str) -> Option<String> {
     })
 }
 
-fn native_static_web(root: &std::path::Path) -> NativeHttp1StaticWeb {
+pub(crate) fn native_static_web(root: &std::path::Path) -> NativeHttp1StaticWeb {
     NativeHttp1StaticWeb::from_config(&fluxheim_config::WebConfig {
         root: Some(root.to_path_buf()),
         cache_control: "public, max-age=120".to_owned(),
@@ -100,96 +100,6 @@ fn native_static_web_with_cache(root: &std::path::Path) -> NativeHttp1StaticWeb 
     )
     .unwrap()
     .unwrap()
-}
-
-#[cfg(feature = "php-fpm")]
-fn php_config() -> fluxheim_config::PhpConfig {
-    fluxheim_config::PhpConfig {
-        enabled: true,
-        path_info: fluxheim_config::PhpPathInfoMode::Split,
-        ..Default::default()
-    }
-}
-
-#[cfg(feature = "php-fpm")]
-#[test]
-fn native_static_web_resolves_explicit_php_script_for_native_adapter() {
-    let root = TempDir::new().unwrap();
-    fs::write(root.path().join("index.php"), b"<?php echo 'ok';").unwrap();
-    let web = native_static_web(root.path());
-
-    let resolution = web
-        .resolve_php_script(&php_config(), "/index.php/user", false)
-        .unwrap();
-
-    let NativePhpScriptResolve::Execute(resolution) = resolution else {
-        panic!("expected executable PHP script");
-    };
-    assert_eq!(resolution.local_path, root.path().join("index.php"));
-    assert_eq!(resolution.script_name, "/index.php");
-    assert_eq!(resolution.path_info, "/user");
-
-    root.close().unwrap();
-}
-
-#[cfg(feature = "php-fpm")]
-#[test]
-fn native_static_web_php_front_controller_uses_index_when_missing_path() {
-    let root = TempDir::new().unwrap();
-    fs::write(root.path().join("index.php"), b"<?php echo 'ok';").unwrap();
-    let web = native_static_web(root.path());
-
-    let resolution = web
-        .resolve_php_script(&php_config(), "/missing/page", false)
-        .unwrap();
-
-    let NativePhpScriptResolve::Execute(resolution) = resolution else {
-        panic!("expected front-controller PHP script");
-    };
-    assert_eq!(resolution.local_path, root.path().join("index.php"));
-    assert_eq!(resolution.script_name, "/index.php");
-    assert!(resolution.path_info.is_empty());
-
-    root.close().unwrap();
-}
-
-#[cfg(feature = "php-fpm")]
-#[test]
-fn native_static_web_php_resolver_declines_existing_static_when_configured() {
-    let root = TempDir::new().unwrap();
-    fs::write(root.path().join("asset.txt"), b"static").unwrap();
-    fs::write(root.path().join("index.php"), b"<?php echo 'ok';").unwrap();
-    let web = native_static_web(root.path());
-
-    let resolution = web
-        .resolve_php_script(&php_config(), "/asset.txt", true)
-        .unwrap();
-
-    assert_eq!(resolution, NativePhpScriptResolve::Decline);
-
-    root.close().unwrap();
-}
-
-#[cfg(feature = "php-fpm")]
-#[test]
-fn native_static_web_php_resolver_rejects_denied_prefix() {
-    let root = TempDir::new().unwrap();
-    fs::create_dir(root.path().join("admin")).unwrap();
-    fs::write(root.path().join("admin/index.php"), b"<?php echo 'no';").unwrap();
-    let web = native_static_web(root.path());
-    let php = fluxheim_config::PhpConfig {
-        enabled: true,
-        deny_path_prefixes: vec!["/admin".to_owned()],
-        ..php_config()
-    };
-
-    let resolution = web
-        .resolve_php_script(&php, "/admin/index.php", false)
-        .unwrap();
-
-    assert_eq!(resolution, NativePhpScriptResolve::Forbidden);
-
-    root.close().unwrap();
 }
 
 #[tokio::test]

@@ -177,6 +177,8 @@ behavior when the change improves security or project direction.
 - Split the remaining PHP-FPM crate regression suite into focused I/O/policy,
   parameter/script, and response/config test modules, reducing the crate root to
   a small facade below the line-limit target.
+- Split native route static-web PHP resolution tests into a focused module,
+  bringing the route static-web test module below the line-limit target.
 - Split PHP-FPM endpoint selection, timeout classification, retry policy, and
   retry deadline helpers into a focused private module.
 - Split PHP-FPM request-body replay, zeroized memory body ownership, spool-file

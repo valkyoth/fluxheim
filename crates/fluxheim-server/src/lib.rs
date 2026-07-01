@@ -181,6 +181,10 @@ mod native_http1_route_proxy_tests;
 #[path = "native_http1_route_static_web_tests.rs"]
 mod native_http1_route_static_web_tests;
 
+#[cfg(all(test, feature = "php-fpm"))]
+#[path = "native_http1_route_static_web_php_tests.rs"]
+mod native_http1_route_static_web_php_tests;
+
 #[cfg(all(
     test,
     any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")

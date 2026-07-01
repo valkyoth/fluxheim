@@ -175,6 +175,8 @@ is clean.
 - Split the remaining PHP-FPM crate regression suite into focused I/O/policy,
   parameter/script, and response/config test modules, reducing the crate root to
   a small facade below the line-limit target.
+- Split native route static-web PHP resolution tests into a focused module,
+  bringing the route static-web test module below the line-limit target.
 - Split PHP-FPM keepalive pool management and one-shot FastCGI execution into a
   focused private module while preserving the public crate exports.
 - Split PHP-FPM endpoint selection, timeout classification, retry policy, and
