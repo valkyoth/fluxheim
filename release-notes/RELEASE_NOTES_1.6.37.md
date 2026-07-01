@@ -109,6 +109,8 @@ is clean.
 - Split FNV hash selection and shared weighted-index expansion into focused
   private load-balancer selection modules, bringing `selection.rs` below the
   line-limit target.
+- Move `fluxheim-cache` header policy tests out of `src/headers.rs`, leaving
+  the cache header facade below the line-limit target.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

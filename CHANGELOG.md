@@ -111,6 +111,8 @@ behavior when the change improves security or project direction.
 - Split FNV hash selection and shared weighted-index expansion into focused
   private load-balancer selection modules, bringing `selection.rs` below the
   line-limit target.
+- Move `fluxheim-cache` header policy tests out of `src/headers.rs`, leaving
+  the cache header facade below the line-limit target.
 
 ## 1.6.36 - 2026-06-30
 
