@@ -9,15 +9,7 @@ use fluxheim_protocol::{
     parse_http1_request_head,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
-use tokio::net::TcpListener;
-#[cfg(unix)]
-use tokio::net::UnixListener;
-use tokio::sync::Semaphore;
 use tokio::time::timeout;
-#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
-use tokio_openssl::SslStream;
-#[cfg(feature = "tls-rustls-backend")]
-use tokio_rustls::TlsAcceptor;
 use zeroize::Zeroizing;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -27,10 +19,22 @@ use crate::{DownstreamHttp1Policy, ProxyProtocolPolicy};
 const READ_CHUNK_BYTES: usize = 8192;
 
 mod body;
+mod listener;
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+mod openssl_listener;
 mod proxy_protocol;
 mod request;
 mod response;
+#[cfg(feature = "tls-rustls-backend")]
+mod rustls_listener;
 use body::read_body;
+#[cfg(unix)]
+pub use listener::serve_native_http1_unix_listener;
+pub use listener::{serve_native_http1_listener, serve_native_http1_listener_with_proxy_protocol};
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+pub use openssl_listener::{
+    serve_native_http1_and_http2_openssl_listener, serve_native_http1_openssl_listener,
+};
 use proxy_protocol::read_proxy_protocol_source;
 pub use request::{
     NativeHttp1GeoContext, NativeHttp1Request, NativeHttp1RequestContext,
@@ -38,6 +42,10 @@ pub use request::{
 };
 use response::write_response;
 pub use response::{NativeHttp1Response, NativeHttp1ResponseWritePolicy};
+#[cfg(feature = "tls-rustls-backend")]
+pub use rustls_listener::{
+    serve_native_http1_and_http2_rustls_listener, serve_native_http1_rustls_listener,
+};
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -154,7 +162,7 @@ where
     .await
 }
 
-async fn serve_native_http1_connection_with_context<S, H>(
+pub(super) async fn serve_native_http1_connection_with_context<S, H>(
     mut stream: S,
     peer_addr: Option<SocketAddr>,
     request_context: NativeHttp1RequestContext,
@@ -280,288 +288,7 @@ where
     }
 }
 
-pub async fn serve_native_http1_listener<H, F>(
-    listener: TcpListener,
-    policy: DownstreamHttp1Policy,
-    handler: Arc<H>,
-    shutdown: F,
-) -> Result<(), NativeHttp1Error>
-where
-    H: NativeHttp1Handler,
-    F: Future<Output = ()> + Send,
-{
-    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
-    let local_addr = listener.local_addr().ok();
-    tokio::pin!(shutdown);
-    loop {
-        tokio::select! {
-            () = &mut shutdown => return Ok(()),
-            accepted = listener.accept() => {
-                let (stream, peer_addr) = accepted?;
-                let Ok(permit) = semaphore.clone().try_acquire_owned() else {
-                    log::warn!(
-                        target: "fluxheim::native_http1",
-                        "HTTP/1 connection rejected: listener at capacity; peer={peer_addr}; limit={}",
-                        policy.max_connections());
-                    continue;
-                };
-                let handler = handler.clone();
-                tokio::spawn(async move {
-                    let request_context = NativeHttp1RequestContext {
-                        local_addr,
-                        ..NativeHttp1RequestContext::default()
-                    };
-                    let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, policy, handler).await;
-                    drop(permit);
-                });
-            }
-        }
-    }
-}
-
-pub async fn serve_native_http1_listener_with_proxy_protocol<H, F>(
-    listener: TcpListener,
-    policy: DownstreamHttp1Policy,
-    proxy_protocol: ProxyProtocolPolicy,
-    handler: Arc<H>,
-    shutdown: F,
-) -> Result<(), NativeHttp1Error>
-where
-    H: NativeHttp1Handler,
-    F: Future<Output = ()> + Send,
-{
-    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
-    let local_addr = listener.local_addr().ok();
-    tokio::pin!(shutdown);
-    loop {
-        tokio::select! {
-            () = &mut shutdown => return Ok(()),
-            accepted = listener.accept() => {
-                let (stream, peer_addr) = accepted?;
-                let Ok(permit) = semaphore.clone().try_acquire_owned() else {
-                    log::warn!(
-                        target: "fluxheim::native_http1",
-                        "HTTP/1 PROXY-protocol connection rejected: listener at capacity; peer={peer_addr}; limit={}",
-                        policy.max_connections());
-                    continue;
-                };
-                let handler = handler.clone();
-                let proxy_protocol = proxy_protocol.clone();
-                tokio::spawn(async move {
-                    let result = serve_native_http1_proxy_protocol_connection(
-                        stream,
-                        peer_addr,
-                        local_addr,
-                        proxy_protocol,
-                        policy,
-                        handler,
-                    )
-                    .await;
-                    if let Err(error) = result {
-                        log::debug!(
-                            target: "fluxheim::native_http1",
-                            "HTTP/1 PROXY-protocol connection failed; peer={peer_addr}; error={error}"
-                        );
-                    }
-                    drop(permit);
-                });
-            }
-        }
-    }
-}
-
-#[cfg(unix)]
-pub async fn serve_native_http1_unix_listener<H, F>(
-    listener: UnixListener,
-    policy: DownstreamHttp1Policy,
-    handler: Arc<H>,
-    shutdown: F,
-) -> Result<(), NativeHttp1Error>
-where
-    H: NativeHttp1Handler,
-    F: Future<Output = ()> + Send,
-{
-    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
-    tokio::pin!(shutdown);
-    loop {
-        tokio::select! {
-            () = &mut shutdown => return Ok(()),
-            accepted = listener.accept() => {
-                let (stream, _) = accepted?;
-                let Ok(permit) = semaphore.clone().try_acquire_owned() else {
-                    log::warn!(
-                        target: "fluxheim::native_http1",
-                        "HTTP/1 Unix listener connection rejected: listener at capacity; limit={}",
-                        policy.max_connections());
-                    continue;
-                };
-                let handler = handler.clone();
-                tokio::spawn(async move {
-                    let request_context = NativeHttp1RequestContext::default();
-                    let _ = serve_native_http1_connection_with_context(
-                        stream,
-                        None,
-                        request_context,
-                        policy,
-                        handler,
-                    )
-                    .await;
-                    drop(permit);
-                });
-            }
-        }
-    }
-}
-
-#[cfg(feature = "tls-rustls-backend")]
-pub async fn serve_native_http1_rustls_listener<H, F>(
-    listener: TcpListener,
-    policy: DownstreamHttp1Policy,
-    tls_config: Arc<rustls::ServerConfig>,
-    handler: Arc<H>,
-    shutdown: F,
-) -> Result<(), NativeHttp1Error>
-where
-    H: NativeHttp1Handler,
-    F: Future<Output = ()> + Send,
-{
-    let acceptor = TlsAcceptor::from(tls_config);
-    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
-    let local_addr = listener.local_addr().ok();
-    tokio::pin!(shutdown);
-    loop {
-        tokio::select! {
-            () = &mut shutdown => return Ok(()),
-            accepted = listener.accept() => {
-                let (stream, peer_addr) = accepted?;
-                let Ok(permit) = semaphore.clone().try_acquire_owned() else {
-                    log::warn!(
-                        target: "fluxheim::native_http1",
-                        "HTTPS HTTP/1 connection rejected: listener at capacity; peer={peer_addr}; limit={}",
-                        policy.max_connections());
-                    continue;
-                };
-                let acceptor = acceptor.clone();
-                let handler = handler.clone();
-                tokio::spawn(async move {
-                    let handshake = timeout(policy.tls_handshake_timeout(), acceptor.accept(stream)).await;
-                    match handshake {
-                        Ok(Ok(stream)) => {
-                            let mut request_context = native_rustls_request_context(&stream);
-                            request_context.local_addr = local_addr;
-                            let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, policy, handler).await;
-                        }
-                        Ok(Err(error)) => {
-                            log::debug!(
-                                target: "fluxheim::native_http1",
-                                "HTTPS HTTP/1 TLS handshake failed; peer={peer_addr}; error={error}"
-                            );
-                        }
-                        Err(_) => {
-                            log::debug!(
-                                target: "fluxheim::native_http1",
-                                "HTTPS HTTP/1 TLS handshake timed out; peer={peer_addr}; timeout_secs={}",
-                                policy.tls_handshake_timeout().as_secs()
-                            );
-                        }
-                    }
-                    drop(permit);
-                });
-            }
-        }
-    }
-}
-
-#[cfg(feature = "tls-rustls-backend")]
-pub async fn serve_native_http1_and_http2_rustls_listener<H, F>(
-    listener: TcpListener,
-    http1_policy: DownstreamHttp1Policy,
-    tls_config: Arc<rustls::ServerConfig>,
-    h2_dispatch: NativeTlsHttp2Dispatch,
-    handler: Arc<H>,
-    shutdown: F,
-) -> Result<(), NativeHttp1Error>
-where
-    H: NativeHttp1Handler,
-    F: Future<Output = ()> + Send,
-{
-    let acceptor = TlsAcceptor::from(tls_config);
-    let semaphore = Arc::new(Semaphore::new(http1_policy.max_connections()));
-    let local_addr = listener.local_addr().ok();
-    tokio::pin!(shutdown);
-    loop {
-        tokio::select! {
-            () = &mut shutdown => return Ok(()),
-            accepted = listener.accept() => {
-                let (stream, peer_addr) = accepted?;
-                let Ok(permit) = semaphore.clone().try_acquire_owned() else {
-                    log::warn!(
-                        target: "fluxheim::native_http1",
-                        "HTTPS connection rejected: listener at capacity; peer={peer_addr}; limit={}",
-                        http1_policy.max_connections());
-                    continue;
-                };
-                let acceptor = acceptor.clone();
-                let handler = handler.clone();
-                tokio::spawn(async move {
-                    let handshake = timeout(http1_policy.tls_handshake_timeout(), acceptor.accept(stream)).await;
-                    match handshake {
-                        Ok(Ok(stream)) => {
-                            let mut request_context = native_rustls_request_context(&stream);
-                            request_context.local_addr = local_addr;
-                            match stream.get_ref().1.alpn_protocol() {
-                                Some(b"h2") if h2_dispatch.http2_allowed => {
-                                    let h2_handler = Arc::new(crate::NativeHttp2RouteAdapter::new(
-                                        handler,
-                                        Some(peer_addr),
-                                        request_context,
-                                    ));
-                                    if let Err(error) = crate::serve_native_http2_connection(
-                                        stream,
-                                        h2_dispatch.policy,
-                                        h2_handler,
-                                    )
-                                    .await
-                                    {
-                                        log::debug!(
-                                            target: "fluxheim::native_http2",
-                                            "HTTPS HTTP/2 connection failed; peer={peer_addr}; error={error}"
-                                        );
-                                    }
-                                }
-                                Some(b"http/1.1") | None if h2_dispatch.http1_allowed => {
-                                    let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, http1_policy, handler).await;
-                                }
-                                selected => {
-                                    log::debug!(
-                                        target: "fluxheim::native_http1",
-                                        "HTTPS connection negotiated unsupported ALPN; peer={peer_addr}; alpn={selected:?}"
-                                    );
-                                }
-                            }
-                        }
-                        Ok(Err(error)) => {
-                            log::debug!(
-                                target: "fluxheim::native_http1",
-                                "HTTPS TLS handshake failed; peer={peer_addr}; error={error}"
-                            );
-                        }
-                        Err(_) => {
-                            log::debug!(
-                                target: "fluxheim::native_http1",
-                                "HTTPS TLS handshake timed out; peer={peer_addr}; timeout_secs={}",
-                                http1_policy.tls_handshake_timeout().as_secs()
-                            );
-                        }
-                    }
-                    drop(permit);
-                });
-            }
-        }
-    }
-}
-
-async fn serve_native_http1_proxy_protocol_connection<S, H>(
+pub(super) async fn serve_native_http1_proxy_protocol_connection<S, H>(
     mut stream: S,
     peer_addr: SocketAddr,
     local_addr: Option<SocketAddr>,
@@ -597,189 +324,6 @@ where
         handler,
     )
     .await
-}
-
-#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
-pub async fn serve_native_http1_openssl_listener<H, F>(
-    listener: TcpListener,
-    policy: DownstreamHttp1Policy,
-    acceptor: Arc<openssl::ssl::SslAcceptor>,
-    handler: Arc<H>,
-    shutdown: F,
-) -> Result<(), NativeHttp1Error>
-where
-    H: NativeHttp1Handler,
-    F: Future<Output = ()> + Send,
-{
-    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
-    let local_addr = listener.local_addr().ok();
-    tokio::pin!(shutdown);
-    loop {
-        tokio::select! {
-            () = &mut shutdown => return Ok(()),
-            accepted = listener.accept() => {
-                let (stream, peer_addr) = accepted?;
-                let Ok(permit) = semaphore.clone().try_acquire_owned() else {
-                    log::warn!(
-                        target: "fluxheim::native_http1",
-                        "HTTPS HTTP/1 connection rejected: listener at capacity; peer={peer_addr}; limit={}",
-                        policy.max_connections());
-                    continue;
-                };
-                let acceptor = acceptor.clone();
-                let handler = handler.clone();
-                tokio::spawn(async move {
-                    let stream = match native_openssl_server_stream(&acceptor, stream) {
-                        Ok(stream) => stream,
-                        Err(error) => {
-                            log::debug!(
-                                target: "fluxheim::native_http1",
-                                "HTTPS HTTP/1 OpenSSL stream setup failed; peer={peer_addr}; error={error}"
-                            );
-                            drop(permit);
-                            return;
-                        }
-                    };
-                    let mut stream = stream;
-                    let handshake =
-                        timeout(policy.tls_handshake_timeout(), std::pin::Pin::new(&mut stream).accept())
-                            .await;
-                    match handshake {
-                        Ok(Ok(())) => {
-                            let mut request_context = native_openssl_request_context(&stream);
-                            request_context.local_addr = local_addr;
-                            let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, policy, handler).await;
-                        }
-                        Ok(Err(error)) => {
-                            log::debug!(
-                                target: "fluxheim::native_http1",
-                                "HTTPS HTTP/1 TLS handshake failed; peer={peer_addr}; error={error}"
-                            );
-                        }
-                        Err(_) => {
-                            log::debug!(
-                                target: "fluxheim::native_http1",
-                                "HTTPS HTTP/1 TLS handshake timed out; peer={peer_addr}; timeout_secs={}",
-                                policy.tls_handshake_timeout().as_secs()
-                            );
-                        }
-                    }
-                    drop(permit);
-                });
-            }
-        }
-    }
-}
-
-#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
-pub async fn serve_native_http1_and_http2_openssl_listener<H, F>(
-    listener: TcpListener,
-    http1_policy: DownstreamHttp1Policy,
-    acceptor: Arc<openssl::ssl::SslAcceptor>,
-    h2_dispatch: NativeTlsHttp2Dispatch,
-    handler: Arc<H>,
-    shutdown: F,
-) -> Result<(), NativeHttp1Error>
-where
-    H: NativeHttp1Handler,
-    F: Future<Output = ()> + Send,
-{
-    let semaphore = Arc::new(Semaphore::new(http1_policy.max_connections()));
-    let local_addr = listener.local_addr().ok();
-    tokio::pin!(shutdown);
-    loop {
-        tokio::select! {
-            () = &mut shutdown => return Ok(()),
-            accepted = listener.accept() => {
-                let (stream, peer_addr) = accepted?;
-                let Ok(permit) = semaphore.clone().try_acquire_owned() else {
-                    log::warn!(
-                        target: "fluxheim::native_http1",
-                        "HTTPS connection rejected: listener at capacity; peer={peer_addr}; limit={}",
-                        http1_policy.max_connections());
-                    continue;
-                };
-                let acceptor = acceptor.clone();
-                let handler = handler.clone();
-                tokio::spawn(async move {
-                    let stream = match native_openssl_server_stream(&acceptor, stream) {
-                        Ok(stream) => stream,
-                        Err(error) => {
-                            log::debug!(
-                                target: "fluxheim::native_http1",
-                                "HTTPS OpenSSL stream setup failed; peer={peer_addr}; error={error}"
-                            );
-                            drop(permit);
-                            return;
-                        }
-                    };
-                    let mut stream = stream;
-                    let handshake =
-                        timeout(http1_policy.tls_handshake_timeout(), std::pin::Pin::new(&mut stream).accept())
-                            .await;
-                    match handshake {
-                        Ok(Ok(())) => {
-                            let mut request_context = native_openssl_request_context(&stream);
-                            request_context.local_addr = local_addr;
-                            match stream.ssl().selected_alpn_protocol() {
-                                Some(b"h2") if h2_dispatch.http2_allowed => {
-                                    let h2_handler = Arc::new(crate::NativeHttp2RouteAdapter::new(
-                                        handler,
-                                        Some(peer_addr),
-                                        request_context,
-                                    ));
-                                    if let Err(error) = crate::serve_native_http2_connection(
-                                        stream,
-                                        h2_dispatch.policy,
-                                        h2_handler,
-                                    )
-                                    .await
-                                    {
-                                        log::debug!(
-                                            target: "fluxheim::native_http2",
-                                            "HTTPS HTTP/2 connection failed; peer={peer_addr}; error={error}"
-                                        );
-                                    }
-                                }
-                                Some(b"http/1.1") | None if h2_dispatch.http1_allowed => {
-                                    let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, http1_policy, handler).await;
-                                }
-                                selected => {
-                                    log::debug!(
-                                        target: "fluxheim::native_http1",
-                                        "HTTPS connection negotiated unsupported ALPN; peer={peer_addr}; alpn={selected:?}"
-                                    );
-                                }
-                            }
-                        }
-                        Ok(Err(error)) => {
-                            log::debug!(
-                                target: "fluxheim::native_http1",
-                                "HTTPS TLS handshake failed; peer={peer_addr}; error={error}"
-                            );
-                        }
-                        Err(_) => {
-                            log::debug!(
-                                target: "fluxheim::native_http1",
-                                "HTTPS TLS handshake timed out; peer={peer_addr}; timeout_secs={}",
-                                http1_policy.tls_handshake_timeout().as_secs()
-                            );
-                        }
-                    }
-                    drop(permit);
-                });
-            }
-        }
-    }
-}
-
-#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
-fn native_openssl_server_stream(
-    acceptor: &openssl::ssl::SslAcceptor,
-    stream: tokio::net::TcpStream,
-) -> Result<SslStream<tokio::net::TcpStream>, openssl::error::ErrorStack> {
-    let ssl = openssl::ssl::Ssl::new(acceptor.context())?;
-    SslStream::new(ssl, stream)
 }
 
 async fn write_bad_request<S>(stream: &mut S) -> Result<(), NativeHttp1Error>
@@ -848,80 +392,8 @@ fn owned_headers(headers: &[Http1Header<'_>]) -> Vec<(String, String)> {
         .collect()
 }
 
-#[cfg(feature = "tls-rustls-backend")]
-fn native_rustls_request_context<S>(
-    stream: &tokio_rustls::server::TlsStream<S>,
-) -> NativeHttp1RequestContext {
-    let (_, connection) = stream.get_ref();
-    NativeHttp1RequestContext {
-        local_addr: None,
-        effective_client_addr: None,
-        downstream_tls: true,
-        tls_identity: Some(NativeHttp1TlsClientIdentity {
-            cipher: connection
-                .negotiated_cipher_suite()
-                .map(|suite| format!("{:?}", suite.suite())),
-            version: connection
-                .protocol_version()
-                .map(|version| format!("{version:?}")),
-            organization: None,
-            serial_number: None,
-            cert_sha256: connection
-                .peer_certificates()
-                .and_then(|certificates| certificates.first())
-                .map(|certificate| sha256_hex(certificate.as_ref())),
-        }),
-        geo_context: None,
-    }
-}
-
-#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
-fn native_openssl_request_context<S>(stream: &SslStream<S>) -> NativeHttp1RequestContext {
-    let ssl = stream.ssl();
-    let peer_certificate = ssl.peer_certificate();
-    NativeHttp1RequestContext {
-        local_addr: None,
-        effective_client_addr: None,
-        downstream_tls: true,
-        tls_identity: Some(NativeHttp1TlsClientIdentity {
-            cipher: ssl.current_cipher().map(|cipher| cipher.name().to_owned()),
-            version: Some(ssl.version_str().to_owned()),
-            organization: peer_certificate
-                .as_ref()
-                .and_then(openssl_certificate_organization),
-            serial_number: peer_certificate
-                .as_ref()
-                .and_then(openssl_certificate_serial),
-            cert_sha256: peer_certificate
-                .as_ref()
-                .and_then(|certificate| certificate.to_der().ok())
-                .map(|der| sha256_hex(&der)),
-        }),
-        geo_context: None,
-    }
-}
-
-#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
-fn openssl_certificate_organization(certificate: &openssl::x509::X509) -> Option<String> {
-    certificate
-        .subject_name()
-        .entries_by_nid(openssl::nid::Nid::ORGANIZATIONNAME)
-        .next()
-        .and_then(|entry| entry.data().to_string().ok())
-}
-
-#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
-fn openssl_certificate_serial(certificate: &openssl::x509::X509) -> Option<String> {
-    certificate
-        .serial_number()
-        .to_bn()
-        .ok()
-        .and_then(|serial| serial.to_hex_str().ok())
-        .map(|serial| serial.to_string())
-}
-
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
-fn sha256_hex(input: &[u8]) -> String {
+pub(super) fn sha256_hex(input: &[u8]) -> String {
     use sha2::{Digest, Sha256};
 
     let digest = Sha256::digest(input);

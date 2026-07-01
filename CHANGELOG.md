@@ -163,6 +163,9 @@ behavior when the change improves security or project direction.
   checks into a focused child module while preserving listener behavior.
 - Split native downstream HTTP/1 request-body reading, content-length handling,
   chunked decoding, and body timeout wrapping into a focused child module.
+- Split native downstream HTTP/1 plain TCP/Unix listener accept loops and
+  Rustls/OpenSSL TLS listener accept loops into focused child modules, bringing
+  `native_http1.rs` below the modularity target.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
