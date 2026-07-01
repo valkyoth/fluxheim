@@ -36,6 +36,7 @@ pub mod config_observability;
 pub mod config_path;
 pub mod config_php;
 pub mod config_proxy;
+pub mod config_proxy_auth;
 pub mod config_route;
 pub mod config_server;
 pub mod config_stream;
