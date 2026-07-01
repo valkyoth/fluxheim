@@ -119,6 +119,8 @@ behavior when the change improves security or project direction.
   round-robin, and unsafe-method retry tests into a focused child test module.
 - Split native proxy request/response header policy and forwarded-header tests
   into a focused child test module.
+- Split native proxy compression and configured error-page tests into a focused
+  child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
