@@ -160,6 +160,8 @@ behavior when the change improves security or project direction.
   script mapping helpers into a focused private module.
 - Split PHP-FPM response parsing, static-offload target validation, cache-policy
   checks, and response-header strip policy into a focused private module.
+- Split managed PHP-FPM config rendering, instance-name generation, sanitized
+  PATH fallback, and restart backoff helpers into a focused private module.
 
 ## 1.6.36 - 2026-06-30
 

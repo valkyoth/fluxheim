@@ -158,6 +158,8 @@ is clean.
   script mapping helpers into a focused private module.
 - Split PHP-FPM response parsing, static-offload target validation, cache-policy
   checks, and response-header strip policy into a focused private module.
+- Split managed PHP-FPM config rendering, instance-name generation, sanitized
+  PATH fallback, and restart backoff helpers into a focused private module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
