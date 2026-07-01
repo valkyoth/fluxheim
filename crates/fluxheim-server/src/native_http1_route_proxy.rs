@@ -14,8 +14,7 @@ use fluxheim_protocol::route_method_matches;
 
 #[cfg(feature = "acme")]
 use crate::NativeHttp1AcmeHttp01Store;
-#[cfg(feature = "acme")]
-use crate::native_http1_route_acme::native_acme_http_01_response;
+use crate::native_http1_route_action::{NativeHttp1RouteAction, write_takeover_rejection};
 #[cfg(any(
     feature = "compression-brotli",
     feature = "compression-gzip",
@@ -33,7 +32,7 @@ use crate::native_http1_route_matcher::{NativeHttp1RouteMatcher, NativeRegexRout
 #[cfg(feature = "php-fpm")]
 use crate::native_http1_route_php::NativePhpFpmRoute;
 use crate::native_http1_route_redirect::{
-    NativeHttp1RouteRedirect, https_redirect_location, redirect_reason, redirect_response,
+    NativeHttp1RouteRedirect, https_redirect_location, redirect_reason,
 };
 #[cfg(not(feature = "privacy-mode"))]
 use crate::native_http1_route_request_headers::joined_header_value;
@@ -50,7 +49,6 @@ use crate::{
     NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1Request, NativeHttp1Response,
     NativeHttp1StaticWeb, ProxyProtocolTrustedSource,
 };
-use tokio::io::AsyncWriteExt;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1RouteProxy {
@@ -169,17 +167,6 @@ pub struct NativeHttp1RouteProxyRoute {
     concurrency: NativeConcurrencyLimit,
     grpc: GrpcRouteConfig,
     action: NativeHttp1RouteAction,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum NativeHttp1RouteAction {
-    #[cfg(feature = "acme")]
-    AcmeHttp01(NativeHttp1AcmeHttp01Store),
-    #[cfg(feature = "php-fpm")]
-    PhpFpm(Box<NativePhpFpmRoute>),
-    Proxy(Box<NativeHttp1Proxy>),
-    Redirect(NativeHttp1RouteRedirect),
-    StaticWeb(Box<NativeHttp1StaticWeb>),
 }
 
 #[cfg(feature = "otel-tracing")]
@@ -1155,33 +1142,19 @@ impl NativeHttp1RouteProxyRoute {
     }
 
     pub fn proxy(&self) -> Option<&NativeHttp1Proxy> {
-        match &self.action {
-            NativeHttp1RouteAction::Proxy(proxy) => Some(proxy.as_ref()),
-            #[cfg(feature = "acme")]
-            NativeHttp1RouteAction::AcmeHttp01(_) => None,
-            #[cfg(feature = "php-fpm")]
-            NativeHttp1RouteAction::PhpFpm(_) => None,
-            NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => None,
-        }
+        self.action.proxy()
     }
 
     pub fn is_redirect(&self) -> bool {
-        matches!(self.action, NativeHttp1RouteAction::Redirect(_))
+        self.action.is_redirect()
     }
 
     fn https_redirect_exempt_or_redirect(&self) -> bool {
-        if self.https_redirect_exempt || self.is_redirect() {
-            return true;
-        }
-        #[cfg(feature = "acme")]
-        if matches!(self.action, NativeHttp1RouteAction::AcmeHttp01(_)) {
-            return true;
-        }
-        false
+        self.https_redirect_exempt || self.is_redirect() || self.action.https_redirect_exempt()
     }
 
     pub fn is_static_web(&self) -> bool {
-        matches!(self.action, NativeHttp1RouteAction::StaticWeb(_))
+        self.action.is_static_web()
     }
 }
 
@@ -1769,16 +1742,7 @@ fn decoded_route_policy_path(path: &str) -> Option<String> {
 
 impl NativeHttp1RouteProxyRoute {
     fn request_body_timeout(&self) -> Option<Duration> {
-        match &self.action {
-            #[cfg(feature = "acme")]
-            NativeHttp1RouteAction::AcmeHttp01(_) => None,
-            NativeHttp1RouteAction::Proxy(proxy) => proxy.request_body_timeout(),
-            #[cfg(feature = "php-fpm")]
-            NativeHttp1RouteAction::PhpFpm(php) => {
-                Some(Duration::from_secs(php.request_timeout_secs()))
-            }
-            NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => None,
-        }
+        self.action.request_body_timeout()
     }
 
     fn prefix_len(&self) -> usize {
@@ -1792,23 +1756,7 @@ impl NativeHttp1RouteProxyRoute {
             feature = "compression-zstd"
         ))]
         let compression_request = self.compression.as_ref().map(|_| request.clone());
-        let mut response = match &self.action {
-            #[cfg(feature = "acme")]
-            NativeHttp1RouteAction::AcmeHttp01(store) => {
-                native_acme_http_01_response(&request, store).await
-            }
-            NativeHttp1RouteAction::Proxy(proxy) => proxy.handle(request).await,
-            #[cfg(feature = "php-fpm")]
-            NativeHttp1RouteAction::PhpFpm(php) => php.handle(request).await,
-            NativeHttp1RouteAction::Redirect(redirect) => redirect_response(&request, redirect),
-            NativeHttp1RouteAction::StaticWeb(web) => {
-                let Some((path, _)) = request_path_and_query(&request) else {
-                    return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
-                        .close_connection();
-                };
-                web.handle(&request, &path)
-            }
-        };
+        let mut response = self.action.handle(request).await;
         self.response_headers.apply(&mut response);
         #[cfg(any(
             feature = "compression-brotli",
@@ -1824,14 +1772,7 @@ impl NativeHttp1RouteProxyRoute {
     }
 
     fn handles_connection_takeover(&self, request: &NativeHttp1Request) -> bool {
-        match &self.action {
-            NativeHttp1RouteAction::Proxy(proxy) => proxy.handles_connection_takeover(request),
-            #[cfg(feature = "acme")]
-            NativeHttp1RouteAction::AcmeHttp01(_) => false,
-            #[cfg(feature = "php-fpm")]
-            NativeHttp1RouteAction::PhpFpm(_) => false,
-            NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => false,
-        }
+        self.action.handles_connection_takeover(request)
     }
 
     async fn handle_connection_takeover(
@@ -1840,70 +1781,8 @@ impl NativeHttp1RouteProxyRoute {
         prebuffered: Vec<u8>,
         stream: NativeHttp1ConnectionStream,
     ) -> Result<(), NativeHttp1Error> {
-        match &self.action {
-            NativeHttp1RouteAction::Proxy(proxy) => {
-                proxy
-                    .handle_connection_takeover(request, prebuffered, stream)
-                    .await
-            }
-            #[cfg(feature = "acme")]
-            NativeHttp1RouteAction::AcmeHttp01(_) => {
-                let mut stream = stream;
-                write_takeover_rejection(
-                    &mut stream,
-                    400,
-                    "Bad Request",
-                    b"unsupported upgrade target\n",
-                )
-                .await
-            }
-            #[cfg(feature = "php-fpm")]
-            NativeHttp1RouteAction::PhpFpm(_) => {
-                let mut stream = stream;
-                write_takeover_rejection(
-                    &mut stream,
-                    400,
-                    "Bad Request",
-                    b"unsupported upgrade target\n",
-                )
-                .await
-            }
-            NativeHttp1RouteAction::Redirect(_) | NativeHttp1RouteAction::StaticWeb(_) => {
-                let mut stream = stream;
-                write_takeover_rejection(
-                    &mut stream,
-                    400,
-                    "Bad Request",
-                    b"unsupported upgrade target\n",
-                )
-                .await
-            }
-        }
+        self.action
+            .handle_connection_takeover(request, prebuffered, stream)
+            .await
     }
-}
-
-async fn write_takeover_rejection<S>(
-    stream: &mut S,
-    status: u16,
-    reason: &str,
-    body: &[u8],
-) -> Result<(), NativeHttp1Error>
-where
-    S: tokio::io::AsyncWrite + Unpin,
-{
-    stream
-        .write_all(
-            format!(
-                "HTTP/1.1 {status} {reason}\r\n\
-                 Connection: close\r\n\
-                 Content-Length: {}\r\n\
-                 Content-Type: text/plain\r\n\r\n",
-                body.len()
-            )
-            .as_bytes(),
-        )
-        .await?;
-    stream.write_all(body).await?;
-    stream.flush().await?;
-    Ok(())
 }
