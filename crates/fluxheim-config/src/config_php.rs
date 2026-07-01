@@ -9,6 +9,7 @@ use crate::config::{
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 pub use crate::config_php_fpm_validate::MAX_PHP_FPM_TCP_UPSTREAMS;
 use crate::config_php_fpm_validate::validate_php_fpm_config;
+use crate::config_php_limits::validate_php_limits;
 #[cfg(unix)]
 pub use crate::config_php_managed::validate_php_fpm_managed_config;
 pub use crate::config_php_paths::MAX_PHP_ERROR_PAGES;
@@ -249,56 +250,7 @@ impl PhpConfig {
         validate_php_deny_path_prefixes(&self.deny_path_prefixes)?;
         validate_php_params(&self.params)?;
         validate_required_timeout_secs("php.request_timeout_secs", self.request_timeout_secs)?;
-        if self.max_in_flight == 0 || self.max_in_flight > MAX_PHP_MAX_IN_FLIGHT {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.max_in_flight",
-                reason: "must be between 1 and 4096",
-            });
-        }
-        if self
-            .max_request_body_bytes
-            .is_some_and(|bytes| bytes.as_u64() == 0)
-        {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.max_request_body_bytes",
-                reason: "must be greater than zero",
-            });
-        }
-        if self
-            .request_body_spool_threshold_bytes
-            .is_some_and(|bytes| bytes.as_u64() == 0)
-        {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.request_body_spool_threshold_bytes",
-                reason: "must be greater than zero",
-            });
-        }
-        if let (Some(spool_threshold), Some(max_request_body)) = (
-            self.request_body_spool_threshold_bytes,
-            self.max_request_body_bytes,
-        ) && spool_threshold.as_u64() >= max_request_body.as_u64()
-        {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.request_body_spool_threshold_bytes",
-                reason: "must be less than php.max_request_body_bytes when both are set",
-            });
-        }
-        if self.request_body_spool_threshold_bytes.is_some()
-            && self.request_body_spool_dir.is_none()
-        {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.request_body_spool_dir",
-                reason: "is required when php.request_body_spool_threshold_bytes is set",
-            });
-        }
-        if self.request_body_spool_dir.is_some()
-            && self.request_body_spool_threshold_bytes.is_none()
-        {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.request_body_spool_threshold_bytes",
-                reason: "is required when php.request_body_spool_dir is set",
-            });
-        }
+        validate_php_limits(self)?;
         if let Some(spool_dir) = &self.request_body_spool_dir {
             if spool_dir.as_os_str().is_empty() {
                 return Err(ConfigError::InvalidPhpConfig {
@@ -308,48 +260,6 @@ impl PhpConfig {
             }
             let spool_dir_field = format!("{scope}.request_body_spool_dir");
             validate_php_request_body_spool_dir(spool_dir_field, spool_dir)?;
-        }
-        if self.max_response_bytes.as_u64() == 0 {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.max_response_bytes",
-                reason: "must be greater than zero",
-            });
-        }
-        if self.max_response_bytes.as_u64() > MAX_PHP_RESPONSE_CONFIG_BYTES as u64 {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.max_response_bytes",
-                reason: "must be less than or equal to 64MiB",
-            });
-        }
-        if self.max_response_header_bytes.as_u64() == 0 {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.max_response_header_bytes",
-                reason: "must be greater than zero",
-            });
-        }
-        if self.max_response_header_bytes.as_u64() > MAX_PHP_RESPONSE_HEADER_CONFIG_BYTES as u64 {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.max_response_header_bytes",
-                reason: "must be less than or equal to 1MiB",
-            });
-        }
-        if self.server_port == Some(0) {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.server_port",
-                reason: "must be greater than zero",
-            });
-        }
-        if self.stderr_max_bytes.as_u64() == 0 {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.stderr_max_bytes",
-                reason: "must be greater than zero",
-            });
-        }
-        if self.stderr_max_bytes.as_u64() > MAX_PHP_STDERR_LOG_BYTES as u64 {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.stderr_max_bytes",
-                reason: "must be less than or equal to 1MiB",
-            });
         }
         validate_php_stderr_failure_patterns(&self.stderr_failure_patterns)?;
         validate_php_hide_response_headers(&self.hide_response_headers)?;
@@ -555,10 +465,6 @@ impl Default for PhpFpmConfig {
         }
     }
 }
-
-const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
-const MAX_PHP_RESPONSE_CONFIG_BYTES: usize = 64 * 1024 * 1024;
-const MAX_PHP_RESPONSE_HEADER_CONFIG_BYTES: usize = 1024 * 1024;
 
 impl PhpFpmConfig {
     pub fn resolve_relative_paths(&mut self, base_dir: &Path) {

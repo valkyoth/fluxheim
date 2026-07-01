@@ -36,6 +36,7 @@ pub mod config_observability;
 pub mod config_path;
 pub mod config_php;
 pub mod config_php_fpm_validate;
+pub mod config_php_limits;
 #[cfg(unix)]
 pub mod config_php_managed;
 pub mod config_php_paths;
