@@ -12,6 +12,7 @@ use crate::config_net::{normalize_host, upstream_host, valid_authority, valid_up
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 pub use crate::config_proxy_auth::{AuthRequestConfig, AuthRequestConfigFragment};
 pub use crate::config_proxy_error_page::ProxyErrorPageConfig;
+pub use crate::config_proxy_protocol::{UpstreamHttpVersion, UpstreamProxyProtocol};
 pub use crate::config_proxy_traffic_mirror::{TrafficMirrorConfig, TrafficMirrorConfigFragment};
 #[cfg(feature = "load-balancer")]
 use crate::config_proxy_upstream_policy::validate_load_balancer_backend_keys;
@@ -202,24 +203,6 @@ pub struct ProxyConfigFragment {
     downstream_min_send_rate_bytes_per_sec: Option<usize>,
     error_pages: Option<Vec<ProxyErrorPageConfig>>,
     load_balance: Option<LoadBalanceConfigFragment>,
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum UpstreamProxyProtocol {
-    #[default]
-    Off,
-    V1,
-    V2,
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum UpstreamHttpVersion {
-    #[default]
-    Http1,
-    Http2,
-    Http1AndHttp2,
 }
 
 pub const MAX_PROXY_UPSTREAMS: usize = 64;

@@ -132,6 +132,9 @@ behavior when the change improves security or project direction.
 - Split proxy upstream subset validation, static IP-upstream detection, and
   load-balancer backend-key collision checks into a focused private
   `fluxheim-config` module.
+- Split shared proxy upstream HTTP/proxy-protocol enums into a focused
+  `fluxheim-config` module while preserving the existing proxy config
+  re-exports.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.
