@@ -101,6 +101,8 @@ behavior when the change improves security or project direction.
   fill, and slice storage into a focused child module.
 - Split native proxy memory-cache origin, peer-fill, revalidation, Vary,
   memory-store, and disk-store admission into a focused child module.
+- Split native proxy memory-cache disk lookup, stale/revalidation lookup, and
+  memory promotion from disk hits into a focused child module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
