@@ -1,6 +1,4 @@
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -8,14 +6,16 @@ use serde::{Deserialize, Serialize};
 use crate::config::{
     ByteSize, ConfigError, ProxyErrorPageConfig, extend_unique, validate_required_timeout_secs,
 };
-use crate::config_path::{
-    path_existing_prefix_contains_symlink, path_inspection_failed,
-    validate_non_world_writable_parent, validate_path,
-};
+use crate::config_path::{validate_non_world_writable_parent, validate_path};
 pub use crate::config_php_fpm_validate::MAX_PHP_FPM_TCP_UPSTREAMS;
 use crate::config_php_fpm_validate::validate_php_fpm_config;
 #[cfg(unix)]
 pub use crate::config_php_managed::validate_php_fpm_managed_config;
+pub use crate::config_php_paths::MAX_PHP_ERROR_PAGES;
+use crate::config_php_paths::{
+    php_root_resolved_path, validate_php_error_pages, validate_php_request_body_spool_dir,
+    validate_php_root_path,
+};
 pub use crate::config_php_validation::{
     MAX_PHP_ALLOWED_EXTENSIONS, MAX_PHP_DENY_PATH_PREFIXES, MAX_PHP_FPM_RETRY_METHODS,
     MAX_PHP_FPM_RETRY_STATUSES, MAX_PHP_HIDE_RESPONSE_HEADERS, MAX_PHP_INTERCEPT_ERROR_STATUSES,
@@ -25,7 +25,6 @@ pub use crate::config_php_validation::{
     validate_php_intercept_error_statuses, validate_php_params,
     validate_php_stderr_failure_patterns,
 };
-use crate::config_route::validate_route_path;
 
 pub const DEFAULT_PHP_MAX_IN_FLIGHT: usize = 8;
 pub const MAX_PHP_MAX_IN_FLIGHT: usize = 4096;
@@ -223,12 +222,8 @@ impl PhpConfig {
         validate_php_root_path(root_field.clone(), root, self.resolve_root_symlink)?;
         validate_non_world_writable_parent(root_field.clone(), Some(root))?;
         if self.resolve_root_symlink
-            && let Ok(metadata) = fs::symlink_metadata(root)
-            && metadata.file_type().is_symlink()
+            && let Some(resolved) = php_root_resolved_path(root_field.clone(), root)?
         {
-            let resolved = root
-                .canonicalize()
-                .map_err(|error| path_inspection_failed(root_field.clone(), root, error))?;
             validate_non_world_writable_parent(format!("{root_field}.resolved"), Some(&resolved))?;
         }
         if let Some(fpm_root) = &self.fpm_root {
@@ -561,7 +556,6 @@ impl Default for PhpFpmConfig {
     }
 }
 
-pub const MAX_PHP_ERROR_PAGES: usize = 64;
 const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
 const MAX_PHP_RESPONSE_CONFIG_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PHP_RESPONSE_HEADER_CONFIG_BYTES: usize = 1024 * 1024;
@@ -648,132 +642,4 @@ fn default_php_fpm_retry_methods() -> Vec<String> {
 
 fn default_true() -> bool {
     true
-}
-
-fn validate_php_request_body_spool_dir(field: String, path: &Path) -> Result<(), ConfigError> {
-    validate_path(field.clone(), Some(path))?;
-    #[cfg(unix)]
-    match crate::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path) {
-        Ok(true) => {
-            return Err(ConfigError::UnsafePath {
-                field,
-                path: path.to_path_buf(),
-            });
-        }
-        Ok(false) => {}
-        Err(error) => {
-            return Err(path_inspection_failed(field, path, error));
-        }
-    }
-    #[cfg(not(unix))]
-    validate_non_world_writable_parent(field.clone(), Some(path))?;
-
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if !metadata.is_dir() => {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.request_body_spool_dir",
-                reason: "must be a directory when it already exists",
-            });
-        }
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(path_inspection_failed(field, path, error));
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_php_error_pages(error_pages: &[ProxyErrorPageConfig]) -> Result<(), ConfigError> {
-    if error_pages.len() > MAX_PHP_ERROR_PAGES {
-        return Err(ConfigError::InvalidPhpConfig {
-            field: "php.error_pages",
-            reason: "at most 64 error pages are allowed",
-        });
-    }
-    let mut seen = BTreeSet::new();
-    for error_page in error_pages {
-        if !(400..=599).contains(&error_page.status) {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.error_pages.status",
-                reason: "statuses must be HTTP error statuses from 400 through 599",
-            });
-        }
-        validate_route_path("php.error_pages.path", &error_page.path, false).map_err(|_| {
-            ConfigError::InvalidPhpConfig {
-                field: "php.error_pages.path",
-                reason: "must be an absolute internal request path",
-            }
-        })?;
-        error_page.web.validate()?;
-        if !error_page.web.enabled() {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.error_pages.web.root",
-                reason: "is required for each PHP error page",
-            });
-        }
-        if !seen.insert(error_page.status) {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.error_pages.status",
-                reason: "duplicate statuses are not allowed",
-            });
-        }
-    }
-    Ok(())
-}
-
-fn validate_php_root_path(
-    field: impl Into<String>,
-    path: &Path,
-    allow_final_symlink: bool,
-) -> Result<(), ConfigError> {
-    let field = field.into();
-    if !allow_final_symlink {
-        return validate_path(field, Some(path));
-    }
-
-    if path
-        .components()
-        .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
-        return Err(ConfigError::UnsafePath {
-            field,
-            path: path.to_path_buf(),
-        });
-    }
-
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        match path_existing_prefix_contains_symlink(parent) {
-            Ok(true) => {
-                return Err(ConfigError::UnsafePath {
-                    field,
-                    path: path.to_path_buf(),
-                });
-            }
-            Ok(false) => {}
-            Err(error) => {
-                return Err(path_inspection_failed(field, path, error));
-            }
-        }
-    }
-
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            let resolved = path
-                .canonicalize()
-                .map_err(|error| path_inspection_failed(field.clone(), path, error))?;
-            validate_path(format!("{field}.resolved"), Some(&resolved))?;
-        }
-        Ok(_) => validate_path(field, Some(path))?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(path_inspection_failed(field, path, error));
-        }
-    }
-
-    Ok(())
 }

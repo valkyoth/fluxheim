@@ -38,6 +38,7 @@ pub mod config_php;
 pub mod config_php_fpm_validate;
 #[cfg(unix)]
 pub mod config_php_managed;
+pub mod config_php_paths;
 pub mod config_php_validation;
 pub mod config_proxy;
 pub mod config_proxy_auth;

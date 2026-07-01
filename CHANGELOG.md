@@ -76,6 +76,9 @@ behavior when the change improves security or project direction.
 - Split external PHP-FPM endpoint, retry, timeout, and keepalive validation
   into a focused `fluxheim-config` module while preserving
   `PhpFpmConfig::validate`.
+- Split PHP root, request-spool directory, and PHP error-page validation into
+  a focused `fluxheim-config` path module while preserving existing validation
+  behavior.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
