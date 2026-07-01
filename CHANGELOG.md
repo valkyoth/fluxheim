@@ -145,6 +145,8 @@ behavior when the change improves security or project direction.
 - Split the load-balancer inner strategy dispatcher and backend member adapter
   helpers into a focused private module, further reducing the crate root to the
   public facade and orchestration glue.
+- Split load-balancer runtime-state snapshot/load/save glue into a focused
+  private module while preserving the public runtime-state methods.
 
 ## 1.6.36 - 2026-06-30
 

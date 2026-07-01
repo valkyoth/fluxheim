@@ -143,6 +143,8 @@ is clean.
 - Split the load-balancer inner strategy dispatcher and backend member adapter
   helpers into a focused private module, further reducing the crate root to the
   public facade and orchestration glue.
+- Split load-balancer runtime-state snapshot/load/save glue into a focused
+  private module while preserving the public runtime-state methods.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
