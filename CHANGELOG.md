@@ -83,6 +83,8 @@ behavior when the change improves security or project direction.
   reason mapping into a focused server module.
 - Split native proxy cache fill concurrency permits and cache-lock writer
   cleanup into a focused server module.
+- Split native proxy cached-hit rendering, conditional `304 Not Modified`
+  handling, and cached range-response selection into a focused server module.
 - Split native route proxy upstream/load-balancer construction into a focused
   server module so route dispatch keeps shrinking without changing serving
   behavior.
