@@ -27,6 +27,7 @@ mod native_http1_proxy_runtime;
 #[cfg(feature = "acme")]
 mod native_http1_route_acme;
 mod native_http1_route_action;
+mod native_http1_route_cache_policy;
 #[cfg(any(
     feature = "compression-brotli",
     feature = "compression-gzip",

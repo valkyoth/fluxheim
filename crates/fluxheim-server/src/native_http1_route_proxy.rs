@@ -15,6 +15,10 @@ use fluxheim_protocol::route_method_matches;
 #[cfg(feature = "acme")]
 use crate::NativeHttp1AcmeHttp01Store;
 use crate::native_http1_route_action::{NativeHttp1RouteAction, write_takeover_rejection};
+use crate::native_http1_route_cache_policy::{
+    native_cache_policy_enabled, native_route_cache_policy_blocked,
+    native_vhost_cache_policy_blocked, root_native_cache_supported,
+};
 #[cfg(any(
     feature = "compression-brotli",
     feature = "compression-gzip",
@@ -1156,52 +1160,6 @@ impl NativeHttp1RouteProxyRoute {
     pub fn is_static_web(&self) -> bool {
         self.action.is_static_web()
     }
-}
-
-fn native_cache_policy_enabled(cache: &fluxheim_config::CacheConfig) -> bool {
-    cache.enabled || cache.local_static
-}
-
-fn native_vhost_cache_policy_blocked(vhost: &fluxheim_config::VhostConfig) -> bool {
-    if !native_cache_policy_enabled(&vhost.cache) {
-        return false;
-    }
-    !vhost_native_cache_supported(vhost)
-}
-
-fn native_route_cache_policy_blocked(route: &fluxheim_config::RouteConfig) -> bool {
-    route.cache.as_ref().is_some_and(|cache| {
-        if !native_cache_policy_enabled(cache) {
-            return false;
-        }
-        !route_native_cache_supported(route, cache)
-    })
-}
-
-fn root_native_cache_supported(config: &fluxheim_config::Config) -> bool {
-    (config.web.enabled() && NativeHttp1StaticWeb::cache_supported(&config.cache))
-        || (config.proxy.has_configured_upstream()
-            && NativeHttp1Proxy::proxy_cache_supported_for_proxy(&config.cache, &config.proxy))
-}
-
-fn vhost_native_cache_supported(vhost: &fluxheim_config::VhostConfig) -> bool {
-    (vhost.web.enabled() && NativeHttp1StaticWeb::cache_supported(&vhost.cache))
-        || (vhost.proxy.has_configured_upstream()
-            && NativeHttp1Proxy::proxy_cache_supported_for_proxy(&vhost.cache, &vhost.proxy))
-}
-
-fn route_native_cache_supported(
-    route: &fluxheim_config::RouteConfig,
-    cache: &fluxheim_config::CacheConfig,
-) -> bool {
-    route
-        .web
-        .as_ref()
-        .is_some_and(|web| web.enabled() && NativeHttp1StaticWeb::cache_supported(cache))
-        || route.proxy.as_ref().is_some_and(|proxy| {
-            proxy.has_configured_upstream()
-                && NativeHttp1Proxy::proxy_cache_supported_for_proxy(cache, proxy)
-        })
 }
 
 impl NativeHttp1Handler for NativeHttp1RouteProxy {
