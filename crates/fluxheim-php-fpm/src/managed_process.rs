@@ -51,12 +51,12 @@ impl std::fmt::Debug for ManagedPhpFpmProcess {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         #[cfg(unix)]
         {
-            return formatter
+            formatter
                 .debug_struct("ManagedPhpFpmProcess")
                 .field("socket", &self.plan.socket)
                 .field("config_path", &self.plan.config_path)
                 .field("pid_path", &self.plan.pid_path)
-                .finish_non_exhaustive();
+                .finish_non_exhaustive()
         }
         #[cfg(not(unix))]
         {
