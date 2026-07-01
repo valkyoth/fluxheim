@@ -121,6 +121,8 @@ behavior when the change improves security or project direction.
 - Split native proxy cache-support checks, cache attachment helpers, and
   equality comparison out of the builder so proxy construction stays below the
   modularity target.
+- Split root native-proxy load-balancer admin statistics and mutation handlers
+  into a focused child module while preserving the existing admin API surface.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
