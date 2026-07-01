@@ -3,10 +3,16 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{
-    ByteSize, ConfigError, ProxyErrorPageConfig, extend_unique, validate_required_timeout_secs,
-};
+use crate::config::{ByteSize, ConfigError, ProxyErrorPageConfig, validate_required_timeout_secs};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
+use crate::config_php_defaults::{
+    default_php_allowed_extensions, default_php_fpm_idle_timeout_secs,
+    default_php_fpm_managed_max_requests, default_php_fpm_managed_workers,
+    default_php_fpm_pool_max_idle, default_php_fpm_retry_methods,
+    default_php_fpm_slowlog_trace_depth, default_php_index, default_php_max_in_flight,
+    default_php_max_response_bytes, default_php_max_response_header_bytes,
+    default_php_request_timeout_secs, default_php_stderr_max_bytes, default_true,
+};
 pub use crate::config_php_fpm_validate::MAX_PHP_FPM_TCP_UPSTREAMS;
 use crate::config_php_fpm_validate::validate_php_fpm_config;
 use crate::config_php_limits::validate_php_limits;
@@ -17,6 +23,7 @@ use crate::config_php_paths::{
     php_root_resolved_path, validate_php_error_pages, validate_php_request_body_spool_dir,
     validate_php_root_path,
 };
+use crate::config_php_preset::apply_php_preset_defaults;
 pub use crate::config_php_validation::{
     MAX_PHP_ALLOWED_EXTENSIONS, MAX_PHP_DENY_PATH_PREFIXES, MAX_PHP_FPM_RETRY_METHODS,
     MAX_PHP_FPM_RETRY_STATUSES, MAX_PHP_HIDE_RESPONSE_HEADERS, MAX_PHP_INTERCEPT_ERROR_STATUSES,
@@ -146,27 +153,7 @@ impl Default for PhpConfig {
 
 impl PhpConfig {
     pub fn apply_preset_defaults(&mut self) {
-        match self.preset {
-            PhpPreset::None => {}
-            PhpPreset::WordPress => self.apply_wordpress_preset_defaults(),
-        }
-    }
-
-    fn apply_wordpress_preset_defaults(&mut self) {
-        if self.try_files == PhpTryFilesMode::FrontController {
-            self.try_files = PhpTryFilesMode::WordPress;
-        }
-        extend_unique(
-            &mut self.deny_path_prefixes,
-            [
-                "/wp-content/uploads/",
-                "/wp-content/blogs.dir/",
-                "/blogs.dir/",
-                "/uploads/",
-                "/files/",
-            ]
-            .map(str::to_owned),
-        );
+        apply_php_preset_defaults(self);
     }
 
     pub fn enabled(&self) -> bool {
@@ -493,59 +480,4 @@ impl PhpFpmConfig {
     pub fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         validate_php_fpm_config(self, scope)
     }
-}
-
-pub(crate) fn default_php_fpm_managed_workers() -> usize {
-    4
-}
-
-pub(crate) fn default_php_fpm_managed_max_requests() -> usize {
-    1000
-}
-
-pub(crate) fn default_php_fpm_slowlog_trace_depth() -> usize {
-    20
-}
-fn default_php_index() -> String {
-    "index.php".to_owned()
-}
-
-fn default_php_allowed_extensions() -> Vec<String> {
-    vec!["php".to_owned()]
-}
-
-fn default_php_request_timeout_secs() -> u64 {
-    30
-}
-
-fn default_php_max_in_flight() -> usize {
-    DEFAULT_PHP_MAX_IN_FLIGHT
-}
-
-fn default_php_max_response_bytes() -> ByteSize {
-    ByteSize::from_bytes(64 * 1024 * 1024)
-}
-
-fn default_php_max_response_header_bytes() -> ByteSize {
-    ByteSize::from_bytes(64 * 1024)
-}
-
-fn default_php_stderr_max_bytes() -> ByteSize {
-    ByteSize::from_bytes(2048)
-}
-
-fn default_php_fpm_pool_max_idle() -> usize {
-    8
-}
-
-fn default_php_fpm_idle_timeout_secs() -> u64 {
-    60
-}
-
-fn default_php_fpm_retry_methods() -> Vec<String> {
-    vec!["GET".to_owned(), "HEAD".to_owned(), "OPTIONS".to_owned()]
-}
-
-fn default_true() -> bool {
-    true
 }

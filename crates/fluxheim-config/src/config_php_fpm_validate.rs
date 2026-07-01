@@ -6,9 +6,10 @@ use crate::config_net::{upstream_host, valid_authority};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 #[cfg(unix)]
 use crate::config_php::validate_php_fpm_managed_config;
-use crate::config_php::{
-    PhpFpmConfig, PhpFpmMode, PhpFpmProcessManager, default_php_fpm_managed_max_requests,
-    default_php_fpm_managed_workers, default_php_fpm_slowlog_trace_depth,
+use crate::config_php::{PhpFpmConfig, PhpFpmMode, PhpFpmProcessManager};
+use crate::config_php_defaults::{
+    default_php_fpm_managed_max_requests, default_php_fpm_managed_workers,
+    default_php_fpm_slowlog_trace_depth,
 };
 use crate::config_php_validation::{
     validate_php_fpm_retry_methods, validate_php_fpm_retry_statuses,

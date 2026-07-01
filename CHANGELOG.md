@@ -81,6 +81,8 @@ behavior when the change improves security or project direction.
   behavior.
 - Split PHP numeric, body-spooling, response-size, and stderr-size validation
   into a focused `fluxheim-config` limit module.
+- Split PHP default and preset helper logic into focused `fluxheim-config`
+  modules, bringing `config_php.rs` under the 500-line modularity target.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

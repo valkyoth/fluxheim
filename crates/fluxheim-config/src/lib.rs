@@ -35,11 +35,13 @@ pub mod config_net;
 pub mod config_observability;
 pub mod config_path;
 pub mod config_php;
+pub mod config_php_defaults;
 pub mod config_php_fpm_validate;
 pub mod config_php_limits;
 #[cfg(unix)]
 pub mod config_php_managed;
 pub mod config_php_paths;
+pub mod config_php_preset;
 pub mod config_php_validation;
 pub mod config_proxy;
 pub mod config_proxy_auth;
