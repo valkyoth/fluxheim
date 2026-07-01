@@ -145,6 +145,8 @@ behavior when the change improves security or project direction.
   preserving proxy, redirect, static-web, ACME, PHP, and upgrade behavior.
 - Split native route cache-policy eligibility checks into a focused server
   module while preserving config validation behavior.
+- Move decoded route-policy path handling into the native route limits module
+  so access/rate/concurrency policy matching stays grouped.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

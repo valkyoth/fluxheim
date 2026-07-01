@@ -30,7 +30,7 @@ use crate::native_http1_route_compression::{
 use crate::native_http1_route_grpc::native_grpc_rejection_response;
 use crate::native_http1_route_limits::{
     NativeConcurrencyLimit, NativeConcurrencyPermit, NativeIpAccessPolicy, NativeRateLimit,
-    NativeRateLimitDecision,
+    NativeRateLimitDecision, decoded_route_policy_path,
 };
 use crate::native_http1_route_matcher::{NativeHttp1RouteMatcher, NativeRegexRouteMatcher};
 #[cfg(feature = "php-fpm")]
@@ -1680,22 +1680,6 @@ impl NativeHttp1RouteProxy {
         }
         Ok(permits)
     }
-}
-
-fn decoded_route_policy_path(path: &str) -> Option<String> {
-    // One decode pass mirrors the compatibility access-policy path check. This
-    // catches ordinary encoded route aliases such as /%61dmin while avoiding a
-    // second, independent route-normalization model for double-encoded input.
-    if !path.as_bytes().contains(&b'%') {
-        return None;
-    }
-    let decoded = percent_encoding::percent_decode_str(path)
-        .decode_utf8()
-        .ok()?;
-    if decoded == path || decoded.contains('\0') || !decoded.starts_with('/') {
-        return None;
-    }
-    Some(decoded.into_owned())
 }
 
 impl NativeHttp1RouteProxyRoute {

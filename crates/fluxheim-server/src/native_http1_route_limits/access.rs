@@ -139,6 +139,22 @@ fn normalized_access_strings(values: &[String]) -> Vec<String> {
         .collect()
 }
 
+pub(crate) fn decoded_route_policy_path(path: &str) -> Option<String> {
+    // One decode pass mirrors the compatibility access-policy path check. This
+    // catches ordinary encoded route aliases such as /%61dmin while avoiding a
+    // second, independent route-normalization model for double-encoded input.
+    if !path.as_bytes().contains(&b'%') {
+        return None;
+    }
+    let decoded = percent_encoding::percent_decode_str(path)
+        .decode_utf8()
+        .ok()?;
+    if decoded == path || decoded.contains('\0') || !decoded.starts_with('/') {
+        return None;
+    }
+    Some(decoded.into_owned())
+}
+
 fn parse_native_access_sources(
     values: &[String],
 ) -> Result<Vec<ProxyProtocolTrustedSource>, NativeHttp1RouteProxyConfigError> {
