@@ -174,6 +174,9 @@ behavior when the change improves security or project direction.
 - Split managed PHP-FPM process lifecycle, child cleanup, restart watchdog, and
   process start handling into a focused private module below the line-limit
   target.
+- Split the remaining PHP-FPM crate regression suite into focused I/O/policy,
+  parameter/script, and response/config test modules, reducing the crate root to
+  a small facade below the line-limit target.
 - Split PHP-FPM endpoint selection, timeout classification, retry policy, and
   retry deadline helpers into a focused private module.
 - Split PHP-FPM request-body replay, zeroized memory body ownership, spool-file
