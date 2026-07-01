@@ -145,6 +145,8 @@ behavior when the change improves security or project direction.
 - Split native route-proxy config/admission tests for redirect-only routes,
   vhost/route cache policies, PHP root validation, and peer-fill cache
   eligibility into a focused child test module.
+- Split native route-proxy routing selection, request-body timeout, gRPC
+  policy, and rewritten-path safety tests into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
