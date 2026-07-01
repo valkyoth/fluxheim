@@ -68,6 +68,9 @@ behavior when the change improves security or project direction.
 - Split final proxy config validation orchestration into a focused
   `fluxheim-config` module so `config_proxy.rs` can stay below the 500-line
   modularity target.
+- Split native route proxy upstream/load-balancer construction into a focused
+  server module so route dispatch keeps shrinking without changing serving
+  behavior.
 - Split pure PHP config validators and public PHP validation limits into a
   focused `fluxheim-config` module while preserving the existing `config_php`
   and root `config` re-exports.

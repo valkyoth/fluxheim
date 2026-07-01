@@ -8,9 +8,9 @@ use std::time::Duration;
 use fluxheim_config::config_net::{normalize_host, normalize_host_pattern};
 use fluxheim_config::{Config, VhostConfig};
 
-#[cfg(feature = "load-balancer")]
-use crate::native_http1_route_proxy::NativeLoadBalancerCollectors;
 use crate::native_http1_route_proxy::NativeRouteProxyBuildContext;
+#[cfg(feature = "load-balancer")]
+use crate::native_http1_route_proxy_upstream::NativeLoadBalancerCollectors;
 use crate::{
     DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler,
     NativeHttp1Request, NativeHttp1Response, NativeHttp1RouteProxy,

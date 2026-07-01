@@ -40,6 +40,7 @@ mod native_http1_route_matcher;
 #[cfg(feature = "php-fpm")]
 mod native_http1_route_php;
 mod native_http1_route_proxy;
+mod native_http1_route_proxy_upstream;
 mod native_http1_route_redirect;
 mod native_http1_route_request_headers;
 mod native_http1_route_response_headers;
