@@ -98,6 +98,9 @@ behavior when the change improves security or project direction.
 - Split header response-policy structs and header validation helpers into
   focused `fluxheim-config` modules, leaving the header config facade below the
   modularity target while preserving existing re-exports.
+- Split stream TLS policy validation, stream connection-slot accounting, and
+  stream config tests into focused `fluxheim-config` modules, leaving the
+  stream config facade below the modularity target.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.

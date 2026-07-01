@@ -32,6 +32,10 @@ pub mod config_proxy;
 pub mod config_route;
 pub mod config_server;
 pub mod config_stream;
+pub mod config_stream_slots;
+#[cfg(all(test, feature = "stream-proxy"))]
+mod config_stream_tests;
+pub mod config_stream_tls;
 pub mod config_tls;
 pub mod config_types;
 pub mod config_udp;
