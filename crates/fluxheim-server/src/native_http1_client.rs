@@ -7,7 +7,7 @@ use fluxheim_protocol::{proxy_protocol_v1_header, proxy_protocol_v2_header};
 use h2::client::SendRequest;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::OwnedSemaphorePermit;
 use tokio::time::{Instant as TokioInstant, timeout, timeout_at};
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
@@ -17,7 +17,7 @@ use crate::native_http1_upstream_response::{
     read_upstream_response_head,
 };
 use crate::native_http2_client::{
-    NativeHttp2ConnectionDriver, native_http2_upstream_client_on_h2c_upgraded_io,
+    native_http2_upstream_client_on_h2c_upgraded_io,
     native_http2_upstream_client_on_io_with_keepalive, send_native_http2_upstream_request,
 };
 use crate::{
@@ -26,6 +26,7 @@ use crate::{
 };
 
 mod http2;
+mod pool;
 mod request;
 mod socket;
 mod upgrade;
@@ -34,6 +35,10 @@ use http2::{
     h2c_upgrade_error_can_fallback, h2c_upgrade_settings_header, native_http2_error,
     native_http2_error_is_connection_fatal, native_http2_error_retry_safe,
     native_http2_response_to_http1, native_http2_upstream_request, upstream_h2_scheme,
+};
+use pool::{
+    IdleNativeHttp1Connection, NativeHttp1Pool, NativeHttp2Pool, NativeHttp2PooledConnection,
+    native_http1_retry_method_allowed, pooled_connection_error_can_retry,
 };
 #[cfg(test)]
 use request::upstream_owned_header_for_request;
@@ -94,30 +99,6 @@ enum NativeUpstreamHttpProtocol {
     Http1AndHttp2,
 }
 
-#[derive(Debug, Default)]
-struct NativeHttp1Pool {
-    max_idle: usize,
-    idle_timeout: Option<Duration>,
-    idle: Mutex<Vec<IdleNativeHttp1Connection>>,
-}
-
-#[derive(Debug)]
-struct NativeHttp2Pool {
-    stream_slots: Arc<Semaphore>,
-    connection: Mutex<Option<Arc<NativeHttp2PooledConnection>>>,
-    setup: Mutex<()>,
-}
-
-struct NativeHttp2PooledConnection {
-    client: SendRequest<Bytes>,
-    driver: NativeHttp2ConnectionDriver,
-}
-
-struct IdleNativeHttp1Connection {
-    stream: NativeHttp1Stream,
-    inserted_at: Instant,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeTcpKeepalivePolicy {
     idle: Duration,
@@ -144,43 +125,6 @@ impl NativeTcpKeepalivePolicy {
 
     pub const fn count(&self) -> u32 {
         self.count
-    }
-}
-
-impl std::fmt::Debug for IdleNativeHttp1Connection {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("IdleNativeHttp1Connection")
-            .field("inserted_at", &self.inserted_at)
-            .finish_non_exhaustive()
-    }
-}
-
-impl std::fmt::Debug for NativeHttp2PooledConnection {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("NativeHttp2PooledConnection")
-            .finish_non_exhaustive()
-    }
-}
-
-impl Drop for NativeHttp2PooledConnection {
-    fn drop(&mut self) {
-        self.driver.abort();
-    }
-}
-
-impl NativeHttp2Pool {
-    fn new(max_concurrent_streams: u32) -> Self {
-        debug_assert!(
-            (max_concurrent_streams as usize) <= Semaphore::MAX_PERMITS,
-            "max_concurrent_streams exceeds Semaphore::MAX_PERMITS"
-        );
-        Self {
-            stream_slots: Arc::new(Semaphore::new(max_concurrent_streams as usize)),
-            connection: Mutex::new(None),
-            setup: Mutex::new(()),
-        }
     }
 }
 
@@ -266,11 +210,10 @@ impl NativeHttp1Upstream {
 
     pub fn with_authority(mut self, authority: impl Into<String>) -> Self {
         self.authority = authority.into();
-        self.pool = Arc::new(NativeHttp1Pool {
-            max_idle: self.pool.max_idle,
-            idle_timeout: self.pool.idle_timeout,
-            idle: Mutex::new(Vec::new()),
-        });
+        self.pool = Arc::new(NativeHttp1Pool::new(
+            self.pool.max_idle,
+            self.pool.idle_timeout,
+        ));
         self.http2_pool = Arc::new(NativeHttp2Pool::new(
             self.http2_policy.max_concurrent_streams(),
         ));
@@ -451,20 +394,12 @@ impl NativeHttp1Upstream {
     }
 
     pub fn with_pool_max_idle(mut self, max_idle: usize) -> Self {
-        self.pool = Arc::new(NativeHttp1Pool {
-            max_idle,
-            idle_timeout: self.pool.idle_timeout,
-            idle: Mutex::new(Vec::new()),
-        });
+        self.pool = Arc::new(NativeHttp1Pool::new(max_idle, self.pool.idle_timeout));
         self
     }
 
     pub fn with_pool_idle_timeout(mut self, timeout: Option<Duration>) -> Self {
-        self.pool = Arc::new(NativeHttp1Pool {
-            max_idle: self.pool.max_idle,
-            idle_timeout: timeout,
-            idle: Mutex::new(Vec::new()),
-        });
+        self.pool = Arc::new(NativeHttp1Pool::new(self.pool.max_idle, timeout));
         self
     }
 
@@ -1066,24 +1001,6 @@ impl NativeHttp1Upstream {
         validate_h2c_upgrade_response(&response_head, h2c_upgrade_response_head_limits())?;
         Ok(stream)
     }
-}
-
-fn pooled_connection_error_can_retry(error: &NativeHttp1Error) -> bool {
-    matches!(
-        error,
-        NativeHttp1Error::Io(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::BrokenPipe
-                    | std::io::ErrorKind::ConnectionAborted
-                    | std::io::ErrorKind::ConnectionReset
-                    | std::io::ErrorKind::UnexpectedEof
-            )
-    )
-}
-
-fn native_http1_retry_method_allowed(method: &str) -> bool {
-    matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE")
 }
 
 fn timeout_error(message: &'static str) -> NativeHttp1Error {

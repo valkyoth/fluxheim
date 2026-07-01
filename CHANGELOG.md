@@ -174,6 +174,8 @@ behavior when the change improves security or project direction.
 - Split native upstream HTTP/1 request writing, forwarded-header ownership,
   hop-by-hop filtering, peer-fill internal header filtering, and Host
   validation into a focused child module shared with HTTP/2 upstream requests.
+- Split native upstream HTTP/1 and HTTP/2 pool state, stale-connection retry
+  predicates, and pooled-connection cleanup into a focused child module.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
