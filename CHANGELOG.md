@@ -142,6 +142,9 @@ behavior when the change improves security or project direction.
   reducing `fluxheim-load-balancer/src/lib.rs` to orchestration/facade code.
 - Split the load-balancer background-service wrapper into a focused service
   module while preserving the public `UpstreamLoadBalancerService` export.
+- Split the load-balancer inner strategy dispatcher and backend member adapter
+  helpers into a focused private module, further reducing the crate root to the
+  public facade and orchestration glue.
 
 ## 1.6.36 - 2026-06-30
 
