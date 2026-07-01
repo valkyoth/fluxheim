@@ -31,6 +31,7 @@ mod metrics;
 mod persistence;
 mod policy;
 mod policy_config;
+mod policy_stats;
 mod selection;
 mod selection_candidate;
 mod selection_consistent;
@@ -79,8 +80,9 @@ use self::discovery::{
 };
 pub(crate) use self::key::backend_key;
 use self::persistence::{LoadBalanceKeySource, LoadBalancerPersistenceState};
-use self::policy::{BackendSelectionPolicy, BackendStatsInputs, load_balancer_backend_stats};
+use self::policy::BackendSelectionPolicy;
 use self::policy_config::backend_aliases;
+use self::policy_stats::{BackendStatsInputs, load_balancer_backend_stats};
 use self::selection::{
     LoadBalancerSelectInputs, SelectionPass, select_least_connections, select_least_sessions,
     select_least_time, select_maglev, select_weighted_round_robin,
