@@ -118,6 +118,9 @@ behavior when the change improves security or project direction.
 - Split native proxy construction, config mapping, weighted upstream setup, and
   equality handling into a focused builder module, leaving the core proxy type
   definition small.
+- Split native proxy cache-support checks, cache attachment helpers, and
+  equality comparison out of the builder so proxy construction stays below the
+  modularity target.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.

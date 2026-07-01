@@ -4,7 +4,6 @@ use std::time::Duration;
 
 #[cfg(not(feature = "privacy-mode"))]
 use crate::ProxyProtocolTrustedSource;
-use crate::native_http1_cache::native_disk_cache_supported;
 use crate::native_http1_proxy::NativeHttp1Proxy;
 #[cfg(feature = "load-balancer")]
 use crate::native_http1_proxy::NativeLoadBalancerAdminPool;
@@ -21,17 +20,14 @@ use crate::native_http1_proxy_config::{
 };
 use crate::native_http1_proxy_config_error::NativeHttp1ProxyConfigError;
 use crate::native_http1_proxy_error_page::native_error_pages_from_config;
-use crate::native_http1_proxy_memory_cache::NativeProxyMemoryCache;
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 use crate::native_http1_proxy_mirror::NativeTrafficMirror;
-use crate::native_http1_proxy_peer_fill::native_peer_fill_supported;
 use crate::native_http1_proxy_request::native_response_write_policy_from_config;
 use crate::native_http1_route_request_headers::{
     NativeRouteRequestHeaderPolicy, default_native_request_header_policy,
 };
 use crate::native_http1_route_response_headers::NativeRouteResponseHeaderPolicy;
 use crate::{NativeHttp1ResponseWritePolicy, NativeHttp1Upstream};
-use fluxheim_config::CacheConfig;
 
 #[cfg(feature = "load-balancer")]
 type NativeProxyConfigBuild = (
@@ -236,38 +232,6 @@ impl NativeHttp1Proxy {
         compression: fluxheim_config::CompressionConfig,
     ) -> Self {
         self.compression = Some(compression);
-        self
-    }
-
-    pub fn proxy_cache_supported(cache: &CacheConfig) -> bool {
-        cache.enabled
-            && (cache.memory.enabled || (cache.disk.enabled && native_disk_cache_supported(cache)))
-            && native_peer_fill_supported(cache)
-    }
-
-    pub fn proxy_cache_supported_for_proxy(
-        cache: &CacheConfig,
-        proxy: &fluxheim_config::ProxyConfig,
-    ) -> bool {
-        Self::proxy_cache_supported(cache) && native_slice_cache_supported_for_proxy(cache, proxy)
-    }
-
-    pub fn with_proxy_cache_config(mut self, cache: &CacheConfig) -> Self {
-        if let Some(cache) = NativeProxyMemoryCache::from_config(cache) {
-            self.cache = Some(cache);
-        }
-        self
-    }
-
-    pub fn with_proxy_cache_config_for(
-        mut self,
-        cache: &CacheConfig,
-        vhost: &str,
-        route: Option<&str>,
-    ) -> Self {
-        if let Some(cache) = NativeProxyMemoryCache::from_config_with_metrics(cache, vhost, route) {
-            self.cache = Some(cache);
-        }
         self
     }
 
@@ -510,79 +474,4 @@ impl NativeHttp1Proxy {
             Ok(Some(native))
         }
     }
-}
-
-impl PartialEq for NativeHttp1Proxy {
-    fn eq(&self, other: &Self) -> bool {
-        let base_equal = self.upstreams == other.upstreams
-            && self.upstream_slots == other.upstream_slots
-            && self.error_pages == other.error_pages
-            && self.request_headers == other.request_headers
-            && self.response_headers == other.response_headers
-            && self.response_write_policy == other.response_write_policy
-            && self.request_body_timeout == other.request_body_timeout
-            && self.websocket == other.websocket
-            && self.cache == other.cache;
-        #[cfg(any(
-            feature = "compression-brotli",
-            feature = "compression-gzip",
-            feature = "compression-zstd",
-            feature = "auth-request",
-            feature = "load-balancer",
-            all(feature = "traffic-mirror", not(feature = "privacy-mode"))
-        ))]
-        let mut equal = base_equal;
-        #[cfg(feature = "load-balancer")]
-        {
-            equal = equal
-                && self.load_balancer_upstream_template == other.load_balancer_upstream_template;
-        }
-        #[cfg(any(
-            feature = "compression-brotli",
-            feature = "compression-gzip",
-            feature = "compression-zstd"
-        ))]
-        {
-            equal = equal && self.compression == other.compression;
-        }
-        #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
-        {
-            equal = equal && self.mirror == other.mirror;
-        }
-        #[cfg(feature = "auth-request")]
-        {
-            equal = equal && self.auth_request == other.auth_request;
-        }
-        #[cfg(any(
-            feature = "compression-brotli",
-            feature = "compression-gzip",
-            feature = "compression-zstd",
-            feature = "auth-request",
-            feature = "load-balancer",
-            all(feature = "traffic-mirror", not(feature = "privacy-mode"))
-        ))]
-        {
-            equal
-        }
-        #[cfg(not(any(
-            feature = "compression-brotli",
-            feature = "compression-gzip",
-            feature = "compression-zstd",
-            feature = "auth-request",
-            feature = "load-balancer",
-            all(feature = "traffic-mirror", not(feature = "privacy-mode"))
-        )))]
-        {
-            base_equal
-        }
-    }
-}
-
-impl Eq for NativeHttp1Proxy {}
-
-fn native_slice_cache_supported_for_proxy(
-    cache: &CacheConfig,
-    proxy: &fluxheim_config::ProxyConfig,
-) -> bool {
-    !cache.range.slice.enabled || proxy.configured_primary_upstream().is_some()
 }
