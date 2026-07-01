@@ -196,6 +196,17 @@ mod native_http1_proxy_tls_tests;
     test,
     any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")
 ))]
+#[path = "native_http1_proxy_mtls_tests.rs"]
+mod native_http1_proxy_mtls_tests;
+
+#[cfg(all(test, feature = "tls-rustls-backend"))]
+#[path = "native_http1_proxy_tls_h2_tests.rs"]
+mod native_http1_proxy_tls_h2_tests;
+
+#[cfg(all(
+    test,
+    any(feature = "tls-rustls-backend", feature = "tls-openssl-backend")
+))]
 #[path = "native_http1_proxy_tls_policy_tests.rs"]
 mod native_http1_proxy_tls_policy_tests;
 

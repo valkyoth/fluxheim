@@ -193,6 +193,8 @@ is clean.
   line-limit target.
 - Split native HTTP/2 response, trailer, flow-control hold, and HTTP/1 adapter
   regression tests into a focused response test module.
+- Split native upstream TLS proxy regression tests into base TLS, Rustls H2
+  ALPN, and mTLS modules, removing the oversized TLS test exception.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
