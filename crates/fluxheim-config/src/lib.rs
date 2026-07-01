@@ -19,6 +19,7 @@ pub mod config_cache_memory;
 pub mod config_cache_peer;
 pub mod config_cache_purger;
 pub mod config_cache_range;
+pub mod config_cache_storage_bin;
 pub mod config_compression;
 pub mod config_geoip;
 pub mod config_header;

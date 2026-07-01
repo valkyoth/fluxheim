@@ -93,6 +93,8 @@ behavior when the change improves security or project direction.
   preserving the existing public re-export.
 - Split cache peer-fill config and peer URL validation into a focused
   `fluxheim-config` module while preserving the existing public re-exports.
+- Split cache storage-bin config into a focused `fluxheim-config` module while
+  preserving the existing public re-export.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

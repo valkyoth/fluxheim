@@ -25,7 +25,7 @@ use crate::config_cache::CacheConfigFragment;
 pub use crate::config_cache::{
     CacheConfig, CacheDiskBackend, CacheDiskConfig, CacheDiskEncryptionAlgorithm,
     CacheDiskEncryptionConfig, CacheDiskEncryptionOpenBaoConfig, CacheDiskEncryptionProvider,
-    CacheDiskStorageBinConfig, CacheKeyPart, CachePreset, CacheStaleErrorKind,
+    CacheKeyPart, CachePreset, CacheStaleErrorKind,
 };
 #[cfg(test)]
 pub use crate::config_cache::{
@@ -43,6 +43,7 @@ pub use crate::config_cache_peer::{CachePeerConfig, CachePeerFillConfig};
 pub use crate::config_cache_purger::CachePurgerConfig;
 use crate::config_cache_purger::CachePurgerConfigFragment;
 pub use crate::config_cache_range::{CacheRangeConfig, CacheRangeSliceConfig};
+pub use crate::config_cache_storage_bin::CacheDiskStorageBinConfig;
 pub use crate::config_compression::CompressionConfig;
 use crate::config_compression::CompressionConfigFragment;
 #[cfg(test)]
