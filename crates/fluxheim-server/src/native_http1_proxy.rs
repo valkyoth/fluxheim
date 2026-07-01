@@ -40,6 +40,11 @@ use crate::native_http1_proxy_config::{
     native_upstream_from_proxy_config, proxy_requires_advanced_load_balancer,
     proxy_requires_advanced_upstream_transport, proxy_uses_dynamic_upstream_discovery,
 };
+#[cfg(feature = "load-balancer")]
+use crate::native_http1_proxy_error_page::native_proxy_status_reason;
+use crate::native_http1_proxy_error_page::{
+    NativeHttp1ProxyErrorPage, native_error_page_response, native_error_pages_from_config,
+};
 use crate::native_http1_proxy_metrics::{
     record_native_cache_activity, record_native_cache_activity_scope,
     record_native_cache_operation_duration, record_native_proxy_outcome,
@@ -72,7 +77,7 @@ use crate::native_http1_route_request_headers::{
 use crate::native_http1_route_response_headers::NativeRouteResponseHeaderPolicy;
 use crate::{
     NativeHttp1ConnectionStream, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
-    NativeHttp1ResponseWritePolicy, NativeHttp1StaticWeb, NativeHttp1Upstream,
+    NativeHttp1ResponseWritePolicy, NativeHttp1Upstream,
 };
 use fluxheim_cache::{
     CacheRangeRequest, CacheRequest, CacheRequestView, CacheSliceBounds, CacheStaleEvent,
@@ -138,13 +143,6 @@ pub struct NativeHttp1Proxy {
     metrics_vhost: Arc<str>,
     metrics_route: Option<Arc<str>>,
     next_upstream: Arc<AtomicUsize>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct NativeHttp1ProxyErrorPage {
-    status: u16,
-    path: String,
-    web: NativeHttp1StaticWeb,
 }
 
 #[derive(Clone, Debug)]
@@ -2625,17 +2623,21 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
                     compression_request.as_ref(),
                 );
             }
-            let error_response = self
-                .error_page_response(&request, status)
-                .unwrap_or_else(|| {
-                    if status == 504 {
-                        NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
-                            .close_connection()
-                    } else {
-                        NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
-                            .close_connection()
-                    }
-                });
+            let error_response = native_error_page_response(
+                &self.error_pages,
+                self.response_write_policy,
+                &request,
+                status,
+            )
+            .unwrap_or_else(|| {
+                if status == 504 {
+                    NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
+                        .close_connection()
+                } else {
+                    NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
+                        .close_connection()
+                }
+            });
             self.finish_response(
                 &request,
                 error_response,
@@ -3217,16 +3219,20 @@ impl NativeHttp1Proxy {
                             compression_request,
                         );
                     }
-                    let error_response =
-                        self.error_page_response(&request, status)
-                            .unwrap_or_else(|| {
-                                NativeHttp1Response::new(
-                                    status,
-                                    native_proxy_status_reason(status),
-                                    b"service unavailable\n",
-                                )
-                                .close_connection()
-                            });
+                    let error_response = native_error_page_response(
+                        &self.error_pages,
+                        self.response_write_policy,
+                        &request,
+                        status,
+                    )
+                    .unwrap_or_else(|| {
+                        NativeHttp1Response::new(
+                            status,
+                            native_proxy_status_reason(status),
+                            b"service unavailable\n",
+                        )
+                        .close_connection()
+                    });
                     return self.finish_response(
                         &request,
                         error_response,
@@ -3410,17 +3416,20 @@ impl NativeHttp1Proxy {
                 compression_request,
             );
         }
-        let error_response = self
-            .error_page_response(&request, status)
-            .unwrap_or_else(|| {
-                if status == 504 {
-                    NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
-                        .close_connection()
-                } else {
-                    NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n")
-                        .close_connection()
-                }
-            });
+        let error_response = native_error_page_response(
+            &self.error_pages,
+            self.response_write_policy,
+            &request,
+            status,
+        )
+        .unwrap_or_else(|| {
+            if status == 504 {
+                NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")
+                    .close_connection()
+            } else {
+                NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n").close_connection()
+            }
+        });
         self.finish_response(
             &request,
             error_response,
@@ -3446,19 +3455,6 @@ impl NativeHttp1Proxy {
         self.load_balancer_upstream_template
             .clone()
             .map(|upstream| upstream.with_authority(authority.to_owned()))
-    }
-
-    fn error_page_response(
-        &self,
-        request: &NativeHttp1Request,
-        status: u16,
-    ) -> Option<NativeHttp1Response> {
-        self.error_pages
-            .iter()
-            .find(|page| page.status == status)
-            .and_then(|page| page.web.handle_error_page(request, &page.path, status))
-            .map(|response| response.with_write_policy(self.response_write_policy))
-            .map(NativeHttp1Response::close_connection)
     }
 
     fn finish_response(
@@ -3553,39 +3549,6 @@ fn native_request_header_values<'a>(
         .iter()
         .filter(move |(header_name, _)| header_name.eq_ignore_ascii_case(name))
         .map(|(_, value)| value.as_str())
-}
-
-#[cfg(feature = "load-balancer")]
-fn native_proxy_status_reason(status: u16) -> &'static str {
-    match status {
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        403 => "Forbidden",
-        404 => "Not Found",
-        429 => "Too Many Requests",
-        500 => "Internal Server Error",
-        502 => "Bad Gateway",
-        503 => "Service Unavailable",
-        504 => "Gateway Timeout",
-        _ => "Error",
-    }
-}
-
-fn native_error_pages_from_config(
-    proxy: &fluxheim_config::ProxyConfig,
-) -> Result<Vec<NativeHttp1ProxyErrorPage>, NativeHttp1ProxyConfigError> {
-    let mut pages = Vec::with_capacity(proxy.error_pages.len());
-    for page in &proxy.error_pages {
-        let web = NativeHttp1StaticWeb::from_config(&page.web)
-            .map_err(|_| NativeHttp1ProxyConfigError::ErrorPages)?
-            .ok_or(NativeHttp1ProxyConfigError::ErrorPages)?;
-        pages.push(NativeHttp1ProxyErrorPage {
-            status: page.status,
-            path: page.path.clone(),
-            web,
-        });
-    }
-    Ok(pages)
 }
 
 fn native_proxy_error_is_timeout(error: &crate::NativeHttp1Error) -> bool {
