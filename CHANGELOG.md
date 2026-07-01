@@ -54,6 +54,9 @@ behavior when the change improves security or project direction.
 - Split trusted client-IP restoration and Forwarded header helpers out of
   `fluxheim-headers/src/lib.rs` into a focused crate module while preserving
   the public exports and privacy-mode gating.
+- Split proxy dynamic upstream discovery validation out of
+  `fluxheim-config/src/config_proxy.rs` into a focused config module while
+  preserving the existing validation behavior.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

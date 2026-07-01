@@ -37,6 +37,7 @@ pub mod config_path;
 pub mod config_php;
 pub mod config_proxy;
 pub mod config_proxy_auth;
+pub mod config_proxy_discovery;
 pub mod config_proxy_error_page;
 pub mod config_proxy_protocol;
 pub mod config_proxy_traffic_mirror;
