@@ -94,7 +94,6 @@ pub(crate) fn validate_php_root_path(
     path: &Path,
     allow_final_symlink: bool,
 ) -> Result<(), ConfigError> {
-    let field = field.into();
     if !allow_final_symlink {
         return validate_path(field, Some(path));
     }
