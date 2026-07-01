@@ -97,6 +97,8 @@ behavior when the change improves security or project direction.
   preserving the existing public re-export.
 - Split cache disk-encryption and OpenBao Transit config into a focused
   `fluxheim-config` module while preserving existing public re-exports.
+- Split cache disk-tier config into a focused `fluxheim-config` module while
+  preserving the existing public re-exports and merge behavior.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

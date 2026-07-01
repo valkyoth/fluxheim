@@ -22,9 +22,7 @@ pub use crate::config_admin::{
     AdminSelfHealingConfig, AdminTransportConfig,
 };
 use crate::config_cache::CacheConfigFragment;
-pub use crate::config_cache::{
-    CacheConfig, CacheDiskBackend, CacheDiskConfig, CacheKeyPart, CachePreset, CacheStaleErrorKind,
-};
+pub use crate::config_cache::{CacheConfig, CacheKeyPart, CachePreset, CacheStaleErrorKind};
 #[cfg(test)]
 pub use crate::config_cache::{
     MAX_CACHE_BYPASS_COOKIES, MAX_CACHE_BYPASS_PATHS, MAX_CACHE_CONTENT_TYPES,
@@ -36,6 +34,7 @@ pub use crate::config_cache_controls::CACHE_PREDICTOR_MAX_CAPACITY;
 pub use crate::config_cache_controls::{
     CacheLockConfig, CacheOriginProtectionConfig, CachePredictorConfig,
 };
+pub use crate::config_cache_disk::{CacheDiskBackend, CacheDiskConfig};
 #[cfg(test)]
 pub use crate::config_cache_encryption::fips_allowed_local_openbao_endpoint;
 pub use crate::config_cache_encryption::{
