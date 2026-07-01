@@ -146,6 +146,9 @@ behavior when the change improves security or project direction.
 - Split the UDP beta proxy listener bootstrap, runtime state/session helpers,
   and tests into child modules, bringing `src/udp_proxy.rs` below the
   modularity target.
+- Split native upstream TLS file loading and symlink-safety tests into a child
+  module so certificate/key/CA bundle file handling is isolated from backend
+  connector setup.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
