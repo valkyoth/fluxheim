@@ -230,6 +230,18 @@ mod native_http1_plan_tests;
 #[path = "native_runtime_http1_proxy_tests.rs"]
 mod native_runtime_http1_proxy_tests;
 
+#[cfg(all(test, feature = "tls-rustls-backend"))]
+#[path = "native_runtime_http1_proxy_tls_tests.rs"]
+mod native_runtime_http1_proxy_tls_tests;
+
+#[cfg(all(
+    test,
+    not(feature = "tls-rustls-backend"),
+    feature = "tls-openssl-backend"
+))]
+#[path = "native_runtime_http1_proxy_openssl_tests.rs"]
+mod native_runtime_http1_proxy_openssl_tests;
+
 #[cfg(test)]
 #[path = "native_http2_tests.rs"]
 mod native_http2_tests;

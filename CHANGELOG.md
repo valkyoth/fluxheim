@@ -200,6 +200,8 @@ behavior when the change improves security or project direction.
 - Split native upstream HTTP/1 client regression tests into base response,
   h2c-upgrade, forwarded-header/timeout, and PROXY protocol modules, removing
   the oversized client-test exception.
+- Split native HTTP/1 runtime proxy tests into plain/PROXY, Rustls TLS, and
+  OpenSSL TLS modules, removing the oversized runtime-proxy test exception.
 
 ## 1.6.36 - 2026-06-30
 

@@ -198,6 +198,8 @@ is clean.
 - Split native upstream HTTP/1 client regression tests into base response,
   h2c-upgrade, forwarded-header/timeout, and PROXY protocol modules, removing
   the oversized client-test exception.
+- Split native HTTP/1 runtime proxy tests into plain/PROXY, Rustls TLS, and
+  OpenSSL TLS modules, removing the oversized runtime-proxy test exception.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,
