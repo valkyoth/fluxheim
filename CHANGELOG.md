@@ -111,6 +111,8 @@ behavior when the change improves security or project direction.
   `native_http1_proxy_memory_cache.rs` below the modularity target.
 - Split native proxy HTTP/2 upstream parity tests into a focused child test
   module while keeping shared proxy fixtures private to the parent test module.
+- Split native proxy HTTP/2 upstream test fixtures into a focused support module
+  so the H2 test module stays below the modularity target.
 - Split native proxy unsupported-policy and config-blocker tests into a focused
   child test module.
 - Split native proxy static upstream failover, round-robin, weighted

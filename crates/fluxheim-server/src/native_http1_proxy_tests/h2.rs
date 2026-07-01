@@ -11,10 +11,16 @@ use crate::{
 };
 
 use super::{
-    downstream_get, h2_blocking_upstream, h2_handshake_stall_upstream, h2_idle_upstream,
-    h2_reconnecting_upstream, h2_reset_then_ok_upstream, h2_upstream, h2_upstream_with_body,
-    native_proxy_test_request_for, proxy_listener_for, static_load_balance_without_health_check,
-    unused_local_address,
+    downstream_get, native_proxy_test_request_for, proxy_listener_for,
+    static_load_balance_without_health_check, unused_local_address,
+};
+
+#[path = "h2_support.rs"]
+mod support;
+
+use support::{
+    h2_blocking_upstream, h2_handshake_stall_upstream, h2_idle_upstream, h2_reconnecting_upstream,
+    h2_reset_then_ok_upstream, h2_upstream, h2_upstream_with_body,
 };
 
 #[tokio::test]
