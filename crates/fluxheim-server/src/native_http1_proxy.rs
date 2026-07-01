@@ -37,10 +37,10 @@ use crate::native_http1_proxy_runtime::{
     feature = "compression-zstd"
 ))]
 use crate::native_http1_route_compression::apply_native_response_compression;
-use crate::native_http1_route_proxy::NativeRouteResponseHeaderPolicy;
 use crate::native_http1_route_request_headers::{
     NativeRouteRequestHeaderPolicy, default_native_request_header_policy,
 };
+use crate::native_http1_route_response_headers::NativeRouteResponseHeaderPolicy;
 use crate::{
     DownstreamHttp2Policy, NativeHttp1ConnectionStream, NativeHttp1Handler, NativeHttp1Request,
     NativeHttp1Response, NativeHttp1ResponseWritePolicy, NativeHttp1StaticWeb, NativeHttp1Upstream,
