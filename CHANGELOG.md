@@ -176,6 +176,9 @@ behavior when the change improves security or project direction.
   validation into a focused child module shared with HTTP/2 upstream requests.
 - Split native upstream HTTP/1 and HTTP/2 pool state, stale-connection retry
   predicates, and pooled-connection cleanup into a focused child module.
+- Split native upstream HTTP/2 send orchestration, stream-slot admission,
+  pooled-connection setup, negotiated-stream handling, and h2c upgrade probing
+  into a focused child module.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
