@@ -45,6 +45,8 @@ mod native_http1_route_redirect;
 mod native_http1_route_request_headers;
 mod native_http1_route_response_headers;
 mod native_http1_route_rewrite;
+#[cfg(feature = "otel-tracing")]
+mod native_http1_route_trace;
 mod native_http1_static_web;
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 mod native_http1_tls;

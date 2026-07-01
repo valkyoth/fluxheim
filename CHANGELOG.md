@@ -73,6 +73,8 @@ behavior when the change improves security or project direction.
   behavior.
 - Split native route redirect hardening tests into a focused server test module
   while preserving the existing live-listener coverage.
+- Split native route traceparent propagation into a focused server module while
+  preserving the existing trusted-peer behavior.
 - Split pure PHP config validators and public PHP validation limits into a
   focused `fluxheim-config` module while preserving the existing `config_php`
   and root `config` re-exports.

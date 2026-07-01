@@ -53,6 +53,8 @@ use crate::native_http1_route_response_headers::NativeRouteResponseHeaderPolicy;
 use crate::native_http1_route_rewrite::{
     NativeRouteRewritePolicy, request_path_and_query, rewrite_route_request,
 };
+#[cfg(feature = "otel-tracing")]
+use crate::native_http1_route_trace::{NativeTracePropagation, apply_native_route_traceparent};
 use crate::{
     DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler,
     NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1Request, NativeHttp1Response,
@@ -134,23 +136,6 @@ pub struct NativeHttp1RouteProxyRoute {
     concurrency: NativeConcurrencyLimit,
     grpc: GrpcRouteConfig,
     action: NativeHttp1RouteAction,
-}
-
-#[cfg(feature = "otel-tracing")]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct NativeTracePropagation {
-    enabled: bool,
-    traceparent: bool,
-}
-
-#[cfg(feature = "otel-tracing")]
-impl NativeTracePropagation {
-    const fn from_config(config: &fluxheim_config::TracingConfig) -> Self {
-        Self {
-            enabled: config.enabled,
-            traceparent: config.traceparent,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1493,27 +1478,8 @@ impl NativeHttp1RouteProxy {
 
     #[cfg(feature = "otel-tracing")]
     fn apply_traceparent(&self, request: &mut NativeHttp1Request) {
-        let inbound = request
-            .headers
-            .iter()
-            .find(|(name, value)| {
-                name.eq_ignore_ascii_case("traceparent") && !value.trim().is_empty()
-            })
-            .map(|(_, value)| value.trim().to_owned());
-        request
-            .headers
-            .retain(|(name, _)| !name.eq_ignore_ascii_case("traceparent"));
-        if !self.trace_propagation.enabled || !self.trace_propagation.traceparent {
-            return;
-        }
         let trusted_peer = self.trace_trusted_peer(request);
-        if let Some(trace_context) =
-            fluxheim_observability::context_from_traceparent(inbound.as_deref(), trusted_peer)
-        {
-            request
-                .headers
-                .push(("traceparent".to_owned(), trace_context.to_traceparent()));
-        }
+        apply_native_route_traceparent(request, self.trace_propagation, trusted_peer);
     }
 
     #[cfg(feature = "otel-tracing")]
