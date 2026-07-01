@@ -12,14 +12,12 @@ pub use crate::config_acme::{
 pub use crate::config_acme::{
     MAX_ACME_CHALLENGE_UPSTREAMS, MAX_ACME_ISSUERS, MAX_VHOST_ACME_DOMAINS,
 };
-use crate::config_admin::AdminConfigFragment;
 pub use crate::config_admin::MAX_ADMIN_HEALTH_PATH_BYTES;
 pub use crate::config_admin::{
     AdminAuthThrottleConfig, AdminClientCertificateConfig, AdminConfig, AdminHealthConfig,
     AdminHealthResponseMode, AdminOpsSocketConfig, AdminRemoteTransportMode,
     AdminSelfHealingConfig, AdminTransportConfig,
 };
-use crate::config_cache::CacheConfigFragment;
 pub use crate::config_cache::validate_cache_compliance_internal_crypto;
 pub use crate::config_cache::{CacheConfig, CachePreset};
 pub use crate::config_cache_controls::CACHE_PREDICTOR_MAX_CAPACITY;
@@ -37,7 +35,6 @@ pub use crate::config_cache_memory::CacheMemoryConfig;
 pub use crate::config_cache_peer::{CachePeerConfig, CachePeerFillConfig};
 pub use crate::config_cache_policy::{CacheKeyPart, CacheStaleErrorKind, extend_unique};
 pub use crate::config_cache_purger::CachePurgerConfig;
-use crate::config_cache_purger::CachePurgerConfigFragment;
 pub use crate::config_cache_range::{CacheRangeConfig, CacheRangeSliceConfig};
 pub use crate::config_cache_storage_bin::CacheDiskStorageBinConfig;
 #[cfg(test)]
@@ -47,10 +44,10 @@ pub use crate::config_cache_validate::{
     MAX_CACHE_VARY_REQUEST_HEADERS,
 };
 pub use crate::config_compression::CompressionConfig;
-use crate::config_compression::CompressionConfigFragment;
 #[cfg(test)]
 pub use crate::config_compression::DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES;
 pub use crate::config_error::ConfigError;
+use crate::config_fragment::ConfigFragment;
 pub use crate::config_geoip::{GeoIpConfig, GeoIpDatabaseConfig, GeoIpProvider};
 pub use crate::config_header::{
     ForwardedClientIpHeaderMode, HeaderOperationsConfig, HeaderPolicyConfig, HeaderValues,
@@ -77,10 +74,7 @@ pub use crate::config_load_balance::{
 pub use crate::config_loader::ConfigLoadError;
 #[cfg(feature = "load-balancer")]
 pub use crate::config_loader::read_proxy_upstreams_file;
-use crate::config_loader::{
-    canonical_config_source, config_directory_files, read_regular_config_file_to_string,
-    regular_visible_toml_file, toml_files,
-};
+use crate::config_loader::{canonical_config_source, config_directory_files, toml_files};
 pub use crate::config_logging::{
     AccessLoggingConfig, LoggingConfig, LoggingFileConfig, LoggingFormat, LoggingLevel,
     LoggingTarget,
@@ -105,7 +99,6 @@ pub use crate::config_php::{
     PhpConfig, PhpFpmConfig, PhpFpmMode, PhpFpmProcessManager, PhpPathInfoMode, PhpPreset,
     PhpRuntime, PhpStderrLogLevel, PhpTryFilesMode,
 };
-use crate::config_proxy::ProxyConfigFragment;
 pub use crate::config_proxy::{
     AuthRequestConfig, ProxyConfig, ProxyErrorPageConfig, TrafficMirrorConfig, UpstreamHttpVersion,
     UpstreamProxyProtocol,
@@ -115,16 +108,13 @@ pub use crate::config_proxy::{MAX_PROXY_ERROR_PAGES, MAX_PROXY_UPSTREAMS};
 pub use crate::config_route::{
     GrpcRouteConfig, RouteConfig, RouteRedirectConfig, VhostRedirectConfig,
 };
-use crate::config_server::ServerConfigFragment;
 pub use crate::config_server::{
     DownstreamProxyProtocol, HostRoutingConfig, HttpsRedirectConfig, ServerConfig,
     ServerLimitsConfig, ServerProcessConfig,
 };
 #[cfg(test)]
 pub use crate::config_server::{MAX_SERVER_LISTENERS, MAX_TRUSTED_PROXIES};
-use crate::config_stream::StreamConfigFragment;
 pub use crate::config_stream::{StreamConfig, StreamRouteConfig};
-use crate::config_tls::TlsConfigFragment;
 #[cfg(test)]
 pub use crate::config_tls::{
     MAX_TLS_CERTIFICATES, MAX_TLS_CIPHER_SUITES, MAX_TLS_CURVE_PREFERENCES,
@@ -139,7 +129,6 @@ pub use crate::config_udp::{UdpConfig, UdpRouteConfig, UdpRouteMode};
 pub use crate::config_vhost::VhostConfig;
 #[cfg(test)]
 pub use crate::config_web::MAX_WEB_INDEX_FILES;
-use crate::config_web::WebConfigFragment;
 pub use crate::config_web::{DirectoryListingConfig, WebConfig};
 use serde::{Deserialize, Serialize};
 
@@ -678,99 +667,6 @@ fn managed_acme_domains_for_vhost(
         .filter_map(|domain| normalize_host(domain))
         .collect::<std::collections::HashSet<_>>();
     (!domains.is_empty()).then_some(domains)
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct ConfigFragment {
-    #[serde(default)]
-    include_conf_d: bool,
-    #[serde(default)]
-    server: Option<ServerConfigFragment>,
-    #[serde(default)]
-    admin: Option<AdminConfigFragment>,
-    #[serde(default)]
-    metrics: Option<MetricsConfig>,
-    #[serde(default)]
-    tracing: Option<TracingConfig>,
-    #[serde(default)]
-    logging: Option<LoggingConfig>,
-    #[serde(default)]
-    headers: Option<HeaderPolicyConfig>,
-    #[serde(default)]
-    tls: Option<TlsConfigFragment>,
-    #[serde(default)]
-    proxy: Option<ProxyConfigFragment>,
-    #[serde(default)]
-    compression: Option<CompressionConfigFragment>,
-    #[serde(default)]
-    cache: Option<CacheConfigFragment>,
-    #[serde(default)]
-    cache_purger: Option<CachePurgerConfigFragment>,
-    #[serde(default)]
-    web: Option<WebConfigFragment>,
-    #[serde(default)]
-    geoip: Option<GeoIpConfig>,
-    #[serde(default)]
-    stream: Option<StreamConfigFragment>,
-    #[serde(default)]
-    udp: Option<UdpConfig>,
-    #[serde(default)]
-    vhosts: Vec<VhostConfig>,
-}
-
-impl ConfigFragment {
-    fn load(path: &Path) -> Result<Self, ConfigLoadError> {
-        if !regular_visible_toml_file(path)? {
-            return Err(ConfigLoadError::InvalidPath {
-                path: path.to_path_buf(),
-            });
-        }
-        let raw = read_regular_config_file_to_string(path)?;
-        toml::from_str(&raw).map_err(|source| ConfigLoadError::Parse {
-            path: path.to_path_buf(),
-            source,
-        })
-    }
-
-    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
-        if let Some(server) = &mut self.server {
-            server.resolve_relative_paths(base_dir);
-        }
-        if let Some(tls) = &mut self.tls {
-            tls.resolve_relative_paths(base_dir);
-        }
-        if let Some(admin) = &mut self.admin {
-            admin.resolve_relative_paths(base_dir);
-        }
-        if let Some(metrics) = &mut self.metrics {
-            metrics.resolve_relative_paths(base_dir);
-        }
-        if let Some(tracing) = &mut self.tracing {
-            tracing.resolve_relative_paths(base_dir);
-        }
-        if let Some(logging) = &mut self.logging {
-            logging.resolve_relative_paths(base_dir);
-        }
-        if let Some(proxy) = &mut self.proxy {
-            proxy.resolve_relative_paths(base_dir);
-        }
-        if let Some(cache) = &mut self.cache {
-            cache.resolve_relative_paths(base_dir);
-        }
-        if let Some(web) = &mut self.web {
-            web.resolve_relative_paths(base_dir);
-        }
-        if let Some(geoip) = &mut self.geoip {
-            geoip.resolve_relative_paths(base_dir);
-        }
-        if let Some(stream) = &mut self.stream {
-            stream.resolve_relative_paths(base_dir);
-        }
-        for vhost in &mut self.vhosts {
-            vhost.resolve_relative_paths(base_dir);
-        }
-    }
 }
 
 fn validate_auth_request_compliance_internal_crypto(
