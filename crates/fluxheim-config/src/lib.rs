@@ -45,6 +45,10 @@ pub mod internal_crypto;
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 mod otlp_http;
 pub mod reload;
+#[cfg(all(test, feature = "load-balancer"))]
+mod reload_load_balancer_tests;
+#[cfg(test)]
+mod reload_tests;
 
 pub use config::*;
 

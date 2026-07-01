@@ -101,6 +101,9 @@ behavior when the change improves security or project direction.
 - Split stream TLS policy validation, stream connection-slot accounting, and
   stream config tests into focused `fluxheim-config` modules, leaving the
   stream config facade below the modularity target.
+- Move reload-classification tests into focused base and load-balancer test
+  modules, leaving `fluxheim-config/src/reload.rs` as the small runtime reload
+  classifier.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.

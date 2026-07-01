@@ -10,6 +10,7 @@ use crate::config::{
 use crate::config_net::{
     valid_authority, valid_ip_matcher, valid_trusted_proxy, valid_upstream_alias,
 };
+#[cfg(feature = "stream-proxy")]
 pub use crate::config_stream_slots::{StreamConnectionSlot, acquire_stream_connection_slot};
 
 pub const MAX_STREAM_ROUTES: usize = 128;
