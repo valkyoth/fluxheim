@@ -126,6 +126,8 @@ behavior when the change improves security or project direction.
   path.
 - Split native proxy auth-request and traffic-mirror integration tests into a
   focused feature-gated child test module.
+- Split native proxy static construction, timeout, pool, proxy-protocol, and
+  socket-option config tests into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
