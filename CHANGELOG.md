@@ -71,6 +71,8 @@ behavior when the change improves security or project direction.
 - Split native route proxy upstream/load-balancer construction into a focused
   server module so route dispatch keeps shrinking without changing serving
   behavior.
+- Split native route redirect hardening tests into a focused server test module
+  while preserving the existing live-listener coverage.
 - Split pure PHP config validators and public PHP validation limits into a
   focused `fluxheim-config` module while preserving the existing `config_php`
   and root `config` re-exports.
