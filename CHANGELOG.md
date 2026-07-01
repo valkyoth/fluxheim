@@ -111,6 +111,8 @@ behavior when the change improves security or project direction.
   re-export.
 - Split TOML config fragment loading and relative-path resolution into a
   focused `fluxheim-config` module.
+- Split root config loading, preset application, `conf.d` merge, and fragment
+  merge behavior into a focused `fluxheim-config` module.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

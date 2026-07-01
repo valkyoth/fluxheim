@@ -66,6 +66,7 @@ mod config_proxy_transport;
 mod config_proxy_upstream_attributes;
 mod config_proxy_upstream_policy;
 mod config_proxy_validate;
+pub mod config_root_load;
 pub mod config_route;
 pub mod config_server;
 pub mod config_stream;
