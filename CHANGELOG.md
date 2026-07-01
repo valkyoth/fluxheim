@@ -109,6 +109,8 @@ behavior when the change improves security or project direction.
 - Split native proxy memory-cache lookup, key selection, memory hit selection,
   stale lookup, and revalidation lookup into a focused child module, bringing
   `native_http1_proxy_memory_cache.rs` below the modularity target.
+- Split native proxy HTTP/2 upstream parity tests into a focused child test
+  module while keeping shared proxy fixtures private to the parent test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
