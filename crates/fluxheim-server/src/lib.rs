@@ -41,6 +41,7 @@ mod native_http1_proxy_mirror;
 mod native_http1_proxy_peer_fill;
 mod native_http1_proxy_peer_fill_auth;
 mod native_http1_proxy_request;
+mod native_http1_proxy_response_finish;
 mod native_http1_proxy_runtime;
 #[cfg(feature = "acme")]
 mod native_http1_route_acme;

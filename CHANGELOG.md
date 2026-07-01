@@ -100,6 +100,9 @@ behavior when the change improves security or project direction.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
+- Split native proxy response finalization, cache-status header application,
+  response-header policy, compression, metrics accounting, and authenticated
+  peer-fill response signing into a focused server module.
 - Split native proxy construction, config mapping, weighted upstream setup, and
   equality handling into a focused builder module, leaving the core proxy type
   definition small.
