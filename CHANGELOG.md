@@ -167,6 +167,8 @@ behavior when the change improves security or project direction.
 - Split PHP-FPM request-body replay, zeroized memory body ownership, spool-file
   allocation, cleanup, and spool-directory validation into a focused private
   module.
+- Split PHP-FPM streamed FastCGI response collection and bounded chunk
+  accounting into a focused private module.
 
 ## 1.6.36 - 2026-06-30
 
