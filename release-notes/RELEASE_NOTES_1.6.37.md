@@ -191,6 +191,8 @@ is clean.
 - Split native HTTP/2 response validation and bounded response-data writes into
   a focused private module, bringing the downstream H2 stack below the
   line-limit target.
+- Split native HTTP/2 response, trailer, flow-control hold, and HTTP/1 adapter
+  regression tests into a focused response test module.
 - Keep the root `fluxheim` crate focused on binary, CLI, admin, and runtime
   orchestration glue.
 - Continue enforcing modularity, release metadata, Pingora dependency,

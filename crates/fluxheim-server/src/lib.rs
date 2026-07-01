@@ -212,6 +212,10 @@ mod native_runtime_http1_proxy_tests;
 mod native_http2_tests;
 
 #[cfg(test)]
+#[path = "native_http2_response_tests.rs"]
+mod native_http2_response_tests;
+
+#[cfg(test)]
 #[path = "native_http2_upstream_tests.rs"]
 mod native_http2_upstream_tests;
 
