@@ -125,6 +125,9 @@ behavior when the change improves security or project direction.
   into a focused child module while preserving the existing admin API surface.
 - Split root native-proxy cache runtime statistics, activity-reset summaries,
   and native totals overlay logic into a focused cache-stats child module.
+- Split root native-proxy cache selection, exact/bulk/indexed/stale purge
+  handlers, and purge activity accounting into a focused cache-purge child
+  module.
 - Split native route proxy request dispatch, route selection, rate/concurrency
   enforcement, fallback static/PHP/proxy handling, and connection takeover into
   a focused handler module.
