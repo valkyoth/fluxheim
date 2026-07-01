@@ -7,6 +7,8 @@
 pub mod config;
 pub mod config_access;
 pub mod config_acme;
+pub mod config_acme_challenge;
+pub mod config_acme_issuer;
 pub mod config_admin;
 pub mod config_admin_health;
 pub mod config_admin_socket;

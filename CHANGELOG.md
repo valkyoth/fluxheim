@@ -86,6 +86,9 @@ behavior when the change improves security or project direction.
   health/throttle/self-healing config sections into focused
   `fluxheim-config` modules, leaving `config_admin.rs` as the schema entry
   point and re-export surface.
+- Split ACME vhost challenge routing and issuer/EAB validation into focused
+  `fluxheim-config` modules, leaving `config_acme.rs` below the modularity
+  target without changing the public config exports.
 - Split cache admin math, warm summaries, object-lookup summaries, and tests
   out of `fluxheim-cache/src/api.rs`, leaving cache API DTOs below the
   line-limit target.

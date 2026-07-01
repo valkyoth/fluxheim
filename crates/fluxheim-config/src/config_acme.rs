@@ -4,18 +4,16 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use toml::value::{Datetime, Offset};
 
-use crate::config::{
-    AccessPolicyConfig, ConcurrencyLimitConfig, ConfigError, GrpcRouteConfig, ProxyConfig,
-    RateLimitConfig, RouteConfig, VhostHeaderPolicyConfig, valid_credential_name,
-    validate_config_list_len, validate_optional_timeout_secs,
-};
-use crate::config_net::{normalize_host, valid_authority};
+use crate::config::{ConfigError, validate_config_list_len};
+pub use crate::config_acme_challenge::{MAX_ACME_CHALLENGE_UPSTREAMS, VhostAcmeChallengeConfig};
+use crate::config_acme_issuer::default_acme_issuers;
+pub use crate::config_acme_issuer::{AcmeExternalAccountBindingConfig, AcmeIssuerConfig};
+use crate::config_net::normalize_host;
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 use crate::config_tls::TlsConfig;
 
 pub const MAX_ACME_ISSUERS: usize = 128;
 pub const MAX_VHOST_ACME_DOMAINS: usize = 64;
-pub const MAX_ACME_CHALLENGE_UPSTREAMS: usize = 64;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -94,123 +92,6 @@ impl VhostAcmeConfig {
         }
 
         Ok(())
-    }
-}
-
-const ACME_HTTP_CHALLENGE_PREFIX: &str = "/.well-known/acme-challenge/";
-
-#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct VhostAcmeChallengeConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub upstream: Option<String>,
-    #[serde(default)]
-    pub upstreams: Vec<String>,
-    #[serde(default)]
-    pub upstream_tls: bool,
-    #[serde(default)]
-    pub connect_timeout_secs: Option<u64>,
-    #[serde(default)]
-    pub read_timeout_secs: Option<u64>,
-    #[serde(default)]
-    pub send_timeout_secs: Option<u64>,
-}
-
-impl VhostAcmeChallengeConfig {
-    pub fn validate(&self, vhost: &str) -> Result<(), ConfigError> {
-        if !self.enabled {
-            return Ok(());
-        }
-
-        if self.upstream.is_some() && !self.upstreams.is_empty() {
-            return Err(ConfigError::ConflictingAcmeChallengeUpstreams {
-                vhost: vhost.to_owned(),
-            });
-        }
-        if self.upstream.is_none() && self.upstreams.is_empty() {
-            return Err(ConfigError::MissingAcmeChallengeUpstream {
-                vhost: vhost.to_owned(),
-            });
-        }
-        if self.upstreams.len() > MAX_ACME_CHALLENGE_UPSTREAMS {
-            return Err(ConfigError::TooManyAcmeChallengeUpstreams {
-                vhost: vhost.to_owned(),
-                max: MAX_ACME_CHALLENGE_UPSTREAMS,
-            });
-        }
-
-        if let Some(upstream) = &self.upstream
-            && !valid_authority(upstream)
-        {
-            return Err(ConfigError::InvalidUpstream {
-                address: upstream.clone(),
-            });
-        }
-        let mut seen_upstreams = std::collections::HashSet::new();
-        for upstream in &self.upstreams {
-            if !valid_authority(upstream) {
-                return Err(ConfigError::InvalidUpstream {
-                    address: upstream.clone(),
-                });
-            }
-            if !seen_upstreams.insert(upstream.to_ascii_lowercase()) {
-                return Err(ConfigError::DuplicateAcmeChallengeUpstream {
-                    vhost: vhost.to_owned(),
-                    upstream: upstream.clone(),
-                });
-            }
-        }
-
-        validate_optional_timeout_secs(
-            "vhosts.acme_challenge.connect_timeout_secs",
-            self.connect_timeout_secs,
-        )?;
-        validate_optional_timeout_secs(
-            "vhosts.acme_challenge.read_timeout_secs",
-            self.read_timeout_secs,
-        )?;
-        validate_optional_timeout_secs(
-            "vhosts.acme_challenge.send_timeout_secs",
-            self.send_timeout_secs,
-        )?;
-        Ok(())
-    }
-
-    pub fn route_config(&self) -> Option<RouteConfig> {
-        self.enabled.then(|| RouteConfig {
-            name: "acme-http-01".to_owned(),
-            path_exact: None,
-            path_prefix: Some(ACME_HTTP_CHALLENGE_PREFIX.to_owned()),
-            path_regex: None,
-            methods: Vec::new(),
-            fallback: false,
-            https_redirect_exempt: true,
-            strip_prefix: None,
-            rewrite_prefix: None,
-            rewrite_template: None,
-            max_request_body_bytes: None,
-            access: AccessPolicyConfig::default(),
-            rate_limit: RateLimitConfig::default(),
-            concurrency: ConcurrencyLimitConfig::default(),
-            grpc: GrpcRouteConfig::default(),
-            redirect: None,
-            proxy: Some(ProxyConfig {
-                upstream: self.upstream.clone(),
-                upstreams: self.upstreams.clone(),
-                upstream_tls: self.upstream_tls,
-                connect_timeout_secs: self.connect_timeout_secs,
-                read_timeout_secs: self.read_timeout_secs,
-                send_timeout_secs: self.send_timeout_secs,
-                ..ProxyConfig::default()
-            }),
-            web: None,
-            php: None,
-            cache: None,
-            compression: None,
-            headers: VhostHeaderPolicyConfig::default(),
-        })
     }
 }
 
@@ -490,91 +371,6 @@ impl AcmeRenewalConfig {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AcmeIssuerConfig {
-    pub name: String,
-    pub directory_url: String,
-    #[serde(default)]
-    pub eab: Option<AcmeExternalAccountBindingConfig>,
-}
-
-impl AcmeIssuerConfig {
-    fn resolve_relative_paths(&mut self, base_dir: &Path) {
-        if let Some(eab) = &mut self.eab {
-            eab.resolve_relative_paths(base_dir);
-        }
-    }
-
-    fn validate(&self) -> Result<(), ConfigError> {
-        if self.name.trim().is_empty() {
-            return Err(ConfigError::EmptyAcmeIssuerName {
-                scope: "tls.acme.issuers.name",
-            });
-        }
-        if !valid_https_url(&self.directory_url) {
-            return Err(ConfigError::InvalidAcmeDirectoryUrl {
-                issuer: self.name.clone(),
-                url: self.directory_url.clone(),
-            });
-        }
-        if let Some(eab) = &self.eab {
-            eab.validate(&self.name)?;
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AcmeExternalAccountBindingConfig {
-    #[serde(default)]
-    pub key_id_env: Option<String>,
-    #[serde(default)]
-    pub key_id_file: Option<PathBuf>,
-    #[serde(default)]
-    pub key_id_credential: Option<String>,
-    #[serde(default)]
-    pub hmac_key_env: Option<String>,
-    #[serde(default)]
-    pub hmac_key_file: Option<PathBuf>,
-    #[serde(default)]
-    pub hmac_key_credential: Option<String>,
-}
-
-impl AcmeExternalAccountBindingConfig {
-    fn resolve_relative_paths(&mut self, base_dir: &Path) {
-        if let Some(path) = &mut self.key_id_file
-            && path.is_relative()
-        {
-            *path = base_dir.join(&path);
-        }
-        if let Some(path) = &mut self.hmac_key_file
-            && path.is_relative()
-        {
-            *path = base_dir.join(&path);
-        }
-    }
-
-    fn validate(&self, issuer: &str) -> Result<(), ConfigError> {
-        validate_secret_source(
-            issuer,
-            "key_id",
-            self.key_id_env.as_deref(),
-            self.key_id_file.as_ref(),
-            self.key_id_credential.as_deref(),
-        )?;
-        validate_secret_source(
-            issuer,
-            "hmac_key",
-            self.hmac_key_env.as_deref(),
-            self.hmac_key_file.as_ref(),
-            self.hmac_key_credential.as_deref(),
-        )
-    }
-}
-
 fn default_acme_contact_email() -> Option<String> {
     None
 }
@@ -599,64 +395,6 @@ fn default_acme_renewal_retry_max_secs() -> u64 {
     24 * 60 * 60
 }
 
-fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
-    vec![
-        AcmeIssuerConfig {
-            name: "letsencrypt".to_owned(),
-            directory_url: "https://acme-v02.api.letsencrypt.org/directory".to_owned(),
-            eab: None,
-        },
-        AcmeIssuerConfig {
-            name: "letsencrypt-staging".to_owned(),
-            directory_url: "https://acme-staging-v02.api.letsencrypt.org/directory".to_owned(),
-            eab: None,
-        },
-        AcmeIssuerConfig {
-            name: "actalis".to_owned(),
-            directory_url: "https://acme-api.actalis.com/acme/directory".to_owned(),
-            eab: Some(AcmeExternalAccountBindingConfig {
-                key_id_env: Some("FLUXHEIM_ACTALIS_EAB_KID".to_owned()),
-                key_id_file: None,
-                key_id_credential: None,
-                hmac_key_env: Some("FLUXHEIM_ACTALIS_EAB_HMAC_KEY".to_owned()),
-                hmac_key_file: None,
-                hmac_key_credential: None,
-            }),
-        },
-        AcmeIssuerConfig {
-            name: "google-trust-services".to_owned(),
-            directory_url: "https://dv.acme-v02.api.pki.goog/directory".to_owned(),
-            eab: Some(AcmeExternalAccountBindingConfig {
-                key_id_env: Some("FLUXHEIM_GTS_EAB_KID".to_owned()),
-                key_id_file: None,
-                key_id_credential: None,
-                hmac_key_env: Some("FLUXHEIM_GTS_EAB_HMAC_KEY".to_owned()),
-                hmac_key_file: None,
-                hmac_key_credential: None,
-            }),
-        },
-        AcmeIssuerConfig {
-            name: "google-trust-services-staging".to_owned(),
-            directory_url: "https://dv.acme-v02.test-api.pki.goog/directory".to_owned(),
-            eab: Some(AcmeExternalAccountBindingConfig {
-                key_id_env: Some("FLUXHEIM_GTS_STAGING_EAB_KID".to_owned()),
-                key_id_file: None,
-                key_id_credential: None,
-                hmac_key_env: Some("FLUXHEIM_GTS_STAGING_EAB_HMAC_KEY".to_owned()),
-                hmac_key_file: None,
-                hmac_key_credential: None,
-            }),
-        },
-    ]
-}
-
-fn valid_https_url(value: &str) -> bool {
-    let value = value.trim();
-    value.starts_with("https://")
-        && value.len() > "https://".len()
-        && !value.chars().any(char::is_whitespace)
-}
-
 fn invalid_email(value: &str) -> bool {
     let value = value.trim();
     value.is_empty()
@@ -675,43 +413,6 @@ fn invalid_acme_renew_after_datetime(value: &Datetime) -> bool {
             .and_then(|time| time.second)
             .is_some_and(|second| second > 59)
         || matches!(value.offset, Some(Offset::Custom { minutes }) if minutes <= -1_440 || minutes >= 1_440)
-}
-
-fn validate_secret_source(
-    issuer: &str,
-    field: &'static str,
-    env: Option<&str>,
-    file: Option<&PathBuf>,
-    credential: Option<&str>,
-) -> Result<(), ConfigError> {
-    let env = env.map(str::trim).filter(|value| !value.is_empty());
-    let file = file.filter(|path| !path.as_os_str().is_empty());
-    let credential = credential.map(str::trim).filter(|value| !value.is_empty());
-    let file_field = format!("tls.acme.issuers.{issuer}.eab.{field}_file");
-    validate_path(file_field.clone(), file.map(PathBuf::as_path))?;
-    validate_non_world_writable_parent(file_field, file.map(PathBuf::as_path))?;
-
-    if let Some(credential) = credential
-        && !valid_credential_name(credential)
-    {
-        return Err(ConfigError::InvalidAcmeEabCredentialName {
-            issuer: issuer.to_owned(),
-            field,
-            credential: credential.to_owned(),
-        });
-    }
-
-    match (env.is_some(), file.is_some(), credential.is_some()) {
-        (true, false, false) | (false, true, false) | (false, false, true) => Ok(()),
-        (false, false, false) => Err(ConfigError::InvalidAcmeEabSecretSource {
-            issuer: issuer.to_owned(),
-            field,
-        }),
-        _ => Err(ConfigError::ConflictingAcmeEabSecretSource {
-            issuer: issuer.to_owned(),
-            field,
-        }),
-    }
 }
 
 fn default_true() -> bool {

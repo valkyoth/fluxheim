@@ -33,7 +33,6 @@ documents why the exception is temporary and how it will be removed.
 | `src/udp_proxy.rs` | 1038 | UDP beta runtime. | Split before beta promotion. |
 | `crates/fluxheim-config/src/config_stream.rs` | 947 | Stream proxy config and TLS validation. | Split with stream runtime cutover. |
 | `crates/fluxheim-config/src/reload.rs` | 809 | Reload classification and diff behavior. | Move snapshot/reload-safe classification into dedicated modules. |
-| `crates/fluxheim-config/src/config_acme.rs` | 719 | ACME config and validation. | Move with `fluxheim-acme`. |
 | `src/config_tester.rs` | 716 | Config tester CLI and profile logic. | Split profile checks from CLI output. |
 | `src/stream_tls.rs` | 657 | Stream upstream TLS adapter. | Move with stream runtime cutover. |
 | `crates/fluxheim-server/src/native_http1_proxy_tests.rs` | 805 | Native HTTP/1 proxy parity tests temporarily group plain, TLS, mTLS, failover, pooling, round-robin, weighted round-robin, config-gate, compression, error-page, and forwarded-header fixtures for the native upstream cutover slices. | Split plain failover/round-robin, TLS/mTLS, pooling, compression/error-page, forwarded-header, and config-gate tests after the native proxy API stabilizes. |
