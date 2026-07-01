@@ -89,6 +89,8 @@ behavior when the change improves security or project direction.
   counter helpers into a focused server module.
 - Split native proxy cache revalidation, `only-if-cached`, response header
   filtering, tag extraction, and Vary-key helpers into a focused server module.
+- Split native proxy configuration error typing and diagnostics into a focused
+  server module.
 - Split native route proxy upstream/load-balancer construction into a focused
   server module so route dispatch keeps shrinking without changing serving
   behavior.

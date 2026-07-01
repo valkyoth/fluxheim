@@ -30,6 +30,7 @@ mod native_http1_proxy_cache_policy;
 mod native_http1_proxy_cache_response;
 mod native_http1_proxy_cache_slice;
 mod native_http1_proxy_config;
+mod native_http1_proxy_config_error;
 mod native_http1_proxy_error_page;
 mod native_http1_proxy_metrics;
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
