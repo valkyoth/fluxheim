@@ -128,6 +128,9 @@ behavior when the change improves security or project direction.
   focused feature-gated child test module.
 - Split native proxy static construction, timeout, pool, proxy-protocol, and
   socket-option config tests into a focused child test module.
+- Split native proxy pooling, upstream PROXY protocol, upstream timeout, and
+  request-body timeout runtime tests into a focused child test module, bringing
+  `native_http1_proxy_tests.rs` below the modularity target.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
