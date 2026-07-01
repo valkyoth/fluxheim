@@ -131,6 +131,8 @@ behavior when the change improves security or project direction.
   helpers into a focused server module while preserving header behavior.
 - Split native route access checks, token-bucket rate limiting, and concurrency
   permits into focused server modules while preserving route policy behavior.
+- Split native route PHP-FPM handling and PHP path canonicalization helpers into
+  focused server modules while preserving PHP fallback behavior.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
