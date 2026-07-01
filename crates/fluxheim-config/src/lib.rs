@@ -39,6 +39,7 @@ pub mod config_proxy;
 pub mod config_proxy_auth;
 pub mod config_proxy_discovery;
 pub mod config_proxy_error_page;
+pub mod config_proxy_fragment;
 pub mod config_proxy_protocol;
 pub mod config_proxy_traffic_mirror;
 mod config_proxy_transport;

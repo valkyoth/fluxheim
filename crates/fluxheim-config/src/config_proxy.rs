@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ByteSize, ConfigError, LoadBalanceConfig, validate_optional_timeout_secs};
-use crate::config_load_balance::LoadBalanceConfigFragment;
 use crate::config_net::{upstream_host, valid_authority};
 pub use crate::config_proxy_auth::{AuthRequestConfig, AuthRequestConfigFragment};
 use crate::config_proxy_discovery::{
@@ -11,6 +10,7 @@ use crate::config_proxy_discovery::{
     validate_proxy_upstream_discovery,
 };
 pub use crate::config_proxy_error_page::ProxyErrorPageConfig;
+pub use crate::config_proxy_fragment::ProxyConfigFragment;
 pub use crate::config_proxy_protocol::{UpstreamHttpVersion, UpstreamProxyProtocol};
 pub use crate::config_proxy_traffic_mirror::{TrafficMirrorConfig, TrafficMirrorConfigFragment};
 use crate::config_proxy_transport::validate_proxy_upstream_transport;
@@ -142,66 +142,6 @@ pub struct ProxyConfig {
     pub error_pages: Vec<ProxyErrorPageConfig>,
     #[serde(default)]
     pub load_balance: LoadBalanceConfig,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProxyConfigFragment {
-    upstream: Option<String>,
-    upstreams: Option<Vec<String>>,
-    upstreams_file: Option<PathBuf>,
-    upstreams_file_refresh_secs: Option<u64>,
-    upstreams_http_url: Option<String>,
-    upstreams_http_refresh_secs: Option<u64>,
-    upstreams_http_bearer_token_file: Option<PathBuf>,
-    upstreams_http_allow_private_backends: Option<bool>,
-    upstream_dns_refresh_secs: Option<u64>,
-    upstream_dns_allow_private_backends: Option<bool>,
-    upstream_weights: Option<Vec<usize>>,
-    upstream_priority_groups: Option<Vec<u16>>,
-    upstream_priority_group_min_active: Option<usize>,
-    upstream_localities: Option<Vec<String>>,
-    preferred_upstream_localities: Option<Vec<String>>,
-    upstream_max_in_flight: Option<Vec<usize>>,
-    upstream_aliases: Option<Vec<String>>,
-    upstream_tags: Option<Vec<Vec<String>>>,
-    backup_upstreams: Option<Vec<String>>,
-    drain_upstreams: Option<Vec<String>>,
-    disabled_upstreams: Option<Vec<String>>,
-    upstream_tls: Option<bool>,
-    upstream_sni: Option<String>,
-    upstream_verify_cert: Option<bool>,
-    upstream_verify_hostname: Option<bool>,
-    upstream_alternative_cn: Option<String>,
-    upstream_ca_path: Option<PathBuf>,
-    upstream_client_cert_path: Option<PathBuf>,
-    upstream_client_key_path: Option<PathBuf>,
-    upstream_proxy_protocol: Option<UpstreamProxyProtocol>,
-    upstream_http_version: Option<UpstreamHttpVersion>,
-    upstream_h2c_upgrade: Option<bool>,
-    websocket: Option<bool>,
-    auth_request: Option<AuthRequestConfigFragment>,
-    mirror: Option<TrafficMirrorConfigFragment>,
-    upstream_h2_max_streams: Option<usize>,
-    upstream_h2_ping_interval_secs: Option<u64>,
-    connect_timeout_secs: Option<u64>,
-    upstream_total_connection_timeout_secs: Option<u64>,
-    upstream_idle_timeout_secs: Option<u64>,
-    upstream_tcp_keepalive_idle_secs: Option<u64>,
-    upstream_tcp_keepalive_interval_secs: Option<u64>,
-    upstream_tcp_keepalive_count: Option<usize>,
-    upstream_tcp_user_timeout_ms: Option<u64>,
-    upstream_tcp_recv_buffer_bytes: Option<ByteSize>,
-    upstream_dscp: Option<u8>,
-    upstream_tcp_fast_open: Option<bool>,
-    read_timeout_secs: Option<u64>,
-    send_timeout_secs: Option<u64>,
-    downstream_read_timeout_secs: Option<u64>,
-    downstream_write_timeout_secs: Option<u64>,
-    downstream_total_response_timeout_secs: Option<u64>,
-    downstream_min_send_rate_bytes_per_sec: Option<usize>,
-    error_pages: Option<Vec<ProxyErrorPageConfig>>,
-    load_balance: Option<LoadBalanceConfigFragment>,
 }
 
 pub const MAX_PROXY_UPSTREAMS: usize = 64;
@@ -609,56 +549,6 @@ impl ProxyConfig {
             });
         }
         Ok(())
-    }
-}
-
-impl ProxyConfigFragment {
-    pub(crate) fn has_conflicting_upstream_sources(&self) -> bool {
-        usize::from(self.upstream.is_some())
-            + usize::from(
-                self.upstreams
-                    .as_ref()
-                    .is_some_and(|upstreams| !upstreams.is_empty()),
-            )
-            + usize::from(self.upstreams_file.is_some())
-            + usize::from(self.upstreams_http_url.is_some())
-            > 1
-    }
-
-    pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
-        if let Some(path) = &mut self.upstream_ca_path
-            && path.is_relative()
-        {
-            *path = base_dir.join(&path);
-        }
-        if let Some(path) = &mut self.upstreams_file
-            && path.is_relative()
-        {
-            *path = base_dir.join(&path);
-        }
-        if let Some(path) = &mut self.upstreams_http_bearer_token_file
-            && path.is_relative()
-        {
-            *path = base_dir.join(&path);
-        }
-        if let Some(load_balance) = &mut self.load_balance {
-            load_balance.resolve_relative_paths(base_dir);
-        }
-        if let Some(path) = &mut self.upstream_client_cert_path
-            && path.is_relative()
-        {
-            *path = base_dir.join(&path);
-        }
-        if let Some(path) = &mut self.upstream_client_key_path
-            && path.is_relative()
-        {
-            *path = base_dir.join(&path);
-        }
-        if let Some(error_pages) = &mut self.error_pages {
-            for error_page in error_pages {
-                error_page.resolve_relative_paths(base_dir);
-            }
-        }
     }
 }
 

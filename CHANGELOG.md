@@ -63,6 +63,8 @@ behavior when the change improves security or project direction.
 - Split proxy upstream transport validation for TLS material, SNI, upstream
   protocol selection, H2 knobs, socket options, and upstream timeouts into a
   focused `fluxheim-config` module.
+- Split proxy config fragments into a focused `fluxheim-config` module while
+  preserving the existing `config_proxy` re-export and merge behavior.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.
