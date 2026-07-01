@@ -26,14 +26,17 @@ use crate::native_http1_proxy_cache_fill::{
     NativeCacheFillGate, NativeCacheFillPermit, NativeOriginFillPermit, NativePeerFillPermit,
     acquire_native_origin_fill_permit, acquire_native_peer_fill_permit,
 };
+use crate::native_http1_proxy_cache_headers::{
+    cached_proxy_headers, native_cache_entry_revalidatable, native_cache_revalidation_request,
+    native_not_modified_refresh_header_skipped, native_request_cache_only_if_cached,
+    native_response_cache_tags, native_vary_cache_key,
+};
 use crate::native_http1_proxy_cache_policy::{
     native_cache_entry_has_stale_window, native_cache_entry_serve_stale_while_revalidate,
     native_cache_expiry_times, native_cache_stale_event_for_error, native_predictor_counter_uses,
     prune_native_predictor_counters,
 };
-use crate::native_http1_proxy_cache_response::{
-    native_cached_hit_response, native_entry_first_header,
-};
+use crate::native_http1_proxy_cache_response::native_cached_hit_response;
 use crate::native_http1_proxy_cache_slice::{
     NativeCacheSliceObject, NativeCacheSliceResponse, native_compose_slice_response,
     native_if_range_matches_slice_identity, native_origin_slice_request,
@@ -91,13 +94,12 @@ use crate::{
 };
 use fluxheim_cache::{
     CacheRangeRequest, CacheRequest, CacheRequestView, CacheSliceBounds, CacheStaleEvent,
-    VaryCachePolicy, VaryRequestHashField, cache_key_with_component,
-    cache_method_temporarily_bypassed, cache_should_serve_stale, cache_vary_policy,
-    collect_cache_tags, image_cache_key, range_response_cache_admission_rejection,
-    request_cache_bypass_reason, request_cache_revalidation_requested, resolve_client_slice_ranges,
-    response_age_secs, response_cache_admission_rejection,
-    response_range_cache_admission_rejection, selected_cache_range_request,
-    selected_cache_slice_range_request, vary_request_hash_material,
+    VaryCachePolicy, cache_key_with_component, cache_method_temporarily_bypassed,
+    cache_should_serve_stale, cache_vary_policy, image_cache_key,
+    range_response_cache_admission_rejection, request_cache_bypass_reason,
+    request_cache_revalidation_requested, resolve_client_slice_ranges, response_age_secs,
+    response_cache_admission_rejection, response_range_cache_admission_rejection,
+    selected_cache_range_request, selected_cache_slice_range_request,
 };
 use fluxheim_config::CacheConfig;
 use tokio::sync::Notify;
@@ -3356,103 +3358,6 @@ fn native_request_header<'a>(request: &'a NativeHttp1Request, name: &str) -> Opt
         .iter()
         .find_map(|(header_name, value)| header_name.eq_ignore_ascii_case(name).then_some(value))
         .map(String::as_str)
-}
-
-fn native_cache_entry_revalidatable(
-    entry: &NativeMemoryCacheEntry,
-    now: std::time::Instant,
-) -> bool {
-    entry.expires_at <= now
-        && (native_entry_first_header(entry, "etag").is_some()
-            || native_entry_first_header(entry, "last-modified").is_some())
-}
-
-fn native_cache_revalidation_request(
-    mut request: NativeHttp1Request,
-    entry: &NativeMemoryCacheEntry,
-) -> NativeHttp1Request {
-    if !request.contains_header("if-none-match")
-        && let Some(etag) = native_entry_first_header(entry, "etag")
-    {
-        request.headers.push(("if-none-match".to_owned(), etag));
-        return request;
-    }
-    if !request.contains_header("if-modified-since")
-        && let Some(last_modified) = native_entry_first_header(entry, "last-modified")
-    {
-        request
-            .headers
-            .push(("if-modified-since".to_owned(), last_modified));
-    }
-    request
-}
-
-fn native_not_modified_refresh_header_skipped(name: &str) -> bool {
-    name.eq_ignore_ascii_case("content-length")
-        || name.eq_ignore_ascii_case("content-range")
-        || name.eq_ignore_ascii_case("transfer-encoding")
-}
-
-fn native_request_cache_only_if_cached(request: &NativeHttp1Request) -> bool {
-    native_request_header_values(request, "cache-control").any(|value| {
-        value
-            .split(',')
-            .any(|directive| directive.trim().eq_ignore_ascii_case("only-if-cached"))
-    })
-}
-
-fn cached_proxy_headers(
-    response: &NativeHttp1Response,
-    cache: &CacheConfig,
-) -> Vec<(String, String)> {
-    response
-        .headers()
-        .iter()
-        .filter(|(name, _)| {
-            !name.eq_ignore_ascii_case("age")
-                && !cache
-                    .hide_response_headers
-                    .iter()
-                    .any(|hidden| hidden.eq_ignore_ascii_case(name))
-        })
-        .cloned()
-        .collect()
-}
-
-fn native_response_cache_tags(response: &NativeHttp1Response, cache: &CacheConfig) -> Vec<String> {
-    let mut tags = Vec::new();
-    let mut total_bytes = 0_usize;
-    for tag_header in &cache.tag_headers {
-        for (_, value) in response
-            .headers()
-            .iter()
-            .filter(|(name, _)| name.eq_ignore_ascii_case(tag_header))
-        {
-            collect_cache_tags(value, &mut tags, &mut total_bytes);
-        }
-    }
-    tags
-}
-
-fn native_vary_cache_key(
-    base_key: &str,
-    fields: &[String],
-    request: &NativeHttp1Request,
-) -> Option<String> {
-    let material = vary_request_hash_material(fields.iter().map(|field| {
-        VaryRequestHashField {
-            name: field.as_str(),
-            values: request
-                .headers
-                .iter()
-                .filter_map(|(name, value)| {
-                    name.eq_ignore_ascii_case(field).then_some(value.as_bytes())
-                })
-                .collect(),
-        }
-    }));
-    let variance = base64_ng::URL_SAFE_NO_PAD.encode_string(&material).ok()?;
-    Some(format!("{base_key};vary:{variance}"))
 }
 
 #[cfg(test)]
