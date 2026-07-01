@@ -73,6 +73,9 @@ behavior when the change improves security or project direction.
   and root `config` re-exports.
 - Split managed PHP-FPM config validation into a Unix-gated
   `fluxheim-config` module while preserving the existing PHP config API.
+- Split external PHP-FPM endpoint, retry, timeout, and keepalive validation
+  into a focused `fluxheim-config` module while preserving
+  `PhpFpmConfig::validate`.
 - Split background supervision and shutdown primitives out of
   `fluxheim-runtime/src/lib.rs` into focused runtime modules while preserving
   the public exports.

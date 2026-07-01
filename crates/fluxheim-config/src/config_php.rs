@@ -1,20 +1,19 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
-use std::net::{IpAddr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    ByteSize, ConfigError, ProxyErrorPageConfig, extend_unique, validate_optional_timeout_secs,
-    validate_required_timeout_secs,
+    ByteSize, ConfigError, ProxyErrorPageConfig, extend_unique, validate_required_timeout_secs,
 };
-use crate::config_net::{upstream_host, valid_authority};
 use crate::config_path::{
     path_existing_prefix_contains_symlink, path_inspection_failed,
     validate_non_world_writable_parent, validate_path,
 };
+pub use crate::config_php_fpm_validate::MAX_PHP_FPM_TCP_UPSTREAMS;
+use crate::config_php_fpm_validate::validate_php_fpm_config;
 #[cfg(unix)]
 pub use crate::config_php_managed::validate_php_fpm_managed_config;
 pub use crate::config_php_validation::{
@@ -562,9 +561,6 @@ impl Default for PhpFpmConfig {
     }
 }
 
-const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
-const MAX_PHP_FPM_RETRIES: u8 = 10;
-pub const MAX_PHP_FPM_TCP_UPSTREAMS: usize = 64;
 pub const MAX_PHP_ERROR_PAGES: usize = 64;
 const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
 const MAX_PHP_RESPONSE_CONFIG_BYTES: usize = 64 * 1024 * 1024;
@@ -595,227 +591,19 @@ impl PhpFpmConfig {
     }
 
     pub fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
-        let endpoint_count = usize::from(self.socket.is_some())
-            + usize::from(self.tcp.is_some())
-            + usize::from(!self.tcp_upstreams.is_empty());
-        match self.mode {
-            PhpFpmMode::External => {
-                match endpoint_count {
-                    1 => {}
-                    0 => {
-                        return Err(ConfigError::InvalidPhpConfig {
-                            field: "php.fpm",
-                            reason: "enabled PHP requires php-fpm socket, tcp, or tcp_upstreams",
-                        });
-                    }
-                    _ => {
-                        return Err(ConfigError::InvalidPhpConfig {
-                            field: "php.fpm",
-                            reason: "configure only one of socket, tcp, or tcp_upstreams",
-                        });
-                    }
-                }
-                if self.php_fpm_binary.is_some()
-                    || self.socket_dir.is_some()
-                    || self.workers != default_php_fpm_managed_workers()
-                    || self.max_requests_per_worker != default_php_fpm_managed_max_requests()
-                    || self.process_manager != PhpFpmProcessManager::Static
-                    || self.start_servers.is_some()
-                    || self.min_spare_servers.is_some()
-                    || self.max_spare_servers.is_some()
-                    || self.max_spawn_rate.is_some()
-                    || self.process_idle_timeout_secs.is_some()
-                    || self.listen_backlog.is_some()
-                    || self.listen_owner.is_some()
-                    || self.listen_group.is_some()
-                    || self.listen_mode.is_some()
-                    || self.request_terminate_timeout_secs.is_some()
-                    || self.request_terminate_timeout_track_finished
-                    || self.request_slowlog_timeout_secs.is_some()
-                    || self.request_slowlog_trace_depth != default_php_fpm_slowlog_trace_depth()
-                    || !self.clear_env
-                    || !self.catch_workers_output
-                    || !self.decorate_workers_output
-                    || self.session_save_path.is_some()
-                    || self.upload_tmp_dir.is_some()
-                    || self.user.is_some()
-                    || self.group.is_some()
-                {
-                    return Err(ConfigError::InvalidPhpConfig {
-                        field: "php.fpm.mode",
-                        reason: "managed php-fpm fields require mode = \"managed\"",
-                    });
-                }
-            }
-            PhpFpmMode::Managed => {
-                if endpoint_count != 0 {
-                    return Err(ConfigError::InvalidPhpConfig {
-                        field: "php.fpm.mode",
-                        reason: "managed php-fpm creates its own private socket; do not set socket, tcp, or tcp_upstreams",
-                    });
-                }
-                #[cfg(not(unix))]
-                {
-                    return Err(ConfigError::InvalidPhpConfig {
-                        field: "php.fpm.mode",
-                        reason: "managed php-fpm requires Unix sockets",
-                    });
-                }
-                #[cfg(unix)]
-                {
-                    validate_php_fpm_managed_config(self, scope)?;
-                }
-            }
-        }
-
-        if let Some(socket) = &self.socket {
-            let field = format!("{scope}.fpm.socket");
-            if socket.as_os_str().is_empty() {
-                return Err(ConfigError::InvalidPhpConfig {
-                    field: "php.fpm.socket",
-                    reason: "socket cannot be empty",
-                });
-            }
-            validate_path(field.clone(), Some(socket))?;
-            validate_non_world_writable_parent(field, Some(socket))?;
-        }
-        if let Some(tcp) = &self.tcp
-            && !valid_authority(tcp)
-        {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.fpm.tcp",
-                reason: "must be host:port or ip:port",
-            });
-        }
-        if let Some(tcp) = &self.tcp {
-            validate_php_fpm_tcp_endpoint(tcp, self.allow_private_tcp_upstreams, "php.fpm.tcp")?;
-        }
-        if self.tcp_upstreams.len() > MAX_PHP_FPM_TCP_UPSTREAMS {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.fpm.tcp_upstreams",
-                reason: "at most 64 upstreams are allowed",
-            });
-        }
-        let mut seen_tcp_upstreams = BTreeSet::new();
-        for tcp in &self.tcp_upstreams {
-            if !valid_authority(tcp) {
-                return Err(ConfigError::InvalidPhpConfig {
-                    field: "php.fpm.tcp_upstreams",
-                    reason: "entries must be host:port or ip:port",
-                });
-            }
-            validate_php_fpm_tcp_endpoint(
-                tcp,
-                self.allow_private_tcp_upstreams,
-                "php.fpm.tcp_upstreams",
-            )?;
-            if !seen_tcp_upstreams.insert(tcp.to_ascii_lowercase()) {
-                return Err(ConfigError::InvalidPhpConfig {
-                    field: "php.fpm.tcp_upstreams",
-                    reason: "duplicate upstreams are not allowed",
-                });
-            }
-        }
-
-        validate_optional_timeout_secs("php.fpm.connect_timeout_secs", self.connect_timeout_secs)?;
-        validate_optional_timeout_secs("php.fpm.read_timeout_secs", self.read_timeout_secs)?;
-        validate_optional_timeout_secs("php.fpm.write_timeout_secs", self.write_timeout_secs)?;
-        validate_optional_timeout_secs("php.fpm.retry_timeout_secs", self.retry_timeout_secs)?;
-        if self.max_retries > MAX_PHP_FPM_RETRIES {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.fpm.max_retries",
-                reason: "must be less than or equal to 10",
-            });
-        }
-        validate_php_fpm_retry_methods(&self.retry_methods)?;
-        validate_php_fpm_retry_statuses(&self.retry_statuses)?;
-        if self.keepalive {
-            if self.pool_max_idle == 0 {
-                return Err(ConfigError::InvalidPhpConfig {
-                    field: "php.fpm.pool_max_idle",
-                    reason: "must be greater than zero when php.fpm.keepalive is enabled",
-                });
-            }
-            if self.pool_max_idle > MAX_PHP_FPM_POOL_MAX_IDLE {
-                return Err(ConfigError::InvalidPhpConfig {
-                    field: "php.fpm.pool_max_idle",
-                    reason: "must be less than or equal to 1024",
-                });
-            }
-            validate_required_timeout_secs("php.fpm.idle_timeout_secs", self.idle_timeout_secs)?;
-        }
-        Ok(())
+        validate_php_fpm_config(self, scope)
     }
 }
 
-fn validate_php_fpm_tcp_endpoint(
-    authority: &str,
-    allow_private_tcp_upstreams: bool,
-    field: &'static str,
-) -> Result<(), ConfigError> {
-    let Some(host) = upstream_host(authority) else {
-        return Err(ConfigError::InvalidPhpConfig {
-            field,
-            reason: "entries must be host:port or ip:port",
-        });
-    };
-    let Ok(address) = host.parse::<IpAddr>() else {
-        return Ok(());
-    };
-    if php_fpm_tcp_ip_always_invalid(address) {
-        return Err(ConfigError::InvalidPhpConfig {
-            field,
-            reason: "must not use unspecified or multicast IP literals",
-        });
-    }
-    if !allow_private_tcp_upstreams && php_fpm_tcp_ip_requires_private_opt_in(address) {
-        return Err(ConfigError::InvalidPhpConfig {
-            field,
-            reason: "loopback, private, or link-local IP literals require allow_private_tcp_upstreams = true",
-        });
-    }
-    Ok(())
-}
-
-fn php_fpm_tcp_ip_always_invalid(address: IpAddr) -> bool {
-    match address {
-        IpAddr::V4(address) => {
-            address.is_unspecified() || address.is_broadcast() || address.is_multicast()
-        }
-        IpAddr::V6(address) => address.is_unspecified() || address.is_multicast(),
-    }
-}
-
-fn php_fpm_tcp_ip_requires_private_opt_in(address: IpAddr) -> bool {
-    match address {
-        IpAddr::V4(address) => {
-            address.is_loopback() || address.is_private() || address.is_link_local()
-        }
-        IpAddr::V6(address) => {
-            address.is_loopback()
-                || ipv6_is_unique_local(address)
-                || ipv6_is_unicast_link_local(address)
-        }
-    }
-}
-
-fn ipv6_is_unique_local(address: Ipv6Addr) -> bool {
-    address.segments()[0] & 0xfe00 == 0xfc00
-}
-
-fn ipv6_is_unicast_link_local(address: Ipv6Addr) -> bool {
-    address.segments()[0] & 0xffc0 == 0xfe80
-}
-
-fn default_php_fpm_managed_workers() -> usize {
+pub(crate) fn default_php_fpm_managed_workers() -> usize {
     4
 }
 
-fn default_php_fpm_managed_max_requests() -> usize {
+pub(crate) fn default_php_fpm_managed_max_requests() -> usize {
     1000
 }
 
-fn default_php_fpm_slowlog_trace_depth() -> usize {
+pub(crate) fn default_php_fpm_slowlog_trace_depth() -> usize {
     20
 }
 fn default_php_index() -> String {

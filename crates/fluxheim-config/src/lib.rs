@@ -35,6 +35,7 @@ pub mod config_net;
 pub mod config_observability;
 pub mod config_path;
 pub mod config_php;
+pub mod config_php_fpm_validate;
 #[cfg(unix)]
 pub mod config_php_managed;
 pub mod config_php_validation;
