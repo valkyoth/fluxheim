@@ -76,6 +76,10 @@ use crate::native_http1_proxy_peer_fill_auth::{
     NativePeerFillAuth, native_peer_fill_auth_from_config,
     native_peer_fill_request_signature_matches, native_peer_fill_sign_response,
 };
+use crate::native_http1_proxy_request::{
+    native_proxy_error_is_timeout, native_request_header, native_request_is_websocket_upgrade,
+    native_response_write_policy_from_config,
+};
 use crate::native_http1_proxy_runtime::{
     register_native_cache_stats_handle, register_native_memory_cache_purge_handle,
 };
@@ -3229,58 +3233,6 @@ impl NativeHttp1Proxy {
         };
         !native_peer_fill_request_signature_matches(auth, request)
     }
-}
-
-fn native_response_write_policy_from_config(
-    proxy: &fluxheim_config::ProxyConfig,
-) -> NativeHttp1ResponseWritePolicy {
-    NativeHttp1ResponseWritePolicy::new(
-        proxy.downstream_write_timeout_secs.map(Duration::from_secs),
-        proxy
-            .downstream_total_response_timeout_secs
-            .map(Duration::from_secs),
-        proxy.downstream_min_send_rate_bytes_per_sec,
-    )
-}
-
-fn native_request_is_websocket_upgrade(request: &NativeHttp1Request) -> bool {
-    request.method == "GET"
-        && native_request_header_values(request, "upgrade")
-            .any(|value| value.trim().eq_ignore_ascii_case("websocket"))
-        && native_request_header_values(request, "connection").any(|value| {
-            value
-                .split(',')
-                .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
-        })
-        && native_request_header_values(request, "sec-websocket-key").count() == 1
-        && native_request_header_values(request, "sec-websocket-version")
-            .any(|value| value.trim() == "13")
-}
-
-fn native_request_header_values<'a>(
-    request: &'a NativeHttp1Request,
-    name: &'a str,
-) -> impl Iterator<Item = &'a str> {
-    request
-        .headers
-        .iter()
-        .filter(move |(header_name, _)| header_name.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_str())
-}
-
-fn native_proxy_error_is_timeout(error: &crate::NativeHttp1Error) -> bool {
-    matches!(
-        error,
-        crate::NativeHttp1Error::Io(error) if error.kind() == std::io::ErrorKind::TimedOut
-    )
-}
-
-fn native_request_header<'a>(request: &'a NativeHttp1Request, name: &str) -> Option<&'a str> {
-    request
-        .headers
-        .iter()
-        .find_map(|(header_name, value)| header_name.eq_ignore_ascii_case(name).then_some(value))
-        .map(String::as_str)
 }
 
 #[cfg(test)]
