@@ -92,6 +92,9 @@ behavior when the change improves security or project direction.
 - Split server listener, limit, trusted-proxy, HTTPS redirect, and TLS-listener
   config regression coverage out of the central config suite into a focused
   child test module.
+- Split vhost, route, config-list limit, ACME challenge, redirect, and
+  default-host validation coverage out of the central config suite into focused
+  child test modules.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
