@@ -13,9 +13,9 @@ use crate::config::{AdminAuthThrottleConfig, AdminConfig};
 use super::unix_secs;
 
 mod token_store;
-pub(in crate::admin) use token_store::{
-    load_admin_token, read_bounded_secret_file, read_secret_file,
-};
+pub(in crate::admin) use token_store::load_admin_token;
+#[cfg(test)]
+pub(in crate::admin) use token_store::{read_bounded_secret_file, read_secret_file};
 
 pub(super) const MAX_ADMIN_TOKEN_BYTES: usize = 8 * 1024;
 pub(super) const MAX_ADMIN_TOKEN_FILE_BYTES: u64 = MAX_ADMIN_TOKEN_BYTES as u64;
