@@ -2,6 +2,37 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
+pub(super) fn init_logging(
+    config: &crate::config::Config,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let env = env_logger::Env::default().default_filter_or(config.logging.level.as_filter());
+    let format = config.logging.format;
+    let mut builder = env_logger::Builder::from_env(env);
+    builder.format(move |buf, record| match format {
+        crate::config::LoggingFormat::Json => write_json_log_record(buf, record),
+        crate::config::LoggingFormat::Text => write_text_log_record(buf, record),
+    });
+
+    if config.logging.file.enabled {
+        let path = config.logging.file.path.as_deref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "logging.file.enabled requires logging.file.path",
+            )
+        })?;
+        let file = open_log_file(path, config.logging.file.append)?;
+        builder.target(env_logger::Target::Pipe(Box::new(file)));
+    } else {
+        builder.target(match config.logging.target {
+            crate::config::LoggingTarget::Stdout => env_logger::Target::Stdout,
+            crate::config::LoggingTarget::Stderr => env_logger::Target::Stderr,
+        });
+    }
+
+    let _ = builder.try_init();
+    Ok(())
+}
+
 pub(super) fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
     reject_log_path_symlink_prefix(path)?;
 
