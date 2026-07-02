@@ -117,6 +117,8 @@ behavior when the change improves security or project direction.
   out of the root runtime adapter, and move logging initialization into the
   runtime logging helper, bringing `src/runtime.rs` below the modularity line
   target.
+- Split metrics registry/export regression coverage out of the root metrics
+  adapter into a focused test module while preserving metrics-feature coverage.
 - Split TLS storage and downstream certificate-selector unit tests out of the
   root TLS adapter into focused test modules while preserving private-helper
   coverage.
