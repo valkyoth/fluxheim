@@ -63,6 +63,9 @@ behavior when the change improves security or project direction.
 - Split instant-acme account creation and HTTP-01/TLS-ALPN renewal execution
   into a focused ACME client module, bringing `src/acme.rs` below the
   modularity target.
+- Split `fluxheim-acme` companion command execution, config loading, and
+  certificate reload socket handling into focused child modules while keeping
+  `src/acme_companion.rs` as CLI parser/dispatcher glue.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of

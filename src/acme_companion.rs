@@ -1,15 +1,19 @@
 use std::error::Error;
-#[cfg(all(feature = "acme-client", unix))]
-use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-#[cfg(feature = "acme")]
-use crate::config::Config;
+#[path = "acme_companion_commands.rs"]
+mod commands;
+#[path = "acme_companion_config.rs"]
+mod config_loader;
+#[path = "acme_companion_reload.rs"]
+mod reload;
 
-#[cfg(all(feature = "acme-client", unix))]
-const MAX_CERTIFICATE_RELOAD_RESPONSE_BYTES: u64 = 4096;
+use commands::{print_status, print_targets, run_renew};
+use reload::request_certificate_reload_for_config;
+#[cfg(all(feature = "acme-client", unix, test))]
+use reload::{MAX_CERTIFICATE_RELOAD_RESPONSE_BYTES, request_certificate_reload};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -88,241 +92,6 @@ where
             request_certificate_reload_for_config(cli.config.as_deref())
         }
     }
-}
-
-#[cfg(feature = "acme-client")]
-fn run_renew(
-    config_path: Option<&std::path::Path>,
-    force_renew: bool,
-    vhost: Option<&str>,
-    reload_after_renewal: bool,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    #[cfg(feature = "tls-rustls-backend")]
-    crate::tls::install_rustls_crypto_provider()?;
-
-    let config = load_validated_config(config_path)?;
-    if let Some(vhost) = vhost {
-        ensure_acme_target_exists(&config, vhost)?;
-    }
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    let now = std::time::SystemTime::now();
-    let run = if let Some(vhost) = vhost {
-        runtime.block_on(crate::acme::renew_selected_instant_acme_targets(
-            &config,
-            now,
-            vhost,
-            force_renew,
-        ))?
-    } else if force_renew {
-        runtime.block_on(crate::acme::renew_all_instant_acme_targets(&config, now))?
-    } else {
-        runtime.block_on(crate::acme::renew_due_instant_acme_targets(&config, now))?
-    };
-
-    println!("acme attempted: {}", run.attempted);
-    if !force_renew && run.attempted == 0 {
-        println!("acme status: no certificates are missing or due for renewal");
-    }
-
-    let renewed_count = run.renewed.len();
-    for outcome in &run.renewed {
-        println!(
-            "renewed: {} issuer={} cert={} key={} challenges={}",
-            outcome.vhost_name,
-            outcome.issuer,
-            outcome.certificate.cert_path.display(),
-            outcome.certificate.key_path.display(),
-            outcome.published_challenges
-        );
-    }
-    for failure in &run.failed {
-        println!(
-            "failed: {} issuer={} domains={} error={}",
-            failure.vhost_name,
-            failure.issuer,
-            failure.domains.join(","),
-            failure.error.replace('\n', " ")
-        );
-    }
-
-    if renewed_count > 0 && reload_after_renewal && config.tls.acme.renewal.reload_after_renewal {
-        request_certificate_reload(&config)?;
-    }
-
-    if !run.failed.is_empty() {
-        return Err(format!("ACME renewal failed for {} target(s)", run.failed.len()).into());
-    }
-    Ok(())
-}
-
-#[cfg(not(feature = "acme-client"))]
-fn run_renew(
-    _config_path: Option<&std::path::Path>,
-    _force_renew: bool,
-    _vhost: Option<&str>,
-    _reload_after_renewal: bool,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    Err("fluxheim-acme renew requires the `acme-client` feature".into())
-}
-
-#[cfg(all(feature = "acme-client", unix))]
-fn request_certificate_reload(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let path = &config.server.process.certificate_reload_sock;
-    let mut stream = std::os::unix::net::UnixStream::connect(path)?;
-    stream.write_all(b"reload-certificates\n")?;
-    let mut response = String::new();
-    let mut limited = (&mut stream).take(MAX_CERTIFICATE_RELOAD_RESPONSE_BYTES);
-    limited.read_to_string(&mut response)?;
-    let response = response.trim();
-    if response == "ok" {
-        println!("certificate reload: ok");
-        return Ok(());
-    }
-    Err(format!(
-        "certificate reload request through {} failed: {response}",
-        path.display()
-    )
-    .into())
-}
-
-#[cfg(all(feature = "acme-client", unix))]
-fn request_certificate_reload_for_config(
-    config_path: Option<&std::path::Path>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let config = load_validated_config(config_path)?;
-    request_certificate_reload(&config)
-}
-
-#[cfg(all(feature = "acme-client", not(unix)))]
-fn request_certificate_reload(_config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
-    Err("certificate reload control socket requires Unix domain sockets".into())
-}
-
-#[cfg(any(not(feature = "acme-client"), all(feature = "acme-client", not(unix))))]
-fn request_certificate_reload_for_config(
-    _config_path: Option<&std::path::Path>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    Err(
-        "certificate reload control socket requires Unix domain sockets and the `acme-client` feature"
-            .into(),
-    )
-}
-
-#[cfg(feature = "acme")]
-fn print_targets(
-    config_path: Option<&std::path::Path>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let config = load_validated_config(config_path)?;
-    let targets = crate::acme::renewal_targets(&config);
-    println!("acme targets: {}", targets.len());
-    for target in targets {
-        println!(
-            "target: {} issuer={} challenge={:?} domains={} cert={} key={}",
-            target.vhost_name,
-            target.issuer,
-            target.challenge,
-            target.domains.join(","),
-            target.certificate.cert_path.display(),
-            target.certificate.key_path.display()
-        );
-    }
-    Ok(())
-}
-
-#[cfg(feature = "acme")]
-fn print_status(
-    config_path: Option<&std::path::Path>,
-    vhost: Option<&str>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let config = load_validated_config(config_path)?;
-    if let Some(vhost) = vhost {
-        ensure_acme_target_exists(&config, vhost)?;
-    }
-
-    let now = std::time::SystemTime::now();
-    let observations = crate::acme::observe_configured_certificates(&config);
-    let queue = crate::acme::plan_renewal_queue(&config, &observations, now);
-    let items: Vec<_> = queue
-        .into_iter()
-        .filter(|item| vhost.is_none_or(|name| item.target.vhost_name == name))
-        .collect();
-    println!("acme status targets: {}", items.len());
-    for item in items {
-        let status = if item.not_after.is_none() {
-            "missing"
-        } else if item.due_now {
-            "due"
-        } else {
-            "valid"
-        };
-        let not_after = item
-            .not_after
-            .map(system_time_epoch_secs)
-            .unwrap_or_else(|| "missing".to_owned());
-        println!(
-            "target: {} status={} due_now={} due_at={} not_after={} issuer={} domains={} cert={} key={}",
-            item.target.vhost_name,
-            status,
-            item.due_now,
-            system_time_epoch_secs(item.due_at),
-            not_after,
-            item.target.issuer,
-            item.target.domains.join(","),
-            item.target.certificate.cert_path.display(),
-            item.target.certificate.key_path.display()
-        );
-    }
-    Ok(())
-}
-
-#[cfg(feature = "acme")]
-fn load_validated_config(
-    config_path: Option<&std::path::Path>,
-) -> Result<Config, Box<dyn Error + Send + Sync>> {
-    let config = Config::load(config_path)?;
-    config.validate()?;
-    crate::cli::validate_compiled_module_config(&config)?;
-    Ok(config)
-}
-
-#[cfg(feature = "acme")]
-fn ensure_acme_target_exists(
-    config: &Config,
-    vhost: &str,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if crate::acme::renewal_targets(config)
-        .into_iter()
-        .any(|target| target.vhost_name == vhost)
-    {
-        return Ok(());
-    }
-    Err(format!("unknown ACME vhost target {vhost:?}").into())
-}
-
-#[cfg(feature = "acme")]
-fn system_time_epoch_secs(time: std::time::SystemTime) -> String {
-    match time.duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => duration.as_secs().to_string(),
-        Err(_) => "before-unix-epoch".to_owned(),
-    }
-}
-
-#[cfg(not(feature = "acme"))]
-fn print_targets(
-    _config_path: Option<&std::path::Path>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    Err("fluxheim-acme requires the `acme` or `acme-client` feature".into())
-}
-
-#[cfg(not(feature = "acme"))]
-fn print_status(
-    _config_path: Option<&std::path::Path>,
-    _vhost: Option<&str>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    Err("fluxheim-acme requires the `acme` or `acme-client` feature".into())
 }
 
 #[cfg(test)]
