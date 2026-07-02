@@ -197,6 +197,10 @@ behavior when the change improves security or project direction.
 - Split native HTTP/1 filesystem disk-cache index rebuild, shard-path writes,
   atomic file replacement, and soft-purge rewriting into a focused child
   module.
+- Split native HTTP/1 disk-cache object inspection into a focused child module.
+- Moved native HTTP/1 disk-cache private purge methods and shared mutation/state
+  helpers into focused child modules, bringing `native_http1_cache.rs` below the
+  500-line modularity target.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.

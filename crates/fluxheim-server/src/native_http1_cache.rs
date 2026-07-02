@@ -1,10 +1,7 @@
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
-use std::time::{Instant, SystemTime};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
-use fluxheim_cache::purge_index::{
-    CacheIndexedPurgeResult, CachePurgeIndexEntry, CacheStalePurgeResult,
-};
 use fluxheim_cache::{
     CacheObjectFreshnessState, DiskCacheObjectKey, SerializedCacheObject, encode_disk_cache_object,
     parse_disk_cache_object,
@@ -20,12 +17,16 @@ mod native_http1_cache_disk_path;
 mod native_http1_cache_encryption;
 #[path = "native_http1_cache_filesystem.rs"]
 mod native_http1_cache_filesystem;
+#[path = "native_http1_cache_inspect.rs"]
+mod native_http1_cache_inspect;
 #[path = "native_http1_cache_memory.rs"]
 mod native_http1_cache_memory;
 #[path = "native_http1_cache_meta.rs"]
 mod native_http1_cache_meta;
 #[path = "native_http1_cache_purge.rs"]
 mod native_http1_cache_purge;
+#[path = "native_http1_cache_state.rs"]
+mod native_http1_cache_state;
 #[path = "native_http1_cache_storage_bin.rs"]
 mod native_http1_cache_storage_bin;
 
@@ -34,12 +35,12 @@ use native_http1_cache_backend::{
     NativeDiskCacheBackend, NativeDiskCacheLocation, NativeDiskCacheRecord, NativeDiskCacheState,
 };
 use native_http1_cache_disk_path::{
-    NativeSafeDiskCachePath, native_cache_path_contains_symlink, native_disk_cache_read_limit,
-    read_native_disk_cache_file,
+    native_cache_path_contains_symlink, native_disk_cache_read_limit, read_native_disk_cache_file,
 };
 use native_http1_cache_encryption::{
     NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1, NativeDiskCacheEncryption,
 };
+pub use native_http1_cache_inspect::inspect_native_disk_cache_object;
 pub(crate) use native_http1_cache_memory::{
     NativeMemoryCacheCounter, NativeMemoryCacheEntry, NativeMemoryCacheFill,
     NativeMemoryCacheState, NativeMemoryCacheVariant, lock_native_memory_cache,
@@ -53,12 +54,12 @@ use native_http1_cache_meta::{
 };
 pub(crate) use native_http1_cache_purge::register_native_disk_cache_purge_handle;
 pub use native_http1_cache_purge::{
-    inspect_native_disk_cache_object, purge_native_disk_cache_path_exact,
-    purge_native_disk_cache_path_pattern, purge_native_disk_cache_path_prefix,
-    purge_native_disk_cache_primary, purge_native_disk_cache_stale,
-    purge_native_disk_cache_stale_all, purge_native_disk_cache_tag,
+    purge_native_disk_cache_path_exact, purge_native_disk_cache_path_pattern,
+    purge_native_disk_cache_path_prefix, purge_native_disk_cache_primary,
+    purge_native_disk_cache_stale, purge_native_disk_cache_stale_all, purge_native_disk_cache_tag,
     purge_native_disk_cache_user_tag,
 };
+use native_http1_cache_state::native_disk_cache_mutation_locks;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeDiskCacheObjectMetadata {
@@ -457,280 +458,6 @@ impl NativeDiskCache {
         }
         self.persist_storage_bin_index();
     }
-
-    fn purge_primary(&self, primary_key: &str, combined_key: &str) -> bool {
-        let mut purged = self.remove_combined(combined_key);
-        let variant_keys = self.with_state(|state| {
-            state
-                .variants
-                .get(primary_key)
-                .into_iter()
-                .flatten()
-                .map(|variant| variant.key.clone())
-                .collect::<Vec<_>>()
-        });
-        for variant_key in variant_keys {
-            purged |= self.remove_combined(&variant_key);
-        }
-        purged
-    }
-
-    fn purge_user_tag(&self, user_tag: &str, limit: usize, soft: bool) -> CacheIndexedPurgeResult {
-        let entries =
-            self.with_state(|state| state.purge_index.entries_for_user_tag(user_tag, limit));
-        self.purge_indexed_entries(entries, soft)
-    }
-
-    fn purge_path_prefix(
-        &self,
-        user_tag: &str,
-        path_prefix: &str,
-        limit: usize,
-        soft: bool,
-    ) -> CacheIndexedPurgeResult {
-        let entries = self.with_state(|state| {
-            state
-                .purge_index
-                .entries_for_user_tag_path_prefix(user_tag, path_prefix, limit)
-        });
-        self.purge_indexed_entries(entries, soft)
-    }
-
-    fn purge_path_exact(
-        &self,
-        user_tag: &str,
-        path_exact: &str,
-        limit: usize,
-        soft: bool,
-    ) -> CacheIndexedPurgeResult {
-        let entries = self.with_state(|state| {
-            state
-                .purge_index
-                .entries_for_user_tag_path_exact(user_tag, path_exact, limit)
-        });
-        self.purge_indexed_entries(entries, soft)
-    }
-
-    fn purge_cache_tag(
-        &self,
-        user_tag: &str,
-        cache_tag: &str,
-        limit: usize,
-        soft: bool,
-    ) -> CacheIndexedPurgeResult {
-        let entries = self.with_state(|state| {
-            state
-                .purge_index
-                .entries_for_user_tag_cache_tag(user_tag, cache_tag, limit)
-        });
-        self.purge_indexed_entries(entries, soft)
-    }
-
-    fn purge_path_pattern(
-        &self,
-        user_tag: &str,
-        path_pattern: &str,
-        limit: usize,
-        soft: bool,
-    ) -> CacheIndexedPurgeResult {
-        let entries = self.with_state(|state| {
-            state
-                .purge_index
-                .entries_for_user_tag_path_pattern(user_tag, path_pattern, limit)
-        });
-        self.purge_indexed_entries(entries, soft)
-    }
-
-    fn purge_stale(&self, user_tag: &str, limit: usize, dry_run: bool) -> CacheStalePurgeResult {
-        let entries =
-            self.with_state(|state| state.purge_index.entries_for_user_tag(user_tag, limit));
-        self.purge_stale_entries(entries, dry_run)
-    }
-
-    fn purge_indexed_entries(
-        &self,
-        entries: Vec<CachePurgeIndexEntry>,
-        soft: bool,
-    ) -> CacheIndexedPurgeResult {
-        let now = Instant::now();
-        let mut purged = 0_usize;
-        for entry in &entries {
-            if soft {
-                let Some(record) =
-                    self.with_state(|state| state.objects.get(&entry.combined_key).cloned())
-                else {
-                    self.with_state(|state| {
-                        state.purge_index.remove_combined(&entry.combined_key);
-                    });
-                    continue;
-                };
-                if matches!(record.location, NativeDiskCacheLocation::StorageBin(_)) {
-                    if self.remove_combined(&entry.combined_key) {
-                        purged = purged.saturating_add(1);
-                    }
-                    continue;
-                }
-                let softened = self.soft_purge_filesystem_record(entry, &record, now);
-                if softened {
-                    purged = purged.saturating_add(1);
-                }
-                continue;
-            }
-            if self.remove_combined(&entry.combined_key) {
-                purged = purged.saturating_add(1);
-            }
-        }
-        CacheIndexedPurgeResult {
-            matched: entries.len(),
-            purged,
-            truncated: false,
-        }
-    }
-
-    fn purge_stale_entries(
-        &self,
-        entries: Vec<CachePurgeIndexEntry>,
-        dry_run: bool,
-    ) -> CacheStalePurgeResult {
-        let now = Instant::now();
-        let mut scanned = 0_usize;
-        let mut stale = 0_usize;
-        let mut purged = 0_usize;
-        for entry in &entries {
-            let Some(object) = self.get_combined(&entry.combined_key) else {
-                self.with_state(|state| {
-                    state.purge_index.remove_combined(&entry.combined_key);
-                });
-                continue;
-            };
-            scanned = scanned.saturating_add(1);
-            if object.expires_at > now {
-                continue;
-            }
-            stale = stale.saturating_add(1);
-            if !dry_run && self.remove_combined(&entry.combined_key) {
-                purged = purged.saturating_add(1);
-            }
-        }
-        CacheStalePurgeResult {
-            scanned,
-            stale,
-            purged,
-            truncated: false,
-        }
-    }
-
-    fn remove_combined(&self, combined_key: &str) -> bool {
-        let _mutation = self.lock_key_mutation(combined_key);
-        self.remove_combined_locked(combined_key)
-    }
-
-    fn remove_combined_locked(&self, combined_key: &str) -> bool {
-        let removed = self.with_state_mut(|state| {
-            let removed = state.objects.remove(combined_key);
-            if let Some(record) = &removed {
-                state.bytes = state.bytes.saturating_sub(record.weight);
-                state.purge_index.remove_combined(combined_key);
-            }
-            state.variants.retain(|_, variants| {
-                variants.retain(|variant| variant.key != combined_key);
-                !variants.is_empty()
-            });
-            removed
-        });
-        if let Some(record) = removed {
-            let _ = self.remove_location(&record.location);
-            self.persist_storage_bin_index();
-            return true;
-        }
-        false
-    }
-
-    fn evict_oldest(&self) -> std::io::Result<bool> {
-        let Some(key) = self.with_state(|state| {
-            state
-                .objects
-                .iter()
-                .min_by_key(|(key, record)| (record.accessed_at, (*key).clone()))
-                .map(|(key, _)| key.clone())
-        }) else {
-            return Ok(false);
-        };
-        Ok(self.remove_combined(&key))
-    }
-
-    fn remove_location(&self, location: &NativeDiskCacheLocation) -> std::io::Result<()> {
-        match (&self.backend, location) {
-            (NativeDiskCacheBackend::Filesystem, NativeDiskCacheLocation::Filesystem(path)) => {
-                match NativeSafeDiskCachePath::from_path(path.clone()).remove_file() {
-                    Ok(()) => Ok(()),
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                    Err(error) => Err(error),
-                }
-            }
-            (
-                NativeDiskCacheBackend::StorageBin(_),
-                NativeDiskCacheLocation::StorageBin(location),
-            ) => self.release_storage_bin_location(*location),
-            _ => Ok(()),
-        }
-    }
-
-    fn lock_key_mutation(&self, combined_key: &str) -> MutexGuard<'_, ()> {
-        let stripe = native_disk_cache_mutation_lock_stripe(combined_key);
-        match self.mutation_locks[stripe].lock() {
-            Ok(guard) => guard,
-            Err(error) => {
-                log::error!(
-                    target: "fluxheim::native_http1",
-                    "native disk cache mutation lock poisoned: {error}"
-                );
-                std::process::abort();
-            }
-        }
-    }
-
-    fn with_state<R>(&self, f: impl FnOnce(&NativeDiskCacheState) -> R) -> R {
-        match self.state.lock() {
-            Ok(state) => f(&state),
-            Err(error) => {
-                log::error!(
-                    target: "fluxheim::native_http1",
-                    "native disk cache mutex poisoned: {error}"
-                );
-                std::process::abort();
-            }
-        }
-    }
-
-    fn with_state_mut<R>(&self, f: impl FnOnce(&mut NativeDiskCacheState) -> R) -> R {
-        match self.state.lock() {
-            Ok(mut state) => f(&mut state),
-            Err(error) => {
-                log::error!(
-                    target: "fluxheim::native_http1",
-                    "native disk cache mutex poisoned: {error}"
-                );
-                std::process::abort();
-            }
-        }
-    }
-}
-
-fn native_disk_cache_mutation_locks() -> Box<[Mutex<()>]> {
-    (0..NATIVE_DISK_CACHE_MUTATION_LOCKS)
-        .map(|_| Mutex::new(()))
-        .collect::<Vec<_>>()
-        .into_boxed_slice()
-}
-
-fn native_disk_cache_mutation_lock_stripe(combined_key: &str) -> usize {
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in combined_key.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    (hash as usize) % NATIVE_DISK_CACHE_MUTATION_LOCKS
 }
 
 pub(crate) fn native_disk_cache_supported(cache: &CacheConfig) -> bool {
@@ -747,8 +474,6 @@ fn native_disk_cache_encryption_supported(cache: &CacheConfig) -> bool {
         CacheDiskEncryptionProvider::OpenbaoTransit => cfg!(feature = "openbao-cache-encryption"),
     }
 }
-
-const NATIVE_DISK_CACHE_MUTATION_LOCKS: usize = 128;
 
 #[cfg(test)]
 #[path = "native_http1_cache_tests.rs"]

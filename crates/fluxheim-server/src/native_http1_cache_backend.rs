@@ -27,7 +27,7 @@ pub(super) struct NativeStorageBinBackend {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct NativeDiskCacheState {
+pub(crate) struct NativeDiskCacheState {
     pub(super) objects: HashMap<String, NativeDiskCacheRecord>,
     pub(super) variants: HashMap<String, Vec<NativeMemoryCacheVariant>>,
     pub(super) purge_index: CachePurgeIndex,
