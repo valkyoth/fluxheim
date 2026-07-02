@@ -4,6 +4,8 @@ use clap::{Parser, Subcommand};
 
 mod acme_init_commands;
 mod acme_init_issuer;
+#[cfg(feature = "acme-client")]
+mod acme_init_toml;
 mod acme_renew_commands;
 #[cfg(feature = "cache")]
 mod cache_common;

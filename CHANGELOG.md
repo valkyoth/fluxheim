@@ -79,6 +79,8 @@ behavior when the change improves security or project direction.
 - Split the ACME init issuer CLI value enum into a focused child module so
   `src/cli.rs` keeps room under the modularity target after test-profile
   import gating.
+- Split ACME init TOML rendering into a focused CLI child module so the
+  command runner no longer owns serialization DTOs.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
