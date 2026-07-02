@@ -203,6 +203,8 @@ behavior when the change improves security or project direction.
   500-line modularity target.
 - Split compression config regression coverage out of the central config test
   suite into a focused child test module.
+- Split GeoIP config regression coverage out of the central config test suite
+  into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
