@@ -163,6 +163,8 @@ behavior when the change improves security or project direction.
   slice-cache composition tests into a focused child test module.
 - Split native route-proxy peer-fill, only-if-cached, and peer Age admission
   tests into a focused child test module.
+- Split native route-proxy min-uses, predictor, stale-while-revalidate, and
+  stale-if-error freshness tests into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
