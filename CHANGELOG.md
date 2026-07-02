@@ -89,6 +89,9 @@ behavior when the change improves security or project direction.
   error-page child test modules.
 - Split header policy config regression coverage out of the central config
   suite into focused generic, request, response, and vhost child test modules.
+- Split server listener, limit, trusted-proxy, HTTPS redirect, and TLS-listener
+  config regression coverage out of the central config suite into a focused
+  child test module.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
