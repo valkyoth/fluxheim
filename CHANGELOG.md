@@ -100,6 +100,8 @@ behavior when the change improves security or project direction.
 - Split server listener, limit, HTTPS redirect, and process default helpers out
   of the server config DTO module while preserving serde defaults and
   validation behavior.
+- Split UDP config regression tests out of the production UDP config DTO module
+  while preserving the existing UDP validation coverage.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.

@@ -79,6 +79,8 @@ pub mod config_stream_tls;
 pub mod config_tls;
 pub mod config_types;
 pub mod config_udp;
+#[cfg(test)]
+mod config_udp_tests;
 pub mod config_vhost;
 pub mod config_web;
 pub mod fs_trust;
