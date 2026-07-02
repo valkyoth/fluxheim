@@ -132,6 +132,8 @@ behavior when the change improves security or project direction.
   adapter into a focused private module.
 - Split TLS storage validation and permission/path-safety preflight logic out of
   the root TLS adapter, bringing `src/tls.rs` below the modularity line target.
+- Split ACME renewal, certificate-install, account-store, HTTP-01, EAB, and
+  retry regression coverage into focused child test modules.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
