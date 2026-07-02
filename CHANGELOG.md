@@ -190,6 +190,8 @@ behavior when the change improves security or project direction.
   inspection into a focused child module.
 - Split native HTTP/1 memory cache entries, state, TTL helpers, pruning, and
   cache-status decoration into a focused child module.
+- Split native HTTP/1 disk cache backend/state/store-key definitions into a
+  focused child module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.

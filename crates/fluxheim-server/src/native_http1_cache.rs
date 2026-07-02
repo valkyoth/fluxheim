@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -9,16 +8,17 @@ use fluxheim_cache::purge_index::{
     CacheIndexedPurgeResult, CachePurgeIndexEntry, CacheStalePurgeResult,
 };
 use fluxheim_cache::{
-    CacheObjectFreshnessState, CachePurgeIndex, DiskCacheObjectKey, DiskTierPlan,
-    STORAGE_BIN_DATA_DIR, STORAGE_BIN_MANIFEST_FILENAME, SerializedCacheObject, StorageBinFileSet,
+    CacheObjectFreshnessState, DiskCacheObjectKey, SerializedCacheObject, StorageBinFileSet,
     StorageBinFreeMap, StorageBinIndexEntry, StorageBinLayoutPlan, StorageBinObjectLocation,
-    encode_disk_cache_object, parse_disk_cache_object, prepare_storage_bin_layout,
-    read_storage_bin_index, write_storage_bin_index,
+    encode_disk_cache_object, parse_disk_cache_object, read_storage_bin_index,
+    write_storage_bin_index,
 };
 use fluxheim_config::{CacheConfig, CacheDiskBackend, CacheDiskEncryptionProvider};
 use sha2::{Digest as _, Sha256};
 use zeroize::Zeroizing;
 
+#[path = "native_http1_cache_backend.rs"]
+mod native_http1_cache_backend;
 #[path = "native_http1_cache_disk_path.rs"]
 mod native_http1_cache_disk_path;
 #[path = "native_http1_cache_encryption.rs"]
@@ -30,9 +30,13 @@ mod native_http1_cache_meta;
 #[path = "native_http1_cache_purge.rs"]
 mod native_http1_cache_purge;
 
+pub(crate) use native_http1_cache_backend::NativeDiskCacheStoreKey;
+use native_http1_cache_backend::{
+    NativeDiskCacheBackend, NativeDiskCacheLocation, NativeDiskCacheRecord, NativeDiskCacheState,
+};
 use native_http1_cache_disk_path::{
     NativeSafeDiskCachePath, create_native_cache_dir_all, native_cache_path_contains_symlink,
-    native_disk_cache_read_limit, prepare_native_disk_cache_root, read_native_disk_cache_file,
+    native_disk_cache_read_limit, read_native_disk_cache_file,
 };
 use native_http1_cache_encryption::{
     NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1, NativeDiskCacheEncryption,
@@ -100,114 +104,6 @@ pub(crate) struct NativeDiskCacheStats {
     pub(crate) bin_files: u64,
     pub(crate) max_size_bytes: u64,
     pub(crate) purge_index_entries: u64,
-}
-
-#[derive(Debug)]
-enum NativeDiskCacheBackend {
-    Filesystem,
-    StorageBin(Box<NativeStorageBinBackend>),
-}
-
-#[derive(Debug)]
-struct NativeStorageBinBackend {
-    layout: StorageBinLayoutPlan,
-    files: StorageBinFileSet,
-    free_map: Mutex<StorageBinFreeMap>,
-}
-
-#[derive(Debug, Default)]
-struct NativeDiskCacheState {
-    objects: HashMap<String, NativeDiskCacheRecord>,
-    variants: HashMap<String, Vec<NativeMemoryCacheVariant>>,
-    purge_index: CachePurgeIndex,
-    bytes: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct NativeDiskCacheRecord {
-    location: NativeDiskCacheLocation,
-    weight: u64,
-    accessed_at: SystemTime,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum NativeDiskCacheLocation {
-    Filesystem(PathBuf),
-    StorageBin(StorageBinObjectLocation),
-}
-
-impl NativeDiskCacheLocation {
-    fn display(&self) -> String {
-        match self {
-            Self::Filesystem(path) => path.display().to_string(),
-            Self::StorageBin(location) => format!(
-                "storage-bin:{:016x}:{}+{}",
-                location.bin_id, location.offset, location.len
-            ),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct NativeDiskCacheStoreKey {
-    pub(crate) combined: String,
-    pub(crate) primary: String,
-    pub(crate) user_tag: String,
-    pub(crate) index_path: Option<String>,
-    pub(crate) cache_tags: Vec<String>,
-    pub(crate) vary_fields: Vec<String>,
-}
-
-impl NativeDiskCacheBackend {
-    fn from_config(config: &CacheConfig) -> std::io::Result<(PathBuf, Self)> {
-        let path = config.disk.path.as_ref().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "native disk cache requires cache.disk.path",
-            )
-        })?;
-        match config.disk.backend {
-            CacheDiskBackend::Filesystem => {
-                let root = prepare_native_disk_cache_root(path)?;
-                Ok((root, Self::Filesystem))
-            }
-            CacheDiskBackend::StorageBin => {
-                let plan = DiskTierPlan {
-                    backend: CacheDiskBackend::StorageBin,
-                    path: path.clone(),
-                    max_size_bytes: config.disk.max_size_bytes,
-                    max_object_bytes: config.max_object_bytes,
-                    cache_tag_headers: Vec::new(),
-                    storage_bin: config.disk.storage_bin.clone(),
-                    encryption: config.disk.encryption.clone(),
-                };
-                let mut layout = StorageBinLayoutPlan::from_disk_plan(&plan).ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "native storage-bin cache requires a storage-bin disk plan",
-                    )
-                })?;
-                prepare_storage_bin_layout(&layout)?;
-                let root = layout.root.canonicalize()?;
-                layout = StorageBinLayoutPlan {
-                    root: root.clone(),
-                    manifest_path: root.join(STORAGE_BIN_MANIFEST_FILENAME),
-                    data_dir: root.join(STORAGE_BIN_DATA_DIR),
-                    ..layout
-                };
-                let free_map = StorageBinFreeMap::new(&layout);
-                let files = StorageBinFileSet::new(layout.clone());
-                Ok((
-                    root,
-                    Self::StorageBin(Box::new(NativeStorageBinBackend {
-                        layout,
-                        files,
-                        free_map: Mutex::new(free_map),
-                    })),
-                ))
-            }
-        }
-    }
 }
 
 impl NativeDiskCache {
