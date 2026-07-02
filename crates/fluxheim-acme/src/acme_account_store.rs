@@ -3,6 +3,8 @@ use std::io;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use sanitization::SecretVec;
+
 #[cfg(target_os = "linux")]
 use super::UNIX_O_NOFOLLOW;
 use super::{
@@ -83,10 +85,11 @@ pub fn store_account_credentials(
     ensure_safe_account_directory(directory)?;
     ensure_safe_account_destination(&credentials_path.path)?;
 
-    let contents =
-        serde_json::to_vec(credentials).map_err(|error| AcmeAccountStoreError::Serialize {
+    let contents = SecretVec::from_vec(serde_json::to_vec(credentials).map_err(|error| {
+        AcmeAccountStoreError::Serialize {
             message: error.to_string(),
-        })?;
+        }
+    })?);
     if contents.len() as u64 > MAX_ACCOUNT_CREDENTIALS_BYTES {
         return Err(AcmeAccountStoreError::Oversized {
             path: credentials_path.path.clone(),
@@ -96,7 +99,7 @@ pub fn store_account_credentials(
 
     let tmp_path = directory.join(".credentials.json.tmp");
     let result = (|| {
-        write_account_credentials_file(&tmp_path, &contents)?;
+        contents.with_secret(|contents| write_account_credentials_file(&tmp_path, contents))?;
         fs::rename(&tmp_path, &credentials_path.path)
             .map_err(|error| account_store_io_error(&credentials_path.path, error))?;
         sync_account_directory(directory)?;

@@ -9,6 +9,15 @@ behavior when the change improves security or project direction.
 
 ## 1.6.37 - Unreleased
 
+### Security
+
+- Harden OpenSSL stream-upstream TLS connectors with a TLS 1.2 minimum and an
+  explicit modern TLS 1.2/TLS 1.3 cipher allowlist, matching the native HTTP
+  upstream OpenSSL baseline.
+- Store serialized ACME account credentials in `sanitization::SecretVec` while
+  writing them to disk so account private-key JSON is cleared from heap memory
+  on drop.
+
 ### Changed
 
 - Start the final pre-Wasm crate-boundary cleanup release with release metadata

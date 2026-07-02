@@ -3,12 +3,24 @@ use std::net::IpAddr;
 use fluxheim_common::{FluxError, FluxResult};
 use fluxheim_config::config_net::upstream_host;
 use openssl::pkey::PKey;
-use openssl::ssl::{SslConnector, SslMethod};
+use openssl::ssl::{SslConnector, SslConnectorBuilder, SslMethod, SslVersion};
 use openssl::x509::{X509, store::X509StoreBuilder};
 use sanitization::SecretVec;
 
 use crate::config::StreamRouteConfig;
 use crate::upstream_tls::read_upstream_tls_file;
+
+const OPENSSL_STREAM_UPSTREAM_TLS12_CIPHERS: &str = concat!(
+    "ECDHE-ECDSA-AES256-GCM-SHA384:",
+    "ECDHE-RSA-AES256-GCM-SHA384:",
+    "ECDHE-ECDSA-CHACHA20-POLY1305:",
+    "ECDHE-RSA-CHACHA20-POLY1305:",
+    "ECDHE-ECDSA-AES128-GCM-SHA256:",
+    "ECDHE-RSA-AES128-GCM-SHA256",
+);
+
+const OPENSSL_STREAM_UPSTREAM_TLS13_CIPHERS: &str =
+    "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256";
 
 pub(super) fn build_openssl_connector(route: &StreamRouteConfig) -> FluxResult<SslConnector> {
     let mut builder = SslConnector::builder(SslMethod::tls()).map_err(|error| {
@@ -16,6 +28,7 @@ pub(super) fn build_openssl_connector(route: &StreamRouteConfig) -> FluxResult<S
             "stream upstream TLS connector setup failed: {error}"
         ))
     })?;
+    configure_openssl_stream_tls_baseline(&mut builder)?;
     if let Some(ca_path) = route.upstream_ca_path.as_deref() {
         let contents = read_upstream_tls_file(ca_path)
             .map_err(|error| FluxError::io("read stream upstream TLS CA bundle", error))?;
@@ -110,6 +123,31 @@ pub(super) fn build_openssl_connector(route: &StreamRouteConfig) -> FluxResult<S
     Ok(builder.build())
 }
 
+fn configure_openssl_stream_tls_baseline(builder: &mut SslConnectorBuilder) -> FluxResult<()> {
+    builder
+        .set_min_proto_version(Some(SslVersion::TLS1_2))
+        .map_err(|error| {
+            FluxError::invalid_input(format!(
+                "failed to set stream upstream TLS minimum version: {error}"
+            ))
+        })?;
+    builder
+        .set_cipher_list(OPENSSL_STREAM_UPSTREAM_TLS12_CIPHERS)
+        .map_err(|error| {
+            FluxError::invalid_input(format!(
+                "failed to configure stream upstream TLS cipher list: {error}"
+            ))
+        })?;
+    builder
+        .set_ciphersuites(OPENSSL_STREAM_UPSTREAM_TLS13_CIPHERS)
+        .map_err(|error| {
+            FluxError::invalid_input(format!(
+                "failed to configure stream upstream TLS 1.3 ciphersuites: {error}"
+            ))
+        })?;
+    Ok(())
+}
+
 pub(super) fn stream_upstream_tls_sni(
     configured: Option<&str>,
     upstream_authority: &str,
@@ -125,7 +163,8 @@ pub(super) fn stream_upstream_tls_sni(
 
 #[cfg(test)]
 mod tests {
-    use super::stream_upstream_tls_sni;
+    use super::{configure_openssl_stream_tls_baseline, stream_upstream_tls_sni};
+    use openssl::ssl::{SslConnector, SslMethod, SslVersion};
 
     #[test]
     fn openssl_sni_derives_only_dns_hosts() {
@@ -138,5 +177,13 @@ mod tests {
             stream_upstream_tls_sni(Some("configured.example.test"), "127.0.0.1:443"),
             "configured.example.test"
         );
+    }
+
+    #[test]
+    fn openssl_stream_tls_baseline_sets_tls12_minimum() {
+        let mut builder = SslConnector::builder(SslMethod::tls()).unwrap();
+        configure_openssl_stream_tls_baseline(&mut builder).unwrap();
+
+        assert_eq!(builder.min_proto_version(), Some(SslVersion::TLS1_2));
     }
 }

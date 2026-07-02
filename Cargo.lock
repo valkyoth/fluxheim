@@ -745,6 +745,7 @@ dependencies = [
  "proptest",
  "rcgen",
  "rustix",
+ "sanitization",
  "serde_json",
  "sha2",
  "tokio",
