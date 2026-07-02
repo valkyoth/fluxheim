@@ -155,6 +155,8 @@ behavior when the change improves security or project direction.
 - Split native route-proxy access-policy, trusted-forwarded identity, client
   certificate, GeoIP, rate-limit, and concurrency tests into focused child test
   modules.
+- Split native route-proxy PHP-FPM routing tests and FastCGI responder fixtures
+  into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
