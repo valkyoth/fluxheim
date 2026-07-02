@@ -6,6 +6,14 @@ use serde::{Deserialize, Serialize};
 use crate::config::{ByteSize, ConfigError, validate_config_list_len};
 use crate::config_net::{trusted_proxy_ipv6_prefix_broader_than_32, valid_trusted_proxy};
 use crate::config_path::{validate_optional_process_path, validate_required_process_path};
+use crate::config_server_defaults::{
+    default_https_redirect_status, default_listen, default_max_request_body_bytes,
+    default_max_request_header_bytes, default_max_request_headers, default_max_uri_bytes,
+    default_process_certificate_reload_sock, default_process_listener_tasks_per_fd,
+    default_process_max_retries, default_process_pid_file, default_process_threads,
+    default_process_upgrade_sock, default_process_upstream_keepalive_pool_size, default_true,
+    validate_process_optional_duration, validate_process_usize,
+};
 
 pub const MAX_SERVER_LISTENERS: usize = 64;
 pub const MAX_TRUSTED_PROXIES: usize = 512;
@@ -246,10 +254,6 @@ impl HttpsRedirectConfig {
     }
 }
 
-fn default_https_redirect_status() -> u16 {
-    308
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerProcessConfig {
@@ -404,92 +408,4 @@ impl ServerLimitsConfig {
 
         Ok(())
     }
-}
-
-fn default_listen() -> Vec<String> {
-    vec!["127.0.0.1:8080".to_owned()]
-}
-
-fn default_max_request_header_bytes() -> ByteSize {
-    ByteSize::from_bytes(64 * 1024)
-}
-
-fn default_max_uri_bytes() -> ByteSize {
-    ByteSize::from_bytes(8 * 1024)
-}
-
-fn default_max_request_headers() -> usize {
-    100
-}
-
-fn default_max_request_body_bytes() -> ByteSize {
-    ByteSize::from_bytes(16 * 1024 * 1024)
-}
-
-fn default_process_pid_file() -> PathBuf {
-    default_process_runtime_path("fluxheim.pid")
-}
-
-fn default_process_upgrade_sock() -> PathBuf {
-    default_process_runtime_path("fluxheim-upgrade.sock")
-}
-
-fn default_process_certificate_reload_sock() -> PathBuf {
-    default_process_runtime_path("fluxheim-cert-reload.sock")
-}
-
-#[cfg(not(any(test, feature = "test-support")))]
-fn default_process_runtime_path(name: &str) -> PathBuf {
-    PathBuf::from("/run/fluxheim").join(name)
-}
-
-#[cfg(any(test, feature = "test-support"))]
-fn default_process_runtime_path(name: &str) -> PathBuf {
-    let root = PathBuf::from("target/fluxheim-test-tmp");
-    let _ = std::fs::create_dir_all(&root);
-    let root = root.canonicalize().unwrap_or(root);
-    root.join("run").join(name)
-}
-
-fn default_process_threads() -> usize {
-    1
-}
-
-fn default_process_listener_tasks_per_fd() -> usize {
-    1
-}
-
-fn default_process_upstream_keepalive_pool_size() -> usize {
-    128
-}
-
-fn default_process_max_retries() -> usize {
-    16
-}
-
-fn validate_process_usize(
-    field: &'static str,
-    value: usize,
-    min: usize,
-    max: usize,
-) -> Result<(), ConfigError> {
-    if (min..=max).contains(&value) {
-        Ok(())
-    } else {
-        Err(ConfigError::InvalidProcessSetting { field })
-    }
-}
-
-fn validate_process_optional_duration(
-    field: &'static str,
-    value: Option<u64>,
-) -> Result<(), ConfigError> {
-    match value {
-        Some(0) => Err(ConfigError::InvalidProcessSetting { field }),
-        Some(_) | None => Ok(()),
-    }
-}
-
-fn default_true() -> bool {
-    true
 }

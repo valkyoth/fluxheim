@@ -70,6 +70,7 @@ pub mod config_root_load;
 pub mod config_root_validate;
 pub mod config_route;
 pub mod config_server;
+mod config_server_defaults;
 pub mod config_stream;
 pub mod config_stream_slots;
 #[cfg(all(test, feature = "stream-proxy"))]

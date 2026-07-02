@@ -97,6 +97,9 @@ behavior when the change improves security or project direction.
   while preserving the `fluxheim-server` public re-export.
 - Split disk cache object index and LRU tracking types out of the cache object
   serialization module while preserving the existing `object` exports.
+- Split server listener, limit, HTTPS redirect, and process default helpers out
+  of the server config DTO module while preserving serde defaults and
+  validation behavior.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
