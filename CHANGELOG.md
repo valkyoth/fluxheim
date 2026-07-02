@@ -68,6 +68,8 @@ behavior when the change improves security or project direction.
 - Split final proxy config validation orchestration into a focused
   `fluxheim-config` module so `config_proxy.rs` can stay below the 500-line
   modularity target.
+- Split proxy timeout validation coverage out of the central config regression
+  suite into a focused child test module.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.

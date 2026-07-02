@@ -37,6 +37,8 @@ mod compression;
 mod geoip;
 #[path = "config_tests_headers.rs"]
 mod headers;
+#[path = "config_tests_proxy_timeouts.rs"]
+mod proxy_timeouts;
 
 fn secure_test_dir(label: &str) -> PathBuf {
     let path = unique_temp_path(label);
@@ -1654,129 +1656,6 @@ fn vhost_without_proxy_does_not_inherit_legacy_default_upstream() {
 }
 
 #[test]
-fn rejects_zero_proxy_timeouts() {
-    let config: Config = toml::from_str(
-        r#"
-            [proxy]
-            upstream = "127.0.0.1:3000"
-            read_timeout_secs = 0
-            downstream_min_send_rate_bytes_per_sec = 1
-            "#,
-    )
-    .unwrap();
-
-    assert_eq!(
-        config.validate(),
-        Err(ConfigError::InvalidProxyTimeout {
-            field: "proxy.read_timeout_secs"
-        })
-    );
-
-    let config: Config = toml::from_str(
-        r#"
-            [proxy]
-            upstream = "127.0.0.1:3000"
-            downstream_read_timeout_secs = 0
-            "#,
-    )
-    .unwrap();
-
-    assert_eq!(
-        config.validate(),
-        Err(ConfigError::InvalidProxyTimeout {
-            field: "proxy.downstream_read_timeout_secs"
-        })
-    );
-
-    let config: Config = toml::from_str(
-        r#"
-            [proxy]
-            upstream = "127.0.0.1:3000"
-            downstream_write_timeout_secs = 0
-            "#,
-    )
-    .unwrap();
-
-    assert_eq!(
-        config.validate(),
-        Err(ConfigError::InvalidProxyTimeout {
-            field: "proxy.downstream_write_timeout_secs"
-        })
-    );
-
-    let config: Config = toml::from_str(
-        r#"
-            [proxy]
-            upstream = "127.0.0.1:3000"
-            downstream_total_response_timeout_secs = 0
-            "#,
-    )
-    .unwrap();
-
-    assert_eq!(
-        config.validate(),
-        Err(ConfigError::InvalidProxyTimeout {
-            field: "proxy.downstream_total_response_timeout_secs"
-        })
-    );
-
-    let config: Config = toml::from_str(
-        r#"
-            [proxy]
-            upstream = "127.0.0.1:3000"
-            downstream_min_send_rate_bytes_per_sec = 0
-            "#,
-    )
-    .unwrap();
-
-    assert_eq!(
-        config.validate(),
-        Err(ConfigError::InvalidProxyTimeout {
-            field: "proxy.downstream_min_send_rate_bytes_per_sec"
-        })
-    );
-}
-
-#[test]
-fn rejects_unbounded_proxy_timeouts() {
-    let config: Config = toml::from_str(
-        r#"
-            [proxy]
-            upstream = "127.0.0.1:3000"
-            read_timeout_secs = 86401
-            "#,
-    )
-    .unwrap();
-
-    assert_eq!(
-        config.validate(),
-        Err(ConfigError::InvalidProxyTimeout {
-            field: "proxy.read_timeout_secs"
-        })
-    );
-
-    let config: Config = toml::from_str(
-        r#"
-            [proxy]
-            upstream = "127.0.0.1:3000"
-
-            [proxy.auth_request]
-            enabled = true
-            url = "http://127.0.0.1:3001/auth"
-            read_timeout_secs = 86401
-            "#,
-    )
-    .unwrap();
-
-    assert_eq!(
-        config.validate(),
-        Err(ConfigError::InvalidProxyTimeout {
-            field: "proxy.auth_request.read_timeout_secs"
-        })
-    );
-}
-
-#[test]
 fn rejects_invalid_proxy_error_pages() {
     let config: Config = toml::from_str(
         r#"
@@ -2198,29 +2077,6 @@ fn rejects_too_many_header_append_values() {
             operation: "append values",
             max: super::MAX_HEADER_APPEND_VALUES,
         })
-    );
-}
-
-#[test]
-fn parses_proxy_downstream_timeout_defaults_from_toml() {
-    let config: Config = toml::from_str(
-        r#"
-            [server]
-            listen = ["127.0.0.1:18080"]
-
-            [proxy]
-            upstream = "origin.example.test:8080"
-            "#,
-    )
-    .unwrap();
-
-    assert_eq!(
-        config.proxy.downstream_write_timeout_secs,
-        Some(DEFAULT_PROXY_DOWNSTREAM_WRITE_TIMEOUT_SECS)
-    );
-    assert_eq!(
-        config.proxy.downstream_total_response_timeout_secs,
-        Some(DEFAULT_PROXY_DOWNSTREAM_TOTAL_RESPONSE_TIMEOUT_SECS)
     );
 }
 
