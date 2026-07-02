@@ -134,6 +134,9 @@ behavior when the change improves security or project direction.
   the root TLS adapter, bringing `src/tls.rs` below the modularity line target.
 - Split ACME renewal, certificate-install, account-store, HTTP-01, EAB, and
   retry regression coverage into focused child test modules.
+- Split ACME secret-loading, account-store, certificate-install, instant-client,
+  and renewal error types into a focused private module while preserving the
+  public `crate::acme::*Error` re-exports.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
