@@ -157,6 +157,8 @@ behavior when the change improves security or project direction.
   modules.
 - Split native route-proxy PHP-FPM routing tests and FastCGI responder fixtures
   into a focused child test module.
+- Split native route-proxy memory, disk, encrypted disk, storage-bin, OpenBao,
+  and tiered cache storage tests into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
