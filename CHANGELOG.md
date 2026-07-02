@@ -194,6 +194,9 @@ behavior when the change improves security or project direction.
   focused child module.
 - Split native HTTP/1 storage-bin allocation, rebuild, release, and index
   persistence into a focused child module.
+- Split native HTTP/1 filesystem disk-cache index rebuild, shard-path writes,
+  atomic file replacement, and soft-purge rewriting into a focused child
+  module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
