@@ -99,6 +99,9 @@ behavior when the change improves security or project direction.
   static-web index, and generic config validation coverage out of the central
   config suite so the parent test module is only a small module registry and
   shared helper host.
+- Split the public config-error module into a small stable re-export wrapper,
+  a focused error-kind module, and a separate formatting/source module as
+  preparation for domain-specific error formatting cleanup.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
