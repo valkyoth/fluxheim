@@ -5,7 +5,7 @@ fn execute_renewal_publishes_finalizes_installs_and_cleans_http_01() {
     let storage = fluxheim_common::test_support::unique_temp_path("acme-execute-renewal");
     let mut config = acme_config_with_vhosts(vec![managed_vhost("example")]);
     config.tls.acme.storage = Some(storage.clone());
-    config.tls.acme.challenge = crate::config::AcmeChallenge::Http01;
+    config.tls.acme.challenge = fluxheim_config::AcmeChallenge::Http01;
     config.tls.acme.contact_email = Some("admin@example.test".to_owned());
     let item = plan_renewal_queue(&config, &[], UNIX_EPOCH + Duration::from_secs(1_000)).remove(0);
     let mut client = FakeAcmeIssuerClient::new();
@@ -35,7 +35,7 @@ fn execute_renewal_cleans_challenge_when_finalize_fails() {
     let storage = fluxheim_common::test_support::unique_temp_path("acme-execute-finalize-fail");
     let mut config = acme_config_with_vhosts(vec![managed_vhost("example")]);
     config.tls.acme.storage = Some(storage.clone());
-    config.tls.acme.challenge = crate::config::AcmeChallenge::Http01;
+    config.tls.acme.challenge = fluxheim_config::AcmeChallenge::Http01;
     let item = plan_renewal_queue(&config, &[], UNIX_EPOCH + Duration::from_secs(1_000)).remove(0);
     let mut client = FakeAcmeIssuerClient::new();
     client.fail_finalize = true;

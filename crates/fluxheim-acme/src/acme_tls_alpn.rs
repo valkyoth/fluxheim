@@ -1,6 +1,6 @@
 use zeroize::Zeroizing;
 
-use crate::config::normalize_host;
+use fluxheim_config::normalize_host;
 
 use super::{AcmeRenewalError, AcmeTlsAlpn01ChallengeStore};
 

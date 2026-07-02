@@ -2,7 +2,7 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
-use crate::config::AcmeChallenge;
+use fluxheim_config::AcmeChallenge;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AcmeSecretLoadError {

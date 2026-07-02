@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use zeroize::Zeroizing;
 
-use crate::config::AcmeExternalAccountBindingConfig;
+use fluxheim_config::AcmeExternalAccountBindingConfig;
 
 #[cfg(target_os = "linux")]
 use super::UNIX_O_NOFOLLOW;

@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::normalize_host;
+use fluxheim_config::normalize_host;
 
 #[cfg(target_os = "linux")]
 fn open_regular_http_01_challenge_file(path: &Path) -> io::Result<std::fs::File> {

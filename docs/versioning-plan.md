@@ -2956,13 +2956,12 @@ available for the stabilization/security-only follow-up.
 
   Primary extraction targets:
 
-  - Start `fluxheim-acme` as a workspace crate. The root `src/acme.rs` and
-    `src/acme_companion.rs` still hold account/order/renewal/storage logic plus
-    companion binary wiring, while TLS certificate loading and native listener
-    planning already live in `fluxheim-tls`/`fluxheim-server`. Split ACME as a
-    domain crate with typed account, order, storage, renewal, install, and
-    reload APIs. Keep `src/bin/fluxheim-acme.rs`, CLI commands, and runtime
-    orchestration as thin root wiring.
+  - Start `fluxheim-acme` as a workspace crate and move ACME account, order,
+    challenge, renewal, certificate install, and certificate observation logic
+    into it. Keep `src/bin/fluxheim-acme.rs`, CLI commands, runtime
+    orchestration, and the root `src/acme.rs` compatibility re-export as thin
+    root wiring until the remaining binary glue can move behind stable crate
+    APIs.
   - Move observability helpers still living in root `metrics`, `metrics_otlp`,
     `otel_otlp`, `otlp_http`, and `trace_context` into
     `fluxheim-observability` where this does not change exported metric names,

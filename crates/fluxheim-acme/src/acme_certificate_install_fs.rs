@@ -33,19 +33,19 @@ pub(super) fn certificate_directory(
 
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::acme) struct UnixFileOwner {
+pub(crate) struct UnixFileOwner {
     uid: u32,
     gid: u32,
 }
 
 #[cfg(unix)]
-pub(in crate::acme) type ManagedCertificateOwner = Option<UnixFileOwner>;
+pub(crate) type ManagedCertificateOwner = Option<UnixFileOwner>;
 
 #[cfg(not(unix))]
-pub(in crate::acme) type ManagedCertificateOwner = ();
+pub(crate) type ManagedCertificateOwner = ();
 
 #[cfg(unix)]
-pub(in crate::acme) fn managed_certificate_owner(
+pub(crate) fn managed_certificate_owner(
     storage: &Path,
 ) -> Result<ManagedCertificateOwner, AcmeCertificateInstallError> {
     if !rustix::process::geteuid().is_root() {
@@ -85,7 +85,7 @@ pub(in crate::acme) fn managed_certificate_owner(
 }
 
 #[cfg(not(unix))]
-pub(in crate::acme) fn managed_certificate_owner(
+pub(crate) fn managed_certificate_owner(
     _storage: &Path,
 ) -> Result<ManagedCertificateOwner, AcmeCertificateInstallError> {
     Ok(())
@@ -192,7 +192,7 @@ pub(super) fn ensure_safe_destination(path: &Path) -> Result<(), AcmeCertificate
     }
 }
 
-pub(in crate::acme) fn reject_existing_symlink_in_path(
+pub(crate) fn reject_existing_symlink_in_path(
     path: &Path,
 ) -> Result<(), AcmeCertificateInstallError> {
     let mut current = PathBuf::new();

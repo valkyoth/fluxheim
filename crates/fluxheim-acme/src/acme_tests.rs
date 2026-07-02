@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::config::{
+use fluxheim_config::{
     AcmeConfig, AcmeExternalAccountBindingConfig, AcmeIssuerConfig, CacheConfig, Config,
     ProxyConfig, TlsConfig, VhostAcmeConfig, VhostConfig, VhostTlsConfig, WebConfig,
 };
@@ -54,8 +54,8 @@ fn managed_vhost(name: &str) -> VhostConfig {
         access: Default::default(),
         rate_limit: Default::default(),
         concurrency: Default::default(),
-        acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
-        redirect: crate::config::VhostRedirectConfig::default(),
+        acme_challenge: fluxheim_config::VhostAcmeChallengeConfig::default(),
+        redirect: fluxheim_config::VhostRedirectConfig::default(),
         tls: VhostTlsConfig {
             enabled: true,
             acme: VhostAcmeConfig {
@@ -68,8 +68,8 @@ fn managed_vhost(name: &str) -> VhostConfig {
         proxy: ProxyConfig::default(),
         cache: CacheConfig::default(),
         compression: None,
-        headers: crate::config::VhostHeaderPolicyConfig::default(),
-        php: crate::config::PhpConfig::default(),
+        headers: fluxheim_config::VhostHeaderPolicyConfig::default(),
+        php: fluxheim_config::PhpConfig::default(),
         web: WebConfig::default(),
         routes: Vec::new(),
     }
@@ -95,7 +95,7 @@ fn test_certificate_pem() -> &'static [u8] {
 }
 
 fn valid_leaf_certificate_pem() -> &'static [u8] {
-    include_bytes!("../tests/fixtures/tls/localhost-cert.pem")
+    include_bytes!("../../../tests/fixtures/tls/localhost-cert.pem")
 }
 
 fn test_private_key_pem() -> &'static [u8] {

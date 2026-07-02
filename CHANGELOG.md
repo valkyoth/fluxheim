@@ -66,6 +66,10 @@ behavior when the change improves security or project direction.
 - Split `fluxheim-acme` companion command execution, config loading, and
   certificate reload socket handling into focused child modules while keeping
   `src/acme_companion.rs` as CLI parser/dispatcher glue.
+- Move ACME account, challenge, renewal, certificate install, and certificate
+  observation logic into the new `fluxheim-acme` workspace crate; the root
+  `src/acme.rs` module now stays as a compatibility re-export for existing
+  runtime and companion wiring.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of

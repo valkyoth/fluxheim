@@ -3,12 +3,12 @@ use super::*;
 #[path = "acme_certificate_install_backup.rs"]
 mod backup;
 #[path = "acme_certificate_install_fs.rs"]
-pub(in crate::acme) mod fs_ops;
+pub(crate) mod fs_ops;
 
 use backup::{backup_existing_file, cleanup_backup, restore_backup};
 #[cfg(not(unix))]
 use fs_ops::CertificateDirectoryFd;
-pub(in crate::acme) use fs_ops::{
+pub(crate) use fs_ops::{
     ManagedCertificateOwner, managed_certificate_owner, reject_existing_symlink_in_path,
 };
 use fs_ops::{

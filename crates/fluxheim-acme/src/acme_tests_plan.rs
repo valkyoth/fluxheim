@@ -16,8 +16,8 @@ fn builds_targets_from_enabled_vhosts() {
         access: Default::default(),
         rate_limit: Default::default(),
         concurrency: Default::default(),
-        acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
-        redirect: crate::config::VhostRedirectConfig::default(),
+        acme_challenge: fluxheim_config::VhostAcmeChallengeConfig::default(),
+        redirect: fluxheim_config::VhostRedirectConfig::default(),
         tls: VhostTlsConfig {
             enabled: true,
             acme: VhostAcmeConfig {
@@ -30,8 +30,8 @@ fn builds_targets_from_enabled_vhosts() {
         proxy: ProxyConfig::default(),
         cache: CacheConfig::default(),
         compression: None,
-        headers: crate::config::VhostHeaderPolicyConfig::default(),
-        php: crate::config::PhpConfig::default(),
+        headers: fluxheim_config::VhostHeaderPolicyConfig::default(),
+        php: fluxheim_config::PhpConfig::default(),
         web: WebConfig::default(),
         routes: Vec::new(),
     }]);
