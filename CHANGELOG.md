@@ -125,6 +125,9 @@ behavior when the change improves security or project direction.
   module while preserving the existing inherent `LoadBalanceConfig` API.
 - Split load-balancer selection enum helpers and metric-label coverage into a
   focused config child module while preserving the existing public re-export.
+- Split stream config merge, path-resolution, upstream-selection, and
+  validation methods out of the stream DTO module while preserving the existing
+  inherent stream config APIs.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
