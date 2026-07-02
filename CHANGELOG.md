@@ -93,6 +93,8 @@ behavior when the change improves security or project direction.
   child modules.
 - Split CLI cache-key preview command handling and shared cache CLI request
   validation helpers into focused child modules.
+- Split CLI cache object lookup command handling, parsing, and expectation
+  validation into focused child modules.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
