@@ -3,13 +3,9 @@ use std::sync::Arc;
 
 use fluxheim_config::{PhpConfig, PhpFpmMode};
 
-use crate::managed_config::{
-    managed_php_fpm_config, managed_php_fpm_instance_name,
-};
+use crate::managed_config::{managed_php_fpm_config, managed_php_fpm_instance_name};
 #[cfg(unix)]
-use crate::managed_spawn::{
-    ensure_managed_php_fpm_directory, write_managed_php_fpm_config_file,
-};
+use crate::managed_spawn::{ensure_managed_php_fpm_directory, write_managed_php_fpm_config_file};
 #[cfg(unix)]
 use crate::request_body::{
     create_php_request_body_spool_dir_sync, ensure_php_request_body_spool_dir,
