@@ -104,6 +104,9 @@ behavior when the change improves security or project direction.
   preparation for domain-specific error formatting cleanup.
 - Split runtime unit tests out of the root runtime adapter into a focused test
   module while preserving private-helper coverage.
+- Split TLS storage and downstream certificate-selector unit tests out of the
+  root TLS adapter into focused test modules while preserving private-helper
+  coverage.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
