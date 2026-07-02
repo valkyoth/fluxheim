@@ -53,6 +53,9 @@ behavior when the change improves security or project direction.
   preserving the public exports.
 - Split native metrics bearer-token secret loading and safe token-file opening
   out of the root metrics adapter into a focused private module.
+- Split the native `/metrics` HTTP app, listener background service, and bearer
+  authorization checks out of the root metrics registry into a focused private
+  module.
 - Split trusted client-IP restoration and Forwarded header helpers out of
   `fluxheim-headers/src/lib.rs` into a focused crate module while preserving
   the public exports and privacy-mode gating.

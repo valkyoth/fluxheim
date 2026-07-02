@@ -25,6 +25,8 @@ mod http_types;
 pub mod internal_crypto;
 #[cfg(feature = "metrics")]
 pub mod metrics;
+#[cfg(feature = "metrics")]
+mod metrics_native;
 #[cfg(feature = "metrics-otlp")]
 pub mod metrics_otlp;
 #[cfg(feature = "metrics")]
