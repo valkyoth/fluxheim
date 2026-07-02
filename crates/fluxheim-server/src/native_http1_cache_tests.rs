@@ -1,7 +1,9 @@
+use super::native_http1_cache_purge::{
+    native_disk_cache_purge_registry_is_unlocked_for_test, purge_native_disk_cache,
+};
 use super::{
-    NATIVE_DISK_CACHE_PURGE_REGISTRY, NativeDiskCache, NativeDiskCacheBackend,
-    NativeDiskCacheLocation, NativeDiskCacheRecord, NativeDiskCacheState,
-    native_disk_cache_mutation_locks, native_peer_fill_cache_ttl, purge_native_disk_cache,
+    NativeDiskCache, NativeDiskCacheBackend, NativeDiskCacheLocation, NativeDiskCacheRecord,
+    NativeDiskCacheState, native_disk_cache_mutation_locks, native_peer_fill_cache_ttl,
     register_native_disk_cache_purge_handle,
 };
 use fluxheim_config::{ByteSize, CacheConfig};
@@ -60,10 +62,7 @@ fn disk_cache_purge_callback_runs_outside_registry_lock() {
 
     let mut callback_saw_unlocked_registry = false;
     let purged = purge_native_disk_cache(vhost.as_ref(), None, |_| {
-        callback_saw_unlocked_registry = NATIVE_DISK_CACHE_PURGE_REGISTRY
-            .get()
-            .and_then(|registry| registry.try_lock().ok())
-            .is_some();
+        callback_saw_unlocked_registry = native_disk_cache_purge_registry_is_unlocked_for_test();
         true
     });
 
