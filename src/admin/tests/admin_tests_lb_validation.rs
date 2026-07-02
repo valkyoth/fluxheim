@@ -1,3 +1,4 @@
+#[cfg(feature = "load-balancer")]
 use super::*;
 
 #[cfg(feature = "load-balancer")]

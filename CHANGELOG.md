@@ -60,6 +60,8 @@ behavior when the change improves security or project direction.
 - Split admin UDP and load-balancer regression tests into focused child
   modules and align the test helper with the production native LB admin-pool
   wiring.
+- Split admin snapshot, rollback, reload, and self-healing regression tests
+  into focused child modules.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.

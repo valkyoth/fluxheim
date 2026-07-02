@@ -1,3 +1,4 @@
+#[cfg(any(feature = "load-balancer", feature = "udp-proxy"))]
 use super::*;
 
 #[cfg(feature = "udp-proxy")]
