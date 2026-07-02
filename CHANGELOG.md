@@ -64,6 +64,8 @@ behavior when the change improves security or project direction.
   into focused child modules.
 - Split admin status, auth-throttle, and request limit regression tests into a
   focused child module.
+- Split shared admin regression-test support helpers into a focused child
+  module.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
