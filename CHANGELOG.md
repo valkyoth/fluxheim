@@ -82,6 +82,9 @@ behavior when the change improves security or project direction.
   child module.
 - Split admin cache status/activity and cache purge endpoint handlers into
   focused child modules.
+- Split admin snapshot reload, live rollback, self-healing, and watchdog
+  runtime handlers into a focused child module so `src/admin.rs` now satisfies
+  the 500-line modularity target.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
