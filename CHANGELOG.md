@@ -85,6 +85,8 @@ behavior when the change improves security or project direction.
   tester entrypoint stays focused on command orchestration.
 - Split route path, regex, rewrite-template, and method validation helpers out
   of the route config DTO module while preserving the existing helper exports.
+- Split primitive cache value validators out of the cache config validator so
+  the main validator stays focused on policy ordering and cross-field checks.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.

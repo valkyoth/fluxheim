@@ -1,10 +1,20 @@
 use std::collections::BTreeSet;
 
-use crate::config::{ConfigError, valid_http_token};
+use self::config_cache_value_validate::{
+    cache_sensitive_request_header, validate_cache_bypass_request_header_value,
+    validate_cache_content_types, validate_cache_cookie_name, validate_cache_cookie_value,
+    validate_cache_extensions, validate_cache_list_len, validate_cache_methods,
+    validate_cache_no_store_response_header_value, validate_cache_query_param,
+    validate_cache_query_value,
+};
+use crate::config::ConfigError;
 use crate::config_cache::CacheConfig;
 use crate::config_cache_policy::{CacheKeyPart, validate_cache_key_namespace};
 use crate::config_header::validate_header_name;
 use crate::config_route::validate_route_path;
+
+#[path = "config_cache_value_validate.rs"]
+mod config_cache_value_validate;
 
 const MAX_CACHE_HEADER_LIST_ENTRIES: usize = 64;
 pub const MAX_CACHE_BYPASS_PATHS: usize = 128;
@@ -297,204 +307,5 @@ pub(crate) fn validate_cache_config(
 
     cache.memory.validate(scope, cache.max_object_bytes)?;
     cache.disk.validate(scope, cache.max_object_bytes)?;
-    Ok(())
-}
-
-fn validate_cache_content_types(
-    cache: &CacheConfig,
-    scope: &'static str,
-) -> Result<(), ConfigError> {
-    if cache.content_types.is_empty() {
-        return Err(ConfigError::EmptyCacheContentTypes { scope });
-    }
-    for content_type in &cache.content_types {
-        let content_type = content_type.trim();
-        let Some((kind, subtype)) = content_type.split_once('/') else {
-            return Err(ConfigError::InvalidCacheContentType {
-                scope,
-                content_type: content_type.to_owned(),
-            });
-        };
-        if kind.is_empty()
-            || subtype.is_empty()
-            || kind == "*"
-            || content_type.contains(';')
-            || content_type.chars().any(char::is_whitespace)
-            || content_type.chars().any(char::is_control)
-            || (subtype.contains('*') && subtype != "*")
-        {
-            return Err(ConfigError::InvalidCacheContentType {
-                scope,
-                content_type: content_type.to_owned(),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn validate_cache_extensions(cache: &CacheConfig, scope: &'static str) -> Result<(), ConfigError> {
-    if cache.image_extensions.is_empty() {
-        return Err(ConfigError::EmptyCacheImageExtensions { scope });
-    }
-    for extension in &cache.image_extensions {
-        let extension = extension.trim();
-        if extension.is_empty()
-            || extension.starts_with('.')
-            || extension.contains('/')
-            || extension.contains('\\')
-            || extension.chars().any(char::is_whitespace)
-        {
-            return Err(ConfigError::InvalidCacheImageExtension {
-                scope,
-                extension: extension.to_owned(),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn validate_cache_methods(cache: &CacheConfig, scope: &'static str) -> Result<(), ConfigError> {
-    if cache.methods.is_empty() {
-        return Err(ConfigError::EmptyCacheMethods { scope });
-    }
-    for method in &cache.methods {
-        if !valid_http_token(method) || method.chars().any(char::is_lowercase) {
-            return Err(ConfigError::InvalidCacheMethod {
-                scope,
-                method: method.clone(),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn cache_sensitive_request_header(header: &str) -> bool {
-    matches!(
-        header.to_ascii_lowercase().as_str(),
-        "authorization" | "cookie" | "proxy-authorization"
-    )
-}
-
-fn validate_cache_query_param(scope: &'static str, param: &str) -> Result<(), ConfigError> {
-    if param.is_empty()
-        || param.len() > 128
-        || param.chars().any(|ch| {
-            ch.is_control() || ch.is_whitespace() || matches!(ch, '&' | '=' | '#' | '?' | ';')
-        })
-    {
-        return Err(ConfigError::InvalidCacheBypassQueryParam {
-            scope,
-            param: param.to_owned(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_cache_query_value(
-    scope: &'static str,
-    param: &str,
-    value: &str,
-) -> Result<(), ConfigError> {
-    if value.trim().is_empty()
-        || value.len() > 4096
-        || value
-            .chars()
-            .any(|ch| ch.is_control() || ch.is_whitespace() || matches!(ch, '&' | '#' | ';'))
-    {
-        return Err(ConfigError::InvalidCacheBypassQueryValue {
-            scope,
-            param: param.to_owned(),
-            value: value.to_owned(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_cache_bypass_request_header_value(
-    scope: &'static str,
-    header: &str,
-    value: &str,
-) -> Result<(), ConfigError> {
-    if value.trim().is_empty()
-        || value.len() > 4096
-        || value
-            .as_bytes()
-            .iter()
-            .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f))
-    {
-        return Err(ConfigError::InvalidCacheBypassRequestHeaderValue {
-            scope,
-            header: header.to_owned(),
-            value: value.to_owned(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_cache_no_store_response_header_value(
-    scope: &'static str,
-    header: &str,
-    value: &str,
-) -> Result<(), ConfigError> {
-    if value.trim().is_empty()
-        || value.len() > 4096
-        || value
-            .as_bytes()
-            .iter()
-            .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f))
-    {
-        return Err(ConfigError::InvalidCacheNoStoreResponseHeaderValue {
-            scope,
-            header: header.to_owned(),
-            value: value.to_owned(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_cache_cookie_name(scope: &'static str, name: &str) -> Result<(), ConfigError> {
-    if name.is_empty() || name.len() > 128 || !valid_cookie_name(name) {
-        return Err(ConfigError::InvalidCacheBypassCookieName {
-            scope,
-            name: name.to_owned(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_cache_cookie_value(
-    scope: &'static str,
-    name: &str,
-    value: &str,
-) -> Result<(), ConfigError> {
-    if value.len() > 1024
-        || value
-            .bytes()
-            .any(|byte| byte < 0x20 || byte == 0x7f || matches!(byte, b';' | b','))
-    {
-        return Err(ConfigError::InvalidCacheBypassCookieValue {
-            scope,
-            name: name.to_owned(),
-            value: value.to_owned(),
-        });
-    }
-    Ok(())
-}
-
-fn valid_cookie_name(value: &str) -> bool {
-    value.bytes().all(|byte| {
-        matches!(byte, 0x21 | 0x23..=0x27 | 0x2a..=0x2b | 0x2d..=0x2e | 0x30..=0x39 | 0x41..=0x5a | 0x5e..=0x7a | 0x7c | 0x7e)
-    })
-}
-
-fn validate_cache_list_len(
-    scope: &'static str,
-    field: &'static str,
-    len: usize,
-    max: usize,
-) -> Result<(), ConfigError> {
-    if len > max {
-        return Err(ConfigError::InvalidCacheListLength { scope, field, max });
-    }
     Ok(())
 }
