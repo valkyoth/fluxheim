@@ -184,6 +184,8 @@ behavior when the change improves security or project direction.
 - Split native HTTP/1 cache unit tests into a focused child test module.
 - Split native HTTP/1 disk cache metadata serialization and safe filesystem
   path helpers into focused child modules.
+- Split native HTTP/1 disk cache encryption and OpenBao Transit helpers into
+  focused child modules.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
