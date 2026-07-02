@@ -165,6 +165,9 @@ behavior when the change improves security or project direction.
   tests into a focused child test module.
 - Split native route-proxy min-uses, predictor, stale-while-revalidate, and
   stale-if-error freshness tests into a focused child test module.
+- Split native route-proxy origin-protection, cache-lock, authorization/no-store
+  bypass, Age normalization, and Vary isolation tests into a focused child test
+  module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
