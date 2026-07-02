@@ -68,6 +68,8 @@ behavior when the change improves security or project direction.
   module.
 - Split admin cache status, purge JSON shaping, cache metric, and repeated
   purge batch helpers into a focused child module.
+- Split admin bearer-token loading, auth throttling, and client-certificate
+  authorization helpers into a focused child module.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
