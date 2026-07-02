@@ -95,6 +95,8 @@ behavior when the change improves security or project direction.
   validation helpers into focused child modules.
 - Split CLI cache object lookup command handling, parsing, and expectation
   validation into focused child modules.
+- Split CLI compiled-module/runtime validation and TLS storage checks into
+  focused child modules while preserving the public `crate::cli` exports.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
