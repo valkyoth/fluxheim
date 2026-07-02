@@ -45,6 +45,8 @@ behavior when the change improves security or project direction.
 - Split ACME External Account Binding helpers out of `src/acme.rs` into a
   focused helper module so EAB secret loading, bounded file reads, and HMAC-key
   decoding are isolated from the ACME renewal/install adapter.
+- Split ACME account credential pathing, bounded JSON loading, safe writes, and
+  symlink rejection into a focused account-store helper module.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of
