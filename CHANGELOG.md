@@ -119,6 +119,9 @@ behavior when the change improves security or project direction.
   target.
 - Split metrics registry/export regression coverage out of the root metrics
   adapter into a focused test module while preserving metrics-feature coverage.
+- Split metrics `OnceLock` registry storage and Prometheus constructor helpers
+  into focused private modules for core, PHP/OTLP, cache gauge, and cache
+  activity metrics.
 - Split TLS storage and downstream certificate-selector unit tests out of the
   root TLS adapter into focused test modules while preserving private-helper
   coverage.
