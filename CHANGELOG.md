@@ -102,6 +102,8 @@ behavior when the change improves security or project direction.
 - Split the public config-error module into a small stable re-export wrapper,
   a focused error-kind module, and a separate formatting/source module as
   preparation for domain-specific error formatting cleanup.
+- Split runtime unit tests out of the root runtime adapter into a focused test
+  module while preserving private-helper coverage.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
