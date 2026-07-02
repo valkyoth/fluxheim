@@ -156,6 +156,8 @@ fi
 %changelog
 * Tue Jun 30 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.37-1
 - Start the final pre-Wasm crate-boundary cleanup release.
+- Harden OpenSSL stream-upstream TLS connectors and ACME account credential
+  serialization buffers.
 - Prepare ACME, observability, header-policy, TLS helper, native proxy, and CLI
   boundaries for smaller crate-owned APIs.
 

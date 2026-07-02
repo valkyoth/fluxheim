@@ -13,6 +13,11 @@ is clean.
 - Start the final pre-Wasm crate-boundary cleanup pass.
 - Update the pinned Rust toolchain, workspace `rust-version` fields, and
   container builder images to Rust 1.96.1.
+- Harden OpenSSL stream-upstream TLS connectors with a TLS 1.2 minimum and an
+  explicit modern TLS 1.2/TLS 1.3 cipher allowlist.
+- Store serialized ACME account credentials in `sanitization::SecretVec` while
+  writing them to disk so account private-key JSON is cleared from heap memory
+  on drop.
 - Prepare ACME, observability, header-policy, TLS helper, native proxy, and CLI
   boundaries for smaller crate-owned APIs.
 - Remove private root compatibility shims for common errors, filesystem trust
