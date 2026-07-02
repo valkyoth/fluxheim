@@ -14,7 +14,7 @@ documents why the exception is temporary and how it will be removed.
 
 | File | Baseline lines | Reason | Split target |
 | --- | ---: | --- | --- |
-| `src/cli.rs` | 3675 | Legacy command dispatch and release/admin/cache tooling after CLI regression coverage and crypto/cache-keygen command helpers moved to focused child modules. | Split command handlers by domain after runtime crates settle. |
+| `src/cli.rs` | 3077 | Legacy command dispatch and release/admin/cache tooling after CLI regression coverage, crypto/cache-keygen command helpers, and ACME CLI helpers moved to focused child modules. | Split command handlers by domain after runtime crates settle. |
 | `src/acme.rs` | 2305 | ACME account/order/install/renewal and filesystem safety in one root adapter after regression coverage, error typing, challenge stores, renewal queue helpers, and PEM validation moved to focused child modules. | Move to `fluxheim-acme` after the native listener/TLS cutover stabilizes. |
 | `crates/fluxheim-config/src/config_error_display.rs` | 837 | Config error `Display`/`Error` formatting split away from the public `config_error` wrapper while preserving `fluxheim_config::ConfigError`. | Split formatting helpers by config domain so each formatter module stays below the 500-line target. |
 | `crates/fluxheim-config/src/config_error_kind.rs` | 626 | Public `ConfigError` enum variants split away from formatting without changing the public API. | Evaluate domain-specific internal error builders and whether variant groups can move behind smaller public constructors without API churn. |

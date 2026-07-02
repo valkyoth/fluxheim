@@ -87,6 +87,8 @@ behavior when the change improves security or project direction.
   the 500-line modularity target.
 - Split CLI crypto diagnostics and cache-key generation helpers into a focused
   child module.
+- Split CLI ACME renewal and managed ACME initializer helpers into focused
+  child modules.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
