@@ -149,10 +149,10 @@ Notes:
   address before TLS, HTTP, and stream handling. The v2 parser supports TCP4/TCP6 and
   LOCAL/UNSPEC frames, skips bounded TLV payloads, and rejects unsupported
   address families or oversized v2 payloads.
-- `[server.process]` maps safe process settings into Pingora's `ServerConf`.
-  Changes to these values require a process upgrade, not a live snapshot
-  reload. Keep `threads` conservative in containers because Pingora allocates
-  worker threads per service.
+- `[server.process]` maps safe process settings into Fluxheim's native runtime
+  process plan. Changes to these values require a process upgrade, not a live
+  snapshot reload. Keep `threads` conservative in containers because worker
+  threads and listener tasks are process-level resources.
 - `pid_file`, `upgrade_sock`, `certificate_reload_sock`, and optional
   `error_log` must not contain parent traversal, must not be below symlinked
   existing parent directories, and on Unix must not use a group- or
@@ -687,11 +687,10 @@ rootless container secrets or a local file readable only by the Fluxheim user.
 `[metrics]` is disabled by default and should remain loopback-only unless it is
 fronted by a trusted local monitoring agent. The native metrics handler only
 serves `GET`/`HEAD /metrics` and can enforce a bearer token from
-`metrics.token_file`. During the Pingora compatibility
-runtime, Fluxheim validates the configured token source at startup, but the
-compatibility metrics listener still relies on the metrics listener binding and
-network ACLs for access control until the final native runner cutover owns this
-service.
+`metrics.token_file`. Fluxheim validates the configured token source at
+startup, and the native metrics listener enforces the token before returning
+Prometheus output. Keep the listener bound to loopback or a trusted management
+network even when token authentication is enabled.
 
 `metrics.token_env` is parsed but rejected because Rust 2024 treats process
 environment mutation as unsafe and Fluxheim forbids unsafe code in the root
@@ -1307,8 +1306,7 @@ content types, and leaves gRPC-Web/JSON transcoding out of scope.
 `upstream_total_connection_timeout_secs` wraps full upstream establishment,
 including protocol/TLS setup where the selected connector exposes it.
 `upstream_idle_timeout_secs` controls how long reusable idle upstream
-connections remain in the native HTTP/1.1 upstream pool or the remaining
-Pingora compatibility keepalive pool before they are closed.
+connections remain in the native HTTP/1.1 upstream pool before they are closed.
 `upstream_tcp_keepalive_idle_secs`, `upstream_tcp_keepalive_interval_secs`, and
 `upstream_tcp_keepalive_count` configure TCP keepalive probes on upstream
 connections and must be set together. `upstream_tcp_user_timeout_ms` maps to
@@ -1323,7 +1321,7 @@ parity tests.
 `upstream_weights` is optional and, when set, must contain one positive weight
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must
-fit in Pingora's weighted selector.
+fit in Fluxheim's bounded weighted selector.
 `upstream_priority_groups` is optional and, when set, must contain one priority
 value for each `upstreams` entry. Higher values are preferred first, then lower
 values are activated when higher priority groups have fewer than
@@ -1404,14 +1402,14 @@ uses unsalted CRC32 by design so its mapping remains compatible with nginx and
 Pingora Ketama behavior. Do not use Ketama when the hash key is attacker
 controlled and deterministic backend targeting is unacceptable; use Fluxheim's
 salted rendezvous, bounded-load consistent, or Maglev selectors instead.
-`max_iterations` bounds how many ready candidates Pingora or Fluxheim may
-inspect while applying health, drain, slow-start, backup, priority, and
+`max_iterations` bounds how many ready candidates Fluxheim may inspect while
+applying health, drain, slow-start, backup, priority, and
 in-flight policies. `all_down_status` defaults to `502` and may be set to
 another HTTP 5xx status, commonly `503`, for requests where a configured
 load-balanced pool has no selectable backend. `least-connections`,
 `weighted-least-connections`, and
 `ratio-least-connections` all use the same Fluxheim-held in-flight request
-permits, `upstream_weights`, and Pingora's current backend health state, so a
+permits, `upstream_weights`, and Fluxheim's current backend health state, so a
 backend with weight `4` can carry roughly four times the in-flight request
 share of a backend with weight `1`. `least-sessions` requires
 `proxy.load_balance.persistence.enabled = true` and selects by the lowest
@@ -1427,7 +1425,7 @@ changes until ring/table rebuild and sampling semantics are specified.
 `power-of-two`
 also accepts `power-of-two-choices`, `two-choice`, `weighted-two-choice`, and
 `weighted-random-two-choice`; all names sample two healthy backends through
-Pingora's random weighted selector and choose the lower weighted in-flight
+Fluxheim's random weighted selector and choose the lower weighted in-flight
 pressure using `upstream_weights`.
 With metrics enabled, load-balanced selections, unavailable pools, retries,
 queue wait/full/timeout outcomes, and success/failure/ejection outcomes are counted by
@@ -1634,7 +1632,7 @@ warming, Fluxheim allows a selection instead of failing the entire pool, so
 slow-start is a traffic-shaping guard rather than an availability blocker.
 `proxy.load_balance.retry.enabled = true` enables bounded redispatch for
 connection failures that happen before the request is sent upstream. It is
-limited by `max_retries`, by Pingora's process-wide retry cap, and by
+limited by `max_retries` and by
 `methods`, which accepts only safe method tokens such as `GET`, `HEAD`,
 `OPTIONS`, and `TRACE`. `statuses = [500, 502, 503]` can additionally
 redispatch selected HTTP 5xx responses before response streaming starts, and
@@ -1733,11 +1731,11 @@ HTTP/2 origins do not use the same hop-by-hop upgrade mechanism.
 `downstream_min_send_rate_bytes_per_sec` protect the client-facing side of
 proxied requests and responses. The read timeout caps each stalled downstream
 request-body read and defaults to 60 seconds; this applies to HTTP/1 and to
-HTTP/2 DATA-frame waits in Fluxheim's vendored Pingora core. The write timeout
+HTTP/2 DATA-frame waits in Fluxheim's native HTTP/2 stack. The write timeout
 caps each stalled downstream write and defaults to 30 seconds. The total
 response timeout is an absolute HTTP/2 response-write lifetime bound and
 defaults to 300 seconds; it is not reset by partial writes or client
-`WINDOW_UPDATE` frames. The minimum send rate asks Pingora to derive a timeout
+`WINDOW_UPDATE` frames. The minimum send rate asks Fluxheim to derive a timeout
 from each response chunk size and is mainly useful
 against slow HTTP/1 clients. These fields are optional and can be set globally,
 per vhost, or on a route-level proxy block.
@@ -2154,7 +2152,6 @@ actively debugging cache policy.
 `[cache.predictor]`, `[vhosts.cache.predictor]`, and
 `[vhosts.routes.cache.predictor]` are opt-in cacheability predictors. The
 native HTTP/1 memory-cache path uses Fluxheim-owned bounded cache-pass counters;
-the compatibility runtime maps the same setting to Pingora's predictor.
 When enabled, Fluxheim can remember recent origin-level uncacheable outcomes
 such as `private`/`no-store` cache responses or oversized responses and bypass
 future cache lookup and cache locking for the same primary key until the
@@ -2434,7 +2431,7 @@ values are `connect`, `timeout`, `read`, `write`, `connection-closed`,
 `http-status`, `protocol`, `tls`, and `other`. The default includes all
 classes. `stale_if_error_statuses` optionally narrows HTTP-status stale serving
 to selected 5xx origin statuses; when it is empty, any upstream 5xx status that
-Pingora reports as stale-if-error eligible is allowed. `content_types` is the
+Fluxheim marks stale-if-error eligible is allowed. `content_types` is the
 allow-list for `200 OK` origin
 response media types. Entries may be exact media types such as `text/css` or
 subtype wildcards such as `image/*`. `extensions` is the user-facing alias for
@@ -3506,5 +3503,5 @@ Before packaging a custom feature set, validate it:
 scripts/validate-features.sh proxy,web,tls-rustls
 ```
 
-This catches unsupported combinations before Cargo starts compiling Pingora.
+This catches unsupported combinations before Cargo starts compiling Fluxheim.
 See [Feature Matrix](features.md) for the complete feature/profile list.

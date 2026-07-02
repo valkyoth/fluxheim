@@ -128,6 +128,9 @@ behavior when the change improves security or project direction.
 - Split stream config merge, path-resolution, upstream-selection, and
   validation methods out of the stream DTO module while preserving the existing
   inherent stream config APIs.
+- Refresh release-checklist, runtime-baseline, cache-backend, and FIPS docs so
+  they describe the current native runtime, empty Pingora dependency surface,
+  Fluxheim-owned cache paths, and direct OpenSSL integration.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.

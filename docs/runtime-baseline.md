@@ -32,7 +32,7 @@ The generated files are:
 | --- | --- |
 | `metadata.env` | Package version, git commit, dirty flag, timestamp, host, rustc, and Cargo versions. |
 | `cargo-tree/*.txt` | Locked dependency trees for default, full, cache-edge, proxy-edge, load-balancer-edge, native-web-tls, native-web-openssl, PHP, and privacy profiles. |
-| `pingora-dependency-surface.tsv` | Report-only list of Pingora crates still present per profile. |
+| `pingora-dependency-surface.tsv` | Pingora dependency proof report; this should be empty for every supported profile. |
 | `binary-size.tsv` | Default release binary size when release/build mode is used. |
 | `startup-time.tsv` | Milliseconds from process spawn to first successful local HTTP response. |
 | `process-idle.tsv` | Idle RSS, file-descriptor count, sample counts, and TLS availability. |
@@ -50,7 +50,7 @@ by:
 scripts/validate-pingora-dependency-policy.sh check
 ```
 
-That gate fails when a Pingora crate is present without an exception, when an
+That gate fails when a Pingora crate re-enters a supported profile, when an
 exception is stale, or when the current Fluxheim version has reached the
 exception's `removal_target`. `cargo test` also runs
 `tests/pingora_dependency_policy.rs`, which checks the same removal targets

@@ -211,9 +211,9 @@ tracked for future module lines.
   pools only. DNS/file/HTTP-discovery pools reject them because discovery
   refresh owns the live member set.
 - The load-balancer core is Fluxheim-owned, including backend-set snapshots,
-  runtime mutation, health/discovery loops, and selection policy. Pingora still
-  remains the HTTP proxy transport boundary until the `1.6.x` native HTTP
-  runtime cutover completes.
+  runtime mutation, health/discovery loops, and selection policy. The native
+  HTTP proxy transport path now consumes the same Fluxheim-owned selector,
+  health, discovery, persistence, and runtime mutation state.
 - During the `1.6.32` native runtime cutover, static native HTTP proxy pools
   with active load-balancer health checks share one `UpstreamLoadBalancer`
   instance between request selection and the native background health service.

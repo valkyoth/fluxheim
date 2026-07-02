@@ -210,7 +210,7 @@ Fluxheim binary.
 For custom deployments, combine `tls-openssl-fips` with the raw modules you
 need. Do not combine it with a broad profile alias that already enables
 `tls-rustls`, because Cargo features are additive and Fluxheim supports only one
-Pingora TLS backend per binary.
+TLS backend per binary.
 
 Examples:
 
@@ -255,7 +255,7 @@ Current Fluxheim enforcement:
 
 - Adds a direct `openssl` crate dependency only for OpenSSL FIPS diagnostics
   and provider/property checks.
-- Uses Fluxheim's local `pingora-openssl` patch to avoid forced
+- Uses direct OpenSSL/tokio-openssl integration without enabling
   `openssl/vendored`, so builds can link against the operator-selected OpenSSL
   installation.
 - Requires OpenSSL 3.x behavior for the FIPS property query path.
@@ -367,14 +367,11 @@ Rust's memory-safety guarantees. Treat rustls/AWS-LC FIPS evidence as evidence
 for the selected validated module, compiler, platform, and Security Policy, not
 as a pure-Rust cryptographic implementation claim.
 
-The rustls listener also has a final fail-closed assertion in Fluxheim's
-vendored Pingora rustls listener path. Fluxheim validates provider status,
-cipher suites, and key-exchange groups before listener construction, and logs
-certificate/resolver context before that final assertion. If this assertion is
-ever reached, the process terminates rather than continuing with a listener
-that cannot report rustls FIPS mode. That is an accepted reliability tradeoff
-for the FIPS/ISO-required rustls candidate path until Pingora exposes a fully
-recoverable listener-build API.
+The native rustls listener validates provider status, cipher suites, and
+key-exchange groups before listener construction. If provider activation or
+policy construction fails in FIPS/ISO-required mode, Fluxheim rejects startup
+rather than continuing with a listener that cannot prove the selected FIPS
+boundary.
 
 Release-mode rustls/AWS-LC FIPS evidence should be generated on an
 AWS-LC-supported FIPS builder, not an arbitrary rolling distribution compiler.

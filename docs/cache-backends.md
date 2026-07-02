@@ -21,19 +21,18 @@ internal cache implementation.
   high-churn caches.
 - Enabled tier budgets must be at least as large as `cache.max_object_bytes`.
 - `cache.enabled = true` requires at least one storage tier.
-- The proxy emits vhost-aware Pingora cache keys and enables Pingora `HttpCache`
+- The native proxy emits vhost-aware Fluxheim cache keys and runs Fluxheim
   admission for eligible image requests with a configured memory or disk tier.
-- Pingora cache locks collapse concurrent misses for the same cache key to
+- Fluxheim cache-fill gates collapse concurrent misses for the same cache key to
   prevent cache stampedes when many clients request the same uncached or
   expired object at once. One request receives the writer permit and fetches
   from the origin; matching readers wait for that writer up to the configured
   timeout instead of all hitting the origin together. `cache.lock`,
   `vhosts.cache.lock`, and `vhosts.routes.cache.lock` configure whether request
   collapsing is enabled and how long writer age and reader wait timeouts last.
-  Defaults preserve the original 30 second writer age timeout and 30 second
-  waiter timeout.
+  Defaults use a 30 second writer age timeout and 30 second waiter timeout.
 - `cache.predictor`, `vhosts.cache.predictor`, and
-  `vhosts.routes.cache.predictor` can opt into Pingora's cacheability
+  `vhosts.routes.cache.predictor` can opt into Fluxheim's cacheability
   predictor. The predictor keeps a bounded LRU of primary keys that recently
   produced origin-level uncacheable outcomes, allowing Fluxheim to bypass cache
   lookup and cache locking early for those keys. Fluxheim-specific custom
@@ -75,7 +74,7 @@ internal cache implementation.
   such as a bounded 404 TTL for immutable asset paths.
 - `cache.vary_request_headers`, `vhosts.cache.vary_request_headers`, and
   `vhosts.routes.cache.vary_request_headers` add safe request headers to the
-  Pingora cache variance key even when the origin does not emit a matching
+  Fluxheim cache variance key even when the origin does not emit a matching
   `Vary` header. Sensitive headers such as `Cookie`, `Authorization`, and
   `Proxy-Authorization` are rejected here; use `bypass_request_headers` for
   request-specific responses. The configured list is capped at 16 headers,
@@ -137,7 +136,7 @@ internal cache implementation.
   only admitted when explicitly listed here.
 - `cache.stale_if_error_secs`, `vhosts.cache.stale_if_error_secs`, and
   `vhosts.routes.cache.stale_if_error_secs` add an explicit stale-if-error
-  window to cache-participating responses. Pingora can then serve an expired
+  window to cache-participating responses. Fluxheim can then serve an expired
   stored object during upstream errors while the stale window is still valid.
 - `cache.stale_if_error_on`, `vhosts.cache.stale_if_error_on`, and
   `vhosts.routes.cache.stale_if_error_on` can narrow that behavior to selected
@@ -148,11 +147,11 @@ internal cache implementation.
 - `cache.stale_if_error_statuses`, `vhosts.cache.stale_if_error_statuses`, and
   `vhosts.routes.cache.stale_if_error_statuses` can narrow HTTP-status
   stale-if-error serving to selected 5xx origin statuses. An empty list means
-  all upstream 5xx statuses that Pingora marks stale-if-error eligible.
+  all upstream 5xx statuses that Fluxheim marks stale-if-error eligible.
 - `cache.stale_while_revalidate_secs`,
   `vhosts.cache.stale_while_revalidate_secs`, and
   `vhosts.routes.cache.stale_while_revalidate_secs` add an explicit
-  stale-while-revalidate window to cache-participating responses. Pingora can
+  stale-while-revalidate window to cache-participating responses. Fluxheim can
   then serve an expired stored object while revalidating it with the upstream.
 - `cache.content_types`, `vhosts.cache.content_types`, and
   `vhosts.routes.cache.content_types` allow exact media types and subtype
@@ -164,9 +163,9 @@ internal cache implementation.
   participates in the cache key. The default is `true`; disabling it should be
   limited to static routes where the query string is not part of origin
   response identity.
-- The first Pingora memory adapter stores complete objects only; it buffers up to
+- The native memory cache stores complete objects only; it buffers up to
   `cache.max_object_bytes` and refuses anything larger.
-- The first Pingora disk adapter stores complete objects below `cache.disk.path`
+- The native disk cache stores complete objects below `cache.disk.path`
   using SHA-256-derived shard paths, same-directory temporary files, and atomic
   rename. It refuses objects above `cache.max_object_bytes`, maintains a
   runtime disk-object index for stats and least-recently-used eviction, and
@@ -211,7 +210,7 @@ internal cache implementation.
   new bin files to the configured bin size before object bytes are committed.
 - The storage-bin backend can encode, allocate, store, read, purge, and release
   objects through the manifest/bin/free-map primitives. Restart recovery,
-  eviction parity, the Pingora `Storage` implementation, and runtime backend
+  eviction parity, the Fluxheim native storage interface, and runtime backend
   selection are in place. The release gate includes a storage-bin smoke that
   verifies live proxy traffic populates the bin/index files and returns `MISS`
   followed by `HIT`.
@@ -362,14 +361,14 @@ internal cache implementation.
   `Cache-Control: no-cache`, `Cache-Control: max-age=0`, and
   `Pragma: no-cache` are ignored by default for shared-cache protection; when
   `allow_client_cache_refresh` is enabled they keep cache lookup enabled and
-  force Pingora to revalidate an existing stored object instead of treating the
+  force Fluxheim to revalidate an existing stored object instead of treating the
   request as a plain bypass.
   Proxied image cache admission also refuses shared-cache
   storage when origin responses send `Cache-Control: no-store`, `private`,
   `no-cache`, `max-age=0`, or `s-maxage=0`, because validator-based
   revalidation for zero-freshness admission is not complete yet. Proxied cache
-  variants use Pingora's
-  variance hook for `Vary`; repeated `Vary` headers are normalized, request variant headers are
+  variants use Fluxheim's
+  variance handling for `Vary`; repeated `Vary` headers are normalized, request variant headers are
   hashed into the variant key, and unsafe or identity-sensitive `Vary` headers
   are rejected from cache admission. Responses carrying `Set-Cookie` are not
   admitted into the shared static cache. Origin `200 OK` responses must match
@@ -378,7 +377,7 @@ internal cache implementation.
   disallowed `Content-Type` values still reject `200 OK` responses, and
   redirects or error statuses without an explicit TTL are rejected from shared
   cache admission.
-  Pingora's cache pipeline injects `Age` on stored-response hits and applies
+  Fluxheim injects `Age` on stored-response hits and applies
   downstream conditional/range handling when cache is enabled. Fluxheim also has
   an opt-in fixed-slice range cache for large proxy objects. Slice caching
   stores normalized byte slices, validates object identity with total length and
@@ -408,12 +407,12 @@ internal cache implementation.
   `304 Not Modified` during proxy-cache revalidation. Changed `Vary` values
   during 304 revalidation are detected and treated as a no-store revalidation
   response, keeping the existing cached metadata instead of corrupting variant
-  selection. Full changed-`Vary` re-keying remains a future Pingora-path
+  selection. Full changed-`Vary` re-keying remains future native-cache
   improvement because the stored variance key must change together with the
   response metadata. Broader cache-header matrix tests across static and
   proxied responses remain useful hardening work.
 - When both memory and disk tiers are enabled on a vhost, Fluxheim uses a
-  tiered Pingora storage adapter: memory is L1, disk is L2, misses are written
+  tiered native storage path: memory is L1, disk is L2, misses are written
   to both tiers, disk hits are promoted back into memory when they fit, and
   purge invalidates both tiers.
 - The protected admin endpoint `GET /_fluxheim/cache/status` reports aggregate,
@@ -475,7 +474,7 @@ peer-fill enabled policy counts, peer counts, maximum concurrency, and per-vhost
 or per-route peer-fill flags so operators can audit the selected policy shape
 without exposing peer URLs.
 `fluxheim_cache_operation_duration_seconds{scope,vhost,route,phase,operation}`
-records Pingora cache lookup and cache-lock wait durations as bounded
+records Fluxheim cache lookup and cache-lock wait durations as bounded
 histograms, so operators can distinguish slow storage reads from stampede wait
 time without labeling cache keys, paths, queries, cookies, or request headers.
 The OTLP metrics exporter includes histogram payloads, so the same timing
@@ -507,7 +506,7 @@ records successful admin purge commands with bounded operation and mode labels;
   and `cache-pass`. `request-refresh` means `allow_client_cache_refresh` is
   enabled and the client requested revalidation through `Cache-Control:
   no-cache`, `Cache-Control: max-age=0`, or `Pragma: no-cache`; Fluxheim keeps
-  cache enabled and asks Pingora to revalidate the stored object instead of
+  cache enabled and asks Fluxheim to revalidate the stored object instead of
   treating this as a full cache bypass.
   `Cache-Control: no-store` remains a bypass with `request-no-store` so the
   response is not admitted into the shared cache. The proxy cache smoke suite
@@ -832,23 +831,21 @@ Pingora-neutral `FluxCacheStorage`, `FluxHandleHit`, and `FluxHandleMiss`
 interfaces for hit, miss, purge, metadata-update, and admission semantics. The
 memory, disk, storage-bin, and tiered memory-plus-disk backends are adapted to
 that crate-owned interface. The crate also owns plaintext disk object header
-sizing, encoding, and parsing; encrypted disk object handling remains in the
-root adapter until the native HTTP/cache cutover. Storage-bin layout, manifest,
-index-entry, object-location, and free-map allocation helpers also live in
-`fluxheim-cache`, while safe file opening and symlink checks remain in the root
-adapter. The current Pingora HTTP proxy path still requires `Storage`,
-`HandleHit`, and `HandleMiss`, so `cache.rs` keeps a compatibility adapter at
-that edge until the native HTTP runtime cutover removes `pingora-cache` from the
-build graph.
+sizing, encoding, and parsing. Storage-bin layout, manifest, index-entry,
+object-location, and free-map allocation helpers also live in `fluxheim-cache`.
+The native HTTP proxy now uses Fluxheim-owned cache lookup, admission, stale
+serving, peer-fill, range, and disk/tiered storage paths; the remaining root
+cache glue is process-level integration, admin/CLI wiring, metrics, and
+backward-compatible public API surface rather than a Pingora runtime adapter.
 
-Request collapsing remains integrated with Pingora cache locks while the HTTP
-proxy path is still Pingora-backed. Disk-only admissions stream response body
-chunks into a bounded temp file under the cache root before atomically
-committing the final object, avoiding whole-object admission buffering for the
-disk tier. Reader-visible partial writes remain disabled until Fluxheim can
-provide a safe tagged reader for in-progress objects.
+Request collapsing is implemented by Fluxheim cache-fill gates. Disk-only
+admissions stream response body chunks into a bounded temp file under the cache
+root before atomically committing the final object, avoiding whole-object
+admission buffering for the disk tier. Reader-visible partial writes remain
+disabled until Fluxheim can provide a safe tagged reader for in-progress
+objects.
 
-Additional Pingora cache primitives worth exposing as Fluxheim matures:
+Additional cache primitives worth exposing as Fluxheim matures:
 
 - `HttpCacheDigest` records cache lock wait time and lookup/header-read time.
   These are good candidates for low-cardinality Prometheus histograms and
@@ -857,12 +854,11 @@ Additional Pingora cache primitives worth exposing as Fluxheim matures:
 - Cacheability prediction is exposed through opt-in `[cache.predictor]`,
   `[vhosts.cache.predictor]`, and `[vhosts.routes.cache.predictor]` settings.
   The native HTTP/1 memory-cache path uses Fluxheim-owned bounded cache-pass
-  counters; the compatibility runtime maps the same setting to Pingora's
-  `CacheablePredictor`. `cache-key` and `cache-lookup` report and can assert
+  counters. `cache-key` and `cache-lookup` report and can assert
   the selected predictor state with `--expect-cache-predictor-enabled`.
-  Fluxheim skips custom Fluxheim policy reasons in the compatibility predictor
-  so local min-use, bypass, and response-header refusal controls remain
-  governed by Fluxheim counters.
+  Fluxheim skips custom policy reasons in the predictor so local min-use,
+  bypass, and response-header refusal controls remain governed by Fluxheim
+  counters.
 - `ForcedFreshness::ForceExpired` is already used for bounded client refresh
   revalidation (`Cache-Control: no-cache`, `Cache-Control: max-age=0`, and
   `Pragma: no-cache`). Future force-miss or force-fresh controls should only be
@@ -888,7 +884,7 @@ A production adapter must:
   `Accept-Ranges`, `If-None-Match`, `If-Modified-Since`, request
   `Cache-Control`, `Pragma`, `Range`, and `If-Range`.
 - Implemented now: static validators/ranges/client refresh controls, proxied
-  client refresh bypass, Pingora `Vary` variance keys with unsafe/sensitive
+  client refresh bypass, Fluxheim `Vary` variance keys with unsafe/sensitive
   `Vary` rejection, shared-cache refusal for `Set-Cookie` responses, `image/*`
   origin response admission for proxied image cache, opt-in bounded proxy
   `Range` caching for safe single byte windows, opt-in fixed-slice range
@@ -907,8 +903,8 @@ A production adapter must:
   enforcing `cache.max_object_bytes`; implemented for disk-only cache admission
   by writing bounded response chunks to a temp file before final commit.
   Reader-visible partial streaming is still pending.
-- Support request collapsing or integrate with Pingora cache locks. Implemented
-  for memory, disk, and tiered cache policies through Pingora cache locks.
+- Support request collapsing. Implemented for memory, disk, and tiered cache
+  policies through Fluxheim cache-fill gates.
 - Support hit-for-pass/pass-cache decisions for repeatedly uncacheable dynamic
   objects. Implemented as opt-in `pass_uncacheable_after` with a bounded
   short-lived in-memory decision table.

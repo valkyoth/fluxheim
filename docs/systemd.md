@@ -19,7 +19,7 @@ The packaged unit is intentionally conservative:
   architecture filtering, and a conservative system-service/network syscall
   allow-list;
 - limits address families to IPv4, IPv6, and Unix domain sockets;
-- stops with `SIGTERM` and lets Fluxheim/Pingora shut down gracefully.
+- stops with `SIGTERM` and lets Fluxheim shut down gracefully.
 
 These systemd controls are the supported `1.0` host sandbox. They are
 deployment-level controls and do not require a special Fluxheim binary.
