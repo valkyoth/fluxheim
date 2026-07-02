@@ -60,6 +60,9 @@ behavior when the change improves security or project direction.
 - Split ACME managed certificate installation, backup/restore, ownership, and
   symlink-safe file replacement helpers into focused certificate installer
   modules that stay below the modularity target.
+- Split instant-acme account creation and HTTP-01/TLS-ALPN renewal execution
+  into a focused ACME client module, bringing `src/acme.rs` below the
+  modularity target.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of
