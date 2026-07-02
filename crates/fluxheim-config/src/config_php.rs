@@ -24,6 +24,10 @@ use crate::config_php_paths::{
     validate_php_root_path,
 };
 use crate::config_php_preset::apply_php_preset_defaults;
+pub use crate::config_php_types::{
+    PhpFpmMode, PhpFpmProcessManager, PhpPathInfoMode, PhpPreset, PhpRuntime, PhpStderrLogLevel,
+    PhpTryFilesMode,
+};
 pub use crate::config_php_validation::{
     MAX_PHP_ALLOWED_EXTENSIONS, MAX_PHP_DENY_PATH_PREFIXES, MAX_PHP_FPM_RETRY_METHODS,
     MAX_PHP_FPM_RETRY_STATUSES, MAX_PHP_HIDE_RESPONSE_HEADERS, MAX_PHP_INTERCEPT_ERROR_STATUSES,
@@ -36,15 +40,6 @@ pub use crate::config_php_validation::{
 
 pub const DEFAULT_PHP_MAX_IN_FLIGHT: usize = 8;
 pub const MAX_PHP_MAX_IN_FLIGHT: usize = 4096;
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PhpPreset {
-    #[default]
-    None,
-    #[serde(rename = "wordpress")]
-    WordPress,
-}
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -256,66 +251,6 @@ impl PhpConfig {
         self.fpm.validate(scope)?;
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-pub enum PhpRuntime {
-    #[default]
-    #[serde(rename = "php-fpm")]
-    PhpFpm,
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-pub enum PhpPathInfoMode {
-    #[default]
-    #[serde(rename = "disabled")]
-    Disabled,
-    #[serde(rename = "split", alias = "strict")]
-    Split,
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-pub enum PhpTryFilesMode {
-    #[default]
-    #[serde(rename = "front-controller")]
-    FrontController,
-    #[serde(rename = "wordpress")]
-    WordPress,
-    #[serde(rename = "strict")]
-    Strict,
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-pub enum PhpStderrLogLevel {
-    #[serde(rename = "error")]
-    Error,
-    #[default]
-    #[serde(rename = "warn")]
-    Warn,
-    #[serde(rename = "info")]
-    Info,
-    #[serde(rename = "debug")]
-    Debug,
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-pub enum PhpFpmMode {
-    #[default]
-    #[serde(rename = "external")]
-    External,
-    #[serde(rename = "managed")]
-    Managed,
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-pub enum PhpFpmProcessManager {
-    #[default]
-    #[serde(rename = "static")]
-    Static,
-    #[serde(rename = "dynamic")]
-    Dynamic,
-    #[serde(rename = "ondemand")]
-    Ondemand,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]

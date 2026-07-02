@@ -113,6 +113,9 @@ behavior when the change improves security or project direction.
 - Split load-balancer runtime mutation request/result DTOs and backend-state
   parsing into a focused API child module while preserving the existing
   `fluxheim-load-balancer` public exports.
+- Split PHP preset, runtime, path-info, try-files, stderr log-level, FPM mode,
+  and process-manager enums into a focused config child module while preserving
+  the existing `config_php` re-exports.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.

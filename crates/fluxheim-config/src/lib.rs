@@ -54,6 +54,7 @@ pub mod config_php_limits;
 pub mod config_php_managed;
 pub mod config_php_paths;
 pub mod config_php_preset;
+mod config_php_types;
 pub mod config_php_validation;
 pub mod config_proxy;
 pub mod config_proxy_auth;
