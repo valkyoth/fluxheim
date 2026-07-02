@@ -111,6 +111,8 @@ behavior when the change improves security or project direction.
   preparation for domain-specific error formatting cleanup.
 - Split runtime unit tests out of the root runtime adapter into a focused test
   module while preserving private-helper coverage.
+- Split runtime log-file opening and JSON/text log record formatting out of the
+  root runtime adapter into a focused private module.
 - Split TLS storage and downstream certificate-selector unit tests out of the
   root TLS adapter into focused test modules while preserving private-helper
   coverage.

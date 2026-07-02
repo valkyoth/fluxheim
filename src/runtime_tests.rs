@@ -1,4 +1,4 @@
-use super::{log_record_json, open_log_file};
+use super::runtime_logging::{log_record_json, open_log_file};
 use fluxheim_common::test_support::unique_temp_path;
 
 #[test]

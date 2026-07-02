@@ -1,12 +1,6 @@
 use std::error::Error;
-#[cfg(feature = "proxy")]
-use std::fs::File;
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
 use std::io::Read;
-#[cfg(feature = "proxy")]
-use std::io::Write;
-#[cfg(feature = "proxy")]
-use std::path::Path;
 #[cfg(feature = "proxy")]
 use std::sync::Arc;
 
@@ -15,6 +9,12 @@ use crate::config::CachePurgerConfig;
 use crate::config::Config;
 #[cfg(feature = "proxy")]
 use crate::config::{LoggingFormat, LoggingTarget};
+
+#[cfg(feature = "proxy")]
+#[path = "runtime_logging.rs"]
+mod runtime_logging;
+#[cfg(feature = "proxy")]
+use runtime_logging::{open_log_file, write_json_log_record, write_text_log_record};
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
 const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
@@ -1010,118 +1010,6 @@ fn init_logging(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let _ = builder.try_init();
     Ok(())
-}
-
-#[cfg(feature = "proxy")]
-fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
-    reject_log_path_symlink_prefix(path)?;
-
-    let mut flags =
-        rustix::fs::OFlags::CREATE | rustix::fs::OFlags::WRONLY | rustix::fs::OFlags::CLOEXEC;
-    if append {
-        flags |= rustix::fs::OFlags::APPEND;
-    } else {
-        flags |= rustix::fs::OFlags::TRUNC;
-    }
-
-    #[cfg(unix)]
-    {
-        flags |= rustix::fs::OFlags::NOFOLLOW;
-    }
-
-    let fd = rustix::fs::open(
-        path,
-        flags,
-        rustix::fs::Mode::RUSR
-            | rustix::fs::Mode::WUSR
-            | rustix::fs::Mode::RGRP
-            | rustix::fs::Mode::WGRP
-            | rustix::fs::Mode::ROTH
-            | rustix::fs::Mode::WOTH,
-    )
-    .map_err(rustix_to_io_error)?;
-    let file = File::from(fd);
-    let metadata = file.metadata()?;
-    if !metadata.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("log path is not a regular file: {}", path.display()),
-        ));
-    }
-
-    Ok(file)
-}
-
-#[cfg(feature = "proxy")]
-fn reject_log_path_symlink_prefix(path: &Path) -> std::io::Result<()> {
-    let mut current = std::path::PathBuf::new();
-    for component in path.components() {
-        current.push(component);
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("log path contains symlink component: {}", current.display()),
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
-}
-
-#[cfg(feature = "proxy")]
-fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
-    std::io::Error::from_raw_os_error(error.raw_os_error())
-}
-
-#[cfg(feature = "proxy")]
-fn write_text_log_record(
-    buf: &mut env_logger::fmt::Formatter,
-    record: &log::Record<'_>,
-) -> std::io::Result<()> {
-    writeln!(
-        buf,
-        "{} {} {}: {}",
-        buf.timestamp_millis(),
-        record.level(),
-        record.target(),
-        record.args()
-    )
-}
-
-#[cfg(feature = "proxy")]
-fn write_json_log_record(
-    buf: &mut env_logger::fmt::Formatter,
-    record: &log::Record<'_>,
-) -> std::io::Result<()> {
-    if record.target() == "fluxheim::access" {
-        return writeln!(buf, "{}", record.args());
-    }
-
-    writeln!(
-        buf,
-        "{}",
-        log_record_json(
-            &buf.timestamp_millis().to_string(),
-            record.level().as_str(),
-            record.target(),
-            &record.args().to_string(),
-        )
-    )
-}
-
-#[cfg(feature = "proxy")]
-fn log_record_json(timestamp: &str, level: &str, target: &str, message: &str) -> String {
-    format!(
-        "{{\"timestamp\":\"{}\",\"level\":\"{}\",\"target\":\"{}\",\"message\":\"{}\"}}",
-        fluxheim_observability::json_escape(timestamp),
-        fluxheim_observability::json_escape(level),
-        fluxheim_observability::json_escape(target),
-        fluxheim_observability::json_escape(message),
-    )
 }
 
 #[cfg(all(test, feature = "proxy"))]
