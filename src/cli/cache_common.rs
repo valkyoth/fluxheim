@@ -7,10 +7,10 @@ use crate::http_types::NativeCachePreviewRequest;
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 use super::{
-    CacheKeyOptions,
     cache_warm_support::{
         cache_warm_default_host, validate_cache_warm_host, validate_cache_warm_path,
     },
+    command_options::CacheKeyOptions,
 };
 
 #[cfg(all(feature = "cache", feature = "proxy"))]

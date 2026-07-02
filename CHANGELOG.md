@@ -97,6 +97,9 @@ behavior when the change improves security or project direction.
   validation into focused child modules.
 - Split CLI compiled-module/runtime validation and TLS storage checks into
   focused child modules while preserving the public `crate::cli` exports.
+- Split CLI command dispatch, command option DTOs, and public entrypoint
+  helpers into focused child modules so `src/cli.rs` now satisfies the
+  500-line modularity target.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.

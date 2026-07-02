@@ -1,6 +1,8 @@
 use std::error::Error;
 
-use super::{CacheKeyOptions, CacheLookupOptions};
+#[cfg(all(feature = "cache", feature = "proxy"))]
+use super::command_options::CacheKeyOptions;
+use super::command_options::CacheLookupOptions;
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 use super::{

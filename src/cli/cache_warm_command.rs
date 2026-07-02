@@ -1,8 +1,11 @@
 use std::error::Error;
 
+#[cfg(feature = "cache")]
 use crate::config::Config;
 
-use super::{CacheWarmOptions, cache_common::parse_cache_cli_headers, cache_warm_support::*};
+use super::command_options::CacheWarmOptions;
+#[cfg(feature = "cache")]
+use super::{cache_common::parse_cache_cli_headers, cache_warm_support::*};
 
 #[cfg(feature = "cache")]
 pub(super) fn run_cache_warm_command(
@@ -201,4 +204,45 @@ pub(super) fn print_cache_warm_counts<K: std::fmt::Display>(
     if let Some(summary) = fluxheim_cache::cache_warm_counts_summary(counts) {
         println!("{label}: {summary}");
     }
+}
+
+#[cfg(not(feature = "cache"))]
+pub(super) fn run_cache_warm_command(
+    options: CacheWarmOptions<'_>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let CacheWarmOptions {
+        config_path,
+        listen,
+        host,
+        headers,
+        paths,
+        input,
+        timeout_secs,
+        max_targets,
+        fail_fast,
+        dry_run,
+        repeat,
+        allow_statuses,
+        cache_status_header,
+        expect_cache_statuses,
+        expect_cache_status_sequence,
+    } = options;
+    let _ = (
+        config_path,
+        listen,
+        host,
+        headers,
+        paths,
+        input,
+        timeout_secs,
+        max_targets,
+        fail_fast,
+        dry_run,
+        repeat,
+        allow_statuses,
+        cache_status_header,
+        expect_cache_statuses,
+        expect_cache_status_sequence,
+    );
+    Err("cache-warm requires the cache feature".into())
 }

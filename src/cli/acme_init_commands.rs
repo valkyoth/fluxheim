@@ -9,7 +9,7 @@ use zeroize::Zeroizing;
 
 #[cfg(feature = "acme-client")]
 use super::AcmeInitIssuer;
-use super::AcmeInitOptions;
+use super::command_options::AcmeInitOptions;
 
 #[cfg(feature = "acme-client")]
 pub(super) fn run_acme_init_command(
