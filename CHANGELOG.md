@@ -70,6 +70,8 @@ behavior when the change improves security or project direction.
   purge batch helpers into a focused child module.
 - Split admin bearer-token loading, auth throttling, and client-certificate
   authorization helpers into a focused child module.
+- Split admin native HTTP response builders, request-target parsing helpers,
+  and token-store filesystem helpers into focused child modules.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
