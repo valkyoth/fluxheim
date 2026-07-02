@@ -137,6 +137,9 @@ behavior when the change improves security or project direction.
 - Split ACME secret-loading, account-store, certificate-install, instant-client,
   and renewal error types into a focused private module while preserving the
   public `crate::acme::*Error` re-exports.
+- Split CLI regression coverage into focused child test modules for core
+  command handling, cache warm, cache lookup, cache-key, and cache-key preview
+  validation, reducing the root CLI adapter without changing command behavior.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.

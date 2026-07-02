@@ -15,7 +15,7 @@ documents why the exception is temporary and how it will be removed.
 | File | Baseline lines | Reason | Split target |
 | --- | ---: | --- | --- |
 | `src/admin.rs` | 7943 | Legacy admin HTTP endpoint router over every domain. | Reduce after domain APIs stabilize; possible `fluxheim-admin` after `1.6.17`. |
-| `src/cli.rs` | 5544 | Legacy command dispatch and release/admin/cache tooling. | Split command handlers by domain after runtime crates settle. |
+| `src/cli.rs` | 3831 | Legacy command dispatch and release/admin/cache tooling after CLI regression coverage moved to focused child modules. | Split command handlers by domain after runtime crates settle. |
 | `src/acme.rs` | 2765 | ACME account/order/install/renewal and filesystem safety in one root adapter after regression coverage and error typing moved to focused child modules. | Move to `fluxheim-acme` after the native listener/TLS cutover stabilizes. |
 | `src/metrics_tests.rs` | 1405 | Extracted root metrics regression coverage spanning config, runtime totals, labels, privacy mode, OTLP counters, native recorders, and Prometheus output shape. | Split by metrics domain once the production metrics adapter moves into `fluxheim-observability`. |
 | `crates/fluxheim-config/src/config_error_display.rs` | 837 | Config error `Display`/`Error` formatting split away from the public `config_error` wrapper while preserving `fluxheim_config::ConfigError`. | Split formatting helpers by config domain so each formatter module stays below the 500-line target. |
