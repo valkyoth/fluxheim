@@ -172,6 +172,8 @@ behavior when the change improves security or project direction.
   test module.
 - Split native route-proxy ACME challenge-route and managed HTTP-01 tests into
   a focused child test module.
+- Split native route-proxy WebSocket upgrade/tunnel tests into a focused child
+  test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
