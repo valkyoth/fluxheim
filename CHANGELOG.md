@@ -91,6 +91,8 @@ behavior when the change improves security or project direction.
   DTO module while preserving the existing public helper export.
 - Split proxy default helper functions out of the proxy config DTO module while
   preserving serde defaults and upstream policy validation behavior.
+- Split managed PHP-FPM child spawn, cleanup, termination, and watchdog
+  lifecycle helpers out of the process ownership module.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
