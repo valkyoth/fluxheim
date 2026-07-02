@@ -161,6 +161,8 @@ behavior when the change improves security or project direction.
   and tiered cache storage tests into a focused child test module.
 - Split native route-proxy cached range responses, range-miss bypasses, and
   slice-cache composition tests into a focused child test module.
+- Split native route-proxy peer-fill, only-if-cached, and peer Age admission
+  tests into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
