@@ -123,6 +123,7 @@ metrics = [
     "dep:prometheus",
     "dep:sanitization",
     "dep:sha2",
+    "fluxheim-observability/metrics-secret",
     "fluxheim-load-balancer?/metrics",
 ]
 metrics-otlp = [

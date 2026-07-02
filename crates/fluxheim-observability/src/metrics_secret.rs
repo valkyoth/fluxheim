@@ -9,8 +9,8 @@ use zeroize::Zeroizing;
 const MAX_METRICS_TOKEN_BYTES: usize = 8 * 1024;
 const MAX_METRICS_TOKEN_FILE_BYTES: u64 = MAX_METRICS_TOKEN_BYTES as u64;
 
-pub(crate) fn load_native_metrics_token(
-    config: &crate::config::MetricsConfig,
+pub fn load_native_metrics_token(
+    config: &fluxheim_config::MetricsConfig,
 ) -> Result<Option<SecretString>, Box<dyn Error + Send + Sync>> {
     let raw = match (&config.token_env, &config.token_file) {
         (Some(_), None) => {

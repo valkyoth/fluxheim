@@ -9,6 +9,7 @@ description = "Internal Fluxheim observability and trace context boundary."
 
 [features]
 default = []
+metrics-secret = ["dep:fluxheim-config", "dep:rustix", "dep:sanitization", "dep:zeroize"]
 otlp-http = ["dep:ureq"]
 otlp-metrics = ["dep:prometheus", "dep:serde_json"]
 otlp-trace = ["dep:fluxheim-config", "dep:serde_json", "otlp-http"]
@@ -18,8 +19,11 @@ fluxheim-config = { path = "../fluxheim-config", optional = true }
 getrandom = "0.4.3"
 log = "0.4.33"
 prometheus = { version = "0.14.0", optional = true }
+rustix = { version = "1.1.4", features = ["fs"], optional = true }
+sanitization = { version = "1.2.2", features = ["alloc"], optional = true }
 serde_json = { version = "1.0.150", optional = true }
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"], optional = true }
+zeroize = { version = "1.8.2", features = ["derive"], optional = true }
 
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }

@@ -82,6 +82,9 @@ behavior when the change improves security or project direction.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
+- Move native metrics bearer-token secret loading into `fluxheim-observability`
+  behind a scoped `metrics-secret` feature, keeping the root metrics adapter
+  focused on listener and Prometheus response handling.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of

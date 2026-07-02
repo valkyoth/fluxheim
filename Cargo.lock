@@ -856,8 +856,11 @@ dependencies = [
  "getrandom 0.4.3",
  "log",
  "prometheus",
+ "rustix",
+ "sanitization",
  "serde_json",
  "ureq",
+ "zeroize",
 ]
 
 [[package]]

@@ -14,8 +14,9 @@ use sha2::{Digest, Sha256};
 #[cfg(feature = "proxy")]
 use tokio::net::TcpListener;
 
+use fluxheim_observability::load_native_metrics_token;
+
 use crate::metrics::prometheus_text;
-use crate::metrics_secret::load_native_metrics_token;
 
 pub fn native_prometheus_response() -> Result<NativeHttp1Response, prometheus::Error> {
     Ok(NativeHttp1Response::new(200, "OK", prometheus_text()?)

@@ -27,8 +27,6 @@ pub mod metrics;
 mod metrics_native;
 #[cfg(feature = "metrics-otlp")]
 pub mod metrics_otlp;
-#[cfg(feature = "metrics")]
-mod metrics_secret;
 #[cfg(all(feature = "web", feature = "proxy"))]
 mod native_http1_static;
 #[cfg(feature = "proxy")]

@@ -21,6 +21,8 @@ pub use metrics_labels::{
     metrics_udp_mode_label, metrics_udp_outcome_label, metrics_usize_to_i64_saturating,
     metrics_usize_to_u64_saturating,
 };
+#[cfg(feature = "metrics-secret")]
+pub use metrics_secret::load_native_metrics_token;
 #[cfg(feature = "otlp-http")]
 pub use otlp_http::OtlpHttpEndpoint;
 #[cfg(feature = "otlp-http")]
@@ -37,6 +39,9 @@ mod trace_context;
 
 #[cfg(feature = "otlp-http")]
 mod otlp_http;
+
+#[cfg(feature = "metrics-secret")]
+mod metrics_secret;
 
 #[cfg(feature = "otlp-trace")]
 mod otlp_trace;
