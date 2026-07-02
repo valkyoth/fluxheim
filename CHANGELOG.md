@@ -76,6 +76,9 @@ behavior when the change improves security or project direction.
 - Move the cache preview request DTO from the root HTTP type shim into
   `fluxheim-cache`, removing another root compatibility module from active
   code.
+- Split the ACME init issuer CLI value enum into a focused child module so
+  `src/cli.rs` keeps room under the modularity target after test-profile
+  import gating.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of

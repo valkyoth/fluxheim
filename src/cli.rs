@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 
 mod acme_init_commands;
+mod acme_init_issuer;
 mod acme_renew_commands;
 #[cfg(feature = "cache")]
 mod cache_common;
@@ -23,6 +24,7 @@ mod runtime_validation;
 #[cfg(test)]
 mod test_exports;
 mod tls_storage_check;
+pub use acme_init_issuer::AcmeInitIssuer;
 pub use crypto_commands::print_crypto_diagnostics;
 pub use entrypoint::{run_from_args, run_from_env};
 pub use runtime_validation::{validate_compiled_module_config, validate_runtime_config};
@@ -479,13 +481,6 @@ pub enum CliCommand {
         #[arg(long)]
         expect_serve_stale_while_revalidate: bool,
     },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum AcmeInitIssuer {
-    Actalis,
-    Letsencrypt,
-    LetsencryptStaging,
 }
 
 #[cfg(all(
