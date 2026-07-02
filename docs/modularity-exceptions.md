@@ -14,7 +14,7 @@ documents why the exception is temporary and how it will be removed.
 
 | File | Baseline lines | Reason | Split target |
 | --- | ---: | --- | --- |
-| `src/admin.rs` | 4221 | Legacy admin HTTP endpoint router over every domain after admin endpoint, auth, cache, load-balancer, snapshot, self-healing, and shared regression-test support moved to child modules. | Continue splitting admin domain helpers, then evaluate `fluxheim-admin`. |
+| `src/admin.rs` | 3651 | Legacy admin HTTP endpoint router over every domain after admin endpoint, auth, cache, load-balancer, snapshot, self-healing, shared regression-test support, and cache response helper blocks moved to child modules. | Continue splitting admin domain helpers, then evaluate `fluxheim-admin`. |
 | `src/cli.rs` | 3831 | Legacy command dispatch and release/admin/cache tooling after CLI regression coverage moved to focused child modules. | Split command handlers by domain after runtime crates settle. |
 | `src/acme.rs` | 2305 | ACME account/order/install/renewal and filesystem safety in one root adapter after regression coverage, error typing, challenge stores, renewal queue helpers, and PEM validation moved to focused child modules. | Move to `fluxheim-acme` after the native listener/TLS cutover stabilizes. |
 | `crates/fluxheim-config/src/config_error_display.rs` | 837 | Config error `Display`/`Error` formatting split away from the public `config_error` wrapper while preserving `fluxheim_config::ConfigError`. | Split formatting helpers by config domain so each formatter module stays below the 500-line target. |
