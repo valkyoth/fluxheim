@@ -142,3 +142,101 @@ fn parses_static_cache_headers() {
     assert!(config.web.directory_listing.exact_size);
     assert!(config.web.directory_listing.local_time);
 }
+
+#[test]
+fn rejects_invalid_static_cache_header_value() {
+    let config: Config = toml::from_str(
+        r#"
+            [web]
+            root = "public"
+            cache_control = "public\nx-bad: injected"
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidResponseHeaderValue {
+            field: "web.cache_control"
+        })
+    );
+}
+
+#[test]
+fn rejects_invalid_server_process_settings() {
+    let config: Config = toml::from_str(
+        r#"
+            [server.process]
+            threads = 0
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidProcessSetting {
+            field: "server.process.threads"
+        })
+    );
+
+    let config: Config = toml::from_str(
+        r#"
+            [server.process]
+            grace_period_seconds = 0
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidProcessSetting {
+            field: "server.process.grace_period_seconds"
+        })
+    );
+
+    let config: Config = toml::from_str(
+        r#"
+            [server.process]
+            pid_file = ""
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::EmptyProcessPath {
+            field: "server.process.pid_file"
+        })
+    );
+
+    let config: Config = toml::from_str(
+        r#"
+            [server.process]
+            upgrade_sock = "../fluxheim.sock"
+            "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::UnsafePath { field, .. }) if field == "server.process.upgrade_sock"
+    ));
+
+    #[cfg(unix)]
+    {
+        let pid_file = unique_world_writable_child("config-process-world-writable", "fluxheim.pid");
+        let config: Config = toml::from_str(&format!(
+            r#"
+                [server.process]
+                pid_file = "{}"
+                "#,
+            pid_file.display()
+        ))
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::UnsafePath { field, .. }) if field == "server.process.pid_file"
+        ));
+    }
+}
