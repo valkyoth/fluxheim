@@ -73,6 +73,9 @@ behavior when the change improves security or project direction.
 - Split load-balancer config regression coverage out of the central config
   suite into focused selection, health, passive-health, persistence, and retry
   child test modules.
+- Split cache config regression coverage out of the central config suite into
+  focused core, header/bypass, key/TTL, origin/peer/purger, disk, encryption,
+  and memory child test modules.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
