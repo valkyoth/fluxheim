@@ -79,6 +79,9 @@ behavior when the change improves security or project direction.
 - Split PHP-FPM config regression coverage out of the central config suite into
   focused parsing, managed-process, TCP endpoint, spool/limit, header/error,
   retry, and params/path child test modules.
+- Split TLS, ACME, and FIPS config regression coverage out of the central config
+  suite into focused policy, compliance, certificate, and ACME child test
+  modules.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
