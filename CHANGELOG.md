@@ -74,6 +74,8 @@ behavior when the change improves security or project direction.
   and token-store filesystem helpers into focused child modules.
 - Split admin cache purge request validation helpers into the cache helper
   module.
+- Split admin metric wrapper, status JSON, query parsing, boolean flag, and
+  timestamp helpers into a focused child module.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
