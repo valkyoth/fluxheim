@@ -89,6 +89,8 @@ behavior when the change improves security or project direction.
   child module.
 - Split CLI ACME renewal and managed ACME initializer helpers into focused
   child modules.
+- Split CLI cache-warm command orchestration and support helpers into focused
+  child modules.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
