@@ -174,6 +174,8 @@ behavior when the change improves security or project direction.
   a focused child test module.
 - Split native route-proxy WebSocket upgrade/tunnel tests into a focused child
   test module.
+- Split native route-proxy header-default and privacy-mode spoofable-header
+  tests into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
