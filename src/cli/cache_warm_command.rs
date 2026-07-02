@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::config::Config;
 
-use super::{CacheWarmOptions, cache_warm_support::*, parse_cache_cli_headers};
+use super::{CacheWarmOptions, cache_common::parse_cache_cli_headers, cache_warm_support::*};
 
 #[cfg(feature = "cache")]
 pub(super) fn run_cache_warm_command(
