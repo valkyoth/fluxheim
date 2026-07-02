@@ -6,7 +6,6 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use crate::config::{AcmeChallenge, Config};
@@ -210,6 +209,8 @@ mod acme_challenges;
 mod acme_eab;
 #[path = "acme_errors.rs"]
 mod acme_errors;
+#[path = "acme_names.rs"]
+mod acme_names;
 #[path = "acme_pem.rs"]
 mod acme_pem;
 #[path = "acme_queue.rs"]
@@ -239,6 +240,10 @@ pub use acme_errors::AcmeInstantClientError;
 use acme_errors::instant_client_error_to_renewal_error;
 pub use acme_errors::{
     AcmeAccountStoreError, AcmeCertificateInstallError, AcmeRenewalError, AcmeSecretLoadError,
+};
+use acme_names::{
+    managed_certificate_segment, normalized_domain, short_sha256_hex,
+    valid_http_01_key_authorization, valid_http_01_token,
 };
 use acme_pem::{validate_certificate_pem, validate_private_key_pem};
 pub use acme_queue::{next_retry_at, plan_renewal_queue, toml_offset_datetime_to_system_time};
@@ -1576,60 +1581,6 @@ fn sync_directory(
 
 fn sync_directory_io(path: &Path) -> io::Result<()> {
     fs::File::open(path)?.sync_all()
-}
-
-fn normalized_domain(domain: &str) -> String {
-    domain.trim().trim_end_matches('.').to_ascii_lowercase()
-}
-
-fn managed_certificate_segment(vhost_name: &str) -> String {
-    let normalized = vhost_name.trim().to_ascii_lowercase();
-    let mut slug = String::with_capacity(normalized.len().min(48));
-    let mut last_was_separator = false;
-
-    for character in normalized.chars() {
-        let safe = character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-');
-        let next = if safe { character } else { '-' };
-        if next == '-' && last_was_separator {
-            continue;
-        }
-        last_was_separator = next == '-';
-        slug.push(next);
-        if slug.len() >= 48 {
-            break;
-        }
-    }
-
-    let slug = slug.trim_matches(['.', '_', '-']);
-    let slug = if slug.is_empty() { "vhost" } else { slug };
-    format!("{slug}-{}", short_sha256_hex(vhost_name.as_bytes()))
-}
-
-fn short_sha256_hex(input: &[u8]) -> String {
-    let digest = Sha256::digest(input);
-    let mut value = String::with_capacity(16);
-    for byte in &digest[..8] {
-        use std::fmt::Write as _;
-        let _ = write!(value, "{byte:02x}");
-    }
-    value
-}
-
-fn valid_http_01_token(token: &str) -> bool {
-    !token.is_empty()
-        && token.len() <= MAX_HTTP_01_TOKEN_BYTES
-        && token
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-}
-
-fn valid_http_01_key_authorization(value: &str) -> bool {
-    let value = value.trim_end_matches(['\r', '\n']);
-    !value.is_empty()
-        && value.len() as u64 <= MAX_HTTP_01_KEY_AUTHORIZATION_BYTES
-        && !value.bytes().any(|byte| {
-            byte == b'\0' || byte == b'\r' || byte == b'\n' || byte < 0x20 || byte == 0x7f
-        })
 }
 
 #[cfg(test)]

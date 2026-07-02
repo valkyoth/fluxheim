@@ -55,6 +55,8 @@ behavior when the change improves security or project direction.
   beside the HTTP-01 challenge store.
 - Move the instant-acme client error to renewal error adapter into the ACME
   error module.
+- Move ACME domain normalization, managed certificate name hashing, and HTTP-01
+  token validation helpers into a focused naming/validation module.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of
