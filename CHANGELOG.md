@@ -53,6 +53,8 @@ behavior when the change improves security or project direction.
   preserving the public exports.
 - Split native metrics bearer-token secret loading and safe token-file opening
   out of the root metrics adapter into a focused private module.
+- Split admin cache status, activity reset, and bulk purge regression tests
+  into focused child modules while preserving the admin endpoint behavior.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
