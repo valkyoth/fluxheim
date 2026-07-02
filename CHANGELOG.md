@@ -57,6 +57,9 @@ behavior when the change improves security or project direction.
   error module.
 - Move ACME domain normalization, managed certificate name hashing, and HTTP-01
   token validation helpers into a focused naming/validation module.
+- Split ACME managed certificate installation, backup, restore, ownership, and
+  symlink-safe file replacement helpers into a focused certificate installer
+  module.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of
