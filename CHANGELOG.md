@@ -176,6 +176,8 @@ behavior when the change improves security or project direction.
   test module.
 - Split native route-proxy header-default and privacy-mode spoofable-header
   tests into a focused child test module.
+- Split native route-proxy test cache/request/header/config support builders
+  into a focused child support module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
