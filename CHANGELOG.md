@@ -85,6 +85,8 @@ behavior when the change improves security or project direction.
 - Split admin snapshot reload, live rollback, self-healing, and watchdog
   runtime handlers into a focused child module so `src/admin.rs` now satisfies
   the 500-line modularity target.
+- Split CLI crypto diagnostics and cache-key generation helpers into a focused
+  child module.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
