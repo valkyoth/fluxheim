@@ -14,7 +14,7 @@ documents why the exception is temporary and how it will be removed.
 
 | File | Baseline lines | Reason | Split target |
 | --- | ---: | --- | --- |
-| `crates/fluxheim-config/src/config_tests.rs` | 6698 | Legacy central config regression suite after basic server/process/static-web, compression, GeoIP, generic header validation, proxy timeout, load-balancer, cache, PHP-FPM, and TLS/ACME/FIPS coverage moved to focused child modules. | Split by config domain as crates stabilize. |
+| `crates/fluxheim-config/src/config_tests.rs` | 5899 | Legacy central config regression suite after basic server/process/static-web, compression, GeoIP, generic header validation, proxy timeout, load-balancer, cache, PHP-FPM, TLS/ACME/FIPS, admin, observability, and logging coverage moved to focused child modules. | Split by config domain as crates stabilize. |
 | `src/admin.rs` | 7943 | Legacy admin HTTP endpoint router over every domain. | Reduce after domain APIs stabilize; possible `fluxheim-admin` after `1.6.17`. |
 | `src/cli.rs` | 5544 | Legacy command dispatch and release/admin/cache tooling. | Split command handlers by domain after runtime crates settle. |
 | `src/acme.rs` | 3909 | ACME account/order/install/renewal and filesystem safety in one root adapter. | Move to `fluxheim-acme` after the native listener/TLS cutover stabilizes. |
