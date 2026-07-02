@@ -122,6 +122,9 @@ behavior when the change improves security or project direction.
 - Split metrics `OnceLock` registry storage and Prometheus constructor helpers
   into focused private modules for core, PHP/OTLP, cache gauge, and cache
   activity metrics.
+- Split cache runtime totals, cache activity metrics, purger metrics, and
+  native cache/proxy Prometheus recorders out of the root metrics adapter,
+  bringing `src/metrics.rs` below the modularity target.
 - Split TLS storage and downstream certificate-selector unit tests out of the
   root TLS adapter into focused test modules while preserving private-helper
   coverage.
