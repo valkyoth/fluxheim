@@ -81,6 +81,8 @@ behavior when the change improves security or project direction.
   import gating.
 - Split ACME init TOML rendering into a focused CLI child module so the
   command runner no longer owns serialization DTOs.
+- Split config-tester regression coverage into a child module so the production
+  tester entrypoint stays focused on command orchestration.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
