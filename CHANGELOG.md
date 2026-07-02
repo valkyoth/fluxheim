@@ -47,6 +47,8 @@ behavior when the change improves security or project direction.
   decoding are isolated from the ACME renewal/install adapter.
 - Split ACME account credential pathing, bounded JSON loading, safe writes, and
   symlink rejection into a focused account-store helper module.
+- Split ACME managed-certificate path construction, certificate expiration
+  observation, and regular-file certificate reads into a focused helper module.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of
