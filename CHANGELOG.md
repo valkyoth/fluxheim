@@ -102,6 +102,9 @@ behavior when the change improves security or project direction.
   validation behavior.
 - Split UDP config regression tests out of the production UDP config DTO module
   while preserving the existing UDP validation coverage.
+- Split static-web directory listing DTOs, path rendering, HTML escaping, and
+  timestamp formatting into a focused `fluxheim-web` child module while
+  preserving the public crate exports.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
