@@ -15,6 +15,7 @@ mod headers_vary;
 pub mod metrics;
 pub mod object;
 pub mod plan;
+mod preview_request;
 pub mod purge_index;
 pub mod request;
 pub mod storage;
@@ -80,6 +81,7 @@ pub use object::{
     parse_disk_cache_object, write_disk_cache_object_plaintext_prefix,
 };
 pub use plan::{CacheStoragePlan, DiskTierPlan, MemoryTierPlan};
+pub use preview_request::NativeCachePreviewRequest;
 pub use purge_index::{CachePurgeIndex, CachePurgeIndexEntry};
 pub use request::{
     CacheClientRange, CacheContentRange, CacheKey, CacheRangeRequest, CacheRequest,

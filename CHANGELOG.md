@@ -73,6 +73,9 @@ behavior when the change improves security or project direction.
 - Point internal ACME runtime, companion, config-tester, and TLS helper calls at
   `fluxheim_acme` directly so the root ACME module is no longer part of the
   internal dependency path.
+- Move the cache preview request DTO from the root HTTP type shim into
+  `fluxheim-cache`, removing another root compatibility module from active
+  code.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of

@@ -1,23 +1,14 @@
-//! Fluxheim-owned HTTP type boundary.
-//!
-//! Internal modules should prefer these standard `http` crate types for plain
-//! HTTP values.
+//! Cache preview request DTO used by CLI/admin cache inspection paths.
 
-#[cfg(any(feature = "cache", feature = "compression", feature = "php-fpm"))]
-#[allow(unused_imports)]
-pub(crate) use http::StatusCode;
-
-#[cfg(all(feature = "proxy", feature = "cache"))]
 #[derive(Clone, Debug)]
-pub(crate) struct NativeCachePreviewRequest {
+pub struct NativeCachePreviewRequest {
     pub method: http::Method,
     pub uri: http::Uri,
     pub headers: http::HeaderMap,
 }
 
-#[cfg(all(feature = "proxy", feature = "cache"))]
 impl NativeCachePreviewRequest {
-    pub(crate) fn build(
+    pub fn build(
         method: &str,
         uri: &[u8],
         _version: Option<http::Version>,
@@ -31,7 +22,7 @@ impl NativeCachePreviewRequest {
         })
     }
 
-    pub(crate) fn insert_header(
+    pub fn insert_header(
         &mut self,
         name: impl AsRef<str>,
         value: impl AsRef<str>,

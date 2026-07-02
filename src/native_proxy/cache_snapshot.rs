@@ -13,7 +13,7 @@ pub struct NativeProxySnapshot {
 impl NativeProxySnapshot {
     pub(crate) fn native_image_cache_key_preview_for_request(
         &self,
-        request: &crate::http_types::NativeCachePreviewRequest,
+        request: &fluxheim_cache::NativeCachePreviewRequest,
     ) -> CacheKeyPreview {
         let host = request
             .headers
@@ -136,7 +136,7 @@ impl NativeProxySnapshot {
 
     pub(crate) fn native_image_cache_object_lookup_for_request(
         &self,
-        request: &crate::http_types::NativeCachePreviewRequest,
+        request: &fluxheim_cache::NativeCachePreviewRequest,
     ) -> io::Result<CacheObjectLookup> {
         let preview = self.native_image_cache_key_preview_for_request(request);
         let mut objects = Vec::new();
@@ -189,7 +189,7 @@ fn native_cache_object_metadata(
 }
 
 fn native_cache_lookup_request_headers(
-    request: &crate::http_types::NativeCachePreviewRequest,
+    request: &fluxheim_cache::NativeCachePreviewRequest,
 ) -> Vec<(String, String)> {
     request
         .headers

@@ -312,7 +312,7 @@ mod tests {
         assert_eq!(stats.vhosts[0].routes[0].name, "images");
 
         let mut request =
-            crate::http_types::NativeCachePreviewRequest::build("GET", b"/images/42.png", None)
+            fluxheim_cache::NativeCachePreviewRequest::build("GET", b"/images/42.png", None)
                 .unwrap();
         request.insert_header("host", "NEW.EXAMPLE:80").unwrap();
         let preview = proxy
@@ -345,7 +345,7 @@ mod tests {
         );
         let proxy = FluxProxy::from_config(&config).unwrap();
         let mut request =
-            crate::http_types::NativeCachePreviewRequest::build("GET", b"/images/42.png", None)
+            fluxheim_cache::NativeCachePreviewRequest::build("GET", b"/images/42.png", None)
                 .unwrap();
         request.insert_header("host", "EXAMPLE.COM:80").unwrap();
 

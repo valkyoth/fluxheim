@@ -3,7 +3,7 @@ use std::error::Error;
 use crate::config::Config;
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
-use crate::http_types::NativeCachePreviewRequest;
+use fluxheim_cache::NativeCachePreviewRequest;
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 use super::{
