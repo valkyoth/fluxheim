@@ -118,6 +118,8 @@ behavior when the change improves security or project direction.
   coverage.
 - Split TLS storage issue typing and CLI-facing formatting out of the root TLS
   adapter into a focused private module.
+- Split TLS storage validation and permission/path-safety preflight logic out of
+  the root TLS adapter, bringing `src/tls.rs` below the modularity line target.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
