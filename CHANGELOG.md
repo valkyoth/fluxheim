@@ -142,6 +142,9 @@ behavior when the change improves security or project direction.
   public `crate::acme::*Error` re-exports.
 - Split ACME HTTP-01 and TLS-ALPN-01 challenge stores into a focused private
   module while preserving the public `crate::acme` re-exports.
+- Split ACME renewal queue planning, retry backoff, and TOML datetime
+  conversion helpers into a focused private module while preserving the public
+  `crate::acme` re-exports.
 - Split CLI regression coverage into focused child test modules for core
   command handling, cache warm, cache lookup, cache-key, and cache-key preview
   validation, reducing the root CLI adapter without changing command behavior.
