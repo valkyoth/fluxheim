@@ -55,6 +55,8 @@ behavior when the change improves security or project direction.
   out of the root metrics adapter into a focused private module.
 - Split admin cache status, activity reset, and bulk purge regression tests
   into focused child modules while preserving the admin endpoint behavior.
+- Split admin cache purge, index, prefix, tag, stale, and wildcard endpoint
+  regression tests into focused child modules.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
