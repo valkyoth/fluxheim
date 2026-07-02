@@ -3,7 +3,6 @@ use std::fmt::{Display, Formatter};
 
 use super::kind::ConfigError;
 use crate::config_admin::MAX_ADMIN_HEALTH_PATH_BYTES;
-use crate::config_cache_controls::CACHE_PREDICTOR_MAX_CAPACITY;
 
 impl Display for ConfigError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
@@ -266,112 +265,36 @@ impl Display for ConfigError {
                 formatter,
                 "{field} must be a non-empty HTTP response header value without control characters"
             ),
-            Self::EmptyTlsCertificatePath { scope } => {
-                write!(formatter, "{scope}.cert_path cannot be empty")
+            Self::EmptyTlsCertificatePath { .. }
+            | Self::EmptyTlsKeyPath { .. }
+            | Self::TlsEnabledWithoutCertificateSource { .. }
+            | Self::InvalidTlsPolicy { .. }
+            | Self::TlsListenerWithoutTls
+            | Self::TlsListenerWithoutStaticCertificate
+            | Self::MissingAcmeStorage
+            | Self::EmptyAcmeStorage
+            | Self::InvalidAcmeContactEmail
+            | Self::UnsupportedAcmeChallenge { .. }
+            | Self::InvalidAcmeRenewalDuration { .. }
+            | Self::InvalidAcmeRenewAfterDatetime
+            | Self::AcmeRenewalRetryInitialExceedsMax
+            | Self::EmptyAcmeIssuerName { .. }
+            | Self::DuplicateAcmeIssuerName { .. }
+            | Self::UnknownAcmeIssuer { .. }
+            | Self::InvalidAcmeDirectoryUrl { .. }
+            | Self::InvalidAcmeEabSecretSource { .. }
+            | Self::InvalidAcmeEabCredentialName { .. }
+            | Self::ConflictingAcmeEabSecretSource { .. }
+            | Self::VhostAcmeWithoutGlobalAcme { .. }
+            | Self::EmptyVhostAcmeDomains { .. }
+            | Self::InvalidVhostAcmeDomain { .. }
+            | Self::DuplicateVhostAcmeDomain { .. }
+            | Self::MissingAcmeChallengeUpstream { .. }
+            | Self::ConflictingAcmeChallengeUpstreams { .. }
+            | Self::TooManyAcmeChallengeUpstreams { .. }
+            | Self::DuplicateAcmeChallengeUpstream { .. } => {
+                super::display_tls::format_tls_error(self, formatter)
             }
-            Self::EmptyTlsKeyPath { scope } => {
-                write!(formatter, "{scope}.key_path cannot be empty")
-            }
-            Self::TlsEnabledWithoutCertificateSource { scope } => write!(
-                formatter,
-                "{scope}.enabled requires a static certificate or ACME"
-            ),
-            Self::InvalidTlsPolicy { field, reason } => {
-                write!(formatter, "{field} is invalid: {reason}")
-            }
-            Self::TlsListenerWithoutTls => {
-                write!(formatter, "server.tls_listen requires tls.enabled = true")
-            }
-            Self::TlsListenerWithoutStaticCertificate => write!(
-                formatter,
-                "server.tls_listen requires a global certificate or a static/ACME certificate source on server.default_vhost"
-            ),
-            Self::MissingAcmeStorage => {
-                write!(
-                    formatter,
-                    "tls.acme.storage is required when ACME is enabled"
-                )
-            }
-            Self::EmptyAcmeStorage => write!(formatter, "tls.acme.storage cannot be empty"),
-            Self::InvalidAcmeContactEmail => {
-                write!(
-                    formatter,
-                    "tls.acme.contact_email must be a valid email address when ACME is enabled"
-                )
-            }
-            Self::UnsupportedAcmeChallenge { challenge } => write!(
-                formatter,
-                "tls.acme.challenge {challenge:?} is not supported for managed ACME yet; use \"http-01\" or \"tls-alpn-01\""
-            ),
-            Self::InvalidAcmeRenewalDuration { field } => {
-                write!(formatter, "{field} must be greater than zero")
-            }
-            Self::InvalidAcmeRenewAfterDatetime => write!(
-                formatter,
-                "tls.acme.renewal.renew_after must be a full TOML offset datetime"
-            ),
-            Self::AcmeRenewalRetryInitialExceedsMax => write!(
-                formatter,
-                "tls.acme.renewal.retry_initial_secs cannot exceed retry_max_secs"
-            ),
-            Self::EmptyAcmeIssuerName { scope } => write!(formatter, "{scope} cannot be empty"),
-            Self::DuplicateAcmeIssuerName { name } => {
-                write!(formatter, "duplicate ACME issuer {name:?}")
-            }
-            Self::UnknownAcmeIssuer { name } => write!(formatter, "unknown ACME issuer {name:?}"),
-            Self::InvalidAcmeDirectoryUrl { issuer, url } => write!(
-                formatter,
-                "ACME issuer {issuer:?} must use an https directory URL, got {url:?}"
-            ),
-            Self::InvalidAcmeEabSecretSource { issuer, field } => write!(
-                formatter,
-                "ACME issuer {issuer:?} EAB {field} must be read from an env var, file, or credential"
-            ),
-            Self::InvalidAcmeEabCredentialName {
-                issuer,
-                field,
-                credential,
-            } => write!(
-                formatter,
-                "ACME issuer {issuer:?} EAB {field} credential name {credential:?} must be a safe credential name"
-            ),
-            Self::ConflictingAcmeEabSecretSource { issuer, field } => write!(
-                formatter,
-                "ACME issuer {issuer:?} EAB {field} cannot use more than one secret source"
-            ),
-            Self::VhostAcmeWithoutGlobalAcme { scope } => {
-                write!(formatter, "{scope}.acme.enabled requires tls.acme.enabled")
-            }
-            Self::EmptyVhostAcmeDomains { scope } => {
-                write!(
-                    formatter,
-                    "{scope}.acme needs at least one non-wildcard domain"
-                )
-            }
-            Self::InvalidVhostAcmeDomain { scope, domain } => write!(
-                formatter,
-                "{scope}.acme.domains must contain concrete DNS names, got {domain:?}"
-            ),
-            Self::DuplicateVhostAcmeDomain { scope, domain } => write!(
-                formatter,
-                "{scope}.acme.domains contains duplicate domain {domain:?}"
-            ),
-            Self::MissingAcmeChallengeUpstream { vhost } => write!(
-                formatter,
-                "vhost {vhost:?} acme_challenge.enabled requires acme_challenge.upstream or acme_challenge.upstreams"
-            ),
-            Self::ConflictingAcmeChallengeUpstreams { vhost } => write!(
-                formatter,
-                "vhost {vhost:?} acme_challenge.upstream and acme_challenge.upstreams cannot both be configured"
-            ),
-            Self::TooManyAcmeChallengeUpstreams { vhost, max } => write!(
-                formatter,
-                "vhost {vhost:?} acme_challenge.upstreams must contain at most {max} entries"
-            ),
-            Self::DuplicateAcmeChallengeUpstream { vhost, upstream } => write!(
-                formatter,
-                "vhost {vhost:?} acme_challenge.upstreams contains duplicate upstream {upstream:?}"
-            ),
             Self::InvalidUpstream { address } => {
                 write!(
                     formatter,
@@ -453,376 +376,91 @@ impl Display for ConfigError {
             Self::InvalidLoadBalanceRetry { field } => {
                 write!(formatter, "{field} contains an invalid retry value")
             }
-            Self::EmptyCacheImageExtensions { scope } => {
-                write!(formatter, "{scope}.image_extensions cannot be empty")
+            Self::EmptyCacheImageExtensions { .. }
+            | Self::InvalidCacheImageExtension { .. }
+            | Self::EmptyCacheMethods { .. }
+            | Self::InvalidCacheMethod { .. }
+            | Self::EmptyCacheContentTypes { .. }
+            | Self::InvalidCacheContentType { .. }
+            | Self::InvalidCacheMaxObjectBytes { .. }
+            | Self::InvalidCacheStatusTtl { .. }
+            | Self::InvalidCacheDefaultStatusTtl { .. }
+            | Self::InvalidCacheMinUses { .. }
+            | Self::InvalidCacheRangePolicy { .. }
+            | Self::InvalidCacheBypassPath { .. }
+            | Self::InvalidCacheBypassQueryParam { .. }
+            | Self::InvalidCacheBypassQueryValue { .. }
+            | Self::InvalidCacheBypassRequestHeaderValue { .. }
+            | Self::InvalidCacheNoStoreResponseHeaderValue { .. }
+            | Self::InvalidCacheBypassCookieName { .. }
+            | Self::InvalidCacheBypassCookieValue { .. }
+            | Self::InvalidCacheStaleIfErrorTtl { .. }
+            | Self::InvalidCacheStaleWhileRevalidateTtl { .. }
+            | Self::EmptyCacheStaleIfErrorOn { .. }
+            | Self::InvalidCacheStaleIfErrorStatus { .. }
+            | Self::InvalidCacheVaryRequestHeader { .. }
+            | Self::InvalidCacheListLength { .. }
+            | Self::DuplicateCacheTagHeader { .. }
+            | Self::InvalidCacheKeyNamespace { .. }
+            | Self::EmptyCacheKeyParts { .. }
+            | Self::DuplicateCacheKeyPart { .. }
+            | Self::MissingCacheKeyPath { .. }
+            | Self::InvalidCacheLockTimeout { .. }
+            | Self::InvalidCachePredictorCapacity { .. }
+            | Self::InvalidCacheOriginProtectionPolicy { .. }
+            | Self::InvalidCachePeerFillPolicy { .. }
+            | Self::InvalidCachePeerFillPeer { .. }
+            | Self::DuplicateCachePeerFillPeerName { .. }
+            | Self::DuplicateCachePeerFillPeerUrl { .. }
+            | Self::CachePeerFillNotCompiled
+            | Self::CacheEnabledWithoutStorageTier { .. }
+            | Self::InvalidCacheTierMaxSize { .. }
+            | Self::CacheTierSmallerThanMaxObject { .. }
+            | Self::CacheStorageBinLargerThanDiskTier { .. }
+            | Self::CacheStorageBinSmallerThanMaxObject { .. }
+            | Self::InvalidCacheStorageBinMaxOpenBins { .. }
+            | Self::InvalidCacheEncryptionPolicy { .. }
+            | Self::InvalidCacheEncryptionCredentialName { .. }
+            | Self::UnsupportedCacheDiskBackend { .. }
+            | Self::CachePurgerNotCompiled
+            | Self::InvalidCachePurgerPolicy { .. }
+            | Self::MissingCacheDiskPath { .. }
+            | Self::EmptyCacheDiskPath { .. } => {
+                super::display_cache::format_cache_error(self, formatter)
             }
-            Self::InvalidCacheImageExtension { scope, extension } => write!(
-                formatter,
-                "{scope}.image_extensions must contain bare file extensions, got {extension:?}"
-            ),
-            Self::EmptyCacheMethods { scope } => {
-                write!(formatter, "{scope}.methods cannot be empty")
+            Self::EmptyWebRoot
+            | Self::EmptyIndexFiles
+            | Self::InvalidIndexFile { .. }
+            | Self::EmptyVhostName
+            | Self::EmptyVhostHosts { .. }
+            | Self::InvalidVhostHost { .. }
+            | Self::InvalidVhostLimit { .. }
+            | Self::InvalidAccessRule { .. }
+            | Self::DuplicateAccessRule { .. }
+            | Self::InvalidRateLimit { .. }
+            | Self::InvalidConcurrencyLimit { .. }
+            | Self::MissingVhostRedirectTarget { .. }
+            | Self::VhostRedirectConflictsWithFallback { .. }
+            | Self::EmptyRouteName { .. }
+            | Self::InvalidRouteMatcher { .. }
+            | Self::RouteRegexDisabled { .. }
+            | Self::InvalidRouteRegex { .. }
+            | Self::InvalidRouteMethods { .. }
+            | Self::DuplicateFallbackRoute { .. }
+            | Self::InvalidRouteStripPrefix { .. }
+            | Self::InvalidRouteRewritePrefix { .. }
+            | Self::InvalidRouteRewriteTemplate { .. }
+            | Self::InvalidRouteAction { .. }
+            | Self::InvalidRouteGrpcPolicy { .. }
+            | Self::InvalidRouteLimit { .. }
+            | Self::InvalidRouteRedirectStatus { .. }
+            | Self::InvalidRouteRedirectTarget { .. }
+            | Self::VhostSection { .. }
+            | Self::RouteSection { .. }
+            | Self::DuplicateVhostName { .. }
+            | Self::DuplicateVhostHost { .. } => {
+                super::display_route::format_route_error(self, formatter)
             }
-            Self::InvalidCacheMethod { scope, method } => write!(
-                formatter,
-                "{scope}.methods must contain uppercase HTTP method tokens, got {method:?}"
-            ),
-            Self::EmptyCacheContentTypes { scope } => {
-                write!(formatter, "{scope}.content_types cannot be empty")
-            }
-            Self::InvalidCacheContentType {
-                scope,
-                content_type,
-            } => write!(
-                formatter,
-                "{scope}.content_types must contain media types such as \"image/*\" or \"text/css\", got {content_type:?}"
-            ),
-            Self::InvalidCacheMaxObjectBytes { scope } => {
-                write!(
-                    formatter,
-                    "{scope}.max_object_bytes must be greater than zero"
-                )
-            }
-            Self::InvalidCacheStatusTtl {
-                scope,
-                status,
-                ttl_secs,
-            } => write!(
-                formatter,
-                "{scope}.status_ttls[{status}] must use an HTTP status code from 100 to 599 and a positive TTL, got {ttl_secs}"
-            ),
-            Self::InvalidCacheDefaultStatusTtl { scope } => {
-                write!(
-                    formatter,
-                    "{scope}.default_status_ttl_secs must be greater than zero"
-                )
-            }
-            Self::InvalidCacheMinUses { scope } => {
-                write!(formatter, "{scope}.min_uses must be greater than zero")
-            }
-            Self::InvalidCacheRangePolicy {
-                scope,
-                field,
-                reason,
-            } => write!(formatter, "{scope}.{field} is invalid: {reason}"),
-            Self::InvalidCacheBypassPath { scope, path } => write!(
-                formatter,
-                "{scope}.bypass_path_prefixes and {scope}.bypass_path_exact must contain absolute normalized request paths, got {path:?}"
-            ),
-            Self::InvalidCacheBypassQueryParam { scope, param } => write!(
-                formatter,
-                "{scope}.bypass_query_params must contain raw query parameter names without whitespace, controls, '&', '=', '#', '?', or ';', got {param:?}"
-            ),
-            Self::InvalidCacheBypassQueryValue {
-                scope,
-                param,
-                value,
-            } => write!(
-                formatter,
-                "{scope}.bypass_query_values[{param:?}] must contain a non-empty safe raw query value without whitespace, controls, '&', '#', or ';', got {value:?}"
-            ),
-            Self::InvalidCacheBypassRequestHeaderValue {
-                scope,
-                header,
-                value,
-            } => write!(
-                formatter,
-                "{scope}.bypass_request_header_values[{header:?}] must contain a non-empty safe header value without controls, got {value:?}"
-            ),
-            Self::InvalidCacheNoStoreResponseHeaderValue {
-                scope,
-                header,
-                value,
-            } => write!(
-                formatter,
-                "{scope}.no_store_response_header_values[{header:?}] must contain a non-empty safe header value without controls, got {value:?}"
-            ),
-            Self::InvalidCacheBypassCookieName { scope, name } => write!(
-                formatter,
-                "{scope}.bypass_cookie_names must contain cookie name tokens without whitespace or separators, got {name:?}"
-            ),
-            Self::InvalidCacheBypassCookieValue { scope, name, value } => write!(
-                formatter,
-                "{scope}.bypass_cookie_values[{name:?}] must contain a safe cookie value without controls, ';', or ',', got {value:?}"
-            ),
-            Self::InvalidCacheStaleIfErrorTtl { scope } => {
-                write!(
-                    formatter,
-                    "{scope}.stale_if_error_secs must be greater than zero"
-                )
-            }
-            Self::InvalidCacheStaleWhileRevalidateTtl { scope } => {
-                write!(
-                    formatter,
-                    "{scope}.stale_while_revalidate_secs must be greater than zero"
-                )
-            }
-            Self::EmptyCacheStaleIfErrorOn { scope } => {
-                write!(
-                    formatter,
-                    "{scope}.stale_if_error_on must not be empty when stale_if_error_secs is set"
-                )
-            }
-            Self::InvalidCacheStaleIfErrorStatus { scope, status } => write!(
-                formatter,
-                "{scope}.stale_if_error_statuses must contain HTTP 5xx status codes, got {status}"
-            ),
-            Self::InvalidCacheVaryRequestHeader { scope, header } => write!(
-                formatter,
-                "{scope}.vary_request_headers must not include sensitive request header {header:?}; use bypass_request_headers for request-specific responses"
-            ),
-            Self::InvalidCacheListLength { scope, field, max } => write!(
-                formatter,
-                "{scope}.{field} must contain at most {max} entries"
-            ),
-            Self::DuplicateCacheTagHeader { scope, header } => write!(
-                formatter,
-                "{scope}.tag_headers must not contain duplicate response headers, got {header:?}"
-            ),
-            Self::InvalidCacheKeyNamespace { scope, namespace } => write!(
-                formatter,
-                "{scope}.key_namespace must be 1-128 characters and contain only ASCII letters, digits, '-', '_', '.', or ':', got {namespace:?}"
-            ),
-            Self::EmptyCacheKeyParts { scope } => {
-                write!(formatter, "{scope}.key_parts must not be empty")
-            }
-            Self::DuplicateCacheKeyPart { scope, part } => write!(
-                formatter,
-                "{scope}.key_parts must not contain duplicate cache key part {part}"
-            ),
-            Self::MissingCacheKeyPath { scope } => {
-                write!(formatter, "{scope}.key_parts must include path")
-            }
-            Self::InvalidCacheLockTimeout { field } => {
-                write!(formatter, "{field} must be greater than zero")
-            }
-            Self::InvalidCachePredictorCapacity { scope } => write!(
-                formatter,
-                "{scope}.predictor.capacity must be between 1 and {CACHE_PREDICTOR_MAX_CAPACITY} when the predictor is enabled"
-            ),
-            Self::InvalidCacheOriginProtectionPolicy {
-                scope,
-                field,
-                reason,
-            } => write!(formatter, "{scope}.{field} is invalid: {reason}"),
-            Self::InvalidCachePeerFillPolicy {
-                scope,
-                field,
-                reason,
-            } => write!(formatter, "{scope}.{field} is invalid: {reason}"),
-            Self::InvalidCachePeerFillPeer {
-                scope,
-                peer,
-                reason,
-            } => write!(
-                formatter,
-                "{scope}.peer_fill peer {peer:?} is invalid: {reason}"
-            ),
-            Self::DuplicateCachePeerFillPeerName { scope, name } => write!(
-                formatter,
-                "{scope}.peer_fill.peers contains duplicate peer name {name:?}"
-            ),
-            Self::DuplicateCachePeerFillPeerUrl { scope, url } => write!(
-                formatter,
-                "{scope}.peer_fill.peers contains duplicate peer base_url {url:?}"
-            ),
-            Self::CachePeerFillNotCompiled => write!(
-                formatter,
-                "cache peer_fill.enabled requires building Fluxheim with the cache feature"
-            ),
-            Self::CacheEnabledWithoutStorageTier { scope } => {
-                write!(
-                    formatter,
-                    "{scope}.enabled requires cache.memory.enabled or cache.disk.enabled"
-                )
-            }
-            Self::InvalidCacheTierMaxSize { field } => {
-                write!(formatter, "{field} must be greater than zero")
-            }
-            Self::CacheTierSmallerThanMaxObject { tier } => write!(
-                formatter,
-                "{tier}.max_size_bytes must be at least cache.max_object_bytes"
-            ),
-            Self::CacheStorageBinLargerThanDiskTier { scope } => write!(
-                formatter,
-                "{scope}.disk.storage_bin.bin_size_bytes must not exceed {scope}.disk.max_size_bytes"
-            ),
-            Self::CacheStorageBinSmallerThanMaxObject { scope } => write!(
-                formatter,
-                "{scope}.disk.storage_bin.bin_size_bytes must be at least {scope}.max_object_bytes"
-            ),
-            Self::InvalidCacheStorageBinMaxOpenBins { scope } => write!(
-                formatter,
-                "{scope}.disk.storage_bin.max_open_bins must be greater than zero"
-            ),
-            Self::InvalidCacheEncryptionPolicy {
-                scope,
-                field,
-                reason,
-            } => write!(formatter, "{scope}.{field} is invalid: {reason}"),
-            Self::InvalidCacheEncryptionCredentialName {
-                scope,
-                field,
-                credential,
-            } => write!(
-                formatter,
-                "{scope}.disk.encryption.{field} credential name {credential:?} must be a safe credential name"
-            ),
-            Self::UnsupportedCacheDiskBackend { scope, backend } => write!(
-                formatter,
-                "{scope}.disk.backend = {backend:?} is not supported by this build"
-            ),
-            Self::CachePurgerNotCompiled => write!(
-                formatter,
-                "cache_purger.enabled requires building Fluxheim with the cache feature"
-            ),
-            Self::InvalidCachePurgerPolicy { field, reason } => {
-                write!(formatter, "{field} is invalid: {reason}")
-            }
-            Self::MissingCacheDiskPath { scope } => {
-                write!(
-                    formatter,
-                    "{scope}.disk.path is required when disk cache is enabled"
-                )
-            }
-            Self::EmptyCacheDiskPath { scope } => {
-                write!(formatter, "{scope}.disk.path cannot be empty")
-            }
-            Self::EmptyWebRoot => write!(formatter, "web root cannot be empty"),
-            Self::EmptyIndexFiles => write!(formatter, "at least one web index file is required"),
-            Self::InvalidIndexFile { file } => write!(
-                formatter,
-                "web index file must be a plain file name, got {file:?}"
-            ),
-            Self::EmptyVhostName => write!(formatter, "vhost name cannot be empty"),
-            Self::EmptyVhostHosts { vhost } => {
-                write!(formatter, "vhost {vhost:?} must define at least one host")
-            }
-            Self::InvalidVhostHost { vhost, host } => {
-                write!(formatter, "vhost {vhost:?} has invalid host {host:?}")
-            }
-            Self::InvalidVhostLimit { vhost, field } => {
-                write!(
-                    formatter,
-                    "vhost {vhost:?} {field} must be greater than zero"
-                )
-            }
-            Self::InvalidAccessRule { field, value } => write!(
-                formatter,
-                "{field} entries must be IP addresses or CIDR ranges, got {value:?}"
-            ),
-            Self::DuplicateAccessRule { field, value } => {
-                write!(formatter, "{field} contains duplicate entry {value:?}")
-            }
-            Self::InvalidRateLimit { field } => {
-                write!(formatter, "{field} contains an invalid rate limit value")
-            }
-            Self::InvalidConcurrencyLimit { field } => {
-                write!(
-                    formatter,
-                    "{field} contains an invalid concurrency limit value"
-                )
-            }
-            Self::MissingVhostRedirectTarget { vhost } => write!(
-                formatter,
-                "vhost {vhost:?} redirect.enabled requires redirect.to"
-            ),
-            Self::VhostRedirectConflictsWithFallback { vhost } => write!(
-                formatter,
-                "vhost {vhost:?} redirect.enabled cannot be combined with an explicit fallback route"
-            ),
-            Self::EmptyRouteName { vhost } => {
-                write!(
-                    formatter,
-                    "vhost {vhost:?} contains a route with an empty name"
-                )
-            }
-            Self::InvalidRouteMatcher { vhost, route } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} must define exactly one of path_exact, path_prefix, path_regex, or fallback = true"
-            ),
-            Self::RouteRegexDisabled { vhost, route } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} uses path_regex but server.regex_enabled is false"
-            ),
-            Self::InvalidRouteRegex { vhost, route } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} path_regex must be a valid bounded Rust regex for request paths"
-            ),
-            Self::InvalidRouteMethods {
-                vhost,
-                route,
-                reason,
-            } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} methods policy is invalid: {reason}"
-            ),
-            Self::DuplicateFallbackRoute { vhost } => {
-                write!(
-                    formatter,
-                    "vhost {vhost:?} defines more than one fallback route"
-                )
-            }
-            Self::InvalidRouteStripPrefix { vhost, route } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} strip_prefix must be an absolute path prefix attached to path_prefix"
-            ),
-            Self::InvalidRouteRewritePrefix { vhost, route } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} rewrite_prefix must be an absolute path prefix attached to strip_prefix"
-            ),
-            Self::InvalidRouteRewriteTemplate { vhost, route } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} rewrite_template must be an absolute path template attached to path_regex and cannot be combined with strip_prefix or rewrite_prefix"
-            ),
-            Self::InvalidRouteAction { vhost, route } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} must define exactly one action: redirect, proxy, or web"
-            ),
-            Self::InvalidRouteGrpcPolicy {
-                vhost,
-                route,
-                reason,
-            } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} grpc policy is invalid: {reason}"
-            ),
-            Self::InvalidRouteLimit {
-                vhost,
-                route,
-                field,
-            } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} {field} must be greater than zero"
-            ),
-            Self::InvalidRouteRedirectStatus {
-                vhost,
-                route,
-                status,
-            } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} redirect.status must be one of 301, 302, 307, or 308, got {status}"
-            ),
-            Self::InvalidRouteRedirectTarget { vhost, route } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} redirect.to must be a safe absolute http(s) URL template"
-            ),
-            Self::VhostSection {
-                vhost,
-                section,
-                source,
-            } => write!(formatter, "vhost {vhost:?} {section}: {source}"),
-            Self::RouteSection {
-                vhost,
-                route,
-                section,
-                source,
-            } => write!(
-                formatter,
-                "vhost {vhost:?} route {route:?} {section}: {source}"
-            ),
-            Self::DuplicateVhostName { name } => write!(formatter, "duplicate vhost name {name:?}"),
-            Self::DuplicateVhostHost { host } => write!(formatter, "duplicate vhost host {host:?}"),
         }
     }
 }
