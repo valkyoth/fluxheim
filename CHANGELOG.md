@@ -84,6 +84,9 @@ behavior when the change improves security or project direction.
   modules.
 - Split admin, observability, and logging config regression coverage out of the
   central config suite into focused child test modules.
+- Split proxy upstream config regression coverage out of the central config
+  suite into focused core, discovery, attribute, transport, TLS/policy, and
+  error-page child test modules.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
