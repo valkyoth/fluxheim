@@ -76,6 +76,8 @@ behavior when the change improves security or project direction.
   module.
 - Split admin metric wrapper, status JSON, query parsing, boolean flag, and
   timestamp helpers into a focused child module.
+- Split admin load-balancer and UDP status/mutation endpoint handlers into
+  focused child modules.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
