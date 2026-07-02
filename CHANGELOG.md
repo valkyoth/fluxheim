@@ -110,6 +110,9 @@ behavior when the change improves security or project direction.
   as a public `config_stream` export.
 - Split cache purge request and result DTOs out of the cache API aggregation
   module while preserving the existing `fluxheim-cache` public exports.
+- Split load-balancer runtime mutation request/result DTOs and backend-state
+  parsing into a focused API child module while preserving the existing
+  `fluxheim-load-balancer` public exports.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.

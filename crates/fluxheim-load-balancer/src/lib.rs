@@ -16,6 +16,7 @@ use fluxheim_config::{
 };
 
 mod api;
+mod api_mutation;
 mod api_selection;
 mod backend;
 mod backend_model;
