@@ -53,6 +53,8 @@ behavior when the change improves security or project direction.
   generation into a focused helper module.
 - Move ACME HTTP-01 cleanup and redacted challenge URL error context helpers
   beside the HTTP-01 challenge store.
+- Move the instant-acme client error to renewal error adapter into the ACME
+  error module.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of

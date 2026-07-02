@@ -14,5 +14,5 @@ documents why the exception is temporary and how it will be removed.
 
 | File | Baseline lines | Reason | Split target |
 | --- | ---: | --- | --- |
-| `src/acme.rs` | 1656 | ACME order/install/renewal and filesystem safety in one root adapter after regression coverage, error typing, challenge stores, renewal queue helpers, PEM validation, EAB secret handling, account credential storage, certificate path/observation helpers, and HTTP-01/TLS-ALPN helpers moved to focused child modules. | Move to `fluxheim-acme` after the native listener/TLS cutover stabilizes. |
+| `src/acme.rs` | 1637 | ACME order/install/renewal and filesystem safety in one root adapter after regression coverage, error typing, challenge stores, renewal queue helpers, PEM validation, EAB secret handling, account credential storage, certificate path/observation helpers, HTTP-01/TLS-ALPN helpers, and client error adaptation moved to focused child modules. | Move to `fluxheim-acme` after the native listener/TLS cutover stabilizes. |
 | `crates/fluxheim-config/src/config_error_kind.rs` | 626 | Public `ConfigError` enum variants split away from formatting without changing the public API. | Evaluate domain-specific internal error builders and whether variant groups can move behind smaller public constructors without API churn. |

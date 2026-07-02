@@ -250,3 +250,26 @@ impl fmt::Display for AcmeRenewalError {
 }
 
 impl std::error::Error for AcmeRenewalError {}
+
+#[cfg(feature = "acme-client")]
+pub(super) fn instant_client_error_to_renewal_error(
+    error: AcmeInstantClientError,
+) -> AcmeRenewalError {
+    match error {
+        AcmeInstantClientError::MissingStorage => AcmeRenewalError::MissingStorage,
+        AcmeInstantClientError::UnknownIssuer { issuer } => {
+            AcmeRenewalError::UnknownIssuer { issuer }
+        }
+        AcmeInstantClientError::ExternalAccountBinding(error) => {
+            AcmeRenewalError::ExternalAccountBinding(error)
+        }
+        AcmeInstantClientError::AccountStore(error) => AcmeRenewalError::Client {
+            issuer: "account-store".to_owned(),
+            message: error.to_string(),
+        },
+        AcmeInstantClientError::InvalidExternalAccountBindingHmacKey { issuer, message }
+        | AcmeInstantClientError::Account { issuer, message } => {
+            AcmeRenewalError::Client { issuer, message }
+        }
+    }
+}

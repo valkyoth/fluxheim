@@ -235,6 +235,8 @@ use acme_eab::external_account_key_from_secrets;
 use acme_eab::load_external_account_binding_from_config;
 #[cfg(feature = "acme-client")]
 pub use acme_errors::AcmeInstantClientError;
+#[cfg(feature = "acme-client")]
+use acme_errors::instant_client_error_to_renewal_error;
 pub use acme_errors::{
     AcmeAccountStoreError, AcmeCertificateInstallError, AcmeRenewalError, AcmeSecretLoadError,
 };
@@ -1140,27 +1142,6 @@ fn acme_install_error_to_io_error(error: AcmeCertificateInstallError) -> io::Err
     match error {
         AcmeCertificateInstallError::Io { error, .. } => error,
         other => io::Error::new(io::ErrorKind::InvalidInput, other.to_string()),
-    }
-}
-
-#[cfg(feature = "acme-client")]
-fn instant_client_error_to_renewal_error(error: AcmeInstantClientError) -> AcmeRenewalError {
-    match error {
-        AcmeInstantClientError::MissingStorage => AcmeRenewalError::MissingStorage,
-        AcmeInstantClientError::UnknownIssuer { issuer } => {
-            AcmeRenewalError::UnknownIssuer { issuer }
-        }
-        AcmeInstantClientError::ExternalAccountBinding(error) => {
-            AcmeRenewalError::ExternalAccountBinding(error)
-        }
-        AcmeInstantClientError::AccountStore(error) => AcmeRenewalError::Client {
-            issuer: "account-store".to_owned(),
-            message: error.to_string(),
-        },
-        AcmeInstantClientError::InvalidExternalAccountBindingHmacKey { issuer, message }
-        | AcmeInstantClientError::Account { issuer, message } => {
-            AcmeRenewalError::Client { issuer, message }
-        }
     }
 }
 
