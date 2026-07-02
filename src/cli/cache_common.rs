@@ -52,7 +52,10 @@ pub(super) fn print_optional_unix(label: &str, value: Option<u64>) {
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
-fn cache_key_uri(path: &str, query: Option<&str>) -> Result<String, Box<dyn Error + Send + Sync>> {
+pub(super) fn cache_key_uri(
+    path: &str,
+    query: Option<&str>,
+) -> Result<String, Box<dyn Error + Send + Sync>> {
     validate_cache_warm_path(path)?;
     if path.contains('?') && query.is_some() {
         return Err("cache-key accepts query in either --path or --query, not both".into());
@@ -354,7 +357,7 @@ pub(super) fn parse_cache_cli_headers(
         .collect()
 }
 
-fn parse_cache_cli_header(
+pub(super) fn parse_cache_cli_header(
     command: &str,
     header: &str,
 ) -> Result<(String, String), Box<dyn Error + Send + Sync>> {

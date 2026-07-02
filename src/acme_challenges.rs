@@ -1,4 +1,28 @@
 use super::*;
+
+#[cfg(target_os = "linux")]
+fn open_regular_http_01_challenge_file(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(UNIX_O_NOFOLLOW)
+        .open(path)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_regular_http_01_challenge_file(path: &Path) -> io::Result<std::fs::File> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "ACME HTTP-01 challenge file is not a regular file",
+        ));
+    }
+
+    std::fs::File::open(path)
+}
+
 pub struct AcmeHttp01ChallengeStore {
     pub(super) root: PathBuf,
 }

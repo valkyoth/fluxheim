@@ -152,7 +152,7 @@ pub(super) fn run_cache_keygen_command() -> Result<(), Box<dyn Error + Send + Sy
     Ok(())
 }
 
-fn hex_encode_lower(bytes: &[u8]) -> String {
+pub(super) fn hex_encode_lower(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut encoded = String::with_capacity(bytes.len() * 2);
     for byte in bytes {

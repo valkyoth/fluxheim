@@ -19,7 +19,7 @@ pub(super) struct CacheWarmResult {
 }
 
 #[cfg(feature = "cache")]
-const CACHE_WARM_INPUT_MAX_BYTES: usize = 1024 * 1024;
+pub(super) const CACHE_WARM_INPUT_MAX_BYTES: usize = 1024 * 1024;
 
 #[cfg(feature = "cache")]
 pub(super) fn cache_warm_listen_addr(

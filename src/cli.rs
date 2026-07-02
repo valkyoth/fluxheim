@@ -20,10 +20,14 @@ mod command_options;
 mod crypto_commands;
 mod entrypoint;
 mod runtime_validation;
+#[cfg(test)]
+mod test_exports;
 mod tls_storage_check;
 pub use crypto_commands::print_crypto_diagnostics;
 pub use entrypoint::{run_from_args, run_from_env};
 pub use runtime_validation::{validate_compiled_module_config, validate_runtime_config};
+#[cfg(test)]
+use test_exports::*;
 pub use tls_storage_check::check_tls_storage;
 
 #[derive(Debug, Parser)]

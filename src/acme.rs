@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-use crate::config::{AcmeChallenge, AcmeExternalAccountBindingConfig, Config, normalize_host};
+use crate::config::{AcmeChallenge, Config, normalize_host};
 
 const MANAGED_CERTIFICATE_DIR: &str = "certificates";
 const MANAGED_FULLCHAIN_FILE: &str = "fullchain.pem";
@@ -207,6 +207,8 @@ impl fmt::Debug for AcmeExternalAccountBindingSecrets {
 
 #[path = "acme_challenges.rs"]
 mod acme_challenges;
+#[path = "acme_eab.rs"]
+mod acme_eab;
 #[path = "acme_errors.rs"]
 mod acme_errors;
 #[path = "acme_pem.rs"]
@@ -216,6 +218,11 @@ mod acme_queue;
 pub use acme_challenges::{
     AcmeHttp01ChallengeStore, AcmeTlsAlpn01ChallengeStore, http_01_token_from_path,
 };
+#[cfg(all(feature = "acme-client", test))]
+pub(crate) use acme_eab::decode_eab_hmac_key;
+#[cfg(feature = "acme-client")]
+use acme_eab::external_account_key_from_secrets;
+use acme_eab::load_external_account_binding_from_config;
 #[cfg(feature = "acme-client")]
 pub use acme_errors::AcmeInstantClientError;
 pub use acme_errors::{
@@ -1430,82 +1437,6 @@ fn instant_client_error_to_renewal_error(error: AcmeInstantClientError) -> AcmeR
     }
 }
 
-fn load_external_account_binding_from_config(
-    issuer: &str,
-    eab: &AcmeExternalAccountBindingConfig,
-) -> Result<AcmeExternalAccountBindingSecrets, AcmeSecretLoadError> {
-    Ok(AcmeExternalAccountBindingSecrets {
-        key_id: load_eab_secret(
-            issuer,
-            "key_id",
-            eab.key_id_env.as_deref(),
-            eab.key_id_file.as_deref(),
-            eab.key_id_credential.as_deref(),
-        )?,
-        hmac_key: load_eab_secret(
-            issuer,
-            "hmac_key",
-            eab.hmac_key_env.as_deref(),
-            eab.hmac_key_file.as_deref(),
-            eab.hmac_key_credential.as_deref(),
-        )?,
-    })
-}
-
-#[cfg(feature = "acme-client")]
-fn external_account_key_from_secrets(
-    issuer: &str,
-    secrets: &AcmeExternalAccountBindingSecrets,
-) -> Result<instant_acme::ExternalAccountKey, AcmeInstantClientError> {
-    let key_bytes = decode_eab_hmac_key(issuer, &secrets.hmac_key)?;
-    Ok(instant_acme::ExternalAccountKey::new(
-        secrets.key_id.to_string(),
-        &key_bytes,
-    ))
-}
-
-#[cfg(feature = "acme-client")]
-fn decode_eab_hmac_key(
-    issuer: &str,
-    value: &str,
-) -> Result<Zeroizing<Vec<u8>>, AcmeInstantClientError> {
-    if let Some(decoded) =
-        decoded_eab_hmac_key(base64_ng::URL_SAFE_NO_PAD.decode_vec(value.as_bytes()))
-    {
-        return Ok(decoded);
-    }
-    if let Some(decoded) = decoded_eab_hmac_key(base64_ng::URL_SAFE.decode_vec(value.as_bytes())) {
-        return Ok(decoded);
-    }
-    if let Some(decoded) =
-        decoded_eab_hmac_key(base64_ng::STANDARD_NO_PAD.decode_vec(value.as_bytes()))
-    {
-        return Ok(decoded);
-    }
-    if let Some(decoded) = decoded_eab_hmac_key(base64_ng::STANDARD.decode_vec(value.as_bytes())) {
-        return Ok(decoded);
-    }
-
-    Err(
-        AcmeInstantClientError::InvalidExternalAccountBindingHmacKey {
-            issuer: issuer.to_owned(),
-            message: "expected non-empty base64 or base64url encoded key".to_owned(),
-        },
-    )
-}
-
-#[cfg(feature = "acme-client")]
-fn decoded_eab_hmac_key(
-    decoded: Result<Vec<u8>, base64_ng::DecodeError>,
-) -> Option<Zeroizing<Vec<u8>>> {
-    match decoded {
-        Ok(decoded) if !decoded.is_empty() && decoded.len() as u64 <= MAX_EAB_SECRET_BYTES => {
-            Some(Zeroizing::new(decoded))
-        }
-        _ => None,
-    }
-}
-
 fn certificate_directory(
     paths: &AcmeCertificatePaths,
 ) -> Result<PathBuf, AcmeCertificateInstallError> {
@@ -2068,182 +1999,6 @@ fn sync_directory(
 
 fn sync_directory_io(path: &Path) -> io::Result<()> {
     fs::File::open(path)?.sync_all()
-}
-
-fn load_eab_secret(
-    issuer: &str,
-    field: &'static str,
-    env_name: Option<&str>,
-    file_path: Option<&Path>,
-    credential_name: Option<&str>,
-) -> Result<Zeroizing<String>, AcmeSecretLoadError> {
-    let value = match (env_name, file_path, credential_name) {
-        (Some(env_name), None, None) => {
-            Zeroizing::new(std::env::var(env_name).map_err(|error| {
-                AcmeSecretLoadError::EnvRead {
-                    issuer: issuer.to_owned(),
-                    field,
-                    env: env_name.to_owned(),
-                    message: error.to_string(),
-                }
-            })?)
-        }
-        (None, Some(path), None) => read_eab_secret_file(issuer, field, path)?,
-        (None, None, Some(credential_name)) => {
-            let path = resolve_eab_credential_path(credential_name);
-            read_eab_secret_file(issuer, field, &path)?
-        }
-        _ => {
-            return Err(AcmeSecretLoadError::InvalidSecretSource {
-                issuer: issuer.to_owned(),
-                field,
-            });
-        }
-    };
-
-    normalize_eab_secret(issuer, field, value)
-}
-
-fn resolve_eab_credential_path(credential_name: &str) -> PathBuf {
-    std::env::var_os("CREDENTIALS_DIRECTORY")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/run/secrets"))
-        .join(credential_name)
-}
-
-fn read_eab_secret_file(
-    issuer: &str,
-    field: &'static str,
-    path: &Path,
-) -> Result<Zeroizing<String>, AcmeSecretLoadError> {
-    let file = open_regular_eab_secret_file(issuer, field, path)?;
-    let metadata = file
-        .metadata()
-        .map_err(|error| eab_file_error(issuer, field, path, error))?;
-    if !metadata.file_type().is_file() {
-        return Err(AcmeSecretLoadError::FileRead {
-            issuer: issuer.to_owned(),
-            field,
-            path: path.to_path_buf(),
-            message: "not a regular file".to_owned(),
-        });
-    }
-    if metadata.len() > MAX_EAB_SECRET_BYTES {
-        return Err(AcmeSecretLoadError::OversizedSecret {
-            issuer: issuer.to_owned(),
-            field,
-            max_bytes: MAX_EAB_SECRET_BYTES,
-        });
-    }
-
-    let mut secret = Zeroizing::new(String::new());
-    let mut limited = file.take(MAX_EAB_SECRET_BYTES.saturating_add(1));
-    limited
-        .read_to_string(&mut secret)
-        .map_err(|error| eab_file_error(issuer, field, path, error))?;
-    if secret.len() as u64 > MAX_EAB_SECRET_BYTES {
-        return Err(AcmeSecretLoadError::OversizedSecret {
-            issuer: issuer.to_owned(),
-            field,
-            max_bytes: MAX_EAB_SECRET_BYTES,
-        });
-    }
-
-    Ok(secret)
-}
-
-#[cfg(target_os = "linux")]
-fn open_regular_http_01_challenge_file(path: &Path) -> io::Result<std::fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
-
-    std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(UNIX_O_NOFOLLOW)
-        .open(path)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn open_regular_http_01_challenge_file(path: &Path) -> io::Result<std::fs::File> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    if !metadata.file_type().is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "ACME HTTP-01 challenge file is not a regular file",
-        ));
-    }
-
-    std::fs::File::open(path)
-}
-
-#[cfg(target_os = "linux")]
-fn open_regular_eab_secret_file(
-    issuer: &str,
-    field: &'static str,
-    path: &Path,
-) -> Result<std::fs::File, AcmeSecretLoadError> {
-    use std::os::unix::fs::OpenOptionsExt;
-
-    std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(UNIX_O_NOFOLLOW)
-        .open(path)
-        .map_err(|error| eab_file_error(issuer, field, path, error))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn open_regular_eab_secret_file(
-    issuer: &str,
-    field: &'static str,
-    path: &Path,
-) -> Result<std::fs::File, AcmeSecretLoadError> {
-    let metadata = std::fs::symlink_metadata(path)
-        .map_err(|error| eab_file_error(issuer, field, path, error))?;
-    if !metadata.file_type().is_file() {
-        return Err(AcmeSecretLoadError::FileRead {
-            issuer: issuer.to_owned(),
-            field,
-            path: path.to_path_buf(),
-            message: "not a regular file".to_owned(),
-        });
-    }
-
-    std::fs::File::open(path).map_err(|error| eab_file_error(issuer, field, path, error))
-}
-
-fn eab_file_error(
-    issuer: &str,
-    field: &'static str,
-    path: &Path,
-    error: io::Error,
-) -> AcmeSecretLoadError {
-    AcmeSecretLoadError::FileRead {
-        issuer: issuer.to_owned(),
-        field,
-        path: path.to_path_buf(),
-        message: error.to_string(),
-    }
-}
-
-fn normalize_eab_secret(
-    issuer: &str,
-    field: &'static str,
-    value: Zeroizing<String>,
-) -> Result<Zeroizing<String>, AcmeSecretLoadError> {
-    let value = Zeroizing::new(value.trim().to_owned());
-    if value.is_empty() {
-        return Err(AcmeSecretLoadError::EmptySecret {
-            issuer: issuer.to_owned(),
-            field,
-        });
-    }
-    if value.len() as u64 > MAX_EAB_SECRET_BYTES {
-        return Err(AcmeSecretLoadError::OversizedSecret {
-            issuer: issuer.to_owned(),
-            field,
-            max_bytes: MAX_EAB_SECRET_BYTES,
-        });
-    }
-    Ok(value)
 }
 
 fn normalized_domain(domain: &str) -> String {

@@ -42,6 +42,11 @@ behavior when the change improves security or project direction.
   inline root `headers` module.
 - Split access-log helper functions out of `fluxheim-observability/src/lib.rs`
   into a focused crate module while preserving the public exports.
+- Split ACME External Account Binding helpers out of `src/acme.rs` into a
+  focused helper module so EAB secret loading, bounded file reads, and HMAC-key
+  decoding are isolated from the ACME renewal/install adapter.
+- Move CLI test-only compatibility imports into a focused child module so
+  `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of
   `fluxheim-observability/src/lib.rs` into a focused crate module while
   preserving the public exports.
