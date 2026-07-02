@@ -1,6 +1,6 @@
 use std::error::Error;
 
-#[cfg(feature = "acme")]
+#[cfg(all(feature = "acme-client", unix))]
 use super::config_loader::load_validated_config;
 #[cfg(feature = "acme-client")]
 use crate::config::Config;

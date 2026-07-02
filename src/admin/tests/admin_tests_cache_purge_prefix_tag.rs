@@ -1,3 +1,4 @@
+#[cfg(feature = "cache")]
 use super::*;
 
 #[cfg(feature = "cache")]

@@ -1,3 +1,4 @@
+#[cfg(all(feature = "cache", feature = "proxy"))]
 use super::*;
 #[cfg(all(feature = "cache", feature = "proxy"))]
 #[test]

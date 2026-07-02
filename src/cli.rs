@@ -27,6 +27,7 @@ pub use crypto_commands::print_crypto_diagnostics;
 pub use entrypoint::{run_from_args, run_from_env};
 pub use runtime_validation::{validate_compiled_module_config, validate_runtime_config};
 #[cfg(test)]
+#[allow(unused_imports)]
 use test_exports::*;
 pub use tls_storage_check::check_tls_storage;
 
@@ -475,7 +476,6 @@ pub enum CliCommand {
         #[arg(long)]
         expect_serve_stale_if_error: bool,
 
-        /// Require at least one matching cached object to be eligible for stale-while-revalidate serving.
         #[arg(long)]
         expect_serve_stale_while_revalidate: bool,
     },

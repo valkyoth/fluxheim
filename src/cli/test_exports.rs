@@ -24,4 +24,9 @@ pub(super) use super::cache_warm_support::{
     validate_cache_warm_expected_sequence, validate_cache_warm_expected_statuses,
     validate_cache_warm_header_name,
 };
+#[cfg(any(
+    feature = "tls",
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl"
+))]
 pub(super) use super::crypto_commands::hex_encode_lower;
