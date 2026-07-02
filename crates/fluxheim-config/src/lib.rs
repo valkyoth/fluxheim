@@ -72,6 +72,7 @@ pub mod config_route;
 pub mod config_server;
 mod config_server_defaults;
 pub mod config_stream;
+mod config_stream_defaults;
 pub mod config_stream_slots;
 #[cfg(all(test, feature = "stream-proxy"))]
 mod config_stream_tests;

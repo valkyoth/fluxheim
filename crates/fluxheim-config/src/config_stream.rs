@@ -10,6 +10,11 @@ use crate::config::{
 use crate::config_net::{
     valid_authority, valid_ip_matcher, valid_trusted_proxy, valid_upstream_alias,
 };
+pub use crate::config_stream_defaults::DEFAULT_STREAM_MAX_CONNECTIONS;
+use crate::config_stream_defaults::{
+    default_stream_connect_timeout_secs, default_stream_idle_timeout_secs,
+    default_stream_max_connections, default_true, validate_stream_optional_timeout_secs,
+};
 #[cfg(feature = "stream-proxy")]
 pub use crate::config_stream_slots::{StreamConnectionSlot, acquire_stream_connection_slot};
 
@@ -242,7 +247,7 @@ impl StreamRouteConfig {
             self.connect_timeout_secs,
         )?;
         validate_required_timeout_secs("stream.routes.idle_timeout_secs", self.idle_timeout_secs)?;
-        validate_optional_timeout_secs(
+        validate_stream_optional_timeout_secs(
             "stream.routes.max_connection_secs",
             self.max_connection_secs,
         )?;
@@ -456,32 +461,4 @@ impl Default for StreamRouteConfig {
             upstream_client_key_path: None,
         }
     }
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_stream_connect_timeout_secs() -> u64 {
-    5
-}
-
-pub const DEFAULT_STREAM_MAX_CONNECTIONS: usize = 1024;
-
-fn default_stream_idle_timeout_secs() -> u64 {
-    300
-}
-
-fn default_stream_max_connections() -> usize {
-    DEFAULT_STREAM_MAX_CONNECTIONS
-}
-
-fn validate_optional_timeout_secs(
-    field: &'static str,
-    value: Option<u64>,
-) -> Result<(), ConfigError> {
-    if let Some(value) = value {
-        validate_required_timeout_secs(field, value)?;
-    }
-    Ok(())
 }

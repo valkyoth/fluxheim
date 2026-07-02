@@ -105,6 +105,9 @@ behavior when the change improves security or project direction.
 - Split static-web directory listing DTOs, path rendering, HTML escaping, and
   timestamp formatting into a focused `fluxheim-web` child module while
   preserving the public crate exports.
+- Split stream route default values and optional-timeout validation glue out of
+  the stream config DTO module while preserving `DEFAULT_STREAM_MAX_CONNECTIONS`
+  as a public `config_stream` export.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
