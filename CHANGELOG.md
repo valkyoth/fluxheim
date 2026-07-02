@@ -51,6 +51,8 @@ behavior when the change improves security or project direction.
   observation, and regular-file certificate reads into a focused helper module.
 - Split ACME TLS-ALPN challenge cleanup and temporary challenge-certificate
   generation into a focused helper module.
+- Move ACME HTTP-01 cleanup and redacted challenge URL error context helpers
+  beside the HTTP-01 challenge store.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of

@@ -226,6 +226,8 @@ pub use acme_certificate_paths::{
 pub use acme_challenges::{
     AcmeHttp01ChallengeStore, AcmeTlsAlpn01ChallengeStore, http_01_token_from_path,
 };
+#[cfg(feature = "acme-client")]
+use acme_challenges::{acme_client_error_message_with_http_01_context, cleanup_http_01_challenges};
 #[cfg(all(feature = "acme-client", test))]
 pub(crate) use acme_eab::decode_eab_hmac_key;
 #[cfg(feature = "acme-client")]
@@ -1139,54 +1141,6 @@ fn acme_install_error_to_io_error(error: AcmeCertificateInstallError) -> io::Err
         AcmeCertificateInstallError::Io { error, .. } => error,
         other => io::Error::new(io::ErrorKind::InvalidInput, other.to_string()),
     }
-}
-
-fn cleanup_http_01_challenges(
-    store: &AcmeHttp01ChallengeStore,
-    tokens: &[String],
-) -> Result<(), AcmeRenewalError> {
-    for token in tokens {
-        store
-            .remove_key_authorization(token)
-            .map_err(|error| AcmeRenewalError::Challenge {
-                token: token.clone(),
-                error,
-            })?;
-    }
-    Ok(())
-}
-
-fn acme_client_error_message_with_http_01_context(
-    error: impl fmt::Display,
-    domains: &[String],
-    tokens: &[String],
-) -> String {
-    let message = error.to_string();
-    let urls = http_01_challenge_urls(domains, tokens);
-    if urls.is_empty() {
-        return message;
-    }
-    format!("{message}; published_http_01={}", urls.join(","))
-}
-
-fn http_01_challenge_urls(domains: &[String], tokens: &[String]) -> Vec<String> {
-    let mut urls = Vec::new();
-    for domain in domains {
-        for token in tokens {
-            let token = redacted_http_01_token(token);
-            urls.push(format!(
-                "http://{domain}/.well-known/acme-challenge/{token}"
-            ));
-        }
-    }
-    urls
-}
-
-fn redacted_http_01_token(token: &str) -> String {
-    if token.is_empty() {
-        return "<empty-token>".to_owned();
-    }
-    format!("<redacted:{}b>", token.len())
 }
 
 #[cfg(feature = "acme-client")]

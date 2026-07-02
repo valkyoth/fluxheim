@@ -285,6 +285,54 @@ impl AcmeTlsAlpn01ChallengeStore {
     }
 }
 
+pub(super) fn cleanup_http_01_challenges(
+    store: &AcmeHttp01ChallengeStore,
+    tokens: &[String],
+) -> Result<(), AcmeRenewalError> {
+    for token in tokens {
+        store
+            .remove_key_authorization(token)
+            .map_err(|error| AcmeRenewalError::Challenge {
+                token: token.clone(),
+                error,
+            })?;
+    }
+    Ok(())
+}
+
+pub(super) fn acme_client_error_message_with_http_01_context(
+    error: impl std::fmt::Display,
+    domains: &[String],
+    tokens: &[String],
+) -> String {
+    let message = error.to_string();
+    let urls = http_01_challenge_urls(domains, tokens);
+    if urls.is_empty() {
+        return message;
+    }
+    format!("{message}; published_http_01={}", urls.join(","))
+}
+
+fn http_01_challenge_urls(domains: &[String], tokens: &[String]) -> Vec<String> {
+    let mut urls = Vec::new();
+    for domain in domains {
+        for token in tokens {
+            let token = redacted_http_01_token(token);
+            urls.push(format!(
+                "http://{domain}/.well-known/acme-challenge/{token}"
+            ));
+        }
+    }
+    urls
+}
+
+fn redacted_http_01_token(token: &str) -> String {
+    if token.is_empty() {
+        return "<empty-token>".to_owned();
+    }
+    format!("<redacted:{}b>", token.len())
+}
+
 pub fn http_01_token_from_path(path: &str) -> Option<&str> {
     let token = path.strip_prefix("/.well-known/acme-challenge/")?;
     if token.is_empty() || token.contains('/') {
