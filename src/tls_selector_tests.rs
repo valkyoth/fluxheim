@@ -277,8 +277,8 @@ fn downstream_certificate_selector_uses_managed_acme_certificate_paths() {
     };
 
     let selector = downstream_certificate_selector(&config).unwrap();
-    let default_paths = crate::acme::managed_certificate_paths(&storage, "default");
-    let other_paths = crate::acme::managed_certificate_paths(&storage, "other");
+    let default_paths = fluxheim_acme::managed_certificate_paths(&storage, "default");
+    let other_paths = fluxheim_acme::managed_certificate_paths(&storage, "other");
 
     assert_eq!(
         selector.certificate_for_sni(None),

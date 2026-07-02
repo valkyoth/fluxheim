@@ -27,16 +27,16 @@ pub(super) fn run_renew(
         .build()?;
     let now = std::time::SystemTime::now();
     let run = if let Some(vhost) = vhost {
-        runtime.block_on(crate::acme::renew_selected_instant_acme_targets(
+        runtime.block_on(fluxheim_acme::renew_selected_instant_acme_targets(
             &config,
             now,
             vhost,
             force_renew,
         ))?
     } else if force_renew {
-        runtime.block_on(crate::acme::renew_all_instant_acme_targets(&config, now))?
+        runtime.block_on(fluxheim_acme::renew_all_instant_acme_targets(&config, now))?
     } else {
-        runtime.block_on(crate::acme::renew_due_instant_acme_targets(&config, now))?
+        runtime.block_on(fluxheim_acme::renew_due_instant_acme_targets(&config, now))?
     };
 
     println!("acme attempted: {}", run.attempted);
@@ -90,7 +90,7 @@ pub(super) fn print_targets(
     config_path: Option<&std::path::Path>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = load_validated_config(config_path)?;
-    let targets = crate::acme::renewal_targets(&config);
+    let targets = fluxheim_acme::renewal_targets(&config);
     println!("acme targets: {}", targets.len());
     for target in targets {
         println!(
@@ -117,8 +117,8 @@ pub(super) fn print_status(
     }
 
     let now = std::time::SystemTime::now();
-    let observations = crate::acme::observe_configured_certificates(&config);
-    let queue = crate::acme::plan_renewal_queue(&config, &observations, now);
+    let observations = fluxheim_acme::observe_configured_certificates(&config);
+    let queue = fluxheim_acme::plan_renewal_queue(&config, &observations, now);
     let items: Vec<_> = queue
         .into_iter()
         .filter(|item| vhost.is_none_or(|name| item.target.vhost_name == name))
@@ -157,7 +157,7 @@ fn ensure_acme_target_exists(
     config: &Config,
     vhost: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if crate::acme::renewal_targets(config)
+    if fluxheim_acme::renewal_targets(config)
         .into_iter()
         .any(|target| target.vhost_name == vhost)
     {

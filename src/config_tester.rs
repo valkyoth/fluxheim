@@ -122,7 +122,7 @@ fn run(cli: ConfigTesterCli) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 #[cfg(feature = "acme")]
 fn print_acme_targets(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let targets = crate::acme::renewal_targets(config);
+    let targets = fluxheim_acme::renewal_targets(config);
     println!("acme targets: {}", targets.len());
     for target in targets {
         println!(

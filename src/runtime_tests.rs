@@ -262,11 +262,11 @@ fn rustls_alpn_protocols_include_acme_tls_alpn_when_enabled() {
     };
 
     let protocols =
-        fluxheim_tls::rustls_alpn_protocols(&tls, Some(crate::acme::acme_tls_alpn_protocol()));
+        fluxheim_tls::rustls_alpn_protocols(&tls, Some(fluxheim_acme::acme_tls_alpn_protocol()));
 
     assert_eq!(
         protocols.first().map(Vec::as_slice),
-        Some(crate::acme::acme_tls_alpn_protocol())
+        Some(fluxheim_acme::acme_tls_alpn_protocol())
     );
     assert!(protocols.iter().any(|protocol| protocol == b"h2"));
     assert!(protocols.iter().any(|protocol| protocol == b"http/1.1"));

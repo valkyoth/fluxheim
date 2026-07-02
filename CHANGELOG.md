@@ -70,6 +70,9 @@ behavior when the change improves security or project direction.
   observation logic into the new `fluxheim-acme` workspace crate; the root
   `src/acme.rs` module now stays as a compatibility re-export for existing
   runtime and companion wiring.
+- Point internal ACME runtime, companion, config-tester, and TLS helper calls at
+  `fluxheim_acme` directly so the root ACME module is no longer part of the
+  internal dependency path.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of

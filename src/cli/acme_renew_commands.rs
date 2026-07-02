@@ -22,10 +22,10 @@ pub(super) fn run_acme_renew_command(
         .build()?;
     let now = std::time::SystemTime::now();
     let queue = if force_renew {
-        crate::acme::plan_renewal_queue(&config, &[], now)
+        fluxheim_acme::plan_renewal_queue(&config, &[], now)
     } else {
-        let observations = crate::acme::observe_configured_certificates(&config);
-        crate::acme::plan_renewal_queue(&config, &observations, now)
+        let observations = fluxheim_acme::observe_configured_certificates(&config);
+        fluxheim_acme::plan_renewal_queue(&config, &observations, now)
     };
     println!("acme targets: {}", queue.len());
     for item in &queue {
@@ -74,9 +74,9 @@ pub(super) fn run_acme_renew_command(
     }
 
     let run = if force_renew {
-        runtime.block_on(crate::acme::renew_all_instant_acme_targets(&config, now))?
+        runtime.block_on(fluxheim_acme::renew_all_instant_acme_targets(&config, now))?
     } else {
-        runtime.block_on(crate::acme::renew_due_instant_acme_targets(&config, now))?
+        runtime.block_on(fluxheim_acme::renew_due_instant_acme_targets(&config, now))?
     };
 
     println!("acme attempted: {}", run.attempted);

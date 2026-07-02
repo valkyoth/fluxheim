@@ -201,7 +201,7 @@ pub(super) fn record_cache_runtime_metrics() {
 #[cfg(all(test, feature = "acme-client"))]
 pub(super) fn acme_background_service_enabled(config: &crate::config::Config) -> bool {
     config.tls.acme.automation == crate::config::AcmeAutomationMode::Background
-        && !crate::acme::renewal_targets(config).is_empty()
+        && !fluxheim_acme::renewal_targets(config).is_empty()
 }
 
 #[cfg(feature = "cache")]
@@ -385,7 +385,8 @@ async fn run_acme_renewal_tick(
     config: &crate::config::Config,
     reloader: Option<&DownstreamCertificateReloader>,
 ) {
-    match crate::acme::renew_due_instant_acme_targets(config, std::time::SystemTime::now()).await {
+    match fluxheim_acme::renew_due_instant_acme_targets(config, std::time::SystemTime::now()).await
+    {
         Ok(run) if run.attempted == 0 => {
             log::debug!("ACME renewal check complete; no due certificates");
         }

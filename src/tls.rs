@@ -87,7 +87,7 @@ fn managed_acme_certificate_source(
     } else {
         fluxheim_tls::shared_managed_acme_certificate_owner(config, vhost)?
     };
-    let paths = crate::acme::managed_certificate_paths(storage, owner);
+    let paths = fluxheim_acme::managed_certificate_paths(storage, owner);
     Some(DownstreamCertificateSource {
         certificate: crate::config::StaticCertificateConfig {
             cert_path: paths.cert_path,
