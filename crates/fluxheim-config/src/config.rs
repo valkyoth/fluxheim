@@ -128,9 +128,6 @@ pub use crate::config_web::MAX_WEB_INDEX_FILES;
 pub use crate::config_web::{DirectoryListingConfig, WebConfig};
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
-use crate::config_loader::{MAX_CONFIG_DIRECTORY_FILES, MAX_CONFIG_FILE_BYTES};
-
 pub(crate) const MAX_VHOSTS: usize = 1024;
 pub(crate) const MAX_VHOST_NAME_BYTES: usize = 128;
 pub(crate) const MAX_VHOST_HOSTS: usize = 64;

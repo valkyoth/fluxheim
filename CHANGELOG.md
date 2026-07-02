@@ -95,6 +95,10 @@ behavior when the change improves security or project direction.
 - Split vhost, route, config-list limit, ACME challenge, redirect, and
   default-host validation coverage out of the central config suite into focused
   child test modules.
+- Split config loading, `conf.d` merge policy, parse-error hint, path-safety,
+  static-web index, and generic config validation coverage out of the central
+  config suite so the parent test module is only a small module registry and
+  shared helper host.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
