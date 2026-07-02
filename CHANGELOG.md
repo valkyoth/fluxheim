@@ -87,6 +87,8 @@ behavior when the change improves security or project direction.
   of the route config DTO module while preserving the existing helper exports.
 - Split primitive cache value validators out of the cache config validator so
   the main validator stays focused on policy ordering and cross-field checks.
+- Split FIPS/ISO cache encryption compliance validation out of the cache config
+  DTO module while preserving the existing public helper export.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
