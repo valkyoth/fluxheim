@@ -201,6 +201,8 @@ behavior when the change improves security or project direction.
 - Moved native HTTP/1 disk-cache private purge methods and shared mutation/state
   helpers into focused child modules, bringing `native_http1_cache.rs` below the
   500-line modularity target.
+- Split compression config regression coverage out of the central config test
+  suite into a focused child test module.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
