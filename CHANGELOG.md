@@ -116,6 +116,8 @@ behavior when the change improves security or project direction.
 - Split PHP preset, runtime, path-info, try-files, stderr log-level, FPM mode,
   and process-manager enums into a focused config child module while preserving
   the existing `config_php` re-exports.
+- Split exec and database load-balancer health-check negative config coverage
+  into a focused config test module.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.

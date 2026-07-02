@@ -2,6 +2,8 @@
 mod core;
 #[path = "config_tests_load_balance_health.rs"]
 mod health;
+#[path = "config_tests_load_balance_health_protocols.rs"]
+mod health_protocols;
 #[path = "config_tests_load_balance_passive.rs"]
 mod passive;
 #[path = "config_tests_load_balance_persistence.rs"]
