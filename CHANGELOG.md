@@ -70,6 +70,9 @@ behavior when the change improves security or project direction.
   modularity target.
 - Split proxy timeout validation coverage out of the central config regression
   suite into a focused child test module.
+- Split load-balancer config regression coverage out of the central config
+  suite into focused selection, health, passive-health, persistence, and retry
+  child test modules.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
