@@ -178,6 +178,9 @@ behavior when the change improves security or project direction.
   tests into a focused child test module.
 - Split native route-proxy test cache/request/header/config support builders
   into a focused child support module.
+- Split native route-proxy cache/peer-fill upstream fixture servers into a
+  focused child module, bringing `native_http1_route_proxy_tests.rs` below the
+  modularity target.
 - Split native proxy request handling, cache fill orchestration, static
   upstream retry, load-balanced dispatch, WebSocket takeover, and response
   finishing into a focused handler module.
