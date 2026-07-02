@@ -80,6 +80,8 @@ behavior when the change improves security or project direction.
   focused child modules.
 - Split the admin request router and Unix ops-socket dispatcher into a focused
   child module.
+- Split admin cache status/activity and cache purge endpoint handlers into
+  focused child modules.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
