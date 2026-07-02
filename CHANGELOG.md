@@ -145,6 +145,9 @@ behavior when the change improves security or project direction.
 - Split ACME renewal queue planning, retry backoff, and TOML datetime
   conversion helpers into a focused private module while preserving the public
   `crate::acme` re-exports.
+- Split ACME certificate/private-key PEM validation helpers into a focused
+  private module shared by managed certificate install and TLS-ALPN challenge
+  handling.
 - Split CLI regression coverage into focused child test modules for core
   command handling, cache warm, cache lookup, cache-key, and cache-key preview
   validation, reducing the root CLI adapter without changing command behavior.

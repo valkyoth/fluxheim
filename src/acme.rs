@@ -209,6 +209,8 @@ impl fmt::Debug for AcmeExternalAccountBindingSecrets {
 mod acme_challenges;
 #[path = "acme_errors.rs"]
 mod acme_errors;
+#[path = "acme_pem.rs"]
+mod acme_pem;
 #[path = "acme_queue.rs"]
 mod acme_queue;
 pub use acme_challenges::{
@@ -219,6 +221,7 @@ pub use acme_errors::AcmeInstantClientError;
 pub use acme_errors::{
     AcmeAccountStoreError, AcmeCertificateInstallError, AcmeRenewalError, AcmeSecretLoadError,
 };
+use acme_pem::{validate_certificate_pem, validate_private_key_pem};
 pub use acme_queue::{next_retry_at, plan_renewal_queue, toml_offset_datetime_to_system_time};
 
 pub fn renewal_targets(config: &Config) -> Vec<AcmeRenewalTarget> {
@@ -1501,96 +1504,6 @@ fn decoded_eab_hmac_key(
         }
         _ => None,
     }
-}
-
-fn validate_certificate_pem(contents: &[u8]) -> Result<(), AcmeCertificateInstallError> {
-    validate_pem_bytes(
-        contents,
-        MAX_CERTIFICATE_CHAIN_BYTES,
-        b"-----BEGIN CERTIFICATE-----",
-        b"-----END CERTIFICATE-----",
-        AcmeCertificateInstallError::InvalidCertificatePem,
-    )
-}
-
-fn validate_private_key_pem(contents: &[u8]) -> Result<(), AcmeCertificateInstallError> {
-    if contents.len() > MAX_PRIVATE_KEY_BYTES {
-        return Err(AcmeCertificateInstallError::InvalidPrivateKeyPem(
-            "file is too large",
-        ));
-    }
-    if contents.is_empty() {
-        return Err(AcmeCertificateInstallError::InvalidPrivateKeyPem(
-            "file is empty",
-        ));
-    }
-    if contents
-        .iter()
-        .any(|byte| *byte == b'\0' || (*byte < 0x09) || (*byte > 0x0d && *byte < 0x20))
-    {
-        return Err(AcmeCertificateInstallError::InvalidPrivateKeyPem(
-            "file contains control bytes",
-        ));
-    }
-
-    let supported_key_markers = [
-        (
-            b"-----BEGIN PRIVATE KEY-----".as_slice(),
-            b"-----END PRIVATE KEY-----".as_slice(),
-        ),
-        (
-            b"-----BEGIN EC PRIVATE KEY-----".as_slice(),
-            b"-----END EC PRIVATE KEY-----".as_slice(),
-        ),
-        (
-            b"-----BEGIN RSA PRIVATE KEY-----".as_slice(),
-            b"-----END RSA PRIVATE KEY-----".as_slice(),
-        ),
-    ];
-
-    if supported_key_markers
-        .iter()
-        .any(|(begin, end)| contains_subslice(contents, begin) && contains_subslice(contents, end))
-    {
-        Ok(())
-    } else {
-        Err(AcmeCertificateInstallError::InvalidPrivateKeyPem(
-            "missing supported private-key PEM markers",
-        ))
-    }
-}
-
-fn validate_pem_bytes(
-    contents: &[u8],
-    max_bytes: usize,
-    begin_marker: &[u8],
-    end_marker: &[u8],
-    error: fn(&'static str) -> AcmeCertificateInstallError,
-) -> Result<(), AcmeCertificateInstallError> {
-    if contents.is_empty() {
-        return Err(error("file is empty"));
-    }
-    if contents.len() > max_bytes {
-        return Err(error("file is too large"));
-    }
-    if contents
-        .iter()
-        .any(|byte| *byte == b'\0' || (*byte < 0x09) || (*byte > 0x0d && *byte < 0x20))
-    {
-        return Err(error("file contains control bytes"));
-    }
-    if !contains_subslice(contents, begin_marker) || !contains_subslice(contents, end_marker) {
-        return Err(error("missing PEM markers"));
-    }
-
-    Ok(())
-}
-
-fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty()
-        && haystack
-            .windows(needle.len())
-            .any(|window| window == needle)
 }
 
 fn certificate_directory(
