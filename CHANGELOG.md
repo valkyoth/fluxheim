@@ -49,6 +49,8 @@ behavior when the change improves security or project direction.
   symlink rejection into a focused account-store helper module.
 - Split ACME managed-certificate path construction, certificate expiration
   observation, and regular-file certificate reads into a focused helper module.
+- Split ACME TLS-ALPN challenge cleanup and temporary challenge-certificate
+  generation into a focused helper module.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of

@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-use crate::config::{AcmeChallenge, Config, normalize_host};
+use crate::config::{AcmeChallenge, Config};
 
 const HTTP_01_CHALLENGE_DIR: &str = "http-01";
 const TLS_ALPN_01_CHALLENGE_DIR: &str = "tls-alpn-01";
@@ -214,6 +214,8 @@ mod acme_errors;
 mod acme_pem;
 #[path = "acme_queue.rs"]
 mod acme_queue;
+#[path = "acme_tls_alpn.rs"]
+mod acme_tls_alpn;
 pub use acme_account_store::{
     account_credentials_path, load_account_credentials, store_account_credentials,
 };
@@ -236,6 +238,8 @@ pub use acme_errors::{
 };
 use acme_pem::{validate_certificate_pem, validate_private_key_pem};
 pub use acme_queue::{next_retry_at, plan_renewal_queue, toml_offset_datetime_to_system_time};
+#[cfg(feature = "acme-client")]
+use acme_tls_alpn::{cleanup_tls_alpn_01_challenges, tls_alpn_01_certificate};
 
 pub fn renewal_targets(config: &Config) -> Vec<AcmeRenewalTarget> {
     if !config.tls.enabled || !config.tls.acme.enabled || !config.tls.acme.renewal.enabled {
@@ -1183,71 +1187,6 @@ fn redacted_http_01_token(token: &str) -> String {
         return "<empty-token>".to_owned();
     }
     format!("<redacted:{}b>", token.len())
-}
-
-#[cfg(feature = "acme-client")]
-fn cleanup_tls_alpn_01_challenges(
-    store: &AcmeTlsAlpn01ChallengeStore,
-    domains: &[String],
-) -> Result<(), AcmeRenewalError> {
-    for domain in domains {
-        store
-            .remove_challenge_certificate(domain)
-            .map_err(|error| AcmeRenewalError::Challenge {
-                token: domain.clone(),
-                error,
-            })?;
-    }
-    Ok(())
-}
-
-#[cfg(feature = "acme-client")]
-fn tls_alpn_01_certificate(
-    domain: &str,
-    key_authorization_digest: &[u8],
-) -> Result<(Vec<u8>, Zeroizing<Vec<u8>>), AcmeRenewalError> {
-    if key_authorization_digest.len() != 32 {
-        return Err(AcmeRenewalError::TlsAlpnCertificate {
-            domain: domain.to_owned(),
-            message: "key authorization digest must be 32 bytes".to_owned(),
-        });
-    }
-    let Some(normalized_domain) = normalize_host(domain) else {
-        return Err(AcmeRenewalError::TlsAlpnCertificate {
-            domain: domain.to_owned(),
-            message: "domain is not a valid DNS identifier".to_owned(),
-        });
-    };
-
-    let mut params =
-        rcgen::CertificateParams::new(vec![normalized_domain.clone()]).map_err(|error| {
-            AcmeRenewalError::TlsAlpnCertificate {
-                domain: normalized_domain.clone(),
-                message: error.to_string(),
-            }
-        })?;
-    params
-        .custom_extensions
-        .push(rcgen::CustomExtension::new_acme_identifier(
-            key_authorization_digest,
-        ));
-    let signing_key =
-        rcgen::KeyPair::generate().map_err(|error| AcmeRenewalError::TlsAlpnCertificate {
-            domain: normalized_domain.clone(),
-            message: error.to_string(),
-        })?;
-    let certificate =
-        params
-            .self_signed(&signing_key)
-            .map_err(|error| AcmeRenewalError::TlsAlpnCertificate {
-                domain: normalized_domain,
-                message: error.to_string(),
-            })?;
-
-    Ok((
-        certificate.pem().into_bytes(),
-        Zeroizing::new(signing_key.serialize_pem().into_bytes()),
-    ))
 }
 
 #[cfg(feature = "acme-client")]
