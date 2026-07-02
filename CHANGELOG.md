@@ -151,6 +151,9 @@ behavior when the change improves security or project direction.
 - Split CLI regression coverage into focused child test modules for core
   command handling, cache warm, cache lookup, cache-key, and cache-key preview
   validation, reducing the root CLI adapter without changing command behavior.
+- Split admin core response/health/status tests and auth/client-certificate
+  secret-file tests into focused child modules while preserving existing admin
+  helper coverage.
 - Split native proxy traffic-mirror request construction, sampling, in-flight
   limits, recursion marker handling, and constant-time marker checks into a
   focused server module.
