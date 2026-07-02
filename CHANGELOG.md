@@ -89,6 +89,8 @@ behavior when the change improves security or project direction.
   the main validator stays focused on policy ordering and cross-field checks.
 - Split FIPS/ISO cache encryption compliance validation out of the cache config
   DTO module while preserving the existing public helper export.
+- Split proxy default helper functions out of the proxy config DTO module while
+  preserving serde defaults and upstream policy validation behavior.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
