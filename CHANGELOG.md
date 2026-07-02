@@ -83,6 +83,8 @@ behavior when the change improves security or project direction.
   command runner no longer owns serialization DTOs.
 - Split config-tester regression coverage into a child module so the production
   tester entrypoint stays focused on command orchestration.
+- Split route path, regex, rewrite-template, and method validation helpers out
+  of the route config DTO module while preserving the existing helper exports.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
