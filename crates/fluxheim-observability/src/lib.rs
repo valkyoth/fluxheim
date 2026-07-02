@@ -17,7 +17,8 @@ pub use metrics_labels::{
     metrics_outcome_class, metrics_php_fpm_pool_event_label, metrics_php_fpm_retry_reason_label,
     metrics_php_outcome_label, metrics_php_stderr_state_label, metrics_ratio_per_mille,
     metrics_status_class, metrics_stream_direction_label, metrics_stream_outcome_label,
-    metrics_u64_to_i64_saturating, metrics_usize_to_i64_saturating,
+    metrics_u64_to_i64_saturating, metrics_udp_direction_label, metrics_udp_drop_reason_label,
+    metrics_udp_mode_label, metrics_udp_outcome_label, metrics_usize_to_i64_saturating,
     metrics_usize_to_u64_saturating,
 };
 #[cfg(feature = "otlp-http")]

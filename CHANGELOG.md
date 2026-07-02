@@ -79,6 +79,9 @@ behavior when the change improves security or project direction.
 - Split the ACME init issuer CLI value enum into a focused child module so
   `src/cli.rs` keeps room under the modularity target after test-profile
   import gating.
+- Move UDP metric label bounding helpers into `fluxheim-observability` and
+  remove the root `metrics_labels` forwarding shim; root metrics now import
+  label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
 - Move CLI test-only compatibility imports into a focused child module so
   `src/cli.rs` stays below the modularity target after command-helper splits.
 - Split metrics label and bounded numeric helpers out of

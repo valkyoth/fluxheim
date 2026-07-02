@@ -238,6 +238,44 @@ pub fn metrics_php_stderr_state_label(state: &str) -> &'static str {
     }
 }
 
+pub fn metrics_udp_mode_label(mode: &str) -> &'static str {
+    match mode {
+        "dns_load_balance" => "dns_load_balance",
+        "syslog_forward" => "syslog_forward",
+        "quic_pass_through" => "quic_pass_through",
+        "game_proxy" => "game_proxy",
+        _ => "other",
+    }
+}
+
+pub fn metrics_udp_direction_label(direction: &str) -> &'static str {
+    match direction {
+        "downstream" => "downstream",
+        "upstream" => "upstream",
+        _ => "other",
+    }
+}
+
+pub fn metrics_udp_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "accepted" => "accepted",
+        "sent" => "sent",
+        "error" => "error",
+        _ => "other",
+    }
+}
+
+pub fn metrics_udp_drop_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "max_sessions" => "max_sessions",
+        "max_sessions_per_source" => "max_sessions_per_source",
+        "oversized_downstream" => "oversized_downstream",
+        "oversized_upstream" => "oversized_upstream",
+        "response_rate_limited" => "response_rate_limited",
+        _ => "other",
+    }
+}
+
 pub fn metrics_acme_event_label(event: &str) -> &'static str {
     match event {
         "pending" => "pending",

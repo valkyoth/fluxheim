@@ -2,7 +2,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::metrics_labels::{
+use fluxheim_cache::{
     cache_event_label, cache_operation_label, cache_phase_label, cache_purge_mode_label,
     cache_purge_operation_label, cache_purger_entry_result_label, cache_purger_outcome_label,
     cache_scope_label, cache_tier_label,

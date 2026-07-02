@@ -1,22 +1,38 @@
 use std::time::Duration;
 
+use fluxheim_observability::{
+    metrics_acme_event_label as acme_event_label,
+    metrics_admin_auth_event_label as admin_auth_event_label,
+    metrics_admin_auth_scope_label as admin_auth_scope_label,
+    metrics_compression_encoding_label as compression_encoding_label,
+    metrics_edge_policy_label as edge_policy_label,
+    metrics_edge_policy_outcome_label as edge_policy_outcome_label,
+    metrics_host_routing_reason_label as host_routing_reason_label,
+    metrics_load_balancer_event_label as load_balancer_event_label,
+    metrics_load_balancer_queue_outcome_label as load_balancer_queue_outcome_label,
+    metrics_load_balancer_upstream_label as load_balancer_upstream_label,
+    metrics_otlp_export_outcome_label, metrics_outcome_class as outcome_class,
+    metrics_php_fpm_pool_event_label as php_fpm_pool_event_label,
+    metrics_php_fpm_retry_reason_label as php_fpm_retry_reason_label,
+    metrics_php_outcome_label as php_outcome_label,
+    metrics_php_stderr_state_label as php_stderr_state_label,
+    metrics_stream_direction_label as stream_direction_label,
+    metrics_stream_outcome_label as stream_outcome_label,
+    metrics_udp_direction_label as udp_direction_label,
+    metrics_udp_drop_reason_label as udp_drop_reason_label,
+    metrics_udp_mode_label as udp_mode_label, metrics_udp_outcome_label as udp_outcome_label,
+};
 use prometheus::{Encoder, IntGauge};
 
-use crate::metrics_labels::{
-    acme_event_label, admin_auth_event_label, admin_auth_scope_label, cache_scope_label,
-    compression_encoding_label, edge_policy_label, edge_policy_outcome_label,
-    host_routing_reason_label, load_balancer_event_label, load_balancer_queue_outcome_label,
-    load_balancer_upstream_label, metrics_otlp_export_outcome_label, outcome_class,
-    php_fpm_pool_event_label, php_fpm_retry_reason_label, php_outcome_label,
-    php_stderr_state_label, stream_direction_label, stream_outcome_label, udp_direction_label,
-    udp_drop_reason_label, udp_mode_label, udp_outcome_label,
-};
-pub(crate) use crate::metrics_labels::{method_bucket, status_class};
 #[cfg(feature = "proxy")]
 pub(crate) use crate::metrics_native::metrics_background_service_from_config;
 #[cfg(test)]
 pub(crate) use crate::metrics_native::native_metrics_app_from_config;
 pub use crate::metrics_native::{NativeMetricsApp, native_prometheus_response};
+use fluxheim_cache::cache_scope_label;
+pub(crate) use fluxheim_observability::{
+    metrics_method_bucket as method_bucket, metrics_status_class as status_class,
+};
 
 #[path = "metrics_registry.rs"]
 mod metrics_registry;
