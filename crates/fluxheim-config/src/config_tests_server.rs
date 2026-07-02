@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "acme")]
+use crate::{AcmeConfig, VhostAcmeConfig};
 use crate::{
     GeoIpConfig, StaticCertificateConfig, StreamConfig, TlsConfig, UdpConfig,
     VhostAcmeChallengeConfig, VhostRedirectConfig,
