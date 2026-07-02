@@ -93,6 +93,8 @@ behavior when the change improves security or project direction.
   preserving serde defaults and upstream policy validation behavior.
 - Split managed PHP-FPM child spawn, cleanup, termination, and watchdog
   lifecycle helpers out of the process ownership module.
+- Split the native HTTP/2 stack error type out of the connection driver module
+  while preserving the `fluxheim-server` public re-export.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.
