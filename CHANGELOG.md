@@ -56,6 +56,8 @@ behavior when the change improves security or project direction.
 - Split the native `/metrics` HTTP app, listener background service, and bearer
   authorization checks out of the root metrics registry into a focused private
   module.
+- Split root metrics bounded-label mapping into a focused private module while
+  preserving the existing Prometheus label normalization behavior.
 - Split trusted client-IP restoration and Forwarded header helpers out of
   `fluxheim-headers/src/lib.rs` into a focused crate module while preserving
   the public exports and privacy-mode gating.

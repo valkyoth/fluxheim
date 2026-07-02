@@ -7,6 +7,18 @@ use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
 };
 
+use crate::metrics_labels::{
+    acme_event_label, admin_auth_event_label, admin_auth_scope_label, cache_event_label,
+    cache_operation_label, cache_phase_label, cache_purge_mode_label, cache_purge_operation_label,
+    cache_purger_entry_result_label, cache_purger_outcome_label, cache_scope_label,
+    cache_tier_label, compression_encoding_label, edge_policy_label, edge_policy_outcome_label,
+    host_routing_reason_label, load_balancer_event_label, load_balancer_queue_outcome_label,
+    load_balancer_upstream_label, metrics_otlp_export_outcome_label, outcome_class,
+    php_fpm_pool_event_label, php_fpm_retry_reason_label, php_outcome_label,
+    php_stderr_state_label, stream_direction_label, stream_outcome_label, udp_direction_label,
+    udp_drop_reason_label, udp_mode_label, udp_outcome_label,
+};
+pub(crate) use crate::metrics_labels::{method_bucket, status_class};
 #[cfg(feature = "proxy")]
 pub(crate) use crate::metrics_native::metrics_background_service_from_config;
 #[cfg(test)]
@@ -1635,160 +1647,6 @@ fn int_gauge(
     let _ = cell.set(gauge);
     cell.get()
         .ok_or_else(|| prometheus::Error::Msg(format!("{name} failed to initialize")))
-}
-
-fn outcome_class(status: Option<u16>, error: bool) -> &'static str {
-    fluxheim_observability::metrics_outcome_class(status, error)
-}
-
-fn method_bucket(method: &str) -> &'static str {
-    fluxheim_observability::metrics_method_bucket(method)
-}
-
-fn status_class(status: Option<u16>) -> &'static str {
-    fluxheim_observability::metrics_status_class(status)
-}
-
-fn host_routing_reason_label(reason: &str) -> &'static str {
-    fluxheim_observability::metrics_host_routing_reason_label(reason)
-}
-
-fn admin_auth_event_label(event: &str) -> &'static str {
-    fluxheim_observability::metrics_admin_auth_event_label(event)
-}
-
-fn admin_auth_scope_label(scope: &str) -> &'static str {
-    fluxheim_observability::metrics_admin_auth_scope_label(scope)
-}
-
-fn cache_tier_label(tier: &str) -> &'static str {
-    fluxheim_cache::cache_tier_label(tier)
-}
-
-fn cache_scope_label(route: Option<&str>) -> &'static str {
-    fluxheim_cache::cache_scope_label(route)
-}
-
-fn compression_encoding_label(encoding: &str) -> &'static str {
-    fluxheim_observability::metrics_compression_encoding_label(encoding)
-}
-
-fn edge_policy_label(policy: &str) -> &'static str {
-    fluxheim_observability::metrics_edge_policy_label(policy)
-}
-
-fn edge_policy_outcome_label(outcome: &str) -> &'static str {
-    fluxheim_observability::metrics_edge_policy_outcome_label(outcome)
-}
-
-fn load_balancer_event_label(event: &str) -> &'static str {
-    fluxheim_observability::metrics_load_balancer_event_label(event)
-}
-
-fn load_balancer_queue_outcome_label(outcome: &str) -> &'static str {
-    fluxheim_observability::metrics_load_balancer_queue_outcome_label(outcome)
-}
-
-fn load_balancer_upstream_label(upstream: Option<&str>) -> &str {
-    fluxheim_observability::metrics_load_balancer_upstream_label(upstream)
-}
-
-fn cache_event_label(event: &str) -> &'static str {
-    fluxheim_cache::cache_event_label(event)
-}
-
-fn cache_phase_label(phase: &str) -> &'static str {
-    fluxheim_cache::cache_phase_label(phase)
-}
-
-fn cache_operation_label(operation: &str) -> &'static str {
-    fluxheim_cache::cache_operation_label(operation)
-}
-
-fn cache_purge_operation_label(operation: &str) -> &'static str {
-    fluxheim_cache::cache_purge_operation_label(operation)
-}
-
-fn cache_purge_mode_label(mode: &str) -> &'static str {
-    fluxheim_cache::cache_purge_mode_label(mode)
-}
-
-fn cache_purger_outcome_label(outcome: &str) -> &'static str {
-    fluxheim_cache::cache_purger_outcome_label(outcome)
-}
-
-fn cache_purger_entry_result_label(result: &str) -> &'static str {
-    fluxheim_cache::cache_purger_entry_result_label(result)
-}
-
-fn php_outcome_label(outcome: &str) -> &'static str {
-    fluxheim_observability::metrics_php_outcome_label(outcome)
-}
-
-fn php_fpm_retry_reason_label(reason: &str) -> &'static str {
-    fluxheim_observability::metrics_php_fpm_retry_reason_label(reason)
-}
-
-fn php_fpm_pool_event_label(event: &str) -> &'static str {
-    fluxheim_observability::metrics_php_fpm_pool_event_label(event)
-}
-
-fn php_stderr_state_label(state: &str) -> &'static str {
-    fluxheim_observability::metrics_php_stderr_state_label(state)
-}
-
-fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {
-    fluxheim_observability::metrics_otlp_export_outcome_label(outcome)
-}
-
-fn stream_outcome_label(outcome: &str) -> &'static str {
-    fluxheim_observability::metrics_stream_outcome_label(outcome)
-}
-
-fn stream_direction_label(direction: &str) -> &'static str {
-    fluxheim_observability::metrics_stream_direction_label(direction)
-}
-
-fn udp_mode_label(mode: &str) -> &'static str {
-    match mode {
-        "dns_load_balance" => "dns_load_balance",
-        "syslog_forward" => "syslog_forward",
-        "quic_pass_through" => "quic_pass_through",
-        "game_proxy" => "game_proxy",
-        _ => "other",
-    }
-}
-
-fn udp_direction_label(direction: &str) -> &'static str {
-    match direction {
-        "downstream" => "downstream",
-        "upstream" => "upstream",
-        _ => "other",
-    }
-}
-
-fn udp_outcome_label(outcome: &str) -> &'static str {
-    match outcome {
-        "accepted" => "accepted",
-        "sent" => "sent",
-        "error" => "error",
-        _ => "other",
-    }
-}
-
-fn udp_drop_reason_label(reason: &str) -> &'static str {
-    match reason {
-        "max_sessions" => "max_sessions",
-        "max_sessions_per_source" => "max_sessions_per_source",
-        "oversized_downstream" => "oversized_downstream",
-        "oversized_upstream" => "oversized_upstream",
-        "response_rate_limited" => "response_rate_limited",
-        _ => "other",
-    }
-}
-
-fn acme_event_label(event: &str) -> &'static str {
-    fluxheim_observability::metrics_acme_event_label(event)
 }
 
 #[cfg(test)]
