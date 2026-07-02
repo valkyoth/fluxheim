@@ -1,5 +1,11 @@
 use fluxheim_config::ByteSize;
 
+pub use crate::api_purge::{
+    CacheBackgroundPurgeResult, CacheBulkPurgeRequest, CacheBulkPurgeResult,
+    CacheIndexedPathPatternPurgeRequest, CacheIndexedPathPrefixPurgeRequest,
+    CacheIndexedPurgeRequest, CacheIndexedPurgeResult, CacheIndexedTagPurgeRequest,
+    CachePurgeRequest, CachePurgeResult, CacheStalePurgeRequest, CacheStalePurgeResult,
+};
 pub use crate::api_summary::{
     cache_average_bytes, cache_object_lookup_body_bytes_summary, cache_object_lookup_bool_summary,
     cache_object_lookup_cache_tags_summary, cache_object_lookup_fresh_ttl_summary,
@@ -8,69 +14,6 @@ pub use crate::api_summary::{
     cache_storage_tiers, cache_warm_counts_summary, cache_warm_increment_count,
     cache_warm_safe_label,
 };
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CachePurgeRequest<'a> {
-    pub vhost: Option<&'a str>,
-    pub route: Option<&'a str>,
-    pub host: &'a str,
-    pub method: &'a str,
-    pub path: &'a str,
-    pub query: Option<&'a str>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheBulkPurgeRequest<'a> {
-    pub vhost: Option<&'a str>,
-    pub route: Option<&'a str>,
-    pub host: &'a str,
-    pub method: &'a str,
-    pub paths: Vec<&'a str>,
-    pub query: Option<&'a str>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheIndexedPurgeRequest<'a> {
-    pub vhost: &'a str,
-    pub route: Option<&'a str>,
-    pub limit: usize,
-    pub soft: bool,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheIndexedPathPrefixPurgeRequest<'a> {
-    pub vhost: &'a str,
-    pub route: Option<&'a str>,
-    pub path_prefix: &'a str,
-    pub limit: usize,
-    pub soft: bool,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheIndexedTagPurgeRequest<'a> {
-    pub vhost: &'a str,
-    pub route: Option<&'a str>,
-    pub cache_tag: &'a str,
-    pub limit: usize,
-    pub soft: bool,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheStalePurgeRequest<'a> {
-    pub vhost: &'a str,
-    pub route: Option<&'a str>,
-    pub limit: usize,
-    pub dry_run: bool,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheIndexedPathPatternPurgeRequest<'a> {
-    pub vhost: &'a str,
-    pub route: Option<&'a str>,
-    pub path_pattern: &'a str,
-    pub limit: usize,
-    pub soft: bool,
-}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheKeyPreview {
@@ -112,172 +55,6 @@ impl CacheKeyPreviewScope {
             Self::Vhost => "vhost",
             Self::Route => "route",
         }
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CachePurgeResult {
-    pub vhost: String,
-    pub route: Option<String>,
-    pub host: String,
-    pub method: String,
-    pub path: String,
-    pub query: Option<String>,
-    pub cache_key: String,
-    pub memory_purged: bool,
-    pub disk_purged: bool,
-}
-
-impl CachePurgeResult {
-    pub fn purged(&self) -> bool {
-        self.memory_purged || self.disk_purged
-    }
-
-    pub fn not_purged(&self) -> bool {
-        !self.purged()
-    }
-
-    pub fn memory_not_purged(&self) -> bool {
-        !self.memory_purged
-    }
-
-    pub fn disk_not_purged(&self) -> bool {
-        !self.disk_purged
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheBulkPurgeResult {
-    pub vhost: String,
-    pub results: Vec<CachePurgeResult>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheIndexedPurgeResult {
-    pub vhost: String,
-    pub route: Option<String>,
-    pub memory_matched: usize,
-    pub memory_purged: usize,
-    pub memory_truncated: bool,
-    pub disk_matched: usize,
-    pub disk_purged: usize,
-    pub disk_truncated: bool,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct CacheStalePurgeResult {
-    pub vhost: String,
-    pub route: Option<String>,
-    pub memory_scanned: usize,
-    pub memory_stale: usize,
-    pub memory_purged: usize,
-    pub memory_truncated: bool,
-    pub disk_scanned: usize,
-    pub disk_stale: usize,
-    pub disk_purged: usize,
-    pub disk_truncated: bool,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub struct CacheBackgroundPurgeResult {
-    pub targets: usize,
-    pub scanned: usize,
-    pub stale: usize,
-    pub purged: usize,
-    pub truncated: bool,
-}
-
-impl CacheStalePurgeResult {
-    pub fn scanned(&self) -> usize {
-        self.memory_scanned.saturating_add(self.disk_scanned)
-    }
-
-    pub fn stale(&self) -> usize {
-        self.memory_stale.saturating_add(self.disk_stale)
-    }
-
-    pub fn purged(&self) -> usize {
-        self.memory_purged.saturating_add(self.disk_purged)
-    }
-
-    pub fn not_purged(&self) -> usize {
-        self.stale().saturating_sub(self.purged())
-    }
-
-    pub fn truncated(&self) -> bool {
-        self.memory_truncated || self.disk_truncated
-    }
-
-    pub fn route(&self) -> Option<&str> {
-        self.route.as_deref()
-    }
-}
-
-impl CacheIndexedPurgeResult {
-    pub fn matched(&self) -> usize {
-        self.memory_matched.saturating_add(self.disk_matched)
-    }
-
-    pub fn purged(&self) -> usize {
-        self.memory_purged.saturating_add(self.disk_purged)
-    }
-
-    pub fn not_purged(&self) -> usize {
-        self.matched().saturating_sub(self.purged())
-    }
-
-    pub fn memory_not_purged(&self) -> usize {
-        self.memory_matched.saturating_sub(self.memory_purged)
-    }
-
-    pub fn disk_not_purged(&self) -> usize {
-        self.disk_matched.saturating_sub(self.disk_purged)
-    }
-
-    pub fn truncated(&self) -> bool {
-        self.memory_truncated || self.disk_truncated
-    }
-}
-
-impl CacheBulkPurgeResult {
-    pub fn route(&self) -> Option<&str> {
-        self.results
-            .first()
-            .and_then(|result| result.route.as_deref())
-    }
-
-    pub fn requested(&self) -> usize {
-        self.results.len()
-    }
-
-    pub fn purged(&self) -> usize {
-        self.results.iter().filter(|result| result.purged()).count()
-    }
-
-    pub fn not_purged(&self) -> usize {
-        self.requested().saturating_sub(self.purged())
-    }
-
-    pub fn memory_purged(&self) -> usize {
-        self.results
-            .iter()
-            .filter(|result| result.memory_purged)
-            .count()
-    }
-
-    pub fn memory_not_purged(&self) -> usize {
-        self.requested().saturating_sub(self.memory_purged())
-    }
-
-    pub fn disk_purged(&self) -> usize {
-        self.results
-            .iter()
-            .filter(|result| result.disk_purged)
-            .count()
-    }
-
-    pub fn disk_not_purged(&self) -> usize {
-        self.requested().saturating_sub(self.disk_purged())
     }
 }
 

@@ -108,6 +108,8 @@ behavior when the change improves security or project direction.
 - Split stream route default values and optional-timeout validation glue out of
   the stream config DTO module while preserving `DEFAULT_STREAM_MAX_CONNECTIONS`
   as a public `config_stream` export.
+- Split cache purge request and result DTOs out of the cache API aggregation
+  module while preserving the existing `fluxheim-cache` public exports.
 - Move UDP metric label bounding helpers into `fluxheim-observability` and
   remove the root `metrics_labels` forwarding shim; root metrics now import
   label helpers directly from `fluxheim-observability` and `fluxheim-cache`.

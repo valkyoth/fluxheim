@@ -5,6 +5,7 @@
 )]
 
 pub mod api;
+mod api_purge;
 mod api_summary;
 pub mod headers;
 mod headers_directives;
