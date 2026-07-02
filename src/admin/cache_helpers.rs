@@ -3,6 +3,13 @@ use serde_json::{Value, json};
 mod stats_json;
 pub(super) use stats_json::*;
 
+use super::{
+    DEFAULT_CACHE_INDEXED_PURGE_BATCHES, DEFAULT_CACHE_INDEXED_PURGE_LIMIT,
+    MAX_CACHE_INDEXED_PURGE_BATCHES, MAX_CACHE_INDEXED_PURGE_LIMIT, MAX_CACHE_PURGE_HOST_BYTES,
+    MAX_CACHE_PURGE_METHOD_BYTES, MAX_CACHE_PURGE_PATH_BYTES, MAX_CACHE_PURGE_QUERY_BYTES,
+    MAX_CACHE_PURGE_TAG_BYTES,
+};
+
 #[cfg(feature = "cache")]
 pub(super) fn cache_scope(route: Option<&str>) -> &'static str {
     if route.is_some() { "route" } else { "vhost" }
@@ -232,4 +239,188 @@ pub(super) fn repeat_cache_stale_purge(
                 "cache stale purge batches must be greater than zero",
             )
         })
+}
+pub(super) fn validated_cache_purge_host(host: Option<&str>) -> Result<&str, &'static str> {
+    let Some(host) = host.map(str::trim).filter(|host| !host.is_empty()) else {
+        return Err("cache purge host is required");
+    };
+    if host.len() > MAX_CACHE_PURGE_HOST_BYTES
+        || host
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || matches!(byte, b'/' | b'\\'))
+        || host.chars().any(char::is_whitespace)
+    {
+        return Err("cache purge host is invalid");
+    }
+    Ok(host)
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn validated_cache_purge_method(method: Option<&str>) -> Result<&str, &'static str> {
+    let method = method.unwrap_or("GET").trim();
+    if method.is_empty() {
+        return Err("cache purge method cannot be empty");
+    }
+    if method.len() > MAX_CACHE_PURGE_METHOD_BYTES || !method.bytes().all(is_http_token_byte) {
+        return Err("cache purge method is invalid");
+    }
+    Ok(method)
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn is_http_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn validated_cache_purge_path(path: Option<&str>) -> Result<&str, &'static str> {
+    let Some(path) = path.map(str::trim).filter(|path| !path.is_empty()) else {
+        return Err("cache purge path is required and must start with /");
+    };
+    validate_cache_purge_path_value(path)?;
+    Ok(path)
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn validate_cache_purge_path_value(path: &str) -> Result<(), &'static str> {
+    if !path.starts_with('/') {
+        return Err("cache purge path is required and must start with /");
+    }
+    if path.len() > MAX_CACHE_PURGE_PATH_BYTES
+        || path
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b'\\')
+    {
+        return Err("cache purge path is invalid");
+    }
+    if path_contains_traversal_segment(path)
+        || !fluxheim_common::path_safety::safe_forward_path_and_query(path)
+    {
+        return Err("cache purge path must not contain traversal segments");
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn validated_cache_purge_path_prefix(
+    prefix: Option<&str>,
+) -> Result<&str, &'static str> {
+    let Some(prefix) = prefix.map(str::trim).filter(|prefix| !prefix.is_empty()) else {
+        return Err("cache path-prefix purge prefix is required and must start with /");
+    };
+    validate_cache_purge_path_value(prefix)?;
+    if prefix == "/" {
+        return Err("cache path-prefix purge prefix must not be /; use scope purge instead");
+    }
+    Ok(prefix)
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn validated_cache_purge_path_pattern(
+    pattern: Option<&str>,
+) -> Result<&str, &'static str> {
+    let Some(pattern) = pattern.map(str::trim).filter(|pattern| !pattern.is_empty()) else {
+        return Err("cache wildcard purge pattern is required and must start with /");
+    };
+    validate_cache_purge_path_value(pattern)?;
+    if !pattern.contains('*') {
+        return Err("cache wildcard purge pattern must contain *");
+    }
+    if pattern
+        .chars()
+        .filter(|character| *character != '*')
+        .collect::<String>()
+        == "/"
+    {
+        return Err(
+            "cache wildcard purge pattern must not target the whole cache; use scope purge instead",
+        );
+    }
+    Ok(pattern)
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn validated_cache_purge_tag(tag: Option<&str>) -> Result<&str, &'static str> {
+    let Some(tag) = tag.map(str::trim).filter(|tag| !tag.is_empty()) else {
+        return Err("cache tag purge tag is required");
+    };
+    if tag.len() > MAX_CACHE_PURGE_TAG_BYTES
+        || !tag.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':' | b'/' | b'=')
+        })
+    {
+        return Err("cache tag purge tag is invalid");
+    }
+    Ok(tag)
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn path_contains_traversal_segment(path: &str) -> bool {
+    path.split('/').any(|segment| matches!(segment, "." | ".."))
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn validated_cache_purge_query(
+    query: Option<&str>,
+) -> Result<Option<&str>, &'static str> {
+    let Some(query) = query.filter(|query| !query.is_empty()) else {
+        return Ok(None);
+    };
+    if query.len() > MAX_CACHE_PURGE_QUERY_BYTES
+        || query
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || matches!(byte, b'#'))
+    {
+        return Err("cache purge query is invalid");
+    }
+    Ok(Some(query))
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn validated_cache_indexed_purge_limit(
+    limit: Option<&str>,
+) -> Result<usize, &'static str> {
+    let Some(limit) = limit.map(str::trim).filter(|limit| !limit.is_empty()) else {
+        return Ok(DEFAULT_CACHE_INDEXED_PURGE_LIMIT);
+    };
+    let limit = limit
+        .parse::<usize>()
+        .map_err(|_| "cache indexed purge limit is invalid")?;
+    if limit == 0 || limit > MAX_CACHE_INDEXED_PURGE_LIMIT {
+        return Err("cache indexed purge limit is out of range");
+    }
+    Ok(limit)
+}
+
+#[cfg(feature = "cache")]
+pub(super) fn validated_cache_indexed_purge_batches(
+    batches: Option<&str>,
+) -> Result<usize, &'static str> {
+    let Some(batches) = batches.map(str::trim).filter(|batches| !batches.is_empty()) else {
+        return Ok(DEFAULT_CACHE_INDEXED_PURGE_BATCHES);
+    };
+    let batches = batches
+        .parse::<usize>()
+        .map_err(|_| "cache indexed purge batches is invalid")?;
+    if batches == 0 || batches > MAX_CACHE_INDEXED_PURGE_BATCHES {
+        return Err("cache indexed purge batches is out of range");
+    }
+    Ok(batches)
 }
