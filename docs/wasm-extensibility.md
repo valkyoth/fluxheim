@@ -51,7 +51,8 @@ language.
 The first implementation slice is the sandbox foundation: `fluxheim-wasm`
 loads plugin files from approved roots, rejects symlinked plugin paths and
 oversized modules, records SHA-256 module hashes, and executes real Wasm under
-fuel, memory, table/instance, and wall-time limits.
+fuel, memory, table-element, table/instance, compile-timeout, and wall-time
+limits.
 
 The first useful policy-hook scope should cover the common extension cases
 without exposing request bodies or arbitrary I/O.
@@ -122,7 +123,9 @@ Required limits:
 - maximum module size;
 - maximum compiled artifact size;
 - maximum linear memory;
+- maximum table elements;
 - maximum fuel/instruction budget;
+- maximum compile time;
 - maximum wall-time;
 - maximum log bytes emitted by plugin;
 - maximum header mutations;
@@ -175,13 +178,16 @@ paths = ["/*"]
 - Run `scripts/smoke_wasm_sandbox.sh` to execute a real Wasm decision module
   and verify that an infinite-loop module traps under sandbox limits.
 - Reject missing, symlinked, oversized, and invalid plugin files.
+- Verify Unix plugin opens use `O_NOFOLLOW` where available and reject file
+  identity changes between validation and read.
 - Reject unsupported ABI versions.
 - Verify request header mutation within limits.
 - Verify response header mutation within limits.
 - Verify deny decisions and synthetic responses.
 - Verify plugins cannot access bodies, filesystem, network, env, or admin APIs
   without capability grants.
-- Verify fuel exhaustion, timeout, trap, and panic behavior.
+- Verify fuel exhaustion, timeout, compile timeout, table-element limit, trap,
+  and panic behavior.
 - Verify fail-open and fail-closed policy behavior.
 - Verify sensitive field redaction.
 - Verify plugin execution is isolated per request.

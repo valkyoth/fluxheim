@@ -18,10 +18,17 @@ and trapping Wasm modules.
   and files over the configured module-size limit.
 - Record the SHA-256 hash of loaded plugin bytes for future admin/status and
   audit surfaces.
-- Add a Wasmtime runtime foundation with bounded fuel, memory, instance/table
-  limits, and a wall-time watchdog.
+- Add a Wasmtime runtime foundation with bounded fuel, memory, table elements,
+  instance/table limits, compile timeout, and a per-call wall-time watchdog.
+- Avoid cross-request timeout interference by using a per-store epoch-deadline
+  callback: a shared engine epoch tick only interrupts the invocation whose own
+  deadline has elapsed.
+- Open plugin files with Unix `O_NOFOLLOW` where available and verify the
+  opened file handle still matches the pre-open metadata before reading plugin
+  bytes.
 - Add unit tests for plugin path safety, oversized modules, real Wasm
-  execution, fuel exhaustion, and memory-limit rejection.
+  execution, fuel exhaustion, memory-limit rejection, and table-element limit
+  rejection.
 - Add `scripts/smoke_wasm_sandbox.sh` as a real Wasm smoke test that runs a
   successful module and verifies an infinite-loop module traps under limits.
 - Add the Wasm smoke to `scripts/test_starter.py`; the deep release gate now
@@ -36,3 +43,7 @@ and trapping Wasm modules.
   execution proof. Request/response header hooks, access decisions, cache
   policy hooks, proxy-ABI compatibility, and WASI capabilities remain staged for
   later `1.7.x` releases.
+- Wasm compilation is bounded by a compile timeout around the worker that
+  builds the module. Fuel and epoch checks apply after compilation, so future
+  request-facing hooks should still pair this with configured plugin
+  concurrency limits.

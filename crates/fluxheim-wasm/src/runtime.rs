@@ -1,8 +1,11 @@
 use std::sync::mpsc;
 use std::thread;
+use std::time::Instant;
 
 use thiserror::Error;
-use wasmtime::{Config, Engine, Instance, Module, Store, StoreLimits, StoreLimitsBuilder};
+use wasmtime::{
+    Config, Engine, Instance, Module, Store, StoreLimits, StoreLimitsBuilder, UpdateDeadline,
+};
 
 use crate::{WasmPluginError, WasmPluginFile, WasmSandboxLimits};
 
@@ -27,6 +30,8 @@ pub enum WasmExecutionError {
     RuntimeSetup(String),
     #[error("wasm module compile failed: {0}")]
     Compile(String),
+    #[error("wasm module compile timed out after {timeout_ms}ms")]
+    CompileTimeout { timeout_ms: u128 },
     #[error("wasm module instantiation failed: {0}")]
     Instantiate(String),
     #[error("wasm exported function {function:?} is missing or has the wrong type: {message}")]
@@ -55,11 +60,11 @@ impl FluxWasmRuntime {
         plugin: &WasmPluginFile,
         function: &str,
     ) -> Result<WasmExecutionOutcome, WasmExecutionError> {
-        let module = Module::new(&self.engine, plugin.bytes())
-            .map_err(|error| WasmExecutionError::Compile(error.to_string()))?;
+        let module = self.compile_module(plugin)?;
         let state = RuntimeStoreState {
             limits: StoreLimitsBuilder::new()
                 .memory_size(self.limits.max_memory_bytes)
+                .table_elements(self.limits.max_table_elements)
                 .instances(1)
                 .memories(1)
                 .tables(2)
@@ -71,7 +76,14 @@ impl FluxWasmRuntime {
             .set_fuel(self.limits.fuel)
             .map_err(|error| WasmExecutionError::RuntimeSetup(error.to_string()))?;
         store.set_epoch_deadline(1);
-        store.epoch_deadline_trap();
+        let deadline = Instant::now() + self.limits.timeout;
+        store.epoch_deadline_callback(move |_store| {
+            if Instant::now() >= deadline {
+                Ok(UpdateDeadline::Interrupt)
+            } else {
+                Ok(UpdateDeadline::Continue(1))
+            }
+        });
 
         let (watchdog_cancel, watchdog_cancelled) = mpsc::channel();
         let watchdog_engine = self.engine.clone();
@@ -104,6 +116,27 @@ impl FluxWasmRuntime {
             result: result?,
             plugin_sha256: plugin.sha256_hex().to_owned(),
         })
+    }
+
+    fn compile_module(&self, plugin: &WasmPluginFile) -> Result<Module, WasmExecutionError> {
+        let engine = self.engine.clone();
+        let bytes = plugin.bytes().to_vec();
+        let (result_sender, result_receiver) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            let result = Module::new(&engine, &bytes)
+                .map_err(|error| WasmExecutionError::Compile(error.to_string()));
+            let _ = result_sender.send(result);
+        });
+
+        match result_receiver.recv_timeout(self.limits.compile_timeout) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(WasmExecutionError::CompileTimeout {
+                timeout_ms: self.limits.compile_timeout.as_millis(),
+            }),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(WasmExecutionError::Compile(
+                "compile worker failed".to_owned(),
+            )),
+        }
     }
 }
 
@@ -180,6 +213,30 @@ mod tests {
         );
         let limits = WasmSandboxLimits {
             max_memory_bytes: 64 * 1024,
+            ..WasmSandboxLimits::default()
+        };
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+
+        let error = runtime.run_i32_no_args(&plugin, "decision").unwrap_err();
+
+        assert!(matches!(error, WasmExecutionError::Instantiate(_)));
+    }
+
+    #[test]
+    fn runtime_rejects_excessive_table_declaration() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"
+            (module
+              (table 11 funcref)
+              (func (export "decision") (result i32) i32.const 1))
+            "#,
+        );
+        let limits = WasmSandboxLimits {
+            max_table_elements: 10,
             ..WasmSandboxLimits::default()
         };
         let plugin =

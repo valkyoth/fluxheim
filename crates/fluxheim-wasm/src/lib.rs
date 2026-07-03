@@ -12,6 +12,44 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))
+))]
+const WASM_PLUGIN_O_NOFOLLOW: i32 = 0o400000;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+const WASM_PLUGIN_O_NOFOLLOW: i32 = 0x0100;
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))
+))]
+compile_error!(
+    "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe Wasm plugin opening before building Fluxheim"
+);
+
 #[cfg(feature = "runtime")]
 mod runtime;
 #[cfg(feature = "runtime")]
@@ -20,15 +58,19 @@ pub use runtime::{FluxWasmRuntime, WasmExecutionError, WasmExecutionOutcome};
 pub const FLUXHEIM_WASM_ABI_VERSION: u32 = 1;
 pub const DEFAULT_MAX_MODULE_BYTES: u64 = 1_048_576;
 pub const DEFAULT_MAX_MEMORY_BYTES: usize = 16 * 1024 * 1024;
+pub const DEFAULT_MAX_TABLE_ELEMENTS: usize = 10_000;
 pub const DEFAULT_FUEL: u64 = 5_000_000;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(50);
+pub const DEFAULT_COMPILE_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct WasmSandboxLimits {
     pub max_module_bytes: u64,
     pub max_memory_bytes: usize,
+    pub max_table_elements: usize,
     pub fuel: u64,
     pub timeout: Duration,
+    pub compile_timeout: Duration,
 }
 
 impl Default for WasmSandboxLimits {
@@ -36,8 +78,10 @@ impl Default for WasmSandboxLimits {
         Self {
             max_module_bytes: DEFAULT_MAX_MODULE_BYTES,
             max_memory_bytes: DEFAULT_MAX_MEMORY_BYTES,
+            max_table_elements: DEFAULT_MAX_TABLE_ELEMENTS,
             fuel: DEFAULT_FUEL,
             timeout: DEFAULT_TIMEOUT,
+            compile_timeout: DEFAULT_COMPILE_TIMEOUT,
         }
     }
 }
@@ -56,6 +100,12 @@ impl WasmSandboxLimits {
                 reason: "must be greater than zero",
             });
         }
+        if self.max_table_elements == 0 {
+            return Err(WasmPluginError::InvalidLimit {
+                field: "max_table_elements",
+                reason: "must be greater than zero",
+            });
+        }
         if self.fuel == 0 {
             return Err(WasmPluginError::InvalidLimit {
                 field: "fuel",
@@ -65,6 +115,12 @@ impl WasmSandboxLimits {
         if self.timeout.is_zero() {
             return Err(WasmPluginError::InvalidLimit {
                 field: "timeout",
+                reason: "must be greater than zero",
+            });
+        }
+        if self.compile_timeout.is_zero() {
+            return Err(WasmPluginError::InvalidLimit {
+                field: "compile_timeout",
                 reason: "must be greater than zero",
             });
         }
@@ -142,10 +198,7 @@ pub fn load_plugin_file(
         });
     }
 
-    let file = fs::File::open(path).map_err(|source| WasmPluginError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let file = open_verified_plugin_file(path, &metadata)?;
     let mut bytes = Vec::new();
     file.take(limits.max_module_bytes.saturating_add(1))
         .read_to_end(&mut bytes)
@@ -166,6 +219,47 @@ pub fn load_plugin_file(
         bytes,
         sha256_hex,
     })
+}
+
+fn open_verified_plugin_file(
+    path: &Path,
+    expected_metadata: &fs::Metadata,
+) -> Result<fs::File, WasmPluginError> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(WASM_PLUGIN_O_NOFOLLOW);
+    }
+
+    let file = options.open(path).map_err(|source| WasmPluginError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let opened_metadata = file.metadata().map_err(|source| WasmPluginError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !opened_metadata.is_file() {
+        return Err(WasmPluginError::UnsafePath {
+            path: path.to_path_buf(),
+            message: "plugin handle must be a regular file",
+        });
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if opened_metadata.dev() != expected_metadata.dev()
+            || opened_metadata.ino() != expected_metadata.ino()
+        {
+            return Err(WasmPluginError::UnsafePath {
+                path: path.to_path_buf(),
+                message: "plugin file identity changed before read",
+            });
+        }
+    }
+    Ok(file)
 }
 
 pub fn validate_plugin_path(

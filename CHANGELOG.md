@@ -19,10 +19,21 @@ behavior when the change improves security or project direction.
 - Add strict Wasm plugin file loading from approved absolute directories with
   regular-file, symlink-parent, module-size, and SHA-256 recording checks.
 - Add a Wasmtime-backed runtime foundation with bounded module execution using
-  fuel, memory, instance/table limits, and a wall-time watchdog.
+  fuel, memory, table-element, instance/table limits, compile timeout, and a
+  per-call wall-time watchdog.
 - Add `scripts/smoke_wasm_sandbox.sh` and a test-starter entry that execute
   real Wasm modules, including a successful decision function and a trapped
   infinite-loop module.
+
+### Security
+
+- Avoid cross-request Wasm timeout interference by using a per-store epoch
+  deadline callback that only interrupts when that invocation's own wall-clock
+  deadline has elapsed.
+- Cap Wasm table elements in addition to linear memory so plugins cannot grow
+  host-side table storage outside the configured sandbox budget.
+- Open Wasm plugin files with Unix `O_NOFOLLOW` where available and verify the
+  opened file identity still matches the pre-open metadata before reading.
 
 ### Changed
 
