@@ -2,7 +2,11 @@ use std::fs;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use fluxheim_wasm::{FluxWasmRuntime, WasmExecutionError, WasmSandboxLimits, load_plugin_file};
+use fluxheim_wasm::{
+    FluxWasmRuntime, WasmExecutionError, WasmManifestError, WasmPluginAbi, WasmPluginFailMode,
+    WasmPluginManifest, WasmPluginPhase, WasmSandboxLimits, load_plugin_file,
+    validate_plugin_manifest,
+};
 
 fn main() -> ExitCode {
     match run() {
@@ -32,6 +36,35 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         timeout: Duration::from_millis(100),
         ..WasmSandboxLimits::default()
     };
+    let manifest = WasmPluginManifest {
+        name: "smoke-decision".to_owned(),
+        path: plugin.clone(),
+        abi: WasmPluginAbi::FluxheimPolicyV1,
+        phases: vec![WasmPluginPhase::RequestHeaders],
+        limits,
+        fail_mode: WasmPluginFailMode::FailClosed,
+    };
+    let validated = validate_plugin_manifest(manifest, false)?;
+    if validated.path() != plugin {
+        return Err("validated manifest path drifted".into());
+    }
+
+    let unsafe_manifest = WasmPluginManifest {
+        name: "unsafe-access".to_owned(),
+        path: plugin.clone(),
+        abi: WasmPluginAbi::FluxheimPolicyV1,
+        phases: vec![WasmPluginPhase::AccessDecision],
+        limits,
+        fail_mode: WasmPluginFailMode::FailOpen,
+    };
+    match validate_plugin_manifest(unsafe_manifest, false) {
+        Err(WasmManifestError::UnsafeFailOpen) => {}
+        Ok(_) => return Err("unsafe fail-open manifest was accepted".into()),
+        Err(error) => {
+            return Err(format!("expected unsafe fail-open rejection, got {error}").into());
+        }
+    }
+
     let loaded = load_plugin_file(&plugin, std::slice::from_ref(&root), limits)?;
     let runtime = FluxWasmRuntime::new(limits)?;
     let outcome = runtime.run_i32_no_args(&loaded, "decision")?;

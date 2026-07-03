@@ -35,7 +35,9 @@ and trapping Wasm modules.
   rejection.
 - Add `scripts/smoke_wasm_sandbox.sh` as a real Wasm smoke test that runs a
   successful module, verifies an infinite-loop module traps under limits, and
-  proves table growth beyond the configured table-element cap is denied.
+  proves table growth beyond the configured table-element cap is denied. The
+  smoke also validates an accepted plugin manifest and rejects an unsafe
+  `fail_open` access-decision manifest.
 - Add regression tests for symlinked approved-root rejection, zero
   compile-timeout validation, and unrelated engine epoch ticks before an
   invocation's own deadline.

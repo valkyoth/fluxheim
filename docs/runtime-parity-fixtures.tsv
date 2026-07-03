@@ -21,7 +21,7 @@ scripts/smoke_mysql_health_check.sh	script	1.6.35	MySQL/MariaDB active health-ch
 scripts/smoke_postgres_health_check.sh	script	1.6.35	PostgreSQL active health-check parity against a containerized backend.
 scripts/check_smoke_images.sh	script	1.6.35	External smoke dependency image freshness and digest evidence for WordPress, OpenBao, and database smokes.
 scripts/test_starter.py	script	1.6.35	Human-facing selector for local, container, database, WordPress, privacy, and release-gate smokes.
-scripts/smoke_wasm_sandbox.sh	script	1.7.0	Real Wasm sandbox execution and limit-trap smoke.
+scripts/smoke_wasm_sandbox.sh	script	1.7.0	Real Wasm sandbox execution, manifest validation, unsafe fail-open rejection, and limit-trap smoke.
 scripts/validate-wasm-example-plan.sh	script	1.7.0	Wasm example parity acceptance-plan invariant for the 1.7 line.
 scripts/validate-1-0-core.sh	script	1.6.8-1.6.11	Representative stable-core config validation parity.
 scripts/validate-1-0-fixtures.sh	script	1.6.8-1.6.11	Gateway fixture validation parity.

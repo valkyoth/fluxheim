@@ -184,7 +184,8 @@ paths = ["/*"]
 
 - Run `scripts/smoke_wasm_sandbox.sh` to execute a real Wasm decision module
   and verify that an infinite-loop module traps under sandbox limits and table
-  growth past the configured cap is denied.
+  growth past the configured cap is denied. The smoke also validates an
+  accepted manifest and rejects unsafe `fail_open` security-decision manifests.
 - Reject missing, symlinked, oversized, and invalid plugin files.
 - Reject symlinked approved plugin roots.
 - Verify Unix plugin opens use `O_NOFOLLOW` where available and reject file

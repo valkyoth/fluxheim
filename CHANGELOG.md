@@ -23,7 +23,8 @@ behavior when the change improves security or project direction.
   per-call wall-time watchdog.
 - Add `scripts/smoke_wasm_sandbox.sh` and a test-starter entry that execute
   real Wasm modules, including a successful decision function and a trapped
-  infinite-loop module.
+  infinite-loop module. The smoke also validates an accepted plugin manifest
+  and proves unsafe `fail_open` security-decision manifests are rejected.
 - Add a typed Wasm plugin manifest boundary with ABI, phase, fail-mode, path,
   and sandbox-limit validation so later hook wiring consumes validated plugin
   declarations instead of ad hoc config.
