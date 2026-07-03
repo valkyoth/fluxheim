@@ -21,6 +21,8 @@ scripts/smoke_mysql_health_check.sh	script	1.6.35	MySQL/MariaDB active health-ch
 scripts/smoke_postgres_health_check.sh	script	1.6.35	PostgreSQL active health-check parity against a containerized backend.
 scripts/check_smoke_images.sh	script	1.6.35	External smoke dependency image freshness and digest evidence for WordPress, OpenBao, and database smokes.
 scripts/test_starter.py	script	1.6.35	Human-facing selector for local, container, database, WordPress, privacy, and release-gate smokes.
+scripts/smoke_wasm_sandbox.sh	script	1.7.0	Real Wasm sandbox execution and limit-trap smoke.
+scripts/validate-wasm-example-plan.sh	script	1.7.0	Wasm example parity acceptance-plan invariant for the 1.7 line.
 scripts/validate-1-0-core.sh	script	1.6.8-1.6.11	Representative stable-core config validation parity.
 scripts/validate-1-0-fixtures.sh	script	1.6.8-1.6.11	Gateway fixture validation parity.
 scripts/validate-tls-backends.sh	script	1.6.6	TLS backend build/config parity.
@@ -38,5 +40,6 @@ examples/stream-tcp.toml	config	1.6.3	Stream proxy config parity.
 examples/tls-modern.toml	config	1.6.6	Modern TLS policy config parity.
 examples/tls-intermediate.toml	config	1.6.6	Intermediate TLS policy config parity.
 examples/php-fpm.toml	config	1.6.9	PHP-FPM adapter parity.
+docs/wasm-policy-example-parity.md	doc	1.7.0	End-of-line Wasm example and live-test requirements for F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-like cache policy parity.
 tests/fixtures/tls/localhost-cert.pem	fixture	1.6.6	TLS listener/upstream test certificate fixture.
 tests/fixtures/tls/localhost-key.pem	fixture	1.6.6	TLS listener/upstream test key fixture.

@@ -41,6 +41,10 @@ behavior when the change improves security or project direction.
   `1.7` implementation status while keeping request/response policy hooks,
   proxy ABI compatibility, and WASI capabilities staged for later `1.7.x`
   releases.
+- Expand the `1.7` roadmap into concrete staged releases through stabilization
+  and add an enforced Wasm example parity plan for F5 iRules-style policy,
+  nginx Lua/OpenResty-style header policy, HAProxy Lua/SPOE-style routing and
+  load-balancer policy, and VCL-like cache policy examples.
 
 ## 1.6.37 - 2026-07-03
 

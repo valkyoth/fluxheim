@@ -30,6 +30,11 @@ syntax compatibility: Fluxheim should expose typed, versioned host calls and
 bounded decisions rather than embedding Tcl, Lua, or an unrestricted scripting
 language.
 
+The end-of-line example and test requirements for F5 iRules-style policy,
+nginx Lua/OpenResty-style header policy, HAProxy Lua/SPOE-style routing and
+load-balancer policy, and VCL-like cache policy are tracked in
+[Wasm Policy Example Parity](wasm-policy-example-parity.md).
+
 ## Design Goals
 
 - Keep WASM runtime code out of default builds.

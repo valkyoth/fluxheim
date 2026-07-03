@@ -42,6 +42,9 @@ scripts/validate-pingora-boundary-policy.sh check
 echo "stable release gate: runtime parity fixture inventory"
 scripts/validate-runtime-fixtures.sh check
 
+echo "stable release gate: Wasm example parity plan"
+scripts/validate-wasm-example-plan.sh
+
 if [ "$mode" = "release" ]; then
     echo "stable release gate: compatible crate freshness"
     scripts/check_latest_crates.sh

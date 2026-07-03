@@ -469,9 +469,12 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Config Reference](docs/config-reference.md), and
 [Production Readiness](docs/production-readiness.md).
 
-Next lines are planned separately after `1.6`: `1.7` for shared Wasm
-extensibility covering nginx-Lua-style hooks and VCL-like cache policy hooks,
-and `1.8` for HTTP/3/QUIC based on the Rust `quinn`/`h3` stack. See
+The active `1.7` line is the shared Wasm extensibility line. It starts with the
+sandbox foundation and is planned to add tested examples for F5 iRules-style
+policy, nginx Lua/OpenResty-style header policy, HAProxy Lua/SPOE-style
+routing/load-balancer policy, and VCL-like cache policy before the line is
+complete. The `1.8` line remains HTTP/3/QUIC based on the Rust `quinn`/`h3`
+stack. See
 [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
 full release ladder.
 
@@ -506,6 +509,7 @@ full release ladder.
 - [Metrics Architecture](docs/metrics-architecture.md)
 - [OpenTelemetry Tracing](docs/opentelemetry-tracing.md)
 - [WASM Extensibility](docs/wasm-extensibility.md)
+- [Wasm Policy Example Parity](docs/wasm-policy-example-parity.md)
 - [Crypto RPC Edge](docs/crypto-rpc-edge.md)
 - [External Authorization Request](docs/auth-request.md)
 - [Zero-Retention Privacy Mode](docs/zero-retention-privacy-mode.md)

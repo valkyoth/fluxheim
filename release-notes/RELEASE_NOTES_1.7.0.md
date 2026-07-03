@@ -33,6 +33,11 @@ and trapping Wasm modules.
   successful module and verifies an infinite-loop module traps under limits.
 - Add the Wasm smoke to `scripts/test_starter.py`; the deep release gate now
   enables it by default through `FLUXHEIM_GATE_WASM=1`.
+- Add `docs/wasm-policy-example-parity.md` and
+  `scripts/validate-wasm-example-plan.sh` so the `1.7` line has explicit
+  end-of-line example/test requirements for F5 iRules-style policy, nginx
+  Lua/OpenResty-style header policy, HAProxy Lua/SPOE-style routing and
+  load-balancer policy, and VCL-like cache policy.
 
 ## Operator Notes
 
