@@ -90,58 +90,72 @@ pub enum WasmPluginError {
     Io { path: PathBuf, source: io::Error },
 }
 
+struct ValidatedPluginPath {
+    requested: PathBuf,
+    canonical: PathBuf,
+    metadata: fs::Metadata,
+}
+
+impl ValidatedPluginPath {
+    fn requested(&self) -> &Path {
+        &self.requested
+    }
+
+    fn canonical(&self) -> &Path {
+        &self.canonical
+    }
+
+    fn metadata(&self) -> &fs::Metadata {
+        &self.metadata
+    }
+}
+
 pub fn load_plugin_file(
     path: &Path,
     approved_roots: &[PathBuf],
     limits: WasmSandboxLimits,
 ) -> Result<WasmPluginFile, WasmPluginError> {
     let limits = limits.validate()?;
-    validate_plugin_path(path, approved_roots)?;
+    let validated = validated_plugin_path(path, approved_roots)?;
 
-    let metadata = fs::symlink_metadata(path).map_err(|source| WasmPluginError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let metadata = validated.metadata();
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(WasmPluginError::UnsafePath {
-            path: path.to_path_buf(),
+            path: validated.requested().to_path_buf(),
             message: "plugin must be a regular file",
         });
     }
     if metadata.len() > limits.max_module_bytes {
         return Err(WasmPluginError::Oversized {
-            path: path.to_path_buf(),
+            path: validated.requested().to_path_buf(),
             max_bytes: limits.max_module_bytes,
         });
     }
 
-    let file = open_verified_plugin_file(path, &metadata)?;
+    let file = open_verified_plugin_file(&validated)?;
     let mut bytes = Vec::new();
     file.take(limits.max_module_bytes.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|source| WasmPluginError::Io {
-            path: path.to_path_buf(),
+            path: validated.requested().to_path_buf(),
             source,
         })?;
     if bytes.len() as u64 > limits.max_module_bytes {
         return Err(WasmPluginError::Oversized {
-            path: path.to_path_buf(),
+            path: validated.requested().to_path_buf(),
             max_bytes: limits.max_module_bytes,
         });
     }
 
     let sha256_hex = sha256_hex(&bytes);
     Ok(WasmPluginFile {
-        path: path.to_path_buf(),
+        path: validated.requested().to_path_buf(),
         bytes,
         sha256_hex,
     })
 }
 
-fn open_verified_plugin_file(
-    path: &Path,
-    expected_metadata: &fs::Metadata,
-) -> Result<fs::File, WasmPluginError> {
+fn open_verified_plugin_file(validated: &ValidatedPluginPath) -> Result<fs::File, WasmPluginError> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -150,28 +164,30 @@ fn open_verified_plugin_file(
         options.custom_flags(WASM_PLUGIN_O_NOFOLLOW);
     }
 
-    let file = options.open(path).map_err(|source| WasmPluginError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let file = options
+        .open(validated.canonical())
+        .map_err(|source| WasmPluginError::Io {
+            path: validated.requested().to_path_buf(),
+            source,
+        })?;
     let opened_metadata = file.metadata().map_err(|source| WasmPluginError::Io {
-        path: path.to_path_buf(),
+        path: validated.requested().to_path_buf(),
         source,
     })?;
     if !opened_metadata.is_file() {
         return Err(WasmPluginError::UnsafePath {
-            path: path.to_path_buf(),
+            path: validated.requested().to_path_buf(),
             message: "plugin handle must be a regular file",
         });
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        if opened_metadata.dev() != expected_metadata.dev()
-            || opened_metadata.ino() != expected_metadata.ino()
+        if opened_metadata.dev() != validated.metadata().dev()
+            || opened_metadata.ino() != validated.metadata().ino()
         {
             return Err(WasmPluginError::UnsafePath {
-                path: path.to_path_buf(),
+                path: validated.requested().to_path_buf(),
                 message: "plugin file identity changed before read",
             });
         }
@@ -183,6 +199,13 @@ pub fn validate_plugin_path(
     path: &Path,
     approved_roots: &[PathBuf],
 ) -> Result<(), WasmPluginError> {
+    validated_plugin_path(path, approved_roots).map(|_| ())
+}
+
+fn validated_plugin_path(
+    path: &Path,
+    approved_roots: &[PathBuf],
+) -> Result<ValidatedPluginPath, WasmPluginError> {
     if !path.is_absolute() {
         return Err(WasmPluginError::RelativePath {
             path: path.to_path_buf(),
@@ -216,7 +239,16 @@ pub fn validate_plugin_path(
             source,
         })?;
         if plugin_canonical.starts_with(root_canonical) {
-            return Ok(());
+            let metadata =
+                fs::symlink_metadata(&plugin_canonical).map_err(|source| WasmPluginError::Io {
+                    path: plugin_canonical.clone(),
+                    source,
+                })?;
+            return Ok(ValidatedPluginPath {
+                requested: path.to_path_buf(),
+                canonical: plugin_canonical,
+                metadata,
+            });
         }
     }
 

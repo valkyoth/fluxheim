@@ -1,4 +1,5 @@
-use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -22,13 +23,14 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let root = std::env::temp_dir().join(format!("fluxheim-wasm-smoke-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root)?;
-    let plugin = root.join("decision.wasm");
-    fs::write(
-        &plugin,
-        wat::parse_str(r#"(module (func (export "decision") (result i32) i32.const 42))"#)?,
+    let directory = tempfile::Builder::new()
+        .prefix("fluxheim-wasm-smoke-")
+        .tempdir()?;
+    let root = directory.path().to_path_buf();
+    let plugin = write_wasm_fixture(
+        &root,
+        "decision-",
+        r#"(module (func (export "decision") (result i32) i32.const 42))"#,
     )?;
 
     let limits = WasmSandboxLimits {
@@ -75,17 +77,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("plugin hash was not recorded".into());
     }
 
-    let spinner = root.join("spin.wasm");
-    fs::write(
-        &spinner,
-        wat::parse_str(
-            r#"
+    let spinner = write_wasm_fixture(
+        &root,
+        "spin-",
+        r#"
             (module
               (func (export "spin") (result i32)
                 (loop br 0)
                 i32.const 0))
             "#,
-        )?,
     )?;
     let limited = WasmSandboxLimits {
         fuel: 500,
@@ -100,11 +100,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Err(error) => return Err(format!("expected trap for fuel exhaustion, got {error}").into()),
     }
 
-    let table_grower = root.join("table-grow.wasm");
-    fs::write(
-        &table_grower,
-        wat::parse_str(
-            r#"
+    let table_grower = write_wasm_fixture(
+        &root,
+        "table-grow-",
+        r#"
             (module
               (table 1 100 funcref)
               (func (export "decision") (result i32)
@@ -112,7 +111,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 i32.const 20
                 table.grow))
             "#,
-        )?,
     )?;
     let table_limited = WasmSandboxLimits {
         max_table_elements: 10,
@@ -126,6 +124,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("expected table growth denial -1, got {}", outcome.result).into());
     }
 
-    fs::remove_dir_all(&root)?;
     Ok(())
+}
+
+fn write_wasm_fixture(
+    root: &Path,
+    prefix: &str,
+    wat_source: &str,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let mut file = tempfile::Builder::new()
+        .prefix(prefix)
+        .suffix(".wasm")
+        .tempfile_in(root)?;
+    file.write_all(&wat::parse_str(wat_source)?)?;
+    let (_file, path) = file.keep()?;
+    Ok(path)
 }

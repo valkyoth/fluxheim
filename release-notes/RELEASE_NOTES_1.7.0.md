@@ -35,6 +35,9 @@ and trapping Wasm modules.
 - Open plugin files with Unix `O_NOFOLLOW` where available and verify the
   opened file handle still matches the pre-open metadata before reading plugin
   bytes.
+- Carry the canonical approved plugin path from validation into the final
+  metadata/open sequence so filesystem access uses the same path boundary that
+  was checked.
 - Add unit tests for plugin path safety, oversized modules, real Wasm
   execution, fuel exhaustion, memory-limit rejection, and table-element limit
   rejection.
