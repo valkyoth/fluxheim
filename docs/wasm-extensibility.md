@@ -135,6 +135,7 @@ Required limits:
 - maximum table elements;
 - maximum fuel/instruction budget;
 - maximum compile time;
+- maximum concurrent compile workers;
 - maximum wall-time;
 - maximum log bytes emitted by plugin;
 - maximum header mutations;

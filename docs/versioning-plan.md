@@ -3089,8 +3089,9 @@ Stable scope:
 - `v1.7.1`: wire the manifest boundary into Fluxheim config validation:
   plugin registry, per-vhost/per-route attachment validation, host-call
   namespace, deterministic error taxonomy, fail-open/fail-closed behavior, and
-  admin-visible plugin hashes. Add compile-only fixtures for accepted and
-  rejected plugin declarations.
+  admin-visible plugin hashes. Add per-plugin/per-vhost execution admission
+  budgets before any request-path hook wiring, plus compile-only fixtures for
+  accepted and rejected plugin declarations.
 - `v1.7.2`: implement request header and access-control hooks. Cover
   F5-iRules-style conditional allow/deny/synthetic error behavior and
   nginx-Lua/OpenResty-style request header mutation through typed host calls.
@@ -3111,11 +3112,10 @@ Stable scope:
   store-admission header inspection, and safe response-header mutation. Add
   live cache tests that prove MISS/HIT behavior, TTL bounds, tag assignment,
   and low-cardinality key validation.
-- `v1.7.6`: implement plugin chain ordering, per-vhost/per-route concurrency
-  budgets, compiled-module cache isolation by module hash/ABI/features/version,
-  admin/metrics visibility, and deterministic reload behavior. Add tests for
-  chain ordering, concurrent execution isolation, reload hash changes, and
-  metrics labels without leaking secrets.
+- `v1.7.6`: implement plugin chain ordering, compiled-module cache isolation by
+  module hash/ABI/features/version, admin/metrics visibility, and deterministic
+  reload behavior. Add tests for chain ordering, concurrent execution
+  isolation, reload hash changes, and metrics labels without leaking secrets.
 - `v1.7.7`: optional `wasm-proxy-abi` compatibility preview. Map a reviewed
   safe subset of proxy-oriented ABI calls to Fluxheim's typed host calls,
   reject unsupported calls deterministically, and add compatibility fixtures.
@@ -4668,8 +4668,8 @@ circular dependencies.
   gates, strict plugin-file loading, resource-limited Wasmtime execution, typed
   plugin manifest validation, and real sandbox smoke tests.
 - `v1.7.1`: config integration for the typed plugin registry and attachment
-  validation, host-call namespace, admin-visible hashes, and rejected-config
-  fixtures.
+  validation, host-call namespace, per-plugin/per-vhost execution admission
+  budgets, admin-visible hashes, and rejected-config fixtures.
 - `v1.7.2`: request-header and access-control hooks with F5-iRules-style and
   nginx-Lua/OpenResty-style live examples.
 - `v1.7.3`: response-header hooks, bounded synthetic responses, and sensitive
@@ -4678,8 +4678,8 @@ circular dependencies.
   HAProxy-Lua/SPOE-style live examples.
 - `v1.7.5`: VCL-like cache policy hooks for lookup/admission, cache-key
   components, TTL/tag/store-admission decisions, and live cache HIT/MISS tests.
-- `v1.7.6`: plugin chain ordering, concurrency budgets, compiled-module cache
-  isolation, reload behavior, metrics, and admin visibility.
+- `v1.7.6`: plugin chain ordering, compiled-module cache isolation, reload
+  behavior, metrics, and admin visibility.
 - `v1.7.7`: optional `wasm-proxy-abi` compatibility preview with deterministic
   unsupported-call rejection.
 - `v1.7.8`: optional `wasm-wasi` capability preview with explicit grants only.

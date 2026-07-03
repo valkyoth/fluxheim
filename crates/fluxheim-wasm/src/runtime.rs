@@ -1,4 +1,5 @@
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{OnceLock, mpsc};
 use std::thread;
 use std::time::Instant;
 
@@ -8,6 +9,8 @@ use wasmtime::{
 };
 
 use crate::{WasmPluginError, WasmPluginFile, WasmSandboxLimits};
+
+const MAX_CONCURRENT_COMPILES: usize = 16;
 
 #[derive(Debug)]
 pub struct FluxWasmRuntime {
@@ -30,6 +33,8 @@ pub enum WasmExecutionError {
     RuntimeSetup(String),
     #[error("wasm module compile failed: {0}")]
     Compile(String),
+    #[error("wasm module compile concurrency limit reached")]
+    CompileConcurrencyLimit,
     #[error("wasm module compile timed out after {timeout_ms}ms")]
     CompileTimeout { timeout_ms: u128 },
     #[error("wasm module instantiation failed: {0}")]
@@ -42,6 +47,48 @@ pub enum WasmExecutionError {
 
 struct RuntimeStoreState {
     limits: StoreLimits,
+}
+
+#[derive(Debug)]
+struct CounterPermit {
+    counter: &'static AtomicUsize,
+}
+
+impl Drop for CounterPermit {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn compile_slots() -> &'static AtomicUsize {
+    static SLOTS: OnceLock<AtomicUsize> = OnceLock::new();
+    SLOTS.get_or_init(|| AtomicUsize::new(0))
+}
+
+fn acquire_counter_permit(
+    counter: &'static AtomicUsize,
+    limit: usize,
+) -> Result<CounterPermit, WasmExecutionError> {
+    let mut current = counter.load(Ordering::Acquire);
+    loop {
+        if current >= limit {
+            return Err(WasmExecutionError::CompileConcurrencyLimit);
+        }
+        match counter.compare_exchange_weak(
+            current,
+            current + 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return Ok(CounterPermit { counter }),
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn acquire_compile_permit() -> Result<CounterPermit, WasmExecutionError> {
+    let slots = compile_slots();
+    acquire_counter_permit(slots, MAX_CONCURRENT_COMPILES)
 }
 
 impl FluxWasmRuntime {
@@ -119,12 +166,14 @@ impl FluxWasmRuntime {
     }
 
     fn compile_module(&self, plugin: &WasmPluginFile) -> Result<Module, WasmExecutionError> {
+        let compile_permit = acquire_compile_permit()?;
         let engine = self.engine.clone();
         let bytes = plugin.bytes().to_vec();
         let (result_sender, result_receiver) = mpsc::sync_channel(1);
         thread::spawn(move || {
             let result = Module::new(&engine, &bytes)
                 .map_err(|error| WasmExecutionError::Compile(error.to_string()));
+            drop(compile_permit);
             let _ = result_sender.send(result);
         });
 
@@ -274,6 +323,23 @@ mod tests {
         let outcome = runtime.run_i32_no_args(&plugin, "decision").unwrap();
 
         assert_eq!(outcome.result, -1);
+    }
+
+    #[test]
+    fn compile_counter_rejects_calls_above_limit_until_permit_drops() {
+        let counter = Box::leak(Box::new(AtomicUsize::new(0)));
+        let first = acquire_counter_permit(counter, 2).unwrap();
+        let second = acquire_counter_permit(counter, 2).unwrap();
+
+        let error = acquire_counter_permit(counter, 2).unwrap_err();
+
+        assert!(matches!(error, WasmExecutionError::CompileConcurrencyLimit));
+        drop(first);
+        let third = acquire_counter_permit(counter, 2).unwrap();
+        assert_eq!(counter.load(Ordering::Acquire), 2);
+        drop(second);
+        drop(third);
+        assert_eq!(counter.load(Ordering::Acquire), 0);
     }
 
     #[test]

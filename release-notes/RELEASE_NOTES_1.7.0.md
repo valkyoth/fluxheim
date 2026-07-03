@@ -26,6 +26,9 @@ and trapping Wasm modules.
   manifest and loads the exact approved plugin path with the validated limits.
 - Add a Wasmtime runtime foundation with bounded fuel, memory, table elements,
   instance/table limits, compile timeout, and a per-call wall-time watchdog.
+- Bound concurrent Wasm module compilation workers so a timed-out adversarial
+  compile keeps occupying one capped slot until it actually exits instead of
+  allowing unbounded compile-thread growth.
 - Avoid cross-request timeout interference by using a per-store epoch-deadline
   callback: a shared engine epoch tick only interrupts the invocation whose own
   deadline has elapsed.

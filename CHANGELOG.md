@@ -21,6 +21,8 @@ behavior when the change improves security or project direction.
 - Add a Wasmtime-backed runtime foundation with bounded module execution using
   fuel, memory, table-element, instance/table limits, compile timeout, and a
   per-call wall-time watchdog.
+- Bound concurrent Wasm module compilation workers so timed-out compilations
+  cannot create unbounded orphaned CPU/thread pressure.
 - Add `scripts/smoke_wasm_sandbox.sh` and a test-starter entry that execute
   real Wasm modules, including a successful decision function and a trapped
   infinite-loop module. The smoke also validates an accepted plugin manifest
