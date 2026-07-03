@@ -45,6 +45,9 @@ before Cargo starts compiling Fluxheim.
 | `compression-zstd` | No | Zstandard response compression for eligible known-length responses. |
 | `geoip` | No | Local MMDB Geo-Context lookup for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, exposed to bounded access policy and structured logs. |
 | `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream routes, source IP/CIDR allow/deny policy, DNS-rebinding guards for hostname upstreams, bounded idle/lifetime/byte caps, route-local PROXY protocol receive/send, stream upstream TLS/mTLS controls, and weighted/drain/backup policy. |
+| `wasm` | No | WebAssembly sandbox foundation with strict plugin-file loading and bounded Wasmtime execution. Request/response policy hooks are staged for later `1.7.x` releases. |
+| `wasm-proxy-abi` | No | Reserved Wasm proxy-ABI compatibility feature; currently depends on the sandbox foundation. |
+| `wasm-wasi` | No | Reserved Wasm/WASI capability feature; currently depends on the sandbox foundation and remains disabled by default. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
 
@@ -249,6 +252,9 @@ Focused image profile status:
 | `privacy-mode` + `metrics-otlp` | Zero-retention builds must not compile metrics export. |
 | `privacy-mode` + `otel-tracing` | Zero-retention builds must not compile trace context propagation. |
 | `privacy-mode` + `otel-otlp` | Zero-retention builds must not compile trace export. |
+| `privacy-mode` + `wasm` | Zero-retention builds must not compile sandboxed policy extensions. |
+| `privacy-mode` + `wasm-proxy-abi` | Zero-retention builds must not compile sandboxed policy extensions. |
+| `privacy-mode` + `wasm-wasi` | Zero-retention builds must not compile sandboxed policy extensions. |
 
 Because `cache` is part of the default build, privacy builds must use
 `--no-default-features`.
@@ -262,7 +268,6 @@ These are documented architecture tracks, not enabled Cargo features yet:
 | Image filter | [Image Filter](image-filter.md) |
 | Programmable media edge | [Programmable Media Edge](programmable-media-edge.md) |
 | OpenTelemetry OTLP export | [OpenTelemetry Tracing](opentelemetry-tracing.md) |
-| WASM extensibility | [WASM Extensibility](wasm-extensibility.md) |
 | Crypto RPC edge | [Crypto RPC Edge](crypto-rpc-edge.md) |
 | WAF | [WAF Architecture](waf-architecture.md) |
 | Cloudflare origin support | [Cloudflare Origin Support](cloudflare-origin-support.md) |

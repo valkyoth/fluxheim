@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.6.37"
+version = "1.7.0"
 edition = "2024"
 rust-version = "1.96.1"
 license = "EUPL-1.2"
@@ -27,6 +27,7 @@ members = [
     "crates/fluxheim-web",
     "crates/fluxheim-php-fpm",
     "crates/fluxheim-load-balancer",
+    "crates/fluxheim-wasm",
 ]
 resolver = "3"
 
@@ -73,6 +74,9 @@ stream-proxy = ["proxy", "dep:fluxheim-stream", "fluxheim-config/stream-proxy"]
 udp-proxy = ["proxy", "fluxheim-config/udp-proxy"]
 traffic-mirror = ["proxy", "fluxheim-config/traffic-mirror", "fluxheim-server/traffic-mirror"]
 geoip = ["proxy", "fluxheim-config/geoip", "fluxheim-geoip/runtime"]
+wasm = ["dep:fluxheim-wasm", "fluxheim-wasm/runtime"]
+wasm-proxy-abi = ["wasm"]
+wasm-wasi = ["wasm"]
 cache = ["dep:bytes", "dep:moka", "dep:sha2", "fluxheim-config/cache", "fluxheim-server/openbao-cache-encryption"]
 web = [
     "dep:bytes",
@@ -261,6 +265,7 @@ fluxheim-snapshot = { path = "crates/fluxheim-snapshot" }
 fluxheim-stream = { path = "crates/fluxheim-stream", optional = true }
 fluxheim-tls = { path = "crates/fluxheim-tls" }
 fluxheim-web = { path = "crates/fluxheim-web", optional = true }
+fluxheim-wasm = { path = "crates/fluxheim-wasm", optional = true }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
 futures = "0.3.32"
 getrandom = "0.4.3"

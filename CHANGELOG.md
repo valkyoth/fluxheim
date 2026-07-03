@@ -7,7 +7,31 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.6.37 - Unreleased
+## 1.7.0 - Unreleased
+
+### Added
+
+- Start the `1.7` WebAssembly extensibility line with the new optional
+  `fluxheim-wasm` workspace crate.
+- Add the compile-time `wasm`, `wasm-proxy-abi`, and `wasm-wasi` feature
+  switches. The `wasm` feature is optional and remains incompatible with
+  `privacy-mode`.
+- Add strict Wasm plugin file loading from approved absolute directories with
+  regular-file, symlink-parent, module-size, and SHA-256 recording checks.
+- Add a Wasmtime-backed runtime foundation with bounded module execution using
+  fuel, memory, instance/table limits, and a wall-time watchdog.
+- Add `scripts/smoke_wasm_sandbox.sh` and a test-starter entry that execute
+  real Wasm modules, including a successful decision function and a trapped
+  infinite-loop module.
+
+### Changed
+
+- Update the Wasm extensibility plan from future-only planning to active
+  `1.7` implementation status while keeping request/response policy hooks,
+  proxy ABI compatibility, and WASI capabilities staged for later `1.7.x`
+  releases.
+
+## 1.6.37 - 2026-07-03
 
 ### Security
 

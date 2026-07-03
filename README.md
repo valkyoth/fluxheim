@@ -134,7 +134,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional `geoip` feature with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. |
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
 | HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.8` protocol milestone using the Rust `quinn`/`h3` stack after the `1.6` Pingora-free runtime is stable. |
-| WASM policy hooks | ❌ | Planned for the later `1.7` extensibility line. |
+| WASM sandbox foundation | 🧪 | `1.7.0`; optional `wasm` feature with strict plugin-file loading and bounded real-Wasm execution smoke. Policy hooks remain staged for later `1.7.x`. |
 
 See [Production Readiness](docs/production-readiness.md) for the precise
 stable-core promise and deployment checks. See
@@ -342,8 +342,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.6.37-wolfi`, `v1.6.37-cache-wolfi`, `v1.6.37-proxy-wolfi`,
-`v1.6.37-load-balancer-wolfi`, and `v1.6.37-php-wolfi`.
+`v1.7.0-wolfi`, `v1.7.0-cache-wolfi`, `v1.7.0-proxy-wolfi`,
+`v1.7.0-load-balancer-wolfi`, and `v1.7.0-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
@@ -539,7 +539,7 @@ scripts/release_checks.sh
 
 For focused live testing, `scripts/test_starter.py` provides a human-facing
 menu over the maintained smoke scripts. It can run categories such as
-load-balancer, cache, WordPress, database health checks, privacy mode,
+load-balancer, cache, WordPress, database health checks, privacy mode, Wasm,
 observability, containers, and RPM builds without memorizing every script name.
 The observability smoke starts disposable Prometheus and Jaeger containers by
 default unless `FLUXHEIM_PROMETHEUS_URL` or `FLUXHEIM_JAEGER_URL` point at
@@ -549,6 +549,7 @@ already-running services:
 scripts/test_starter.py --list
 scripts/test_starter.py --category load-balancer
 scripts/test_starter.py --run privacy
+scripts/test_starter.py --run wasm
 ```
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting and

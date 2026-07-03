@@ -1,19 +1,24 @@
 # WASM Extensibility
 
-Status: planned `1.7` optional module family after the `1.6` Pingora-exit
-runtime line.
+Status: active `1.7` optional module family after the `1.6` Pingora-free
+runtime line. Fluxheim `1.7.0` ships the first sandbox foundation:
+compile-time feature gates, strict plugin-file loading, bounded Wasmtime
+execution, and real Wasm smoke coverage. Request/response policy hooks,
+proxy-ABI compatibility, and WASI capabilities remain staged for later `1.7.x`
+releases.
 
-Planned Cargo features:
+Cargo features:
 
 - `wasm`
 - `wasm-proxy-abi`
 - `wasm-wasi`
 
-Latest crate candidates checked on 2026-05-05:
+Latest crate candidates checked on 2026-07-03:
 
-- `wasmtime 44.0.1`
-- `wasmtime-wasi 44.0.1`
+- `wasmtime 46.0.1`
+- `wasmtime-wasi 46.0.1`
 - `proxy-wasm 0.2.4`
+- `wat 1.252.0`
 
 WASM extensibility gives Fluxheim a sandboxed way to run operator-provided
 logic without compiling that logic into the Fluxheim binary. It should be
@@ -43,8 +48,13 @@ language.
 
 ## Stage 1: Header, Access-Control, And Cache Policy Hooks
 
-The first useful scope should cover the common extension cases without exposing
-request bodies or arbitrary I/O.
+The first implementation slice is the sandbox foundation: `fluxheim-wasm`
+loads plugin files from approved roots, rejects symlinked plugin paths and
+oversized modules, records SHA-256 module hashes, and executes real Wasm under
+fuel, memory, table/instance, and wall-time limits.
+
+The first useful policy-hook scope should cover the common extension cases
+without exposing request bodies or arbitrary I/O.
 
 Allowed hooks:
 
@@ -162,6 +172,8 @@ paths = ["/*"]
 
 ## Test Plan
 
+- Run `scripts/smoke_wasm_sandbox.sh` to execute a real Wasm decision module
+  and verify that an infinite-loop module traps under sandbox limits.
 - Reject missing, symlinked, oversized, and invalid plugin files.
 - Reject unsupported ABI versions.
 - Verify request header mutation within limits.

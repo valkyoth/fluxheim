@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.6.37
+Version:        1.7.0
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Fri Jul 03 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.0-1
+- Start the WebAssembly extensibility line with an optional sandbox crate.
+- Add strict Wasm plugin path validation and bounded Wasmtime execution.
+- Add real Wasm sandbox smoke coverage for successful execution and limit traps.
+
 * Tue Jun 30 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.37-1
 - Start the final pre-Wasm crate-boundary cleanup release.
 - Harden OpenSSL stream-upstream TLS connectors and ACME account credential

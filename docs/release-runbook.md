@@ -57,6 +57,7 @@ scripts/test_starter.py --list
 scripts/test_starter.py --category load-balancer
 scripts/test_starter.py --run privacy
 scripts/test_starter.py --run images
+scripts/test_starter.py --run wasm
 ```
 
 For PHP-FPM releases, also run:
@@ -94,12 +95,13 @@ Set `FLUXHEIM_GATE_LOAD_BALANCER_CONTAINER=1`, or use
 `scripts/stable_release_deep_gate.sh release`, to also build and run the
 focused load-balancer image against two local origins before tagging.
 The deep gate also enables the smoke dependency image check, OpenBao cache
-encryption, database health checks, WordPress, PHP Wolfi, RPM build, privacy
-mode, framing, and fuzz-target compile checks by default. The observability
-smoke starts disposable Prometheus and Jaeger containers unless external URLs
-are configured; Prometheus scrape and OTLP metrics ingestion are required in
-that self-contained mode, while Jaeger trace ingestion remains opt-in through
-`FLUXHEIM_JAEGER_REQUIRE_TRACE=1` until native span export is implemented.
+encryption, database health checks, WordPress, Wasm sandbox execution, PHP
+Wolfi, RPM build, privacy mode, framing, and fuzz-target compile checks by
+default. The observability smoke starts disposable Prometheus and Jaeger
+containers unless external URLs are configured; Prometheus scrape and OTLP
+metrics ingestion are required in that self-contained mode, while Jaeger trace
+ingestion remains opt-in through `FLUXHEIM_JAEGER_REQUIRE_TRACE=1` until native
+span export is implemented.
 Disable an individual deep gate only when equivalent evidence has already been
 captured on another builder.
 

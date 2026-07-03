@@ -3073,10 +3073,15 @@ the proxy or load-balancer hot path.
 
 Stable scope:
 
-- Compile-time `wasm` module.
-- Plugin loading from approved directories with strict path, ownership, and
-  symlink validation.
-- Wasmtime-based sandbox evaluation after license/advisory review.
+- `v1.7.0`: compile-time `wasm`, `wasm-proxy-abi`, and `wasm-wasi` feature
+  gates, with the Wasm feature family absent from default builds and rejected
+  by `privacy-mode`.
+- `v1.7.0`: `fluxheim-wasm` workspace crate foundation with plugin loading
+  from approved directories, strict absolute-path validation, regular-file and
+  symlink-parent rejection, module-size limits, and SHA-256 recording.
+- `v1.7.0`: Wasmtime-based sandbox evaluation with fuel, memory,
+  table/instance, and wall-time limits plus a real Wasm smoke script that
+  verifies successful execution and trapped infinite-loop behavior.
 - Request header hook.
 - Response header hook.
 - TCP stream hook points after the stream foundation and load-balancer

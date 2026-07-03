@@ -165,6 +165,13 @@ TESTS: tuple[TestEntry, ...] = (
         "Runs WordPress behind Fluxheim TLS reverse proxy.",
     ),
     TestEntry(
+        "wasm",
+        "Wasm sandbox smoke",
+        "wasm",
+        ("scripts/smoke_wasm_sandbox.sh",),
+        "Executes real Wasm modules through the bounded sandbox, including a limit trap.",
+    ),
+    TestEntry(
         "observability",
         "Observability smoke",
         "observability",

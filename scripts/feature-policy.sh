@@ -6,7 +6,7 @@
 
 TLS_BACKENDS="tls-rustls tls-rustls-fips tls-openssl"
 PHP_RUNTIMES="php-fpm"
-PRIVACY_INCOMPATIBLE_FEATURES="cache metrics metrics-otlp otel-tracing otel-otlp compression compression-gzip compression-zstd compression-brotli"
+PRIVACY_INCOMPATIBLE_FEATURES="cache metrics metrics-otlp otel-tracing otel-otlp compression compression-gzip compression-zstd compression-brotli wasm wasm-proxy-abi wasm-wasi"
 
 expand_fluxheim_feature() {
     case "$1" in

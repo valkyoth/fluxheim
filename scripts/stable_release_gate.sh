@@ -127,6 +127,13 @@ else
     echo "stable release gate: skipping WordPress live smokes; set FLUXHEIM_GATE_WORDPRESS=1 to enable"
 fi
 
+if [ "${FLUXHEIM_GATE_WASM:-0}" = "1" ]; then
+    echo "stable release gate: Wasm sandbox smoke"
+    scripts/smoke_wasm_sandbox.sh
+else
+    echo "stable release gate: skipping Wasm sandbox smoke; set FLUXHEIM_GATE_WASM=1 to enable"
+fi
+
 if [ "${FLUXHEIM_GATE_PHP_WOLFI:-0}" = "1" ]; then
     echo "stable release gate: PHP Wolfi image smoke"
     scripts/smoke_fluxheim_php_wolfi.sh

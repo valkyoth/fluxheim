@@ -1,0 +1,25 @@
+[package]
+name = "fluxheim-wasm"
+version = "1.7.0"
+edition = "2024"
+rust-version = "1.96.1"
+license = "EUPL-1.2"
+publish = false
+description = "Internal Fluxheim sandboxed WebAssembly extension runtime boundary."
+
+[features]
+default = []
+runtime = ["dep:wasmtime"]
+
+[[example]]
+name = "wasm_sandbox_smoke"
+required-features = ["runtime"]
+
+[dependencies]
+sha2 = "0.11.0"
+thiserror = "2.0.18"
+wasmtime = { version = "46.0.1", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+wat = "1.252.0"

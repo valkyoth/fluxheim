@@ -215,8 +215,8 @@ variant image smoke tests.
 
 For release-candidate validation, run the deeper local gate. It enables the TLS
 backend matrix, OpenSSL FIPS-capable validation, rustls/AWS-LC FIPS-capable
-validation, local TLS scan, local load smoke, raw request-framing smoke, and
-fuzz target compile check:
+validation, local TLS scan, local load smoke, raw request-framing smoke, real
+Wasm sandbox execution, and fuzz target compile check:
 
 ```bash
 scripts/stable_release_deep_gate.sh release
@@ -239,6 +239,7 @@ FLUXHEIM_GATE_FIPS_RUSTLS=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_OWASP_RUN=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_TLS_SCAN=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_LOAD=1 scripts/stable_release_gate.sh release
+FLUXHEIM_GATE_WASM=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_FRAMING=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_FUZZ_CHECK=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_IMAGE_VARIANTS="debian alpine wolfi suse-micro" scripts/stable_release_gate.sh release
