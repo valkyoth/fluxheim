@@ -156,8 +156,10 @@ fi
 %changelog
 * Fri Jul 03 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.0-1
 - Start the WebAssembly extensibility line with an optional sandbox crate.
-- Add strict Wasm plugin path validation and bounded Wasmtime execution.
-- Add real Wasm sandbox smoke coverage for successful execution and limit traps.
+- Add strict Wasm plugin path and manifest validation with bounded Wasmtime
+  execution.
+- Bound Wasm compile workers and add real sandbox smoke coverage for successful
+  execution, manifest rejection, and limit traps.
 
 * Tue Jun 30 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.6.37-1
 - Start the final pre-Wasm crate-boundary cleanup release.

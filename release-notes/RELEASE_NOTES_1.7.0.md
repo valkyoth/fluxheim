@@ -63,7 +63,7 @@ and trapping Wasm modules.
   execution proof. Request/response header hooks, access decisions, cache
   policy hooks, proxy-ABI compatibility, and WASI capabilities remain staged for
   later `1.7.x` releases.
-- Wasm compilation is bounded by a compile timeout around the worker that
-  builds the module. Fuel and epoch checks apply after compilation, so future
-  request-facing hooks should still pair this with configured plugin
-  concurrency limits.
+- Wasm compilation is bounded by a compile timeout and a global compile-worker
+  concurrency cap. Fuel and epoch checks apply after compilation, so future
+  request-facing hooks must still pair this with configured per-plugin and
+  per-vhost execution concurrency limits before request-path use.
