@@ -18,6 +18,10 @@ and trapping Wasm modules.
   and files over the configured module-size limit.
 - Record the SHA-256 hash of loaded plugin bytes for future admin/status and
   audit surfaces.
+- Add a typed Wasm plugin manifest boundary with plugin name, path, ABI, phase,
+  fail-mode, and sandbox-limit validation. Preview ABIs require explicit
+  allowance, duplicate phases are rejected, and `fail_open` is rejected for
+  security decision phases.
 - Add a Wasmtime runtime foundation with bounded fuel, memory, table elements,
   instance/table limits, compile timeout, and a per-call wall-time watchdog.
 - Avoid cross-request timeout interference by using a per-store epoch-deadline

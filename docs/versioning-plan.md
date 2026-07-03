@@ -3082,11 +3082,15 @@ Stable scope:
 - `v1.7.0`: Wasmtime-based sandbox evaluation with fuel, memory,
   table/instance, and wall-time limits plus a real Wasm smoke script that
   verifies successful execution and trapped infinite-loop behavior.
-- `v1.7.1`: define the typed plugin ABI envelope: ABI version handshake,
-  plugin manifest/config model, host-call namespace, deterministic error
-  taxonomy, fail-open/fail-closed behavior, per-vhost/per-route attachment
-  validation, and admin-visible plugin hashes. Add compile-only fixtures for
-  accepted and rejected plugin declarations.
+- `v1.7.0`: typed plugin manifest boundary with plugin name, path, ABI, phase,
+  fail-mode, and sandbox-limit validation. Preview ABIs require explicit
+  allowance, duplicate phases are rejected, and `fail_open` is rejected for
+  security decision phases.
+- `v1.7.1`: wire the manifest boundary into Fluxheim config validation:
+  plugin registry, per-vhost/per-route attachment validation, host-call
+  namespace, deterministic error taxonomy, fail-open/fail-closed behavior, and
+  admin-visible plugin hashes. Add compile-only fixtures for accepted and
+  rejected plugin declarations.
 - `v1.7.2`: implement request header and access-control hooks. Cover
   F5-iRules-style conditional allow/deny/synthetic error behavior and
   nginx-Lua/OpenResty-style request header mutation through typed host calls.
@@ -4661,10 +4665,11 @@ circular dependencies.
   drop-clearing structs to `sanitization` containers/derives where practical,
   rather than mixing that API migration into the runtime replacement work.
 - `v1.7.0`: shared Wasm sandbox foundation. Stop at compile-time feature
-  gates, strict plugin-file loading, resource-limited Wasmtime execution, and
-  real sandbox smoke tests.
-- `v1.7.1`: typed plugin ABI envelope, manifest/config validation, fail-mode
-  semantics, admin-visible hashes, and rejected-config fixtures.
+  gates, strict plugin-file loading, resource-limited Wasmtime execution, typed
+  plugin manifest validation, and real sandbox smoke tests.
+- `v1.7.1`: config integration for the typed plugin registry and attachment
+  validation, host-call namespace, admin-visible hashes, and rejected-config
+  fixtures.
 - `v1.7.2`: request-header and access-control hooks with F5-iRules-style and
   nginx-Lua/OpenResty-style live examples.
 - `v1.7.3`: response-header hooks, bounded synthetic responses, and sensitive

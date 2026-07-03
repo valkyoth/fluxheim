@@ -50,8 +50,13 @@ compile_error!(
     "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe Wasm plugin opening before building Fluxheim"
 );
 
+mod manifest;
 #[cfg(feature = "runtime")]
 mod runtime;
+pub use manifest::{
+    ValidatedWasmPluginManifest, WasmManifestError, WasmPluginAbi, WasmPluginFailMode,
+    WasmPluginManifest, WasmPluginPhase, validate_plugin_manifest,
+};
 #[cfg(feature = "runtime")]
 pub use runtime::{FluxWasmRuntime, WasmExecutionError, WasmExecutionOutcome};
 
