@@ -54,8 +54,9 @@ mod manifest;
 #[cfg(feature = "runtime")]
 mod runtime;
 pub use manifest::{
-    ValidatedWasmPluginManifest, WasmManifestError, WasmPluginAbi, WasmPluginFailMode,
-    WasmPluginManifest, WasmPluginPhase, validate_plugin_manifest,
+    LoadedWasmPlugin, ValidatedWasmPluginManifest, WasmManifestError, WasmPluginAbi,
+    WasmPluginFailMode, WasmPluginLoadError, WasmPluginManifest, WasmPluginPhase,
+    load_plugin_from_manifest, validate_plugin_manifest,
 };
 #[cfg(feature = "runtime")]
 pub use runtime::{FluxWasmRuntime, WasmExecutionError, WasmExecutionOutcome};

@@ -5,7 +5,7 @@ use std::time::Duration;
 use fluxheim_wasm::{
     FluxWasmRuntime, WasmExecutionError, WasmManifestError, WasmPluginAbi, WasmPluginFailMode,
     WasmPluginManifest, WasmPluginPhase, WasmSandboxLimits, load_plugin_file,
-    validate_plugin_manifest,
+    load_plugin_from_manifest, validate_plugin_manifest,
 };
 
 fn main() -> ExitCode {
@@ -44,8 +44,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         limits,
         fail_mode: WasmPluginFailMode::FailClosed,
     };
-    let validated = validate_plugin_manifest(manifest, false)?;
-    if validated.path() != plugin {
+    let loaded_manifest_plugin =
+        load_plugin_from_manifest(manifest, std::slice::from_ref(&root), false)?;
+    if loaded_manifest_plugin.manifest().path() != plugin {
         return Err("validated manifest path drifted".into());
     }
 
@@ -65,9 +66,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let loaded = load_plugin_file(&plugin, std::slice::from_ref(&root), limits)?;
     let runtime = FluxWasmRuntime::new(limits)?;
-    let outcome = runtime.run_i32_no_args(&loaded, "decision")?;
+    let outcome = runtime.run_i32_no_args(loaded_manifest_plugin.file(), "decision")?;
     if outcome.result != 42 {
         return Err(format!("expected decision 42, got {}", outcome.result).into());
     }

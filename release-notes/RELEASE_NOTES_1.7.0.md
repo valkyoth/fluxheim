@@ -22,6 +22,8 @@ and trapping Wasm modules.
   fail-mode, and sandbox-limit validation. Preview ABIs require explicit
   allowance, duplicate phases are rejected, and `fail_open` is rejected for
   security decision phases.
+- Add a manifest-backed plugin loader API so future config wiring validates a
+  manifest and loads the exact approved plugin path with the validated limits.
 - Add a Wasmtime runtime foundation with bounded fuel, memory, table elements,
   instance/table limits, compile timeout, and a per-call wall-time watchdog.
 - Avoid cross-request timeout interference by using a per-store epoch-deadline

@@ -3,7 +3,9 @@ use std::path::{Component, Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::{FLUXHEIM_WASM_ABI_VERSION, WasmSandboxLimits};
+use crate::{
+    FLUXHEIM_WASM_ABI_VERSION, WasmPluginError, WasmPluginFile, WasmSandboxLimits, load_plugin_file,
+};
 
 pub const MAX_PLUGIN_NAME_BYTES: usize = 64;
 pub const MAX_PLUGIN_PHASES: usize = 16;
@@ -64,6 +66,22 @@ pub struct ValidatedWasmPluginManifest {
     fail_mode: WasmPluginFailMode,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct LoadedWasmPlugin {
+    manifest: ValidatedWasmPluginManifest,
+    file: WasmPluginFile,
+}
+
+impl LoadedWasmPlugin {
+    pub fn manifest(&self) -> &ValidatedWasmPluginManifest {
+        &self.manifest
+    }
+
+    pub fn file(&self) -> &WasmPluginFile {
+        &self.file
+    }
+}
+
 impl ValidatedWasmPluginManifest {
     pub fn name(&self) -> &str {
         &self.name
@@ -119,6 +137,14 @@ pub enum WasmManifestError {
     },
 }
 
+#[derive(Debug, Error)]
+pub enum WasmPluginLoadError {
+    #[error(transparent)]
+    Manifest(#[from] WasmManifestError),
+    #[error(transparent)]
+    Plugin(#[from] WasmPluginError),
+}
+
 pub fn validate_plugin_manifest(
     manifest: WasmPluginManifest,
     allow_preview_abi: bool,
@@ -140,6 +166,16 @@ pub fn validate_plugin_manifest(
         limits,
         fail_mode: manifest.fail_mode,
     })
+}
+
+pub fn load_plugin_from_manifest(
+    manifest: WasmPluginManifest,
+    approved_roots: &[PathBuf],
+    allow_preview_abi: bool,
+) -> Result<LoadedWasmPlugin, WasmPluginLoadError> {
+    let manifest = validate_plugin_manifest(manifest, allow_preview_abi)?;
+    let file = load_plugin_file(manifest.path(), approved_roots, manifest.limits())?;
+    Ok(LoadedWasmPlugin { manifest, file })
 }
 
 fn validate_manifest_limits(
@@ -237,6 +273,7 @@ fn validate_fail_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::time::Duration;
 
     fn valid_manifest() -> WasmPluginManifest {
@@ -248,6 +285,12 @@ mod tests {
             limits: WasmSandboxLimits::default(),
             fail_mode: WasmPluginFailMode::FailClosed,
         }
+    }
+
+    fn write_plugin(directory: &tempfile::TempDir) -> PathBuf {
+        let path = directory.path().join("plugin.wasm");
+        fs::write(&path, b"\0asm\x01\0\0\0").unwrap();
+        path
     }
 
     #[test]
@@ -359,6 +402,38 @@ mod tests {
                 field: "timeout",
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn loads_plugin_from_valid_manifest() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_plugin(&directory);
+        let mut manifest = valid_manifest();
+        manifest.path = plugin_path.clone();
+
+        let loaded =
+            load_plugin_from_manifest(manifest, &[directory.path().to_path_buf()], false).unwrap();
+
+        assert_eq!(loaded.manifest().path(), plugin_path);
+        assert_eq!(loaded.file().bytes(), b"\0asm\x01\0\0\0");
+        assert_eq!(loaded.file().sha256_hex().len(), 64);
+    }
+
+    #[test]
+    fn load_from_manifest_still_rejects_unapproved_root() {
+        let approved = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let plugin_path = write_plugin(&outside);
+        let mut manifest = valid_manifest();
+        manifest.path = plugin_path;
+
+        let error = load_plugin_from_manifest(manifest, &[approved.path().to_path_buf()], false)
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            WasmPluginLoadError::Plugin(WasmPluginError::OutsideApprovedRoots { .. })
         ));
     }
 }

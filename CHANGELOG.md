@@ -28,6 +28,8 @@ behavior when the change improves security or project direction.
 - Add a typed Wasm plugin manifest boundary with ABI, phase, fail-mode, path,
   and sandbox-limit validation so later hook wiring consumes validated plugin
   declarations instead of ad hoc config.
+- Add a manifest-backed plugin loader API that validates the manifest and then
+  loads the exact approved plugin path with the validated per-plugin limits.
 - Extend Wasm sandbox tests and smoke coverage for symlinked approved-root
   rejection, compile-timeout validation, table-growth denial, and unrelated
   engine epoch ticks before an invocation's own deadline.

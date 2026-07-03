@@ -58,8 +58,10 @@ loads plugin files from approved roots, rejects symlinked plugin paths and
 oversized modules, records SHA-256 module hashes, and executes real Wasm under
 fuel, memory, table-element, table/instance, compile-timeout, and wall-time
 limits. It also defines a typed plugin manifest boundary for plugin name, path,
-ABI, phase, fail-mode, and per-plugin sandbox limits; production hook execution
-still starts later in the `1.7` line.
+ABI, phase, fail-mode, and per-plugin sandbox limits. The manifest-backed
+loader validates the manifest and then loads the exact approved plugin path
+with the validated limits; production hook execution still starts later in the
+`1.7` line.
 
 The first useful policy-hook scope should cover the common extension cases
 without exposing request bodies or arbitrary I/O.
