@@ -397,6 +397,25 @@ mod tests {
     }
 
     #[test]
+    fn plugin_loader_rejects_symlinked_approved_root() {
+        let directory = tempfile::tempdir().unwrap();
+        let real_root = directory.path().join("plugins");
+        let root_link = directory.path().join("plugins-link");
+        fs::create_dir(&real_root).unwrap();
+        let plugin = real_root.join("plugin.wasm");
+        fs::write(&plugin, b"\0asm\x01\0\0\0").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real_root, &root_link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real_root, &root_link).unwrap();
+
+        let error =
+            load_plugin_file(&plugin, &[root_link], WasmSandboxLimits::default()).unwrap_err();
+
+        assert!(matches!(error, WasmPluginError::UnsafePath { .. }));
+    }
+
+    #[test]
     fn plugin_loader_rejects_outside_approved_roots() {
         let approved = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
@@ -433,5 +452,23 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(error, WasmPluginError::Oversized { .. }));
+    }
+
+    #[test]
+    fn sandbox_limits_reject_zero_compile_timeout() {
+        let error = WasmSandboxLimits {
+            compile_timeout: Duration::ZERO,
+            ..WasmSandboxLimits::default()
+        }
+        .validate()
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            WasmPluginError::InvalidLimit {
+                field: "compile_timeout",
+                ..
+            }
+        ));
     }
 }

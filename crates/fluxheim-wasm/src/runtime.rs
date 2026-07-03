@@ -144,6 +144,7 @@ impl FluxWasmRuntime {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::mpsc;
     use std::time::Duration;
 
     use crate::load_plugin_file;
@@ -246,5 +247,82 @@ mod tests {
         let error = runtime.run_i32_no_args(&plugin, "decision").unwrap_err();
 
         assert!(matches!(error, WasmExecutionError::Instantiate(_)));
+    }
+
+    #[test]
+    fn runtime_denies_table_growth_beyond_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"
+            (module
+              (table 1 100 funcref)
+              (func (export "decision") (result i32)
+                ref.null func
+                i32.const 20
+                table.grow))
+            "#,
+        );
+        let limits = WasmSandboxLimits {
+            max_table_elements: 10,
+            ..WasmSandboxLimits::default()
+        };
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+
+        let outcome = runtime.run_i32_no_args(&plugin, "decision").unwrap();
+
+        assert_eq!(outcome.result, -1);
+    }
+
+    #[test]
+    fn runtime_ignores_external_epoch_ticks_before_own_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"
+            (module
+              (func (export "decision") (result i32)
+                (local $i i32)
+                (loop $again
+                  local.get $i
+                  i32.const 1
+                  i32.add
+                  local.tee $i
+                  i32.const 200000
+                  i32.lt_s
+                  br_if $again)
+                i32.const 9))
+            "#,
+        );
+        let limits = WasmSandboxLimits {
+            fuel: 5_000_000,
+            timeout: Duration::from_secs(5),
+            ..WasmSandboxLimits::default()
+        };
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+        let engine = runtime.engine.clone();
+        let (stop_sender, stop_receiver) = mpsc::channel();
+        let ticker = thread::spawn(move || {
+            loop {
+                match stop_receiver.try_recv() {
+                    Ok(()) | Err(mpsc::TryRecvError::Disconnected) => break,
+                    Err(mpsc::TryRecvError::Empty) => {
+                        engine.increment_epoch();
+                        thread::yield_now();
+                    }
+                }
+            }
+        });
+
+        let result = runtime.run_i32_no_args(&plugin, "decision");
+
+        let _ = stop_sender.send(());
+        let _ = ticker.join();
+        let outcome = result.unwrap();
+        assert_eq!(outcome.result, 9);
     }
 }

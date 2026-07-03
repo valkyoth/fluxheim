@@ -67,6 +67,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Err(error) => return Err(format!("expected trap for fuel exhaustion, got {error}").into()),
     }
 
+    let table_grower = root.join("table-grow.wasm");
+    fs::write(
+        &table_grower,
+        wat::parse_str(
+            r#"
+            (module
+              (table 1 100 funcref)
+              (func (export "decision") (result i32)
+                ref.null func
+                i32.const 20
+                table.grow))
+            "#,
+        )?,
+    )?;
+    let table_limited = WasmSandboxLimits {
+        max_table_elements: 10,
+        ..WasmSandboxLimits::default()
+    };
+    let loaded_table_grower =
+        load_plugin_file(&table_grower, std::slice::from_ref(&root), table_limited)?;
+    let runtime = FluxWasmRuntime::new(table_limited)?;
+    let outcome = runtime.run_i32_no_args(&loaded_table_grower, "decision")?;
+    if outcome.result != -1 {
+        return Err(format!("expected table growth denial -1, got {}", outcome.result).into());
+    }
+
     fs::remove_dir_all(&root)?;
     Ok(())
 }

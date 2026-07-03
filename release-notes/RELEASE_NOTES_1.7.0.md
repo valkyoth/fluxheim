@@ -30,7 +30,11 @@ and trapping Wasm modules.
   execution, fuel exhaustion, memory-limit rejection, and table-element limit
   rejection.
 - Add `scripts/smoke_wasm_sandbox.sh` as a real Wasm smoke test that runs a
-  successful module and verifies an infinite-loop module traps under limits.
+  successful module, verifies an infinite-loop module traps under limits, and
+  proves table growth beyond the configured table-element cap is denied.
+- Add regression tests for symlinked approved-root rejection, zero
+  compile-timeout validation, and unrelated engine epoch ticks before an
+  invocation's own deadline.
 - Add the Wasm smoke to `scripts/test_starter.py`; the deep release gate now
   enables it by default through `FLUXHEIM_GATE_WASM=1`.
 - Add `docs/wasm-policy-example-parity.md` and

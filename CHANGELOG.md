@@ -24,6 +24,9 @@ behavior when the change improves security or project direction.
 - Add `scripts/smoke_wasm_sandbox.sh` and a test-starter entry that execute
   real Wasm modules, including a successful decision function and a trapped
   infinite-loop module.
+- Extend Wasm sandbox tests and smoke coverage for symlinked approved-root
+  rejection, compile-timeout validation, table-growth denial, and unrelated
+  engine epoch ticks before an invocation's own deadline.
 
 ### Security
 

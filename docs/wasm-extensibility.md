@@ -181,8 +181,10 @@ paths = ["/*"]
 ## Test Plan
 
 - Run `scripts/smoke_wasm_sandbox.sh` to execute a real Wasm decision module
-  and verify that an infinite-loop module traps under sandbox limits.
+  and verify that an infinite-loop module traps under sandbox limits and table
+  growth past the configured cap is denied.
 - Reject missing, symlinked, oversized, and invalid plugin files.
+- Reject symlinked approved plugin roots.
 - Verify Unix plugin opens use `O_NOFOLLOW` where available and reject file
   identity changes between validation and read.
 - Reject unsupported ABI versions.
@@ -193,6 +195,8 @@ paths = ["/*"]
   without capability grants.
 - Verify fuel exhaustion, timeout, compile timeout, table-element limit, trap,
   and panic behavior.
+- Verify unrelated engine epoch ticks cannot prematurely interrupt an
+  invocation before its own deadline.
 - Verify fail-open and fail-closed policy behavior.
 - Verify sensitive field redaction.
 - Verify plugin execution is isolated per request.
