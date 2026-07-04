@@ -7,7 +7,7 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.7.1 - Unreleased
+## 1.7.1 - 2026-07-04
 
 ### Added
 
@@ -16,6 +16,25 @@ behavior when the change improves security or project direction.
 - Add config fixtures that accept valid plugin declarations and reject unknown
   plugin references, attachment phase mismatches, unsafe `fail_open` security
   decisions, disabled registries, and invalid execution admission budgets.
+- Add deterministic Wasm attachment priorities and process-wide, per-plugin,
+  and per-attachment execution admission ceilings.
+- Wire live native HTTP/1 `access-decision` Wasm hooks with `first-deny-wins`
+  composition, fail-closed execution behavior, and non-overridable built-in
+  ACL decisions.
+- Add Wasm status and low-cardinality metrics coverage for execution limits,
+  invocations, duration, and admission rejections.
+
+### Changed
+
+- Compile live Wasm modules once at native hook-registry construction time,
+  then instantiate isolated stores per request.
+- Classify Wasm registry, attachment, limit, and admission changes as
+  `wasm-runtime-changed` reload-impact changes until atomic compiled-module
+  hot reload is implemented.
+- Update Docker GitHub Action pins, Prometheus smoke coverage to `v3.13.0`,
+  and `base64-ng` to `1.3.5`.
+- Document the 1.7.1 Wasm/config modularity exceptions with explicit split
+  targets for the follow-up 1.7 cleanup work.
 
 ## 1.7.0 - 2026-07-03
 

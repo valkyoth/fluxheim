@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.7.0
+Version:        1.7.1
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -48,11 +48,11 @@ Requires:       ca-certificates
 
 %description
 Fluxheim is a modular Rust edge gateway for websites, applications, caching,
-and load balancing. The 1.6 line is the staged Pingora-exit line while keeping
-the packaged native build on the full production feature set: proxy, static web
-serving, cache, load balancing, managed ACME, Prometheus metrics,
-OpenTelemetry export support, GeoIP policy, stream proxying, and PHP-FPM
-support.
+and load balancing. The 1.7 line adds optional WebAssembly policy
+extensibility while keeping the packaged native build on the full production
+feature set: proxy, static web serving, cache, load balancing, managed ACME,
+Prometheus metrics, OpenTelemetry export support, GeoIP policy, stream
+proxying, and PHP-FPM support.
 
 This spec builds from vendored Cargo dependencies and uses Cargo offline mode.
 It intentionally does not download crates during the RPM build.
@@ -154,6 +154,15 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat Jul 04 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.1-1
+- Add live native HTTP/1 Wasm access-decision hooks with deterministic
+  first-deny-wins ordering and fail-closed security decisions.
+- Add config-level Wasm plugin registry validation, attachment priorities,
+  process/plugin/attachment admission limits, and authenticated status/metrics
+  visibility.
+- Compile live Wasm hook modules at registry build time while preserving
+  per-request store and instance isolation.
+
 * Fri Jul 03 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.0-1
 - Start the WebAssembly extensibility line with an optional sandbox crate.
 - Add strict Wasm plugin path and manifest validation with bounded Wasmtime
