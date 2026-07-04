@@ -166,10 +166,10 @@ TESTS: tuple[TestEntry, ...] = (
     ),
     TestEntry(
         "wasm",
-        "Wasm sandbox smoke",
+        "Wasm config and sandbox smoke",
         "wasm",
-        ("scripts/smoke_wasm_sandbox.sh",),
-        "Executes real Wasm modules through the bounded sandbox, including a limit trap.",
+        ("scripts/validate-wasm-config-registry.sh", "scripts/smoke_wasm_sandbox.sh"),
+        "Validates the Fluxheim Wasm config registry and executes real Wasm modules through the bounded sandbox.",
     ),
     TestEntry(
         "observability",
