@@ -1037,6 +1037,7 @@ version = "1.7.0"
 dependencies = [
  "fluxheim-common",
  "fluxheim-protocol",
+ "fluxheim-wasm",
  "log",
  "proptest",
  "regex",

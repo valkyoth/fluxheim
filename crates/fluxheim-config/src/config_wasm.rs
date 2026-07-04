@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
+#[cfg(feature = "wasm")]
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -126,6 +128,14 @@ impl WasmConfig {
             .map(|plugin| (plugin.name.as_str(), plugin))
             .collect()
     }
+
+    #[cfg(feature = "wasm")]
+    pub fn plugin_manifests(&self) -> Result<Vec<fluxheim_wasm::WasmPluginManifest>, ConfigError> {
+        self.plugins
+            .iter()
+            .map(|plugin| plugin.to_wasm_manifest(&self.default_limits))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -185,6 +195,28 @@ impl WasmPluginConfig {
             admission.validate("wasm.plugins.admission")?;
         }
         Ok(())
+    }
+
+    #[cfg(feature = "wasm")]
+    pub fn to_wasm_manifest(
+        &self,
+        default_limits: &WasmSandboxLimitsConfig,
+    ) -> Result<fluxheim_wasm::WasmPluginManifest, ConfigError> {
+        let limits = self.limits.unwrap_or(*default_limits).to_wasm_limits()?;
+        Ok(fluxheim_wasm::WasmPluginManifest {
+            name: self.name.clone(),
+            path: self.path.clone(),
+            expected_sha256: self.sha256.clone(),
+            abi: self.abi.to_wasm_abi(),
+            phases: self
+                .phases
+                .iter()
+                .copied()
+                .map(WasmPluginPhase::to_wasm_phase)
+                .collect(),
+            limits,
+            fail_mode: self.fail_mode.to_wasm_fail_mode(),
+        })
     }
 }
 
@@ -249,6 +281,15 @@ impl WasmPluginAbi {
     fn is_preview(self) -> bool {
         !matches!(self, Self::FluxheimPolicyV1)
     }
+
+    #[cfg(feature = "wasm")]
+    fn to_wasm_abi(self) -> fluxheim_wasm::WasmPluginAbi {
+        match self {
+            Self::FluxheimPolicyV1 => fluxheim_wasm::WasmPluginAbi::FluxheimPolicyV1,
+            Self::ProxyWasmPreview => fluxheim_wasm::WasmPluginAbi::ProxyWasmPreview,
+            Self::WasiPreview => fluxheim_wasm::WasmPluginAbi::WasiPreview,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq, Deserialize, Serialize)]
@@ -262,12 +303,36 @@ pub enum WasmPluginPhase {
     CacheStore,
 }
 
+#[cfg(feature = "wasm")]
+impl WasmPluginPhase {
+    fn to_wasm_phase(self) -> fluxheim_wasm::WasmPluginPhase {
+        match self {
+            Self::RequestHeaders => fluxheim_wasm::WasmPluginPhase::RequestHeaders,
+            Self::ResponseHeaders => fluxheim_wasm::WasmPluginPhase::ResponseHeaders,
+            Self::AccessDecision => fluxheim_wasm::WasmPluginPhase::AccessDecision,
+            Self::RouteDecision => fluxheim_wasm::WasmPluginPhase::RouteDecision,
+            Self::CacheLookup => fluxheim_wasm::WasmPluginPhase::CacheLookup,
+            Self::CacheStore => fluxheim_wasm::WasmPluginPhase::CacheStore,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum WasmPluginFailMode {
     #[default]
     FailClosed,
     FailOpen,
+}
+
+#[cfg(feature = "wasm")]
+impl WasmPluginFailMode {
+    fn to_wasm_fail_mode(self) -> fluxheim_wasm::WasmPluginFailMode {
+        match self {
+            Self::FailClosed => fluxheim_wasm::WasmPluginFailMode::FailClosed,
+            Self::FailOpen => fluxheim_wasm::WasmPluginFailMode::FailOpen,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -358,6 +423,33 @@ impl WasmSandboxLimitsConfig {
             });
         }
         Ok(())
+    }
+
+    #[cfg(feature = "wasm")]
+    fn to_wasm_limits(self) -> Result<fluxheim_wasm::WasmSandboxLimits, ConfigError> {
+        let max_memory_bytes = usize::try_from(self.max_memory_bytes.as_u64()).map_err(|_| {
+            ConfigError::InvalidWasmPolicy {
+                scope: "wasm sandbox limits".to_owned(),
+                field: "max_memory_bytes",
+                reason: "value is too large for this platform",
+            }
+        })?;
+        let max_table_elements = usize::try_from(self.max_table_elements).map_err(|_| {
+            ConfigError::InvalidWasmPolicy {
+                scope: "wasm sandbox limits".to_owned(),
+                field: "max_table_elements",
+                reason: "value is too large for this platform",
+            }
+        })?;
+
+        Ok(fluxheim_wasm::WasmSandboxLimits {
+            max_module_bytes: self.max_module_bytes.as_u64(),
+            max_memory_bytes,
+            max_table_elements,
+            fuel: self.fuel,
+            timeout: Duration::from_millis(self.timeout_ms),
+            compile_timeout: Duration::from_millis(self.compile_timeout_ms),
+        })
     }
 }
 

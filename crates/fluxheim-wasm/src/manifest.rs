@@ -50,6 +50,7 @@ pub enum WasmPluginFailMode {
 pub struct WasmPluginManifest {
     pub name: String,
     pub path: PathBuf,
+    pub expected_sha256: Option<String>,
     pub abi: WasmPluginAbi,
     pub phases: Vec<WasmPluginPhase>,
     pub limits: WasmSandboxLimits,
@@ -60,6 +61,7 @@ pub struct WasmPluginManifest {
 pub struct ValidatedWasmPluginManifest {
     name: String,
     path: PathBuf,
+    expected_sha256: Option<String>,
     abi: WasmPluginAbi,
     phases: Vec<WasmPluginPhase>,
     limits: WasmSandboxLimits,
@@ -91,6 +93,10 @@ impl ValidatedWasmPluginManifest {
         &self.path
     }
 
+    pub fn expected_sha256(&self) -> Option<&str> {
+        self.expected_sha256.as_deref()
+    }
+
     pub fn abi(&self) -> WasmPluginAbi {
         self.abi
     }
@@ -120,6 +126,8 @@ pub enum WasmManifestError {
     RelativePath { path: PathBuf },
     #[error("wasm plugin path contains a non-normal component: {path}")]
     NonNormalPath { path: PathBuf },
+    #[error("wasm plugin expected SHA-256 digest must be 64 lowercase hex characters")]
+    InvalidExpectedSha256,
     #[error("wasm plugin must declare at least one phase")]
     EmptyPhases,
     #[error("wasm plugin declares too many phases: max {max}")]
@@ -143,6 +151,12 @@ pub enum WasmPluginLoadError {
     Manifest(#[from] WasmManifestError),
     #[error(transparent)]
     Plugin(#[from] WasmPluginError),
+    #[error("wasm plugin digest mismatch: {path}: expected {expected}, got {actual}")]
+    DigestMismatch {
+        path: PathBuf,
+        expected: String,
+        actual: String,
+    },
 }
 
 pub fn validate_plugin_manifest(
@@ -151,6 +165,9 @@ pub fn validate_plugin_manifest(
 ) -> Result<ValidatedWasmPluginManifest, WasmManifestError> {
     validate_plugin_name(&manifest.name)?;
     validate_manifest_path(&manifest.path)?;
+    if let Some(expected_sha256) = &manifest.expected_sha256 {
+        validate_expected_sha256(expected_sha256)?;
+    }
     let limits = validate_manifest_limits(manifest.limits)?;
     if manifest.abi.is_preview() && !allow_preview_abi {
         return Err(WasmManifestError::PreviewAbiDisabled { abi: manifest.abi });
@@ -161,6 +178,7 @@ pub fn validate_plugin_manifest(
     Ok(ValidatedWasmPluginManifest {
         name: manifest.name,
         path: manifest.path,
+        expected_sha256: manifest.expected_sha256,
         abi: manifest.abi,
         phases: manifest.phases,
         limits,
@@ -175,6 +193,15 @@ pub fn load_plugin_from_manifest(
 ) -> Result<LoadedWasmPlugin, WasmPluginLoadError> {
     let manifest = validate_plugin_manifest(manifest, allow_preview_abi)?;
     let file = load_plugin_file(manifest.path(), approved_roots, manifest.limits())?;
+    if let Some(expected) = manifest.expected_sha256()
+        && !file.sha256_hex().eq_ignore_ascii_case(expected)
+    {
+        return Err(WasmPluginLoadError::DigestMismatch {
+            path: manifest.path().to_path_buf(),
+            expected: expected.to_owned(),
+            actual: file.sha256_hex().to_owned(),
+        });
+    }
     Ok(LoadedWasmPlugin { manifest, file })
 }
 
@@ -232,6 +259,14 @@ fn validate_manifest_path(path: &Path) -> Result<(), WasmManifestError> {
     Ok(())
 }
 
+fn validate_expected_sha256(value: &str) -> Result<(), WasmManifestError> {
+    if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(WasmManifestError::InvalidExpectedSha256)
+    }
+}
+
 fn validate_phases(phases: &[WasmPluginPhase]) -> Result<(), WasmManifestError> {
     if phases.is_empty() {
         return Err(WasmManifestError::EmptyPhases);
@@ -280,6 +315,7 @@ mod tests {
         WasmPluginManifest {
             name: "security-headers".to_owned(),
             path: PathBuf::from("/srv/fluxheim/plugins/security_headers.wasm"),
+            expected_sha256: None,
             abi: WasmPluginAbi::FluxheimPolicyV1,
             phases: vec![WasmPluginPhase::RequestHeaders],
             limits: WasmSandboxLimits::default(),
@@ -330,6 +366,16 @@ mod tests {
         let error = validate_plugin_manifest(manifest, false).unwrap_err();
 
         assert!(matches!(error, WasmManifestError::NonNormalPath { .. }));
+    }
+
+    #[test]
+    fn rejects_invalid_expected_digest() {
+        let mut manifest = valid_manifest();
+        manifest.expected_sha256 = Some("not-hex".to_owned());
+
+        let error = validate_plugin_manifest(manifest, false).unwrap_err();
+
+        assert_eq!(error, WasmManifestError::InvalidExpectedSha256);
     }
 
     #[test]
@@ -418,6 +464,23 @@ mod tests {
         assert_eq!(loaded.manifest().path(), plugin_path);
         assert_eq!(loaded.file().bytes(), b"\0asm\x01\0\0\0");
         assert_eq!(loaded.file().sha256_hex().len(), 64);
+    }
+
+    #[test]
+    fn load_from_manifest_enforces_expected_digest() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_plugin(&directory);
+        let mut manifest = valid_manifest();
+        manifest.path = plugin_path.clone();
+        manifest.expected_sha256 = Some("0".repeat(64));
+
+        let error = load_plugin_from_manifest(manifest, &[directory.path().to_path_buf()], false)
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            WasmPluginLoadError::DigestMismatch { path, .. } if path == plugin_path
+        ));
     }
 
     #[test]

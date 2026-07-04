@@ -41,6 +41,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let manifest = WasmPluginManifest {
         name: "smoke-decision".to_owned(),
         path: plugin.clone(),
+        expected_sha256: None,
         abi: WasmPluginAbi::FluxheimPolicyV1,
         phases: vec![WasmPluginPhase::RequestHeaders],
         limits,
@@ -55,6 +56,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let unsafe_manifest = WasmPluginManifest {
         name: "unsafe-access".to_owned(),
         path: plugin.clone(),
+        expected_sha256: None,
         abi: WasmPluginAbi::FluxheimPolicyV1,
         phases: vec![WasmPluginPhase::AccessDecision],
         limits,

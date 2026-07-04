@@ -15,6 +15,9 @@ staged for later `1.7.x` releases.
 - Add `[[wasm.attachments]]` declarations that attach a known plugin to a
   configured vhost and optional route, with optional phase narrowing and
   per-attachment admission budgets.
+- Add a typed config-to-loader manifest bridge so validated `[[wasm.plugins]]`
+  entries become `fluxheim-wasm` manifests with inherited sandbox limits and
+  optional expected SHA-256 digests.
 - Reject unknown plugin references, attachment phases not declared by the
   plugin, duplicate same-target attachments, preview ABIs without explicit
   allowance, unsafe `fail_open` security-decision plugins, invalid plugin
@@ -29,6 +32,8 @@ staged for later `1.7.x` releases.
   or attachments are accepted.
 - Binaries built without the `wasm` feature reject non-empty `[wasm]` config
   during validation instead of accepting a registry that cannot run.
+- `sha256` on `[[wasm.plugins]]` is enforced by the plugin loader when a plugin
+  file is loaded, not just checked as a syntactically valid digest.
 - Plugin paths and plugin roots must be absolute and must not contain `.` or
   `..` components. Runtime file existence and symlink checks are still handled
   by the `fluxheim-wasm` loader when hook execution is wired later.

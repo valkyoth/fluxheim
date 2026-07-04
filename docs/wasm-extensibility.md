@@ -207,6 +207,12 @@ feature. Default and privacy-oriented builds reject non-empty `[wasm]` config
 during validation so a plugin registry cannot be configured without a runtime
 that can eventually enforce it.
 
+The config crate converts validated plugin declarations into
+`fluxheim-wasm` loader manifests. Per-plugin sandbox limits override
+`[wasm.default_limits]`; omitted limits inherit the defaults. If `sha256` is
+set on a plugin, the loader rejects a plugin file whose actual SHA-256 digest
+does not match.
+
 `1.7.1` validates the registry and attachment declarations only. Request-path
 execution starts in later `1.7.x` hook releases.
 

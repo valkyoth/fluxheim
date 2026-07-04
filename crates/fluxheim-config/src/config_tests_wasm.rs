@@ -66,6 +66,104 @@ fn wasm_registry_and_attachments_validate() {
 
 #[cfg(feature = "wasm")]
 #[test]
+fn wasm_registry_builds_loader_manifests_with_defaults() {
+    let config = base_wasm_config(
+        r#"
+        [[wasm.attachments]]
+        plugin = "headers"
+        vhost = "app"
+        phases = ["request-headers"]
+        "#,
+    );
+
+    config.validate().unwrap();
+    let manifests = config.wasm.plugin_manifests().unwrap();
+
+    assert_eq!(manifests.len(), 2);
+    assert_eq!(manifests[0].name, "headers");
+    assert_eq!(manifests[0].expected_sha256, None);
+    assert_eq!(
+        manifests[0].abi,
+        fluxheim_wasm::WasmPluginAbi::FluxheimPolicyV1
+    );
+    assert_eq!(
+        manifests[0].phases,
+        vec![
+            fluxheim_wasm::WasmPluginPhase::RequestHeaders,
+            fluxheim_wasm::WasmPluginPhase::ResponseHeaders,
+        ]
+    );
+    assert_eq!(manifests[0].limits.max_module_bytes, 1_048_576);
+    assert_eq!(manifests[0].limits.max_memory_bytes, 16 * 1024 * 1024);
+    fluxheim_wasm::validate_plugin_manifest(manifests[0].clone(), false).unwrap();
+}
+
+#[cfg(feature = "wasm")]
+#[test]
+fn wasm_registry_builds_loader_manifest_with_plugin_overrides() {
+    let config: Config = toml::from_str(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+
+        [wasm.default_limits]
+        max_module_bytes = "2MiB"
+        max_memory_bytes = "32MiB"
+        max_table_elements = 20000
+        fuel = 6000000
+        timeout_ms = 60
+        compile_timeout_ms = 600
+
+        [[wasm.plugins]]
+        name = "headers"
+        path = "/srv/fluxheim/plugins/headers.wasm"
+        sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        phases = ["request-headers"]
+
+        [wasm.plugins.limits]
+        max_module_bytes = "3MiB"
+        max_memory_bytes = "64MiB"
+        max_table_elements = 30000
+        fuel = 7000000
+        timeout_ms = 70
+        compile_timeout_ms = 700
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#,
+    )
+    .unwrap();
+
+    config.validate().unwrap();
+    let manifests = config.wasm.plugin_manifests().unwrap();
+
+    assert_eq!(manifests.len(), 1);
+    assert_eq!(
+        manifests[0].expected_sha256.as_deref(),
+        Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    );
+    assert_eq!(manifests[0].limits.max_module_bytes, 3 * 1024 * 1024);
+    assert_eq!(manifests[0].limits.max_memory_bytes, 64 * 1024 * 1024);
+    assert_eq!(manifests[0].limits.max_table_elements, 30000);
+    assert_eq!(manifests[0].limits.fuel, 7_000_000);
+    assert_eq!(
+        manifests[0].limits.timeout,
+        std::time::Duration::from_millis(70)
+    );
+    assert_eq!(
+        manifests[0].limits.compile_timeout,
+        std::time::Duration::from_millis(700)
+    );
+    fluxheim_wasm::validate_plugin_manifest(manifests[0].clone(), false).unwrap();
+}
+
+#[cfg(feature = "wasm")]
+#[test]
 fn wasm_attachment_rejects_unknown_plugin() {
     let config = base_wasm_config(
         r#"
