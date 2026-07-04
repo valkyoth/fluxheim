@@ -213,6 +213,12 @@ The config crate converts validated plugin declarations into
 set on a plugin, the loader rejects a plugin file whose actual SHA-256 digest
 does not match.
 
+Authenticated `/_fluxheim/status` responses include a validation-only WASM
+registry summary when Fluxheim is built with `wasm`: enabled state,
+plugin/attachment counts, plugin names, phases, fail modes, and expected
+SHA-256 digests. Actual loaded plugin hashes are added when runtime hook loading
+is wired.
+
 `1.7.1` validates the registry and attachment declarations only. Request-path
 execution starts in later `1.7.x` hook releases.
 

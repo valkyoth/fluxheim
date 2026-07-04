@@ -18,6 +18,9 @@ staged for later `1.7.x` releases.
 - Add a typed config-to-loader manifest bridge so validated `[[wasm.plugins]]`
   entries become `fluxheim-wasm` manifests with inherited sandbox limits and
   optional expected SHA-256 digests.
+- Add authenticated `/_fluxheim/status` visibility for the validation-only
+  WASM registry: enabled state, plugin/attachment counts, plugin names, phases,
+  fail modes, and expected SHA-256 digests.
 - Reject unknown plugin references, attachment phases not declared by the
   plugin, duplicate same-target attachments, preview ABIs without explicit
   allowance, unsafe `fail_open` security-decision plugins, invalid plugin

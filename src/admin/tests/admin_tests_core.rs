@@ -212,3 +212,52 @@ fn status_endpoint_requires_bearer_token() {
             .contains(r#""pending_validation":null"#)
     );
 }
+
+#[cfg(feature = "wasm")]
+#[test]
+fn status_endpoint_reports_wasm_registry_summary() {
+    let config: Config = toml::from_str(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+        plugin_roots = ["/srv/fluxheim/plugins"]
+
+        [[wasm.plugins]]
+        name = "headers"
+        path = "/srv/fluxheim/plugins/headers.wasm"
+        sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        phases = ["request-headers", "response-headers"]
+
+        [[wasm.attachments]]
+        plugin = "headers"
+        vhost = "app"
+        phases = ["response-headers"]
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#,
+    )
+    .unwrap();
+    config.validate().unwrap();
+
+    let response =
+        app_with_config(config).handle("GET", "/_fluxheim/status", None, &auth_headers());
+    assert_eq!(response.status, StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+
+    assert_eq!(body["wasm"]["enabled"], true);
+    assert_eq!(body["wasm"]["plugin_count"], 1);
+    assert_eq!(body["wasm"]["attachment_count"], 1);
+    assert_eq!(body["wasm"]["plugins"][0]["name"], "headers");
+    assert_eq!(
+        body["wasm"]["plugins"][0]["expected_sha256"],
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    );
+    assert_eq!(body["wasm"]["plugins"][0]["phases"][0], "request-headers");
+    assert_eq!(body["wasm"]["attachments"][0]["vhost"], "app");
+}

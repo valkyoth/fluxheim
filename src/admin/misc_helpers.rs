@@ -4,7 +4,7 @@ use http::HeaderMap;
 
 use serde_json::{Value, json};
 
-#[cfg(feature = "udp-proxy")]
+#[cfg(any(feature = "udp-proxy", feature = "wasm"))]
 use crate::config::Config;
 
 use fluxheim_config::reload::ReloadReason;
@@ -140,6 +140,88 @@ pub(super) fn udp_route_mode_label(mode: crate::config::UdpRouteMode) -> &'stati
         crate::config::UdpRouteMode::SyslogForward => "syslog-forward",
         crate::config::UdpRouteMode::QuicPassThrough => "quic-pass-through",
         crate::config::UdpRouteMode::GameProxy => "game-proxy",
+    }
+}
+
+#[cfg(feature = "wasm")]
+pub(super) fn wasm_status_json(config: &Config) -> Value {
+    let plugins = config
+        .wasm
+        .plugins
+        .iter()
+        .map(|plugin| {
+            json!({
+                "name": plugin.name,
+                "path": plugin.path.display().to_string(),
+                "expected_sha256": plugin.sha256.as_deref(),
+                "abi": wasm_abi_label(plugin.abi),
+                "host_call_namespace": wasm_host_call_namespace_label(plugin.host_call_namespace),
+                "phases": plugin.phases.iter().map(|phase| wasm_phase_label(*phase)).collect::<Vec<_>>(),
+                "fail_mode": wasm_fail_mode_label(plugin.fail_mode),
+                "has_custom_limits": plugin.limits.is_some(),
+                "has_custom_admission": plugin.admission.is_some(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let attachments = config
+        .wasm
+        .attachments
+        .iter()
+        .map(|attachment| {
+            json!({
+                "plugin": attachment.plugin,
+                "vhost": attachment.vhost,
+                "route": attachment.route.as_deref(),
+                "phases": attachment.phases.iter().map(|phase| wasm_phase_label(*phase)).collect::<Vec<_>>(),
+                "has_custom_admission": attachment.admission.is_some(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "enabled": config.wasm.enabled,
+        "allow_preview_abi": config.wasm.allow_preview_abi,
+        "plugin_root_count": config.wasm.plugin_roots.len(),
+        "plugin_count": plugins.len(),
+        "attachment_count": attachments.len(),
+        "plugins": plugins,
+        "attachments": attachments,
+    })
+}
+
+#[cfg(feature = "wasm")]
+fn wasm_abi_label(abi: crate::config::WasmPluginAbi) -> &'static str {
+    match abi {
+        crate::config::WasmPluginAbi::FluxheimPolicyV1 => "fluxheim-policy-v1",
+        crate::config::WasmPluginAbi::ProxyWasmPreview => "proxy-wasm-preview",
+        crate::config::WasmPluginAbi::WasiPreview => "wasi-preview",
+    }
+}
+
+#[cfg(feature = "wasm")]
+fn wasm_host_call_namespace_label(namespace: crate::config::WasmHostCallNamespace) -> &'static str {
+    match namespace {
+        crate::config::WasmHostCallNamespace::FluxheimPolicyV1 => "fluxheim-policy-v1",
+    }
+}
+
+#[cfg(feature = "wasm")]
+fn wasm_phase_label(phase: crate::config::WasmPluginPhase) -> &'static str {
+    match phase {
+        crate::config::WasmPluginPhase::RequestHeaders => "request-headers",
+        crate::config::WasmPluginPhase::ResponseHeaders => "response-headers",
+        crate::config::WasmPluginPhase::AccessDecision => "access-decision",
+        crate::config::WasmPluginPhase::RouteDecision => "route-decision",
+        crate::config::WasmPluginPhase::CacheLookup => "cache-lookup",
+        crate::config::WasmPluginPhase::CacheStore => "cache-store",
+    }
+}
+
+#[cfg(feature = "wasm")]
+fn wasm_fail_mode_label(fail_mode: crate::config::WasmPluginFailMode) -> &'static str {
+    match fail_mode {
+        crate::config::WasmPluginFailMode::FailClosed => "fail-closed",
+        crate::config::WasmPluginFailMode::FailOpen => "fail-open",
     }
 }
 

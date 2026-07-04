@@ -253,6 +253,14 @@ impl AdminApp {
             }
             body
         };
+        #[cfg(feature = "wasm")]
+        let body = {
+            let mut body = body;
+            if let Some(object) = body.as_object_mut() {
+                object.insert("wasm".to_owned(), wasm_status_json(&current_config));
+            }
+            body
+        };
         json_response_value(StatusCode::OK, &body)
     }
 }
