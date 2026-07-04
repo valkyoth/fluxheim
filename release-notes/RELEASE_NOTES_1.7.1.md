@@ -21,6 +21,8 @@ staged for later `1.7.x` releases.
 - Add authenticated `/_fluxheim/status` visibility for the validation-only
   WASM registry: enabled state, plugin/attachment counts, plugin names, phases,
   fail modes, and expected SHA-256 digests.
+- Add accepted and rejected WASM config-registry fixtures and wire them into
+  `scripts/validate-wasm-config-registry.sh`.
 - Reject unknown plugin references, attachment phases not declared by the
   plugin, duplicate same-target attachments, preview ABIs without explicit
   allowance, unsafe `fail_open` security-decision plugins, invalid plugin

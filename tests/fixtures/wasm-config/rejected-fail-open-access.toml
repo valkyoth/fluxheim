@@ -1,0 +1,24 @@
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "app"
+
+[wasm]
+enabled = true
+plugin_roots = ["/srv/fluxheim/plugins"]
+
+[[wasm.plugins]]
+name = "access_gate"
+path = "/srv/fluxheim/plugins/access_gate.wasm"
+abi = "fluxheim-policy-v1"
+host_call_namespace = "fluxheim-policy-v1"
+phases = ["access-decision"]
+fail_mode = "fail-open"
+
+[[wasm.attachments]]
+plugin = "access_gate"
+vhost = "app"
+phases = ["access-decision"]
+
+[[vhosts]]
+name = "app"
+hosts = ["app.test"]
