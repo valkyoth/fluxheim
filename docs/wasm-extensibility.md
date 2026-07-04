@@ -3,7 +3,7 @@
 Status: active `1.7` optional module family after the `1.6` Pingora-free
 runtime line. Fluxheim `1.7.0` shipped the first sandbox foundation:
 compile-time feature gates, strict plugin-file loading, bounded Wasmtime
-execution, and real Wasm smoke coverage. Fluxheim `1.7.2` starts live
+execution, and real Wasm smoke coverage. Fluxheim `1.7.1` starts live
 request-path execution with native HTTP/1 access-decision hooks. Header
 mutation, response hooks, proxy-ABI compatibility, and WASI capabilities remain
 staged for later `1.7.x` releases.
@@ -75,7 +75,7 @@ order. Security decisions use a safe default: `access-decision` is
 be overridden by a plugin. Header mutation phases will run in the configured
 order once the typed host-call ABI for reading and mutating headers lands.
 
-The `1.7.2` preview access ABI calls an exported
+The `1.7.1` preview access ABI calls an exported
 `fluxheim_access_decision() -> i32` function:
 
 - `0`: continue to the next plugin;
@@ -261,7 +261,7 @@ still enforced inside that global ceiling.
 the same phase and vhost/route. Lower numeric priorities run first; ties use
 the declaration order in the loaded config. Access decisions use
 `first-deny-wins` and are active for native HTTP/1 route proxy traffic in
-`1.7.2`.
+`1.7.1`.
 
 Config fragments preserve explicit resets to stock WASM defaults. A later
 `conf.d` fragment can set `[wasm.default_limits]` or
@@ -274,8 +274,9 @@ plugin/attachment counts, plugin names, phases, fail modes, and expected
 SHA-256 digests. Actual loaded plugin hashes are added when runtime hook loading
 is wired.
 
-`1.7.1` validates the registry and attachment declarations only. Request-path
-execution starts in later `1.7.x` hook releases.
+`1.7.1` validates the registry and attachment declarations and enables the
+first native HTTP/1 access-decision request-path hook. Header mutation and
+other hook families remain staged for later `1.7.x` releases.
 
 ## Reload Semantics
 

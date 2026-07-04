@@ -23,7 +23,7 @@ do
     fi
 done
 
-for version in 1.7.2 1.7.3 1.7.4 1.7.5 1.7.9 1.7.10; do
+for version in 1.7.1 1.7.2 1.7.3 1.7.4 1.7.8 1.7.9; do
     if ! grep -q "v$version" "$plan"; then
         echo "wasm example plan: $plan does not assign v$version work" >&2
         exit 1

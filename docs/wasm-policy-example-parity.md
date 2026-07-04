@@ -46,7 +46,7 @@ Required live test:
 - the plugin cannot read request bodies, filesystem paths, admin tokens, or
   upstream TLS secrets.
 
-Target release: `v1.7.2`.
+Target release: `v1.7.1`.
 
 ### nginx Lua/OpenResty-Style Header Policy
 
@@ -73,8 +73,7 @@ Required live test:
 - Authorization, Cookie, Set-Cookie, private keys, and admin credentials are
   not exposed to the plugin unless a future explicit capability allows it.
 
-Target releases: `v1.7.2` for request headers and `v1.7.3` for response
-headers.
+Target release: `v1.7.2`.
 
 ### HAProxy Lua/SPOE-Style Routing And Load-Balancer Policy
 
@@ -100,7 +99,7 @@ Required live test:
 - mirror/shadow decisions never recurse and only target configured mirrors;
 - a plugin trying to choose an unknown pool is rejected deterministically.
 
-Target release: `v1.7.4`.
+Target release: `v1.7.3`.
 
 ### VCL-Like Cache Policy
 
@@ -130,7 +129,7 @@ Required live test:
 - plugin cache tags are visible to purge/status tooling;
 - unsafe Set-Cookie or private responses remain uncacheable.
 
-Target release: `v1.7.5`.
+Target release: `v1.7.4`.
 
 ## Stabilization Requirements
 

@@ -1,26 +1,25 @@
 # Fluxheim 1.7.1 Release Notes
 
 Fluxheim 1.7.1 continues the WebAssembly extensibility line with config-level
-integration for the typed plugin registry. Runtime request-path hooks remain
-staged for later `1.7.x` releases.
+plugin registry integration, deterministic hook-chain contracts, and the first
+live request-path hook family: native HTTP/1 access decisions. Request-header
+mutation remains staged until the typed host-call ABI can safely pass and
+mutate header state.
 
 ## Highlights
 
 - Add `[wasm]` config validation for plugin roots, default sandbox limits,
-  default execution admission budgets, plugin declarations, and plugin
-  attachments.
+  default execution admission budgets, process-wide execution admission,
+  plugin declarations, and plugin attachments.
 - Add `[[wasm.plugins]]` declarations with plugin name, path, optional expected
   SHA-256 digest, ABI, host-call namespace, phases, fail mode, per-plugin
   sandbox limits, and per-plugin admission budgets.
 - Add `[[wasm.attachments]]` declarations that attach a known plugin to a
-  configured vhost and optional route, with optional phase narrowing and
-  per-attachment admission budgets.
+  configured vhost and optional route, with optional phase narrowing,
+  deterministic `priority`, and per-attachment admission budgets.
 - Add a typed config-to-loader manifest bridge so validated `[[wasm.plugins]]`
   entries become `fluxheim-wasm` manifests with inherited sandbox limits and
   optional expected SHA-256 digests.
-- Add authenticated `/_fluxheim/status` visibility for the validation-only
-  WASM registry: enabled state, plugin/attachment counts, plugin names, phases,
-  fail modes, and expected SHA-256 digests.
 - Add accepted and rejected WASM config-registry fixtures and wire them into
   `scripts/validate-wasm-config-registry.sh`.
 - Reject unknown plugin references, attachment phases not declared by the
@@ -34,11 +33,29 @@ staged for later `1.7.x` releases.
   directories.
 - Require `sha256` for plugins that declare security-decision phases
   (`access-decision`, `route-decision`, or `cache-store`).
+- Add `wasm.max_total_concurrent_executions`, a process-wide ceiling for total
+  concurrent Wasm plugin executions.
+- Add a canonical ordered attachment view in config so all hook families use
+  the same priority/declaration-order rules.
+- Add reusable `fluxheim-wasm` access-decision and process-wide admission
+  primitives, including `first-deny-wins` composition.
+- Wire live native HTTP/1 `access-decision` hooks for vhost and route
+  attachments. Built-in ACLs remain non-overridable; Wasm access hooks can only
+  add an allow/continue or deny decision after built-in access policy passes.
+- Add live listener tests that load real Wasm modules and prove deny behavior,
+  priority-ordered `first-deny-wins`, percent-decoded route policy selection,
+  and fail-closed behavior for invalid output and traps.
+- Classify any `[wasm]` runtime, plugin, attachment, limit, or admission change
+  as `wasm-runtime-changed` and require a process upgrade until the compiled
+  module cache and atomic reload path are implemented and tested.
+- Expose the process-wide Wasm execution ceiling and attachment priorities in
+  authenticated `/_fluxheim/status`.
+- Add low-cardinality Wasm metrics for plugin executions, execution duration,
+  and admission rejections. Native hook execution installs Prometheus recorders
+  when metrics are enabled.
 - Preserve explicit WASM default resets from later `conf.d` fragments by using
   fragment-aware merge semantics for default sandbox limits and admission
   budgets.
-- Keep the new config integration validation-only. No request/response,
-  routing, cache, or load-balancer hook execution is enabled by this release.
 
 ## Operator Notes
 
@@ -46,21 +63,25 @@ staged for later `1.7.x` releases.
   or attachments are accepted.
 - Binaries built without the `wasm` feature reject non-empty `[wasm]` config
   during validation instead of accepting a registry that cannot run.
-- `sha256` on `[[wasm.plugins]]` is enforced by the plugin loader when a plugin
-  file is loaded, not just checked as a syntactically valid digest. It is
-  mandatory for security-decision phases.
+- The default process-wide Wasm execution ceiling is `256`.
+- The default attachment priority is `1000`.
+- `access-decision` hooks use the exported
+  `fluxheim_access_decision() -> i32` preview ABI in this release: `0`
+  continues the chain, `1` allows/continues, and `2` denies with `403`.
 - Plugin paths and plugin roots must be absolute and must not contain `.` or
   `..` components. Plugin paths must be under `wasm.plugin_roots`, and plugin
   roots must be scoped directories such as `/srv/fluxheim/plugins`, not broad
-  roots such as `/` or `/etc`. Runtime file existence and symlink checks are
-  still handled by the `fluxheim-wasm` loader when hook execution is wired
-  later.
-- Attachments use root-scoped target fields:
+  roots such as `/` or `/etc`.
+- Runtime loaded plugin hashes remain staged for a later `1.7.x` status slice.
+  Configured expected hashes remain visible in admin status.
+
+Example attachment:
 
 ```toml
 [[wasm.attachments]]
 plugin = "security_headers"
 vhost = "example"
 route = "static"
+priority = 100
 phases = ["response-headers"]
 ```

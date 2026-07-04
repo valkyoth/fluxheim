@@ -134,7 +134,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional `geoip` feature with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. |
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
 | HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.8` protocol milestone using the Rust `quinn`/`h3` stack after the `1.6` Pingora-free runtime is stable. |
-| WASM sandbox foundation | 🧪 | `1.7.0`-`1.7.2`; optional `wasm` feature with strict plugin-file loading, bounded real-Wasm execution smoke, config-level plugin registry validation, typed loader manifests, authenticated registry status visibility, deterministic attachment ordering, global admission limits, Wasm-aware reload classification, and live native HTTP/1 access-decision hooks. Header mutation and richer policy hooks remain staged for later `1.7.x`. |
+| WASM sandbox foundation | 🧪 | `1.7.0`-`1.7.1`; optional `wasm` feature with strict plugin-file loading, bounded real-Wasm execution smoke, config-level plugin registry validation, typed loader manifests, authenticated registry status visibility, deterministic attachment ordering, global admission limits, Wasm-aware reload classification, and live native HTTP/1 access-decision hooks. Header mutation and richer policy hooks remain staged for later `1.7.x`. |
 
 See [Production Readiness](docs/production-readiness.md) for the precise
 stable-core promise and deployment checks. See
