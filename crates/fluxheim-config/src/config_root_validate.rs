@@ -37,7 +37,9 @@ impl Config {
         self.geoip.validate()?;
         self.stream.validate()?;
         self.udp.validate()?;
+        self.wasm.validate()?;
         self.validate_vhosts()?;
+        self.validate_wasm_attachments()?;
         self.validate_geoip_policy()?;
         self.validate_compliance_internal_crypto()?;
         Ok(())
@@ -190,6 +192,38 @@ impl Config {
             }
         }
 
+        Ok(())
+    }
+
+    fn validate_wasm_attachments(&self) -> Result<(), ConfigError> {
+        let plugins = self.wasm.plugin_map();
+        crate::config_wasm::validate_wasm_attachments(
+            &self.wasm.attachments,
+            "wasm.attachments",
+            &plugins,
+        )?;
+        for attachment in &self.wasm.attachments {
+            let Some(vhost) = self
+                .vhosts
+                .iter()
+                .find(|vhost| vhost.name == attachment.vhost)
+            else {
+                return Err(ConfigError::InvalidWasmPolicy {
+                    scope: "wasm.attachments".to_owned(),
+                    field: "vhost",
+                    reason: "attachment references an unknown vhost",
+                });
+            };
+            if let Some(route_name) = &attachment.route
+                && !vhost.routes.iter().any(|route| route.name == *route_name)
+            {
+                return Err(ConfigError::InvalidWasmPolicy {
+                    scope: format!("wasm attachment for vhost {:?}", vhost.name),
+                    field: "route",
+                    reason: "attachment references an unknown route",
+                });
+            }
+        }
         Ok(())
     }
 

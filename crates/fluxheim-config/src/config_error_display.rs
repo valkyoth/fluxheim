@@ -208,6 +208,31 @@ impl Display for ConfigError {
             Self::InvalidCompliancePolicy { field, reason } => {
                 write!(formatter, "{field} is invalid: {reason}")
             }
+            Self::InvalidWasmPolicy {
+                scope,
+                field,
+                reason,
+            } => {
+                write!(formatter, "{scope} {field} is invalid: {reason}")
+            }
+            Self::DuplicateWasmPluginName { name } => {
+                write!(
+                    formatter,
+                    "wasm.plugins contains duplicate plugin name {name:?}"
+                )
+            }
+            Self::UnknownWasmPlugin { scope, plugin } => {
+                write!(
+                    formatter,
+                    "{scope} references unknown wasm plugin {plugin:?}"
+                )
+            }
+            Self::DuplicateWasmAttachment { scope, plugin } => {
+                write!(
+                    formatter,
+                    "{scope} contains duplicate wasm attachment for plugin {plugin:?}"
+                )
+            }
             Self::InvalidPhpConfig { field, reason } => {
                 write!(formatter, "{field} is invalid: {reason}")
             }

@@ -161,6 +161,9 @@ impl Config {
         if let Some(udp) = fragment.udp {
             self.udp = udp;
         }
+        if let Some(wasm) = fragment.wasm {
+            self.wasm.merge(wasm);
+        }
         self.vhosts.extend(fragment.vhosts);
         Ok(())
     }

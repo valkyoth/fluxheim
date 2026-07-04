@@ -150,6 +150,7 @@ fn rejects_invalid_upstream() {
         geoip: GeoIpConfig::default(),
         stream: StreamConfig::default(),
         udp: UdpConfig::default(),
+        wasm: WasmConfig::default(),
         vhosts: vec![],
     };
 

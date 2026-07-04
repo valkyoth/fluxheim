@@ -13,8 +13,8 @@ use super::{
     LoadBalanceSelection, LoggingConfig, MetricsConfig, ProxyConfig, RateLimitMode, ServerConfig,
     ServerLimitsConfig, TlsAlpnPolicy, TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference,
     TlsPolicyProfile, TlsProtocolVersion, TracingConfig, UpstreamHttpVersion,
-    UpstreamProxyProtocol, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
-    normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
+    UpstreamProxyProtocol, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WasmConfig,
+    WebConfig, normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
     validate_dynamic_header_template,
 };
 #[cfg(feature = "cache")]
@@ -82,6 +82,8 @@ mod vhost_hosts;
 mod vhost_route_errors;
 #[path = "config_tests_vhost_routes.rs"]
 mod vhost_routes;
+#[path = "config_tests_wasm.rs"]
+mod wasm;
 #[path = "config_tests_web.rs"]
 mod web;
 

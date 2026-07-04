@@ -19,6 +19,7 @@ fn rejects_duplicate_vhost_hosts() {
         geoip: GeoIpConfig::default(),
         stream: StreamConfig::default(),
         udp: UdpConfig::default(),
+        wasm: WasmConfig::default(),
         vhosts: vec![
             VhostConfig {
                 name: "first.example".to_owned(),

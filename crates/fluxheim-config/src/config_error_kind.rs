@@ -150,6 +150,22 @@ pub enum ConfigError {
         field: &'static str,
         reason: &'static str,
     },
+    InvalidWasmPolicy {
+        scope: String,
+        field: &'static str,
+        reason: &'static str,
+    },
+    DuplicateWasmPluginName {
+        name: String,
+    },
+    UnknownWasmPlugin {
+        scope: String,
+        plugin: String,
+    },
+    DuplicateWasmAttachment {
+        scope: String,
+        plugin: String,
+    },
     InvalidPhpConfig {
         field: &'static str,
         reason: &'static str,

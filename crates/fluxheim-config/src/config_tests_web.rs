@@ -24,6 +24,7 @@ fn rejects_empty_index_files() {
         geoip: GeoIpConfig::default(),
         stream: StreamConfig::default(),
         udp: UdpConfig::default(),
+        wasm: WasmConfig::default(),
         vhosts: vec![],
     };
 
@@ -56,6 +57,7 @@ fn rejects_too_many_index_files() {
         geoip: GeoIpConfig::default(),
         stream: StreamConfig::default(),
         udp: UdpConfig::default(),
+        wasm: WasmConfig::default(),
         vhosts: vec![],
     };
 
@@ -128,6 +130,7 @@ fn rejects_nested_index_files() {
         geoip: GeoIpConfig::default(),
         stream: StreamConfig::default(),
         udp: UdpConfig::default(),
+        wasm: WasmConfig::default(),
         vhosts: vec![],
     };
 

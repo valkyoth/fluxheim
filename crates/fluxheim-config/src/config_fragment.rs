@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{
     ConfigLoadError, GeoIpConfig, HeaderPolicyConfig, LoggingConfig, MetricsConfig, TracingConfig,
-    UdpConfig, VhostConfig,
+    UdpConfig, VhostConfig, WasmConfig,
 };
 use crate::config_admin::AdminConfigFragment;
 use crate::config_cache::CacheConfigFragment;
@@ -52,6 +52,8 @@ pub(crate) struct ConfigFragment {
     pub(crate) stream: Option<StreamConfigFragment>,
     #[serde(default)]
     pub(crate) udp: Option<UdpConfig>,
+    #[serde(default)]
+    pub(crate) wasm: Option<WasmConfig>,
     #[serde(default)]
     pub(crate) vhosts: Vec<VhostConfig>,
 }
@@ -103,6 +105,9 @@ impl ConfigFragment {
         }
         if let Some(stream) = &mut self.stream {
             stream.resolve_relative_paths(base_dir);
+        }
+        if let Some(wasm) = &mut self.wasm {
+            wasm.resolve_relative_paths(base_dir);
         }
         for vhost in &mut self.vhosts {
             vhost.resolve_relative_paths(base_dir);

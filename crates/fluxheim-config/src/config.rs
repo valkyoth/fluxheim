@@ -123,6 +123,10 @@ pub use crate::config_tls::{
 pub use crate::config_types::{ByteSize, ByteSizeParseError};
 pub use crate::config_udp::{UdpConfig, UdpRouteConfig, UdpRouteMode};
 pub use crate::config_vhost::VhostConfig;
+pub use crate::config_wasm::{
+    WasmAdmissionBudgetConfig, WasmAttachmentConfig, WasmConfig, WasmHostCallNamespace,
+    WasmPluginAbi, WasmPluginConfig, WasmPluginFailMode, WasmPluginPhase, WasmSandboxLimitsConfig,
+};
 #[cfg(test)]
 pub use crate::config_web::MAX_WEB_INDEX_FILES;
 pub use crate::config_web::{DirectoryListingConfig, WebConfig};
@@ -170,6 +174,8 @@ pub struct Config {
     pub stream: StreamConfig,
     #[serde(default)]
     pub udp: UdpConfig,
+    #[serde(default)]
+    pub wasm: WasmConfig,
     #[serde(default)]
     pub vhosts: Vec<VhostConfig>,
 }

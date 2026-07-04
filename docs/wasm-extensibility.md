@@ -165,23 +165,45 @@ ABI version, feature set, and Fluxheim version.
 ## Configuration Sketch
 
 ```toml
-[wasm.plugins.security_headers]
+[wasm]
+enabled = true
+plugin_roots = ["/etc/fluxheim/plugins"]
+
+[[wasm.plugins]]
+name = "security_headers"
 path = "/etc/fluxheim/plugins/security_headers.wasm"
-abi = "proxy"
-max_memory = "32MiB"
+abi = "fluxheim-policy-v1"
+host_call_namespace = "fluxheim-policy-v1"
+phases = ["response-headers"]
+fail_mode = "fail-closed"
+
+[wasm.plugins.limits]
+max_module_bytes = "1MiB"
+max_memory_bytes = "16MiB"
+max_table_elements = 10000
 fuel = 5000000
-timeout = "5ms"
-fail_mode = "fail_closed"
+timeout_ms = 50
+compile_timeout_ms = 500
+
+[[wasm.attachments]]
+plugin = "security_headers"
+vhost = "example"
+phases = ["response-headers"]
 
 [[vhosts]]
 name = "example"
 hosts = ["example.com"]
 
-[[vhosts.wasm]]
-plugin = "security_headers"
-phase = "response_headers"
-paths = ["/*"]
+[[vhosts.routes]]
+name = "static"
+path_prefix = "/static/"
+
+[vhosts.routes.web]
+root = "/srv/example/static"
 ```
+
+`1.7.1` validates the registry and attachment declarations only. Request-path
+execution starts in later `1.7.x` hook releases.
 
 ## Test Plan
 

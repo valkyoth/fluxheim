@@ -7,7 +7,17 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.7.0 - Unreleased
+## 1.7.1 - Unreleased
+
+### Added
+
+- Add validation-only WASM config integration for root plugin registries and
+  root-scoped vhost/route attachment declarations.
+- Add config fixtures that accept valid plugin declarations and reject unknown
+  plugin references, attachment phase mismatches, unsafe `fail_open` security
+  decisions, disabled registries, and invalid execution admission budgets.
+
+## 1.7.0 - 2026-07-03
 
 ### Added
 
