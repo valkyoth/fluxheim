@@ -37,14 +37,16 @@ mutate header state.
   concurrent Wasm plugin executions.
 - Add a canonical ordered attachment view in config so all hook families use
   the same priority/declaration-order rules.
-- Add reusable `fluxheim-wasm` access-decision and process-wide admission
-  primitives, including `first-deny-wins` composition.
+- Add reusable `fluxheim-wasm` access-decision and admission primitives,
+  including process-wide, per-plugin, and per-attachment execution ceilings
+  plus `first-deny-wins` composition.
 - Wire live native HTTP/1 `access-decision` hooks for vhost and route
   attachments. Built-in ACLs remain non-overridable; Wasm access hooks can only
   add an allow/continue or deny decision after built-in access policy passes.
 - Add live listener tests that load real Wasm modules and prove deny behavior,
   priority-ordered `first-deny-wins`, percent-decoded route policy selection,
-  and fail-closed behavior for invalid output and traps.
+  process-wide/plugin/attachment admission rejection, and fail-closed behavior
+  for invalid output and traps.
 - Classify any `[wasm]` runtime, plugin, attachment, limit, or admission change
   as `wasm-runtime-changed` and require a process upgrade until the compiled
   module cache and atomic reload path are implemented and tested.

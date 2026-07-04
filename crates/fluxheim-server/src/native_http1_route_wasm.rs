@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use fluxheim_config::{
-    Config, WasmAttachmentConfig, WasmPluginConfig, WasmPluginFailMode, WasmPluginPhase,
-};
+use fluxheim_config::{Config, WasmAttachmentConfig, WasmPluginFailMode, WasmPluginPhase};
 use fluxheim_wasm::{
     FluxWasmAdmissionController, FluxWasmRuntime, LoadedWasmPlugin, WasmAccessDecision,
     WasmAccessDeny, WasmExecutionError, WasmPluginLoadError, load_plugin_from_manifest,
@@ -34,6 +32,7 @@ struct NativeWasmAttachment {
     vhost: String,
     route: Option<String>,
     phases: Vec<WasmPluginPhase>,
+    admission: FluxWasmAdmissionController,
 }
 
 #[derive(Debug)]
@@ -42,13 +41,15 @@ struct NativeWasmPlugin {
     loaded: LoadedWasmPlugin,
     runtime: FluxWasmRuntime,
     fail_mode: WasmPluginFailMode,
+    admission: FluxWasmAdmissionController,
 }
 
 #[derive(Clone, Debug)]
 struct NativeWasmHook {
     plugin: Arc<NativeWasmPlugin>,
     phase: WasmPluginPhase,
-    admission: FluxWasmAdmissionController,
+    global_admission: FluxWasmAdmissionController,
+    attachment_admission: FluxWasmAdmissionController,
 }
 
 #[derive(Debug)]
@@ -59,9 +60,16 @@ pub(crate) enum NativeWasmAccessOutcome {
 
 #[derive(Debug)]
 pub(crate) enum NativeWasmHookError {
-    Admission,
+    Admission(NativeWasmAdmissionScope),
     Execution(WasmExecutionError),
     Join,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NativeWasmAdmissionScope {
+    Global,
+    Plugin,
+    Attachment,
 }
 
 impl PartialEq for NativeWasmHooks {
@@ -105,12 +113,22 @@ impl NativeWasmHookRegistry {
             let runtime = FluxWasmRuntime::new(loaded.manifest().limits())
                 .map_err(|_| NativeWasmRegistryError::Runtime)?;
             let name = loaded.manifest().name().to_owned();
+            let plugin_config = config
+                .wasm
+                .plugins
+                .iter()
+                .find(|plugin| plugin.name == name)
+                .ok_or(NativeWasmRegistryError::Config)?;
             plugins.insert(
                 name.clone(),
                 Arc::new(NativeWasmPlugin {
                     name,
-                    fail_mode: plugin_fail_mode(loaded.manifest().name(), &config.wasm.plugins)
-                        .ok_or(NativeWasmRegistryError::Config)?,
+                    fail_mode: plugin_config.fail_mode,
+                    admission: admission_controller(
+                        plugin_config
+                            .admission
+                            .unwrap_or(config.wasm.default_admission),
+                    )?,
                     loaded,
                     runtime,
                 }),
@@ -134,6 +152,11 @@ impl NativeWasmHookRegistry {
                 plugin,
                 vhost: attachment.vhost.clone(),
                 route: attachment.route.clone(),
+                admission: admission_controller(
+                    attachment
+                        .admission
+                        .unwrap_or(config.wasm.default_admission),
+                )?,
             });
         }
 
@@ -152,7 +175,8 @@ impl NativeWasmHookRegistry {
             .map(|attachment| NativeWasmHook {
                 plugin: attachment.plugin.clone(),
                 phase: WasmPluginPhase::AccessDecision,
-                admission: self.admission.clone(),
+                global_admission: self.admission.clone(),
+                attachment_admission: attachment.admission.clone(),
             })
             .collect();
         NativeWasmHooks { access_decision }
@@ -204,7 +228,7 @@ impl NativeWasmHook {
             Ok(_) => self.failed_access_decision("error"),
             Err(error) => {
                 let outcome = match error {
-                    NativeWasmHookError::Admission => "fail_closed",
+                    NativeWasmHookError::Admission(_) => "fail_closed",
                     NativeWasmHookError::Execution(WasmExecutionError::Trap(_)) => "trap",
                     NativeWasmHookError::Execution(WasmExecutionError::CompileTimeout {
                         ..
@@ -222,13 +246,21 @@ impl NativeWasmHook {
         function: &'static str,
     ) -> Result<i32, NativeWasmHookError> {
         let plugin = self.plugin.clone();
-        let admission = self.admission.clone();
+        let global_admission = self.global_admission.clone();
+        let attachment_admission = self.attachment_admission.clone();
         let started = Instant::now();
         let plugin_name = plugin.name.clone();
         let result = tokio::task::spawn_blocking(move || {
-            let _permit = admission
+            let _global_permit = global_admission
                 .try_acquire()
-                .map_err(|_| NativeWasmHookError::Admission)?;
+                .map_err(|_| NativeWasmHookError::Admission(NativeWasmAdmissionScope::Global))?;
+            let _plugin_permit = plugin
+                .admission
+                .try_acquire()
+                .map_err(|_| NativeWasmHookError::Admission(NativeWasmAdmissionScope::Plugin))?;
+            let _attachment_permit = attachment_admission.try_acquire().map_err(|_| {
+                NativeWasmHookError::Admission(NativeWasmAdmissionScope::Attachment)
+            })?;
             plugin
                 .runtime
                 .run_i32_no_args(plugin.loaded.file(), function)
@@ -255,8 +287,8 @@ impl NativeWasmHook {
             Ok(_) => {
                 record_native_wasm_execution(&plugin_name, phase_label, "error", started.elapsed())
             }
-            Err(NativeWasmHookError::Admission) => {
-                record_native_wasm_admission_rejection(&plugin_name, phase_label, "global");
+            Err(NativeWasmHookError::Admission(scope)) => {
+                record_native_wasm_admission_rejection(&plugin_name, phase_label, scope.as_label());
                 record_native_wasm_execution(
                     &plugin_name,
                     phase_label,
@@ -318,9 +350,22 @@ fn attachment_phases(
     }
 }
 
-fn plugin_fail_mode(name: &str, plugins: &[WasmPluginConfig]) -> Option<WasmPluginFailMode> {
-    plugins
-        .iter()
-        .find(|plugin| plugin.name == name)
-        .map(|plugin| plugin.fail_mode)
+fn admission_controller(
+    budget: fluxheim_config::WasmAdmissionBudgetConfig,
+) -> Result<FluxWasmAdmissionController, NativeWasmRegistryError> {
+    FluxWasmAdmissionController::new(
+        usize::try_from(budget.max_concurrent_executions)
+            .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?,
+    )
+    .map_err(|_| NativeWasmRegistryError::AdmissionLimit)
+}
+
+impl NativeWasmAdmissionScope {
+    fn as_label(self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Plugin => "plugin",
+            Self::Attachment => "attachment",
+        }
+    }
 }

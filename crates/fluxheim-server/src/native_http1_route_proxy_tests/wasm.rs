@@ -108,6 +108,85 @@ async fn native_wasm_access_decision_fails_closed_on_trap() {
     assert!(response.ends_with("wasm access decision trap\n"));
 }
 
+#[tokio::test]
+async fn native_wasm_access_decision_enforces_attachment_admission_budget() {
+    let fixture = WasmRouteFixture::new(&[("busy", WasmPluginBody::BusyLoop)]);
+    let upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let router = NativeHttp1HostRouter::from_config(
+        &fixture.config_with_attachments(
+            upstream,
+            vec![wasm_attachment_with_admission("busy", "route", 100, 1)],
+        ),
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+    let proxy = router_listener(router).await;
+
+    let first = tokio::spawn(async move { downstream_get(proxy, "/route").await });
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    let second = downstream_get(proxy, "/route").await;
+    let first = first.await.unwrap();
+
+    assert!([first.as_str(), second.as_str()].iter().any(|response| {
+        response.starts_with("HTTP/1.1 503 Service Unavailable\r\n")
+            && response.ends_with("wasm access decision fail_closed\n")
+    }));
+}
+
+#[tokio::test]
+async fn native_wasm_access_decision_enforces_plugin_admission_budget_across_attachments() {
+    let fixture = WasmRouteFixture::new(&[("busy", WasmPluginBody::BusyLoop)]);
+    let upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![
+            wasm_attachment("busy", "route", 100),
+            wasm_attachment("busy", "other", 100),
+        ],
+    );
+    config.vhosts[0].routes.push(other_route());
+    config.wasm.plugins[0].admission = Some(fluxheim_config::WasmAdmissionBudgetConfig {
+        max_concurrent_executions: 1,
+        queue_limit: 0,
+    });
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let first = tokio::spawn(async move { downstream_get(proxy, "/route").await });
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    let second = downstream_get(proxy, "/other").await;
+    let first = first.await.unwrap();
+
+    assert!([first.as_str(), second.as_str()].iter().any(|response| {
+        response.starts_with("HTTP/1.1 503 Service Unavailable\r\n")
+            && response.ends_with("wasm access decision fail_closed\n")
+    }));
+}
+
+#[tokio::test]
+async fn native_wasm_access_decision_enforces_global_admission_budget() {
+    let fixture = WasmRouteFixture::new(&[("busy", WasmPluginBody::BusyLoop)]);
+    let upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let mut config =
+        fixture.config_with_attachments(upstream, vec![wasm_attachment("busy", "route", 100)]);
+    config.wasm.max_total_concurrent_executions = 1;
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let first = tokio::spawn(async move { downstream_get(proxy, "/route").await });
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    let second = downstream_get(proxy, "/route").await;
+    let first = first.await.unwrap();
+
+    assert!([first.as_str(), second.as_str()].iter().any(|response| {
+        response.starts_with("HTTP/1.1 503 Service Unavailable\r\n")
+            && response.ends_with("wasm access decision fail_closed\n")
+    }));
+}
+
 struct WasmRouteFixture {
     _directory: TempDir,
     root: PathBuf,
@@ -158,6 +237,7 @@ impl WasmRouteFixture {
 enum WasmPluginBody {
     Decision(i32),
     Trap,
+    BusyLoop,
 }
 
 impl WasmPluginBody {
@@ -172,6 +252,10 @@ impl WasmPluginBody {
                 r#"(module (func (export "fluxheim_access_decision") (result i32) unreachable))"#
                     .to_owned()
             }
+            Self::BusyLoop => {
+                r#"(module (func (export "fluxheim_access_decision") (result i32) (loop br 0) i32.const 1))"#
+                    .to_owned()
+            }
         }
     }
 }
@@ -180,6 +264,13 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
     let bytes = wat::parse_str(body.source()).unwrap();
     let path = root.join(format!("{name}.wasm"));
     fs::write(&path, &bytes).unwrap();
+    let limits = matches!(body, WasmPluginBody::BusyLoop).then_some(
+        fluxheim_config::WasmSandboxLimitsConfig {
+            fuel: 1_000_000_000,
+            timeout_ms: 500,
+            ..Default::default()
+        },
+    );
     fluxheim_config::WasmPluginConfig {
         name: name.to_owned(),
         path,
@@ -188,7 +279,7 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
         host_call_namespace: fluxheim_config::WasmHostCallNamespace::FluxheimPolicyV1,
         phases: vec![fluxheim_config::WasmPluginPhase::AccessDecision],
         fail_mode: fluxheim_config::WasmPluginFailMode::FailClosed,
-        limits: None,
+        limits,
         admission: None,
     }
 }
@@ -206,6 +297,27 @@ fn wasm_attachment(
         priority,
         admission: None,
     }
+}
+
+fn wasm_attachment_with_admission(
+    plugin: &str,
+    route: &str,
+    priority: u32,
+    max_concurrent_executions: u32,
+) -> fluxheim_config::WasmAttachmentConfig {
+    let mut attachment = wasm_attachment(plugin, route, priority);
+    attachment.admission = Some(fluxheim_config::WasmAdmissionBudgetConfig {
+        max_concurrent_executions,
+        queue_limit: 0,
+    });
+    attachment
+}
+
+fn other_route() -> fluxheim_config::RouteConfig {
+    let mut route = native_route_proxy_test_route();
+    route.name = "other".to_owned();
+    route.path_exact = Some("/other".to_owned());
+    route
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
