@@ -45,6 +45,7 @@ mutate header state.
   add an allow/continue or deny decision after built-in access policy passes.
 - Add live listener tests that load real Wasm modules and prove deny behavior,
   priority-ordered `first-deny-wins`, percent-decoded route policy selection,
+  non-overridable built-in route ACLs,
   process-wide/plugin/attachment admission rejection, and fail-closed behavior
   for invalid output, traps, and execution timeouts.
 - Classify any `[wasm]` runtime, plugin, attachment, limit, or admission change

@@ -73,6 +73,26 @@ async fn native_wasm_access_decision_uses_decoded_policy_route() {
 }
 
 #[tokio::test]
+async fn native_wasm_access_decision_cannot_override_builtin_route_acl() {
+    let fixture = WasmRouteFixture::new(&[("allow", WasmPluginBody::Decision(1))]);
+    let upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let mut config =
+        fixture.config_with_attachments(upstream, vec![wasm_attachment("allow", "route", 100)]);
+    config.vhosts[0].routes[0].access = fluxheim_config::AccessPolicyConfig {
+        deny: vec!["127.0.0.1".to_owned()],
+        ..Default::default()
+    };
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, "/route").await;
+
+    assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(response.ends_with("forbidden\n"));
+}
+
+#[tokio::test]
 async fn native_wasm_access_decision_fails_closed_on_invalid_output() {
     let fixture = WasmRouteFixture::new(&[("invalid", WasmPluginBody::Decision(9))]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
