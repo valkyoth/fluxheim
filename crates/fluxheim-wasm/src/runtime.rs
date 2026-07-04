@@ -157,11 +157,6 @@ fn acquire_counter_permit(
     }
 }
 
-fn acquire_compile_permit() -> Result<CounterPermit, WasmExecutionError> {
-    let slots = compile_slots();
-    acquire_counter_permit(slots, MAX_CONCURRENT_COMPILES)
-}
-
 impl FluxWasmRuntime {
     pub fn new(limits: WasmSandboxLimits) -> Result<Self, WasmExecutionError> {
         let limits = limits.validate()?;
@@ -268,7 +263,16 @@ impl FluxWasmRuntime {
     }
 
     fn compile_module(&self, plugin: &WasmPluginFile) -> Result<Module, WasmExecutionError> {
-        let compile_permit = acquire_compile_permit()?;
+        self.compile_module_with_counter(plugin, compile_slots(), MAX_CONCURRENT_COMPILES)
+    }
+
+    fn compile_module_with_counter(
+        &self,
+        plugin: &WasmPluginFile,
+        counter: &'static AtomicUsize,
+        limit: usize,
+    ) -> Result<Module, WasmExecutionError> {
+        let compile_permit = acquire_counter_permit(counter, limit)?;
         let engine = self.engine.clone();
         let bytes = plugin.bytes().to_vec();
         let (result_sender, result_receiver) = mpsc::sync_channel(1);
@@ -328,6 +332,7 @@ mod tests {
 
     #[test]
     fn compiled_module_execution_does_not_need_compile_slots() {
+        let counter = Box::leak(Box::new(AtomicUsize::new(0)));
         let directory = tempfile::tempdir().unwrap();
         let plugin_path = write_wat_plugin(
             &directory,
@@ -337,19 +342,24 @@ mod tests {
         let plugin =
             load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
         let runtime = FluxWasmRuntime::new(limits).unwrap();
-        let module = runtime.compile_plugin_module(&plugin).unwrap();
-        let permits = (0..MAX_CONCURRENT_COMPILES)
-            .map(|_| acquire_compile_permit().unwrap())
-            .collect::<Vec<_>>();
+        let module = FluxWasmCompiledModule {
+            module: runtime
+                .compile_module_with_counter(&plugin, counter, 1)
+                .unwrap(),
+            plugin_sha256: plugin.sha256_hex().to_owned(),
+        };
+        let permit = acquire_counter_permit(counter, 1).unwrap();
 
         let outcome = runtime
             .run_compiled_i32_no_args(&module, "decision")
             .unwrap();
-        let error = runtime.run_i32_no_args(&plugin, "decision").unwrap_err();
+        let error = runtime
+            .compile_module_with_counter(&plugin, counter, 1)
+            .unwrap_err();
 
         assert_eq!(outcome.result, 7);
         assert!(matches!(error, WasmExecutionError::CompileConcurrencyLimit));
-        drop(permits);
+        drop(permit);
     }
 
     #[test]
