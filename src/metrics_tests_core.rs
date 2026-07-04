@@ -191,6 +191,8 @@ fn records_wasm_plugin_metrics_with_bounded_labels() {
         std::time::Duration::from_millis(3),
     );
     record_wasm_plugin_admission_rejection("access_gate", "access-decision", "global");
+    record_wasm_plugin_admission_rejection("access_gate", "access-decision", "plugin");
+    record_wasm_plugin_admission_rejection("access_gate", "access-decision", "attachment");
     record_wasm_plugin_admission_rejection("bad/plugin/name", "attacker-phase", "attacker-scope");
 
     let metric_families = prometheus::gather();
@@ -209,6 +211,8 @@ fn records_wasm_plugin_metrics_with_bounded_labels() {
     assert!(output.contains(r#"outcome="deny""#));
     assert!(output.contains(r#"outcome="other""#));
     assert!(output.contains(r#"scope="global""#));
+    assert!(output.contains(r#"scope="plugin""#));
+    assert!(output.contains(r#"scope="attachment""#));
     assert!(output.contains(r#"scope="other""#));
     assert!(!output.contains("bad/plugin/name"));
     assert!(!output.contains("attacker-phase"));

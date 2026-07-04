@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, mpsc};
 use std::thread;
 use std::time::Instant;
@@ -100,6 +100,8 @@ pub enum WasmExecutionError {
     CompileConcurrencyLimit,
     #[error("wasm module compile timed out after {timeout_ms}ms")]
     CompileTimeout { timeout_ms: u128 },
+    #[error("wasm execution timed out after {timeout_ms}ms")]
+    ExecutionTimeout { timeout_ms: u128 },
     #[error("wasm module instantiation failed: {0}")]
     Instantiate(String),
     #[error("wasm exported function {function:?} is missing or has the wrong type: {message}")]
@@ -195,11 +197,14 @@ impl FluxWasmRuntime {
             }
         });
 
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let watchdog_timed_out = Arc::clone(&timed_out);
         let (watchdog_cancel, watchdog_cancelled) = mpsc::channel();
         let watchdog_engine = self.engine.clone();
         let timeout = self.limits.timeout;
         let watchdog = thread::spawn(move || {
             if watchdog_cancelled.recv_timeout(timeout).is_err() {
+                watchdog_timed_out.store(true, Ordering::Release);
                 watchdog_engine.increment_epoch();
             }
         });
@@ -221,9 +226,19 @@ impl FluxWasmRuntime {
         let _ = watchdog_cancel.send(());
         let _ = watchdog.join();
 
+        let result = match result {
+            Ok(result) => result,
+            Err(_) if timed_out.load(Ordering::Acquire) => {
+                return Err(WasmExecutionError::ExecutionTimeout {
+                    timeout_ms: self.limits.timeout.as_millis(),
+                });
+            }
+            Err(error) => return Err(error),
+        };
+
         Ok(WasmExecutionOutcome {
             function: function.to_owned(),
-            result: result?,
+            result,
             plugin_sha256: plugin.sha256_hex().to_owned(),
         })
     }
@@ -311,6 +326,32 @@ mod tests {
         let error = runtime.run_i32_no_args(&plugin, "spin").unwrap_err();
 
         assert!(matches!(error, WasmExecutionError::Trap(_)));
+    }
+
+    #[test]
+    fn runtime_reports_wall_time_timeout_separately_from_traps() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"
+            (module
+              (func (export "spin") (result i32)
+                (loop br 0)
+                i32.const 0))
+            "#,
+        );
+        let limits = WasmSandboxLimits {
+            fuel: 1_000_000_000,
+            timeout: Duration::from_millis(25),
+            ..WasmSandboxLimits::default()
+        };
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+
+        let error = runtime.run_i32_no_args(&plugin, "spin").unwrap_err();
+
+        assert!(matches!(error, WasmExecutionError::ExecutionTimeout { .. }));
     }
 
     #[test]

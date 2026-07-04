@@ -230,6 +230,9 @@ impl NativeWasmHook {
                 let outcome = match error {
                     NativeWasmHookError::Admission(_) => "fail_closed",
                     NativeWasmHookError::Execution(WasmExecutionError::Trap(_)) => "trap",
+                    NativeWasmHookError::Execution(WasmExecutionError::ExecutionTimeout {
+                        ..
+                    }) => "timeout",
                     NativeWasmHookError::Execution(WasmExecutionError::CompileTimeout {
                         ..
                     }) => "timeout",
@@ -298,6 +301,16 @@ impl NativeWasmHook {
             }
             Err(NativeWasmHookError::Execution(WasmExecutionError::Trap(_))) => {
                 record_native_wasm_execution(&plugin_name, phase_label, "trap", started.elapsed());
+            }
+            Err(NativeWasmHookError::Execution(WasmExecutionError::ExecutionTimeout {
+                ..
+            })) => {
+                record_native_wasm_execution(
+                    &plugin_name,
+                    phase_label,
+                    "timeout",
+                    started.elapsed(),
+                );
             }
             Err(NativeWasmHookError::Execution(WasmExecutionError::CompileTimeout { .. })) => {
                 record_native_wasm_execution(

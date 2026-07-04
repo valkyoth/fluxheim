@@ -46,7 +46,7 @@ mutate header state.
 - Add live listener tests that load real Wasm modules and prove deny behavior,
   priority-ordered `first-deny-wins`, percent-decoded route policy selection,
   process-wide/plugin/attachment admission rejection, and fail-closed behavior
-  for invalid output and traps.
+  for invalid output, traps, and execution timeouts.
 - Classify any `[wasm]` runtime, plugin, attachment, limit, or admission change
   as `wasm-runtime-changed` and require a process upgrade until the compiled
   module cache and atomic reload path are implemented and tested.
