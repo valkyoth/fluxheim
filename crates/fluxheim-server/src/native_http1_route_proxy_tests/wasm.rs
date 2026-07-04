@@ -13,7 +13,7 @@ use super::{downstream_get, native_route_proxy_test_route, native_route_proxy_te
 
 #[tokio::test]
 async fn native_wasm_access_decision_denies_before_upstream() {
-    let fixture = WasmRouteFixture::new(&[("deny", 2)]);
+    let fixture = WasmRouteFixture::new(&[("deny", WasmPluginBody::Decision(2))]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
     let router = NativeHttp1HostRouter::from_config(
         &fixture.config_with_attachments(upstream, vec![wasm_attachment("deny", "route", 100)]),
@@ -31,7 +31,10 @@ async fn native_wasm_access_decision_denies_before_upstream() {
 
 #[tokio::test]
 async fn native_wasm_access_decision_uses_first_deny_in_priority_order() {
-    let fixture = WasmRouteFixture::new(&[("deny", 2), ("invalid", 9)]);
+    let fixture = WasmRouteFixture::new(&[
+        ("deny", WasmPluginBody::Decision(2)),
+        ("invalid", WasmPluginBody::Decision(9)),
+    ]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
     let router = NativeHttp1HostRouter::from_config(
         &fixture.config_with_attachments(
@@ -54,7 +57,7 @@ async fn native_wasm_access_decision_uses_first_deny_in_priority_order() {
 
 #[tokio::test]
 async fn native_wasm_access_decision_uses_decoded_policy_route() {
-    let fixture = WasmRouteFixture::new(&[("deny", 2)]);
+    let fixture = WasmRouteFixture::new(&[("deny", WasmPluginBody::Decision(2))]);
     let upstream = super::upstream_expect_path("/%72oute", "unexpected").await;
     let router = NativeHttp1HostRouter::from_config(
         &fixture.config_with_attachments(upstream, vec![wasm_attachment("deny", "route", 100)]),
@@ -69,6 +72,42 @@ async fn native_wasm_access_decision_uses_decoded_policy_route() {
     assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
 }
 
+#[tokio::test]
+async fn native_wasm_access_decision_fails_closed_on_invalid_output() {
+    let fixture = WasmRouteFixture::new(&[("invalid", WasmPluginBody::Decision(9))]);
+    let upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let router = NativeHttp1HostRouter::from_config(
+        &fixture.config_with_attachments(upstream, vec![wasm_attachment("invalid", "route", 100)]),
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, "/route").await;
+
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(response.ends_with("wasm access decision error\n"));
+}
+
+#[tokio::test]
+async fn native_wasm_access_decision_fails_closed_on_trap() {
+    let fixture = WasmRouteFixture::new(&[("trap", WasmPluginBody::Trap)]);
+    let upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let router = NativeHttp1HostRouter::from_config(
+        &fixture.config_with_attachments(upstream, vec![wasm_attachment("trap", "route", 100)]),
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, "/route").await;
+
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(response.ends_with("wasm access decision trap\n"));
+}
+
 struct WasmRouteFixture {
     _directory: TempDir,
     root: PathBuf,
@@ -76,13 +115,13 @@ struct WasmRouteFixture {
 }
 
 impl WasmRouteFixture {
-    fn new(plugins: &[(&str, i32)]) -> Self {
+    fn new(plugins: &[(&str, WasmPluginBody)]) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("plugins");
         fs::create_dir(&root).unwrap();
         let plugins = plugins
             .iter()
-            .map(|(name, decision)| wasm_plugin(&root, name, *decision))
+            .map(|(name, body)| wasm_plugin(&root, name, *body))
             .collect();
         Self {
             _directory: directory,
@@ -115,11 +154,30 @@ impl WasmRouteFixture {
     }
 }
 
-fn wasm_plugin(root: &Path, name: &str, decision: i32) -> fluxheim_config::WasmPluginConfig {
-    let bytes = wat::parse_str(format!(
-        r#"(module (func (export "fluxheim_access_decision") (result i32) i32.const {decision}))"#
-    ))
-    .unwrap();
+#[derive(Clone, Copy)]
+enum WasmPluginBody {
+    Decision(i32),
+    Trap,
+}
+
+impl WasmPluginBody {
+    fn source(self) -> String {
+        match self {
+            Self::Decision(decision) => {
+                format!(
+                    r#"(module (func (export "fluxheim_access_decision") (result i32) i32.const {decision}))"#
+                )
+            }
+            Self::Trap => {
+                r#"(module (func (export "fluxheim_access_decision") (result i32) unreachable))"#
+                    .to_owned()
+            }
+        }
+    }
+}
+
+fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config::WasmPluginConfig {
+    let bytes = wat::parse_str(body.source()).unwrap();
     let path = root.join(format!("{name}.wasm"));
     fs::write(&path, &bytes).unwrap();
     fluxheim_config::WasmPluginConfig {
