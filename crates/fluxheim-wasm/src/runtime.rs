@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{OnceLock, mpsc};
+use std::sync::{Arc, OnceLock, mpsc};
 use std::thread;
 use std::time::Instant;
 
@@ -23,6 +23,69 @@ pub struct WasmExecutionOutcome {
     pub function: String,
     pub result: i32,
     pub plugin_sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FluxWasmAdmissionController {
+    active: Arc<AtomicUsize>,
+    max_total_concurrent_executions: usize,
+}
+
+#[derive(Debug)]
+pub struct FluxWasmAdmissionPermit {
+    active: Arc<AtomicUsize>,
+}
+
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum WasmAdmissionError {
+    #[error("wasm admission limit must be greater than zero")]
+    InvalidLimit,
+    #[error("wasm process-wide execution admission limit reached")]
+    GlobalLimitReached,
+}
+
+impl Drop for FluxWasmAdmissionPermit {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+impl FluxWasmAdmissionController {
+    pub fn new(max_total_concurrent_executions: usize) -> Result<Self, WasmAdmissionError> {
+        if max_total_concurrent_executions == 0 {
+            return Err(WasmAdmissionError::InvalidLimit);
+        }
+        Ok(Self {
+            active: Arc::new(AtomicUsize::new(0)),
+            max_total_concurrent_executions,
+        })
+    }
+
+    pub fn active_executions(&self) -> usize {
+        self.active.load(Ordering::Acquire)
+    }
+
+    pub fn try_acquire(&self) -> Result<FluxWasmAdmissionPermit, WasmAdmissionError> {
+        let mut current = self.active.load(Ordering::Acquire);
+        loop {
+            if current >= self.max_total_concurrent_executions {
+                return Err(WasmAdmissionError::GlobalLimitReached);
+            }
+            match self.active.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Ok(FluxWasmAdmissionPermit {
+                        active: Arc::clone(&self.active),
+                    });
+                }
+                Err(observed) => current = observed,
+            }
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -390,5 +453,30 @@ mod tests {
         let _ = ticker.join();
         let outcome = result.unwrap();
         assert_eq!(outcome.result, 9);
+    }
+
+    #[test]
+    fn admission_controller_enforces_process_wide_limit_until_permit_drops() {
+        let controller = FluxWasmAdmissionController::new(2).unwrap();
+        let first = controller.try_acquire().unwrap();
+        let second = controller.try_acquire().unwrap();
+
+        let error = controller.try_acquire().unwrap_err();
+
+        assert_eq!(error, WasmAdmissionError::GlobalLimitReached);
+        assert_eq!(controller.active_executions(), 2);
+        drop(first);
+        let third = controller.try_acquire().unwrap();
+        assert_eq!(controller.active_executions(), 2);
+        drop(second);
+        drop(third);
+        assert_eq!(controller.active_executions(), 0);
+    }
+
+    #[test]
+    fn admission_controller_rejects_zero_limit() {
+        let error = FluxWasmAdmissionController::new(0).unwrap_err();
+
+        assert_eq!(error, WasmAdmissionError::InvalidLimit);
     }
 }

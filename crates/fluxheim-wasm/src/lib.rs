@@ -8,6 +8,7 @@ use std::time::Duration;
 
 mod file;
 mod manifest;
+mod policy;
 #[cfg(feature = "runtime")]
 mod runtime;
 pub use file::{WasmPluginError, WasmPluginFile, load_plugin_file, validate_plugin_path};
@@ -16,8 +17,14 @@ pub use manifest::{
     WasmPluginFailMode, WasmPluginLoadError, WasmPluginManifest, WasmPluginPhase,
     load_plugin_from_manifest, validate_plugin_manifest,
 };
+pub use policy::{
+    WasmAccessChainDecision, WasmAccessDecision, WasmAccessDeny, combine_access_decisions,
+};
 #[cfg(feature = "runtime")]
-pub use runtime::{FluxWasmRuntime, WasmExecutionError, WasmExecutionOutcome};
+pub use runtime::{
+    FluxWasmAdmissionController, FluxWasmAdmissionPermit, FluxWasmRuntime, WasmAdmissionError,
+    WasmExecutionError, WasmExecutionOutcome,
+};
 
 pub const FLUXHEIM_WASM_ABI_VERSION: u32 = 1;
 pub const DEFAULT_MAX_MODULE_BYTES: u64 = 1_048_576;

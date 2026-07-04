@@ -14,6 +14,10 @@ access-control hooks can safely affect traffic.
   Lower priorities run first; equal priorities retain declaration order.
 - Add a canonical ordered attachment view in config so future hook families use
   the same priority/declaration-order rules.
+- Add a reusable `fluxheim-wasm` access-decision combiner with
+  `first-deny-wins` behavior.
+- Add a reusable `fluxheim-wasm` process-wide admission controller that rejects
+  excess concurrent executions until active permits are dropped.
 - Classify any `[wasm]` runtime, plugin, attachment, limit, or admission change
   as `wasm-runtime-changed` and require a process upgrade until the compiled
   module cache and atomic reload path are implemented and tested.
