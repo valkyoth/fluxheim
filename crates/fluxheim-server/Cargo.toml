@@ -27,6 +27,7 @@ tls-openssl-backend = ["dep:fluxheim-tls", "dep:openssl", "dep:tokio-openssl", "
 tls-openssl = ["tls-openssl-backend"]
 tls-openssl-fips = ["tls-openssl"]
 traffic-mirror = ["dep:ureq"]
+wasm = ["dep:fluxheim-wasm", "fluxheim-config/wasm", "fluxheim-wasm/runtime"]
 
 [dependencies]
 bytes = "1.11.1"
@@ -43,6 +44,7 @@ fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-runtime = { path = "../fluxheim-runtime" }
 fluxheim-tls = { path = "../fluxheim-tls", optional = true }
 fluxheim-web = { path = "../fluxheim-web" }
+fluxheim-wasm = { path = "../fluxheim-wasm", optional = true }
 getrandom = "0.4.3"
 # "unstable" is required for Builder::initial_stream_id(3): RFC 7540 h2c
 # upgrade assigns stream 1 to the HTTP/1.1 upgrade request, so new H2 streams
@@ -75,3 +77,4 @@ rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
 flate2 = "1.1.5"
 rcgen = { version = "0.14.8", default-features = false, features = ["pem", "ring"] }
 tempfile = "3.27.0"
+wat = "1.252.0"

@@ -1164,6 +1164,7 @@ dependencies = [
  "fluxheim-protocol",
  "fluxheim-runtime",
  "fluxheim-tls",
+ "fluxheim-wasm",
  "fluxheim-web",
  "getrandom 0.4.3",
  "h2",
@@ -1187,6 +1188,7 @@ dependencies = [
  "tokio-openssl",
  "tokio-rustls",
  "ureq",
+ "wat",
  "zeroize",
 ]
 

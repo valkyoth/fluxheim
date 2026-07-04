@@ -11,6 +11,8 @@ use fluxheim_config::{Config, VhostConfig};
 use crate::native_http1_route_proxy::NativeRouteProxyBuildContext;
 #[cfg(feature = "load-balancer")]
 use crate::native_http1_route_proxy_upstream::NativeLoadBalancerCollectors;
+#[cfg(feature = "wasm")]
+use crate::native_http1_route_wasm::NativeWasmHookRegistry;
 use crate::{
     DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler,
     NativeHttp1Request, NativeHttp1Response, NativeHttp1RouteProxy,
@@ -153,21 +155,28 @@ impl NativeHttp1HostRouter {
             .map(|router| (router, load_balancer_services, load_balancer_admin_pools));
         }
         let trusted_sources = trusted_sources_from_config(config)?;
+        #[cfg(feature = "wasm")]
+        let wasm_registry = NativeWasmHookRegistry::from_config(config).map_err(|_| {
+            NativeHttp1HostRouterConfigError::RouteProxy(NativeHttp1RouteProxyConfigError::Wasm)
+        })?;
         let mut proxies = Vec::with_capacity(config.vhosts.len());
         let mut exact_hosts = HashMap::new();
         let mut wildcard_hosts = Vec::new();
 
         for vhost in &config.vhosts {
+            let context = NativeRouteProxyBuildContext::new(
+                &config.headers,
+                Some(&config.compression),
+                policy,
+                pool_max_idle,
+                &trusted_sources,
+            );
+            #[cfg(feature = "wasm")]
+            let context = context.with_wasm_registry(wasm_registry.as_ref());
             let proxy = Arc::new(route_proxy_from_config(
                 config,
                 vhost,
-                NativeRouteProxyBuildContext::new(
-                    &config.headers,
-                    Some(&config.compression),
-                    policy,
-                    pool_max_idle,
-                    &trusted_sources,
-                ),
+                context,
                 #[cfg(feature = "load-balancer")]
                 NativeLoadBalancerCollectors::new(
                     collect_load_balancer_services.then_some(&mut load_balancer_services),

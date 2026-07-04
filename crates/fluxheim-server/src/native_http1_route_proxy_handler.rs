@@ -17,6 +17,8 @@ use crate::native_http1_route_request_headers::NativeRequestHeaderTemplateContex
 use crate::native_http1_route_rewrite::{
     NativeRouteRewritePolicy, request_path_and_query, rewrite_route_request,
 };
+#[cfg(feature = "wasm")]
+use crate::native_http1_route_wasm::NativeWasmAccessOutcome;
 use crate::{
     NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler, NativeHttp1Proxy,
     NativeHttp1Request, NativeHttp1Response,
@@ -62,6 +64,12 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             {
                 return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
                     .close_connection();
+            }
+            #[cfg(feature = "wasm")]
+            if let Some(response) =
+                wasm_access_rejection(self, decoded_policy_route.or(selected_route)).await
+            {
+                return response;
             }
             if !selected_route
                 .is_some_and(NativeHttp1RouteProxyRoute::https_redirect_exempt_or_redirect)
@@ -238,6 +246,18 @@ impl NativeHttp1RouteProxy {
         {
             return write_takeover_rejection(&mut stream, 403, "Forbidden", b"forbidden\n").await;
         }
+        #[cfg(feature = "wasm")]
+        if let Some((status, reason)) =
+            wasm_access_rejection_status(self, decoded_policy_route.or(selected_route)).await
+        {
+            return write_takeover_rejection(
+                &mut stream,
+                status,
+                status_reason(status),
+                reason.as_bytes(),
+            )
+            .await;
+        }
         let concurrency_route = decoded_policy_route.or(selected_route);
         let concurrency_permits = match self.acquire_concurrency_permits(concurrency_route).await {
             Ok(permits) => permits,
@@ -343,5 +363,43 @@ impl NativeHttp1RouteProxy {
             apply_native_response_compression(request, &mut response, compression);
         }
         Some(response)
+    }
+}
+
+#[cfg(feature = "wasm")]
+async fn wasm_access_rejection(
+    proxy: &NativeHttp1RouteProxy,
+    route: Option<&NativeHttp1RouteProxyRoute>,
+) -> Option<NativeHttp1Response> {
+    wasm_access_rejection_status(proxy, route)
+        .await
+        .map(|(status, reason)| {
+            NativeHttp1Response::new(status, status_reason(status), reason.into_bytes())
+                .close_connection()
+        })
+}
+
+#[cfg(feature = "wasm")]
+async fn wasm_access_rejection_status(
+    proxy: &NativeHttp1RouteProxy,
+    route: Option<&NativeHttp1RouteProxyRoute>,
+) -> Option<(u16, String)> {
+    let hooks = route
+        .map(|route| &route.wasm_hooks)
+        .filter(|hooks| !hooks.is_empty())
+        .unwrap_or(&proxy.wasm_hooks);
+    match hooks.access_decision().await {
+        NativeWasmAccessOutcome::Allow => None,
+        NativeWasmAccessOutcome::Deny { status, reason } => Some((status, format!("{reason}\n"))),
+    }
+}
+
+#[cfg(feature = "wasm")]
+const fn status_reason(status: u16) -> &'static str {
+    match status {
+        403 => "Forbidden",
+        500 => "Internal Server Error",
+        503 => "Service Unavailable",
+        _ => "Error",
     }
 }

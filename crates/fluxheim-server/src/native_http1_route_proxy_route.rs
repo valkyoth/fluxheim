@@ -18,14 +18,18 @@ use crate::native_http1_route_request_headers::{
     NativeRouteRequestHeaderPolicy, default_native_request_header_policy,
 };
 use crate::native_http1_route_response_headers::NativeRouteResponseHeaderPolicy;
+#[cfg(feature = "wasm")]
+use crate::native_http1_route_wasm::NativeWasmHooks;
 use crate::{NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1StaticWeb};
 use fluxheim_config::{GrpcRouteConfig, HeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig};
 
 impl NativeHttp1RouteProxyRoute {
     pub fn exact(path: impl Into<String>, methods: Vec<String>, proxy: NativeHttp1Proxy) -> Self {
+        let path = path.into();
         Self {
+            name: format!("exact {path}"),
             methods,
-            matcher: NativeHttp1RouteMatcher::Exact(path.into()),
+            matcher: NativeHttp1RouteMatcher::Exact(path),
             strip_prefix: None,
             rewrite_prefix: None,
             rewrite_template: None,
@@ -44,13 +48,17 @@ impl NativeHttp1RouteProxyRoute {
             concurrency: NativeConcurrencyLimit::default(),
             grpc: GrpcRouteConfig::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
+            #[cfg(feature = "wasm")]
+            wasm_hooks: NativeWasmHooks::default(),
         }
     }
 
     pub fn prefix(path: impl Into<String>, methods: Vec<String>, proxy: NativeHttp1Proxy) -> Self {
+        let path = path.into();
         Self {
+            name: format!("prefix {path}"),
             methods,
-            matcher: NativeHttp1RouteMatcher::Prefix(path.into()),
+            matcher: NativeHttp1RouteMatcher::Prefix(path),
             strip_prefix: None,
             rewrite_prefix: None,
             rewrite_template: None,
@@ -69,11 +77,14 @@ impl NativeHttp1RouteProxyRoute {
             concurrency: NativeConcurrencyLimit::default(),
             grpc: GrpcRouteConfig::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
+            #[cfg(feature = "wasm")]
+            wasm_hooks: NativeWasmHooks::default(),
         }
     }
 
     pub fn fallback(proxy: NativeHttp1Proxy) -> Self {
         Self {
+            name: "fallback".to_owned(),
             methods: Vec::new(),
             matcher: NativeHttp1RouteMatcher::Fallback,
             strip_prefix: None,
@@ -94,6 +105,8 @@ impl NativeHttp1RouteProxyRoute {
             concurrency: NativeConcurrencyLimit::default(),
             grpc: GrpcRouteConfig::default(),
             action: NativeHttp1RouteAction::Proxy(Box::new(proxy.without_header_policy())),
+            #[cfg(feature = "wasm")]
+            wasm_hooks: NativeWasmHooks::default(),
         }
     }
 
@@ -103,9 +116,11 @@ impl NativeHttp1RouteProxyRoute {
         to: impl Into<String>,
         status: u16,
     ) -> Self {
+        let path = path.into();
         Self {
+            name: format!("redirect exact {path}"),
             methods,
-            matcher: NativeHttp1RouteMatcher::Exact(path.into()),
+            matcher: NativeHttp1RouteMatcher::Exact(path),
             strip_prefix: None,
             rewrite_prefix: None,
             rewrite_template: None,
@@ -127,6 +142,8 @@ impl NativeHttp1RouteProxyRoute {
                 to: to.into(),
                 status,
             }),
+            #[cfg(feature = "wasm")]
+            wasm_hooks: NativeWasmHooks::default(),
         }
     }
 
@@ -136,9 +153,11 @@ impl NativeHttp1RouteProxyRoute {
         to: impl Into<String>,
         status: u16,
     ) -> Self {
+        let path = path.into();
         Self {
+            name: format!("redirect prefix {path}"),
             methods,
-            matcher: NativeHttp1RouteMatcher::Prefix(path.into()),
+            matcher: NativeHttp1RouteMatcher::Prefix(path),
             strip_prefix: None,
             rewrite_prefix: None,
             rewrite_template: None,
@@ -160,6 +179,8 @@ impl NativeHttp1RouteProxyRoute {
                 to: to.into(),
                 status,
             }),
+            #[cfg(feature = "wasm")]
+            wasm_hooks: NativeWasmHooks::default(),
         }
     }
 
@@ -168,9 +189,11 @@ impl NativeHttp1RouteProxyRoute {
         methods: Vec<String>,
         web: NativeHttp1StaticWeb,
     ) -> Self {
+        let path = path.into();
         Self {
+            name: format!("static prefix {path}"),
             methods,
-            matcher: NativeHttp1RouteMatcher::Prefix(path.into()),
+            matcher: NativeHttp1RouteMatcher::Prefix(path),
             strip_prefix: None,
             rewrite_prefix: None,
             rewrite_template: None,
@@ -189,6 +212,8 @@ impl NativeHttp1RouteProxyRoute {
             concurrency: NativeConcurrencyLimit::default(),
             grpc: GrpcRouteConfig::default(),
             action: NativeHttp1RouteAction::StaticWeb(Box::new(web)),
+            #[cfg(feature = "wasm")]
+            wasm_hooks: NativeWasmHooks::default(),
         }
     }
 
@@ -199,6 +224,7 @@ impl NativeHttp1RouteProxyRoute {
         base_headers: &HeaderPolicyConfig,
     ) -> Self {
         Self {
+            name: "acme-http-01".to_owned(),
             methods: Vec::new(),
             matcher: NativeHttp1RouteMatcher::Prefix("/.well-known/acme-challenge/".to_owned()),
             strip_prefix: None,
@@ -221,6 +247,8 @@ impl NativeHttp1RouteProxyRoute {
             action: NativeHttp1RouteAction::AcmeHttp01(NativeHttp1AcmeHttp01Store::new(
                 storage, vhost_name,
             )),
+            #[cfg(feature = "wasm")]
+            wasm_hooks: NativeWasmHooks::default(),
         }
     }
 
@@ -309,6 +337,7 @@ impl NativeHttp1RouteProxyRoute {
         };
         let headers = base_headers.with_vhost_overlay(&route.headers);
         Ok(Self {
+            name: route.name.clone(),
             methods: route.methods.clone(),
             matcher,
             strip_prefix: route.strip_prefix.clone(),
@@ -332,6 +361,8 @@ impl NativeHttp1RouteProxyRoute {
             concurrency: NativeConcurrencyLimit::from_config(&route.concurrency),
             grpc: route.grpc,
             action,
+            #[cfg(feature = "wasm")]
+            wasm_hooks: NativeWasmHooks::default(),
         })
     }
 
@@ -412,5 +443,11 @@ impl NativeHttp1RouteProxyRoute {
 
     pub fn is_static_web(&self) -> bool {
         self.action.is_static_web()
+    }
+
+    #[cfg(feature = "wasm")]
+    pub(crate) fn with_wasm_hooks(mut self, wasm_hooks: NativeWasmHooks) -> Self {
+        self.wasm_hooks = wasm_hooks;
+        self
     }
 }

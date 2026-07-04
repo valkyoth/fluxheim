@@ -155,6 +155,20 @@ impl fluxheim_server::NativeProxyMetricsRecorder for NativeProxyPrometheusRecord
     }
 }
 
+#[cfg(all(feature = "proxy", feature = "wasm"))]
+struct NativeWasmPrometheusRecorder;
+
+#[cfg(all(feature = "proxy", feature = "wasm"))]
+impl fluxheim_server::NativeWasmMetricsRecorder for NativeWasmPrometheusRecorder {
+    fn record_execution(&self, plugin: &str, phase: &str, outcome: &str, duration: Duration) {
+        record_wasm_plugin_execution(plugin, phase, outcome, duration);
+    }
+
+    fn record_admission_rejection(&self, plugin: &str, phase: &str, scope: &str) {
+        record_wasm_plugin_admission_rejection(plugin, phase, scope);
+    }
+}
+
 #[cfg(feature = "proxy")]
 pub fn install_native_cache_metrics_recorder() {
     let _ = fluxheim_server::install_native_cache_metrics_recorder(Arc::new(
@@ -162,6 +176,10 @@ pub fn install_native_cache_metrics_recorder() {
     ));
     let _ = fluxheim_server::install_native_proxy_metrics_recorder(Arc::new(
         NativeProxyPrometheusRecorder,
+    ));
+    #[cfg(feature = "wasm")]
+    let _ = fluxheim_server::install_native_wasm_metrics_recorder(Arc::new(
+        NativeWasmPrometheusRecorder,
     ));
 }
 

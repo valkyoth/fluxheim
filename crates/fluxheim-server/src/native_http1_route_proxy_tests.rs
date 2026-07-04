@@ -43,6 +43,9 @@ mod routing_policy_tests;
 mod support;
 #[path = "native_http1_route_proxy_tests/upstream_cache.rs"]
 mod upstream_cache;
+#[cfg(feature = "wasm")]
+#[path = "native_http1_route_proxy_tests/wasm.rs"]
+mod wasm_tests;
 #[path = "native_http1_route_proxy_tests/websocket.rs"]
 mod websocket_tests;
 

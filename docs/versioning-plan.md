@@ -3092,16 +3092,15 @@ Stable scope:
   admin-visible plugin hashes. Add per-plugin/per-vhost execution admission
   budgets before any request-path hook wiring, plus compile-only fixtures for
   accepted and rejected plugin declarations.
-- `v1.7.2`: implement request header and access-control hooks. Cover
-  F5-iRules-style conditional allow/deny/synthetic error behavior and
-  nginx-Lua/OpenResty-style request header mutation through typed host calls.
-  Before enabling stacked plugins on a live request path, add a deterministic
-  plugin-chain model: an explicit attachment order/priority, a documented
-  combinator for each phase, and a safe `first-deny-wins` rule for
+- `v1.7.2`: implement live native HTTP/1 access-control hooks. Cover
+  F5-iRules-style conditional allow/deny behavior through the first preview
+  access ABI, while keeping built-in Fluxheim ACLs non-overridable. Add a
+  deterministic plugin-chain model: explicit attachment order/priority,
+  documented combinators, and a safe `first-deny-wins` rule for
   `access-decision`. Add tests for two plugins attached to the same
-  phase+vhost/route so allow/deny conflicts, mutation ordering, timeout, trap,
-  and fail-mode behavior are predictable. Add a process-wide Wasm admission
-  ceiling such as `wasm.max_total_concurrent_executions` and, if practical,
+  phase+vhost/route so allow/deny conflicts and priority behavior are
+  predictable. Add a process-wide Wasm admission ceiling such as
+  `wasm.max_total_concurrent_executions`, and, if practical,
   `wasm.max_total_memory_bytes`, so per-plugin limits cannot multiply into an
   unbounded process-wide memory/instance spike. Add reload-impact
   classification for all Wasm config changes before compiled modules are
@@ -3109,14 +3108,16 @@ Stable scope:
   changes must be classified explicitly rather than falling into the generic
   snapshot bucket. Add first-class Prometheus/OTLP metrics for plugin
   invocations, duration, traps, timeouts, fuel exhaustion, admission rejections,
-  and fail-mode outcomes with low-cardinality labels. Add live HTTP smoke tests
-  that load real Wasm plugins and prove allow, deny, mutation, global
-  admission, reload classification, metrics, timeout, trap, and fail-mode
-  behavior.
-- `v1.7.3`: implement response header hooks and synthetic bounded responses.
-  Cover nginx-Lua/OpenResty-style response header mutation and redaction while
-  proving sensitive headers, cookies, bodies, filesystem, network, and admin
-  APIs are unavailable unless an explicit future capability grants them.
+  and fail-mode outcomes with low-cardinality labels. Add live HTTP tests that
+  load real Wasm plugins and prove allow/deny, decoded route-policy selection,
+  global admission, reload classification, metrics, timeout, trap, and
+  fail-mode behavior. Keep request-header mutation staged until typed host
+  calls can pass and mutate request header state safely.
+- `v1.7.3`: implement request and response header hooks plus synthetic bounded
+  responses. Cover nginx-Lua/OpenResty-style request/response header mutation
+  and redaction while proving sensitive headers, cookies, bodies, filesystem,
+  network, and admin APIs are unavailable unless an explicit future capability
+  grants them.
 - `v1.7.4`: implement routing, load-balancer, mirror/shadow, and persistence
   decision hooks. Cover HAProxy-Lua/SPOE-style external-policy workflows with
   bounded typed decisions for pool choice, persistence-key choice, mirror
@@ -4691,14 +4692,15 @@ circular dependencies.
 - `v1.7.1`: config integration for the typed plugin registry and attachment
   validation, host-call namespace, per-plugin/per-vhost execution admission
   budgets, admin-visible hashes, and rejected-config fixtures.
-- `v1.7.2`: request-header and access-control hooks with F5-iRules-style and
-  nginx-Lua/OpenResty-style live examples. This release also establishes the
-  production hook execution contract: explicit attachment order/priority,
-  `first-deny-wins` access-decision composition, process-wide Wasm admission
-  ceilings, Wasm-aware reload-impact classification, and per-plugin
-  Prometheus/OTLP metrics from the first live hook release.
-- `v1.7.3`: response-header hooks, bounded synthetic responses, and sensitive
-  field isolation tests.
+- `v1.7.2`: live native HTTP/1 access-control hooks with F5-iRules-style
+  allow/deny examples. This release also establishes the production hook
+  execution contract: explicit attachment order/priority, `first-deny-wins`
+  access-decision composition, process-wide Wasm admission ceilings,
+  Wasm-aware reload-impact classification, and per-plugin Prometheus/OTLP
+  metrics from the first live hook release.
+- `v1.7.3`: request-header and response-header hooks, bounded synthetic
+  responses, nginx-Lua/OpenResty-style mutation examples, and sensitive field
+  isolation tests.
 - `v1.7.4`: routing/load-balancer/mirror/persistence decision hooks with
   HAProxy-Lua/SPOE-style live examples.
 - `v1.7.5`: VCL-like cache policy hooks for lookup/admission, cache-key

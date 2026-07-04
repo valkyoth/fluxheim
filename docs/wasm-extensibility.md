@@ -1,11 +1,12 @@
 # WASM Extensibility
 
 Status: active `1.7` optional module family after the `1.6` Pingora-free
-runtime line. Fluxheim `1.7.0` ships the first sandbox foundation:
+runtime line. Fluxheim `1.7.0` shipped the first sandbox foundation:
 compile-time feature gates, strict plugin-file loading, bounded Wasmtime
-execution, and real Wasm smoke coverage. Request/response policy hooks,
-proxy-ABI compatibility, and WASI capabilities remain staged for later `1.7.x`
-releases.
+execution, and real Wasm smoke coverage. Fluxheim `1.7.2` starts live
+request-path execution with native HTTP/1 access-decision hooks. Header
+mutation, response hooks, proxy-ABI compatibility, and WASI capabilities remain
+staged for later `1.7.x` releases.
 
 Cargo features:
 
@@ -66,13 +67,24 @@ with the validated limits; production hook execution still starts later in the
 The first useful policy-hook scope should cover the common extension cases
 without exposing request bodies or arbitrary I/O.
 
-Before the first live request-path hooks ship, Fluxheim must define the plugin
-chain contract. Multiple plugins may attach to the same phase and vhost/route,
-so attachments need an explicit order or priority field and every phase needs a
-documented combinator. Security decisions must use a safe default:
-`access-decision` is `first-deny-wins`, with later plugins skipped after a
-terminal deny. Header mutation phases run in the configured order and tests must
-prove that two plugins attached to the same target produce deterministic output.
+The first live request-path hook is `access-decision`. Multiple plugins may
+attach to the same phase and vhost/route, so attachments use explicit
+`priority`; lower priorities run first and equal priorities keep declaration
+order. Security decisions use a safe default: `access-decision` is
+`first-deny-wins`. Built-in Fluxheim access policy runs before Wasm and cannot
+be overridden by a plugin. Header mutation phases will run in the configured
+order once the typed host-call ABI for reading and mutating headers lands.
+
+The `1.7.2` preview access ABI calls an exported
+`fluxheim_access_decision() -> i32` function:
+
+- `0`: continue to the next plugin;
+- `1`: allow/continue;
+- `2`: deny with `403`.
+
+Any other value, trap, timeout, compile error, or admission rejection is treated
+as a plugin failure. Security-decision plugins are validated as `fail-closed`,
+so failures deny instead of silently allowing traffic.
 
 Allowed hooks:
 
@@ -248,7 +260,8 @@ still enforced inside that global ceiling.
 `[[wasm.attachments]].priority` controls chain order for plugins attached to
 the same phase and vhost/route. Lower numeric priorities run first; ties use
 the declaration order in the loaded config. Access decisions use
-`first-deny-wins` when live request-path execution is enabled.
+`first-deny-wins` and are active for native HTTP/1 route proxy traffic in
+`1.7.2`.
 
 Config fragments preserve explicit resets to stock WASM defaults. A later
 `conf.d` fragment can set `[wasm.default_limits]` or
@@ -312,6 +325,8 @@ Required metrics include:
 - Verify two plugins attached to the same phase and target execute in
   deterministic order.
 - Verify `access-decision` composition is `first-deny-wins`.
+- Verify native HTTP/1 live access hooks load real Wasm modules and deny
+  traffic before upstream forwarding.
 - Verify process-wide admission rejects excess concurrent plugin executions
   even when each plugin's individual budget has not been exhausted.
 - Verify WASM registry changes are classified by reload impact and do not fall

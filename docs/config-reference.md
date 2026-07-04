@@ -595,9 +595,11 @@ the process-wide `max_total_concurrent_executions` ceiling, plugin names,
 plugin paths, configured expected SHA-256 digests, declared ABI and host-call
 namespace, phases, fail mode, attachment priority, and whether each plugin or
 attachment overrides the default admission/limit policy. Runtime loaded plugin
-hashes are added by later `1.7.x` hook releases. `1.7.2` defines the live-hook
-execution contract and metric instruments before request-path hooks are
-enabled.
+hashes are added by later `1.7.x` hook releases. `1.7.2` enables the first live
+native HTTP/1 request-path hook family: `access-decision`. The current preview
+ABI calls `fluxheim_access_decision() -> i32`, where `0` continues the chain,
+`1` allows/continues, and `2` denies with `403`. Built-in Fluxheim access
+policy runs first and cannot be overridden by Wasm.
 
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:

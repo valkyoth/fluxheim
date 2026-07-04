@@ -79,6 +79,8 @@ mod native_http1_route_response_headers;
 mod native_http1_route_rewrite;
 #[cfg(feature = "otel-tracing")]
 mod native_http1_route_trace;
+#[cfg(feature = "wasm")]
+mod native_http1_route_wasm;
 mod native_http1_static_web;
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]
 mod native_http1_tls;
@@ -133,8 +135,9 @@ pub use native_http1_plan::{
 pub use native_http1_proxy::NativeLoadBalancerAdminPool;
 pub use native_http1_proxy::{NativeHttp1Proxy, NativeHttp1ProxyConfigError};
 pub use native_http1_proxy_metrics::{
-    NativeCacheMetricsRecorder, NativeProxyMetricsRecorder, install_native_cache_metrics_recorder,
-    install_native_proxy_metrics_recorder,
+    NativeCacheMetricsRecorder, NativeProxyMetricsRecorder, NativeWasmMetricsRecorder,
+    install_native_cache_metrics_recorder, install_native_proxy_metrics_recorder,
+    install_native_wasm_metrics_recorder,
 };
 pub use native_http1_proxy_runtime::{
     NativeCacheRuntimeTotals, native_cache_runtime_totals, purge_native_memory_cache_path_exact,

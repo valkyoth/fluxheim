@@ -24,6 +24,8 @@ use crate::native_http1_route_proxy_upstream::{
 use crate::native_http1_route_response_headers::NativeRouteResponseHeaderPolicy;
 #[cfg(feature = "otel-tracing")]
 use crate::native_http1_route_trace::NativeTracePropagation;
+#[cfg(feature = "wasm")]
+use crate::native_http1_route_wasm::NativeWasmHooks;
 use crate::{
     DownstreamHttp1Policy, NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1StaticWeb,
     ProxyProtocolTrustedSource,
@@ -56,6 +58,8 @@ impl NativeHttp1RouteProxy {
             trace_propagation: NativeTracePropagation::default(),
             #[cfg(not(feature = "privacy-mode"))]
             trusted_sources: Vec::new(),
+            #[cfg(feature = "wasm")]
+            wasm_hooks: NativeWasmHooks::default(),
         }
     }
 
@@ -219,7 +223,7 @@ impl NativeHttp1RouteProxy {
     ) -> Result<Self, NativeHttp1RouteProxyConfigError> {
         let mut proxy = Self::from_vhost_config_with_build_context(
             vhost,
-            context,
+            context.clone(),
             #[cfg(feature = "load-balancer")]
             collectors,
         )?;
@@ -227,6 +231,10 @@ impl NativeHttp1RouteProxy {
         #[cfg(feature = "otel-tracing")]
         {
             proxy.trace_propagation = NativeTracePropagation::from_config(&config.tracing);
+        }
+        #[cfg(feature = "wasm")]
+        if let Some(registry) = context.wasm_registry {
+            proxy.wasm_hooks = registry.hooks_for(&vhost.name, None);
         }
         if let Some(route) = native_managed_http_01_route(config, vhost, context.base_headers)? {
             proxy.routes.insert(0, route);
@@ -399,6 +407,13 @@ impl NativeHttp1RouteProxy {
                 inherited_compression,
                 &vhost.name,
             )?;
+            #[cfg(feature = "wasm")]
+            let route = if let Some(registry) = context.wasm_registry {
+                let route_name = route.name.clone();
+                route.with_wasm_hooks(registry.hooks_for(&vhost.name, Some(&route_name)))
+            } else {
+                route
+            };
             #[cfg(not(feature = "privacy-mode"))]
             let route = route.with_trusted_sources(context.trusted_sources);
             routes.push(route);
@@ -428,6 +443,11 @@ impl NativeHttp1RouteProxy {
             trace_propagation: NativeTracePropagation::default(),
             #[cfg(not(feature = "privacy-mode"))]
             trusted_sources: context.trusted_sources.to_vec(),
+            #[cfg(feature = "wasm")]
+            wasm_hooks: context
+                .wasm_registry
+                .map(|registry| registry.hooks_for(&vhost.name, None))
+                .unwrap_or_default(),
         })
     }
 }

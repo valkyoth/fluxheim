@@ -11,6 +11,8 @@ use crate::native_http1_route_request_headers::NativeRouteRequestHeaderPolicy;
 use crate::native_http1_route_response_headers::NativeRouteResponseHeaderPolicy;
 #[cfg(feature = "otel-tracing")]
 use crate::native_http1_route_trace::NativeTracePropagation;
+#[cfg(feature = "wasm")]
+use crate::native_http1_route_wasm::{NativeWasmHookRegistry, NativeWasmHooks};
 use crate::{
     DownstreamHttp1Policy, NativeHttp1Proxy, NativeHttp1ProxyConfigError, NativeHttp1StaticWeb,
     ProxyProtocolTrustedSource,
@@ -39,9 +41,11 @@ pub struct NativeHttp1RouteProxy {
     pub(crate) trace_propagation: NativeTracePropagation,
     #[cfg(not(feature = "privacy-mode"))]
     pub(crate) trusted_sources: Vec<ProxyProtocolTrustedSource>,
+    #[cfg(feature = "wasm")]
+    pub(crate) wasm_hooks: NativeWasmHooks,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct NativeRouteProxyBuildContext<'a> {
     pub(crate) base_headers: &'a HeaderPolicyConfig,
     pub(crate) inherited_compression: Option<&'a fluxheim_config::CompressionConfig>,
@@ -49,6 +53,8 @@ pub(crate) struct NativeRouteProxyBuildContext<'a> {
     pub(crate) pool_max_idle: usize,
     #[cfg_attr(feature = "privacy-mode", allow(dead_code))]
     pub(crate) trusted_sources: &'a [ProxyProtocolTrustedSource],
+    #[cfg(feature = "wasm")]
+    pub(crate) wasm_registry: Option<&'a NativeWasmHookRegistry>,
 }
 
 impl<'a> NativeRouteProxyBuildContext<'a> {
@@ -65,12 +71,24 @@ impl<'a> NativeRouteProxyBuildContext<'a> {
             policy,
             pool_max_idle,
             trusted_sources,
+            #[cfg(feature = "wasm")]
+            wasm_registry: None,
         }
+    }
+
+    #[cfg(feature = "wasm")]
+    pub(crate) const fn with_wasm_registry(
+        mut self,
+        wasm_registry: Option<&'a NativeWasmHookRegistry>,
+    ) -> Self {
+        self.wasm_registry = wasm_registry;
+        self
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1RouteProxyRoute {
+    pub(crate) name: String,
     pub(crate) methods: Vec<String>,
     pub(crate) matcher: NativeHttp1RouteMatcher,
     pub(crate) strip_prefix: Option<String>,
@@ -91,6 +109,8 @@ pub struct NativeHttp1RouteProxyRoute {
     pub(crate) concurrency: NativeConcurrencyLimit,
     pub(crate) grpc: GrpcRouteConfig,
     pub(crate) action: NativeHttp1RouteAction,
+    #[cfg(feature = "wasm")]
+    pub(crate) wasm_hooks: NativeWasmHooks,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -102,6 +122,8 @@ pub enum NativeHttp1RouteProxyConfigError {
     Proxy(NativeHttp1ProxyConfigError),
     RegexRoute,
     StaticWeb,
+    #[cfg(feature = "wasm")]
+    Wasm,
 }
 
 impl std::fmt::Display for NativeHttp1RouteProxyConfigError {
@@ -122,6 +144,8 @@ impl std::fmt::Display for NativeHttp1RouteProxyConfigError {
                 formatter.write_str("native route proxy regex route configuration error")
             }
             Self::StaticWeb => formatter.write_str("native route static web config is invalid"),
+            #[cfg(feature = "wasm")]
+            Self::Wasm => formatter.write_str("native route wasm hook configuration error"),
         }
     }
 }
@@ -133,6 +157,8 @@ impl std::error::Error for NativeHttp1RouteProxyConfigError {
             Self::AccessPolicy | Self::MissingRouteAction | Self::RegexRoute | Self::StaticWeb => {
                 None
             }
+            #[cfg(feature = "wasm")]
+            Self::Wasm => None,
             #[cfg(feature = "acme")]
             Self::AcmeStorage => None,
         }
