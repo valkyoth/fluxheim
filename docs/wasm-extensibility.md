@@ -148,9 +148,17 @@ ABI version, feature set, and Fluxheim version.
 ## Security Requirements
 
 - Disabled by default at compile time and runtime.
-- Plugin files must be regular files below approved directories.
+- Plugin files must be regular files below approved directories. Config
+  validation rejects plugin declarations unless every plugin path is under one
+  of the configured `wasm.plugin_roots`.
+- Plugin roots must be scoped directories, not `/` or top-level system
+  directories such as `/etc`; use deployment-specific roots such as
+  `/etc/fluxheim/plugins` or `/srv/fluxheim/plugins`.
 - Plugin paths must reject symlinks and symlinked parents.
 - Plugin modules must be hashed and recorded in admin status.
+- Plugins attached to security-decision phases (`access-decision`,
+  `route-decision`, or `cache-store`) must pin `sha256` in config before they
+  are accepted.
 - Host calls must never expose admin tokens, ACME/EAB secrets, private keys,
   authorization headers, cookies, raw request bodies, or filesystem paths unless
   explicitly allowed and redacted.
@@ -172,6 +180,7 @@ plugin_roots = ["/etc/fluxheim/plugins"]
 [[wasm.plugins]]
 name = "security_headers"
 path = "/etc/fluxheim/plugins/security_headers.wasm"
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 abi = "fluxheim-policy-v1"
 host_call_namespace = "fluxheim-policy-v1"
 phases = ["response-headers"]
@@ -212,6 +221,11 @@ The config crate converts validated plugin declarations into
 `[wasm.default_limits]`; omitted limits inherit the defaults. If `sha256` is
 set on a plugin, the loader rejects a plugin file whose actual SHA-256 digest
 does not match.
+
+Config fragments preserve explicit resets to stock WASM defaults. A later
+`conf.d` fragment can set `[wasm.default_limits]` or
+`[wasm.default_admission]` back to the documented defaults and the loader will
+apply that reset instead of treating it as an omitted section.
 
 Authenticated `/_fluxheim/status` responses include a validation-only WASM
 registry summary when Fluxheim is built with `wasm`: enabled state,

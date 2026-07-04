@@ -20,6 +20,7 @@ fn base_wasm_config(extra: &str) -> Config {
         [[wasm.plugins]]
         name = "access"
         path = "/srv/fluxheim/plugins/access.wasm"
+        sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
         phases = ["access-decision"]
 
         [[vhosts]]
@@ -109,6 +110,7 @@ fn wasm_registry_builds_loader_manifest_with_plugin_overrides() {
 
         [wasm]
         enabled = true
+        plugin_roots = ["/srv/fluxheim/plugins"]
 
         [wasm.default_limits]
         max_module_bytes = "2MiB"
@@ -217,6 +219,7 @@ fn wasm_registry_rejects_fail_open_security_decision() {
         [[wasm.plugins]]
         name = "access"
         path = "/srv/fluxheim/plugins/access.wasm"
+        sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
         phases = ["access-decision"]
         fail_mode = "fail-open"
 
@@ -231,6 +234,105 @@ fn wasm_registry_rejects_fail_open_security_decision() {
         config.validate(),
         Err(ConfigError::InvalidWasmPolicy {
             field: "fail_mode",
+            ..
+        })
+    ));
+}
+
+#[cfg(feature = "wasm")]
+#[test]
+fn wasm_registry_rejects_plugin_outside_roots() {
+    let config: Config = toml::from_str(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+        plugin_roots = ["/srv/fluxheim/plugins"]
+
+        [[wasm.plugins]]
+        name = "headers"
+        path = "/opt/other/headers.wasm"
+        phases = ["request-headers"]
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::InvalidWasmPolicy { field: "path", .. })
+    ));
+}
+
+#[cfg(feature = "wasm")]
+#[test]
+fn wasm_registry_rejects_broad_plugin_roots() {
+    let config: Config = toml::from_str(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+        plugin_roots = ["/etc"]
+
+        [[wasm.plugins]]
+        name = "headers"
+        path = "/etc/headers.wasm"
+        phases = ["request-headers"]
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::InvalidWasmPolicy {
+            field: "wasm.plugin_roots",
+            ..
+        })
+    ));
+}
+
+#[cfg(feature = "wasm")]
+#[test]
+fn wasm_registry_requires_sha256_for_security_decision_plugins() {
+    let config: Config = toml::from_str(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+        plugin_roots = ["/srv/fluxheim/plugins"]
+
+        [[wasm.plugins]]
+        name = "access"
+        path = "/srv/fluxheim/plugins/access.wasm"
+        phases = ["access-decision"]
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::InvalidWasmPolicy {
+            field: "sha256",
             ..
         })
     ));

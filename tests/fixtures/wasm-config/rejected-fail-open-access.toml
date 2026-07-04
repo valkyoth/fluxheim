@@ -9,6 +9,7 @@ plugin_roots = ["/srv/fluxheim/plugins"]
 [[wasm.plugins]]
 name = "access_gate"
 path = "/srv/fluxheim/plugins/access_gate.wasm"
+sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 abi = "fluxheim-policy-v1"
 host_call_namespace = "fluxheim-policy-v1"
 phases = ["access-decision"]

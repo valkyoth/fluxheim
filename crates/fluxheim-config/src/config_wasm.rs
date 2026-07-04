@@ -23,6 +23,7 @@ const DEFAULT_WASM_TIMEOUT_MS: u64 = 50;
 const DEFAULT_WASM_COMPILE_TIMEOUT_MS: u64 = 500;
 const DEFAULT_WASM_MAX_CONCURRENT_EXECUTIONS: u32 = 64;
 const DEFAULT_WASM_QUEUE_LIMIT: u32 = 0;
+const MIN_WASM_PLUGIN_ROOT_COMPONENTS: usize = 3;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -43,19 +44,67 @@ pub struct WasmConfig {
     pub attachments: Vec<WasmAttachmentConfig>,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WasmConfigFragment {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    allow_preview_abi: Option<bool>,
+    #[serde(default)]
+    plugin_roots: Option<Vec<PathBuf>>,
+    #[serde(default)]
+    default_limits: Option<WasmSandboxLimitsConfig>,
+    #[serde(default)]
+    default_admission: Option<WasmAdmissionBudgetConfig>,
+    #[serde(default)]
+    plugins: Option<Vec<WasmPluginConfig>>,
+    #[serde(default)]
+    attachments: Option<Vec<WasmAttachmentConfig>>,
+}
+
+impl WasmConfigFragment {
+    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(plugin_roots) = &mut self.plugin_roots {
+            for root in plugin_roots {
+                if root.is_relative() {
+                    *root = base_dir.join(&root);
+                }
+            }
+        }
+        if let Some(plugins) = &mut self.plugins {
+            for plugin in plugins {
+                if plugin.path.is_relative() {
+                    plugin.path = base_dir.join(&plugin.path);
+                }
+            }
+        }
+    }
+}
+
 impl WasmConfig {
-    pub fn merge(&mut self, other: Self) {
-        self.enabled |= other.enabled;
-        self.allow_preview_abi |= other.allow_preview_abi;
-        self.plugin_roots.extend(other.plugin_roots);
-        if other.default_limits != WasmSandboxLimitsConfig::default() {
-            self.default_limits = other.default_limits;
+    pub(crate) fn merge(&mut self, fragment: WasmConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
         }
-        if other.default_admission != WasmAdmissionBudgetConfig::default() {
-            self.default_admission = other.default_admission;
+        if let Some(allow_preview_abi) = fragment.allow_preview_abi {
+            self.allow_preview_abi = allow_preview_abi;
         }
-        self.plugins.extend(other.plugins);
-        self.attachments.extend(other.attachments);
+        if let Some(plugin_roots) = fragment.plugin_roots {
+            self.plugin_roots.extend(plugin_roots);
+        }
+        if let Some(default_limits) = fragment.default_limits {
+            self.default_limits = default_limits;
+        }
+        if let Some(default_admission) = fragment.default_admission {
+            self.default_admission = default_admission;
+        }
+        if let Some(plugins) = fragment.plugins {
+            self.plugins.extend(plugins);
+        }
+        if let Some(attachments) = fragment.attachments {
+            self.attachments.extend(attachments);
+        }
     }
 
     pub fn resolve_relative_paths(&mut self, base_dir: &Path) {
@@ -98,8 +147,15 @@ impl WasmConfig {
                 reason: "plugin roots, plugin declarations, or plugin attachments require wasm.enabled = true",
             });
         }
+        if self.enabled && !self.plugins.is_empty() && self.plugin_roots.is_empty() {
+            return Err(ConfigError::InvalidWasmPolicy {
+                scope: "wasm".to_owned(),
+                field: "plugin_roots",
+                reason: "plugin declarations require at least one wasm.plugin_roots entry",
+            });
+        }
         for root in &self.plugin_roots {
-            validate_wasm_path("wasm.plugin_roots", root)?;
+            validate_wasm_root_path("wasm.plugin_roots", root)?;
         }
         self.default_limits.validate("wasm.default_limits")?;
         self.default_admission.validate("wasm.default_admission")?;
@@ -112,6 +168,7 @@ impl WasmConfig {
         let mut names = HashSet::new();
         for plugin in &self.plugins {
             plugin.validate(self.allow_preview_abi)?;
+            validate_wasm_plugin_path_under_roots(plugin, &self.plugin_roots)?;
             if !names.insert(plugin.name.clone()) {
                 return Err(ConfigError::DuplicateWasmPluginName {
                     name: plugin.name.clone(),
@@ -165,6 +222,13 @@ impl WasmPluginConfig {
         validate_wasm_path("wasm.plugins.path", &self.path)?;
         if let Some(sha256) = &self.sha256 {
             validate_wasm_sha256(sha256)?;
+        }
+        if self.sha256.is_none() && wasm_phases_include_security_decision(&self.phases) {
+            return Err(ConfigError::InvalidWasmPolicy {
+                scope: format!("wasm plugin {:?}", self.name),
+                field: "sha256",
+                reason: "security decision phases require a pinned sha256 digest",
+            });
         }
         if self.abi.is_preview() && !allow_preview_abi {
             return Err(ConfigError::InvalidWasmPolicy {
@@ -544,6 +608,24 @@ fn validate_wasm_plugin_name(field: &'static str, name: &str) -> Result<(), Conf
     Ok(())
 }
 
+fn validate_wasm_plugin_path_under_roots(
+    plugin: &WasmPluginConfig,
+    plugin_roots: &[PathBuf],
+) -> Result<(), ConfigError> {
+    if plugin_roots
+        .iter()
+        .any(|root| plugin.path.starts_with(root.as_path()))
+    {
+        Ok(())
+    } else {
+        Err(ConfigError::InvalidWasmPolicy {
+            scope: format!("wasm plugin {:?}", plugin.name),
+            field: "path",
+            reason: "plugin path must be located under one of wasm.plugin_roots",
+        })
+    }
+}
+
 fn validate_wasm_path(field: &'static str, path: &Path) -> Result<(), ConfigError> {
     if !path.is_absolute()
         || path
@@ -557,6 +639,24 @@ fn validate_wasm_path(field: &'static str, path: &Path) -> Result<(), ConfigErro
         });
     }
     Ok(())
+}
+
+fn validate_wasm_root_path(field: &'static str, path: &Path) -> Result<(), ConfigError> {
+    validate_wasm_path(field, path)?;
+    if normal_component_count(path) < MIN_WASM_PLUGIN_ROOT_COMPONENTS {
+        return Err(ConfigError::InvalidWasmPolicy {
+            scope: field.to_owned(),
+            field,
+            reason: "plugin root must be a scoped directory, not the filesystem root or a top-level system directory",
+        });
+    }
+    Ok(())
+}
+
+fn normal_component_count(path: &Path) -> usize {
+    path.components()
+        .filter(|component| matches!(component, Component::Normal(_)))
+        .count()
 }
 
 fn validate_wasm_phases(phases: &[WasmPluginPhase], scope: &str) -> Result<(), ConfigError> {
@@ -583,6 +683,17 @@ fn validate_wasm_phases(phases: &[WasmPluginPhase], scope: &str) -> Result<(), C
         }
     }
     Ok(())
+}
+
+fn wasm_phases_include_security_decision(phases: &[WasmPluginPhase]) -> bool {
+    phases.iter().any(|phase| {
+        matches!(
+            phase,
+            WasmPluginPhase::AccessDecision
+                | WasmPluginPhase::RouteDecision
+                | WasmPluginPhase::CacheStore
+        )
+    })
 }
 
 fn validate_wasm_fail_mode(

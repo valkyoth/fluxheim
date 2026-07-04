@@ -213,6 +213,78 @@ fn conf_d_proxy_nested_fragments_merge_without_replacing_security_policy() {
     );
 }
 
+#[cfg(feature = "wasm")]
+#[test]
+fn conf_d_wasm_defaults_can_be_reset_to_stock_values() {
+    let dir = TestDir::new("config-conf-d-wasm-default-reset");
+    fs::create_dir_all(dir.child("conf.d")).unwrap();
+    fs::write(
+        dir.child("fluxheim.toml"),
+        r#"
+            include_conf_d = true
+
+            [server]
+            listen = ["127.0.0.1:8080"]
+            default_vhost = "app"
+
+            [wasm]
+            enabled = true
+            plugin_roots = ["/srv/fluxheim/plugins"]
+
+            [wasm.default_limits]
+            max_module_bytes = "2MiB"
+            max_memory_bytes = "32MiB"
+            max_table_elements = 20000
+            fuel = 6000000
+            timeout_ms = 60
+            compile_timeout_ms = 600
+
+            [wasm.default_admission]
+            max_concurrent_executions = 8
+            queue_limit = 4
+
+            [[vhosts]]
+            name = "app"
+            hosts = ["app.test"]
+            "#,
+    )
+    .unwrap();
+    fs::write(
+        dir.child("conf.d/20-wasm-reset.toml"),
+        r#"
+            [wasm.default_limits]
+            max_module_bytes = "1MiB"
+            max_memory_bytes = "16MiB"
+            max_table_elements = 10000
+            fuel = 5000000
+            timeout_ms = 50
+            compile_timeout_ms = 500
+
+            [wasm.default_admission]
+            max_concurrent_executions = 64
+            queue_limit = 0
+            "#,
+    )
+    .unwrap();
+
+    let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+    assert_eq!(
+        config.wasm.default_limits.max_module_bytes.as_u64(),
+        1_048_576
+    );
+    assert_eq!(
+        config.wasm.default_limits.max_memory_bytes.as_u64(),
+        16 * 1024 * 1024
+    );
+    assert_eq!(config.wasm.default_limits.max_table_elements, 10_000);
+    assert_eq!(config.wasm.default_limits.fuel, 5_000_000);
+    assert_eq!(config.wasm.default_limits.timeout_ms, 50);
+    assert_eq!(config.wasm.default_limits.compile_timeout_ms, 500);
+    assert_eq!(config.wasm.default_admission.max_concurrent_executions, 64);
+    assert_eq!(config.wasm.default_admission.queue_limit, 0);
+}
+
 #[test]
 fn conf_d_admin_fragment_extends_without_replacing_main_auth_policy() {
     let dir = TestDir::new("config-file-with-conf-d-admin-fragment");

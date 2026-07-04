@@ -28,6 +28,15 @@ staged for later `1.7.x` releases.
   allowance, unsafe `fail_open` security-decision plugins, invalid plugin
   names, invalid plugin paths, invalid SHA-256 digests, and invalid sandbox or
   admission budgets.
+- Enforce the registry allowlist at config validation time: each plugin path
+  must live under one of the configured `wasm.plugin_roots`, and roots must be
+  scoped deployment directories rather than filesystem-root or top-level system
+  directories.
+- Require `sha256` for plugins that declare security-decision phases
+  (`access-decision`, `route-decision`, or `cache-store`).
+- Preserve explicit WASM default resets from later `conf.d` fragments by using
+  fragment-aware merge semantics for default sandbox limits and admission
+  budgets.
 - Keep the new config integration validation-only. No request/response,
   routing, cache, or load-balancer hook execution is enabled by this release.
 
@@ -38,10 +47,14 @@ staged for later `1.7.x` releases.
 - Binaries built without the `wasm` feature reject non-empty `[wasm]` config
   during validation instead of accepting a registry that cannot run.
 - `sha256` on `[[wasm.plugins]]` is enforced by the plugin loader when a plugin
-  file is loaded, not just checked as a syntactically valid digest.
+  file is loaded, not just checked as a syntactically valid digest. It is
+  mandatory for security-decision phases.
 - Plugin paths and plugin roots must be absolute and must not contain `.` or
-  `..` components. Runtime file existence and symlink checks are still handled
-  by the `fluxheim-wasm` loader when hook execution is wired later.
+  `..` components. Plugin paths must be under `wasm.plugin_roots`, and plugin
+  roots must be scoped directories such as `/srv/fluxheim/plugins`, not broad
+  roots such as `/` or `/etc`. Runtime file existence and symlink checks are
+  still handled by the `fluxheim-wasm` loader when hook execution is wired
+  later.
 - Attachments use root-scoped target fields:
 
 ```toml

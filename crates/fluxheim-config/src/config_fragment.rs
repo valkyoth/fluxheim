@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{
     ConfigLoadError, GeoIpConfig, HeaderPolicyConfig, LoggingConfig, MetricsConfig, TracingConfig,
-    UdpConfig, VhostConfig, WasmConfig,
+    UdpConfig, VhostConfig,
 };
 use crate::config_admin::AdminConfigFragment;
 use crate::config_cache::CacheConfigFragment;
@@ -15,6 +15,7 @@ use crate::config_proxy::ProxyConfigFragment;
 use crate::config_server::ServerConfigFragment;
 use crate::config_stream::StreamConfigFragment;
 use crate::config_tls::TlsConfigFragment;
+use crate::config_wasm::WasmConfigFragment;
 use crate::config_web::WebConfigFragment;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -53,7 +54,7 @@ pub(crate) struct ConfigFragment {
     #[serde(default)]
     pub(crate) udp: Option<UdpConfig>,
     #[serde(default)]
-    pub(crate) wasm: Option<WasmConfig>,
+    pub(crate) wasm: Option<WasmConfigFragment>,
     #[serde(default)]
     pub(crate) vhosts: Vec<VhostConfig>,
 }
