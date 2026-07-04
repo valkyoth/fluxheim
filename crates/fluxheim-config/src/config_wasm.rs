@@ -70,6 +70,15 @@ impl WasmConfig {
     }
 
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+        #[cfg(not(feature = "wasm"))]
+        if self.enabled
+            || !self.plugin_roots.is_empty()
+            || !self.plugins.is_empty()
+            || !self.attachments.is_empty()
+        {
+            return Err(ConfigError::WasmNotCompiled);
+        }
+
         validate_config_list_len(
             "wasm.plugin_roots",
             self.plugin_roots.len(),

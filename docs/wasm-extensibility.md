@@ -202,6 +202,11 @@ path_prefix = "/static/"
 root = "/srv/example/static"
 ```
 
+`wasm.enabled = true` is accepted only by binaries built with Fluxheim's `wasm`
+feature. Default and privacy-oriented builds reject non-empty `[wasm]` config
+during validation so a plugin registry cannot be configured without a runtime
+that can eventually enforce it.
+
 `1.7.1` validates the registry and attachment declarations only. Request-path
 execution starts in later `1.7.x` hook releases.
 

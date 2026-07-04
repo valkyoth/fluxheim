@@ -215,6 +215,10 @@ impl Display for ConfigError {
             } => {
                 write!(formatter, "{scope} {field} is invalid: {reason}")
             }
+            Self::WasmNotCompiled => write!(
+                formatter,
+                "wasm.enabled requires building Fluxheim with the wasm feature"
+            ),
             Self::DuplicateWasmPluginName { name } => {
                 write!(
                     formatter,

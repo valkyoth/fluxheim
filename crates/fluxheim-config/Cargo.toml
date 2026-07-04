@@ -26,6 +26,7 @@ tls-rustls-backend = []
 tls-rustls-fips = []
 traffic-mirror = []
 udp-proxy = []
+wasm = []
 
 [dependencies]
 fluxheim-protocol = { path = "../fluxheim-protocol" }

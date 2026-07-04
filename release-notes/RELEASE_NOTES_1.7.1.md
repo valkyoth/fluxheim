@@ -27,6 +27,8 @@ staged for later `1.7.x` releases.
 
 - `wasm.enabled = true` is required before plugin roots, plugin declarations,
   or attachments are accepted.
+- Binaries built without the `wasm` feature reject non-empty `[wasm]` config
+  during validation instead of accepting a registry that cannot run.
 - Plugin paths and plugin roots must be absolute and must not contain `.` or
   `..` components. Runtime file existence and symlink checks are still handled
   by the `fluxheim-wasm` loader when hook execution is wired later.

@@ -155,6 +155,7 @@ pub enum ConfigError {
         field: &'static str,
         reason: &'static str,
     },
+    WasmNotCompiled,
     DuplicateWasmPluginName {
         name: String,
     },
