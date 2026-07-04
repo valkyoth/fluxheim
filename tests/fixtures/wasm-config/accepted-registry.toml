@@ -5,6 +5,7 @@ default_vhost = "app"
 [wasm]
 enabled = true
 plugin_roots = ["/srv/fluxheim/plugins"]
+max_total_concurrent_executions = 32
 
 [wasm.default_limits]
 max_module_bytes = "1MiB"
@@ -30,6 +31,7 @@ fail_mode = "fail-closed"
 [[wasm.attachments]]
 plugin = "security_headers"
 vhost = "app"
+priority = 100
 phases = ["response-headers"]
 
 [[vhosts]]

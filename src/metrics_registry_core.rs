@@ -16,6 +16,9 @@ static UDP_DROPS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static UDP_ACTIVE_SESSIONS: OnceLock<IntGaugeVec> = OnceLock::new();
 static ADMIN_AUTH_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ACME_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static WASM_PLUGIN_EXECUTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static WASM_PLUGIN_EXECUTION_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
+static WASM_PLUGIN_ADMISSION_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 pub(in crate::metrics) fn proxy_requests_total() -> Result<&'static IntCounterVec, prometheus::Error>
 {
     if let Some(counter) = PROXY_REQUESTS_TOTAL.get() {
@@ -370,4 +373,88 @@ pub(in crate::metrics) fn acme_events_total() -> Result<&'static IntCounterVec, 
     ACME_EVENTS_TOTAL
         .get()
         .ok_or_else(|| prometheus::Error::Msg("ACME event counter failed to initialize".to_owned()))
+}
+
+pub(in crate::metrics) fn wasm_plugin_executions_total()
+-> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = WASM_PLUGIN_EXECUTIONS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_wasm_plugin_executions_total",
+            "Total Fluxheim Wasm plugin executions by bounded plugin name, phase, and outcome.",
+        ),
+        &["plugin", "phase", "outcome"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = WASM_PLUGIN_EXECUTIONS_TOTAL.set(counter);
+    WASM_PLUGIN_EXECUTIONS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg(
+            "fluxheim_wasm_plugin_executions_total failed to initialize".to_owned(),
+        )
+    })
+}
+
+pub(in crate::metrics) fn wasm_plugin_execution_seconds()
+-> Result<&'static HistogramVec, prometheus::Error> {
+    if let Some(histogram) = WASM_PLUGIN_EXECUTION_SECONDS.get() {
+        return Ok(histogram);
+    }
+
+    let histogram = HistogramVec::new(
+        HistogramOpts::new(
+            "fluxheim_wasm_plugin_execution_seconds",
+            "Fluxheim Wasm plugin execution duration by bounded plugin name, phase, and outcome.",
+        )
+        .buckets(vec![
+            0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0,
+        ]),
+        &["plugin", "phase", "outcome"],
+    )?;
+    match prometheus::default_registry().register(Box::new(histogram.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = WASM_PLUGIN_EXECUTION_SECONDS.set(histogram);
+    WASM_PLUGIN_EXECUTION_SECONDS.get().ok_or_else(|| {
+        prometheus::Error::Msg(
+            "fluxheim_wasm_plugin_execution_seconds failed to initialize".to_owned(),
+        )
+    })
+}
+
+pub(in crate::metrics) fn wasm_plugin_admission_rejections_total()
+-> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = WASM_PLUGIN_ADMISSION_REJECTIONS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_wasm_plugin_admission_rejections_total",
+            "Total Fluxheim Wasm plugin admission rejections by bounded plugin name, phase, and admission scope.",
+        ),
+        &["plugin", "phase", "scope"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = WASM_PLUGIN_ADMISSION_REJECTIONS_TOTAL.set(counter);
+    WASM_PLUGIN_ADMISSION_REJECTIONS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg(
+            "fluxheim_wasm_plugin_admission_rejections_total failed to initialize".to_owned(),
+        )
+    })
 }

@@ -172,3 +172,46 @@ fn records_edge_policy_metrics_with_bounded_labels() {
     assert!(!output.contains("attacker-policy"));
     assert!(!output.contains("attacker-outcome"));
 }
+
+#[test]
+fn records_wasm_plugin_metrics_with_bounded_labels() {
+    let _guard = metrics_test_lock();
+    init().unwrap();
+
+    record_wasm_plugin_execution(
+        "access_gate",
+        "access-decision",
+        "deny",
+        std::time::Duration::from_millis(7),
+    );
+    record_wasm_plugin_execution(
+        "bad/plugin/name",
+        "attacker-phase",
+        "attacker-outcome",
+        std::time::Duration::from_millis(3),
+    );
+    record_wasm_plugin_admission_rejection("access_gate", "access-decision", "global");
+    record_wasm_plugin_admission_rejection("bad/plugin/name", "attacker-phase", "attacker-scope");
+
+    let metric_families = prometheus::gather();
+    let mut output = Vec::new();
+    prometheus::TextEncoder::new()
+        .encode(&metric_families, &mut output)
+        .unwrap();
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("fluxheim_wasm_plugin_executions_total"));
+    assert!(output.contains("fluxheim_wasm_plugin_execution_seconds"));
+    assert!(output.contains("fluxheim_wasm_plugin_admission_rejections_total"));
+    assert!(output.contains(r#"plugin="access_gate""#));
+    assert!(output.contains(r#"plugin="other""#));
+    assert!(output.contains(r#"phase="access-decision""#));
+    assert!(output.contains(r#"phase="other""#));
+    assert!(output.contains(r#"outcome="deny""#));
+    assert!(output.contains(r#"outcome="other""#));
+    assert!(output.contains(r#"scope="global""#));
+    assert!(output.contains(r#"scope="other""#));
+    assert!(!output.contains("bad/plugin/name"));
+    assert!(!output.contains("attacker-phase"));
+    assert!(!output.contains("attacker-outcome"));
+    assert!(!output.contains("attacker-scope"));
+}

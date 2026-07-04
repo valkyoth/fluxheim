@@ -68,6 +68,9 @@ pub fn init() -> Result<(), prometheus::Error> {
     udp_active_sessions()?;
     admin_auth_events_total()?;
     acme_events_total()?;
+    wasm_plugin_executions_total()?;
+    wasm_plugin_execution_seconds()?;
+    wasm_plugin_admission_rejections_total()?;
     php_requests_total()?;
     php_request_duration_seconds()?;
     php_stderr_events_total()?;
@@ -307,6 +310,35 @@ pub fn record_acme_event(event: &str) {
     }
 }
 
+pub fn record_wasm_plugin_execution(plugin: &str, phase: &str, outcome: &str, duration: Duration) {
+    let plugin = wasm_plugin_label(plugin);
+    let phase = wasm_phase_metric_label(phase);
+    let outcome = wasm_outcome_metric_label(outcome);
+    match wasm_plugin_executions_total() {
+        Ok(counter) => counter.with_label_values(&[plugin, phase, outcome]).inc(),
+        Err(error) => log::debug!("metrics Wasm plugin execution counter unavailable: {error}"),
+    }
+    match wasm_plugin_execution_seconds() {
+        Ok(histogram) => histogram
+            .with_label_values(&[plugin, phase, outcome])
+            .observe(duration.as_secs_f64()),
+        Err(error) => log::debug!("metrics Wasm plugin execution histogram unavailable: {error}"),
+    }
+}
+
+pub fn record_wasm_plugin_admission_rejection(plugin: &str, phase: &str, scope: &str) {
+    match wasm_plugin_admission_rejections_total() {
+        Ok(counter) => counter
+            .with_label_values(&[
+                wasm_plugin_label(plugin),
+                wasm_phase_metric_label(phase),
+                wasm_admission_scope_metric_label(scope),
+            ])
+            .inc(),
+        Err(error) => log::debug!("metrics Wasm plugin admission counter unavailable: {error}"),
+    }
+}
+
 pub fn record_php_request(
     vhost: &str,
     method: &str,
@@ -401,6 +433,58 @@ fn set_gauge(gauge: Result<&'static IntGauge, prometheus::Error>, value: u64) {
     match gauge {
         Ok(gauge) => gauge.set(u64_to_i64_saturating(value)),
         Err(error) => log::debug!("metrics gauge unavailable: {error}"),
+    }
+}
+
+fn wasm_plugin_label(plugin: &str) -> &str {
+    if plugin.len() <= crate::config::MAX_WASM_PLUGIN_NAME_BYTES
+        && plugin
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        plugin
+    } else {
+        "other"
+    }
+}
+
+fn wasm_phase_metric_label(phase: &str) -> &'static str {
+    match phase {
+        "request-headers" => "request-headers",
+        "response-headers" => "response-headers",
+        "access-decision" => "access-decision",
+        "route-decision" => "route-decision",
+        "cache-lookup" => "cache-lookup",
+        "cache-store" => "cache-store",
+        _ => "other",
+    }
+}
+
+fn wasm_outcome_metric_label(outcome: &str) -> &'static str {
+    match outcome {
+        "allow" => "allow",
+        "deny" => "deny",
+        "continue" => "continue",
+        "mutate" => "mutate",
+        "bypass" => "bypass",
+        "pass" => "pass",
+        "synthetic" => "synthetic",
+        "timeout" => "timeout",
+        "trap" => "trap",
+        "fuel_exhausted" => "fuel_exhausted",
+        "fail_open" => "fail_open",
+        "fail_closed" => "fail_closed",
+        "error" => "error",
+        _ => "other",
+    }
+}
+
+fn wasm_admission_scope_metric_label(scope: &str) -> &'static str {
+    match scope {
+        "global" => "global",
+        "plugin" => "plugin",
+        "attachment" => "attachment",
+        _ => "other",
     }
 }
 

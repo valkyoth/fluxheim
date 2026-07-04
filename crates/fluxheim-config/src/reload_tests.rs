@@ -2,7 +2,7 @@ use crate::config::{
     AdminConfig, Config, HttpsRedirectConfig, LoggingConfig, LoggingFileConfig, LoggingFormat,
     LoggingLevel, LoggingTarget, MetricsConfig, ProxyConfig, ServerConfig, ServerProcessConfig,
     TlsBackend, TlsCipherSuite, TlsConfig, TlsCurvePreference, TlsFipsConfig, TlsPolicyProfile,
-    VhostConfig, WebConfig,
+    VhostConfig, WasmConfig, WebConfig,
 };
 use crate::reload::{ReloadImpact, ReloadReason, classify_reload};
 
@@ -378,4 +378,29 @@ fn metrics_service_change_requires_process_upgrade() {
         classify_reload(&old, &new).to_string(),
         "process-upgrade: metrics-service-changed"
     );
+}
+
+#[test]
+fn wasm_runtime_change_requires_process_upgrade() {
+    let old = Config::default();
+    let new = Config {
+        wasm: WasmConfig {
+            enabled: true,
+            plugin_roots: vec!["/srv/fluxheim/plugins".into()],
+            ..WasmConfig::default()
+        },
+        ..Config::default()
+    };
+
+    assert_eq!(
+        classify_reload(&old, &new),
+        ReloadImpact::ProcessUpgrade {
+            reasons: vec![ReloadReason::WasmRuntimeChanged]
+        }
+    );
+    assert_eq!(
+        classify_reload(&old, &new).to_string(),
+        "process-upgrade: wasm-runtime-changed"
+    );
+    assert!(!classify_reload(&old, &new).is_snapshot_safe());
 }

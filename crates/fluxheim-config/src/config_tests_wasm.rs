@@ -41,6 +41,7 @@ fn wasm_registry_and_attachments_validate() {
         [[wasm.attachments]]
         plugin = "headers"
         vhost = "app"
+        priority = 100
         phases = ["request-headers"]
 
         [[vhosts.routes]]
@@ -54,6 +55,7 @@ fn wasm_registry_and_attachments_validate() {
         plugin = "headers"
         vhost = "app"
         route = "api"
+        priority = 200
         phases = ["response-headers"]
 
         [wasm.attachments.admission]
@@ -63,6 +65,72 @@ fn wasm_registry_and_attachments_validate() {
     );
 
     config.validate().unwrap();
+    assert_eq!(config.wasm.attachments[0].priority, 100);
+    assert_eq!(config.wasm.attachments[1].priority, 200);
+}
+
+#[cfg(feature = "wasm")]
+#[test]
+fn wasm_registry_orders_attachments_by_priority_then_declaration_order() {
+    let config: Config = toml::from_str(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+        plugin_roots = ["/srv/fluxheim/plugins"]
+
+        [[wasm.plugins]]
+        name = "third"
+        path = "/srv/fluxheim/plugins/third.wasm"
+        phases = ["request-headers"]
+
+        [[wasm.plugins]]
+        name = "first"
+        path = "/srv/fluxheim/plugins/first.wasm"
+        phases = ["request-headers"]
+
+        [[wasm.plugins]]
+        name = "second"
+        path = "/srv/fluxheim/plugins/second.wasm"
+        phases = ["request-headers"]
+
+        [[wasm.attachments]]
+        plugin = "third"
+        vhost = "app"
+        priority = 30
+        phases = ["request-headers"]
+
+        [[wasm.attachments]]
+        plugin = "first"
+        vhost = "app"
+        priority = 10
+        phases = ["request-headers"]
+
+        [[wasm.attachments]]
+        plugin = "second"
+        vhost = "app"
+        priority = 10
+        phases = ["request-headers"]
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#,
+    )
+    .unwrap();
+
+    config.validate().unwrap();
+    let ordered = config
+        .wasm
+        .ordered_attachments()
+        .into_iter()
+        .map(|attachment| attachment.plugin.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(ordered, vec!["first", "second", "third"]);
 }
 
 #[cfg(feature = "wasm")]
@@ -370,6 +438,41 @@ fn wasm_registry_rejects_invalid_admission_budget() {
         config.validate(),
         Err(ConfigError::InvalidWasmPolicy {
             field: "max_concurrent_executions",
+            ..
+        })
+    ));
+}
+
+#[cfg(feature = "wasm")]
+#[test]
+fn wasm_registry_rejects_invalid_total_admission_budget() {
+    let config: Config = toml::from_str(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+        plugin_roots = ["/srv/fluxheim/plugins"]
+        max_total_concurrent_executions = 0
+
+        [[wasm.plugins]]
+        name = "headers"
+        path = "/srv/fluxheim/plugins/headers.wasm"
+        phases = ["request-headers"]
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::InvalidWasmPolicy {
+            field: "max_total_concurrent_executions",
             ..
         })
     ));

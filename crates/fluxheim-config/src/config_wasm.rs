@@ -14,6 +14,7 @@ pub const MAX_WASM_PLUGIN_NAME_BYTES: usize = 64;
 pub const MAX_WASM_PLUGIN_PHASES: usize = 16;
 pub const MAX_WASM_MAX_CONCURRENT_EXECUTIONS: u32 = 100_000;
 pub const MAX_WASM_QUEUE_LIMIT: u32 = 100_000;
+pub const MAX_WASM_ATTACHMENT_PRIORITY: u32 = 1_000_000;
 
 const DEFAULT_WASM_MAX_MODULE_BYTES: u64 = 1_048_576;
 const DEFAULT_WASM_MAX_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
@@ -22,10 +23,12 @@ const DEFAULT_WASM_FUEL: u64 = 5_000_000;
 const DEFAULT_WASM_TIMEOUT_MS: u64 = 50;
 const DEFAULT_WASM_COMPILE_TIMEOUT_MS: u64 = 500;
 const DEFAULT_WASM_MAX_CONCURRENT_EXECUTIONS: u32 = 64;
+const DEFAULT_WASM_MAX_TOTAL_CONCURRENT_EXECUTIONS: u32 = 256;
 const DEFAULT_WASM_QUEUE_LIMIT: u32 = 0;
+const DEFAULT_WASM_ATTACHMENT_PRIORITY: u32 = 1000;
 const MIN_WASM_PLUGIN_ROOT_COMPONENTS: usize = 3;
 
-#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WasmConfig {
     #[serde(default)]
@@ -38,10 +41,27 @@ pub struct WasmConfig {
     pub default_limits: WasmSandboxLimitsConfig,
     #[serde(default)]
     pub default_admission: WasmAdmissionBudgetConfig,
+    #[serde(default = "default_wasm_max_total_concurrent_executions")]
+    pub max_total_concurrent_executions: u32,
     #[serde(default)]
     pub plugins: Vec<WasmPluginConfig>,
     #[serde(default)]
     pub attachments: Vec<WasmAttachmentConfig>,
+}
+
+impl Default for WasmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allow_preview_abi: false,
+            plugin_roots: Vec::new(),
+            default_limits: WasmSandboxLimitsConfig::default(),
+            default_admission: WasmAdmissionBudgetConfig::default(),
+            max_total_concurrent_executions: default_wasm_max_total_concurrent_executions(),
+            plugins: Vec::new(),
+            attachments: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -57,6 +77,8 @@ pub(crate) struct WasmConfigFragment {
     default_limits: Option<WasmSandboxLimitsConfig>,
     #[serde(default)]
     default_admission: Option<WasmAdmissionBudgetConfig>,
+    #[serde(default)]
+    max_total_concurrent_executions: Option<u32>,
     #[serde(default)]
     plugins: Option<Vec<WasmPluginConfig>>,
     #[serde(default)]
@@ -98,6 +120,9 @@ impl WasmConfig {
         }
         if let Some(default_admission) = fragment.default_admission {
             self.default_admission = default_admission;
+        }
+        if let Some(max_total_concurrent_executions) = fragment.max_total_concurrent_executions {
+            self.max_total_concurrent_executions = max_total_concurrent_executions;
         }
         if let Some(plugins) = fragment.plugins {
             self.plugins.extend(plugins);
@@ -159,6 +184,7 @@ impl WasmConfig {
         }
         self.default_limits.validate("wasm.default_limits")?;
         self.default_admission.validate("wasm.default_admission")?;
+        validate_wasm_total_admission_budget(self.max_total_concurrent_executions)?;
         validate_config_list_len(
             "wasm.attachments",
             self.attachments.len(),
@@ -183,6 +209,19 @@ impl WasmConfig {
         self.plugins
             .iter()
             .map(|plugin| (plugin.name.as_str(), plugin))
+            .collect()
+    }
+
+    pub fn ordered_attachments(&self) -> Vec<&WasmAttachmentConfig> {
+        let mut attachments = self.attachments.iter().enumerate().collect::<Vec<_>>();
+        attachments.sort_by(|(left_index, left), (right_index, right)| {
+            left.priority
+                .cmp(&right.priority)
+                .then_with(|| left_index.cmp(right_index))
+        });
+        attachments
+            .into_iter()
+            .map(|(_, attachment)| attachment)
             .collect()
     }
 
@@ -293,6 +332,8 @@ pub struct WasmAttachmentConfig {
     pub route: Option<String>,
     #[serde(default)]
     pub phases: Vec<WasmPluginPhase>,
+    #[serde(default = "default_wasm_attachment_priority")]
+    pub priority: u32,
     #[serde(default)]
     pub admission: Option<WasmAdmissionBudgetConfig>,
 }
@@ -328,6 +369,7 @@ impl WasmAttachmentConfig {
         if let Some(admission) = &self.admission {
             admission.validate("wasm attachment admission")?;
         }
+        validate_wasm_attachment_priority(self.priority)?;
         Ok(())
     }
 }
@@ -557,6 +599,32 @@ impl WasmAdmissionBudgetConfig {
     }
 }
 
+fn validate_wasm_total_admission_budget(
+    max_total_concurrent_executions: u32,
+) -> Result<(), ConfigError> {
+    if max_total_concurrent_executions == 0
+        || max_total_concurrent_executions > MAX_WASM_MAX_CONCURRENT_EXECUTIONS
+    {
+        return Err(ConfigError::InvalidWasmPolicy {
+            scope: "wasm".to_owned(),
+            field: "max_total_concurrent_executions",
+            reason: "must be within the supported process-wide execution budget range",
+        });
+    }
+    Ok(())
+}
+
+fn validate_wasm_attachment_priority(priority: u32) -> Result<(), ConfigError> {
+    if priority > MAX_WASM_ATTACHMENT_PRIORITY {
+        return Err(ConfigError::InvalidWasmPolicy {
+            scope: "wasm.attachments".to_owned(),
+            field: "priority",
+            reason: "must be within the supported attachment priority range",
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_wasm_attachments(
     attachments: &[WasmAttachmentConfig],
     scope: &str,
@@ -759,6 +827,14 @@ const fn default_wasm_max_concurrent_executions() -> u32 {
     DEFAULT_WASM_MAX_CONCURRENT_EXECUTIONS
 }
 
+const fn default_wasm_max_total_concurrent_executions() -> u32 {
+    DEFAULT_WASM_MAX_TOTAL_CONCURRENT_EXECUTIONS
+}
+
 const fn default_wasm_queue_limit() -> u32 {
     DEFAULT_WASM_QUEUE_LIMIT
+}
+
+const fn default_wasm_attachment_priority() -> u32 {
+    DEFAULT_WASM_ATTACHMENT_PRIORITY
 }

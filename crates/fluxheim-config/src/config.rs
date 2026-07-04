@@ -124,8 +124,9 @@ pub use crate::config_types::{ByteSize, ByteSizeParseError};
 pub use crate::config_udp::{UdpConfig, UdpRouteConfig, UdpRouteMode};
 pub use crate::config_vhost::VhostConfig;
 pub use crate::config_wasm::{
-    WasmAdmissionBudgetConfig, WasmAttachmentConfig, WasmConfig, WasmHostCallNamespace,
-    WasmPluginAbi, WasmPluginConfig, WasmPluginFailMode, WasmPluginPhase, WasmSandboxLimitsConfig,
+    MAX_WASM_PLUGIN_NAME_BYTES, WasmAdmissionBudgetConfig, WasmAttachmentConfig, WasmConfig,
+    WasmHostCallNamespace, WasmPluginAbi, WasmPluginConfig, WasmPluginFailMode, WasmPluginPhase,
+    WasmSandboxLimitsConfig,
 };
 #[cfg(test)]
 pub use crate::config_web::MAX_WEB_INDEX_FILES;

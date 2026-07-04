@@ -225,6 +225,7 @@ fn status_endpoint_reports_wasm_registry_summary() {
         [wasm]
         enabled = true
         plugin_roots = ["/srv/fluxheim/plugins"]
+        max_total_concurrent_executions = 32
 
         [[wasm.plugins]]
         name = "headers"
@@ -235,6 +236,7 @@ fn status_endpoint_reports_wasm_registry_summary() {
         [[wasm.attachments]]
         plugin = "headers"
         vhost = "app"
+        priority = 25
         phases = ["response-headers"]
 
         [[vhosts]]
@@ -251,6 +253,7 @@ fn status_endpoint_reports_wasm_registry_summary() {
     let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
 
     assert_eq!(body["wasm"]["enabled"], true);
+    assert_eq!(body["wasm"]["max_total_concurrent_executions"], 32);
     assert_eq!(body["wasm"]["plugin_count"], 1);
     assert_eq!(body["wasm"]["attachment_count"], 1);
     assert_eq!(body["wasm"]["plugins"][0]["name"], "headers");
@@ -260,4 +263,5 @@ fn status_endpoint_reports_wasm_registry_summary() {
     );
     assert_eq!(body["wasm"]["plugins"][0]["phases"][0], "request-headers");
     assert_eq!(body["wasm"]["attachments"][0]["vhost"], "app");
+    assert_eq!(body["wasm"]["attachments"][0]["priority"], 25);
 }

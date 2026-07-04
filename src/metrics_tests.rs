@@ -23,7 +23,8 @@ use super::{
     record_metrics_otlp_export, record_php_fpm_pool_event, record_php_fpm_pool_idle,
     record_php_fpm_retry, record_php_request, record_php_stderr, record_proxy_outcome,
     record_response_compression, record_stream_bytes, record_stream_connection,
-    record_udp_datagram, record_udp_drop, set_udp_active_sessions, status_class,
+    record_udp_datagram, record_udp_drop, record_wasm_plugin_admission_rejection,
+    record_wasm_plugin_execution, set_udp_active_sessions, status_class,
 };
 
 #[path = "metrics_tests_config_cache.rs"]

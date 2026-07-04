@@ -42,6 +42,7 @@ pub enum ReloadReason {
     AdminServiceChanged,
     MetricsServiceChanged,
     LoadBalancerServicesChanged,
+    WasmRuntimeChanged,
 }
 
 impl std::fmt::Display for ReloadImpact {
@@ -77,6 +78,7 @@ impl std::fmt::Display for ReloadReason {
             Self::AdminServiceChanged => "admin-service-changed",
             Self::MetricsServiceChanged => "metrics-service-changed",
             Self::LoadBalancerServicesChanged => "load-balancer-services-changed",
+            Self::WasmRuntimeChanged => "wasm-runtime-changed",
         })
     }
 }
@@ -128,6 +130,10 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
 
     if old.metrics != new.metrics {
         reasons.push(ReloadReason::MetricsServiceChanged);
+    }
+
+    if old.wasm != new.wasm {
+        reasons.push(ReloadReason::WasmRuntimeChanged);
     }
 
     #[cfg(feature = "load-balancer")]

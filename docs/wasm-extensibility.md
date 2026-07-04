@@ -193,6 +193,7 @@ instance pressure.
 [wasm]
 enabled = true
 plugin_roots = ["/etc/fluxheim/plugins"]
+max_total_concurrent_executions = 256
 
 [[wasm.plugins]]
 name = "security_headers"
@@ -214,6 +215,7 @@ compile_timeout_ms = 500
 [[wasm.attachments]]
 plugin = "security_headers"
 vhost = "example"
+priority = 100
 phases = ["response-headers"]
 
 [[vhosts]]
@@ -238,6 +240,15 @@ The config crate converts validated plugin declarations into
 `[wasm.default_limits]`; omitted limits inherit the defaults. If `sha256` is
 set on a plugin, the loader rejects a plugin file whose actual SHA-256 digest
 does not match.
+
+`wasm.max_total_concurrent_executions` caps total concurrent plugin executions
+across the whole process. Per-plugin and per-attachment admission budgets are
+still enforced inside that global ceiling.
+
+`[[wasm.attachments]].priority` controls chain order for plugins attached to
+the same phase and vhost/route. Lower numeric priorities run first; ties use
+the declaration order in the loaded config. Access decisions use
+`first-deny-wins` when live request-path execution is enabled.
 
 Config fragments preserve explicit resets to stock WASM defaults. A later
 `conf.d` fragment can set `[wasm.default_limits]` or

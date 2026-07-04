@@ -173,6 +173,7 @@ pub(super) fn wasm_status_json(config: &Config) -> Value {
                 "vhost": attachment.vhost,
                 "route": attachment.route.as_deref(),
                 "phases": attachment.phases.iter().map(|phase| wasm_phase_label(*phase)).collect::<Vec<_>>(),
+                "priority": attachment.priority,
                 "has_custom_admission": attachment.admission.is_some(),
             })
         })
@@ -181,6 +182,7 @@ pub(super) fn wasm_status_json(config: &Config) -> Value {
     json!({
         "enabled": config.wasm.enabled,
         "allow_preview_abi": config.wasm.allow_preview_abi,
+        "max_total_concurrent_executions": config.wasm.max_total_concurrent_executions,
         "plugin_root_count": config.wasm.plugin_roots.len(),
         "plugin_count": plugins.len(),
         "attachment_count": attachments.len(),
