@@ -24,13 +24,14 @@
 Fluxheim is a modular Rust edge gateway for static sites, reverse proxying,
 edge caching, PHP-FPM application serving, ACME automation, observability,
 FIPS/ISO-capable TLS build paths, GeoIP policy, TCP stream proxying, and
-enterprise HTTP/TCP load balancing. The roadmap is moving Fluxheim-owned
-boundaries outward through standard HTTP/error types, native stream and
-load-balancer internals, explicit task orchestration, cache interfaces, server
-bootstrap, HTTP runtime ownership, and eventually HTTP/3/QUIC. The
-operator-facing product is Fluxheim: focused release profiles are available for
-full, cache, proxy, load-balancer, and PHP deployments, with matching container
-images and Linux runtime archives.
+enterprise HTTP/TCP load balancing. Normal Fluxheim builds now use
+Fluxheim-owned Rust runtime boundaries for server/listener/TLS, HTTP/1,
+HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and
+background-service paths. The active `1.7.x` line adds a shared WebAssembly
+policy runtime for typed, sandboxed operator extensions before the later
+HTTP/3/QUIC line. The operator-facing product is Fluxheim: focused release
+profiles are available for full, cache, proxy, load-balancer, and PHP
+deployments, with matching container images and Linux runtime archives.
 
 The load-balancer line targets F5 LTM, HAProxy, nginx, and Envoy-style HTTP/TCP
 pool operations: weighted and adaptive selection, health and circuit state,
@@ -39,10 +40,12 @@ member-state controls, runtime backend-set mutation, status/metrics/audit
 visibility, and a validated enterprise migration fixture. It is not a complete
 BIG-IP platform clone: managed affinity cookies remain local to one process,
 while cross-instance state sync, production UDP/GSLB, WAF, VPN/firewall
-appliance behavior, and iRules/Lua/Wasm scripting are documented future tracks
-rather than hidden or implied behavior. Runtime weight overrides are local,
-in-memory controls for round-robin and least-* selectors in the current
-load-balancer implementation.
+appliance behavior, and syntax-compatible iRules/Lua scripting are documented
+future tracks rather than hidden or implied behavior. The `1.7.x` Wasm line is
+capability parity through typed host calls, not syntax compatibility with F5
+iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, or VCL. Runtime weight overrides
+are local, in-memory controls for round-robin and least-* selectors in the
+current load-balancer implementation.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -133,8 +136,8 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Apple Silicon macOS dev builds | ✅ | `1.4.4`; Level 1 developer support with Mac-safe runtime paths while some upstream macOS support remains experimental. |
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional `geoip` feature with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. |
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
-| HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.8` protocol milestone using the Rust `quinn`/`h3` stack after the `1.6` Pingora-free runtime is stable. |
-| WASM sandbox foundation | 🧪 | `1.7.0`-`1.7.1`; optional `wasm` feature with strict plugin-file loading, bounded real-Wasm execution smoke, config-level plugin registry validation, typed loader manifests, authenticated registry status visibility, deterministic attachment ordering, global admission limits, Wasm-aware reload classification, and live native HTTP/1 access-decision hooks. Header mutation and richer policy hooks remain staged for later `1.7.x`. |
+| HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.8` protocol milestone using the Rust `quinn`/`h3` stack after the `1.7` Wasm extensibility line. |
+| WASM extensibility | 🧪 | Active `1.7.x` line. `1.7.0` added the optional `wasm` feature, strict plugin-file loading, bounded Wasmtime execution, and real-Wasm smoke coverage. `1.7.1` adds config-level plugin registry validation, typed loader manifests, authenticated registry status visibility, deterministic attachment ordering, process/plugin/attachment admission limits, Wasm-aware reload classification, metrics, and live native HTTP/1 access-decision hooks. Header mutation, routing/load-balancer decisions, and VCL-like cache policy hooks remain staged for later `1.7.x`. |
 
 See [Production Readiness](docs/production-readiness.md) for the precise
 stable-core promise and deployment checks. See
@@ -244,17 +247,20 @@ Individual module features:
 
 | Feature | Default | Notes |
 | --- | --- | --- |
-| `proxy` | Yes | Fluxheim reverse-proxy runtime; the current HTTP path is being isolated behind project-owned boundaries. |
-| `web` | Yes | Static file resolver and static response handling. Runtime serving currently uses `proxy` sessions. |
+| `proxy` | Yes | Fluxheim-owned native reverse-proxy runtime for HTTP/1, HTTP/2 origins, WebSocket upgrades, cache integration, load-balancer routing, and edge policy. |
+| `web` | Yes | Static file resolver and static response handling used by the native server path. |
 | `cache` | Yes | Cache module compiled in; runtime cache remains disabled until configured. |
 | `load-balancer` | No | Fluxheim load-balancing module, health checks, and runtime pool policy. |
-| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream semantics. `1.5.6` owns the stream listener loop, async IO boundary, and upstream TLS connector path while the current supervisor still registers it as a service. Includes true idle timeouts, stream upstream TLS/mTLS controls, weighted/drain/backup policy, and expanded smoke coverage. |
+| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream semantics, Fluxheim-owned listener loop and async IO boundary, upstream TLS/mTLS controls, true idle timeouts, weighted/drain/backup policy, and expanded smoke coverage. |
 | `metrics` | No | Prometheus metrics listener. |
 | `acme` | No | ACME planning/renewal support. Requires TLS config and should be paired with one TLS backend for serving. |
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service for HTTP-01 and rustls TLS-ALPN-01 certificate issuance and renewal. |
 | `php-fpm` | No | PHP-FPM FastCGI bridge for WordPress-style PHP applications. Implies `proxy` and `web`; not included in default/focused images. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `security` | Yes | Compile-time security profile marker plus release hardening checks. Runtime enforcement lives in the concrete config, TLS, filesystem, admin, and request-handling modules. |
+| `wasm` | No | Optional `1.7.x` WebAssembly policy runtime. `1.7.1` supports live native HTTP/1 access-decision hooks with deterministic ordering, fail-closed security decisions, admission limits, metrics, and real-Wasm tests. Later `1.7.x` releases add header, routing/load-balancer, and cache-policy hooks. |
+| `wasm-proxy-abi` | No | Reserved compatibility preview for a reviewed safe subset of proxy-oriented Wasm ABI calls; depends on `wasm` and remains off by default. |
+| `wasm-wasi` | No | Reserved WASI capability preview; depends on `wasm` and remains off by default with no filesystem/network/process capabilities unless explicitly granted in a later release. |
 | `tls` | No | Internal TLS marker used by TLS/ACME code; select a concrete backend for serving. |
 | `tls-rustls-fips` | No | rustls/AWS-LC FIPS-capable TLS backend candidate for source builds. |
 
@@ -286,9 +292,9 @@ Recommended profile features:
 | `profile-load-balancer` | `proxy`, `web`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `load-balancer`, `tls-rustls`, `security` | Edge server with Fluxheim load balancing and all compression codecs compiled in. |
 | `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
-| `profile-full` | `profile-load-balancer`, `geoip`, `stream-proxy`, `traffic-mirror` | All stable production modules, including GeoIP, traffic mirroring, and the current stream/load-balancer runtime lines. |
+| `profile-full` | `profile-load-balancer`, `geoip`, `stream-proxy`, `traffic-mirror` | All stable production modules, including GeoIP, traffic mirroring, stream, and load-balancer runtime lines. |
 | `profile-development` | `profile-full`, `php-fpm`, `acme-client`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Broad development build with all compatible production modules. |
-| `profile-web-server` | `proxy`, `web`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Static webserver profile while serving still uses the shared proxy runtime. |
+| `profile-web-server` | `proxy`, `web`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Static webserver profile using Fluxheim's native server path. |
 | `profile-cache-edge` | `proxy`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Cache edge without local static web serving. |
 | `profile-proxy-edge` | `proxy`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Focused reverse proxy edge. |
 | `profile-load-balancer-edge` | `proxy`, `load-balancer`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
@@ -341,9 +347,12 @@ Official container images are published to GitHub Container Registry and Quay:
 - `ghcr.io/valkyoth/fluxheim`
 - `quay.io/valkyoth/fluxheim`
 
-Release tags use the same profile/OS suffixes on both registries, for example
-`v1.7.0-wolfi`, `v1.7.0-cache-wolfi`, `v1.7.0-proxy-wolfi`,
-`v1.7.0-load-balancer-wolfi`, and `v1.7.0-php-wolfi`.
+Release tags use the same profile/OS suffixes on both registries. The first
+`1.7.x` image tags include `v1.7.0-wolfi`, `v1.7.0-cache-wolfi`,
+`v1.7.0-proxy-wolfi`, `v1.7.0-load-balancer-wolfi`, and `v1.7.0-php-wolfi`;
+follow-up `1.7.x` releases use the same suffix pattern, for example
+`v1.7.1-wolfi`, `v1.7.1-cache-wolfi`, `v1.7.1-proxy-wolfi`,
+`v1.7.1-load-balancer-wolfi`, and `v1.7.1-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
@@ -403,6 +412,7 @@ Small manual builds:
 cargo build --no-default-features --features proxy
 cargo build --no-default-features --features proxy,web,tls-rustls
 cargo build --no-default-features --features proxy,web,tls-rustls,privacy-mode
+cargo build --no-default-features --features proxy,web,tls-rustls,wasm
 ```
 
 Validate a custom feature set before building:
@@ -413,10 +423,12 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Release: 1.6 Pingora Exit
+## Current Release: 1.7 Wasm Extensibility
 
 Fluxheim does not treat every planned idea as stable. The current release line
-is `1.6.x`, starting with the `1.6.0` Pingora-exit foundation release.
+is `1.7.x`, the shared Wasm extensibility line. It follows the `1.6.x`
+Pingora-exit line, where normal Fluxheim builds stopped compiling Pingora
+crates and moved request handling onto Fluxheim-owned Rust runtime boundaries.
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
   proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
@@ -462,6 +474,16 @@ is `1.6.x`, starting with the `1.6.0` Pingora-exit foundation release.
   modularity gates, runtime-fact/policy-proof planning, and crate-boundary
   guardrails, then removes Pingora from normal Fluxheim builds in staged
   releases while preserving current operator-facing behavior.
+- `1.7.x` is the shared Wasm extensibility line. It starts with strict plugin
+  file loading, bounded Wasmtime execution, config-level plugin registry
+  validation, deterministic attachment ordering, process/plugin/attachment
+  admission ceilings, Wasm-aware reload classification, metrics, and live
+  native HTTP/1 access-decision hooks. Later `1.7.x` releases add request and
+  response header hooks, routing/load-balancer decisions, mirror/persistence
+  decisions, VCL-like cache policy hooks, optional proxy-ABI/WASI previews, and
+  runnable examples for F5 iRules-style policy, nginx Lua/OpenResty-style
+  header policy, HAProxy Lua/SPOE-style routing/load-balancer policy, and
+  VCL-like cache policy.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
@@ -469,12 +491,7 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Config Reference](docs/config-reference.md), and
 [Production Readiness](docs/production-readiness.md).
 
-The active `1.7` line is the shared Wasm extensibility line. It starts with the
-sandbox foundation and is planned to add tested examples for F5 iRules-style
-policy, nginx Lua/OpenResty-style header policy, HAProxy Lua/SPOE-style
-routing/load-balancer policy, and VCL-like cache policy before the line is
-complete. The `1.8` line remains HTTP/3/QUIC based on the Rust `quinn`/`h3`
-stack. See
+The `1.8` line remains HTTP/3/QUIC based on the Rust `quinn`/`h3` stack. See
 [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
 full release ladder.
 
