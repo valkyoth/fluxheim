@@ -66,6 +66,14 @@ with the validated limits; production hook execution still starts later in the
 The first useful policy-hook scope should cover the common extension cases
 without exposing request bodies or arbitrary I/O.
 
+Before the first live request-path hooks ship, Fluxheim must define the plugin
+chain contract. Multiple plugins may attach to the same phase and vhost/route,
+so attachments need an explicit order or priority field and every phase needs a
+documented combinator. Security decisions must use a safe default:
+`access-decision` is `first-deny-wins`, with later plugins skipped after a
+terminal deny. Header mutation phases run in the configured order and tests must
+prove that two plugins attached to the same target produce deterministic output.
+
 Allowed hooks:
 
 - request headers before upstream selection;
@@ -141,9 +149,18 @@ Required limits:
 - maximum header mutations;
 - maximum synthetic response size;
 - maximum per-vhost concurrent plugin executions.
+- maximum process-wide concurrent plugin executions;
+- maximum process-wide Wasm memory or instance budget where Wasmtime exposes a
+  reliable enforcement point.
 
 Compiled modules should be cached only with strong isolation by module hash,
 ABI version, feature set, and Fluxheim version.
+
+Per-plugin and per-attachment admission budgets are not enough by themselves.
+Fluxheim must also enforce a top-level admission ceiling such as
+`wasm.max_total_concurrent_executions` before any live hook release. Otherwise
+many individually-safe plugins can multiply into unsafe process-wide memory or
+instance pressure.
 
 ## Security Requirements
 
@@ -236,6 +253,37 @@ is wired.
 `1.7.1` validates the registry and attachment declarations only. Request-path
 execution starts in later `1.7.x` hook releases.
 
+## Reload Semantics
+
+WASM configuration must be explicit in reload-impact classification before
+compiled modules are executed on request paths. Changes to plugin path,
+expected hash, ABI, feature flags, sandbox limits, admission budgets,
+attachment order, or attachment targets must not fall through to a generic
+snapshot classification by accident.
+
+The default policy for the first live hook release should be conservative:
+validate the new registry, build a new module/cache generation, and atomically
+swap only after all affected modules are loadable under the new limits. Any
+change that cannot be proven reload-safe must require restart or be rejected by
+the reload path with a clear diagnostic.
+
+## Observability
+
+WASM hooks need first-class operator visibility from the first live hook
+release. Metrics and traces must use low-cardinality labels such as plugin
+name, phase, vhost/route scope, ABI, and outcome. They must not include raw
+request paths, headers, secrets, or plugin-returned arbitrary strings.
+
+Required metrics include:
+
+- plugin invocations and completed decisions;
+- execution duration;
+- traps, panics, timeouts, compile timeouts, and fuel exhaustion;
+- global and per-plugin admission rejections;
+- fail-open and fail-closed outcomes;
+- loaded module count and module-cache generation/hash changes;
+- reload validation, load, swap, and rejection outcomes.
+
 ## Test Plan
 
 - Run `scripts/smoke_wasm_sandbox.sh` to execute a real Wasm decision module
@@ -250,6 +298,15 @@ execution starts in later `1.7.x` hook releases.
 - Verify request header mutation within limits.
 - Verify response header mutation within limits.
 - Verify deny decisions and synthetic responses.
+- Verify two plugins attached to the same phase and target execute in
+  deterministic order.
+- Verify `access-decision` composition is `first-deny-wins`.
+- Verify process-wide admission rejects excess concurrent plugin executions
+  even when each plugin's individual budget has not been exhausted.
+- Verify WASM registry changes are classified by reload impact and do not fall
+  through to the generic snapshot bucket.
+- Verify per-plugin metrics are emitted for success, deny, timeout, trap, fuel
+  exhaustion, admission rejection, and fail-mode behavior.
 - Verify plugins cannot access bodies, filesystem, network, env, or admin APIs
   without capability grants.
 - Verify fuel exhaustion, timeout, compile timeout, table-element limit, trap,

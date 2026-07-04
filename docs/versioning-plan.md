@@ -3095,8 +3095,24 @@ Stable scope:
 - `v1.7.2`: implement request header and access-control hooks. Cover
   F5-iRules-style conditional allow/deny/synthetic error behavior and
   nginx-Lua/OpenResty-style request header mutation through typed host calls.
-  Add live HTTP smoke tests that load real Wasm plugins and prove allow,
-  deny, mutation, timeout, trap, and fail-mode behavior.
+  Before enabling stacked plugins on a live request path, add a deterministic
+  plugin-chain model: an explicit attachment order/priority, a documented
+  combinator for each phase, and a safe `first-deny-wins` rule for
+  `access-decision`. Add tests for two plugins attached to the same
+  phase+vhost/route so allow/deny conflicts, mutation ordering, timeout, trap,
+  and fail-mode behavior are predictable. Add a process-wide Wasm admission
+  ceiling such as `wasm.max_total_concurrent_executions` and, if practical,
+  `wasm.max_total_memory_bytes`, so per-plugin limits cannot multiply into an
+  unbounded process-wide memory/instance spike. Add reload-impact
+  classification for all Wasm config changes before compiled modules are
+  hot-swapped: plugin path, hash, ABI, feature, limit, attachment, and chain
+  changes must be classified explicitly rather than falling into the generic
+  snapshot bucket. Add first-class Prometheus/OTLP metrics for plugin
+  invocations, duration, traps, timeouts, fuel exhaustion, admission rejections,
+  and fail-mode outcomes with low-cardinality labels. Add live HTTP smoke tests
+  that load real Wasm plugins and prove allow, deny, mutation, global
+  admission, reload classification, metrics, timeout, trap, and fail-mode
+  behavior.
 - `v1.7.3`: implement response header hooks and synthetic bounded responses.
   Cover nginx-Lua/OpenResty-style response header mutation and redaction while
   proving sensitive headers, cookies, bodies, filesystem, network, and admin
@@ -3112,10 +3128,15 @@ Stable scope:
   store-admission header inspection, and safe response-header mutation. Add
   live cache tests that prove MISS/HIT behavior, TTL bounds, tag assignment,
   and low-cardinality key validation.
-- `v1.7.6`: implement plugin chain ordering, compiled-module cache isolation by
-  module hash/ABI/features/version, admin/metrics visibility, and deterministic
-  reload behavior. Add tests for chain ordering, concurrent execution
-  isolation, reload hash changes, and metrics labels without leaking secrets.
+- `v1.7.6`: harden the mature plugin runtime after the request, response,
+  routing, and cache hook families exist. Finish compiled-module cache
+  isolation by module hash/ABI/features/version, broaden admin and metrics
+  visibility across all hook families, and add regression tests for
+  cross-family chain ordering, concurrent execution isolation, reload hash
+  changes, and metrics labels without leaking secrets. This release must not be
+  the first point where access-decision ordering, process-wide admission, reload
+  classification, or per-plugin metrics appear; those are prerequisites for
+  `v1.7.2`.
 - `v1.7.7`: optional `wasm-proxy-abi` compatibility preview. Map a reviewed
   safe subset of proxy-oriented ABI calls to Fluxheim's typed host calls,
   reject unsupported calls deterministically, and add compatibility fixtures.
@@ -4671,15 +4692,22 @@ circular dependencies.
   validation, host-call namespace, per-plugin/per-vhost execution admission
   budgets, admin-visible hashes, and rejected-config fixtures.
 - `v1.7.2`: request-header and access-control hooks with F5-iRules-style and
-  nginx-Lua/OpenResty-style live examples.
+  nginx-Lua/OpenResty-style live examples. This release also establishes the
+  production hook execution contract: explicit attachment order/priority,
+  `first-deny-wins` access-decision composition, process-wide Wasm admission
+  ceilings, Wasm-aware reload-impact classification, and per-plugin
+  Prometheus/OTLP metrics from the first live hook release.
 - `v1.7.3`: response-header hooks, bounded synthetic responses, and sensitive
   field isolation tests.
 - `v1.7.4`: routing/load-balancer/mirror/persistence decision hooks with
   HAProxy-Lua/SPOE-style live examples.
 - `v1.7.5`: VCL-like cache policy hooks for lookup/admission, cache-key
   components, TTL/tag/store-admission decisions, and live cache HIT/MISS tests.
-- `v1.7.6`: plugin chain ordering, compiled-module cache isolation, reload
-  behavior, metrics, and admin visibility.
+- `v1.7.6`: mature-runtime hardening across all hook families: compiled-module
+  cache isolation, cross-family chain regression tests, reload hash-change
+  tests, metrics/admin completeness, and secret-safe labels. The initial
+  access-decision ordering, global admission, reload classification, and
+  per-plugin metrics must already exist from `v1.7.2`.
 - `v1.7.7`: optional `wasm-proxy-abi` compatibility preview with deterministic
   unsupported-call rejection.
 - `v1.7.8`: optional `wasm-wasi` capability preview with explicit grants only.
