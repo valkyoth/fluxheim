@@ -218,6 +218,9 @@ pending validation state. `GET /_fluxheim/status` reports:
 - `pending_validation`
 - `load_balancer` when compiled with the load-balancer feature, including
   read-only vhost/route pool and backend runtime state
+- `wasm` when compiled with the wasm feature, including read-only validation
+  registry counts, plugin names, phases, fail modes, and expected SHA-256
+  digests
 
 Confirm the candidate after local health checks succeed:
 

@@ -588,6 +588,15 @@ otherwise reclaimed after the backend leaves the live discovery set.
 Successful and rejected weight operations are counted as `member_weight`,
 `member_weight_invalid`, and `member_weight_not_found`.
 
+When compiled with `wasm`, `GET /_fluxheim/status` includes a read-only `wasm`
+object for the validation-stage plugin registry. It reports whether `[wasm]` is
+enabled, whether preview ABIs are allowed, plugin root/plugin/attachment counts,
+plugin names, plugin paths, configured expected SHA-256 digests, declared ABI
+and host-call namespace, phases, fail mode, and whether each plugin or
+attachment overrides the default admission/limit policy. Runtime loaded plugin
+hashes and execution metrics are added by later `1.7.x` hook releases; `1.7.1`
+does not execute request-path hooks.
+
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:
 

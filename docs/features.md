@@ -45,7 +45,7 @@ before Cargo starts compiling Fluxheim.
 | `compression-zstd` | No | Zstandard response compression for eligible known-length responses. |
 | `geoip` | No | Local MMDB Geo-Context lookup for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, exposed to bounded access policy and structured logs. |
 | `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream routes, source IP/CIDR allow/deny policy, DNS-rebinding guards for hostname upstreams, bounded idle/lifetime/byte caps, route-local PROXY protocol receive/send, stream upstream TLS/mTLS controls, and weighted/drain/backup policy. |
-| `wasm` | No | WebAssembly sandbox foundation with strict plugin-file loading and bounded Wasmtime execution. Request/response policy hooks are staged for later `1.7.x` releases. |
+| `wasm` | No | WebAssembly sandbox foundation with strict plugin-file loading, config-level plugin registry validation, typed loader manifests, authenticated registry status visibility, and bounded Wasmtime execution. Request/response policy hooks are staged for later `1.7.x` releases. |
 | `wasm-proxy-abi` | No | Reserved Wasm proxy-ABI compatibility feature; currently depends on the sandbox foundation. |
 | `wasm-wasi` | No | Reserved Wasm/WASI capability feature; currently depends on the sandbox foundation and remains disabled by default. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
