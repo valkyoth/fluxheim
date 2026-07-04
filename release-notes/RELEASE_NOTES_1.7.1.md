@@ -62,6 +62,9 @@ mutate header state.
 - Preserve explicit WASM default resets from later `conf.d` fragments by using
   fragment-aware merge semantics for default sandbox limits and admission
   budgets.
+- Refresh release tooling pins: Docker GitHub Actions move to current v4/v7
+  patch tags, Prometheus observability smoke coverage uses `v3.13.0`, and the
+  non-Pingora crate freshness gate remains clean.
 
 ## Operator Notes
 

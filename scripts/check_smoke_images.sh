@@ -50,7 +50,7 @@ inspect_image "WordPress MariaDB" "${FLUXHEIM_WORDPRESS_DB_IMAGE:-docker.io/libr
 inspect_image "MariaDB health" "${FLUXHEIM_MYSQL_IMAGE:-docker.io/library/mariadb:11.4}"
 inspect_image "PostgreSQL health" "${FLUXHEIM_POSTGRES_IMAGE:-docker.io/library/postgres:16-alpine}"
 inspect_image "Valkey health" "${FLUXHEIM_REDIS_IMAGE:-docker.io/valkey/valkey:8-alpine}"
-inspect_image "Prometheus smoke" "${FLUXHEIM_PROMETHEUS_IMAGE:-docker.io/prom/prometheus:v3.12.0}"
+inspect_image "Prometheus smoke" "${FLUXHEIM_PROMETHEUS_IMAGE:-docker.io/prom/prometheus:v3.13.0}"
 inspect_image "Jaeger smoke" "${FLUXHEIM_JAEGER_IMAGE:-docker.io/jaegertracing/all-in-one:1.76.0}"
 
 echo
