@@ -65,6 +65,8 @@ mutate header state.
 - Refresh release tooling pins: Docker GitHub Actions move to current v4/v7
   patch tags, Prometheus observability smoke coverage uses `v3.13.0`, and the
   non-Pingora crate freshness gate remains clean.
+- Update `base64-ng` to `1.3.5` across the root, ACME, server, and
+  load-balancer crates.
 
 ## Operator Notes
 
