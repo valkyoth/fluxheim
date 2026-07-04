@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use fluxheim_config::{Config, WasmAttachmentConfig, WasmPluginFailMode, WasmPluginPhase};
 use fluxheim_wasm::{
-    FluxWasmAdmissionController, FluxWasmRuntime, LoadedWasmPlugin, WasmAccessDecision,
+    FluxWasmAdmissionController, FluxWasmCompiledModule, FluxWasmRuntime, WasmAccessDecision,
     WasmAccessDeny, WasmExecutionError, WasmPluginLoadError, load_plugin_from_manifest,
 };
 
@@ -38,8 +38,8 @@ struct NativeWasmAttachment {
 #[derive(Debug)]
 struct NativeWasmPlugin {
     name: String,
-    loaded: LoadedWasmPlugin,
     runtime: FluxWasmRuntime,
+    module: FluxWasmCompiledModule,
     fail_mode: WasmPluginFailMode,
     admission: FluxWasmAdmissionController,
 }
@@ -112,6 +112,9 @@ impl NativeWasmHookRegistry {
             )?;
             let runtime = FluxWasmRuntime::new(loaded.manifest().limits())
                 .map_err(|_| NativeWasmRegistryError::Runtime)?;
+            let module = runtime
+                .compile_plugin_module(loaded.file())
+                .map_err(|_| NativeWasmRegistryError::Runtime)?;
             let name = loaded.manifest().name().to_owned();
             let plugin_config = config
                 .wasm
@@ -129,8 +132,8 @@ impl NativeWasmHookRegistry {
                             .admission
                             .unwrap_or(config.wasm.default_admission),
                     )?,
-                    loaded,
                     runtime,
+                    module,
                 }),
             );
         }
@@ -266,7 +269,7 @@ impl NativeWasmHook {
             })?;
             plugin
                 .runtime
-                .run_i32_no_args(plugin.loaded.file(), function)
+                .run_compiled_i32_no_args(&plugin.module, function)
                 .map(|outcome| outcome.result)
                 .map_err(NativeWasmHookError::Execution)
         })

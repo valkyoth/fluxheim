@@ -165,8 +165,11 @@ Required limits:
 - maximum process-wide Wasm memory or instance budget where Wasmtime exposes a
   reliable enforcement point.
 
-Compiled modules should be cached only with strong isolation by module hash,
-ABI version, feature set, and Fluxheim version.
+Fluxheim `1.7.1` compiles each live hook module when the native WASM hook
+registry is built and reuses that compiled module on the request path. Each
+request still receives a fresh Wasmtime store and instance for isolation.
+Future cross-generation module caches must remain isolated by module hash, ABI
+version, feature set, and Fluxheim version.
 
 Per-plugin and per-attachment admission budgets are not enough by themselves.
 Fluxheim must also enforce a top-level admission ceiling such as
@@ -268,11 +271,10 @@ Config fragments preserve explicit resets to stock WASM defaults. A later
 `[wasm.default_admission]` back to the documented defaults and the loader will
 apply that reset instead of treating it as an omitted section.
 
-Authenticated `/_fluxheim/status` responses include a validation-only WASM
-registry summary when Fluxheim is built with `wasm`: enabled state,
-plugin/attachment counts, plugin names, phases, fail modes, and expected
-SHA-256 digests. Actual loaded plugin hashes are added when runtime hook loading
-is wired.
+Authenticated `/_fluxheim/status` responses include a WASM registry summary
+when Fluxheim is built with `wasm`: enabled state, plugin/attachment counts,
+plugin names, phases, fail modes, and expected SHA-256 digests. Runtime loaded
+plugin hash exposure remains staged for a later status slice.
 
 `1.7.1` validates the registry and attachment declarations and enables the
 first native HTTP/1 access-decision request-path hook. Header mutation and
@@ -280,11 +282,10 @@ other hook families remain staged for later `1.7.x` releases.
 
 ## Reload Semantics
 
-WASM configuration must be explicit in reload-impact classification before
-compiled modules are executed on request paths. Changes to plugin path,
-expected hash, ABI, feature flags, sandbox limits, admission budgets,
-attachment order, or attachment targets must not fall through to a generic
-snapshot classification by accident.
+WASM configuration must stay explicit in reload-impact classification. Changes
+to plugin path, expected hash, ABI, feature flags, sandbox limits, admission
+budgets, attachment order, or attachment targets must not fall through to a
+generic snapshot classification by accident.
 
 The default policy for the first live hook release should be conservative:
 validate the new registry, build a new module/cache generation, and atomically

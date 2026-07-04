@@ -18,6 +18,12 @@ pub struct FluxWasmRuntime {
     limits: WasmSandboxLimits,
 }
 
+#[derive(Debug, Clone)]
+pub struct FluxWasmCompiledModule {
+    module: Module,
+    plugin_sha256: String,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct WasmExecutionOutcome {
     pub function: String,
@@ -172,7 +178,25 @@ impl FluxWasmRuntime {
         plugin: &WasmPluginFile,
         function: &str,
     ) -> Result<WasmExecutionOutcome, WasmExecutionError> {
-        let module = self.compile_module(plugin)?;
+        let module = self.compile_plugin_module(plugin)?;
+        self.run_compiled_i32_no_args(&module, function)
+    }
+
+    pub fn compile_plugin_module(
+        &self,
+        plugin: &WasmPluginFile,
+    ) -> Result<FluxWasmCompiledModule, WasmExecutionError> {
+        Ok(FluxWasmCompiledModule {
+            module: self.compile_module(plugin)?,
+            plugin_sha256: plugin.sha256_hex().to_owned(),
+        })
+    }
+
+    pub fn run_compiled_i32_no_args(
+        &self,
+        module: &FluxWasmCompiledModule,
+        function: &str,
+    ) -> Result<WasmExecutionOutcome, WasmExecutionError> {
         let state = RuntimeStoreState {
             limits: StoreLimitsBuilder::new()
                 .memory_size(self.limits.max_memory_bytes)
@@ -210,7 +234,7 @@ impl FluxWasmRuntime {
         });
 
         let result = (|| {
-            let instance = Instance::new(&mut store, &module, &[])
+            let instance = Instance::new(&mut store, &module.module, &[])
                 .map_err(|error| WasmExecutionError::Instantiate(error.to_string()))?;
             let exported = instance
                 .get_typed_func::<(), i32>(&mut store, function)
@@ -239,7 +263,7 @@ impl FluxWasmRuntime {
         Ok(WasmExecutionOutcome {
             function: function.to_owned(),
             result,
-            plugin_sha256: plugin.sha256_hex().to_owned(),
+            plugin_sha256: module.plugin_sha256.clone(),
         })
     }
 
@@ -300,6 +324,32 @@ mod tests {
         assert_eq!(outcome.function, "decision");
         assert_eq!(outcome.result, 7);
         assert_eq!(outcome.plugin_sha256.len(), 64);
+    }
+
+    #[test]
+    fn compiled_module_execution_does_not_need_compile_slots() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"(module (func (export "decision") (result i32) i32.const 7))"#,
+        );
+        let limits = WasmSandboxLimits::default();
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+        let module = runtime.compile_plugin_module(&plugin).unwrap();
+        let permits = (0..MAX_CONCURRENT_COMPILES)
+            .map(|_| acquire_compile_permit().unwrap())
+            .collect::<Vec<_>>();
+
+        let outcome = runtime
+            .run_compiled_i32_no_args(&module, "decision")
+            .unwrap();
+        let error = runtime.run_i32_no_args(&plugin, "decision").unwrap_err();
+
+        assert_eq!(outcome.result, 7);
+        assert!(matches!(error, WasmExecutionError::CompileConcurrencyLimit));
+        drop(permits);
     }
 
     #[test]

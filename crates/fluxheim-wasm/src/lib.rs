@@ -22,8 +22,8 @@ pub use policy::{
 };
 #[cfg(feature = "runtime")]
 pub use runtime::{
-    FluxWasmAdmissionController, FluxWasmAdmissionPermit, FluxWasmRuntime, WasmAdmissionError,
-    WasmExecutionError, WasmExecutionOutcome,
+    FluxWasmAdmissionController, FluxWasmAdmissionPermit, FluxWasmCompiledModule, FluxWasmRuntime,
+    WasmAdmissionError, WasmExecutionError, WasmExecutionOutcome,
 };
 
 pub const FLUXHEIM_WASM_ABI_VERSION: u32 = 1;

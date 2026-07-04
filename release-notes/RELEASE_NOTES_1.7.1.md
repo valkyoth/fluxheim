@@ -43,14 +43,17 @@ mutate header state.
 - Wire live native HTTP/1 `access-decision` hooks for vhost and route
   attachments. Built-in ACLs remain non-overridable; Wasm access hooks can only
   add an allow/continue or deny decision after built-in access policy passes.
+- Compile Wasm modules once when the native hook registry is built, then
+  instantiate a fresh store/instance per request. This keeps request execution
+  isolated without spending the global compile-slot budget on every request.
 - Add live listener tests that load real Wasm modules and prove deny behavior,
   priority-ordered `first-deny-wins`, percent-decoded route policy selection,
   non-overridable built-in route ACLs,
   process-wide/plugin/attachment admission rejection, and fail-closed behavior
   for invalid output, traps, and execution timeouts.
 - Classify any `[wasm]` runtime, plugin, attachment, limit, or admission change
-  as `wasm-runtime-changed` and require a process upgrade until the compiled
-  module cache and atomic reload path are implemented and tested.
+  as `wasm-runtime-changed` and require a process upgrade until the atomic
+  compiled-module reload path is implemented and tested.
 - Expose the process-wide Wasm execution ceiling and attachment priorities in
   authenticated `/_fluxheim/status`.
 - Add low-cardinality Wasm metrics for plugin executions, execution duration,

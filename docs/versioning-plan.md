@@ -3124,9 +3124,9 @@ Stable scope:
   live cache tests that prove MISS/HIT behavior, TTL bounds, tag assignment,
   and low-cardinality key validation.
 - `v1.7.5`: harden the mature plugin runtime after the request, response,
-  routing, and cache hook families exist. Finish compiled-module cache
-  isolation by module hash/ABI/features/version, broaden admin and metrics
-  visibility across all hook families, and add regression tests for
+  routing, and cache hook families exist. Finish atomic compiled-module reload
+  generation handling, broaden admin and metrics visibility across all hook
+  families, and add regression tests for
   cross-family chain ordering, concurrent execution isolation, reload hash
   changes, and metrics labels without leaking secrets. This release must not be
   the first point where access-decision ordering, process-wide admission, reload
