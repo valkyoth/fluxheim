@@ -4,8 +4,9 @@ Status: active `1.7` optional module family after the `1.6` Pingora-free
 runtime line. Fluxheim `1.7.0` shipped the first sandbox foundation:
 compile-time feature gates, strict plugin-file loading, bounded Wasmtime
 execution, and real Wasm smoke coverage. Fluxheim `1.7.1` starts live
-request-path execution with native HTTP/1 access-decision hooks. Header
-mutation, response hooks, proxy-ABI compatibility, and WASI capabilities remain
+request-path execution with native HTTP/1 access-decision hooks. Fluxheim
+`1.7.2` adds bounded native HTTP/1 request-header and response-header hooks.
+Proxy-ABI compatibility, cache policy hooks, and WASI capabilities remain
 staged for later `1.7.x` releases.
 
 Cargo features:
@@ -72,8 +73,7 @@ attach to the same phase and vhost/route, so attachments use explicit
 `priority`; lower priorities run first and equal priorities keep declaration
 order. Security decisions use a safe default: `access-decision` is
 `first-deny-wins`. Built-in Fluxheim access policy runs before Wasm and cannot
-be overridden by a plugin. Header mutation phases will run in the configured
-order once the typed host-call ABI for reading and mutating headers lands.
+be overridden by a plugin.
 
 The `1.7.1` preview access ABI calls an exported
 `fluxheim_access_decision() -> i32` function:
@@ -85,6 +85,26 @@ The `1.7.1` preview access ABI calls an exported
 Any other value, trap, timeout, compile error, or admission rejection is treated
 as a plugin failure. Security-decision plugins are validated as `fail-closed`,
 so failures deny instead of silently allowing traffic.
+
+Fluxheim `1.7.2` adds the first header hook ABI. Plugins attached to
+`request-headers` export `fluxheim_request_headers() -> i32`; plugins attached
+to `response-headers` export `fluxheim_response_headers() -> i32`. The current
+`fluxheim_policy_v1` host calls are deliberately symbolic:
+
+- `context(kind, unused) -> i32` returns bounded request context such as a path
+  class;
+- `set_request_header(name_id, value_id) -> i32` sets only allow-listed
+  synthetic request headers;
+- `set_response_header(name_id, value_id) -> i32` sets only allow-listed
+  synthetic response headers;
+- `remove_response_header(name_id, unused) -> i32` removes only allow-listed
+  response headers.
+
+The preview IDs currently cover the nginx-Lua/OpenResty-style example tracked
+for `v1.7.2`: add `x-policy-tier`, remove upstream `x-powered-by`, and add
+`x-fluxheim-policy-branch`. Raw header values, `Authorization`, `Cookie`,
+`Set-Cookie`, request/response bodies, filesystem, network, process, private
+key, and admin API access are not exposed.
 
 Allowed hooks:
 

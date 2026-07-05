@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.7.1
+Version:        1.7.2
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,14 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jul 05 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.2-1
+- Add bounded native HTTP/1 Wasm request-header and response-header hooks.
+- Add symbolic fluxheim_policy_v1 host calls for approved synthetic header
+  mutation without exposing raw sensitive headers, bodies, filesystem, network,
+  or admin APIs.
+- Add live listener coverage for plugin-added request/response headers and
+  fail-closed forbidden header mutation.
+
 * Sat Jul 04 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.1-1
 - Add live native HTTP/1 Wasm access-decision hooks with deterministic
   first-deny-wins ordering and fail-closed security decisions.

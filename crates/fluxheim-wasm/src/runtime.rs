@@ -5,7 +5,8 @@ use std::time::Instant;
 
 use thiserror::Error;
 use wasmtime::{
-    Config, Engine, Instance, Module, Store, StoreLimits, StoreLimitsBuilder, UpdateDeadline,
+    Config, Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
+    UpdateDeadline,
 };
 
 use crate::{WasmPluginError, WasmPluginFile, WasmSandboxLimits};
@@ -22,6 +23,13 @@ pub struct FluxWasmRuntime {
 pub struct FluxWasmCompiledModule {
     module: Module,
     plugin_sha256: String,
+}
+
+#[derive(Clone)]
+pub struct WasmI32HostFunction {
+    module: &'static str,
+    name: &'static str,
+    callback: Arc<dyn Fn(i32, i32) -> Result<i32, String> + Send + Sync>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -90,6 +98,20 @@ impl FluxWasmAdmissionController {
                 }
                 Err(observed) => current = observed,
             }
+        }
+    }
+}
+
+impl WasmI32HostFunction {
+    pub fn new(
+        module: &'static str,
+        name: &'static str,
+        callback: impl Fn(i32, i32) -> Result<i32, String> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            module,
+            name,
+            callback: Arc::new(callback),
         }
     }
 }
@@ -192,6 +214,15 @@ impl FluxWasmRuntime {
         module: &FluxWasmCompiledModule,
         function: &str,
     ) -> Result<WasmExecutionOutcome, WasmExecutionError> {
+        self.run_compiled_i32_no_args_with_hosts(module, function, Vec::new())
+    }
+
+    pub fn run_compiled_i32_no_args_with_hosts(
+        &self,
+        module: &FluxWasmCompiledModule,
+        function: &str,
+        host_functions: Vec<WasmI32HostFunction>,
+    ) -> Result<WasmExecutionOutcome, WasmExecutionError> {
         let state = RuntimeStoreState {
             limits: StoreLimitsBuilder::new()
                 .memory_size(self.limits.max_memory_bytes)
@@ -229,8 +260,28 @@ impl FluxWasmRuntime {
         });
 
         let result = (|| {
-            let instance = Instance::new(&mut store, &module.module, &[])
-                .map_err(|error| WasmExecutionError::Instantiate(error.to_string()))?;
+            let mut linker = Linker::new(&self.engine);
+            let has_host_functions = !host_functions.is_empty();
+            for host_function in host_functions {
+                let callback = host_function.callback.clone();
+                linker
+                    .func_wrap(
+                        host_function.module,
+                        host_function.name,
+                        move |left: i32, right: i32| -> wasmtime::Result<i32> {
+                            callback(left, right).map_err(wasmtime::Error::msg)
+                        },
+                    )
+                    .map_err(|error| WasmExecutionError::RuntimeSetup(error.to_string()))?;
+            }
+            let instance = if has_host_functions {
+                linker
+                    .instantiate(&mut store, &module.module)
+                    .map_err(|error| WasmExecutionError::Instantiate(error.to_string()))?
+            } else {
+                Instance::new(&mut store, &module.module, &[])
+                    .map_err(|error| WasmExecutionError::Instantiate(error.to_string()))?
+            };
             let exported = instance
                 .get_typed_func::<(), i32>(&mut store, function)
                 .map_err(|error| WasmExecutionError::FunctionType {

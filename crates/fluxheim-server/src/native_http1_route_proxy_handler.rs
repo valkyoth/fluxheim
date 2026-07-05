@@ -18,7 +18,10 @@ use crate::native_http1_route_rewrite::{
     NativeRouteRewritePolicy, request_path_and_query, rewrite_route_request,
 };
 #[cfg(feature = "wasm")]
-use crate::native_http1_route_wasm::NativeWasmAccessOutcome;
+use crate::native_http1_route_wasm::{
+    NativeWasmHeaderContext, status_reason, wasm_access_rejection, wasm_access_rejection_status,
+    wasm_request_header_rejection, wasm_response_header_failure,
+};
 use crate::{
     NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler, NativeHttp1Proxy,
     NativeHttp1Request, NativeHttp1Response,
@@ -148,7 +151,28 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 route
                     .request_headers
                     .apply(&mut request, Some(&header_context));
-                return route.handle(request).await;
+                #[cfg(feature = "wasm")]
+                if let Some(response) =
+                    wasm_request_header_rejection(&route.wasm_hooks, &mut request).await
+                {
+                    return response;
+                }
+                #[cfg(feature = "wasm")]
+                let wasm_response_context = NativeWasmHeaderContext::from_request(&request);
+                let response = route.handle(request).await;
+                #[cfg(feature = "wasm")]
+                let mut response = response;
+                #[cfg(feature = "wasm")]
+                if let Some(failure) = wasm_response_header_failure(
+                    &route.wasm_hooks,
+                    wasm_response_context,
+                    &mut response,
+                )
+                .await
+                {
+                    return failure;
+                }
+                return response;
             }
             #[cfg(feature = "php-fpm")]
             if let Some(php) = &self.fallback_php
@@ -157,7 +181,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 return php.handle_resolved(request, path, resolved).await;
             }
             if let Some(response) = self.fallback_web_response(&request, &path) {
-                return response;
+                return self.apply_wasm_response_headers(request, response).await;
             }
             #[cfg(feature = "php-fpm")]
             if let Some(php) = &self.fallback_php {
@@ -165,7 +189,28 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             }
             if let Some(proxy) = &self.fallback {
                 self.apply_traceparent(&mut request);
-                return proxy.handle(request).await;
+                #[cfg(feature = "wasm")]
+                if let Some(response) =
+                    wasm_request_header_rejection(&self.wasm_hooks, &mut request).await
+                {
+                    return response;
+                }
+                #[cfg(feature = "wasm")]
+                let wasm_response_context = NativeWasmHeaderContext::from_request(&request);
+                let response = proxy.handle(request).await;
+                #[cfg(feature = "wasm")]
+                let mut response = response;
+                #[cfg(feature = "wasm")]
+                if let Some(failure) = wasm_response_header_failure(
+                    &self.wasm_hooks,
+                    wasm_response_context,
+                    &mut response,
+                )
+                .await
+                {
+                    return failure;
+                }
+                return response;
             }
             NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection()
         })
@@ -364,42 +409,28 @@ impl NativeHttp1RouteProxy {
         }
         Some(response)
     }
-}
 
-#[cfg(feature = "wasm")]
-async fn wasm_access_rejection(
-    proxy: &NativeHttp1RouteProxy,
-    route: Option<&NativeHttp1RouteProxyRoute>,
-) -> Option<NativeHttp1Response> {
-    wasm_access_rejection_status(proxy, route)
-        .await
-        .map(|(status, reason)| {
-            NativeHttp1Response::new(status, status_reason(status), reason.into_bytes())
-                .close_connection()
-        })
-}
-
-#[cfg(feature = "wasm")]
-async fn wasm_access_rejection_status(
-    proxy: &NativeHttp1RouteProxy,
-    route: Option<&NativeHttp1RouteProxyRoute>,
-) -> Option<(u16, String)> {
-    let hooks = route
-        .map(|route| &route.wasm_hooks)
-        .filter(|hooks| !hooks.is_empty())
-        .unwrap_or(&proxy.wasm_hooks);
-    match hooks.access_decision().await {
-        NativeWasmAccessOutcome::Allow => None,
-        NativeWasmAccessOutcome::Deny { status, reason } => Some((status, format!("{reason}\n"))),
+    #[cfg(feature = "wasm")]
+    async fn apply_wasm_response_headers(
+        &self,
+        request: NativeHttp1Request,
+        mut response: NativeHttp1Response,
+    ) -> NativeHttp1Response {
+        let context = NativeWasmHeaderContext::from_request(&request);
+        if let Some(failure) =
+            wasm_response_header_failure(&self.wasm_hooks, context, &mut response).await
+        {
+            return failure;
+        }
+        response
     }
-}
 
-#[cfg(feature = "wasm")]
-const fn status_reason(status: u16) -> &'static str {
-    match status {
-        403 => "Forbidden",
-        500 => "Internal Server Error",
-        503 => "Service Unavailable",
-        _ => "Error",
+    #[cfg(not(feature = "wasm"))]
+    async fn apply_wasm_response_headers(
+        &self,
+        _request: NativeHttp1Request,
+        response: NativeHttp1Response,
+    ) -> NativeHttp1Response {
+        response
     }
 }

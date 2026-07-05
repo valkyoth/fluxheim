@@ -137,7 +137,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional `geoip` feature with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. |
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
 | HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.8` protocol milestone using the Rust `quinn`/`h3` stack after the `1.7` Wasm extensibility line. |
-| WASM extensibility | 🧪 | Active `1.7.x` line. `1.7.0` added the optional `wasm` feature, strict plugin-file loading, bounded Wasmtime execution, and real-Wasm smoke coverage. `1.7.1` adds config-level plugin registry validation, typed loader manifests, authenticated registry status visibility, deterministic attachment ordering, process/plugin/attachment admission limits, Wasm-aware reload classification, metrics, and live native HTTP/1 access-decision hooks. Header mutation, routing/load-balancer decisions, and VCL-like cache policy hooks remain staged for later `1.7.x`. |
+| WASM extensibility | 🧪 | Active `1.7.x` line. `1.7.0` added the optional `wasm` feature, strict plugin-file loading, bounded Wasmtime execution, and real-Wasm smoke coverage. `1.7.1` adds config-level plugin registry validation, deterministic attachment ordering, admission limits, metrics, and live native HTTP/1 access-decision hooks. `1.7.2` adds bounded native HTTP/1 request/response header hooks. Routing/load-balancer decisions and VCL-like cache policy hooks remain staged for later `1.7.x`. |
 
 See [Production Readiness](docs/production-readiness.md) for the precise
 stable-core promise and deployment checks. See
@@ -258,7 +258,7 @@ Individual module features:
 | `php-fpm` | No | PHP-FPM FastCGI bridge for WordPress-style PHP applications. Implies `proxy` and `web`; not included in default/focused images. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `security` | Yes | Compile-time security profile marker plus release hardening checks. Runtime enforcement lives in the concrete config, TLS, filesystem, admin, and request-handling modules. |
-| `wasm` | No | Optional `1.7.x` WebAssembly policy runtime. `1.7.1` supports live native HTTP/1 access-decision hooks with deterministic ordering, fail-closed security decisions, admission limits, metrics, and real-Wasm tests. Later `1.7.x` releases add header, routing/load-balancer, and cache-policy hooks. |
+| `wasm` | No | Optional `1.7.x` WebAssembly policy runtime. `1.7.2` supports live native HTTP/1 access-decision hooks and bounded request/response header hooks with deterministic ordering, fail-closed security decisions, admission limits, metrics, and real-Wasm tests. Later `1.7.x` releases add routing/load-balancer and cache-policy hooks. |
 | `wasm-proxy-abi` | No | Reserved compatibility preview for a reviewed safe subset of proxy-oriented Wasm ABI calls; depends on `wasm` and remains off by default. |
 | `wasm-wasi` | No | Reserved WASI capability preview; depends on `wasm` and remains off by default with no filesystem/network/process capabilities unless explicitly granted in a later release. |
 | `tls` | No | Internal TLS marker used by TLS/ACME code; select a concrete backend for serving. |
@@ -351,8 +351,8 @@ Release tags use the same profile/OS suffixes on both registries. The first
 `1.7.x` image tags include `v1.7.0-wolfi`, `v1.7.0-cache-wolfi`,
 `v1.7.0-proxy-wolfi`, `v1.7.0-load-balancer-wolfi`, and `v1.7.0-php-wolfi`;
 follow-up `1.7.x` releases use the same suffix pattern, for example
-`v1.7.1-wolfi`, `v1.7.1-cache-wolfi`, `v1.7.1-proxy-wolfi`,
-`v1.7.1-load-balancer-wolfi`, and `v1.7.1-php-wolfi`.
+`v1.7.2-wolfi`, `v1.7.2-cache-wolfi`, `v1.7.2-proxy-wolfi`,
+`v1.7.2-load-balancer-wolfi`, and `v1.7.2-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
@@ -477,13 +477,13 @@ crates and moved request handling onto Fluxheim-owned Rust runtime boundaries.
 - `1.7.x` is the shared Wasm extensibility line. It starts with strict plugin
   file loading, bounded Wasmtime execution, config-level plugin registry
   validation, deterministic attachment ordering, process/plugin/attachment
-  admission ceilings, Wasm-aware reload classification, metrics, and live
-  native HTTP/1 access-decision hooks. Later `1.7.x` releases add request and
-  response header hooks, routing/load-balancer decisions, mirror/persistence
-  decisions, VCL-like cache policy hooks, optional proxy-ABI/WASI previews, and
-  runnable examples for F5 iRules-style policy, nginx Lua/OpenResty-style
-  header policy, HAProxy Lua/SPOE-style routing/load-balancer policy, and
-  VCL-like cache policy.
+  admission ceilings, Wasm-aware reload classification, metrics, live native
+  HTTP/1 access-decision hooks, and bounded request/response header hooks.
+  Later `1.7.x` releases add routing/load-balancer decisions,
+  mirror/persistence decisions, VCL-like cache policy hooks, optional
+  proxy-ABI/WASI previews, and runnable examples for F5 iRules-style policy,
+  nginx Lua/OpenResty-style header policy, HAProxy Lua/SPOE-style
+  routing/load-balancer policy, and VCL-like cache policy.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

@@ -75,6 +75,14 @@ Required live test:
 
 Target release: `v1.7.2`.
 
+Status: implemented in `v1.7.2` for the bounded preview ABI. The live listener
+coverage is in
+`crates/fluxheim-server/src/native_http1_route_proxy_tests/wasm.rs` and proves
+`x-policy-tier` request mutation, `x-fluxheim-policy-branch` response mutation,
+`x-powered-by` response removal, and fail-closed rejection of forbidden header
+mutation IDs. The ABI remains symbolic and does not expose raw sensitive
+headers or bodies.
+
 ### HAProxy Lua/SPOE-Style Routing And Load-Balancer Policy
 
 Capability target:

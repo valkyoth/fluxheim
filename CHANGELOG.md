@@ -7,6 +7,28 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.7.2 - 2026-07-05
+
+### Added
+
+- Add native HTTP/1 Wasm `request-headers` and `response-headers` hooks using
+  bounded integer host calls instead of exposing raw request headers, response
+  headers, bodies, filesystem, network, or admin APIs to plugins.
+- Add a small `fluxheim_policy_v1` host-call surface for symbolic request
+  context, approved synthetic request header mutation, approved response header
+  mutation, and approved response header removal.
+- Add live listener tests proving an origin observes a plugin-added
+  `x-policy-tier` request header, the client observes a plugin-added
+  `x-fluxheim-policy-branch` response header, and origin `x-powered-by` can be
+  removed before delivery.
+
+### Security
+
+- Reject forbidden or oversized-preview Wasm header mutations by failing closed
+  under the existing plugin fail-mode and admission-budget behavior.
+- Keep sensitive headers such as `Authorization`, `Cookie`, and `Set-Cookie`
+  outside the current Wasm host-call ABI.
+
 ## 1.7.1 - 2026-07-04
 
 ### Added

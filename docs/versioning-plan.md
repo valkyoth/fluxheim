@@ -3107,11 +3107,12 @@ Stable scope:
   global admission, reload classification, metrics, timeout, trap, and
   fail-mode behavior. Keep request-header mutation staged until typed host
   calls can pass and mutate request header state safely.
-- `v1.7.2`: implement request and response header hooks plus synthetic bounded
-  responses. Cover nginx-Lua/OpenResty-style request/response header mutation
-  and redaction while proving sensitive headers, cookies, bodies, filesystem,
-  network, and admin APIs are unavailable unless an explicit future capability
-  grants them.
+- `v1.7.2`: implement request and response header hooks through bounded
+  symbolic host calls. Cover nginx-Lua/OpenResty-style request/response header
+  mutation and redaction while proving sensitive headers, cookies, bodies,
+  filesystem, network, and admin APIs are unavailable unless an explicit future
+  capability grants them. Keep broader synthetic response/body surfaces behind
+  later reviewed ABI work.
 - `v1.7.3`: implement routing, load-balancer, mirror/shadow, and persistence
   decision hooks. Cover HAProxy-Lua/SPOE-style external-policy workflows with
   bounded typed decisions for pool choice, persistence-key choice, mirror
@@ -4692,9 +4693,9 @@ circular dependencies.
   composition, process-wide Wasm admission ceilings, Wasm-aware reload-impact
   classification, and per-plugin Prometheus/OTLP metrics from the first live
   hook release.
-- `v1.7.2`: request-header and response-header hooks, bounded synthetic
-  responses, nginx-Lua/OpenResty-style mutation examples, and sensitive field
-  isolation tests.
+- `v1.7.2`: request-header and response-header hooks, bounded symbolic
+  host-call mutation, nginx-Lua/OpenResty-style mutation examples, and
+  sensitive field isolation tests.
 - `v1.7.3`: routing/load-balancer/mirror/persistence decision hooks with
   HAProxy-Lua/SPOE-style live examples.
 - `v1.7.4`: VCL-like cache policy hooks for lookup/admission, cache-key

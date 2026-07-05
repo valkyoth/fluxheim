@@ -601,6 +601,13 @@ ABI calls `fluxheim_access_decision() -> i32`, where `0` continues the chain,
 `1` allows/continues, and `2` denies with `403`. Built-in Fluxheim access
 policy runs first and cannot be overridden by Wasm.
 
+`1.7.2` adds live native HTTP/1 `request-headers` and `response-headers`
+hooks. These hooks use the `fluxheim_policy_v1` host-call namespace with
+bounded integer IDs for coarse request context and allow-listed synthetic
+header mutations. They do not expose raw request headers, response headers,
+`Authorization`, `Cookie`, `Set-Cookie`, request bodies, private keys, admin
+credentials, filesystem, network, or process APIs.
+
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:
 
