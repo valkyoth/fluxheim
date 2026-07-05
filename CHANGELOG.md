@@ -28,6 +28,12 @@ behavior when the change improves security or project direction.
   under the existing plugin fail-mode and admission-budget behavior.
 - Keep sensitive headers such as `Authorization`, `Cookie`, and `Set-Cookie`
   outside the current Wasm host-call ABI.
+- Apply vhost-level Wasm header hooks and fallback response header policy to
+  PHP-FPM fallback responses, closing the only fallback path that skipped the
+  new hook family.
+- Classify Wasm header-hook path context from the matched pre-rewrite request
+  path so route tiering remains consistent when `strip_prefix` or rewrite
+  policy changes the upstream target.
 
 ## 1.7.1 - 2026-07-04
 

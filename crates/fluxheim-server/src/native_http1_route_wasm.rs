@@ -273,11 +273,11 @@ impl NativeWasmHooks {
     pub(crate) async fn apply_request_headers(
         &self,
         request: &mut NativeHttp1Request,
+        context: NativeWasmHeaderContext,
     ) -> Result<(), NativeWasmHeaderError> {
         if self.request_headers.is_empty() {
             return Ok(());
         }
-        let context = NativeWasmHeaderContext::from_request(request);
         for hook in &self.request_headers {
             let mutations = hook
                 .run_header_mutations(
@@ -344,8 +344,9 @@ pub(crate) async fn wasm_access_rejection_status(
 pub(crate) async fn wasm_request_header_rejection(
     hooks: &NativeWasmHooks,
     request: &mut NativeHttp1Request,
+    context: NativeWasmHeaderContext,
 ) -> Option<NativeHttp1Response> {
-    match hooks.apply_request_headers(request).await {
+    match hooks.apply_request_headers(request, context).await {
         Ok(()) => None,
         Err(NativeWasmHeaderError::Failed(phase, outcome)) => Some(
             NativeHttp1Response::new(
@@ -586,6 +587,12 @@ struct NativeWasmHeaderMutations {
 }
 
 impl NativeWasmHeaderContext {
+    pub(crate) fn from_path(path: &str) -> Self {
+        Self {
+            path_class: wasm_path_class(path),
+        }
+    }
+
     pub(crate) fn from_request(request: &NativeHttp1Request) -> Self {
         let path_class = request_path_and_query(request)
             .map(|(path, _)| wasm_path_class(&path))

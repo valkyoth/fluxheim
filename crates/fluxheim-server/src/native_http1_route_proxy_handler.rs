@@ -152,13 +152,17 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .request_headers
                     .apply(&mut request, Some(&header_context));
                 #[cfg(feature = "wasm")]
-                if let Some(response) =
-                    wasm_request_header_rejection(&route.wasm_hooks, &mut request).await
+                let wasm_response_context = NativeWasmHeaderContext::from_path(&path);
+                #[cfg(feature = "wasm")]
+                if let Some(response) = wasm_request_header_rejection(
+                    &route.wasm_hooks,
+                    &mut request,
+                    wasm_response_context,
+                )
+                .await
                 {
                     return response;
                 }
-                #[cfg(feature = "wasm")]
-                let wasm_response_context = NativeWasmHeaderContext::from_request(&request);
                 let response = route.handle(request).await;
                 #[cfg(feature = "wasm")]
                 let mut response = response;
@@ -178,25 +182,77 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             if let Some(php) = &self.fallback_php
                 && let Some(resolved) = php.resolve_for_fallback(&path)
             {
-                return php.handle_resolved(request, path, resolved).await;
+                #[cfg(feature = "wasm")]
+                let wasm_response_context = NativeWasmHeaderContext::from_path(&path);
+                #[cfg(feature = "wasm")]
+                if let Some(response) = wasm_request_header_rejection(
+                    &self.wasm_hooks,
+                    &mut request,
+                    wasm_response_context,
+                )
+                .await
+                {
+                    return response;
+                }
+                let mut response = php.handle_resolved(request, path, resolved).await;
+                self.fallback_response_headers.apply(&mut response);
+                #[cfg(feature = "wasm")]
+                if let Some(failure) = wasm_response_header_failure(
+                    &self.wasm_hooks,
+                    wasm_response_context,
+                    &mut response,
+                )
+                .await
+                {
+                    return failure;
+                }
+                return response;
             }
             if let Some(response) = self.fallback_web_response(&request, &path) {
                 return self.apply_wasm_response_headers(request, response).await;
             }
             #[cfg(feature = "php-fpm")]
             if let Some(php) = &self.fallback_php {
-                return php.handle(request).await;
+                #[cfg(feature = "wasm")]
+                let wasm_response_context = NativeWasmHeaderContext::from_path(&path);
+                #[cfg(feature = "wasm")]
+                if let Some(response) = wasm_request_header_rejection(
+                    &self.wasm_hooks,
+                    &mut request,
+                    wasm_response_context,
+                )
+                .await
+                {
+                    return response;
+                }
+                let mut response = php.handle(request).await;
+                self.fallback_response_headers.apply(&mut response);
+                #[cfg(feature = "wasm")]
+                if let Some(failure) = wasm_response_header_failure(
+                    &self.wasm_hooks,
+                    wasm_response_context,
+                    &mut response,
+                )
+                .await
+                {
+                    return failure;
+                }
+                return response;
             }
             if let Some(proxy) = &self.fallback {
                 self.apply_traceparent(&mut request);
                 #[cfg(feature = "wasm")]
-                if let Some(response) =
-                    wasm_request_header_rejection(&self.wasm_hooks, &mut request).await
+                let wasm_response_context = NativeWasmHeaderContext::from_path(&path);
+                #[cfg(feature = "wasm")]
+                if let Some(response) = wasm_request_header_rejection(
+                    &self.wasm_hooks,
+                    &mut request,
+                    wasm_response_context,
+                )
+                .await
                 {
                     return response;
                 }
-                #[cfg(feature = "wasm")]
-                let wasm_response_context = NativeWasmHeaderContext::from_request(&request);
                 let response = proxy.handle(request).await;
                 #[cfg(feature = "wasm")]
                 let mut response = response;

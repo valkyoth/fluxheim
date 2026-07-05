@@ -231,11 +231,12 @@ async fn native_wasm_access_decision_enforces_global_admission_budget() {
 #[tokio::test]
 async fn native_wasm_request_and_response_headers_use_bounded_host_calls() {
     let fixture = WasmRouteFixture::new(&[("headers", WasmPluginBody::HeaderPolicy)]);
-    let upstream = upstream_expect_policy_header().await;
+    let upstream = upstream_expect_policy_header("/item").await;
     let mut config = fixture
         .config_with_attachments(upstream, vec![wasm_attachment_all("headers", "route", 100)]);
     config.vhosts[0].routes[0].path_exact = None;
     config.vhosts[0].routes[0].path_prefix = Some("/gold".to_owned());
+    config.vhosts[0].routes[0].strip_prefix = Some("/gold".to_owned());
     config.vhosts[0].routes[0].redirect = None;
     config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
         upstreams: vec![upstream.to_string()],
@@ -282,6 +283,59 @@ async fn native_wasm_forbidden_header_mutation_fails_closed() {
 
     assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
     assert!(response.ends_with("wasm request-headers trap\n"));
+}
+
+#[cfg(feature = "php-fpm")]
+#[tokio::test]
+async fn native_wasm_response_headers_apply_to_php_fpm_fallback() {
+    let fixture = WasmRouteFixture::new(&[("headers", WasmPluginBody::HeaderPolicy)]);
+    let fpm = fastcgi_responder(
+        b"Status: 200 OK\r\nContent-Type: text/plain\r\nX-Powered-By: php\r\n\r\nphp-policy",
+    )
+    .await;
+    let root = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir(root.path().join("gold")).unwrap();
+    std::fs::write(
+        root.path().join("gold").join("index.php"),
+        b"<?php echo 'ok';",
+    )
+    .unwrap();
+    let mut vhost = native_route_proxy_test_vhost();
+    vhost.php = fluxheim_config::PhpConfig {
+        enabled: true,
+        root: Some(root.path().to_path_buf()),
+        fpm: fluxheim_config::PhpFpmConfig {
+            tcp: Some(fpm.to_string()),
+            allow_private_tcp_upstreams: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut config = fluxheim_config::Config {
+        vhosts: vec![vhost],
+        ..Default::default()
+    };
+    config.server.default_vhost = Some("route.test".to_owned());
+    config.wasm = fluxheim_config::WasmConfig {
+        enabled: true,
+        plugin_roots: vec![fixture.root.clone()],
+        plugins: fixture.plugins.clone(),
+        attachments: vec![wasm_vhost_attachment_all("headers", 100)],
+        ..Default::default()
+    };
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, "/gold/index.php").await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(
+        response_header(&response, "x-fluxheim-policy-branch").as_deref(),
+        Some("gold")
+    );
+    assert_eq!(response_header(&response, "x-powered-by"), None);
+    assert!(response.ends_with("php-policy"));
 }
 
 struct WasmRouteFixture {
@@ -477,6 +531,20 @@ fn wasm_attachment_all(
     attachment
 }
 
+fn wasm_vhost_attachment_all(plugin: &str, priority: u32) -> fluxheim_config::WasmAttachmentConfig {
+    fluxheim_config::WasmAttachmentConfig {
+        plugin: plugin.to_owned(),
+        vhost: "route.test".to_owned(),
+        route: None,
+        phases: vec![
+            fluxheim_config::WasmPluginPhase::RequestHeaders,
+            fluxheim_config::WasmPluginPhase::ResponseHeaders,
+        ],
+        priority,
+        admission: None,
+    }
+}
+
 fn wasm_attachment_phase(
     plugin: &str,
     route: &str,
@@ -540,7 +608,7 @@ async fn router_listener(router: NativeHttp1HostRouter) -> std::net::SocketAddr 
     addr
 }
 
-async fn upstream_expect_policy_header() -> std::net::SocketAddr {
+async fn upstream_expect_policy_header(expected_path: &'static str) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -559,7 +627,7 @@ async fn upstream_expect_policy_header() -> std::net::SocketAddr {
         }
         let request = String::from_utf8(request).unwrap();
         assert!(
-            request.starts_with("GET /gold/item HTTP/1.1\r\n"),
+            request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
             "unexpected upstream request: {request:?}"
         );
         assert!(
@@ -583,4 +651,72 @@ async fn upstream_expect_policy_header() -> std::net::SocketAddr {
             .unwrap();
     });
     addr
+}
+
+#[cfg(feature = "php-fpm")]
+async fn fastcgi_responder(stdout: &'static [u8]) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request_id = 1_u16;
+        let mut params_done = false;
+        let mut stdin_done = false;
+        while !(params_done && stdin_done) {
+            let (record_type, id, content) = read_fastcgi_record(&mut stream).await;
+            request_id = id;
+            match record_type {
+                4 if content.is_empty() => params_done = true,
+                5 if content.is_empty() => stdin_done = true,
+                _ => {}
+            }
+        }
+        write_fastcgi_record(&mut stream, 6, request_id, stdout)
+            .await
+            .unwrap();
+        write_fastcgi_record(&mut stream, 6, request_id, b"")
+            .await
+            .unwrap();
+        write_fastcgi_record(&mut stream, 3, request_id, &[0, 0, 0, 0, 0, 0, 0, 0])
+            .await
+            .unwrap();
+        stream.shutdown().await.unwrap();
+    });
+    addr
+}
+
+#[cfg(feature = "php-fpm")]
+async fn read_fastcgi_record(stream: &mut tokio::net::TcpStream) -> (u8, u16, Vec<u8>) {
+    let mut header = [0_u8; 8];
+    stream.read_exact(&mut header).await.unwrap();
+    let record_type = header[1];
+    let request_id = u16::from_be_bytes([header[2], header[3]]);
+    let content_len = u16::from_be_bytes([header[4], header[5]]) as usize;
+    let padding_len = header[6] as usize;
+    let mut content = vec![0_u8; content_len];
+    if content_len > 0 {
+        stream.read_exact(&mut content).await.unwrap();
+    }
+    if padding_len > 0 {
+        let mut padding = vec![0_u8; padding_len];
+        stream.read_exact(&mut padding).await.unwrap();
+    }
+    (record_type, request_id, content)
+}
+
+#[cfg(feature = "php-fpm")]
+async fn write_fastcgi_record(
+    stream: &mut tokio::net::TcpStream,
+    record_type: u8,
+    request_id: u16,
+    content: &[u8],
+) -> std::io::Result<()> {
+    let len = u16::try_from(content.len()).unwrap();
+    let mut header = [0_u8; 8];
+    header[0] = 1;
+    header[1] = record_type;
+    header[2..4].copy_from_slice(&request_id.to_be_bytes());
+    header[4..6].copy_from_slice(&len.to_be_bytes());
+    stream.write_all(&header).await?;
+    stream.write_all(content).await
 }

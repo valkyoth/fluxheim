@@ -169,7 +169,10 @@ async fn native_route_proxy_php_route_executes_fastcgi_responder() {
 #[cfg(feature = "php-fpm")]
 #[tokio::test]
 async fn native_route_proxy_vhost_php_takes_precedence_over_static_web_for_php_paths() {
-    let fpm = fastcgi_responder(b"Status: 200 OK\r\nContent-Type: text/plain\r\n\r\nphp-ok").await;
+    let fpm = fastcgi_responder(
+        b"Status: 200 OK\r\nContent-Type: text/plain\r\nX-Powered-By: php\r\n\r\nphp-ok",
+    )
+    .await;
     let root = tempfile::TempDir::new().unwrap();
     std::fs::write(
         root.path().join("wp-login.php"),
@@ -211,6 +214,7 @@ async fn native_route_proxy_vhost_php_takes_precedence_over_static_web_for_php_p
         "unexpected php response: {php_response:?}"
     );
     assert!(php_response.ends_with("php-ok"));
+    assert_eq!(response_header(&php_response, "x-powered-by"), None);
     assert!(!php_response.contains("<?php"));
     assert!(
         static_response.starts_with("HTTP/1.1 200 OK\r\n"),

@@ -25,6 +25,13 @@ bodies, filesystem access, network access, or admin APIs.
 - Add fail-closed coverage for forbidden header mutations. Invalid host-call
   IDs trap the plugin invocation and return `503` unless the plugin is
   explicitly configured for fail-open behavior on a non-security phase.
+- Apply vhost-level Wasm header hooks to PHP-FPM fallback responses as well as
+  route, static, and generic proxy paths.
+- Apply the shared fallback response header policy to PHP-FPM fallback
+  responses, including the default `x-powered-by` removal.
+- Compute Wasm header-hook path context from the matched pre-rewrite request
+  path so path-class policy stays stable when a route strips or rewrites the
+  upstream target.
 
 ## Security Notes
 
@@ -36,6 +43,9 @@ bodies, filesystem access, network access, or admin APIs.
   the current Wasm host-call surface.
 - Built-in Fluxheim ACLs and the `access-decision` chain still run before
   header hooks. Wasm header hooks cannot override built-in access policy.
+- PHP-FPM fallback traffic now goes through the same vhost-level header-hook
+  and fallback response-header post-processing as other fallback response
+  paths.
 - The `wasm` feature remains optional and is still rejected with
   `privacy-mode`.
 
