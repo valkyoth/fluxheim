@@ -3149,6 +3149,17 @@ Stable scope:
   families must run through `scripts/test_starter.py`, the stable/deep release
   gates must include the appropriate Wasm checks, and the docs must clearly
   describe supported capability parity and unsupported syntax/runtime parity.
+- `v1.7.10`: zero-downtime upgrade planning and first implementation slice
+  after the Wasm line is stable. Add a documented design for native binary and
+  Podman deployments that can swap Fluxheim versions without a listener gap:
+  inherited listener file descriptors, systemd socket activation support,
+  readiness-gated new-process startup, old-process drain mode, bounded
+  graceful drain timeout, and a container-safe blue/green handoff pattern
+  through a stable fronting listener or host-level redirect owner. Add smoke
+  coverage that starts an old Fluxheim process, starts a new one, proves new
+  requests move to the new process while existing keep-alive/proxy requests
+  drain on the old process, and documents which Podman setups cannot be
+  truly zero-downtime without a stable fronting layer.
 
 Scope rules:
 
@@ -4714,6 +4725,14 @@ circular dependencies.
 - `v1.7.9`: Wasm stabilization release. All four example families must be in
   `scripts/test_starter.py` and the stable/deep release gates before the line
   is considered complete.
+- `v1.7.10`: zero-downtime upgrade release after Wasm stabilization. Add
+  inherited listener file-descriptor support, systemd socket activation
+  guidance, readiness-gated new-process startup, old-process drain mode,
+  bounded graceful drain timeout, and a documented Podman blue/green pattern
+  that uses a stable fronting listener or host-level redirect owner. Include
+  live upgrade smoke tests that prove no listener gap for the supported native
+  path and clearly document Podman configurations that cannot be seamless
+  without a fronting layer.
 - `v1.8.0`: Fluxheim-owned HTTP/3 and QUIC line. Stop at an opt-in
   `http3`/`http3-experimental` feature using Rust `quinn` for QUIC transport
   and the Rust `h3` stack for HTTP/3 framing behind Fluxheim-owned listener,
