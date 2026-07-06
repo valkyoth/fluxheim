@@ -66,6 +66,6 @@ route matching, or override built-in Fluxheim access policy.
   and dynamic mirror/shadow target decisions remain staged for later `1.7.x`
   slices.
 - Refresh dependency pins for `aws-lc-rs`, `bytes`, `maxminddb`, `zeroize`,
-  `arc-swap`, and `env_logger`; `getrandom`, `base64-ng`, `sanitization`,
+  `getrandom`, `arc-swap`, and `env_logger`; `base64-ng`, `sanitization`,
   cargo security tools, smoke images, and GitHub Actions pins were checked and
   already current.
