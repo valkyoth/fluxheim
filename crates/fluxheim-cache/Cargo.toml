@@ -11,7 +11,7 @@ description = "Internal Fluxheim cache policy and storage boundary."
 async-trait = "0.1.89"
 bytes = "1.12.0"
 fluxheim-config = { path = "../fluxheim-config" }
-getrandom = "0.3.4"
+getrandom = "0.4.3"
 http = "1.4.2"
 rustix = { version = "1.1.2", features = ["fs"] }
 
