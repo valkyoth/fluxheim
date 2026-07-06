@@ -374,6 +374,52 @@ async fn native_wasm_route_decision_does_not_run_before_route_acl() {
     assert!(response.ends_with("forbidden\n"));
 }
 
+#[tokio::test]
+async fn native_wasm_route_decision_enforces_selected_route_rate_limit() {
+    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let stable = upstream_expect_body("/limit/item", "stable").await;
+    let canary = upstream_expect_body("/limit/item", "canary").await;
+    let mut config = fixture.config_with_attachments(
+        stable,
+        vec![wasm_vhost_attachment_phase(
+            "router",
+            100,
+            fluxheim_config::WasmPluginPhase::RouteDecision,
+        )],
+    );
+    let mut canary_route = named_proxy_route("canary", "/limit", canary);
+    canary_route.rate_limit = fluxheim_config::RateLimitConfig {
+        enabled: true,
+        requests_per_second: 1,
+        burst: 1,
+        status: 429,
+        ..Default::default()
+    };
+    config.vhosts[0].routes = vec![
+        named_proxy_route("standard", "/limit", stable),
+        canary_route,
+    ];
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let first = downstream_request(
+        proxy,
+        "GET /limit/item HTTP/1.1\r\nHost: route.test\r\nX-Canary: 1\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let second = downstream_request(
+        proxy,
+        "GET /limit/item HTTP/1.1\r\nHost: route.test\r\nX-Canary: 1\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("canary"));
+    assert!(second.starts_with("HTTP/1.1 429 Too Many Requests\r\n"));
+    assert!(second.ends_with("rate limited\n"));
+}
+
 #[cfg(feature = "load-balancer")]
 #[tokio::test]
 async fn native_wasm_route_decision_selects_configured_load_balanced_route() {

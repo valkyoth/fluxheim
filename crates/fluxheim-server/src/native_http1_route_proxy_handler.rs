@@ -69,23 +69,21 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
                     .close_connection();
             }
-            let concurrency_route = decoded_policy_route.or(selected_route);
             // Delay-mode rate limiting sleeps are still live downstream work.
             // Count them against concurrency so an attacker cannot park
             // unlimited delayed tasks outside the configured vhost/route cap.
-            let _concurrency_permits =
-                match self.acquire_concurrency_permits(concurrency_route).await {
-                    Ok(permits) => permits,
-                    Err(status) => {
-                        return NativeHttp1Response::new(
-                            status,
-                            "Too Many Requests",
-                            b"too many requests\n",
-                        )
-                        .close_connection();
-                    }
-                };
-            match self.check_rate_limits(concurrency_route, client_ip) {
+            let _vhost_concurrency_permit = match self.acquire_vhost_concurrency_permit().await {
+                Ok(permit) => permit,
+                Err(status) => {
+                    return NativeHttp1Response::new(
+                        status,
+                        "Too Many Requests",
+                        b"too many requests\n",
+                    )
+                    .close_connection();
+                }
+            };
+            match self.check_vhost_rate_limit(client_ip) {
                 NativeRateLimitDecision::Allow => {}
                 NativeRateLimitDecision::Delay(delay) => {
                     tokio::time::sleep(delay).await;
@@ -116,6 +114,34 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     NativeWasmRouteResolution::Reject(response) => return response,
                 }
             };
+            let _route_concurrency_permits = match self
+                .acquire_route_concurrency_permits(decoded_policy_route, selected_route)
+                .await
+            {
+                Ok(permits) => permits,
+                Err(status) => {
+                    return NativeHttp1Response::new(
+                        status,
+                        "Too Many Requests",
+                        b"too many requests\n",
+                    )
+                    .close_connection();
+                }
+            };
+            match self.check_route_rate_limits(decoded_policy_route, selected_route, client_ip) {
+                NativeRateLimitDecision::Allow => {}
+                NativeRateLimitDecision::Delay(delay) => {
+                    tokio::time::sleep(delay).await;
+                }
+                NativeRateLimitDecision::Reject(status) => {
+                    return NativeHttp1Response::new(
+                        status,
+                        "Too Many Requests",
+                        b"rate limited\n",
+                    )
+                    .close_connection();
+                }
+            }
             #[cfg(feature = "wasm")]
             if let Some(response) =
                 wasm_access_rejection(self, decoded_policy_route.or(selected_route)).await

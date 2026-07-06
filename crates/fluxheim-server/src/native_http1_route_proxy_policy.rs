@@ -178,6 +178,36 @@ impl NativeHttp1RouteProxy {
             .unwrap_or(NativeRateLimitDecision::Allow)
     }
 
+    pub(crate) fn check_vhost_rate_limit(
+        &self,
+        client_ip: Option<IpAddr>,
+    ) -> NativeRateLimitDecision {
+        self.rate_limit.check(client_ip)
+    }
+
+    pub(crate) fn check_route_rate_limits(
+        &self,
+        first: Option<&NativeHttp1RouteProxyRoute>,
+        second: Option<&NativeHttp1RouteProxyRoute>,
+        client_ip: Option<IpAddr>,
+    ) -> NativeRateLimitDecision {
+        let mut delay = None;
+        for route in unique_route_pair(first, second) {
+            match route.rate_limit.check(client_ip) {
+                NativeRateLimitDecision::Allow => {}
+                NativeRateLimitDecision::Delay(route_delay) => {
+                    delay = Some(
+                        delay.map_or(route_delay, |current: Duration| current.max(route_delay)),
+                    );
+                }
+                decision => return decision,
+            }
+        }
+        delay
+            .map(NativeRateLimitDecision::Delay)
+            .unwrap_or(NativeRateLimitDecision::Allow)
+    }
+
     pub(crate) async fn acquire_concurrency_permits(
         &self,
         route: Option<&NativeHttp1RouteProxyRoute>,
@@ -193,6 +223,37 @@ impl NativeHttp1RouteProxy {
         }
         Ok(permits)
     }
+
+    pub(crate) async fn acquire_vhost_concurrency_permit(
+        &self,
+    ) -> Result<Option<NativeConcurrencyPermit>, u16> {
+        self.concurrency.acquire().await
+    }
+
+    pub(crate) async fn acquire_route_concurrency_permits(
+        &self,
+        first: Option<&NativeHttp1RouteProxyRoute>,
+        second: Option<&NativeHttp1RouteProxyRoute>,
+    ) -> Result<Vec<NativeConcurrencyPermit>, u16> {
+        let mut permits = Vec::with_capacity(2);
+        for route in unique_route_pair(first, second) {
+            if let Some(permit) = route.concurrency.acquire().await? {
+                permits.push(permit);
+            }
+        }
+        Ok(permits)
+    }
+}
+
+fn unique_route_pair<'a>(
+    first: Option<&'a NativeHttp1RouteProxyRoute>,
+    second: Option<&'a NativeHttp1RouteProxyRoute>,
+) -> impl Iterator<Item = &'a NativeHttp1RouteProxyRoute> {
+    first.into_iter().chain(
+        second
+            .into_iter()
+            .filter(move |route| first.is_none_or(|first| !std::ptr::eq(first, *route))),
+    )
 }
 
 impl NativeHttp1RouteProxyRoute {

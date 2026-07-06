@@ -142,9 +142,10 @@ Configured persistence on a selected route also remains Fluxheim-owned. The
 backend after a Wasm route decision. Plugins do not provide arbitrary
 persistence keys in this preview.
 
-Route decisions run only after the built-in vhost/preselected-route ACL,
-rate-limit, and concurrency gates. If the plugin selects a different configured
-route, that selected route's ACL is checked before Fluxheim proceeds.
+Route decisions run only after the built-in vhost ACL, vhost rate-limit, vhost
+concurrency, and preselected/decoded-route ACL gates. If the plugin selects a
+different configured route, that selected route's ACL and route-specific
+rate/concurrency limits are checked before Fluxheim proceeds.
 
 Allowed hooks:
 
