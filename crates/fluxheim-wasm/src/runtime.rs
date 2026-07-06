@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, mpsc};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use thiserror::Error;
 use wasmtime::{
@@ -179,6 +179,23 @@ fn acquire_counter_permit(
     }
 }
 
+fn acquire_counter_permit_with_timeout(
+    counter: &'static AtomicUsize,
+    limit: usize,
+    timeout: Duration,
+) -> Result<CounterPermit, WasmExecutionError> {
+    let started = Instant::now();
+    loop {
+        match acquire_counter_permit(counter, limit) {
+            Ok(permit) => return Ok(permit),
+            Err(WasmExecutionError::CompileConcurrencyLimit) if started.elapsed() < timeout => {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 impl FluxWasmRuntime {
     pub fn new(limits: WasmSandboxLimits) -> Result<Self, WasmExecutionError> {
         let limits = limits.validate()?;
@@ -323,7 +340,14 @@ impl FluxWasmRuntime {
         counter: &'static AtomicUsize,
         limit: usize,
     ) -> Result<Module, WasmExecutionError> {
-        let compile_permit = acquire_counter_permit(counter, limit)?;
+        let started = Instant::now();
+        let compile_permit =
+            acquire_counter_permit_with_timeout(counter, limit, self.limits.compile_timeout)?;
+        let remaining_timeout = self
+            .limits
+            .compile_timeout
+            .checked_sub(started.elapsed())
+            .unwrap_or(Duration::ZERO);
         let engine = self.engine.clone();
         let bytes = plugin.bytes().to_vec();
         let (result_sender, result_receiver) = mpsc::sync_channel(1);
@@ -334,7 +358,7 @@ impl FluxWasmRuntime {
             let _ = result_sender.send(result);
         });
 
-        match result_receiver.recv_timeout(self.limits.compile_timeout) {
+        match result_receiver.recv_timeout(remaining_timeout) {
             Ok(result) => result,
             Err(mpsc::RecvTimeoutError::Timeout) => Err(WasmExecutionError::CompileTimeout {
                 timeout_ms: self.limits.compile_timeout.as_millis(),

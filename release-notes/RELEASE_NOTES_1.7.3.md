@@ -23,6 +23,9 @@ route matching, or override built-in Fluxheim access policy.
 - Add live native load-balancer route coverage proving a Wasm-selected route
   still delegates backend choice to the configured Fluxheim load-balancer
   policy.
+- Add live managed-cookie persistence coverage proving a Wasm-selected
+  load-balanced route still pins the backend through Fluxheim's configured
+  persistence policy.
 - Add live traffic-mirror listener coverage proving a Wasm route decision can
   select an already configured `mirror` route without giving plugins dynamic
   shadow-target access.
@@ -50,5 +53,6 @@ route matching, or override built-in Fluxheim access policy.
   - `1`: select the configured matching route named `canary`;
   - `2`: deny with `403`;
   - `3`: select the configured matching route named `mirror`.
-- Direct backend pool/member choice, persistence-key choice, and dynamic
-  mirror/shadow target decisions remain staged for later `1.7.x` slices.
+- Direct backend pool/member choice, plugin-provided persistence-key choice,
+  and dynamic mirror/shadow target decisions remain staged for later `1.7.x`
+  slices.

@@ -380,6 +380,56 @@ async fn native_wasm_route_decision_selects_configured_load_balanced_route() {
     );
 }
 
+#[cfg(feature = "load-balancer")]
+#[tokio::test]
+async fn native_wasm_route_decision_selects_configured_persistent_route() {
+    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let stable = upstream_expect_body("/sticky/item", "stable").await;
+    let sticky_a = upstream_body_loop("sticky-a", 2).await;
+    let sticky_b = upstream_body_loop("sticky-b", 2).await;
+    let mut config = fixture.config_with_attachments(
+        stable,
+        vec![wasm_vhost_attachment_phase(
+            "router",
+            100,
+            fluxheim_config::WasmPluginPhase::RouteDecision,
+        )],
+    );
+    config.vhosts[0].routes = vec![
+        named_proxy_route("standard", "/sticky", stable),
+        named_persistent_load_balanced_route("canary", "/sticky", &[sticky_a, sticky_b]),
+    ];
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let first = downstream_request(
+        proxy,
+        "GET /sticky/item HTTP/1.1\r\nHost: route.test\r\nX-Canary: 1\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let cookie = response_header(&first, "set-cookie")
+        .and_then(|value| value.split(';').next().map(str::to_owned))
+        .expect("managed persistence cookie is issued");
+    let second = downstream_request(
+        proxy,
+        &format!(
+            "GET /sticky/item HTTP/1.1\r\nHost: route.test\r\nX-Canary: 1\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+        ),
+    )
+    .await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(second.starts_with("HTTP/1.1 200 OK\r\n"));
+    let first_body = first.split("\r\n\r\n").nth(1).unwrap_or_default();
+    let second_body = second.split("\r\n\r\n").nth(1).unwrap_or_default();
+    assert_eq!(first_body, second_body);
+    assert!(
+        first_body == "sticky-a" || first_body == "sticky-b",
+        "unexpected persistent backend body: {first_body:?}"
+    );
+}
+
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 #[tokio::test]
 async fn native_wasm_route_decision_selects_configured_mirror_route() {
@@ -629,13 +679,20 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
     let bytes = wat::parse_str(body.source()).unwrap();
     let path = root.join(format!("{name}.wasm"));
     fs::write(&path, &bytes).unwrap();
-    let limits = matches!(body, WasmPluginBody::BusyLoop).then_some(
-        fluxheim_config::WasmSandboxLimitsConfig {
+    let limits = if matches!(body, WasmPluginBody::BusyLoop) {
+        Some(fluxheim_config::WasmSandboxLimitsConfig {
             fuel: 1_000_000_000,
             timeout_ms: 150,
+            compile_timeout_ms: 5_000,
             ..Default::default()
-        },
-    );
+        })
+    } else {
+        Some(fluxheim_config::WasmSandboxLimitsConfig {
+            timeout_ms: 500,
+            compile_timeout_ms: 5_000,
+            ..Default::default()
+        })
+    };
     fluxheim_config::WasmPluginConfig {
         name: name.to_owned(),
         path,
@@ -800,6 +857,27 @@ fn named_load_balanced_route(
     route
 }
 
+#[cfg(feature = "load-balancer")]
+fn named_persistent_load_balanced_route(
+    name: &str,
+    prefix: &str,
+    upstreams: &[std::net::SocketAddr],
+) -> fluxheim_config::RouteConfig {
+    let mut route = named_load_balanced_route(name, prefix, upstreams);
+    if let Some(proxy) = route.proxy.as_mut() {
+        proxy.load_balance.persistence = fluxheim_config::LoadBalancePersistenceConfig {
+            enabled: true,
+            mode: fluxheim_config::LoadBalancePersistenceMode::ManagedCookie,
+            cookie: Some("fluxheim_wasm_lb".to_owned()),
+            ttl_secs: 60,
+            managed_cookie_path: Some("/".to_owned()),
+            managed_cookie_max_age_secs: Some(60),
+            ..Default::default()
+        };
+    }
+    route
+}
+
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 fn named_proxy_route_with_mirror(
     name: &str,
@@ -935,6 +1013,41 @@ async fn upstream_expect_body(
             )
             .await
             .unwrap();
+    });
+    addr
+}
+
+#[cfg(feature = "load-balancer")]
+async fn upstream_body_loop(body: &'static str, responses: usize) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        for _ in 0..responses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        }
     });
     addr
 }

@@ -7,9 +7,11 @@ execution, and real Wasm smoke coverage. Fluxheim `1.7.1` starts live
 request-path execution with native HTTP/1 access-decision hooks. Fluxheim
 `1.7.2` adds bounded native HTTP/1 request-header and response-header hooks.
 Fluxheim `1.7.3` starts bounded native HTTP/1 route-decision hooks with
-configured canary branch selection. Broader load-balancer pool,
-persistence-key, mirror/shadow, Proxy-ABI compatibility, cache policy hooks,
-and WASI capabilities remain staged for later `1.7.x` releases.
+configured canary and mirror branch selection, including selected native
+load-balanced and persistent routes. Direct backend choice, plugin-provided
+persistence keys, dynamic mirror/shadow target choice, Proxy-ABI compatibility,
+cache policy hooks, and WASI capabilities remain staged for later `1.7.x`
+releases.
 
 Cargo features:
 
@@ -134,6 +136,11 @@ The selected route may use the normal native load-balancer pipeline. Wasm does
 not receive backend addresses or choose individual upstream members in this
 preview; it selects a configured matching route, and Fluxheim's existing
 load-balancer policy chooses the backend.
+
+Configured persistence on a selected route also remains Fluxheim-owned. The
+`1.7.3` coverage proves managed-cookie persistence still pins the selected
+backend after a Wasm route decision. Plugins do not provide arbitrary
+persistence keys in this preview.
 
 Allowed hooks:
 
@@ -331,10 +338,10 @@ plugin hash exposure remains staged for a later status slice.
 first native HTTP/1 access-decision request-path hook. `1.7.2` adds bounded
 request-header and response-header mutation. `1.7.3` adds the first bounded
 route-decision hook with configured `canary` and `mirror` branch selection,
-including live coverage for a selected native load-balanced route. Direct
-backend pool/member choice, persistence-key choice, dynamic mirror/shadow target
-choice, and cache-policy hook families remain staged for later `1.7.x`
-releases.
+including live coverage for selected native load-balanced and managed-cookie
+persistent routes. Direct backend pool/member choice, plugin-provided
+persistence-key choice, dynamic mirror/shadow target choice, and cache-policy
+hook families remain staged for later `1.7.x` releases.
 
 ## Reload Semantics
 

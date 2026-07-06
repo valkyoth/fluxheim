@@ -617,7 +617,8 @@ configured matching route named `mirror`; its normal `[proxy.mirror]` policy
 still controls shadow target, sampling, method allow-list, timeouts, and
 in-flight limits. A selected route may use normal native load balancing;
 Fluxheim still chooses the backend through the configured `proxy.load_balance`
-policy.
+policy. A selected route may also use normal configured load-balancer
+persistence; plugins do not provide arbitrary persistence keys in this preview.
 
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:
