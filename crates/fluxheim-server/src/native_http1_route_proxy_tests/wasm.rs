@@ -344,6 +344,44 @@ async fn native_wasm_route_decision_fails_closed_for_unconfigured_branch() {
     assert!(response.ends_with("wasm route decision unavailable\n"));
 }
 
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+#[tokio::test]
+async fn native_wasm_route_decision_selects_configured_mirror_route() {
+    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let origin = upstream_expect_body("/shadow/item", "origin").await;
+    let (mirror, mirror_rx) = mirror_endpoint().await;
+    let mut config = fixture.config_with_attachments(
+        origin,
+        vec![wasm_vhost_attachment_phase(
+            "router",
+            100,
+            fluxheim_config::WasmPluginPhase::RouteDecision,
+        )],
+    );
+    config.vhosts[0].routes = vec![
+        named_proxy_route("standard", "/shadow", origin),
+        named_proxy_route_with_mirror("mirror", "/shadow", origin, mirror),
+    ];
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_request(
+        proxy,
+        "GET /shadow/item HTTP/1.1\r\nHost: route.test\r\nX-Mirror: 1\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let mirrored = tokio::time::timeout(Duration::from_secs(2), mirror_rx)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("origin"));
+    assert!(mirrored.starts_with("GET /copy/shadow/item HTTP/1.1\r\n"));
+    assert!(mirrored.contains("\r\nx-fluxheim-mirror: 1\r\n"));
+}
+
 #[cfg(feature = "php-fpm")]
 #[tokio::test]
 async fn native_wasm_response_headers_apply_to_php_fpm_fallback() {
@@ -517,15 +555,24 @@ impl WasmPluginBody {
                 (module
                   (import "fluxheim_policy_v1" "context" (func $context (param i32 i32) (result i32)))
                   (func (export "fluxheim_route_decision") (result i32)
-                    i32.const 2
+                    i32.const 3
                     i32.const 0
                     call $context
                     i32.const 1
                     i32.eq
                     if (result i32)
-                      i32.const 1
+                      i32.const 3
                     else
+                      i32.const 2
                       i32.const 0
+                      call $context
+                      i32.const 1
+                      i32.eq
+                      if (result i32)
+                        i32.const 1
+                      else
+                        i32.const 0
+                      end
                     end))
                 "#
                 .to_owned()
@@ -689,6 +736,29 @@ fn named_proxy_route(
     route
 }
 
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+fn named_proxy_route_with_mirror(
+    name: &str,
+    prefix: &str,
+    upstream: std::net::SocketAddr,
+    mirror: std::net::SocketAddr,
+) -> fluxheim_config::RouteConfig {
+    let mut route = named_proxy_route(name, prefix, upstream);
+    if let Some(proxy) = route.proxy.as_mut() {
+        proxy.mirror = fluxheim_config::TrafficMirrorConfig {
+            enabled: true,
+            base_url: Some(format!("http://{mirror}/copy")),
+            sample_per_mille: 1000,
+            methods: vec!["GET".to_owned()],
+            timeout_secs: 2,
+            max_response_bytes: fluxheim_config::ByteSize::from_bytes(1024),
+            max_in_flight: 1,
+            ..Default::default()
+        };
+    }
+    route
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest
@@ -803,6 +873,34 @@ async fn upstream_expect_body(
             .unwrap();
     });
     addr
+}
+
+#[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+async fn mirror_endpoint() -> (std::net::SocketAddr, tokio::sync::oneshot::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let _ = tx.send(String::from_utf8(request).unwrap());
+        stream
+            .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    });
+    (addr, rx)
 }
 
 #[cfg(feature = "php-fpm")]

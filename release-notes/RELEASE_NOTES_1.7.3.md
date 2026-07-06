@@ -13,12 +13,16 @@ route matching, or override built-in Fluxheim access policy.
 - Add a bounded `fluxheim_route_decision() -> i32` preview ABI under the
   existing `fluxheim_policy_v1` host-call namespace.
 - Add symbolic request context for route decisions, including the existing path
-  class and a bounded `x-canary: 1` signal for the first canary routing example.
-- Add configured-route branch selection for the `canary` branch. Fluxheim
-  accepts the decision only when a configured route named `canary` also matches
-  the current request method and path.
+  class plus bounded `x-canary: 1` and `x-mirror: 1` signals for the first
+  configured-branch routing examples.
+- Add configured-route branch selection for the `canary` and `mirror` branches.
+  Fluxheim accepts the decision only when a configured route with that name also
+  matches the current request method and path.
 - Add live listener tests with two local origins proving a Wasm route decision
   can move a request from the standard route to the configured canary route.
+- Add live traffic-mirror listener coverage proving a Wasm route decision can
+  select an already configured `mirror` route without giving plugins dynamic
+  shadow-target access.
 - Add fail-closed coverage for a plugin that selects an unavailable branch.
 
 ## Security Notes
@@ -41,6 +45,7 @@ route matching, or override built-in Fluxheim access policy.
 - The initial preview return values are:
   - `0`: continue with normal route selection;
   - `1`: select the configured matching route named `canary`;
-  - `2`: deny with `403`.
-- Broader pool choice, persistence-key choice, and mirror/shadow decisions
-  remain staged for later `1.7.x` slices.
+  - `2`: deny with `403`;
+  - `3`: select the configured matching route named `mirror`.
+- Broader pool choice, persistence-key choice, and dynamic mirror/shadow target
+  decisions remain staged for later `1.7.x` slices.

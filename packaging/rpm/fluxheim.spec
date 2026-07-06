@@ -156,8 +156,8 @@ fi
 %changelog
 * Mon Jul 06 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.3-1
 - Add bounded native HTTP/1 Wasm route-decision hooks.
-- Add symbolic configured-route canary branch selection with live two-origin
-  listener coverage.
+- Add symbolic configured-route canary and mirror branch selection with live
+  two-origin and traffic-mirror listener coverage.
 - Fail closed when a Wasm route decision selects an unavailable branch.
 
 * Sun Jul 05 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.2-1

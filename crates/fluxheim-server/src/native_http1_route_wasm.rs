@@ -29,6 +29,7 @@ const MAX_WASM_HEADER_MUTATIONS: usize = 16;
 
 const HOST_CONTEXT_PATH_CLASS: i32 = 1;
 const HOST_CONTEXT_CANARY_HEADER: i32 = 2;
+const HOST_CONTEXT_MIRROR_HEADER: i32 = 3;
 const HEADER_X_POLICY_TIER: i32 = 1;
 const HEADER_X_FLUXHEIM_POLICY_BRANCH: i32 = 2;
 const HEADER_X_POWERED_BY: i32 = 3;
@@ -43,6 +44,7 @@ const PATH_CLASS_GOLD: i32 = 3;
 const ROUTE_DECISION_CONTINUE: i32 = 0;
 const ROUTE_DECISION_CANARY: i32 = 1;
 const ROUTE_DECISION_DENY: i32 = 2;
+const ROUTE_DECISION_MIRROR: i32 = 3;
 
 #[derive(Clone, Debug)]
 pub(crate) struct NativeWasmHookRegistry {
@@ -620,6 +622,9 @@ impl NativeWasmHook {
                 status: 403,
                 reason: "wasm route decision denied".to_owned(),
             },
+            Ok(ROUTE_DECISION_MIRROR) => NativeWasmRouteOutcome::Select {
+                route_name: "mirror",
+            },
             Ok(_) => self.failed_route_decision("error"),
             Err(error) => {
                 let outcome = match error {
@@ -684,6 +689,7 @@ pub(crate) struct NativeWasmHeaderContext {
 pub(crate) struct NativeWasmRouteContext {
     path_class: i32,
     canary_header: i32,
+    mirror_header: i32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -718,9 +724,13 @@ impl NativeWasmRouteContext {
         let canary_header = i32::from(request.headers.iter().any(|(name, value)| {
             name.eq_ignore_ascii_case("x-canary") && value.trim().eq_ignore_ascii_case("1")
         }));
+        let mirror_header = i32::from(request.headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("x-mirror") && value.trim().eq_ignore_ascii_case("1")
+        }));
         Self {
             path_class: wasm_path_class(path),
             canary_header,
+            mirror_header,
         }
     }
 }
@@ -839,6 +849,7 @@ fn wasm_route_host_functions(context: NativeWasmRouteContext) -> Vec<WasmI32Host
         move |kind, _unused| match kind {
             HOST_CONTEXT_PATH_CLASS => Ok(context.path_class),
             HOST_CONTEXT_CANARY_HEADER => Ok(context.canary_header),
+            HOST_CONTEXT_MIRROR_HEADER => Ok(context.mirror_header),
             _ => Err("unknown wasm context field".to_owned()),
         },
     )]
@@ -865,6 +876,7 @@ fn wasm_route_outcome_label(value: i32) -> &'static str {
         ROUTE_DECISION_CONTINUE => "continue",
         ROUTE_DECISION_CANARY => "select",
         ROUTE_DECISION_DENY => "deny",
+        ROUTE_DECISION_MIRROR => "select",
         _ => "error",
     }
 }

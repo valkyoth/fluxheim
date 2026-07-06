@@ -609,10 +609,13 @@ header mutations. They do not expose raw request headers, response headers,
 credentials, filesystem, network, or process APIs.
 
 `1.7.3` adds live native HTTP/1 `route-decision` hooks. The first preview ABI
-supports `continue`, `deny`, and configured `canary` branch selection. Fluxheim
-accepts a selected branch only when it maps to an existing configured route that
-still matches the current request method and path; unavailable branches fail
-closed with `503`.
+supports `continue`, `deny`, and configured `canary` or `mirror` branch
+selection. Fluxheim accepts a selected branch only when it maps to an existing
+configured route that still matches the current request method and path;
+unavailable branches fail closed with `503`. The `mirror` branch only selects a
+configured matching route named `mirror`; its normal `[proxy.mirror]` policy
+still controls shadow target, sampling, method allow-list, timeouts, and
+in-flight limits.
 
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:

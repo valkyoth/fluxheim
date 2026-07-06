@@ -114,14 +114,21 @@ return values are deliberately narrow:
 
 - `0`: continue with normal route selection;
 - `1`: select the configured matching route named `canary`;
-- `2`: deny with `403`.
+- `2`: deny with `403`;
+- `3`: select the configured matching route named `mirror`.
 
 The route decision host-call surface reuses `context(kind, unused) -> i32` for
-bounded symbolic inputs. The first routing example exposes only the path class
-and whether the request carried `x-canary: 1`. A selected branch is accepted
+bounded symbolic inputs. The first routing example exposes only the path class,
+whether the request carried `x-canary: 1`, and whether the request carried
+`x-mirror: 1`. A selected branch is accepted
 only when it maps to an existing configured route that still matches the
 current request method and path. Unknown or unavailable branches fail closed
 with `503`.
+
+The `mirror` branch does not let Wasm create a shadow destination. It only
+selects an already configured matching route named `mirror`; the route's normal
+`[proxy.mirror]` policy still controls target URL, method allow-list, sampling,
+timeouts, in-flight limits, and recursion protection.
 
 Allowed hooks:
 
@@ -318,9 +325,9 @@ plugin hash exposure remains staged for a later status slice.
 `1.7.1` validates the registry and attachment declarations and enables the
 first native HTTP/1 access-decision request-path hook. `1.7.2` adds bounded
 request-header and response-header mutation. `1.7.3` adds the first bounded
-route-decision hook with configured `canary` branch selection. Broader
-load-balancer pool, persistence, mirror/shadow, and cache-policy hook families
-remain staged for later `1.7.x` releases.
+route-decision hook with configured `canary` and `mirror` branch selection.
+Broader load-balancer pool, persistence, dynamic mirror/shadow target choice,
+and cache-policy hook families remain staged for later `1.7.x` releases.
 
 ## Reload Semantics
 
