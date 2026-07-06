@@ -65,6 +65,7 @@ route matching, or override built-in Fluxheim access policy.
 - Direct backend pool/member choice, plugin-provided persistence-key choice,
   and dynamic mirror/shadow target decisions remain staged for later `1.7.x`
   slices.
-- Refresh dependency pins for `aws-lc-rs`, `bytes`, `maxminddb`, `arc-swap`,
-  and `env_logger`; `getrandom`, `base64-ng`, `sanitization`, cargo security
-  tools, smoke images, and GitHub Actions pins were checked and already current.
+- Refresh dependency pins for `aws-lc-rs`, `bytes`, `maxminddb`, `zeroize`,
+  `arc-swap`, and `env_logger`; `getrandom`, `base64-ng`, `sanitization`,
+  cargo security tools, smoke images, and GitHub Actions pins were checked and
+  already current.

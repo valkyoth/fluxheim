@@ -23,7 +23,7 @@ rustix = { version = "1.1.4", features = ["fs"], optional = true }
 sanitization = { version = "1.2.2", features = ["alloc"], optional = true }
 serde_json = { version = "1.0.150", optional = true }
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"], optional = true }
-zeroize = { version = "1.8.2", features = ["derive"], optional = true }
+zeroize = { version = "1.9.0", features = ["derive"], optional = true }
 
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }

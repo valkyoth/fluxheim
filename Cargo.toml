@@ -293,7 +293,7 @@ serde_json = { version = "1.0.150", optional = true }
 thiserror = "2.0.18"
 toml = "1.1.2"
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"], optional = true }
-zeroize = { version = "1.8.2", features = ["derive"], optional = true }
+zeroize = { version = "1.9.0", features = ["derive"], optional = true }
 
 [dev-dependencies]
 brotli = { version = "8.0.4", default-features = false, features = ["std"] }

@@ -16,7 +16,7 @@ log = "0.4.33"
 percent-encoding = "2.3.2"
 rustix = { version = "1.1.4", features = ["fs", "process"] }
 tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-util", "net", "rt", "time"] }
-zeroize = "1.8.2"
+zeroize = "1.9.0"
 
 [dev-dependencies]
 tempfile = "3.24.0"
