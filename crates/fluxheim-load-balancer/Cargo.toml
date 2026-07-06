@@ -15,10 +15,10 @@ tls-rustls-backend = ["dep:rustls", "dep:rustls-native-certs", "dep:tokio-rustls
 tls-openssl-backend = ["dep:openssl", "dep:tokio-openssl"]
 
 [dependencies]
-arc-swap = "1.9.1"
+arc-swap = "1.9.2"
 async-trait = "0.1.89"
 base64-ng = "1.3.5"
-bytes = "1.11.1"
+bytes = "1.12.0"
 crc32fast = "1.5.0"
 fluxheim-common = { path = "../fluxheim-common" }
 fluxheim-config = { path = "../fluxheim-config", features = ["load-balancer", "proxy"] }

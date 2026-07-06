@@ -130,7 +130,7 @@ mod runtime {
                     ),
                 )
             })?;
-            let database_type = reader.metadata.database_type.clone();
+            let database_type = reader.metadata().database_type.clone();
             Ok(Self {
                 reader,
                 database_type,

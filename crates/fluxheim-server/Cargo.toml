@@ -30,7 +30,7 @@ traffic-mirror = ["dep:ureq"]
 wasm = ["dep:fluxheim-wasm", "fluxheim-config/wasm", "fluxheim-wasm/runtime"]
 
 [dependencies]
-bytes = "1.11.1"
+bytes = "1.12.0"
 fastcgi-client = { version = "0.11.1", default-features = false, features = ["runtime-tokio"], optional = true }
 fluxheim-common = { path = "../fluxheim-common" }
 fluxheim-cache = { path = "../fluxheim-cache" }

@@ -21,7 +21,7 @@ tls-openssl-fips = [
 ]
 
 [dependencies]
-arc-swap = "1.7.2"
+arc-swap = "1.9.2"
 fluxheim-config = { path = "../fluxheim-config" }
 fluxheim-openssl-fips-support = { path = "../../vendor/fluxheim-openssl-fips-support", optional = true }
 log = "0.4.33"
