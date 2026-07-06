@@ -175,12 +175,6 @@ impl Drop for CompileSlotPermit {
     }
 }
 
-#[cfg(test)]
-fn compile_slots() -> &'static AtomicUsize {
-    static SLOTS: OnceLock<AtomicUsize> = OnceLock::new();
-    SLOTS.get_or_init(|| AtomicUsize::new(0))
-}
-
 fn compile_slot_pool() -> &'static CompileSlotPool {
     static POOL: OnceLock<CompileSlotPool> = OnceLock::new();
     POOL.get_or_init(|| CompileSlotPool {
