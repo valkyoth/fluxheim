@@ -153,7 +153,20 @@ reduces review surface. Shared Wasm
 extensibility moves to `1.7`; it should cover the operational jobs normally
 solved with F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-style
 cache logic, but only after the Pingora-free runtime boundary is stable. HTTP/3
-and QUIC remain a later Fluxheim-owned protocol milestone after that.
+and QUIC move behind a new `1.8` cross-platform production line.
+`1.8.x` should make macOS and Windows as close to Linux parity as practical
+before Fluxheim adds another protocol surface: same public build profiles where
+the platform semantics allow them, regular CI, live smoke tests, platform-safe
+runtime paths, service/install integration, release assets, and security
+reviews for filesystem, ACL, symlink, certificate/key, and process-supervision
+behavior. macOS production support should target Apple Developer ID signed and
+notarized artifacts, with a signed/notarized `.pkg`, a Homebrew formula/cask
+path, or both. Windows production support should target Authenticode-signed
+artifacts and a real installer path: prefer MSIX/App Installer or Microsoft
+Store publication only if the Store model fits Fluxheim's server/service
+behavior; otherwise use a signed MSI or signed zip plus documented Windows
+service installation. HTTP/3 and QUIC become the following `1.9` line after
+cross-platform release evidence is stable.
 After Pingora is removed from normal builds, add a native
 nginx/Ketama-compatible consistent-hash selection mode implemented by
 Fluxheim, not by depending on `pingora-ketama`. The current Fluxheim-owned
