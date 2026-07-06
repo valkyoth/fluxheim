@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock, mpsc};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -142,22 +142,54 @@ struct RuntimeStoreState {
     limits: StoreLimits,
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct CounterPermit {
     counter: &'static AtomicUsize,
 }
 
+struct CompileSlotPool {
+    active: Mutex<usize>,
+    available: Condvar,
+}
+
+struct CompileSlotPermit {
+    pool: &'static CompileSlotPool,
+}
+
+#[cfg(test)]
 impl Drop for CounterPermit {
     fn drop(&mut self) {
         self.counter.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
+impl Drop for CompileSlotPermit {
+    fn drop(&mut self) {
+        let mut active = self.pool.active.lock().unwrap_or_else(|poisoned| {
+            let _ = poisoned;
+            std::process::abort();
+        });
+        *active = active.saturating_sub(1);
+        self.pool.available.notify_one();
+    }
+}
+
+#[cfg(test)]
 fn compile_slots() -> &'static AtomicUsize {
     static SLOTS: OnceLock<AtomicUsize> = OnceLock::new();
     SLOTS.get_or_init(|| AtomicUsize::new(0))
 }
 
+fn compile_slot_pool() -> &'static CompileSlotPool {
+    static POOL: OnceLock<CompileSlotPool> = OnceLock::new();
+    POOL.get_or_init(|| CompileSlotPool {
+        active: Mutex::new(0),
+        available: Condvar::new(),
+    })
+}
+
+#[cfg(test)]
 fn acquire_counter_permit(
     counter: &'static AtomicUsize,
     limit: usize,
@@ -180,18 +212,35 @@ fn acquire_counter_permit(
 }
 
 fn acquire_counter_permit_with_timeout(
-    counter: &'static AtomicUsize,
+    pool: &'static CompileSlotPool,
     limit: usize,
     timeout: Duration,
-) -> Result<CounterPermit, WasmExecutionError> {
+) -> Result<CompileSlotPermit, WasmExecutionError> {
     let started = Instant::now();
+    let mut active = pool.active.lock().unwrap_or_else(|poisoned| {
+        let _ = poisoned;
+        std::process::abort();
+    });
     loop {
-        match acquire_counter_permit(counter, limit) {
-            Ok(permit) => return Ok(permit),
-            Err(WasmExecutionError::CompileConcurrencyLimit) if started.elapsed() < timeout => {
-                thread::sleep(Duration::from_millis(1));
-            }
-            Err(error) => return Err(error),
+        if *active < limit {
+            *active += 1;
+            return Ok(CompileSlotPermit { pool });
+        }
+        let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
+            return Err(WasmExecutionError::CompileConcurrencyLimit);
+        };
+        if remaining.is_zero() {
+            return Err(WasmExecutionError::CompileConcurrencyLimit);
+        }
+        let (next_active, wait) = pool
+            .available
+            .wait_timeout(active, remaining)
+            .unwrap_or_else(|_| {
+                std::process::abort();
+            });
+        active = next_active;
+        if wait.timed_out() && *active >= limit {
+            return Err(WasmExecutionError::CompileConcurrencyLimit);
         }
     }
 }
@@ -331,23 +380,46 @@ impl FluxWasmRuntime {
     }
 
     fn compile_module(&self, plugin: &WasmPluginFile) -> Result<Module, WasmExecutionError> {
-        self.compile_module_with_counter(plugin, compile_slots(), MAX_CONCURRENT_COMPILES)
+        self.compile_module_with_slot_pool(plugin, compile_slot_pool(), MAX_CONCURRENT_COMPILES)
     }
 
+    fn compile_module_with_slot_pool(
+        &self,
+        plugin: &WasmPluginFile,
+        pool: &'static CompileSlotPool,
+        limit: usize,
+    ) -> Result<Module, WasmExecutionError> {
+        let started = Instant::now();
+        let compile_permit =
+            acquire_counter_permit_with_timeout(pool, limit, self.limits.compile_timeout)?;
+        let remaining_timeout = self
+            .limits
+            .compile_timeout
+            .checked_sub(started.elapsed())
+            .unwrap_or(Duration::ZERO);
+        self.compile_module_with_permit(plugin, compile_permit, remaining_timeout)
+    }
+
+    #[cfg(test)]
     fn compile_module_with_counter(
         &self,
         plugin: &WasmPluginFile,
         counter: &'static AtomicUsize,
         limit: usize,
     ) -> Result<Module, WasmExecutionError> {
-        let started = Instant::now();
-        let compile_permit =
-            acquire_counter_permit_with_timeout(counter, limit, self.limits.compile_timeout)?;
-        let remaining_timeout = self
-            .limits
-            .compile_timeout
-            .checked_sub(started.elapsed())
-            .unwrap_or(Duration::ZERO);
+        let compile_permit = acquire_counter_permit(counter, limit)?;
+        self.compile_module_with_permit(plugin, compile_permit, self.limits.compile_timeout)
+    }
+
+    fn compile_module_with_permit<P>(
+        &self,
+        plugin: &WasmPluginFile,
+        compile_permit: P,
+        timeout: Duration,
+    ) -> Result<Module, WasmExecutionError>
+    where
+        P: Send + 'static,
+    {
         let engine = self.engine.clone();
         let bytes = plugin.bytes().to_vec();
         let (result_sender, result_receiver) = mpsc::sync_channel(1);
@@ -358,7 +430,7 @@ impl FluxWasmRuntime {
             let _ = result_sender.send(result);
         });
 
-        match result_receiver.recv_timeout(remaining_timeout) {
+        match result_receiver.recv_timeout(timeout) {
             Ok(result) => result,
             Err(mpsc::RecvTimeoutError::Timeout) => Err(WasmExecutionError::CompileTimeout {
                 timeout_ms: self.limits.compile_timeout.as_millis(),

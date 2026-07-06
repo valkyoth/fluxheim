@@ -36,11 +36,16 @@ route matching, or override built-in Fluxheim access policy.
 - `route-decision` hooks cannot create destinations or bypass route matchers.
   A selected branch must map to an existing configured route with a matching
   method and path.
-- Built-in vhost and route ACLs, rate limits, concurrency limits, body limits,
-  redirect policy, and request/response header policy still apply after the
-  Wasm decision selects a route.
+- Built-in vhost and preselected-route ACLs, rate limits, and concurrency
+  limits run before `route-decision` execution, so denied or shaped clients
+  cannot spend the process-wide Wasm admission budget first.
+- Selected-route ACLs, body limits, redirect policy, and request/response
+  header policy still apply after the Wasm decision selects a route.
 - If a plugin selects an unavailable branch, Fluxheim returns `503` rather than
   falling back silently.
+- Wasm module compilation now waits for a bounded compile slot with a condition
+  variable inside the configured compile timeout instead of polling in 1 ms
+  sleeps under startup/reload contention.
 - The `wasm` feature remains optional and is still rejected with
   `privacy-mode`.
 

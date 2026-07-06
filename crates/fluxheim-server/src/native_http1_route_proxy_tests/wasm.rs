@@ -344,6 +344,36 @@ async fn native_wasm_route_decision_fails_closed_for_unconfigured_branch() {
     assert!(response.ends_with("wasm route decision unavailable\n"));
 }
 
+#[tokio::test]
+async fn native_wasm_route_decision_does_not_run_before_route_acl() {
+    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![wasm_vhost_attachment_phase(
+            "router",
+            100,
+            fluxheim_config::WasmPluginPhase::RouteDecision,
+        )],
+    );
+    config.vhosts[0].routes[0].access = fluxheim_config::AccessPolicyConfig {
+        deny: vec!["127.0.0.1".to_owned()],
+        ..Default::default()
+    };
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_request(
+        proxy,
+        "GET /route HTTP/1.1\r\nHost: route.test\r\nX-Canary: 1\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(response.ends_with("forbidden\n"));
+}
+
 #[cfg(feature = "load-balancer")]
 #[tokio::test]
 async fn native_wasm_route_decision_selects_configured_load_balanced_route() {

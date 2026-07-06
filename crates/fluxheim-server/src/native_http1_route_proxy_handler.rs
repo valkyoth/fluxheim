@@ -60,17 +60,6 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             let client_ip = self.access_client_ip(&request);
             let tls_identity = request.tls_identity.as_ref();
             let geo_context = request.geo_context.as_ref();
-            #[cfg(feature = "wasm")]
-            let selected_route = {
-                match self
-                    .wasm_route_decision(&request, &path, selected_route)
-                    .await
-                {
-                    NativeWasmRouteResolution::Continue => selected_route,
-                    NativeWasmRouteResolution::Select(route) => Some(route),
-                    NativeWasmRouteResolution::Reject(response) => return response,
-                }
-            };
             if !self.access.allows(client_ip, tls_identity, geo_context)
                 || selected_route
                     .is_some_and(|route| !route.access.allows(client_ip, tls_identity, geo_context))
@@ -79,22 +68,6 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             {
                 return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
                     .close_connection();
-            }
-            #[cfg(feature = "wasm")]
-            if let Some(response) =
-                wasm_access_rejection(self, decoded_policy_route.or(selected_route)).await
-            {
-                return response;
-            }
-            if !selected_route
-                .is_some_and(NativeHttp1RouteProxyRoute::https_redirect_exempt_or_redirect)
-                && let Some(response) = https_redirect_response(
-                    &request,
-                    &self.https_redirect,
-                    &self.fallback_response_headers,
-                )
-            {
-                return response;
             }
             let concurrency_route = decoded_policy_route.or(selected_route);
             // Delay-mode rate limiting sleeps are still live downstream work.
@@ -125,6 +98,39 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     )
                     .close_connection();
                 }
+            }
+            #[cfg(feature = "wasm")]
+            let selected_route = {
+                match self
+                    .wasm_route_decision(&request, &path, selected_route)
+                    .await
+                {
+                    NativeWasmRouteResolution::Continue => selected_route,
+                    NativeWasmRouteResolution::Select(route) => {
+                        if !route.access.allows(client_ip, tls_identity, geo_context) {
+                            return NativeHttp1Response::new(403, "Forbidden", b"forbidden\n")
+                                .close_connection();
+                        }
+                        Some(route)
+                    }
+                    NativeWasmRouteResolution::Reject(response) => return response,
+                }
+            };
+            #[cfg(feature = "wasm")]
+            if let Some(response) =
+                wasm_access_rejection(self, decoded_policy_route.or(selected_route)).await
+            {
+                return response;
+            }
+            if !selected_route
+                .is_some_and(NativeHttp1RouteProxyRoute::https_redirect_exempt_or_redirect)
+                && let Some(response) = https_redirect_response(
+                    &request,
+                    &self.https_redirect,
+                    &self.fallback_response_headers,
+                )
+            {
+                return response;
             }
             if let Some(route) = selected_route {
                 if let Some(response) = native_grpc_rejection_response(&route.grpc, &request) {
