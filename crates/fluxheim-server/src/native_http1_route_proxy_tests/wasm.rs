@@ -344,6 +344,42 @@ async fn native_wasm_route_decision_fails_closed_for_unconfigured_branch() {
     assert!(response.ends_with("wasm route decision unavailable\n"));
 }
 
+#[cfg(feature = "load-balancer")]
+#[tokio::test]
+async fn native_wasm_route_decision_selects_configured_load_balanced_route() {
+    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let stable = upstream_expect_body("/lb/item", "stable").await;
+    let canary_a = upstream_expect_body("/lb/item", "canary-a").await;
+    let canary_b = upstream_expect_body("/lb/item", "canary-b").await;
+    let mut config = fixture.config_with_attachments(
+        stable,
+        vec![wasm_vhost_attachment_phase(
+            "router",
+            100,
+            fluxheim_config::WasmPluginPhase::RouteDecision,
+        )],
+    );
+    config.vhosts[0].routes = vec![
+        named_proxy_route("standard", "/lb", stable),
+        named_load_balanced_route("canary", "/lb", &[canary_a, canary_b]),
+    ];
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_request(
+        proxy,
+        "GET /lb/item HTTP/1.1\r\nHost: route.test\r\nX-Canary: 1\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(
+        response.ends_with("canary-a") || response.ends_with("canary-b"),
+        "unexpected load-balanced response: {response:?}"
+    );
+}
+
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 #[tokio::test]
 async fn native_wasm_route_decision_selects_configured_mirror_route() {
@@ -731,6 +767,34 @@ fn named_proxy_route(
     route.redirect = None;
     route.proxy = Some(fluxheim_config::ProxyConfig {
         upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    route
+}
+
+#[cfg(feature = "load-balancer")]
+fn named_load_balanced_route(
+    name: &str,
+    prefix: &str,
+    upstreams: &[std::net::SocketAddr],
+) -> fluxheim_config::RouteConfig {
+    let mut route = native_route_proxy_test_route();
+    route.name = name.to_owned();
+    route.path_exact = None;
+    route.path_prefix = Some(prefix.to_owned());
+    route.redirect = None;
+    route.proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: upstreams
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
+        load_balance: fluxheim_config::LoadBalanceConfig {
+            health_check: fluxheim_config::LoadBalanceHealthCheckConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
         ..Default::default()
     });
     route

@@ -615,7 +615,9 @@ configured route that still matches the current request method and path;
 unavailable branches fail closed with `503`. The `mirror` branch only selects a
 configured matching route named `mirror`; its normal `[proxy.mirror]` policy
 still controls shadow target, sampling, method allow-list, timeouts, and
-in-flight limits.
+in-flight limits. A selected route may use normal native load balancing;
+Fluxheim still chooses the backend through the configured `proxy.load_balance`
+policy.
 
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:

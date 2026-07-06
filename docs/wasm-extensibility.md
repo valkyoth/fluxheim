@@ -130,6 +130,11 @@ selects an already configured matching route named `mirror`; the route's normal
 `[proxy.mirror]` policy still controls target URL, method allow-list, sampling,
 timeouts, in-flight limits, and recursion protection.
 
+The selected route may use the normal native load-balancer pipeline. Wasm does
+not receive backend addresses or choose individual upstream members in this
+preview; it selects a configured matching route, and Fluxheim's existing
+load-balancer policy chooses the backend.
+
 Allowed hooks:
 
 - request headers before upstream selection;
@@ -325,9 +330,11 @@ plugin hash exposure remains staged for a later status slice.
 `1.7.1` validates the registry and attachment declarations and enables the
 first native HTTP/1 access-decision request-path hook. `1.7.2` adds bounded
 request-header and response-header mutation. `1.7.3` adds the first bounded
-route-decision hook with configured `canary` and `mirror` branch selection.
-Broader load-balancer pool, persistence, dynamic mirror/shadow target choice,
-and cache-policy hook families remain staged for later `1.7.x` releases.
+route-decision hook with configured `canary` and `mirror` branch selection,
+including live coverage for a selected native load-balanced route. Direct
+backend pool/member choice, persistence-key choice, dynamic mirror/shadow target
+choice, and cache-policy hook families remain staged for later `1.7.x`
+releases.
 
 ## Reload Semantics
 
