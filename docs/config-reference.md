@@ -608,6 +608,12 @@ header mutations. They do not expose raw request headers, response headers,
 `Authorization`, `Cookie`, `Set-Cookie`, request bodies, private keys, admin
 credentials, filesystem, network, or process APIs.
 
+`1.7.3` adds live native HTTP/1 `route-decision` hooks. The first preview ABI
+supports `continue`, `deny`, and configured `canary` branch selection. Fluxheim
+accepts a selected branch only when it maps to an existing configured route that
+still matches the current request method and path; unavailable branches fail
+closed with `503`.
+
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:
 

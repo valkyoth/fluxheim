@@ -43,6 +43,20 @@ impl NativeHttp1RouteProxy {
             .and_then(|decoded_path| self.select_route_with_fallback(method, decoded_path, false))
     }
 
+    #[cfg(feature = "wasm")]
+    pub(crate) fn select_named_matching_route(
+        &self,
+        method: &str,
+        path: &str,
+        route_name: &str,
+    ) -> Option<&NativeHttp1RouteProxyRoute> {
+        self.routes.iter().find(|route| {
+            route.name == route_name
+                && route_method_matches(&route.methods, method)
+                && route.matcher.is_match(path)
+        })
+    }
+
     fn select_route_with_fallback(
         &self,
         method: &str,

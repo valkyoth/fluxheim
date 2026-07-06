@@ -22,10 +22,13 @@ const REQUEST_HEADERS_PHASE: &str = "request-headers";
 const REQUEST_HEADERS_FUNCTION: &str = "fluxheim_request_headers";
 const RESPONSE_HEADERS_PHASE: &str = "response-headers";
 const RESPONSE_HEADERS_FUNCTION: &str = "fluxheim_response_headers";
+const ROUTE_DECISION_PHASE: &str = "route-decision";
+const ROUTE_DECISION_FUNCTION: &str = "fluxheim_route_decision";
 const WASM_HOST_MODULE: &str = "fluxheim_policy_v1";
 const MAX_WASM_HEADER_MUTATIONS: usize = 16;
 
 const HOST_CONTEXT_PATH_CLASS: i32 = 1;
+const HOST_CONTEXT_CANARY_HEADER: i32 = 2;
 const HEADER_X_POLICY_TIER: i32 = 1;
 const HEADER_X_FLUXHEIM_POLICY_BRANCH: i32 = 2;
 const HEADER_X_POWERED_BY: i32 = 3;
@@ -37,6 +40,9 @@ const PATH_CLASS_OTHER: i32 = 0;
 const PATH_CLASS_API: i32 = 1;
 const PATH_CLASS_STATIC: i32 = 2;
 const PATH_CLASS_GOLD: i32 = 3;
+const ROUTE_DECISION_CONTINUE: i32 = 0;
+const ROUTE_DECISION_CANARY: i32 = 1;
+const ROUTE_DECISION_DENY: i32 = 2;
 
 #[derive(Clone, Debug)]
 pub(crate) struct NativeWasmHookRegistry {
@@ -49,6 +55,7 @@ pub(crate) struct NativeWasmHooks {
     access_decision: Vec<NativeWasmHook>,
     request_headers: Vec<NativeWasmHook>,
     response_headers: Vec<NativeWasmHook>,
+    route_decision: Vec<NativeWasmHook>,
 }
 
 #[derive(Clone, Debug)]
@@ -84,6 +91,13 @@ pub(crate) enum NativeWasmAccessOutcome {
 }
 
 #[derive(Debug)]
+pub(crate) enum NativeWasmRouteOutcome {
+    Continue,
+    Select { route_name: &'static str },
+    Deny { status: u16, reason: String },
+}
+
+#[derive(Debug)]
 pub(crate) enum NativeWasmHookError {
     Admission(NativeWasmAdmissionScope),
     Execution(WasmExecutionError),
@@ -102,6 +116,7 @@ impl PartialEq for NativeWasmHooks {
         self.access_decision == other.access_decision
             && self.request_headers == other.request_headers
             && self.response_headers == other.response_headers
+            && self.route_decision == other.route_decision
     }
 }
 
@@ -237,10 +252,23 @@ impl NativeWasmHookRegistry {
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
+        let route_decision = self
+            .attachments
+            .iter()
+            .filter(|attachment| attachment.matches(vhost, route))
+            .filter(|attachment| attachment.phases.contains(&WasmPluginPhase::RouteDecision))
+            .map(|attachment| NativeWasmHook {
+                plugin: attachment.plugin.clone(),
+                phase: WasmPluginPhase::RouteDecision,
+                global_admission: self.admission.clone(),
+                attachment_admission: attachment.admission.clone(),
+            })
+            .collect();
         NativeWasmHooks {
             access_decision,
             request_headers,
             response_headers,
+            route_decision,
         }
     }
 }
@@ -250,6 +278,7 @@ impl NativeWasmHooks {
         self.access_decision.is_empty()
             && self.request_headers.is_empty()
             && self.response_headers.is_empty()
+            && self.route_decision.is_empty()
     }
 
     pub(crate) async fn access_decision(&self) -> NativeWasmAccessOutcome {
@@ -268,6 +297,34 @@ impl NativeWasmHooks {
             }
         }
         NativeWasmAccessOutcome::Allow
+    }
+
+    pub(crate) async fn route_decision(
+        &self,
+        context: NativeWasmRouteContext,
+    ) -> NativeWasmRouteOutcome {
+        if self.route_decision.is_empty() {
+            return NativeWasmRouteOutcome::Continue;
+        }
+        let mut selected_route = None;
+        for hook in &self.route_decision {
+            match hook.run_route_decision(context).await {
+                NativeWasmRouteOutcome::Continue => {}
+                NativeWasmRouteOutcome::Select { route_name } => {
+                    selected_route.get_or_insert(route_name);
+                }
+                NativeWasmRouteOutcome::Deny { status, reason } => {
+                    return NativeWasmRouteOutcome::Deny { status, reason };
+                }
+            }
+        }
+        selected_route
+            .map(|route_name| NativeWasmRouteOutcome::Select { route_name })
+            .unwrap_or(NativeWasmRouteOutcome::Continue)
+    }
+
+    pub(crate) fn has_route_decision(&self) -> bool {
+        !self.route_decision.is_empty()
     }
 
     pub(crate) async fn apply_request_headers(
@@ -418,8 +475,13 @@ impl NativeWasmHook {
         phase_label: &'static str,
         function: &'static str,
     ) -> Result<i32, NativeWasmHookError> {
-        self.run_i32_with_hosts(phase_label, function, Vec::new())
-            .await
+        self.run_i32_with_hosts(
+            phase_label,
+            function,
+            Vec::new(),
+            wasm_default_outcome_label,
+        )
+        .await
     }
 
     async fn run_i32_with_hosts(
@@ -427,6 +489,7 @@ impl NativeWasmHook {
         phase_label: &'static str,
         function: &'static str,
         host_functions: Vec<WasmI32HostFunction>,
+        outcome_label: fn(i32) -> &'static str,
     ) -> Result<i32, NativeWasmHookError> {
         let plugin = self.plugin.clone();
         let global_admission = self.global_admission.clone();
@@ -455,21 +518,12 @@ impl NativeWasmHook {
         .and_then(|result| result);
 
         match &result {
-            Ok(0) => record_native_wasm_execution(
+            Ok(value) => record_native_wasm_execution(
                 &plugin_name,
                 phase_label,
-                "continue",
+                outcome_label(*value),
                 started.elapsed(),
             ),
-            Ok(1) => {
-                record_native_wasm_execution(&plugin_name, phase_label, "allow", started.elapsed())
-            }
-            Ok(2) => {
-                record_native_wasm_execution(&plugin_name, phase_label, "deny", started.elapsed())
-            }
-            Ok(_) => {
-                record_native_wasm_execution(&plugin_name, phase_label, "error", started.elapsed())
-            }
             Err(NativeWasmHookError::Admission(scope)) => {
                 record_native_wasm_admission_rejection(&plugin_name, phase_label, scope.as_label());
                 record_native_wasm_execution(
@@ -517,7 +571,12 @@ impl NativeWasmHook {
         let state = Arc::new(Mutex::new(NativeWasmHeaderMutations::default()));
         let host_functions = wasm_header_host_functions(context, phase, Arc::clone(&state));
         match self
-            .run_i32_with_hosts(phase_label, function, host_functions)
+            .run_i32_with_hosts(
+                phase_label,
+                function,
+                host_functions,
+                wasm_header_outcome_label,
+            )
             .await
         {
             Ok(0) => state
@@ -542,6 +601,43 @@ impl NativeWasmHook {
         }
     }
 
+    async fn run_route_decision(&self, context: NativeWasmRouteContext) -> NativeWasmRouteOutcome {
+        let host_functions = wasm_route_host_functions(context);
+        match self
+            .run_i32_with_hosts(
+                ROUTE_DECISION_PHASE,
+                ROUTE_DECISION_FUNCTION,
+                host_functions,
+                wasm_route_outcome_label,
+            )
+            .await
+        {
+            Ok(ROUTE_DECISION_CONTINUE) => NativeWasmRouteOutcome::Continue,
+            Ok(ROUTE_DECISION_CANARY) => NativeWasmRouteOutcome::Select {
+                route_name: "canary",
+            },
+            Ok(ROUTE_DECISION_DENY) => NativeWasmRouteOutcome::Deny {
+                status: 403,
+                reason: "wasm route decision denied".to_owned(),
+            },
+            Ok(_) => self.failed_route_decision("error"),
+            Err(error) => {
+                let outcome = match error {
+                    NativeWasmHookError::Admission(_) => "fail_closed",
+                    NativeWasmHookError::Execution(WasmExecutionError::Trap(_)) => "trap",
+                    NativeWasmHookError::Execution(WasmExecutionError::ExecutionTimeout {
+                        ..
+                    }) => "timeout",
+                    NativeWasmHookError::Execution(WasmExecutionError::CompileTimeout {
+                        ..
+                    }) => "timeout",
+                    NativeWasmHookError::Execution(_) | NativeWasmHookError::Join => "error",
+                };
+                self.failed_route_decision(outcome)
+            }
+        }
+    }
+
     fn failed_access_decision(&self, outcome: &'static str) -> WasmAccessDecision {
         match self.plugin.fail_mode {
             WasmPluginFailMode::FailOpen => WasmAccessDecision::Continue,
@@ -549,6 +645,16 @@ impl NativeWasmHook {
                 status: 503,
                 reason: format!("wasm access decision {outcome}"),
             }),
+        }
+    }
+
+    fn failed_route_decision(&self, outcome: &'static str) -> NativeWasmRouteOutcome {
+        match self.plugin.fail_mode {
+            WasmPluginFailMode::FailOpen => NativeWasmRouteOutcome::Continue,
+            WasmPluginFailMode::FailClosed => NativeWasmRouteOutcome::Deny {
+                status: 503,
+                reason: format!("wasm route decision {outcome}"),
+            },
         }
     }
 
@@ -575,6 +681,12 @@ pub(crate) struct NativeWasmHeaderContext {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct NativeWasmRouteContext {
+    path_class: i32,
+    canary_header: i32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NativeWasmHeaderPhase {
     Request,
     Response,
@@ -598,6 +710,18 @@ impl NativeWasmHeaderContext {
             .map(|(path, _)| wasm_path_class(&path))
             .unwrap_or(PATH_CLASS_OTHER);
         Self { path_class }
+    }
+}
+
+impl NativeWasmRouteContext {
+    pub(crate) fn from_request_path(request: &NativeHttp1Request, path: &str) -> Self {
+        let canary_header = i32::from(request.headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("x-canary") && value.trim().eq_ignore_ascii_case("1")
+        }));
+        Self {
+            path_class: wasm_path_class(path),
+            canary_header,
+        }
     }
 }
 
@@ -706,6 +830,43 @@ fn wasm_header_host_functions(
         set_response_function,
         remove_response_function,
     ]
+}
+
+fn wasm_route_host_functions(context: NativeWasmRouteContext) -> Vec<WasmI32HostFunction> {
+    vec![WasmI32HostFunction::new(
+        WASM_HOST_MODULE,
+        "context",
+        move |kind, _unused| match kind {
+            HOST_CONTEXT_PATH_CLASS => Ok(context.path_class),
+            HOST_CONTEXT_CANARY_HEADER => Ok(context.canary_header),
+            _ => Err("unknown wasm context field".to_owned()),
+        },
+    )]
+}
+
+fn wasm_default_outcome_label(value: i32) -> &'static str {
+    match value {
+        0 => "continue",
+        1 => "allow",
+        2 => "deny",
+        _ => "error",
+    }
+}
+
+fn wasm_header_outcome_label(value: i32) -> &'static str {
+    match value {
+        0 => "continue",
+        _ => "error",
+    }
+}
+
+fn wasm_route_outcome_label(value: i32) -> &'static str {
+    match value {
+        ROUTE_DECISION_CONTINUE => "continue",
+        ROUTE_DECISION_CANARY => "select",
+        ROUTE_DECISION_DENY => "deny",
+        _ => "error",
+    }
 }
 
 fn wasm_path_class(path: &str) -> i32 {

@@ -109,6 +109,13 @@ Required live test:
 
 Target release: `v1.7.3`.
 
+Status: first subset implemented in `v1.7.3` for native HTTP/1
+`route-decision` hooks. The current live test uses two local origins and a
+configured `canary` route branch selected by a bounded `x-canary: 1` signal.
+The hook can continue, deny, or select a configured matching branch; arbitrary
+pool names, persistence keys, and mirror/shadow target decisions remain staged
+for later `1.7.x` slices.
+
 ### VCL-Like Cache Policy
 
 Capability target:

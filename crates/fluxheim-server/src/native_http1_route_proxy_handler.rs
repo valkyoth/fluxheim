@@ -19,8 +19,9 @@ use crate::native_http1_route_rewrite::{
 };
 #[cfg(feature = "wasm")]
 use crate::native_http1_route_wasm::{
-    NativeWasmHeaderContext, status_reason, wasm_access_rejection, wasm_access_rejection_status,
-    wasm_request_header_rejection, wasm_response_header_failure,
+    NativeWasmHeaderContext, NativeWasmRouteContext, NativeWasmRouteOutcome, status_reason,
+    wasm_access_rejection, wasm_access_rejection_status, wasm_request_header_rejection,
+    wasm_response_header_failure,
 };
 use crate::{
     NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler, NativeHttp1Proxy,
@@ -59,6 +60,17 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             let client_ip = self.access_client_ip(&request);
             let tls_identity = request.tls_identity.as_ref();
             let geo_context = request.geo_context.as_ref();
+            #[cfg(feature = "wasm")]
+            let selected_route = {
+                match self
+                    .wasm_route_decision(&request, &path, selected_route)
+                    .await
+                {
+                    NativeWasmRouteResolution::Continue => selected_route,
+                    NativeWasmRouteResolution::Select(route) => Some(route),
+                    NativeWasmRouteResolution::Reject(response) => return response,
+                }
+            };
             if !self.access.allows(client_ip, tls_identity, geo_context)
                 || selected_route
                     .is_some_and(|route| !route.access.allows(client_ip, tls_identity, geo_context))
@@ -308,6 +320,56 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             self.handle_connection_takeover_inner(request, prebuffered, stream)
                 .await
         })
+    }
+}
+
+#[cfg(feature = "wasm")]
+enum NativeWasmRouteResolution<'a> {
+    Continue,
+    Select(&'a NativeHttp1RouteProxyRoute),
+    Reject(NativeHttp1Response),
+}
+
+#[cfg(feature = "wasm")]
+impl NativeHttp1RouteProxy {
+    async fn wasm_route_decision<'a>(
+        &'a self,
+        request: &NativeHttp1Request,
+        path: &str,
+        selected_route: Option<&'a NativeHttp1RouteProxyRoute>,
+    ) -> NativeWasmRouteResolution<'a> {
+        let hooks = selected_route
+            .map(|route| &route.wasm_hooks)
+            .filter(|hooks| hooks.has_route_decision())
+            .unwrap_or(&self.wasm_hooks);
+        let context = NativeWasmRouteContext::from_request_path(request, path);
+        match hooks.route_decision(context).await {
+            NativeWasmRouteOutcome::Continue => NativeWasmRouteResolution::Continue,
+            NativeWasmRouteOutcome::Select { route_name } => {
+                if let Some(route) =
+                    self.select_named_matching_route(&request.method, path, route_name)
+                {
+                    NativeWasmRouteResolution::Select(route)
+                } else {
+                    NativeWasmRouteResolution::Reject(
+                        NativeHttp1Response::new(
+                            503,
+                            "Service Unavailable",
+                            b"wasm route decision unavailable\n",
+                        )
+                        .close_connection(),
+                    )
+                }
+            }
+            NativeWasmRouteOutcome::Deny { status, reason } => NativeWasmRouteResolution::Reject(
+                NativeHttp1Response::new(
+                    status,
+                    status_reason(status),
+                    format!("{reason}\n").into_bytes(),
+                )
+                .close_connection(),
+            ),
+        }
     }
 }
 

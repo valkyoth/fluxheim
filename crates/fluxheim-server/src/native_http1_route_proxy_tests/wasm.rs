@@ -11,7 +11,8 @@ use tokio::net::TcpListener;
 use crate::{DownstreamHttp1Policy, NativeHttp1HostRouter, serve_native_http1_listener};
 
 use super::{
-    downstream_get, native_route_proxy_test_route, native_route_proxy_test_vhost, response_header,
+    downstream_get, downstream_request, native_route_proxy_test_route,
+    native_route_proxy_test_vhost, response_header,
 };
 
 #[tokio::test]
@@ -285,6 +286,64 @@ async fn native_wasm_forbidden_header_mutation_fails_closed() {
     assert!(response.ends_with("wasm request-headers trap\n"));
 }
 
+#[tokio::test]
+async fn native_wasm_route_decision_selects_configured_canary_route() {
+    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let stable = upstream_expect_body("/lb/item", "stable").await;
+    let canary = upstream_expect_body("/lb/item", "canary").await;
+    let mut config = fixture.config_with_attachments(
+        stable,
+        vec![wasm_vhost_attachment_phase(
+            "router",
+            100,
+            fluxheim_config::WasmPluginPhase::RouteDecision,
+        )],
+    );
+    config.vhosts[0].routes = vec![
+        named_proxy_route("standard", "/lb", stable),
+        named_proxy_route("canary", "/lb", canary),
+    ];
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_request(
+        proxy,
+        "GET /lb/item HTTP/1.1\r\nHost: route.test\r\nX-Canary: 1\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("canary"));
+}
+
+#[tokio::test]
+async fn native_wasm_route_decision_fails_closed_for_unconfigured_branch() {
+    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let stable = upstream_expect_body("/lb/item", "stable").await;
+    let mut config = fixture.config_with_attachments(
+        stable,
+        vec![wasm_vhost_attachment_phase(
+            "router",
+            100,
+            fluxheim_config::WasmPluginPhase::RouteDecision,
+        )],
+    );
+    config.vhosts[0].routes = vec![named_proxy_route("standard", "/lb", stable)];
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_request(
+        proxy,
+        "GET /lb/item HTTP/1.1\r\nHost: route.test\r\nX-Canary: 1\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(response.ends_with("wasm route decision unavailable\n"));
+}
+
 #[cfg(feature = "php-fpm")]
 #[tokio::test]
 async fn native_wasm_response_headers_apply_to_php_fpm_fallback() {
@@ -389,6 +448,7 @@ enum WasmPluginBody {
     Decision(i32),
     HeaderPolicy,
     ForbiddenHeader,
+    RouteDecision,
     Trap,
     BusyLoop,
 }
@@ -452,6 +512,24 @@ impl WasmPluginBody {
                 "#
                 .to_owned()
             }
+            Self::RouteDecision => {
+                r#"
+                (module
+                  (import "fluxheim_policy_v1" "context" (func $context (param i32 i32) (result i32)))
+                  (func (export "fluxheim_route_decision") (result i32)
+                    i32.const 2
+                    i32.const 0
+                    call $context
+                    i32.const 1
+                    i32.eq
+                    if (result i32)
+                      i32.const 1
+                    else
+                      i32.const 0
+                    end))
+                "#
+                .to_owned()
+            }
             Self::Trap => {
                 r#"(module (func (export "fluxheim_access_decision") (result i32) unreachable))"#
                     .to_owned()
@@ -497,6 +575,7 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         WasmPluginBody::ForbiddenHeader => {
             vec![fluxheim_config::WasmPluginPhase::RequestHeaders]
         }
+        WasmPluginBody::RouteDecision => vec![fluxheim_config::WasmPluginPhase::RouteDecision],
         WasmPluginBody::Decision(_) | WasmPluginBody::Trap | WasmPluginBody::BusyLoop => {
             vec![fluxheim_config::WasmPluginPhase::AccessDecision]
         }
@@ -531,6 +610,7 @@ fn wasm_attachment_all(
     attachment
 }
 
+#[cfg(feature = "php-fpm")]
 fn wasm_vhost_attachment_all(plugin: &str, priority: u32) -> fluxheim_config::WasmAttachmentConfig {
     fluxheim_config::WasmAttachmentConfig {
         plugin: plugin.to_owned(),
@@ -540,6 +620,21 @@ fn wasm_vhost_attachment_all(plugin: &str, priority: u32) -> fluxheim_config::Wa
             fluxheim_config::WasmPluginPhase::RequestHeaders,
             fluxheim_config::WasmPluginPhase::ResponseHeaders,
         ],
+        priority,
+        admission: None,
+    }
+}
+
+fn wasm_vhost_attachment_phase(
+    plugin: &str,
+    priority: u32,
+    phase: fluxheim_config::WasmPluginPhase,
+) -> fluxheim_config::WasmAttachmentConfig {
+    fluxheim_config::WasmAttachmentConfig {
+        plugin: plugin.to_owned(),
+        vhost: "route.test".to_owned(),
+        route: None,
+        phases: vec![phase],
         priority,
         admission: None,
     }
@@ -574,6 +669,23 @@ fn other_route() -> fluxheim_config::RouteConfig {
     let mut route = native_route_proxy_test_route();
     route.name = "other".to_owned();
     route.path_exact = Some("/other".to_owned());
+    route
+}
+
+fn named_proxy_route(
+    name: &str,
+    prefix: &str,
+    upstream: std::net::SocketAddr,
+) -> fluxheim_config::RouteConfig {
+    let mut route = native_route_proxy_test_route();
+    route.name = name.to_owned();
+    route.path_exact = None;
+    route.path_prefix = Some(prefix.to_owned());
+    route.redirect = None;
+    route.proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
     route
 }
 
@@ -646,6 +758,46 @@ async fn upstream_expect_policy_header(expected_path: &'static str) -> std::net:
         stream
             .write_all(
                 b"HTTP/1.1 200 OK\r\nx-powered-by: origin\r\ncontent-length: 6\r\n\r\npolicy",
+            )
+            .await
+            .unwrap();
+    });
+    addr
+}
+
+async fn upstream_expect_body(
+    expected_path: &'static str,
+    body: &'static str,
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request = String::from_utf8(request).unwrap();
+        assert!(
+            request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
+            "unexpected upstream request: {request:?}"
+        );
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .as_bytes(),
             )
             .await
             .unwrap();

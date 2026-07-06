@@ -23,7 +23,7 @@ scripts/check_smoke_images.sh	script	1.6.35	External smoke dependency image fres
 scripts/test_starter.py	script	1.6.35	Human-facing selector for local, container, database, WordPress, privacy, and release-gate smokes.
 scripts/smoke_wasm_sandbox.sh	script	1.7.0	Real Wasm sandbox execution, manifest validation, unsafe fail-open rejection, and limit-trap smoke.
 scripts/validate-wasm-config-registry.sh	script	1.7.1	Wasm config registry validation, build-feature rejection, typed loader manifest conversion, and admin status registry visibility.
-crates/fluxheim-server/src/native_http1_route_proxy_tests/wasm.rs	fixture	1.7.1-1.7.2	Live native HTTP/1 Wasm tests for access decisions, bounded request/response header mutation, priority first-deny-wins, decoded route policy, admission limits, and fail-closed behavior.
+crates/fluxheim-server/src/native_http1_route_proxy_tests/wasm.rs	fixture	1.7.1-1.7.3	Live native HTTP/1 Wasm tests for access decisions, bounded request/response header mutation, bounded route decision, priority first-deny-wins, decoded route policy, admission limits, and fail-closed behavior.
 tests/fixtures/wasm-config/accepted-registry.toml	config	1.7.1	Accepted Wasm plugin registry and attachment fixture for config-tester validation.
 tests/fixtures/wasm-config/rejected-fail-open-access.toml	config	1.7.1	Rejected Wasm access-decision fail-open fixture for config-tester validation.
 scripts/validate-wasm-example-plan.sh	script	1.7.0	Wasm example parity acceptance-plan invariant for the 1.7 line.

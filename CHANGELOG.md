@@ -7,6 +7,24 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.7.3 - 2026-07-06
+
+### Added
+
+- Add live native HTTP/1 Wasm `route-decision` hooks under the bounded
+  `fluxheim_policy_v1` preview ABI.
+- Add symbolic route branch selection for a configured matching `canary` route.
+- Add live listener tests with two local origins proving a request carrying
+  `x-canary: 1` can be routed to the configured canary branch.
+
+### Security
+
+- Keep route decisions constrained to existing configured routes that still
+  match the current request method and path.
+- Fail closed with `503` when a plugin selects an unavailable route branch.
+- Preserve built-in Fluxheim ACL, rate-limit, concurrency, body-limit, redirect,
+  and header-policy enforcement after Wasm route selection.
+
 ## 1.7.2 - 2026-07-05
 
 ### Added

@@ -6,8 +6,10 @@ compile-time feature gates, strict plugin-file loading, bounded Wasmtime
 execution, and real Wasm smoke coverage. Fluxheim `1.7.1` starts live
 request-path execution with native HTTP/1 access-decision hooks. Fluxheim
 `1.7.2` adds bounded native HTTP/1 request-header and response-header hooks.
-Proxy-ABI compatibility, cache policy hooks, and WASI capabilities remain
-staged for later `1.7.x` releases.
+Fluxheim `1.7.3` starts bounded native HTTP/1 route-decision hooks with
+configured canary branch selection. Broader load-balancer pool,
+persistence-key, mirror/shadow, Proxy-ABI compatibility, cache policy hooks,
+and WASI capabilities remain staged for later `1.7.x` releases.
 
 Cargo features:
 
@@ -106,11 +108,28 @@ for `v1.7.2`: add `x-policy-tier`, remove upstream `x-powered-by`, and add
 `Set-Cookie`, request/response bodies, filesystem, network, process, private
 key, and admin API access are not exposed.
 
+Fluxheim `1.7.3` adds the first routing hook ABI. Plugins attached to
+`route-decision` export `fluxheim_route_decision() -> i32`. The current preview
+return values are deliberately narrow:
+
+- `0`: continue with normal route selection;
+- `1`: select the configured matching route named `canary`;
+- `2`: deny with `403`.
+
+The route decision host-call surface reuses `context(kind, unused) -> i32` for
+bounded symbolic inputs. The first routing example exposes only the path class
+and whether the request carried `x-canary: 1`. A selected branch is accepted
+only when it maps to an existing configured route that still matches the
+current request method and path. Unknown or unavailable branches fail closed
+with `503`.
+
 Allowed hooks:
 
 - request headers before upstream selection;
 - response headers before sending to the client;
 - access-control decision: allow, deny with status, or continue;
+- route decision: continue, deny, or select a configured matching symbolic
+  route branch;
 - cache lookup/admission decision: bypass, pass, continue, or deny;
 - bounded cache-key component decision with typed inputs and low-cardinality
   output limits;
@@ -297,8 +316,11 @@ plugin names, phases, fail modes, and expected SHA-256 digests. Runtime loaded
 plugin hash exposure remains staged for a later status slice.
 
 `1.7.1` validates the registry and attachment declarations and enables the
-first native HTTP/1 access-decision request-path hook. Header mutation and
-other hook families remain staged for later `1.7.x` releases.
+first native HTTP/1 access-decision request-path hook. `1.7.2` adds bounded
+request-header and response-header mutation. `1.7.3` adds the first bounded
+route-decision hook with configured `canary` branch selection. Broader
+load-balancer pool, persistence, mirror/shadow, and cache-policy hook families
+remain staged for later `1.7.x` releases.
 
 ## Reload Semantics
 
