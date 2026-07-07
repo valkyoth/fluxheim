@@ -55,6 +55,8 @@ raw keys, TTLs, tags, response headers, or stored metadata.
   behavior.
 - The `wasm` feature remains optional and is still rejected with
   `privacy-mode`.
+- The release gate updates `crossbeam-epoch` to `0.9.20` to clear
+  `RUSTSEC-2026-0204`.
 
 ## Operator Notes
 

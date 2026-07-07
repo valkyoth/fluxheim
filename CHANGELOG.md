@@ -41,6 +41,7 @@ behavior when the change improves security or project direction.
   hooks on unrelated vhosts.
 - Use most-restrictive-wins cache-store aggregation so an earlier `skip` cannot
   mask a later `deny`.
+- Update `crossbeam-epoch` to `0.9.20` to clear `RUSTSEC-2026-0204`.
 
 ### Changed
 
