@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.7.3
+Version:        1.7.4
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue Jul 07 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.4-1
+- Add bounded native HTTP/1 Wasm cache-lookup hooks.
+- Add continue, pass, bypass, and deny cache-lookup outcomes before cache
+  lookup and storage.
+- Add live listener coverage proving Wasm pass-through bypasses storage while
+  normal cache paths still HIT.
+
 * Mon Jul 06 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.3-1
 - Add bounded native HTTP/1 Wasm route-decision hooks.
 - Add symbolic configured-route canary and mirror branch selection with live

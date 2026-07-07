@@ -24,6 +24,8 @@ const RESPONSE_HEADERS_PHASE: &str = "response-headers";
 const RESPONSE_HEADERS_FUNCTION: &str = "fluxheim_response_headers";
 const ROUTE_DECISION_PHASE: &str = "route-decision";
 const ROUTE_DECISION_FUNCTION: &str = "fluxheim_route_decision";
+const CACHE_LOOKUP_PHASE: &str = "cache-lookup";
+const CACHE_LOOKUP_FUNCTION: &str = "fluxheim_cache_lookup";
 const WASM_HOST_MODULE: &str = "fluxheim_policy_v1";
 const MAX_WASM_HEADER_MUTATIONS: usize = 16;
 
@@ -45,6 +47,10 @@ const ROUTE_DECISION_CONTINUE: i32 = 0;
 const ROUTE_DECISION_CANARY: i32 = 1;
 const ROUTE_DECISION_DENY: i32 = 2;
 const ROUTE_DECISION_MIRROR: i32 = 3;
+const CACHE_LOOKUP_CONTINUE: i32 = 0;
+const CACHE_LOOKUP_PASS: i32 = 1;
+const CACHE_LOOKUP_BYPASS: i32 = 2;
+const CACHE_LOOKUP_DENY: i32 = 3;
 
 #[derive(Clone, Debug)]
 pub(crate) struct NativeWasmHookRegistry {
@@ -58,6 +64,7 @@ pub(crate) struct NativeWasmHooks {
     request_headers: Vec<NativeWasmHook>,
     response_headers: Vec<NativeWasmHook>,
     route_decision: Vec<NativeWasmHook>,
+    cache_lookup: Vec<NativeWasmHook>,
 }
 
 #[derive(Clone, Debug)]
@@ -100,6 +107,14 @@ pub(crate) enum NativeWasmRouteOutcome {
 }
 
 #[derive(Debug)]
+pub(crate) enum NativeWasmCacheLookupOutcome {
+    Continue,
+    Pass(&'static str),
+    Bypass(&'static str),
+    Deny { status: u16, reason: String },
+}
+
+#[derive(Debug)]
 pub(crate) enum NativeWasmHookError {
     Admission(NativeWasmAdmissionScope),
     Execution(WasmExecutionError),
@@ -119,6 +134,7 @@ impl PartialEq for NativeWasmHooks {
             && self.request_headers == other.request_headers
             && self.response_headers == other.response_headers
             && self.route_decision == other.route_decision
+            && self.cache_lookup == other.cache_lookup
     }
 }
 
@@ -266,11 +282,24 @@ impl NativeWasmHookRegistry {
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
+        let cache_lookup = self
+            .attachments
+            .iter()
+            .filter(|attachment| attachment.matches(vhost, route))
+            .filter(|attachment| attachment.phases.contains(&WasmPluginPhase::CacheLookup))
+            .map(|attachment| NativeWasmHook {
+                plugin: attachment.plugin.clone(),
+                phase: WasmPluginPhase::CacheLookup,
+                global_admission: self.admission.clone(),
+                attachment_admission: attachment.admission.clone(),
+            })
+            .collect();
         NativeWasmHooks {
             access_decision,
             request_headers,
             response_headers,
             route_decision,
+            cache_lookup,
         }
     }
 }
@@ -281,6 +310,7 @@ impl NativeWasmHooks {
             && self.request_headers.is_empty()
             && self.response_headers.is_empty()
             && self.route_decision.is_empty()
+            && self.cache_lookup.is_empty()
     }
 
     pub(crate) async fn access_decision(&self) -> NativeWasmAccessOutcome {
@@ -327,6 +357,35 @@ impl NativeWasmHooks {
 
     pub(crate) fn has_route_decision(&self) -> bool {
         !self.route_decision.is_empty()
+    }
+
+    pub(crate) async fn cache_lookup_decision(
+        &self,
+        context: NativeWasmCacheLookupContext,
+    ) -> NativeWasmCacheLookupOutcome {
+        if self.cache_lookup.is_empty() {
+            return NativeWasmCacheLookupOutcome::Continue;
+        }
+        let mut selected = NativeWasmCacheLookupOutcome::Continue;
+        for hook in &self.cache_lookup {
+            match hook.run_cache_lookup(context).await {
+                NativeWasmCacheLookupOutcome::Continue => {}
+                NativeWasmCacheLookupOutcome::Pass(reason) => {
+                    if matches!(selected, NativeWasmCacheLookupOutcome::Continue) {
+                        selected = NativeWasmCacheLookupOutcome::Pass(reason);
+                    }
+                }
+                NativeWasmCacheLookupOutcome::Bypass(reason) => {
+                    if matches!(selected, NativeWasmCacheLookupOutcome::Continue) {
+                        selected = NativeWasmCacheLookupOutcome::Bypass(reason);
+                    }
+                }
+                NativeWasmCacheLookupOutcome::Deny { status, reason } => {
+                    return NativeWasmCacheLookupOutcome::Deny { status, reason };
+                }
+            }
+        }
+        selected
     }
 
     pub(crate) async fn apply_request_headers(
@@ -643,6 +702,45 @@ impl NativeWasmHook {
         }
     }
 
+    async fn run_cache_lookup(
+        &self,
+        context: NativeWasmCacheLookupContext,
+    ) -> NativeWasmCacheLookupOutcome {
+        let host_functions = wasm_cache_lookup_host_functions(context);
+        match self
+            .run_i32_with_hosts(
+                CACHE_LOOKUP_PHASE,
+                CACHE_LOOKUP_FUNCTION,
+                host_functions,
+                wasm_cache_lookup_outcome_label,
+            )
+            .await
+        {
+            Ok(CACHE_LOOKUP_CONTINUE) => NativeWasmCacheLookupOutcome::Continue,
+            Ok(CACHE_LOOKUP_PASS) => NativeWasmCacheLookupOutcome::Pass("wasm-pass"),
+            Ok(CACHE_LOOKUP_BYPASS) => NativeWasmCacheLookupOutcome::Bypass("wasm-bypass"),
+            Ok(CACHE_LOOKUP_DENY) => NativeWasmCacheLookupOutcome::Deny {
+                status: 403,
+                reason: "wasm cache lookup denied".to_owned(),
+            },
+            Ok(_) => self.failed_cache_lookup("error"),
+            Err(error) => {
+                let outcome = match error {
+                    NativeWasmHookError::Admission(_) => "fail_closed",
+                    NativeWasmHookError::Execution(WasmExecutionError::Trap(_)) => "trap",
+                    NativeWasmHookError::Execution(WasmExecutionError::ExecutionTimeout {
+                        ..
+                    }) => "timeout",
+                    NativeWasmHookError::Execution(WasmExecutionError::CompileTimeout {
+                        ..
+                    }) => "timeout",
+                    NativeWasmHookError::Execution(_) | NativeWasmHookError::Join => "error",
+                };
+                self.failed_cache_lookup(outcome)
+            }
+        }
+    }
+
     fn failed_access_decision(&self, outcome: &'static str) -> WasmAccessDecision {
         match self.plugin.fail_mode {
             WasmPluginFailMode::FailOpen => WasmAccessDecision::Continue,
@@ -659,6 +757,16 @@ impl NativeWasmHook {
             WasmPluginFailMode::FailClosed => NativeWasmRouteOutcome::Deny {
                 status: 503,
                 reason: format!("wasm route decision {outcome}"),
+            },
+        }
+    }
+
+    fn failed_cache_lookup(&self, outcome: &'static str) -> NativeWasmCacheLookupOutcome {
+        match self.plugin.fail_mode {
+            WasmPluginFailMode::FailOpen => NativeWasmCacheLookupOutcome::Continue,
+            WasmPluginFailMode::FailClosed => NativeWasmCacheLookupOutcome::Deny {
+                status: 503,
+                reason: format!("wasm cache lookup {outcome}"),
             },
         }
     }
@@ -690,6 +798,11 @@ pub(crate) struct NativeWasmRouteContext {
     path_class: i32,
     canary_header: i32,
     mirror_header: i32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct NativeWasmCacheLookupContext {
+    path_class: i32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -732,6 +845,15 @@ impl NativeWasmRouteContext {
             canary_header,
             mirror_header,
         }
+    }
+}
+
+impl NativeWasmCacheLookupContext {
+    pub(crate) fn from_request(request: &NativeHttp1Request) -> Self {
+        let path_class = request_path_and_query(request)
+            .map(|(path, _)| wasm_path_class(&path))
+            .unwrap_or(PATH_CLASS_OTHER);
+        Self { path_class }
     }
 }
 
@@ -855,6 +977,19 @@ fn wasm_route_host_functions(context: NativeWasmRouteContext) -> Vec<WasmI32Host
     )]
 }
 
+fn wasm_cache_lookup_host_functions(
+    context: NativeWasmCacheLookupContext,
+) -> Vec<WasmI32HostFunction> {
+    vec![WasmI32HostFunction::new(
+        WASM_HOST_MODULE,
+        "context",
+        move |kind, _unused| match kind {
+            HOST_CONTEXT_PATH_CLASS => Ok(context.path_class),
+            _ => Err("unknown wasm context field".to_owned()),
+        },
+    )]
+}
+
 fn wasm_default_outcome_label(value: i32) -> &'static str {
     match value {
         0 => "continue",
@@ -877,6 +1012,16 @@ fn wasm_route_outcome_label(value: i32) -> &'static str {
         ROUTE_DECISION_CANARY => "select",
         ROUTE_DECISION_DENY => "deny",
         ROUTE_DECISION_MIRROR => "select",
+        _ => "error",
+    }
+}
+
+fn wasm_cache_lookup_outcome_label(value: i32) -> &'static str {
+    match value {
+        CACHE_LOOKUP_CONTINUE => "continue",
+        CACHE_LOOKUP_PASS => "pass",
+        CACHE_LOOKUP_BYPASS => "bypass",
+        CACHE_LOOKUP_DENY => "deny",
         _ => "error",
     }
 }

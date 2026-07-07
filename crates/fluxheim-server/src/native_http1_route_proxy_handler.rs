@@ -297,6 +297,11 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 {
                     return response;
                 }
+                #[cfg(feature = "wasm")]
+                let response = proxy
+                    .handle_with_wasm_hooks(request, &self.wasm_hooks)
+                    .await;
+                #[cfg(not(feature = "wasm"))]
                 let response = proxy.handle(request).await;
                 #[cfg(feature = "wasm")]
                 let mut response = response;

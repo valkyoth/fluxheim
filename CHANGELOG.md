@@ -7,6 +7,28 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.7.4 - 2026-07-07
+
+### Added
+
+- Add live native HTTP/1 Wasm `cache-lookup` hooks under the bounded
+  `fluxheim_policy_v1` preview ABI.
+- Add `continue`, `pass`, `bypass`, and `deny` cache lookup outcomes before
+  slice lookup, normal lookup, peer-fill, request collapsing, origin-fill
+  protection, and store admission.
+- Add live listener tests proving a plugin can pass selected `/api/*` requests
+  without storing while normal cacheable paths still produce MISS then HIT.
+
+### Security
+
+- Keep cache hooks constrained to integer outcomes and coarse path context in
+  this slice; raw headers, bodies, cache-key bytes, TTL override, tag
+  assignment, and response-store mutation remain unavailable.
+- Preserve built-in access, rate-limit, route, and header-policy ordering
+  before cache-lookup hooks run.
+- Fail closed with `503` when a cache-lookup plugin errors under fail-closed
+  mode, and deny with `403` when a plugin explicitly returns deny.
+
 ## 1.7.3 - 2026-07-06
 
 ### Added

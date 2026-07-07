@@ -8,10 +8,12 @@ request-path execution with native HTTP/1 access-decision hooks. Fluxheim
 `1.7.2` adds bounded native HTTP/1 request-header and response-header hooks.
 Fluxheim `1.7.3` starts bounded native HTTP/1 route-decision hooks with
 configured canary and mirror branch selection, including selected native
-load-balanced and persistent routes. Direct backend choice, plugin-provided
-persistence keys, dynamic mirror/shadow target choice, Proxy-ABI compatibility,
-cache policy hooks, and WASI capabilities remain staged for later `1.7.x`
-releases.
+load-balanced and persistent routes. Fluxheim `1.7.4` starts bounded
+cache-policy hooks with a cache-lookup decision that can continue, pass,
+bypass, or deny before cache lookup and storage. Direct backend choice,
+plugin-provided persistence keys, dynamic mirror/shadow target choice, richer
+cache-key/TTL/tag/store policy hooks, Proxy-ABI compatibility, and WASI
+capabilities remain staged for later `1.7.x` releases.
 
 Cargo features:
 
@@ -146,6 +148,22 @@ Route decisions run only after the built-in vhost ACL, vhost rate-limit, vhost
 concurrency, and preselected/decoded-route ACL gates. If the plugin selects a
 different configured route, that selected route's ACL and route-specific
 rate/concurrency limits are checked before Fluxheim proceeds.
+
+Fluxheim `1.7.4` adds the first cache-policy hook ABI. Plugins attached to
+`cache-lookup` export `fluxheim_cache_lookup() -> i32`:
+
+- `0`: continue normal cache lookup and storage;
+- `1`: pass through origin without cache lookup or storage;
+- `2`: bypass cache lookup and storage;
+- `3`: deny with `403`.
+
+The cache lookup host-call surface deliberately reuses only bounded symbolic
+request context in this slice. It runs before native proxy-cache slice lookup,
+normal lookup, peer-fill, request collapsing, origin-fill protection, and store
+admission, but after Fluxheim's built-in access, route, rate-limit,
+concurrency, and header policy gates. Raw headers, request bodies, cache-key
+bytes, TTL override, tag assignment, cached objects, and response-store
+mutation are not exposed in `1.7.4`.
 
 Allowed hooks:
 
@@ -344,9 +362,10 @@ first native HTTP/1 access-decision request-path hook. `1.7.2` adds bounded
 request-header and response-header mutation. `1.7.3` adds the first bounded
 route-decision hook with configured `canary` and `mirror` branch selection,
 including live coverage for selected native load-balanced and managed-cookie
-persistent routes. Direct backend pool/member choice, plugin-provided
-persistence-key choice, dynamic mirror/shadow target choice, and cache-policy
-hook families remain staged for later `1.7.x` releases.
+persistent routes. `1.7.4` adds bounded cache-lookup decisions before cache
+lookup/storage. Direct backend pool/member choice, plugin-provided
+persistence-key choice, dynamic mirror/shadow target choice, and richer
+cache-key/TTL/tag/store policy hooks remain staged for later `1.7.x` releases.
 
 ## Reload Semantics
 

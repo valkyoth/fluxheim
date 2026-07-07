@@ -620,6 +620,18 @@ Fluxheim still chooses the backend through the configured `proxy.load_balance`
 policy. A selected route may also use normal configured load-balancer
 persistence; plugins do not provide arbitrary persistence keys in this preview.
 
+`1.7.4` adds the first live native HTTP/1 cache-policy hook: `cache-lookup`.
+The preview ABI calls `fluxheim_cache_lookup() -> i32`, where `0` continues
+normal cache lookup/storage, `1` passes the request through origin without
+lookup or storage, `2` bypasses cache lookup/storage, and `3` denies with
+`403`. The hook runs before native proxy-cache slice lookup, normal lookup,
+peer-fill, request collapsing, origin-fill protection, and store admission.
+Built-in access, rate-limit, route selection, and header-policy controls still
+run in their normal order. The current cache hook does not yet expose raw
+headers, request bodies, arbitrary cache-key bytes, TTL override, tag
+assignment, or response-store mutation; those stay staged behind later bounded
+cache-policy ABIs.
+
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:
 

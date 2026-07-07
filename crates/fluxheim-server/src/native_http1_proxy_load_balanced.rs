@@ -14,6 +14,10 @@ use crate::native_http1_proxy_memory_cache::{
     NativePeerFillDecision, NativeProxyCacheLookup, NativeProxyMemoryCache,
 };
 use crate::native_http1_proxy_request::native_proxy_error_is_timeout;
+#[cfg(feature = "wasm")]
+use crate::native_http1_route_wasm::{
+    NativeWasmCacheLookupContext, NativeWasmCacheLookupOutcome, NativeWasmHooks, status_reason,
+};
 use crate::{NativeHttp1Request, NativeHttp1Response};
 use fluxheim_cache::CacheStaleEvent;
 use fluxheim_config::CacheConfig;
@@ -22,6 +26,7 @@ impl NativeHttp1Proxy {
     pub(crate) async fn handle_load_balanced(
         &self,
         mut request: NativeHttp1Request,
+        #[cfg(feature = "wasm")] wasm_hooks: Option<&NativeWasmHooks>,
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -52,7 +57,42 @@ impl NativeHttp1Proxy {
             Option<u64>,
         )>;
         if let Some(cache) = &self.cache {
-            if let Some(slice) = cache.slice_response(&request, self).await {
+            #[cfg(feature = "wasm")]
+            if let Some(hooks) = wasm_hooks {
+                match hooks
+                    .cache_lookup_decision(NativeWasmCacheLookupContext::from_request(&request))
+                    .await
+                {
+                    NativeWasmCacheLookupOutcome::Continue => {}
+                    NativeWasmCacheLookupOutcome::Pass(reason)
+                    | NativeWasmCacheLookupOutcome::Bypass(reason) => {
+                        cache.record_policy_activity("bypass");
+                        proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
+                    }
+                    NativeWasmCacheLookupOutcome::Deny { status, reason } => {
+                        let response = NativeHttp1Response::new(
+                            status,
+                            status_reason(status),
+                            format!("{reason}\n").into_bytes(),
+                        )
+                        .close_connection();
+                        return self.finish_response(
+                            &request,
+                            response,
+                            Some((&cache.config, "BYPASS", Some("wasm-deny"), None)),
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request,
+                        );
+                    }
+                }
+            }
+            if proxy_cache_status.is_none()
+                && let Some(slice) = cache.slice_response(&request, self).await
+            {
                 return self.finish_response(
                     &request,
                     slice.response,
@@ -70,64 +110,66 @@ impl NativeHttp1Proxy {
                     compression_request,
                 );
             }
-            match cache.lookup(&request).await {
-                NativeProxyCacheLookup::Hit { entry, range } => {
-                    let response = native_cached_hit_response(&entry, &request, range);
-                    return self.finish_response(
-                        &request,
-                        response,
-                        Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
-                        #[cfg(any(
-                            feature = "compression-brotli",
-                            feature = "compression-gzip",
-                            feature = "compression-zstd"
-                        ))]
-                        compression_request,
-                    );
-                }
-                NativeProxyCacheLookup::StaleWhileRevalidate { key, entry } => {
-                    cache.record_policy_activity("stale");
-                    self.spawn_cache_revalidation(
-                        cache.clone(),
-                        key,
-                        request.clone(),
-                        entry.clone(),
-                    );
-                    return self.finish_response(
-                        &request,
-                        entry.to_response(),
-                        Some((
-                            &cache.config,
-                            "STALE-UPDATING",
-                            Some("stale-while-revalidate"),
-                            Some(entry.age_secs()),
-                        )),
-                        #[cfg(any(
-                            feature = "compression-brotli",
-                            feature = "compression-gzip",
-                            feature = "compression-zstd"
-                        ))]
-                        compression_request,
-                    );
-                }
-                NativeProxyCacheLookup::Miss {
-                    key,
-                    status,
-                    reason,
-                } => {
-                    if status == "REVALIDATED" {
-                        cache.record_policy_activity("revalidate");
+            if proxy_cache_status.is_none() {
+                match cache.lookup(&request).await {
+                    NativeProxyCacheLookup::Hit { entry, range } => {
+                        let response = native_cached_hit_response(&entry, &request, range);
+                        return self.finish_response(
+                            &request,
+                            response,
+                            Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request,
+                        );
                     }
-                    proxy_cache_fill = Some((cache.clone(), key, status, reason, None));
-                }
-                NativeProxyCacheLookup::Revalidate { key, entry } => {
-                    cache.record_policy_activity("revalidate");
-                    request = native_cache_revalidation_request(request, &entry);
-                    proxy_cache_fill = Some((cache.clone(), key, "EXPIRED", None, Some(entry)));
-                }
-                NativeProxyCacheLookup::Bypass(reason) => {
-                    cache.record_policy_activity("bypass");
-                    proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
+                    NativeProxyCacheLookup::StaleWhileRevalidate { key, entry } => {
+                        cache.record_policy_activity("stale");
+                        self.spawn_cache_revalidation(
+                            cache.clone(),
+                            key,
+                            request.clone(),
+                            entry.clone(),
+                        );
+                        return self.finish_response(
+                            &request,
+                            entry.to_response(),
+                            Some((
+                                &cache.config,
+                                "STALE-UPDATING",
+                                Some("stale-while-revalidate"),
+                                Some(entry.age_secs()),
+                            )),
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request,
+                        );
+                    }
+                    NativeProxyCacheLookup::Miss {
+                        key,
+                        status,
+                        reason,
+                    } => {
+                        if status == "REVALIDATED" {
+                            cache.record_policy_activity("revalidate");
+                        }
+                        proxy_cache_fill = Some((cache.clone(), key, status, reason, None));
+                    }
+                    NativeProxyCacheLookup::Revalidate { key, entry } => {
+                        cache.record_policy_activity("revalidate");
+                        request = native_cache_revalidation_request(request, &entry);
+                        proxy_cache_fill = Some((cache.clone(), key, "EXPIRED", None, Some(entry)));
+                    }
+                    NativeProxyCacheLookup::Bypass(reason) => {
+                        cache.record_policy_activity("bypass");
+                        proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
+                    }
                 }
             }
         }

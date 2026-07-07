@@ -8,6 +8,8 @@ use crate::native_http1_route_acme::native_acme_http_01_response;
 use crate::native_http1_route_php::NativePhpFpmRoute;
 use crate::native_http1_route_redirect::{NativeHttp1RouteRedirect, redirect_response};
 use crate::native_http1_route_rewrite::request_path_and_query;
+#[cfg(feature = "wasm")]
+use crate::native_http1_route_wasm::NativeWasmHooks;
 use crate::{
     NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler, NativeHttp1Proxy,
     NativeHttp1Request, NativeHttp1Response, NativeHttp1StaticWeb,
@@ -79,6 +81,25 @@ impl NativeHttp1RouteAction {
                 };
                 web.handle(&request, &path)
             }
+        }
+    }
+
+    #[cfg(feature = "wasm")]
+    pub(crate) async fn handle_with_wasm_hooks(
+        &self,
+        request: NativeHttp1Request,
+        hooks: &NativeWasmHooks,
+    ) -> NativeHttp1Response {
+        match self {
+            Self::Proxy(proxy) => proxy.handle_with_wasm_hooks(request, hooks).await,
+            #[cfg(feature = "acme")]
+            Self::AcmeHttp01(_) | Self::Redirect(_) | Self::StaticWeb(_) => {
+                self.handle(request).await
+            }
+            #[cfg(feature = "php-fpm")]
+            Self::PhpFpm(_) => self.handle(request).await,
+            #[cfg(not(feature = "acme"))]
+            Self::Redirect(_) | Self::StaticWeb(_) => self.handle(request).await,
         }
     }
 

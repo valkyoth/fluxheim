@@ -13,6 +13,8 @@ use crate::native_http1_proxy_mirror::{
 };
 use crate::native_http1_proxy_peer_fill::strip_native_peer_fill_header;
 use crate::native_http1_proxy_request::native_request_is_websocket_upgrade;
+#[cfg(feature = "wasm")]
+use crate::native_http1_route_wasm::NativeWasmHooks;
 use crate::{
     NativeHttp1ConnectionStream, NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response,
 };
@@ -23,81 +25,10 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
         request: NativeHttp1Request,
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>> {
         Box::pin(async move {
-            let mut request = request;
-            #[cfg(feature = "auth-request")]
-            if let Some(auth_request) = &self.auth_request {
-                match auth_request.authorize(&request).await {
-                    Ok(NativeAuthRequestDecision::Allow { headers }) => {
-                        apply_native_auth_request_headers(&mut request, &headers);
-                    }
-                    Ok(NativeAuthRequestDecision::Deny { status, body }) => {
-                        return NativeHttp1Response::new(
-                            status,
-                            native_auth_status_reason(status),
-                            body,
-                        )
-                        .close_connection();
-                    }
-                    Err(error) => {
-                        log::debug!(
-                            target: "fluxheim::auth_request",
-                            "native auth_request failed: {error}"
-                        );
-                        return NativeHttp1Response::new(
-                            502,
-                            "Bad Gateway",
-                            b"auth_request failed\n".as_slice(),
-                        )
-                        .close_connection();
-                    }
-                }
-            }
-            #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
-            {
-                let already_mirrored = native_request_has_valid_mirror_marker(&request);
-                strip_native_traffic_mirror_headers(&mut request);
-                if !already_mirrored && let Some(mirror) = &self.mirror {
-                    mirror.spawn_if_selected(&request);
-                }
-            }
-            if self.rejects_invalid_authenticated_peer_fill(&request) {
-                return NativeHttp1Response::new(
-                    403,
-                    "Forbidden",
-                    b"invalid peer-fill authentication\n".as_slice(),
-                )
-                .close_connection();
-            }
-            strip_native_peer_fill_header(&mut request);
-            #[cfg(any(
-                feature = "compression-brotli",
-                feature = "compression-gzip",
-                feature = "compression-zstd"
-            ))]
-            let compression_request = self.compression.as_ref().map(|_| request.clone());
-            self.request_headers.apply(&mut request, None);
-            #[cfg(feature = "load-balancer")]
-            if self.load_balancer.is_some() {
-                return self
-                    .handle_load_balanced(
-                        request,
-                        #[cfg(any(
-                            feature = "compression-brotli",
-                            feature = "compression-gzip",
-                            feature = "compression-zstd"
-                        ))]
-                        compression_request.as_ref(),
-                    )
-                    .await;
-            }
-            self.handle_static_upstreams(
+            self.handle_inner(
                 request,
-                #[cfg(any(
-                    feature = "compression-brotli",
-                    feature = "compression-gzip",
-                    feature = "compression-zstd"
-                ))]
-                compression_request.as_ref(),
+                #[cfg(feature = "wasm")]
+                None,
             )
             .await
         })
@@ -128,5 +59,104 @@ impl NativeHttp1Handler for NativeHttp1Proxy {
             self.handle_static_connection_takeover(request, prebuffered, stream)
                 .await
         })
+    }
+}
+
+impl NativeHttp1Proxy {
+    #[cfg(feature = "wasm")]
+    pub(crate) async fn handle_with_wasm_hooks(
+        &self,
+        request: NativeHttp1Request,
+        wasm_hooks: &NativeWasmHooks,
+    ) -> NativeHttp1Response {
+        self.handle_inner(request, Some(wasm_hooks)).await
+    }
+
+    async fn handle_inner(
+        &self,
+        request: NativeHttp1Request,
+        #[cfg(feature = "wasm")] wasm_hooks: Option<&NativeWasmHooks>,
+    ) -> NativeHttp1Response {
+        let mut request = request;
+        #[cfg(feature = "auth-request")]
+        if let Some(auth_request) = &self.auth_request {
+            match auth_request.authorize(&request).await {
+                Ok(NativeAuthRequestDecision::Allow { headers }) => {
+                    apply_native_auth_request_headers(&mut request, &headers);
+                }
+                Ok(NativeAuthRequestDecision::Deny { status, body }) => {
+                    return NativeHttp1Response::new(
+                        status,
+                        native_auth_status_reason(status),
+                        body,
+                    )
+                    .close_connection();
+                }
+                Err(error) => {
+                    log::debug!(
+                        target: "fluxheim::auth_request",
+                        "native auth_request failed: {error}"
+                    );
+                    return NativeHttp1Response::new(
+                        502,
+                        "Bad Gateway",
+                        b"auth_request failed\n".as_slice(),
+                    )
+                    .close_connection();
+                }
+            }
+        }
+        #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
+        {
+            let already_mirrored = native_request_has_valid_mirror_marker(&request);
+            strip_native_traffic_mirror_headers(&mut request);
+            if !already_mirrored && let Some(mirror) = &self.mirror {
+                mirror.spawn_if_selected(&request);
+            }
+        }
+        if self.rejects_invalid_authenticated_peer_fill(&request) {
+            return NativeHttp1Response::new(
+                403,
+                "Forbidden",
+                b"invalid peer-fill authentication\n".as_slice(),
+            )
+            .close_connection();
+        }
+        strip_native_peer_fill_header(&mut request);
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        let compression_request = self.compression.as_ref().map(|_| request.clone());
+        self.request_headers.apply(&mut request, None);
+        #[cfg(feature = "load-balancer")]
+        if self.load_balancer.is_some() {
+            return self
+                .handle_load_balanced(
+                    request,
+                    #[cfg(feature = "wasm")]
+                    wasm_hooks,
+                    #[cfg(any(
+                        feature = "compression-brotli",
+                        feature = "compression-gzip",
+                        feature = "compression-zstd"
+                    ))]
+                    compression_request.as_ref(),
+                )
+                .await;
+        }
+        self.handle_static_upstreams(
+            request,
+            #[cfg(feature = "wasm")]
+            wasm_hooks,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression_request.as_ref(),
+        )
+        .await
     }
 }

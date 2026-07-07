@@ -272,6 +272,12 @@ impl NativeHttp1RouteProxyRoute {
             feature = "compression-zstd"
         ))]
         let compression_request = self.compression.as_ref().map(|_| request.clone());
+        #[cfg(feature = "wasm")]
+        let mut response = self
+            .action
+            .handle_with_wasm_hooks(request, &self.wasm_hooks)
+            .await;
+        #[cfg(not(feature = "wasm"))]
         let mut response = self.action.handle(request).await;
         self.response_headers.apply(&mut response);
         #[cfg(any(

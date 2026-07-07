@@ -1123,7 +1123,7 @@ Reference parity map:
 | mTLS/client auth | NGINX `ssl_verify_client`, HAProxy `verify required`, Envoy TLS validation context | Listener-level required/optional client cert verification, CA bundle validation, identity variables, and route/admin policy use |
 | PROXY protocol | NGINX/HAProxy/Envoy listener and upstream support | Accept v1/v2 only from trusted peers; optionally send v1/v2 upstream |
 | gRPC | Envoy first-class gRPC/trailers, NGINX `grpc_pass` | Preserve HTTP/2 trailers/status/body limits/timeouts; no transcoding in 1.4 |
-| HTTP/3/QUIC | NGINX/Caddy/Envoy support | Track as Fluxheim-owned `1.8` protocol milestone using Rust `quinn`/`h3` after the `1.6` Pingora-free runtime is stable |
+| HTTP/3/QUIC | NGINX/Caddy/Envoy support | Track as Fluxheim-owned `1.9` protocol milestone using Rust `quinn`/`h3` after the `1.8` macOS/Windows production-parity line is stable |
 | Traffic mirroring | NGINX `mirror`, Envoy shadowing | First slice: safe bodyless shadow requests with deterministic sampling, timeout budgets, allow-listed headers, and no effect on primary response; body mirroring/redaction later |
 | Dynamic discovery | Envoy xDS, Caddy dynamic upstreams, DNS/service integrations | DNS refresh and file-watched upstream lists first; xDS/Kubernetes/Consul later |
 | Regex routing and rewrites | NGINX `location ~`, named captures, `rewrite`; HAProxy regex ACLs | Rust `regex`-based route matchers, capture variables, and bounded rewrite/header templates |
@@ -1842,9 +1842,9 @@ Stable scope:
   - xDS/Kubernetes/Consul discovery only after local DNS/file discovery and
     runtime backend mutation are stable. Treat this as a control-plane feature,
     not a quick stream-proxy add-on;
-  - HTTP/3/QUIC remains a later protocol milestone targeted at `1.8`, after
+  - HTTP/3/QUIC remains a later protocol milestone targeted at `1.9`, after
     the Fluxheim-owned Pingora-free server/listener/TLS and HTTP runtime
-    boundaries are stable.
+    boundaries and the `1.8` macOS/Windows production-parity line are stable.
 - Multiple upstreams per pool with safe address validation and per-upstream
   metadata: name, address, weight, backup, disabled/down, drain/maintenance,
   max in-flight requests or connections, max queue, priority group, manual
@@ -3118,13 +3118,17 @@ Stable scope:
   bounded typed decisions for pool choice, persistence-key choice, mirror
   enablement, and deny/pass/continue outcomes. Add live tests with two origins
   and a load-balancer route so the plugin decision is observable.
-- `v1.7.4`: implement cache-policy hooks inspired by VCL but expressed as a
-  constrained Rust/Wasm ABI. Cover lookup/admission bypass/pass/continue/deny,
-  bounded cache-key component output, TTL override, tag assignment,
-  store-admission header inspection, and safe response-header mutation. Add
-  live cache tests that prove MISS/HIT behavior, TTL bounds, tag assignment,
-  and low-cardinality key validation.
-- `v1.7.5`: harden the mature plugin runtime after the request, response,
+- `v1.7.4`: start cache-policy hooks inspired by VCL but expressed as a
+  constrained Rust/Wasm ABI. Cover cache lookup/pass/bypass/continue/deny
+  decisions before slice lookup, normal lookup, peer-fill, request collapsing,
+  origin-fill protection, and store admission. Add live cache tests that prove
+  a plugin can pass selected requests without storing while normal requests
+  still produce MISS then HIT.
+- `v1.7.5`: add the next bounded cache-policy ABI slice for cache-key
+  components, TTL override, tag assignment, store-admission header inspection,
+  and safe response-header mutation, with live tests for TTL bounds, tag
+  assignment, and low-cardinality key validation.
+- `v1.7.6`: harden the mature plugin runtime after the request, response,
   routing, and cache hook families exist. Finish atomic compiled-module reload
   generation handling, broaden admin and metrics visibility across all hook
   families, and add regression tests for
@@ -3133,23 +3137,23 @@ Stable scope:
   the first point where access-decision ordering, process-wide admission, reload
   classification, or per-plugin metrics appear; those are prerequisites for
   `v1.7.1`.
-- `v1.7.6`: optional `wasm-proxy-abi` compatibility preview. Map a reviewed
+- `v1.7.7`: optional `wasm-proxy-abi` compatibility preview. Map a reviewed
   safe subset of proxy-oriented ABI calls to Fluxheim's typed host calls,
   reject unsupported calls deterministically, and add compatibility fixtures.
   This is capability compatibility, not a promise that arbitrary existing
   proxy-wasm plugins run unchanged.
-- `v1.7.7`: optional `wasm-wasi` capability preview for non-request-body
+- `v1.7.8`: optional `wasm-wasi` capability preview for non-request-body
   policy plugins. Keep filesystem, network, clocks, randomness, environment,
   and inherited process state disabled unless explicitly granted and tested.
-- `v1.7.8`: documentation and example parity release. Ship documented,
+- `v1.7.9`: documentation and example parity release. Ship documented,
   runnable examples and live tests for the four migration families:
   F5 iRules-style policy, nginx Lua/OpenResty-style header policy, HAProxy
   Lua/SPOE-style routing/load-balancer policy, and VCL-like cache policy.
-- `v1.7.9`: stabilization and release gate hardening. All four example
+- `v1.7.10`: stabilization and release gate hardening. All four example
   families must run through `scripts/test_starter.py`, the stable/deep release
   gates must include the appropriate Wasm checks, and the docs must clearly
   describe supported capability parity and unsupported syntax/runtime parity.
-- `v1.7.10`: zero-downtime upgrade planning and first implementation slice
+- `v1.7.11`: zero-downtime upgrade planning and first implementation slice
   after the Wasm line is stable. Add a documented design for native binary and
   Podman deployments that can swap Fluxheim versions without a listener gap:
   inherited listener file descriptors, systemd socket activation support,
@@ -3385,14 +3389,15 @@ Exit criteria:
   format, dimensions, quality, and `Accept` bucket.
 - `privacy-mode` rejects incompatible transform/cache combinations.
 
-### 1.8 - HTTP/3 And QUIC
+### 1.9 - HTTP/3 And QUIC
 
 Goal: add opt-in HTTP/3 ingress with Fluxheim-owned UDP listener, QUIC, ALPN,
 certificate, routing, policy, and observability integration.
 
 This should be built as a Fluxheim protocol milestone after the `1.6` Pingora
 exit has made server bootstrap, listener/TLS ownership, and HTTP runtime
-ownership Fluxheim-owned and stable.
+ownership Fluxheim-owned and stable, and after the `1.8` macOS/Windows
+production-parity line has settled.
 The intended implementation path is the Rust `quinn` crate for QUIC transport
 and the Rust `h3` stack for HTTP/3 framing, with Fluxheim-owned adapters around
 TLS policy, vhost routing, request limits, access policy, cache/proxy behavior,
@@ -4765,23 +4770,25 @@ circular dependencies.
   sensitive field isolation tests.
 - `v1.7.3`: routing/load-balancer/mirror/persistence decision hooks with
   HAProxy-Lua/SPOE-style live examples.
-- `v1.7.4`: VCL-like cache policy hooks for lookup/admission, cache-key
-  components, TTL/tag/store-admission decisions, and live cache HIT/MISS tests.
-- `v1.7.5`: mature-runtime hardening across all hook families: compiled-module
+- `v1.7.4`: VCL-like cache lookup policy hooks for lookup/pass/bypass/deny
+  decisions and live cache HIT/MISS tests.
+- `v1.7.5`: VCL-like cache policy mutation hooks for bounded cache-key
+  components, TTL/tag/store-admission decisions, and live TTL/tag/key tests.
+- `v1.7.6`: mature-runtime hardening across all hook families: compiled-module
   cache isolation, cross-family chain regression tests, reload hash-change
   tests, metrics/admin completeness, and secret-safe labels. The initial
   access-decision ordering, global admission, reload classification, and
   per-plugin metrics must already exist from `v1.7.1`.
-- `v1.7.6`: optional `wasm-proxy-abi` compatibility preview with deterministic
+- `v1.7.7`: optional `wasm-proxy-abi` compatibility preview with deterministic
   unsupported-call rejection.
-- `v1.7.7`: optional `wasm-wasi` capability preview with explicit grants only.
-- `v1.7.8`: documentation and example parity release with runnable examples
+- `v1.7.8`: optional `wasm-wasi` capability preview with explicit grants only.
+- `v1.7.9`: documentation and example parity release with runnable examples
   and tests for F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-like
   cache policy mappings.
-- `v1.7.9`: Wasm stabilization release. All four example families must be in
+- `v1.7.10`: Wasm stabilization release. All four example families must be in
   `scripts/test_starter.py` and the stable/deep release gates before the line
   is considered complete.
-- `v1.7.10`: zero-downtime upgrade release after Wasm stabilization. Add
+- `v1.7.11`: zero-downtime upgrade release after Wasm stabilization. Add
   inherited listener file-descriptor support, systemd socket activation
   guidance, readiness-gated new-process startup, old-process drain mode,
   bounded graceful drain timeout, and a documented Podman blue/green pattern
