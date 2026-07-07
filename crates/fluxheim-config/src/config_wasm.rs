@@ -24,6 +24,7 @@ const DEFAULT_WASM_TIMEOUT_MS: u64 = 50;
 const DEFAULT_WASM_COMPILE_TIMEOUT_MS: u64 = 500;
 const DEFAULT_WASM_MAX_CONCURRENT_EXECUTIONS: u32 = 64;
 const DEFAULT_WASM_MAX_TOTAL_CONCURRENT_EXECUTIONS: u32 = 256;
+const DEFAULT_WASM_MAX_TOTAL_CACHE_CONCURRENT_EXECUTIONS: u32 = 256;
 const DEFAULT_WASM_QUEUE_LIMIT: u32 = 0;
 const DEFAULT_WASM_ATTACHMENT_PRIORITY: u32 = 1000;
 const MIN_WASM_PLUGIN_ROOT_COMPONENTS: usize = 3;
@@ -43,6 +44,8 @@ pub struct WasmConfig {
     pub default_admission: WasmAdmissionBudgetConfig,
     #[serde(default = "default_wasm_max_total_concurrent_executions")]
     pub max_total_concurrent_executions: u32,
+    #[serde(default = "default_wasm_max_total_cache_concurrent_executions")]
+    pub max_total_cache_concurrent_executions: u32,
     #[serde(default)]
     pub plugins: Vec<WasmPluginConfig>,
     #[serde(default)]
@@ -58,6 +61,8 @@ impl Default for WasmConfig {
             default_limits: WasmSandboxLimitsConfig::default(),
             default_admission: WasmAdmissionBudgetConfig::default(),
             max_total_concurrent_executions: default_wasm_max_total_concurrent_executions(),
+            max_total_cache_concurrent_executions:
+                default_wasm_max_total_cache_concurrent_executions(),
             plugins: Vec::new(),
             attachments: Vec::new(),
         }
@@ -79,6 +84,8 @@ pub(crate) struct WasmConfigFragment {
     default_admission: Option<WasmAdmissionBudgetConfig>,
     #[serde(default)]
     max_total_concurrent_executions: Option<u32>,
+    #[serde(default)]
+    max_total_cache_concurrent_executions: Option<u32>,
     #[serde(default)]
     plugins: Option<Vec<WasmPluginConfig>>,
     #[serde(default)]
@@ -123,6 +130,11 @@ impl WasmConfig {
         }
         if let Some(max_total_concurrent_executions) = fragment.max_total_concurrent_executions {
             self.max_total_concurrent_executions = max_total_concurrent_executions;
+        }
+        if let Some(max_total_cache_concurrent_executions) =
+            fragment.max_total_cache_concurrent_executions
+        {
+            self.max_total_cache_concurrent_executions = max_total_cache_concurrent_executions;
         }
         if let Some(plugins) = fragment.plugins {
             self.plugins.extend(plugins);
@@ -184,7 +196,14 @@ impl WasmConfig {
         }
         self.default_limits.validate("wasm.default_limits")?;
         self.default_admission.validate("wasm.default_admission")?;
-        validate_wasm_total_admission_budget(self.max_total_concurrent_executions)?;
+        validate_wasm_total_admission_budget(
+            "max_total_concurrent_executions",
+            self.max_total_concurrent_executions,
+        )?;
+        validate_wasm_total_admission_budget(
+            "max_total_cache_concurrent_executions",
+            self.max_total_cache_concurrent_executions,
+        )?;
         validate_config_list_len(
             "wasm.attachments",
             self.attachments.len(),
@@ -600,14 +619,13 @@ impl WasmAdmissionBudgetConfig {
 }
 
 fn validate_wasm_total_admission_budget(
-    max_total_concurrent_executions: u32,
+    field: &'static str,
+    budget: u32,
 ) -> Result<(), ConfigError> {
-    if max_total_concurrent_executions == 0
-        || max_total_concurrent_executions > MAX_WASM_MAX_CONCURRENT_EXECUTIONS
-    {
+    if budget == 0 || budget > MAX_WASM_MAX_CONCURRENT_EXECUTIONS {
         return Err(ConfigError::InvalidWasmPolicy {
             scope: "wasm".to_owned(),
-            field: "max_total_concurrent_executions",
+            field,
             reason: "must be within the supported process-wide execution budget range",
         });
     }
@@ -829,6 +847,10 @@ const fn default_wasm_max_concurrent_executions() -> u32 {
 
 const fn default_wasm_max_total_concurrent_executions() -> u32 {
     DEFAULT_WASM_MAX_TOTAL_CONCURRENT_EXECUTIONS
+}
+
+const fn default_wasm_max_total_cache_concurrent_executions() -> u32 {
+    DEFAULT_WASM_MAX_TOTAL_CACHE_CONCURRENT_EXECUTIONS
 }
 
 const fn default_wasm_queue_limit() -> u32 {

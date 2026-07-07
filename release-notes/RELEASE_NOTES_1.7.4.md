@@ -28,10 +28,14 @@ raw keys, TTLs, tags, response headers, or stored metadata.
   admission.
 - Thread selected route/vhost Wasm hooks into route-proxy cache paths so cache
   decisions use the same attachment model as access, header, and route hooks.
+- Add `wasm.max_total_cache_concurrent_executions` as a separate process-wide
+  admission ceiling for `cache-lookup` and `cache-store` hooks.
 - Add live listener tests proving a plugin can pass `/api/*` without storing
   while normal cacheable paths still produce `MISS` then `HIT`.
 - Add live listener tests proving a plugin can skip storage after an origin
   response and deny before cache write/client delivery.
+- Add live listener coverage proving a later cache-store `deny` wins over an
+  earlier `skip`.
 - Add fail-closed live coverage for cache-lookup deny behavior.
 
 ## Security Notes
@@ -41,6 +45,11 @@ raw keys, TTLs, tags, response headers, or stored metadata.
   network, admin APIs, private keys, cache-key bytes, or cached object bodies.
 - Built-in access policy, rate limits, concurrency limits, route selection, and
   header policy keep their normal order; the cache hook cannot bypass them.
+- Cache hooks use their own process-wide cache admission ceiling so hot
+  cache-policy routes cannot starve access-decision, route-decision, or header
+  hooks on unrelated vhosts.
+- Cache-store hook chains are most-restrictive-wins: every hook runs unless a
+  hook returns `deny`, and `deny` wins over an earlier `skip`.
 - Plugin execution failures still follow the configured fail mode:
   fail-closed denies with `503`, while fail-open continues normal cache
   behavior.
@@ -54,6 +63,8 @@ raw keys, TTLs, tags, response headers, or stored metadata.
 - `pass` and `bypass` outcomes report `x-cache-status: BYPASS` with
   `x-cache-reason: wasm-pass` or `wasm-bypass` when cache status headers are
   enabled.
+- `pass` and `bypass` share the external `BYPASS` cache status but record
+  distinct cache-policy activity as `pass` and `bypass`.
 - Richer cache-policy hooks for bounded cache-key components, TTL override,
   tag assignment, store-admission mutation, and safe response-header mutation
   remain staged for later `1.7.x` slices.

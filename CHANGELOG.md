@@ -18,10 +18,14 @@ behavior when the change improves security or project direction.
   protection, and store admission.
 - Add `continue`, `skip`, and `deny` cache store outcomes after origin response
   and before memory/disk cache writes.
+- Add `wasm.max_total_cache_concurrent_executions` as a separate process-wide
+  admission ceiling for cache-lookup/cache-store hooks.
 - Add live listener tests proving a plugin can pass selected `/api/*` requests
   without storing while normal cacheable paths still produce MISS then HIT.
 - Add live listener tests proving cache-store skip avoids storage and
   cache-store deny blocks delivery before cache write.
+- Add live listener tests proving cache-store `deny` wins over an earlier
+  cache-store `skip`.
 
 ### Security
 
@@ -32,6 +36,16 @@ behavior when the change improves security or project direction.
   before cache-lookup hooks run.
 - Fail closed with `503` when a cache-lookup plugin errors under fail-closed
   mode, and deny with `403` when a plugin explicitly returns deny.
+- Isolate cache-policy hook admission from the shared security-decision hook
+  admission pool so hot cache routes cannot starve access, route, or header
+  hooks on unrelated vhosts.
+- Use most-restrictive-wins cache-store aggregation so an earlier `skip` cannot
+  mask a later `deny`.
+
+### Changed
+
+- Record `cache-lookup` pass and bypass outcomes as distinct cache-policy
+  activity while preserving the external `BYPASS` cache status header.
 
 ## 1.7.3 - 2026-07-06
 

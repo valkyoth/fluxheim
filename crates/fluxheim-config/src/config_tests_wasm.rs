@@ -480,6 +480,42 @@ fn wasm_registry_rejects_invalid_total_admission_budget() {
 
 #[cfg(feature = "wasm")]
 #[test]
+fn wasm_registry_rejects_invalid_total_cache_admission_budget() {
+    let config: Config = toml::from_str(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+        plugin_roots = ["/srv/fluxheim/plugins"]
+        max_total_cache_concurrent_executions = 0
+
+        [[wasm.plugins]]
+        name = "cache"
+        path = "/srv/fluxheim/plugins/cache.wasm"
+        sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        phases = ["cache-store"]
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::InvalidWasmPolicy {
+            field: "max_total_cache_concurrent_executions",
+            ..
+        })
+    ));
+}
+
+#[cfg(feature = "wasm")]
+#[test]
 fn wasm_registry_requires_enabled_flag_for_plugins() {
     let config: Config = toml::from_str(
         r#"

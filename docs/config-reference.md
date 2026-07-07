@@ -592,10 +592,12 @@ When compiled with `wasm`, `GET /_fluxheim/status` includes a read-only `wasm`
 object for the validation-stage plugin registry. It reports whether `[wasm]` is
 enabled, whether preview ABIs are allowed, plugin root/plugin/attachment counts,
 the process-wide `max_total_concurrent_executions` ceiling, plugin names,
-plugin paths, configured expected SHA-256 digests, declared ABI and host-call
-namespace, phases, fail mode, attachment priority, and whether each plugin or
-attachment overrides the default admission/limit policy. Runtime loaded plugin
-hashes are added by later `1.7.x` hook releases. `1.7.1` enables the first live
+the process-wide `max_total_concurrent_executions` ceiling, the cache-specific
+`max_total_cache_concurrent_executions` ceiling, plugin names, plugin paths,
+configured expected SHA-256 digests, declared ABI and host-call namespace,
+phases, fail mode, attachment priority, and whether each plugin or attachment
+overrides the default admission/limit policy. Runtime loaded plugin hashes are
+added by later `1.7.x` hook releases. `1.7.1` enables the first live
 native HTTP/1 request-path hook family: `access-decision`. The current preview
 ABI calls `fluxheim_access_decision() -> i32`, where `0` continues the chain,
 `1` allows/continues, and `2` denies with `403`. Built-in Fluxheim access
@@ -631,10 +633,15 @@ request collapsing, origin-fill protection, and store admission. The
 origin response and before memory/disk cache writes; `0` continues normal
 storage, `1` serves the origin response but skips storage, and `2` denies with
 `403`. Built-in access, rate-limit, route selection, and header-policy
-controls still run in their normal order. The current cache hooks do not yet
-expose raw headers, request bodies, arbitrary cache-key bytes, TTL override,
-tag assignment, or response-store mutation; those stay staged behind later
-bounded cache-policy ABIs.
+controls still run in their normal order. Cache hooks use the separate
+`wasm.max_total_cache_concurrent_executions` process-wide admission ceiling so
+hot cache-policy routes cannot starve security-decision hooks that use
+`wasm.max_total_concurrent_executions`. Cache-store hook chains use
+most-restrictive-wins aggregation: a later `deny` still runs and wins after an
+earlier `skip`. The current cache hooks do not yet expose raw headers, request
+bodies, arbitrary cache-key bytes, TTL override, tag assignment, or
+response-store mutation; those stay staged behind later bounded cache-policy
+ABIs.
 
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:

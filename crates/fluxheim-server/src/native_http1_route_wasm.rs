@@ -62,6 +62,7 @@ const CACHE_STORE_DENY: i32 = 2;
 pub(crate) struct NativeWasmHookRegistry {
     attachments: Vec<NativeWasmAttachment>,
     admission: FluxWasmAdmissionController,
+    cache_admission: FluxWasmAdmissionController,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -97,6 +98,7 @@ struct NativeWasmHook {
     plugin: Arc<NativeWasmPlugin>,
     phase: WasmPluginPhase,
     global_admission: FluxWasmAdmissionController,
+    global_admission_scope: NativeWasmAdmissionScope,
     attachment_admission: FluxWasmAdmissionController,
 }
 
@@ -138,6 +140,7 @@ pub(crate) enum NativeWasmHookError {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum NativeWasmAdmissionScope {
     Global,
+    CacheGlobal,
     Plugin,
     Attachment,
 }
@@ -170,6 +173,11 @@ impl NativeWasmHookRegistry {
         }
         let admission = FluxWasmAdmissionController::new(
             usize::try_from(config.wasm.max_total_concurrent_executions)
+                .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?,
+        )
+        .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?;
+        let cache_admission = FluxWasmAdmissionController::new(
+            usize::try_from(config.wasm.max_total_cache_concurrent_executions)
                 .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?,
         )
         .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?;
@@ -241,6 +249,7 @@ impl NativeWasmHookRegistry {
         Ok(Some(Self {
             attachments,
             admission,
+            cache_admission,
         }))
     }
 
@@ -254,6 +263,7 @@ impl NativeWasmHookRegistry {
                 plugin: attachment.plugin.clone(),
                 phase: WasmPluginPhase::AccessDecision,
                 global_admission: self.admission.clone(),
+                global_admission_scope: NativeWasmAdmissionScope::Global,
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -266,6 +276,7 @@ impl NativeWasmHookRegistry {
                 plugin: attachment.plugin.clone(),
                 phase: WasmPluginPhase::RequestHeaders,
                 global_admission: self.admission.clone(),
+                global_admission_scope: NativeWasmAdmissionScope::Global,
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -282,6 +293,7 @@ impl NativeWasmHookRegistry {
                 plugin: attachment.plugin.clone(),
                 phase: WasmPluginPhase::ResponseHeaders,
                 global_admission: self.admission.clone(),
+                global_admission_scope: NativeWasmAdmissionScope::Global,
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -294,6 +306,7 @@ impl NativeWasmHookRegistry {
                 plugin: attachment.plugin.clone(),
                 phase: WasmPluginPhase::RouteDecision,
                 global_admission: self.admission.clone(),
+                global_admission_scope: NativeWasmAdmissionScope::Global,
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -305,7 +318,8 @@ impl NativeWasmHookRegistry {
             .map(|attachment| NativeWasmHook {
                 plugin: attachment.plugin.clone(),
                 phase: WasmPluginPhase::CacheLookup,
-                global_admission: self.admission.clone(),
+                global_admission: self.cache_admission.clone(),
+                global_admission_scope: NativeWasmAdmissionScope::CacheGlobal,
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -317,7 +331,8 @@ impl NativeWasmHookRegistry {
             .map(|attachment| NativeWasmHook {
                 plugin: attachment.plugin.clone(),
                 phase: WasmPluginPhase::CacheStore,
-                global_admission: self.admission.clone(),
+                global_admission: self.cache_admission.clone(),
+                global_admission_scope: NativeWasmAdmissionScope::CacheGlobal,
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -424,18 +439,21 @@ impl NativeWasmHooks {
         if self.cache_store.is_empty() {
             return NativeWasmCacheStoreOutcome::Continue;
         }
+        let mut selected = NativeWasmCacheStoreOutcome::Continue;
         for hook in &self.cache_store {
             match hook.run_cache_store(context).await {
                 NativeWasmCacheStoreOutcome::Continue => {}
                 NativeWasmCacheStoreOutcome::Skip(reason) => {
-                    return NativeWasmCacheStoreOutcome::Skip(reason);
+                    if matches!(selected, NativeWasmCacheStoreOutcome::Continue) {
+                        selected = NativeWasmCacheStoreOutcome::Skip(reason);
+                    }
                 }
                 NativeWasmCacheStoreOutcome::Deny { status, reason } => {
                     return NativeWasmCacheStoreOutcome::Deny { status, reason };
                 }
             }
         }
-        NativeWasmCacheStoreOutcome::Continue
+        selected
     }
 
     pub(crate) async fn apply_request_headers(
@@ -604,13 +622,14 @@ impl NativeWasmHook {
     ) -> Result<i32, NativeWasmHookError> {
         let plugin = self.plugin.clone();
         let global_admission = self.global_admission.clone();
+        let global_admission_scope = self.global_admission_scope;
         let attachment_admission = self.attachment_admission.clone();
         let started = Instant::now();
         let plugin_name = plugin.name.clone();
         let result = tokio::task::spawn_blocking(move || {
             let _global_permit = global_admission
                 .try_acquire()
-                .map_err(|_| NativeWasmHookError::Admission(NativeWasmAdmissionScope::Global))?;
+                .map_err(|_| NativeWasmHookError::Admission(global_admission_scope))?;
             let _plugin_permit = plugin
                 .admission
                 .try_acquire()
@@ -1265,6 +1284,7 @@ impl NativeWasmAdmissionScope {
     fn as_label(self) -> &'static str {
         match self {
             Self::Global => "global",
+            Self::CacheGlobal => "cache-global",
             Self::Plugin => "plugin",
             Self::Attachment => "attachment",
         }

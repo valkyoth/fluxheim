@@ -176,6 +176,10 @@ memory/disk cache writes. Raw headers, request bodies, cache-key bytes, TTL
 override, tag assignment, cached objects, and response-store mutation are not
 exposed in `1.7.4`.
 
+Cache-store chains use the same restrictive aggregation model as other hook
+families: every hook runs unless a hook returns `deny`; an earlier `skip` does
+not mask a later `deny`.
+
 Allowed hooks:
 
 - request headers before upstream selection;
@@ -269,6 +273,12 @@ Fluxheim must also enforce a top-level admission ceiling such as
 many individually-safe plugins can multiply into unsafe process-wide memory or
 instance pressure.
 
+Cache-policy hooks are isolated from the security-decision admission pool with
+their own process-wide ceiling, `wasm.max_total_cache_concurrent_executions`.
+This keeps a hot cacheable route with `cache-lookup` or `cache-store` hooks
+from starving access-decision, route-decision, and header hooks on unrelated
+vhosts.
+
 ## Security Requirements
 
 - Disabled by default at compile time and runtime.
@@ -301,6 +311,7 @@ instance pressure.
 enabled = true
 plugin_roots = ["/etc/fluxheim/plugins"]
 max_total_concurrent_executions = 256
+max_total_cache_concurrent_executions = 256
 
 [[wasm.plugins]]
 name = "security_headers"
@@ -351,6 +362,12 @@ does not match.
 `wasm.max_total_concurrent_executions` caps total concurrent plugin executions
 across the whole process. Per-plugin and per-attachment admission budgets are
 still enforced inside that global ceiling.
+
+`wasm.max_total_cache_concurrent_executions` caps total concurrent
+`cache-lookup` and `cache-store` plugin executions across the whole process.
+The cache-specific ceiling is intentionally separate from
+`wasm.max_total_concurrent_executions` so cache-policy load cannot exhaust the
+admission pool used by security and routing hooks.
 
 `[[wasm.attachments]].priority` controls chain order for plugins attached to
 the same phase and vhost/route. Lower numeric priorities run first; ties use

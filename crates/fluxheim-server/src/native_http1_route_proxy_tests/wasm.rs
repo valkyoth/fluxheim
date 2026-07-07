@@ -230,6 +230,59 @@ async fn native_wasm_access_decision_enforces_global_admission_budget() {
 }
 
 #[tokio::test]
+async fn native_wasm_cache_admission_budget_does_not_starve_access_hooks() {
+    let fixture = WasmRouteFixture::new(&[
+        ("cache_busy", WasmPluginBody::CacheLookupBusy),
+        ("access", WasmPluginBody::Decision(1)),
+    ]);
+    let cache_upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let access_upstream = upstream_expect_body("/access/item", "access-ok").await;
+    let mut cache_route = named_proxy_route("cache", "/cache", cache_upstream);
+    cache_route.cache = Some(native_proxy_memory_cache_config());
+    let access_route = named_proxy_route("access", "/access", access_upstream);
+    let mut vhost = native_route_proxy_test_vhost();
+    vhost.routes = vec![cache_route, access_route];
+    let mut config = fluxheim_config::Config {
+        vhosts: vec![vhost],
+        ..Default::default()
+    };
+    config.server.default_vhost = Some("route.test".to_owned());
+    config.wasm = fluxheim_config::WasmConfig {
+        enabled: true,
+        plugin_roots: vec![fixture.root.clone()],
+        plugins: fixture.plugins.clone(),
+        attachments: vec![
+            wasm_attachment_phase(
+                "cache_busy",
+                "cache",
+                100,
+                fluxheim_config::WasmPluginPhase::CacheLookup,
+            ),
+            wasm_attachment("access", "access", 100),
+        ],
+        max_total_concurrent_executions: 1,
+        max_total_cache_concurrent_executions: 1,
+        ..Default::default()
+    };
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let cache_request = tokio::spawn(async move { downstream_get(proxy, "/cache/item").await });
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    let access_response = downstream_get(proxy, "/access/item").await;
+    let cache_response = cache_request.await.unwrap();
+
+    assert!(access_response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(access_response.ends_with("access-ok"));
+    assert!(cache_response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(
+        cache_response.contains("wasm cache lookup"),
+        "unexpected cache response: {cache_response:?}"
+    );
+}
+
+#[tokio::test]
 async fn native_wasm_request_and_response_headers_use_bounded_host_calls() {
     let fixture = WasmRouteFixture::new(&[("headers", WasmPluginBody::HeaderPolicy)]);
     let upstream = upstream_expect_policy_header("/item").await;
@@ -740,6 +793,57 @@ async fn native_wasm_cache_store_can_deny_after_origin_response_before_storage()
     );
 }
 
+#[tokio::test]
+async fn native_wasm_cache_store_deny_wins_over_earlier_skip() {
+    let fixture = WasmRouteFixture::new(&[
+        ("skip", WasmPluginBody::CacheStoreSkip),
+        ("deny", WasmPluginBody::CacheStoreDeny),
+    ]);
+    let upstream =
+        super::upstream_cacheable_sequence(&[("/static/store-chain.png", "chain-origin")]).await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![
+            wasm_attachment_phase(
+                "skip",
+                "route",
+                10,
+                fluxheim_config::WasmPluginPhase::CacheStore,
+            ),
+            wasm_attachment_phase(
+                "deny",
+                "route",
+                20,
+                fluxheim_config::WasmPluginPhase::CacheStore,
+            ),
+        ],
+    );
+    config.vhosts[0].routes[0].path_exact = None;
+    config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].routes[0].redirect = None;
+    config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    config.vhosts[0].routes[0].cache = Some(native_proxy_memory_cache_config());
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, "/static/store-chain.png").await;
+
+    assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(response.ends_with("wasm cache store denied\n"));
+    assert_eq!(
+        response_header(&response, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&response, "x-cache-reason").as_deref(),
+        Some("wasm-store-deny")
+    );
+}
+
 #[cfg(feature = "php-fpm")]
 #[tokio::test]
 async fn native_wasm_response_headers_apply_to_php_fpm_fallback() {
@@ -847,6 +951,7 @@ enum WasmPluginBody {
     RouteDecision,
     CacheLookup,
     CacheLookupDeny,
+    CacheLookupBusy,
     CacheStoreSkip,
     CacheStoreDeny,
     Trap,
@@ -961,6 +1066,10 @@ impl WasmPluginBody {
                 r#"(module (func (export "fluxheim_cache_lookup") (result i32) i32.const 3))"#
                     .to_owned()
             }
+            Self::CacheLookupBusy => {
+                r#"(module (func (export "fluxheim_cache_lookup") (result i32) (loop br 0) i32.const 0))"#
+                    .to_owned()
+            }
             Self::CacheStoreSkip => {
                 r#"
                 (module
@@ -999,7 +1108,10 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
     let bytes = wat::parse_str(body.source()).unwrap();
     let path = root.join(format!("{name}.wasm"));
     fs::write(&path, &bytes).unwrap();
-    let limits = if matches!(body, WasmPluginBody::BusyLoop) {
+    let limits = if matches!(
+        body,
+        WasmPluginBody::BusyLoop | WasmPluginBody::CacheLookupBusy
+    ) {
         Some(fluxheim_config::WasmSandboxLimitsConfig {
             fuel: 1_000_000_000,
             timeout_ms: 150,
@@ -1036,7 +1148,9 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
             vec![fluxheim_config::WasmPluginPhase::RequestHeaders]
         }
         WasmPluginBody::RouteDecision => vec![fluxheim_config::WasmPluginPhase::RouteDecision],
-        WasmPluginBody::CacheLookup | WasmPluginBody::CacheLookupDeny => {
+        WasmPluginBody::CacheLookup
+        | WasmPluginBody::CacheLookupDeny
+        | WasmPluginBody::CacheLookupBusy => {
             vec![fluxheim_config::WasmPluginPhase::CacheLookup]
         }
         WasmPluginBody::CacheStoreSkip | WasmPluginBody::CacheStoreDeny => {

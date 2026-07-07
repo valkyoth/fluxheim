@@ -65,8 +65,11 @@ impl NativeHttp1Proxy {
                     .await
                 {
                     NativeWasmCacheLookupOutcome::Continue => {}
-                    NativeWasmCacheLookupOutcome::Pass(reason)
-                    | NativeWasmCacheLookupOutcome::Bypass(reason) => {
+                    NativeWasmCacheLookupOutcome::Pass(reason) => {
+                        cache.record_policy_activity("pass");
+                        proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
+                    }
+                    NativeWasmCacheLookupOutcome::Bypass(reason) => {
                         cache.record_policy_activity("bypass");
                         proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
                     }
