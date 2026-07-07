@@ -3,13 +3,15 @@
 Fluxheim 1.7.4 starts the VCL-like cache-policy part of optional WebAssembly
 extensibility. The first live cache hook is intentionally constrained: plugins
 can decide whether cache lookup proceeds, passes through origin, bypasses
-cache, or denies, but cannot yet mutate raw keys, TTLs, tags, response headers,
-or storage admission.
+cache, skips storage after an origin response, or denies, but cannot yet mutate
+raw keys, TTLs, tags, response headers, or stored metadata.
 
 ## Highlights
 
 - Add live native HTTP/1 `cache-lookup` Wasm hook execution for vhost and route
   attachments.
+- Add live native HTTP/1 `cache-store` Wasm hook execution after origin
+  response and before memory/disk cache writes.
 - Add a bounded `fluxheim_cache_lookup() -> i32` preview ABI under the existing
   `fluxheim_policy_v1` host-call namespace.
 - Add cache lookup outcomes:
@@ -17,6 +19,10 @@ or storage admission.
   - `1`: pass through origin without lookup or storage;
   - `2`: bypass cache lookup and storage;
   - `3`: deny with `403`.
+- Add cache store outcomes:
+  - `0`: continue normal cache storage;
+  - `1`: serve the origin response but skip storage;
+  - `2`: deny with `403`.
 - Apply cache-lookup hooks before native proxy-cache slice lookup, normal
   lookup, peer-fill, request collapsing, origin-fill protection, and store
   admission.
@@ -24,13 +30,15 @@ or storage admission.
   decisions use the same attachment model as access, header, and route hooks.
 - Add live listener tests proving a plugin can pass `/api/*` without storing
   while normal cacheable paths still produce `MISS` then `HIT`.
+- Add live listener tests proving a plugin can skip storage after an origin
+  response and deny before cache write/client delivery.
 - Add fail-closed live coverage for cache-lookup deny behavior.
 
 ## Security Notes
 
-- The cache-lookup hook is constrained to integer outcomes and coarse path
-  context. It does not expose raw headers, bodies, filesystem, network, admin
-  APIs, private keys, cache-key bytes, or cached object bodies.
+- The cache-policy hooks are constrained to integer outcomes and coarse path or
+  response-status context. They do not expose raw headers, bodies, filesystem,
+  network, admin APIs, private keys, cache-key bytes, or cached object bodies.
 - Built-in access policy, rate limits, concurrency limits, route selection, and
   header policy keep their normal order; the cache hook cannot bypass them.
 - Plugin execution failures still follow the configured fail mode:
@@ -41,11 +49,11 @@ or storage admission.
 
 ## Operator Notes
 
-- Plugins that use `cache-lookup` export
-  `fluxheim_cache_lookup() -> i32`.
+- Plugins that use `cache-lookup` export `fluxheim_cache_lookup() -> i32`.
+- Plugins that use `cache-store` export `fluxheim_cache_store() -> i32`.
 - `pass` and `bypass` outcomes report `x-cache-status: BYPASS` with
   `x-cache-reason: wasm-pass` or `wasm-bypass` when cache status headers are
   enabled.
 - Richer cache-policy hooks for bounded cache-key components, TTL override,
-  tag assignment, store-admission inspection, and safe response-header mutation
+  tag assignment, store-admission mutation, and safe response-header mutation
   remain staged for later `1.7.x` slices.

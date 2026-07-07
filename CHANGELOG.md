@@ -16,14 +16,18 @@ behavior when the change improves security or project direction.
 - Add `continue`, `pass`, `bypass`, and `deny` cache lookup outcomes before
   slice lookup, normal lookup, peer-fill, request collapsing, origin-fill
   protection, and store admission.
+- Add `continue`, `skip`, and `deny` cache store outcomes after origin response
+  and before memory/disk cache writes.
 - Add live listener tests proving a plugin can pass selected `/api/*` requests
   without storing while normal cacheable paths still produce MISS then HIT.
+- Add live listener tests proving cache-store skip avoids storage and
+  cache-store deny blocks delivery before cache write.
 
 ### Security
 
-- Keep cache hooks constrained to integer outcomes and coarse path context in
-  this slice; raw headers, bodies, cache-key bytes, TTL override, tag
-  assignment, and response-store mutation remain unavailable.
+- Keep cache hooks constrained to integer outcomes and coarse path/status
+  context in this slice; raw headers, bodies, cache-key bytes, TTL override,
+  tag assignment, and response-store mutation remain unavailable.
 - Preserve built-in access, rate-limit, route, and header-policy ordering
   before cache-lookup hooks run.
 - Fail closed with `503` when a cache-lookup plugin errors under fail-closed

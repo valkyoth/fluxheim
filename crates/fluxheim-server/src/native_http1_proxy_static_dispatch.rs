@@ -16,7 +16,8 @@ use crate::native_http1_proxy_memory_cache::{
 use crate::native_http1_proxy_request::native_proxy_error_is_timeout;
 #[cfg(feature = "wasm")]
 use crate::native_http1_route_wasm::{
-    NativeWasmCacheLookupContext, NativeWasmCacheLookupOutcome, NativeWasmHooks, status_reason,
+    NativeWasmCacheLookupContext, NativeWasmCacheLookupOutcome, NativeWasmCacheStoreContext,
+    NativeWasmCacheStoreOutcome, NativeWasmHooks, status_reason,
 };
 use crate::{NativeHttp1Request, NativeHttp1Response};
 use fluxheim_cache::CacheStaleEvent;
@@ -344,6 +345,55 @@ impl NativeHttp1Proxy {
                                 compression_request,
                             );
                         }
+                        #[cfg(feature = "wasm")]
+                        let store_result = if let Some(hooks) = wasm_hooks {
+                            match hooks
+                                .cache_store_decision(
+                                    NativeWasmCacheStoreContext::from_request_response(
+                                        &request, &response,
+                                    ),
+                                )
+                                .await
+                            {
+                                NativeWasmCacheStoreOutcome::Continue => {
+                                    if *status == "REVALIDATED" {
+                                        cache.store_revalidated(key, &request, &response).await
+                                    } else {
+                                        cache.store(key, &request, &response).await
+                                    }
+                                }
+                                NativeWasmCacheStoreOutcome::Skip(reason) => Err(reason),
+                                NativeWasmCacheStoreOutcome::Deny { status, reason } => {
+                                    let denied = NativeHttp1Response::new(
+                                        status,
+                                        status_reason(status),
+                                        format!("{reason}\n").into_bytes(),
+                                    )
+                                    .close_connection();
+                                    return self.finish_response(
+                                        &request,
+                                        denied,
+                                        Some((
+                                            &cache.config,
+                                            "BYPASS",
+                                            Some("wasm-store-deny"),
+                                            None,
+                                        )),
+                                        #[cfg(any(
+                                            feature = "compression-brotli",
+                                            feature = "compression-gzip",
+                                            feature = "compression-zstd"
+                                        ))]
+                                        compression_request,
+                                    );
+                                }
+                            }
+                        } else if *status == "REVALIDATED" {
+                            cache.store_revalidated(key, &request, &response).await
+                        } else {
+                            cache.store(key, &request, &response).await
+                        };
+                        #[cfg(not(feature = "wasm"))]
                         let store_result = if *status == "REVALIDATED" {
                             cache.store_revalidated(key, &request, &response).await
                         } else {

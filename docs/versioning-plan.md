@@ -3121,9 +3121,11 @@ Stable scope:
 - `v1.7.4`: start cache-policy hooks inspired by VCL but expressed as a
   constrained Rust/Wasm ABI. Cover cache lookup/pass/bypass/continue/deny
   decisions before slice lookup, normal lookup, peer-fill, request collapsing,
-  origin-fill protection, and store admission. Add live cache tests that prove
-  a plugin can pass selected requests without storing while normal requests
-  still produce MISS then HIT.
+  origin-fill protection, and store admission. Cover cache-store
+  continue/skip-store/deny decisions after origin response and before cache
+  writes. Add live cache tests that prove a plugin can pass selected requests
+  without storing while normal requests still produce MISS then HIT, and that a
+  plugin can skip or deny storage before memory/disk writes.
 - `v1.7.5`: add the next bounded cache-policy ABI slice for cache-key
   components, TTL override, tag assignment, store-admission header inspection,
   and safe response-header mutation, with live tests for TTL bounds, tag
@@ -4770,8 +4772,9 @@ circular dependencies.
   sensitive field isolation tests.
 - `v1.7.3`: routing/load-balancer/mirror/persistence decision hooks with
   HAProxy-Lua/SPOE-style live examples.
-- `v1.7.4`: VCL-like cache lookup policy hooks for lookup/pass/bypass/deny
-  decisions and live cache HIT/MISS tests.
+- `v1.7.4`: VCL-like cache lookup/store policy hooks for
+  lookup/pass/bypass/deny and store continue/skip/deny decisions, with live
+  cache HIT/MISS and skip-store tests.
 - `v1.7.5`: VCL-like cache policy mutation hooks for bounded cache-key
   components, TTL/tag/store-admission decisions, and live TTL/tag/key tests.
 - `v1.7.6`: mature-runtime hardening across all hook families: compiled-module

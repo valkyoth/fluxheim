@@ -9,11 +9,12 @@ request-path execution with native HTTP/1 access-decision hooks. Fluxheim
 Fluxheim `1.7.3` starts bounded native HTTP/1 route-decision hooks with
 configured canary and mirror branch selection, including selected native
 load-balanced and persistent routes. Fluxheim `1.7.4` starts bounded
-cache-policy hooks with a cache-lookup decision that can continue, pass,
-bypass, or deny before cache lookup and storage. Direct backend choice,
-plugin-provided persistence keys, dynamic mirror/shadow target choice, richer
-cache-key/TTL/tag/store policy hooks, Proxy-ABI compatibility, and WASI
-capabilities remain staged for later `1.7.x` releases.
+cache-policy hooks with cache-lookup decisions that can continue, pass, bypass,
+or deny before cache lookup and storage, plus cache-store decisions that can
+continue, skip storage, or deny after origin response and before cache write.
+Direct backend choice, plugin-provided persistence keys, dynamic mirror/shadow
+target choice, richer cache-key/TTL/tag store policy hooks, Proxy-ABI
+compatibility, and WASI capabilities remain staged for later `1.7.x` releases.
 
 Cargo features:
 
@@ -149,7 +150,7 @@ concurrency, and preselected/decoded-route ACL gates. If the plugin selects a
 different configured route, that selected route's ACL and route-specific
 rate/concurrency limits are checked before Fluxheim proceeds.
 
-Fluxheim `1.7.4` adds the first cache-policy hook ABI. Plugins attached to
+Fluxheim `1.7.4` adds the first cache-policy hook ABIs. Plugins attached to
 `cache-lookup` export `fluxheim_cache_lookup() -> i32`:
 
 - `0`: continue normal cache lookup and storage;
@@ -161,9 +162,19 @@ The cache lookup host-call surface deliberately reuses only bounded symbolic
 request context in this slice. It runs before native proxy-cache slice lookup,
 normal lookup, peer-fill, request collapsing, origin-fill protection, and store
 admission, but after Fluxheim's built-in access, route, rate-limit,
-concurrency, and header policy gates. Raw headers, request bodies, cache-key
-bytes, TTL override, tag assignment, cached objects, and response-store
-mutation are not exposed in `1.7.4`.
+concurrency, and header policy gates.
+
+Plugins attached to `cache-store` export `fluxheim_cache_store() -> i32`:
+
+- `0`: continue normal cache storage;
+- `1`: serve the origin response but skip storage;
+- `2`: deny with `403`.
+
+The cache store host-call surface exposes only the path class and response
+status as bounded integer context. It runs after an origin response and before
+memory/disk cache writes. Raw headers, request bodies, cache-key bytes, TTL
+override, tag assignment, cached objects, and response-store mutation are not
+exposed in `1.7.4`.
 
 Allowed hooks:
 
@@ -363,9 +374,10 @@ request-header and response-header mutation. `1.7.3` adds the first bounded
 route-decision hook with configured `canary` and `mirror` branch selection,
 including live coverage for selected native load-balanced and managed-cookie
 persistent routes. `1.7.4` adds bounded cache-lookup decisions before cache
-lookup/storage. Direct backend pool/member choice, plugin-provided
-persistence-key choice, dynamic mirror/shadow target choice, and richer
-cache-key/TTL/tag/store policy hooks remain staged for later `1.7.x` releases.
+lookup/storage and bounded cache-store skip/deny decisions before cache writes.
+Direct backend pool/member choice, plugin-provided persistence-key choice,
+dynamic mirror/shadow target choice, and richer cache-key/TTL/tag store policy
+hooks remain staged for later `1.7.x` releases.
 
 ## Reload Semantics
 

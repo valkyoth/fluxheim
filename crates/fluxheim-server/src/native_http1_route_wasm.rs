@@ -26,12 +26,15 @@ const ROUTE_DECISION_PHASE: &str = "route-decision";
 const ROUTE_DECISION_FUNCTION: &str = "fluxheim_route_decision";
 const CACHE_LOOKUP_PHASE: &str = "cache-lookup";
 const CACHE_LOOKUP_FUNCTION: &str = "fluxheim_cache_lookup";
+const CACHE_STORE_PHASE: &str = "cache-store";
+const CACHE_STORE_FUNCTION: &str = "fluxheim_cache_store";
 const WASM_HOST_MODULE: &str = "fluxheim_policy_v1";
 const MAX_WASM_HEADER_MUTATIONS: usize = 16;
 
 const HOST_CONTEXT_PATH_CLASS: i32 = 1;
 const HOST_CONTEXT_CANARY_HEADER: i32 = 2;
 const HOST_CONTEXT_MIRROR_HEADER: i32 = 3;
+const HOST_CONTEXT_RESPONSE_STATUS: i32 = 4;
 const HEADER_X_POLICY_TIER: i32 = 1;
 const HEADER_X_FLUXHEIM_POLICY_BRANCH: i32 = 2;
 const HEADER_X_POWERED_BY: i32 = 3;
@@ -51,6 +54,9 @@ const CACHE_LOOKUP_CONTINUE: i32 = 0;
 const CACHE_LOOKUP_PASS: i32 = 1;
 const CACHE_LOOKUP_BYPASS: i32 = 2;
 const CACHE_LOOKUP_DENY: i32 = 3;
+const CACHE_STORE_CONTINUE: i32 = 0;
+const CACHE_STORE_SKIP: i32 = 1;
+const CACHE_STORE_DENY: i32 = 2;
 
 #[derive(Clone, Debug)]
 pub(crate) struct NativeWasmHookRegistry {
@@ -65,6 +71,7 @@ pub(crate) struct NativeWasmHooks {
     response_headers: Vec<NativeWasmHook>,
     route_decision: Vec<NativeWasmHook>,
     cache_lookup: Vec<NativeWasmHook>,
+    cache_store: Vec<NativeWasmHook>,
 }
 
 #[derive(Clone, Debug)]
@@ -115,6 +122,13 @@ pub(crate) enum NativeWasmCacheLookupOutcome {
 }
 
 #[derive(Debug)]
+pub(crate) enum NativeWasmCacheStoreOutcome {
+    Continue,
+    Skip(&'static str),
+    Deny { status: u16, reason: String },
+}
+
+#[derive(Debug)]
 pub(crate) enum NativeWasmHookError {
     Admission(NativeWasmAdmissionScope),
     Execution(WasmExecutionError),
@@ -135,6 +149,7 @@ impl PartialEq for NativeWasmHooks {
             && self.response_headers == other.response_headers
             && self.route_decision == other.route_decision
             && self.cache_lookup == other.cache_lookup
+            && self.cache_store == other.cache_store
     }
 }
 
@@ -294,12 +309,25 @@ impl NativeWasmHookRegistry {
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
+        let cache_store = self
+            .attachments
+            .iter()
+            .filter(|attachment| attachment.matches(vhost, route))
+            .filter(|attachment| attachment.phases.contains(&WasmPluginPhase::CacheStore))
+            .map(|attachment| NativeWasmHook {
+                plugin: attachment.plugin.clone(),
+                phase: WasmPluginPhase::CacheStore,
+                global_admission: self.admission.clone(),
+                attachment_admission: attachment.admission.clone(),
+            })
+            .collect();
         NativeWasmHooks {
             access_decision,
             request_headers,
             response_headers,
             route_decision,
             cache_lookup,
+            cache_store,
         }
     }
 }
@@ -311,6 +339,7 @@ impl NativeWasmHooks {
             && self.response_headers.is_empty()
             && self.route_decision.is_empty()
             && self.cache_lookup.is_empty()
+            && self.cache_store.is_empty()
     }
 
     pub(crate) async fn access_decision(&self) -> NativeWasmAccessOutcome {
@@ -386,6 +415,27 @@ impl NativeWasmHooks {
             }
         }
         selected
+    }
+
+    pub(crate) async fn cache_store_decision(
+        &self,
+        context: NativeWasmCacheStoreContext,
+    ) -> NativeWasmCacheStoreOutcome {
+        if self.cache_store.is_empty() {
+            return NativeWasmCacheStoreOutcome::Continue;
+        }
+        for hook in &self.cache_store {
+            match hook.run_cache_store(context).await {
+                NativeWasmCacheStoreOutcome::Continue => {}
+                NativeWasmCacheStoreOutcome::Skip(reason) => {
+                    return NativeWasmCacheStoreOutcome::Skip(reason);
+                }
+                NativeWasmCacheStoreOutcome::Deny { status, reason } => {
+                    return NativeWasmCacheStoreOutcome::Deny { status, reason };
+                }
+            }
+        }
+        NativeWasmCacheStoreOutcome::Continue
     }
 
     pub(crate) async fn apply_request_headers(
@@ -741,6 +791,44 @@ impl NativeWasmHook {
         }
     }
 
+    async fn run_cache_store(
+        &self,
+        context: NativeWasmCacheStoreContext,
+    ) -> NativeWasmCacheStoreOutcome {
+        let host_functions = wasm_cache_store_host_functions(context);
+        match self
+            .run_i32_with_hosts(
+                CACHE_STORE_PHASE,
+                CACHE_STORE_FUNCTION,
+                host_functions,
+                wasm_cache_store_outcome_label,
+            )
+            .await
+        {
+            Ok(CACHE_STORE_CONTINUE) => NativeWasmCacheStoreOutcome::Continue,
+            Ok(CACHE_STORE_SKIP) => NativeWasmCacheStoreOutcome::Skip("wasm-store-skip"),
+            Ok(CACHE_STORE_DENY) => NativeWasmCacheStoreOutcome::Deny {
+                status: 403,
+                reason: "wasm cache store denied".to_owned(),
+            },
+            Ok(_) => self.failed_cache_store("error"),
+            Err(error) => {
+                let outcome = match error {
+                    NativeWasmHookError::Admission(_) => "fail_closed",
+                    NativeWasmHookError::Execution(WasmExecutionError::Trap(_)) => "trap",
+                    NativeWasmHookError::Execution(WasmExecutionError::ExecutionTimeout {
+                        ..
+                    }) => "timeout",
+                    NativeWasmHookError::Execution(WasmExecutionError::CompileTimeout {
+                        ..
+                    }) => "timeout",
+                    NativeWasmHookError::Execution(_) | NativeWasmHookError::Join => "error",
+                };
+                self.failed_cache_store(outcome)
+            }
+        }
+    }
+
     fn failed_access_decision(&self, outcome: &'static str) -> WasmAccessDecision {
         match self.plugin.fail_mode {
             WasmPluginFailMode::FailOpen => WasmAccessDecision::Continue,
@@ -767,6 +855,16 @@ impl NativeWasmHook {
             WasmPluginFailMode::FailClosed => NativeWasmCacheLookupOutcome::Deny {
                 status: 503,
                 reason: format!("wasm cache lookup {outcome}"),
+            },
+        }
+    }
+
+    fn failed_cache_store(&self, outcome: &'static str) -> NativeWasmCacheStoreOutcome {
+        match self.plugin.fail_mode {
+            WasmPluginFailMode::FailOpen => NativeWasmCacheStoreOutcome::Continue,
+            WasmPluginFailMode::FailClosed => NativeWasmCacheStoreOutcome::Deny {
+                status: 503,
+                reason: format!("wasm cache store {outcome}"),
             },
         }
     }
@@ -803,6 +901,12 @@ pub(crate) struct NativeWasmRouteContext {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct NativeWasmCacheLookupContext {
     path_class: i32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct NativeWasmCacheStoreContext {
+    path_class: i32,
+    response_status: i32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -854,6 +958,21 @@ impl NativeWasmCacheLookupContext {
             .map(|(path, _)| wasm_path_class(&path))
             .unwrap_or(PATH_CLASS_OTHER);
         Self { path_class }
+    }
+}
+
+impl NativeWasmCacheStoreContext {
+    pub(crate) fn from_request_response(
+        request: &NativeHttp1Request,
+        response: &NativeHttp1Response,
+    ) -> Self {
+        let path_class = request_path_and_query(request)
+            .map(|(path, _)| wasm_path_class(&path))
+            .unwrap_or(PATH_CLASS_OTHER);
+        Self {
+            path_class,
+            response_status: i32::from(response.status()),
+        }
     }
 }
 
@@ -990,6 +1109,20 @@ fn wasm_cache_lookup_host_functions(
     )]
 }
 
+fn wasm_cache_store_host_functions(
+    context: NativeWasmCacheStoreContext,
+) -> Vec<WasmI32HostFunction> {
+    vec![WasmI32HostFunction::new(
+        WASM_HOST_MODULE,
+        "context",
+        move |kind, _unused| match kind {
+            HOST_CONTEXT_PATH_CLASS => Ok(context.path_class),
+            HOST_CONTEXT_RESPONSE_STATUS => Ok(context.response_status),
+            _ => Err("unknown wasm context field".to_owned()),
+        },
+    )]
+}
+
 fn wasm_default_outcome_label(value: i32) -> &'static str {
     match value {
         0 => "continue",
@@ -1022,6 +1155,15 @@ fn wasm_cache_lookup_outcome_label(value: i32) -> &'static str {
         CACHE_LOOKUP_PASS => "pass",
         CACHE_LOOKUP_BYPASS => "bypass",
         CACHE_LOOKUP_DENY => "deny",
+        _ => "error",
+    }
+}
+
+fn wasm_cache_store_outcome_label(value: i32) -> &'static str {
+    match value {
+        CACHE_STORE_CONTINUE => "continue",
+        CACHE_STORE_SKIP => "skip",
+        CACHE_STORE_DENY => "deny",
         _ => "error",
     }
 }
