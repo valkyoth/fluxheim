@@ -11,7 +11,8 @@ use crate::native_http1_proxy_cache_response::native_cached_hit_response;
 use crate::native_http1_proxy_config::native_http1_static_failover_method_allowed;
 use crate::native_http1_proxy_error_page::native_error_page_response;
 use crate::native_http1_proxy_memory_cache::{
-    NativePeerFillDecision, NativeProxyCacheLookup, NativeProxyMemoryCache,
+    NativePeerFillDecision, NativeProxyCacheKeyComponent, NativeProxyCacheLookup,
+    NativeProxyMemoryCache,
 };
 use crate::native_http1_proxy_request::native_proxy_error_is_timeout;
 #[cfg(feature = "wasm")]
@@ -49,13 +50,16 @@ impl NativeHttp1Proxy {
             Option<&'static str>,
             Option<u64>,
         )>;
+        #[cfg(feature = "wasm")]
+        let mut wasm_cache_key_components = Vec::<NativeProxyCacheKeyComponent>::new();
         if let Some(cache) = &self.cache {
             #[cfg(feature = "wasm")]
             if let Some(hooks) = wasm_hooks {
-                match hooks
+                let decision = hooks
                     .cache_lookup_decision(NativeWasmCacheLookupContext::from_request(&request))
-                    .await
-                {
+                    .await;
+                wasm_cache_key_components = decision.key_components;
+                match decision.outcome {
                     NativeWasmCacheLookupOutcome::Continue => {}
                     NativeWasmCacheLookupOutcome::Pass(reason) => {
                         cache.record_policy_activity("pass");
@@ -107,7 +111,16 @@ impl NativeHttp1Proxy {
                 );
             }
             if proxy_cache_status.is_none() {
-                match cache.lookup(&request).await {
+                match cache
+                    .lookup_with_key_components(
+                        &request,
+                        #[cfg(feature = "wasm")]
+                        &wasm_cache_key_components,
+                        #[cfg(not(feature = "wasm"))]
+                        &[],
+                    )
+                    .await
+                {
                     NativeProxyCacheLookup::Hit { entry, range } => {
                         let response = native_cached_hit_response(&entry, &request, range);
                         return self.finish_response(

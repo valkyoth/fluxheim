@@ -4775,8 +4775,9 @@ circular dependencies.
 - `v1.7.4`: VCL-like cache lookup/store policy hooks for
   lookup/pass/bypass/deny and store continue/skip/deny decisions, with live
   cache HIT/MISS and skip-store tests.
-- `v1.7.5`: VCL-like cache policy mutation hooks for bounded cache-key
-  components, TTL/tag/store-admission decisions, and live TTL/tag/key tests.
+- `v1.7.5`: VCL-like cache policy mutation hooks. First slice: bounded
+  symbolic cache-key components with low-cardinality live HIT/MISS tests.
+  Remaining slice: TTL/tag/store-admission decisions and live TTL/tag tests.
 - `v1.7.6`: mature-runtime hardening across all hook families: compiled-module
   cache isolation, cross-family chain regression tests, reload hash-change
   tests, metrics/admin completeness, and secret-safe labels. The initial

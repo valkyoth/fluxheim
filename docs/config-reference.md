@@ -638,10 +638,14 @@ controls still run in their normal order. Cache hooks use the separate
 hot cache-policy routes cannot starve security-decision hooks that use
 `wasm.max_total_concurrent_executions`. Cache-store hook chains use
 most-restrictive-wins aggregation: a later `deny` still runs and wins after an
-earlier `skip`. The current cache hooks do not yet expose raw headers, request
-bodies, arbitrary cache-key bytes, TTL override, tag assignment, or
-response-store mutation; those stay staged behind later bounded cache-policy
-ABIs.
+earlier `skip`. `1.7.5` adds the first bounded cache-key mutation host call:
+plugins can read the symbolic `X-Device-Class` context and append either the
+fixed `wasm-device-class=mobile` or `wasm-device-class=desktop` component to
+the cache key. The host rejects duplicate components, unknown IDs, and
+component counts above the hard cap. The current cache hooks still do not
+expose raw headers, request bodies, arbitrary cache-key bytes, TTL override,
+tag assignment, or response-store mutation; those stay staged behind later
+bounded cache-policy ABIs.
 
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:

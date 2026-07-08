@@ -12,16 +12,20 @@ use crate::native_http1_proxy_cache_policy::{
 };
 use crate::native_http1_proxy_request::native_request_header;
 use fluxheim_cache::{
-    CacheRequest, CacheRequestView, CacheStaleEvent, cache_key_with_component,
-    cache_method_temporarily_bypassed, cache_should_serve_stale, image_cache_key,
-    request_cache_bypass_reason, request_cache_revalidation_requested,
+    CacheRequest, CacheRequestView, CacheStaleEvent, append_cache_key_component,
+    cache_key_with_component, cache_method_temporarily_bypassed, cache_should_serve_stale,
+    image_cache_key, request_cache_bypass_reason, request_cache_revalidation_requested,
     selected_cache_range_request,
 };
 
-use super::{NativeProxyCacheLookup, NativeProxyMemoryCache};
+use super::{NativeProxyCacheKeyComponent, NativeProxyCacheLookup, NativeProxyMemoryCache};
 
 impl NativeProxyMemoryCache {
-    pub(crate) async fn lookup(&self, request: &NativeHttp1Request) -> NativeProxyCacheLookup {
+    pub(crate) async fn lookup_with_key_components(
+        &self,
+        request: &NativeHttp1Request,
+        key_components: &[NativeProxyCacheKeyComponent],
+    ) -> NativeProxyCacheLookup {
         if cache_method_temporarily_bypassed(request.method()) {
             return NativeProxyCacheLookup::Bypass("method-head");
         }
@@ -31,7 +35,7 @@ impl NativeProxyMemoryCache {
         if request.contains_header("authorization") {
             return NativeProxyCacheLookup::Bypass("request-authorization");
         }
-        let Some(key) = self.key(request) else {
+        let Some(key) = self.key_with_components(request, key_components) else {
             return NativeProxyCacheLookup::Bypass("proxy-ineligible");
         };
         if self.cache_pass_should_bypass(&key) {
@@ -95,7 +99,15 @@ impl NativeProxyMemoryCache {
     }
 
     pub(super) fn key(&self, request: &NativeHttp1Request) -> Option<String> {
-        image_cache_key(
+        self.key_with_components(request, &[])
+    }
+
+    pub(super) fn key_with_components(
+        &self,
+        request: &NativeHttp1Request,
+        key_components: &[NativeProxyCacheKeyComponent],
+    ) -> Option<String> {
+        let mut key = image_cache_key(
             &self.config,
             &CacheRequest {
                 method: request.method(),
@@ -104,7 +116,11 @@ impl NativeProxyMemoryCache {
                 query: request.query(),
             },
         )
-        .map(|key| key.as_str().to_owned())
+        .map(|key| key.as_str().to_owned())?;
+        for component in key_components {
+            append_cache_key_component(&mut key, component.label, component.value);
+        }
+        Some(key)
     }
 
     pub(super) async fn get(

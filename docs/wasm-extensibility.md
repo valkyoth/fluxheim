@@ -12,9 +12,11 @@ load-balanced and persistent routes. Fluxheim `1.7.4` starts bounded
 cache-policy hooks with cache-lookup decisions that can continue, pass, bypass,
 or deny before cache lookup and storage, plus cache-store decisions that can
 continue, skip storage, or deny after origin response and before cache write.
-Direct backend choice, plugin-provided persistence keys, dynamic mirror/shadow
-target choice, richer cache-key/TTL/tag store policy hooks, Proxy-ABI
-compatibility, and WASI capabilities remain staged for later `1.7.x` releases.
+Fluxheim `1.7.5` adds the first bounded symbolic cache-key component hook for
+low-cardinality cache variants. Direct backend choice, plugin-provided
+persistence keys, dynamic mirror/shadow target choice, richer TTL/tag store
+policy hooks, Proxy-ABI compatibility, and WASI capabilities remain staged for
+later `1.7.x` releases.
 
 Cargo features:
 
@@ -159,10 +161,24 @@ Fluxheim `1.7.4` adds the first cache-policy hook ABIs. Plugins attached to
 - `3`: deny with `403`.
 
 The cache lookup host-call surface deliberately reuses only bounded symbolic
-request context in this slice. It runs before native proxy-cache slice lookup,
-normal lookup, peer-fill, request collapsing, origin-fill protection, and store
-admission, but after Fluxheim's built-in access, route, rate-limit,
-concurrency, and header policy gates.
+request context. Fluxheim `1.7.5` adds the first bounded cache-key mutation
+host call:
+
+- `context(5, 0)` returns a symbolic device class derived from
+  `X-Device-Class`: `0` for unset/unknown, `5` for `mobile`, and `6` for
+  `desktop`;
+- `set_cache_key_component(1, 5)` adds the low-cardinality
+  `wasm-device-class=mobile` cache-key component;
+- `set_cache_key_component(1, 6)` adds the low-cardinality
+  `wasm-device-class=desktop` cache-key component.
+
+Any other cache-key component ID, value ID, duplicate component, or component
+count above the hard cap fails the hook through the plugin fail mode. Plugins
+still cannot emit arbitrary cache-key bytes or raw request headers. The lookup
+hook runs before native proxy-cache slice lookup, normal lookup, peer-fill,
+request collapsing, origin-fill protection, and store admission, but after
+Fluxheim's built-in access, route, rate-limit, concurrency, and header policy
+gates.
 
 Plugins attached to `cache-store` export `fluxheim_cache_store() -> i32`:
 
@@ -172,9 +188,9 @@ Plugins attached to `cache-store` export `fluxheim_cache_store() -> i32`:
 
 The cache store host-call surface exposes only the path class and response
 status as bounded integer context. It runs after an origin response and before
-memory/disk cache writes. Raw headers, request bodies, cache-key bytes, TTL
-override, tag assignment, cached objects, and response-store mutation are not
-exposed in `1.7.4`.
+memory/disk cache writes. Raw headers, request bodies, arbitrary cache-key
+bytes, TTL override, tag assignment, cached objects, and response-store
+mutation are not exposed in `1.7.5`.
 
 Cache-store chains use the same restrictive aggregation model as other hook
 families: every hook runs unless a hook returns `deny`; an earlier `skip` does
@@ -392,9 +408,10 @@ route-decision hook with configured `canary` and `mirror` branch selection,
 including live coverage for selected native load-balanced and managed-cookie
 persistent routes. `1.7.4` adds bounded cache-lookup decisions before cache
 lookup/storage and bounded cache-store skip/deny decisions before cache writes.
-Direct backend pool/member choice, plugin-provided persistence-key choice,
-dynamic mirror/shadow target choice, and richer cache-key/TTL/tag store policy
-hooks remain staged for later `1.7.x` releases.
+`1.7.5` adds bounded symbolic cache-key components with low-cardinality live
+variant coverage. Direct backend pool/member choice, plugin-provided
+persistence-key choice, dynamic mirror/shadow target choice, and richer TTL/tag
+store policy hooks remain staged for later `1.7.x` releases.
 
 ## Reload Semantics
 

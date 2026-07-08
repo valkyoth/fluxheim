@@ -700,6 +700,71 @@ async fn native_wasm_cache_lookup_denies_before_cache_lookup() {
 }
 
 #[tokio::test]
+async fn native_wasm_cache_lookup_can_add_bounded_cache_key_component() {
+    let fixture = WasmRouteFixture::new(&[("cache", WasmPluginBody::CacheLookupDeviceKey)]);
+    let upstream = super::upstream_cacheable_sequence(&[
+        ("/static/device.png", "mobile-body"),
+        ("/static/device.png", "desktop-body"),
+    ])
+    .await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![wasm_attachment_phase(
+            "cache",
+            "route",
+            100,
+            fluxheim_config::WasmPluginPhase::CacheLookup,
+        )],
+    );
+    config.vhosts[0].routes[0].path_exact = None;
+    config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].routes[0].redirect = None;
+    config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    config.vhosts[0].routes[0].cache = Some(native_proxy_memory_cache_config());
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let mobile = downstream_request(
+        proxy,
+        "GET /static/device.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let desktop = downstream_request(
+        proxy,
+        "GET /static/device.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: desktop\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let mobile_hit = downstream_request(
+        proxy,
+        "GET /static/device.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(mobile.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(mobile.ends_with("mobile-body"));
+    assert_eq!(
+        response_header(&mobile, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(desktop.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(desktop.ends_with("desktop-body"));
+    assert_eq!(
+        response_header(&desktop, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(mobile_hit.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(mobile_hit.ends_with("mobile-body"));
+    assert_eq!(
+        response_header(&mobile_hit, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+}
+
+#[tokio::test]
 async fn native_wasm_cache_store_can_skip_storage_after_origin_response() {
     let fixture = WasmRouteFixture::new(&[("cache", WasmPluginBody::CacheStoreSkip)]);
     let upstream = super::upstream_cacheable_sequence(&[
@@ -950,6 +1015,7 @@ enum WasmPluginBody {
     ForbiddenHeader,
     RouteDecision,
     CacheLookup,
+    CacheLookupDeviceKey,
     CacheLookupDeny,
     CacheLookupBusy,
     CacheStoreSkip,
@@ -1066,6 +1132,30 @@ impl WasmPluginBody {
                 r#"(module (func (export "fluxheim_cache_lookup") (result i32) i32.const 3))"#
                     .to_owned()
             }
+            Self::CacheLookupDeviceKey => {
+                r#"
+                (module
+                  (import "fluxheim_policy_v1" "context" (func $context (param i32 i32) (result i32)))
+                  (import "fluxheim_policy_v1" "set_cache_key_component" (func $set_cache_key_component (param i32 i32) (result i32)))
+                  (func (export "fluxheim_cache_lookup") (result i32)
+                    (local $device_class i32)
+                    i32.const 5
+                    i32.const 0
+                    call $context
+                    local.set $device_class
+                    local.get $device_class
+                    i32.const 0
+                    i32.ne
+                    if
+                      i32.const 1
+                      local.get $device_class
+                      call $set_cache_key_component
+                      drop
+                    end
+                    i32.const 0))
+                "#
+                .to_owned()
+            }
             Self::CacheLookupBusy => {
                 r#"(module (func (export "fluxheim_cache_lookup") (result i32) (loop br 0) i32.const 0))"#
                     .to_owned()
@@ -1149,6 +1239,7 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         }
         WasmPluginBody::RouteDecision => vec![fluxheim_config::WasmPluginPhase::RouteDecision],
         WasmPluginBody::CacheLookup
+        | WasmPluginBody::CacheLookupDeviceKey
         | WasmPluginBody::CacheLookupDeny
         | WasmPluginBody::CacheLookupBusy => {
             vec![fluxheim_config::WasmPluginPhase::CacheLookup]

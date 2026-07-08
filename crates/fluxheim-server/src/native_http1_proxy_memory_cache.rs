@@ -82,6 +82,12 @@ pub(crate) enum NativeProxyCacheLookup {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct NativeProxyCacheKeyComponent {
+    pub(crate) label: &'static str,
+    pub(crate) value: &'static str,
+}
+
 #[derive(Debug)]
 pub(crate) enum NativePeerFillDecision {
     Skip,

@@ -7,6 +7,24 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.7.5 - 2026-07-08
+
+### Added
+
+- Add a bounded native HTTP/1 Wasm cache-key component host call for
+  `cache-lookup` hooks.
+- Add symbolic `X-Device-Class` context and fixed
+  `wasm-device-class=mobile|desktop` cache-key variants.
+- Add live listener tests proving separate mobile and desktop cache variants
+  MISS independently and HIT the original variant on repeat.
+
+### Security
+
+- Reject unknown cache-key component IDs, unknown values, duplicate labels, and
+  component counts above the hard cap through the plugin fail mode.
+- Keep arbitrary request headers, raw cache-key bytes, request bodies, cached
+  objects, TTL override, and tag assignment unavailable in this slice.
+
 ## 1.7.4 - 2026-07-07
 
 ### Added

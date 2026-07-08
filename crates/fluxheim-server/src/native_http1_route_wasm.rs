@@ -9,6 +9,7 @@ use fluxheim_wasm::{
     load_plugin_from_manifest,
 };
 
+use crate::native_http1_proxy_memory_cache::NativeProxyCacheKeyComponent;
 use crate::native_http1_proxy_metrics::{
     record_native_wasm_admission_rejection, record_native_wasm_execution,
 };
@@ -30,18 +31,23 @@ const CACHE_STORE_PHASE: &str = "cache-store";
 const CACHE_STORE_FUNCTION: &str = "fluxheim_cache_store";
 const WASM_HOST_MODULE: &str = "fluxheim_policy_v1";
 const MAX_WASM_HEADER_MUTATIONS: usize = 16;
+const MAX_WASM_CACHE_KEY_COMPONENTS: usize = 4;
 
 const HOST_CONTEXT_PATH_CLASS: i32 = 1;
 const HOST_CONTEXT_CANARY_HEADER: i32 = 2;
 const HOST_CONTEXT_MIRROR_HEADER: i32 = 3;
 const HOST_CONTEXT_RESPONSE_STATUS: i32 = 4;
+const HOST_CONTEXT_DEVICE_CLASS_HEADER: i32 = 5;
 const HEADER_X_POLICY_TIER: i32 = 1;
 const HEADER_X_FLUXHEIM_POLICY_BRANCH: i32 = 2;
 const HEADER_X_POWERED_BY: i32 = 3;
+const CACHE_KEY_DEVICE_CLASS: i32 = 1;
 const VALUE_STANDARD: i32 = 1;
 const VALUE_API: i32 = 2;
 const VALUE_STATIC: i32 = 3;
 const VALUE_GOLD: i32 = 4;
+const VALUE_MOBILE: i32 = 5;
+const VALUE_DESKTOP: i32 = 6;
 const PATH_CLASS_OTHER: i32 = 0;
 const PATH_CLASS_API: i32 = 1;
 const PATH_CLASS_STATIC: i32 = 2;
@@ -121,6 +127,12 @@ pub(crate) enum NativeWasmCacheLookupOutcome {
     Pass(&'static str),
     Bypass(&'static str),
     Deny { status: u16, reason: String },
+}
+
+#[derive(Debug)]
+pub(crate) struct NativeWasmCacheLookupDecision {
+    pub(crate) outcome: NativeWasmCacheLookupOutcome,
+    pub(crate) key_components: Vec<NativeProxyCacheKeyComponent>,
 }
 
 #[derive(Debug)]
@@ -406,13 +418,19 @@ impl NativeWasmHooks {
     pub(crate) async fn cache_lookup_decision(
         &self,
         context: NativeWasmCacheLookupContext,
-    ) -> NativeWasmCacheLookupOutcome {
+    ) -> NativeWasmCacheLookupDecision {
         if self.cache_lookup.is_empty() {
-            return NativeWasmCacheLookupOutcome::Continue;
+            return NativeWasmCacheLookupDecision {
+                outcome: NativeWasmCacheLookupOutcome::Continue,
+                key_components: Vec::new(),
+            };
         }
         let mut selected = NativeWasmCacheLookupOutcome::Continue;
+        let mut key_components = Vec::new();
         for hook in &self.cache_lookup {
-            match hook.run_cache_lookup(context).await {
+            let decision = hook.run_cache_lookup(context).await;
+            key_components.extend(decision.key_components);
+            match decision.outcome {
                 NativeWasmCacheLookupOutcome::Continue => {}
                 NativeWasmCacheLookupOutcome::Pass(reason) => {
                     if matches!(selected, NativeWasmCacheLookupOutcome::Continue) {
@@ -425,11 +443,17 @@ impl NativeWasmHooks {
                     }
                 }
                 NativeWasmCacheLookupOutcome::Deny { status, reason } => {
-                    return NativeWasmCacheLookupOutcome::Deny { status, reason };
+                    return NativeWasmCacheLookupDecision {
+                        outcome: NativeWasmCacheLookupOutcome::Deny { status, reason },
+                        key_components: Vec::new(),
+                    };
                 }
             }
         }
-        selected
+        NativeWasmCacheLookupDecision {
+            outcome: selected,
+            key_components,
+        }
     }
 
     pub(crate) async fn cache_store_decision(
@@ -774,8 +798,9 @@ impl NativeWasmHook {
     async fn run_cache_lookup(
         &self,
         context: NativeWasmCacheLookupContext,
-    ) -> NativeWasmCacheLookupOutcome {
-        let host_functions = wasm_cache_lookup_host_functions(context);
+    ) -> NativeWasmCacheLookupDecision {
+        let key_components = Arc::new(Mutex::new(Vec::new()));
+        let host_functions = wasm_cache_lookup_host_functions(context, Arc::clone(&key_components));
         match self
             .run_i32_with_hosts(
                 CACHE_LOOKUP_PHASE,
@@ -785,12 +810,24 @@ impl NativeWasmHook {
             )
             .await
         {
-            Ok(CACHE_LOOKUP_CONTINUE) => NativeWasmCacheLookupOutcome::Continue,
-            Ok(CACHE_LOOKUP_PASS) => NativeWasmCacheLookupOutcome::Pass("wasm-pass"),
-            Ok(CACHE_LOOKUP_BYPASS) => NativeWasmCacheLookupOutcome::Bypass("wasm-bypass"),
-            Ok(CACHE_LOOKUP_DENY) => NativeWasmCacheLookupOutcome::Deny {
-                status: 403,
-                reason: "wasm cache lookup denied".to_owned(),
+            Ok(CACHE_LOOKUP_CONTINUE) => NativeWasmCacheLookupDecision {
+                outcome: NativeWasmCacheLookupOutcome::Continue,
+                key_components: locked_wasm_cache_key_components(&key_components),
+            },
+            Ok(CACHE_LOOKUP_PASS) => NativeWasmCacheLookupDecision {
+                outcome: NativeWasmCacheLookupOutcome::Pass("wasm-pass"),
+                key_components: Vec::new(),
+            },
+            Ok(CACHE_LOOKUP_BYPASS) => NativeWasmCacheLookupDecision {
+                outcome: NativeWasmCacheLookupOutcome::Bypass("wasm-bypass"),
+                key_components: Vec::new(),
+            },
+            Ok(CACHE_LOOKUP_DENY) => NativeWasmCacheLookupDecision {
+                outcome: NativeWasmCacheLookupOutcome::Deny {
+                    status: 403,
+                    reason: "wasm cache lookup denied".to_owned(),
+                },
+                key_components: Vec::new(),
             },
             Ok(_) => self.failed_cache_lookup("error"),
             Err(error) => {
@@ -868,13 +905,17 @@ impl NativeWasmHook {
         }
     }
 
-    fn failed_cache_lookup(&self, outcome: &'static str) -> NativeWasmCacheLookupOutcome {
-        match self.plugin.fail_mode {
+    fn failed_cache_lookup(&self, outcome: &'static str) -> NativeWasmCacheLookupDecision {
+        let outcome = match self.plugin.fail_mode {
             WasmPluginFailMode::FailOpen => NativeWasmCacheLookupOutcome::Continue,
             WasmPluginFailMode::FailClosed => NativeWasmCacheLookupOutcome::Deny {
                 status: 503,
                 reason: format!("wasm cache lookup {outcome}"),
             },
+        };
+        NativeWasmCacheLookupDecision {
+            outcome,
+            key_components: Vec::new(),
         }
     }
 
@@ -920,6 +961,7 @@ pub(crate) struct NativeWasmRouteContext {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct NativeWasmCacheLookupContext {
     path_class: i32,
+    device_class_header: i32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -976,7 +1018,11 @@ impl NativeWasmCacheLookupContext {
         let path_class = request_path_and_query(request)
             .map(|(path, _)| wasm_path_class(&path))
             .unwrap_or(PATH_CLASS_OTHER);
-        Self { path_class }
+        let device_class_header = wasm_device_class_header(request);
+        Self {
+            path_class,
+            device_class_header,
+        }
     }
 }
 
@@ -1117,15 +1163,39 @@ fn wasm_route_host_functions(context: NativeWasmRouteContext) -> Vec<WasmI32Host
 
 fn wasm_cache_lookup_host_functions(
     context: NativeWasmCacheLookupContext,
+    state: Arc<Mutex<Vec<NativeProxyCacheKeyComponent>>>,
 ) -> Vec<WasmI32HostFunction> {
-    vec![WasmI32HostFunction::new(
+    let context_function = WasmI32HostFunction::new(
         WASM_HOST_MODULE,
         "context",
         move |kind, _unused| match kind {
             HOST_CONTEXT_PATH_CLASS => Ok(context.path_class),
+            HOST_CONTEXT_DEVICE_CLASS_HEADER => Ok(context.device_class_header),
             _ => Err("unknown wasm context field".to_owned()),
         },
-    )]
+    );
+    let set_key_component_function = WasmI32HostFunction::new(
+        WASM_HOST_MODULE,
+        "set_cache_key_component",
+        move |label_id, value_id| {
+            let component = wasm_cache_key_component(label_id, value_id)?;
+            let mut state = state
+                .lock()
+                .map_err(|_| "wasm cache key component lock poisoned".to_owned())?;
+            if state.len() >= MAX_WASM_CACHE_KEY_COMPONENTS {
+                return Err("wasm cache key component limit reached".to_owned());
+            }
+            if state
+                .iter()
+                .any(|existing| existing.label == component.label)
+            {
+                return Err("duplicate wasm cache key component".to_owned());
+            }
+            state.push(component);
+            Ok(0)
+        },
+    );
+    vec![context_function, set_key_component_function]
 }
 
 fn wasm_cache_store_host_functions(
@@ -1233,6 +1303,55 @@ fn wasm_response_removable_header(name_id: i32) -> Result<&'static str, String> 
     match name_id {
         HEADER_X_POWERED_BY => Ok("x-powered-by"),
         _ => Err("forbidden wasm response header removal".to_owned()),
+    }
+}
+
+fn wasm_cache_key_component(
+    label_id: i32,
+    value_id: i32,
+) -> Result<NativeProxyCacheKeyComponent, String> {
+    match (label_id, value_id) {
+        (CACHE_KEY_DEVICE_CLASS, VALUE_MOBILE) => Ok(NativeProxyCacheKeyComponent {
+            label: "wasm-device-class",
+            value: "mobile",
+        }),
+        (CACHE_KEY_DEVICE_CLASS, VALUE_DESKTOP) => Ok(NativeProxyCacheKeyComponent {
+            label: "wasm-device-class",
+            value: "desktop",
+        }),
+        _ => Err("forbidden wasm cache key component".to_owned()),
+    }
+}
+
+fn wasm_device_class_header(request: &NativeHttp1Request) -> i32 {
+    request
+        .headers
+        .iter()
+        .find_map(|(name, value)| {
+            if !name.eq_ignore_ascii_case("x-device-class") {
+                return None;
+            }
+            match value.trim().to_ascii_lowercase().as_str() {
+                "mobile" => Some(VALUE_MOBILE),
+                "desktop" => Some(VALUE_DESKTOP),
+                _ => Some(0),
+            }
+        })
+        .unwrap_or(0)
+}
+
+fn locked_wasm_cache_key_components(
+    state: &Arc<Mutex<Vec<NativeProxyCacheKeyComponent>>>,
+) -> Vec<NativeProxyCacheKeyComponent> {
+    match state.lock() {
+        Ok(components) => components.clone(),
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::security",
+                "wasm cache key component lock poisoned: {error}"
+            );
+            std::process::abort();
+        }
     }
 }
 
