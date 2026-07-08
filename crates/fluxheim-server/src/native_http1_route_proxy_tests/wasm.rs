@@ -744,19 +744,28 @@ async fn native_wasm_cache_lookup_can_add_bounded_cache_key_component() {
     )
     .await;
 
-    assert!(mobile.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(
+        mobile.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected mobile response: {mobile:?}"
+    );
     assert!(mobile.ends_with("mobile-body"));
     assert_eq!(
         response_header(&mobile, "x-cache-status").as_deref(),
         Some("MISS")
     );
-    assert!(desktop.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(
+        desktop.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected desktop response: {desktop:?}"
+    );
     assert!(desktop.ends_with("desktop-body"));
     assert_eq!(
         response_header(&desktop, "x-cache-status").as_deref(),
         Some("MISS")
     );
-    assert!(mobile_hit.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(
+        mobile_hit.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected mobile hit response: {mobile_hit:?}"
+    );
     assert!(mobile_hit.ends_with("mobile-body"));
     assert_eq!(
         response_header(&mobile_hit, "x-cache-status").as_deref(),
@@ -998,6 +1007,115 @@ async fn native_wasm_cache_store_forbidden_header_fails_closed() {
 }
 
 #[tokio::test]
+async fn native_wasm_cache_policy_example_matches_documented_behavior() {
+    let fixture = WasmRouteFixture::new(&[
+        ("cache_lookup", WasmPluginBody::CacheLookupPolicyExample),
+        ("cache_store", WasmPluginBody::CacheStorePolicyExample),
+    ]);
+    let upstream = super::upstream_cacheable_sequence(&[
+        ("/static/example.png", "mobile-body"),
+        ("/static/example.png", "desktop-body"),
+        ("/static/example.png", "mobile-refill"),
+    ])
+    .await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![
+            wasm_attachment_phase(
+                "cache_lookup",
+                "route",
+                100,
+                fluxheim_config::WasmPluginPhase::CacheLookup,
+            ),
+            wasm_attachment_phase(
+                "cache_store",
+                "route",
+                100,
+                fluxheim_config::WasmPluginPhase::CacheStore,
+            ),
+        ],
+    );
+    config.vhosts[0].routes[0].path_exact = None;
+    config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].routes[0].redirect = None;
+    config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    config.vhosts[0].routes[0].cache = Some(native_proxy_memory_cache_config());
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let mobile = downstream_request(
+        proxy,
+        "GET /static/example.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let desktop = downstream_request(
+        proxy,
+        "GET /static/example.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: desktop\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let mobile_hit = downstream_request(
+        proxy,
+        "GET /static/example.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    let mobile_expired = downstream_request(
+        proxy,
+        "GET /static/example.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(
+        mobile.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected mobile response: {mobile:?}"
+    );
+    assert!(mobile.ends_with("mobile-body"));
+    assert_eq!(
+        response_header(&mobile, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(response_header(&mobile, "x-fluxheim-cache-policy"), None);
+
+    assert!(
+        desktop.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected desktop response: {desktop:?}"
+    );
+    assert!(desktop.ends_with("desktop-body"));
+    assert_eq!(
+        response_header(&desktop, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+
+    assert!(
+        mobile_hit.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected mobile hit response: {mobile_hit:?}"
+    );
+    assert!(mobile_hit.ends_with("mobile-body"));
+    assert_eq!(
+        response_header(&mobile_hit, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+    assert_eq!(
+        response_header(&mobile_hit, "x-fluxheim-cache-policy").as_deref(),
+        Some("wasm")
+    );
+
+    assert!(
+        mobile_expired.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected expired mobile response: {mobile_expired:?}"
+    );
+    assert!(mobile_expired.ends_with("mobile-refill"));
+    assert_eq!(
+        response_header(&mobile_expired, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+}
+
+#[tokio::test]
 async fn native_wasm_cache_store_deny_wins_over_earlier_skip() {
     let fixture = WasmRouteFixture::new(&[
         ("skip", WasmPluginBody::CacheStoreSkip),
@@ -1162,6 +1280,8 @@ enum WasmPluginBody {
     CacheStoreShortTtl,
     CacheStoreHeader,
     CacheStoreForbiddenHeader,
+    CacheLookupPolicyExample,
+    CacheStorePolicyExample,
     Trap,
     BusyLoop,
 }
@@ -1368,6 +1488,12 @@ impl WasmPluginBody {
                 "#
                 .to_owned()
             }
+            Self::CacheLookupPolicyExample => {
+                include_str!("../../../../examples/wasm/cache-lookup-policy.wat").to_owned()
+            }
+            Self::CacheStorePolicyExample => {
+                include_str!("../../../../examples/wasm/cache-store-policy.wat").to_owned()
+            }
             Self::Trap => {
                 r#"(module (func (export "fluxheim_access_decision") (result i32) unreachable))"#
                     .to_owned()
@@ -1435,6 +1561,12 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         | WasmPluginBody::CacheStoreShortTtl
         | WasmPluginBody::CacheStoreHeader
         | WasmPluginBody::CacheStoreForbiddenHeader => {
+            vec![fluxheim_config::WasmPluginPhase::CacheStore]
+        }
+        WasmPluginBody::CacheLookupPolicyExample => {
+            vec![fluxheim_config::WasmPluginPhase::CacheLookup]
+        }
+        WasmPluginBody::CacheStorePolicyExample => {
             vec![fluxheim_config::WasmPluginPhase::CacheStore]
         }
         WasmPluginBody::Decision(_) | WasmPluginBody::Trap | WasmPluginBody::BusyLoop => {

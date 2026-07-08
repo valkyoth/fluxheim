@@ -1,0 +1,74 @@
+# Example fragment for the checked-in cache lookup/store Wasm Text modules
+# after compiling them to .wasm files and replacing the sha256 placeholders
+# with the compiled module SHA-256 digests.
+
+[wasm]
+enabled = true
+plugin_roots = ["/etc/fluxheim/plugins"]
+max_total_concurrent_executions = 256
+max_total_cache_concurrent_executions = 128
+
+[[wasm.plugins]]
+name = "cache_lookup_policy"
+path = "/etc/fluxheim/plugins/cache-lookup-policy.wasm"
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+abi = "fluxheim-policy-v1"
+host_call_namespace = "fluxheim-policy-v1"
+phases = ["cache-lookup"]
+fail_mode = "fail-closed"
+
+[wasm.plugins.limits]
+max_module_bytes = "1MiB"
+max_memory_bytes = "16MiB"
+max_table_elements = 10000
+fuel = 5000000
+timeout_ms = 50
+compile_timeout_ms = 500
+
+[[wasm.attachments]]
+plugin = "cache_lookup_policy"
+vhost = "example"
+route = "static"
+priority = 100
+phases = ["cache-lookup"]
+
+[[wasm.plugins]]
+name = "cache_store_policy"
+path = "/etc/fluxheim/plugins/cache-store-policy.wasm"
+sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+abi = "fluxheim-policy-v1"
+host_call_namespace = "fluxheim-policy-v1"
+phases = ["cache-store"]
+fail_mode = "fail-closed"
+
+[wasm.plugins.limits]
+max_module_bytes = "1MiB"
+max_memory_bytes = "16MiB"
+max_table_elements = 10000
+fuel = 5000000
+timeout_ms = 50
+compile_timeout_ms = 500
+
+[[wasm.attachments]]
+plugin = "cache_store_policy"
+vhost = "example"
+route = "static"
+priority = 100
+phases = ["cache-store"]
+
+[[vhosts]]
+name = "example"
+hosts = ["example.com"]
+
+[[vhosts.routes]]
+name = "static"
+path_prefix = "/static/"
+
+[vhosts.routes.cache]
+enabled = true
+
+[vhosts.routes.cache.memory]
+enabled = true
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:3000"]

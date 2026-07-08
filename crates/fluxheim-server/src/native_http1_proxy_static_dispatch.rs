@@ -10,9 +10,10 @@ use crate::native_http1_proxy_cache_policy::native_cache_stale_event_for_error;
 use crate::native_http1_proxy_cache_response::native_cached_hit_response;
 use crate::native_http1_proxy_config::native_http1_static_failover_method_allowed;
 use crate::native_http1_proxy_error_page::native_error_page_response;
+#[cfg(feature = "wasm")]
+use crate::native_http1_proxy_memory_cache::NativeProxyCacheKeyComponent;
 use crate::native_http1_proxy_memory_cache::{
-    NativePeerFillDecision, NativeProxyCacheKeyComponent, NativeProxyCacheLookup,
-    NativeProxyMemoryCache,
+    NativePeerFillDecision, NativeProxyCacheLookup, NativeProxyMemoryCache,
 };
 use crate::native_http1_proxy_request::native_proxy_error_is_timeout;
 #[cfg(feature = "wasm")]

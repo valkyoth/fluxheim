@@ -163,6 +163,8 @@ fi
 - Add live listener coverage proving separate mobile/desktop cache variants
   HIT independently, fixed TTL overrides expire as expected, and bounded
   stored-header metadata appears only on cache hits.
+- Add a checked-in WebAssembly cache-policy example and matching config
+  template.
 
 * Tue Jul 07 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.4-1
 - Add bounded native HTTP/1 Wasm cache-lookup hooks.

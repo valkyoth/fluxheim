@@ -33,6 +33,11 @@ mutate arbitrary cached response headers.
 - Add live native HTTP/1 listener coverage proving a plugin can set the fixed
   stored response header on cache HIT and that forbidden header IDs fail
   closed.
+- Add `examples/wasm/cache-lookup-policy.wat`,
+  `examples/wasm/cache-store-policy.wat`, and a matching config template for
+  the bounded cache-policy ABI.
+- Add a live native HTTP/1 listener test that compiles the checked-in example
+  Wasm source and proves its cache-key, TTL, and stored-header behavior.
 
 ## Security Notes
 

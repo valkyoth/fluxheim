@@ -205,6 +205,14 @@ Cache-store chains use the same restrictive aggregation model as other hook
 families: every hook runs unless a hook returns `deny`; an earlier `skip` does
 not mask a later `deny`.
 
+`examples/wasm/cache-lookup-policy.wat` and
+`examples/wasm/cache-store-policy.wat` show the shipped `1.7.5` cache-policy
+subset as concrete Wasm Text modules, and `examples/wasm/cache-policy.toml`
+shows the matching plugin/attachment config shape. The example is test-backed
+by a live native HTTP/1 listener test that compiles the checked-in sources and
+verifies mobile/desktop cache variants, short TTL expiry, and fixed stored
+response headers.
+
 Allowed hooks:
 
 - request headers before upstream selection;

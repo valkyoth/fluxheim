@@ -9,6 +9,11 @@ cargo run --quiet --locked --no-default-features --features profile-development,
     --config tests/fixtures/wasm-config/accepted-registry.toml \
     --profile development \
     --no-runtime-paths >/dev/null
+cargo run --quiet --locked --no-default-features --features profile-development,wasm \
+    --bin fluxheim-config-tester -- \
+    --config examples/wasm/cache-policy.toml \
+    --profile development \
+    --no-runtime-paths >/dev/null
 
 if cargo run --quiet --locked --no-default-features --features profile-development,wasm \
     --bin fluxheim-config-tester -- \
