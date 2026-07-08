@@ -92,6 +92,7 @@ pub(crate) struct NativeProxyCacheKeyComponent {
 pub(crate) struct NativeProxyCacheStoreMetadata {
     pub(crate) ttl_override: Option<Duration>,
     pub(crate) cache_tags: Vec<&'static str>,
+    pub(crate) response_headers: Vec<(&'static str, &'static str)>,
 }
 
 #[derive(Debug)]

@@ -16,10 +16,13 @@ behavior when the change improves security or project direction.
 - Add symbolic `X-Device-Class` context and fixed
   `wasm-device-class=mobile|desktop` cache-key variants.
 - Add fixed-ID Wasm cache-store TTL overrides and cache tag assignment.
+- Add fixed-ID Wasm cache-store response-header metadata for stored objects.
 - Add live listener tests proving separate mobile and desktop cache variants
   MISS independently and HIT the original variant on repeat.
 - Add live listener tests proving a plugin TTL override expires an otherwise
   longer-lived origin response.
+- Add live listener tests proving fixed stored response-header metadata appears
+  on cache HIT and forbidden stored-header IDs fail closed.
 
 ### Security
 
@@ -27,8 +30,12 @@ behavior when the change improves security or project direction.
   component counts above the hard cap through the plugin fail mode.
 - Reject unknown TTL IDs, duplicate TTL overrides, unknown tag IDs, and tag
   counts above the hard cap through the plugin fail mode.
+- Reject unknown stored-header IDs, duplicate stored-header mutations, and
+  stored-header mutation counts above the hard cap through the plugin fail
+  mode.
 - Keep arbitrary request headers, raw cache-key bytes, request bodies, cached
-  objects, arbitrary TTLs, and arbitrary tag strings unavailable in this slice.
+  objects, arbitrary TTLs, arbitrary tag strings, and arbitrary stored response
+  headers unavailable in this slice.
 
 ## 1.7.4 - 2026-07-07
 

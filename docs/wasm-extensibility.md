@@ -13,7 +13,8 @@ cache-policy hooks with cache-lookup decisions that can continue, pass, bypass,
 or deny before cache lookup and storage, plus cache-store decisions that can
 continue, skip storage, or deny after origin response and before cache write.
 Fluxheim `1.7.5` adds the first bounded symbolic cache-key component hook for
-low-cardinality cache variants plus fixed-ID cache-store TTL/tag metadata.
+low-cardinality cache variants plus fixed-ID cache-store TTL/tag/header
+metadata.
 Direct backend choice, plugin-provided persistence keys, dynamic mirror/shadow
 target choice, richer store policy hooks, Proxy-ABI compatibility, and WASI
 capabilities remain staged for later `1.7.x` releases.
@@ -187,14 +188,18 @@ Plugins attached to `cache-store` export `fluxheim_cache_store() -> i32`:
 - `2`: deny with `403`.
 
 The cache store host-call surface exposes only the path class, response status,
-fixed TTL IDs, and fixed tag IDs. Plugins can call `set_cache_ttl(1, 0)` for a
-short bounded TTL, `set_cache_ttl(2, 0)` for a medium bounded TTL,
-`add_cache_tag(1, 0)` for `wasm-policy`, or `add_cache_tag(2, 0)` for
-`wasm-gold`. Duplicate TTL overrides, unknown TTL/tag IDs, and tag counts above
-the hard cap fail through the plugin fail mode. It runs after an origin
-response and before memory/disk cache writes. Raw headers, request bodies,
-arbitrary cache-key bytes, arbitrary TTLs, arbitrary tag strings, cached
-objects, and response-store mutation are not exposed in `1.7.5`.
+fixed TTL IDs, fixed tag IDs, and one fixed stored response-header family.
+Plugins can call `set_cache_ttl(1, 0)` for a short bounded TTL,
+`set_cache_ttl(2, 0)` for a medium bounded TTL, `add_cache_tag(1, 0)` for
+`wasm-policy`, `add_cache_tag(2, 0)` for `wasm-gold`,
+`set_cache_store_header(1, 1)` for `x-fluxheim-cache-policy: wasm`, or
+`set_cache_store_header(1, 2)` for `x-fluxheim-cache-policy: gold`. Duplicate
+TTL overrides, unknown TTL/tag/header IDs, duplicate stored-header mutations,
+and mutation counts above the hard caps fail through the plugin fail mode. It
+runs after an origin response and before memory/disk cache writes. Raw headers,
+request bodies, arbitrary cache-key bytes, arbitrary TTLs, arbitrary tag
+strings, arbitrary stored response headers, cached objects, and response-store
+body mutation are not exposed in `1.7.5`.
 
 Cache-store chains use the same restrictive aggregation model as other hook
 families: every hook runs unless a hook returns `deny`; an earlier `skip` does
@@ -413,7 +418,7 @@ including live coverage for selected native load-balanced and managed-cookie
 persistent routes. `1.7.4` adds bounded cache-lookup decisions before cache
 lookup/storage and bounded cache-store skip/deny decisions before cache writes.
 `1.7.5` adds bounded symbolic cache-key components with low-cardinality live
-variant coverage plus fixed-ID TTL/tag store metadata. Direct backend
+variant coverage plus fixed-ID TTL/tag/header store metadata. Direct backend
 pool/member choice, plugin-provided persistence-key choice, dynamic
 mirror/shadow target choice, and richer store policy hooks remain staged for
 later `1.7.x` releases.

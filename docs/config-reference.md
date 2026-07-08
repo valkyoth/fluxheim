@@ -643,13 +643,17 @@ plugins can read the symbolic `X-Device-Class` context and append either the
 fixed `wasm-device-class=mobile` or `wasm-device-class=desktop` component to
 the cache key. The host rejects duplicate components, unknown IDs, and
 component counts above the hard cap. `1.7.5` also adds fixed-ID cache-store
-TTL/tag metadata: `set_cache_ttl(1, 0)`, `set_cache_ttl(2, 0)`,
-`add_cache_tag(1, 0)`, and `add_cache_tag(2, 0)`. Unknown TTL/tag IDs,
-duplicate TTL overrides, and tag counts above the hard cap fail through the
-plugin fail mode. The current cache hooks still do not expose raw headers,
-request bodies, arbitrary cache-key bytes, arbitrary TTLs, arbitrary tag
-strings, or response-store mutation; those stay staged behind later bounded
-cache-policy ABIs.
+TTL/tag/header metadata: `set_cache_ttl(1, 0)`, `set_cache_ttl(2, 0)`,
+`add_cache_tag(1, 0)`, `add_cache_tag(2, 0)`,
+`set_cache_store_header(1, 1)`, and `set_cache_store_header(1, 2)`. The stored
+header call only writes `x-fluxheim-cache-policy` with fixed values to the
+cached object; the immediate origin MISS response is not rewritten. Unknown
+TTL/tag/header IDs, duplicate TTL overrides, duplicate stored-header
+mutations, and mutation counts above the hard caps fail through the plugin fail
+mode. The current cache hooks still do not expose raw headers, request bodies,
+arbitrary cache-key bytes, arbitrary TTLs, arbitrary tag strings, arbitrary
+stored response headers, or response-store body mutation; those stay staged
+behind later bounded cache-policy ABIs.
 
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:

@@ -913,6 +913,91 @@ async fn native_wasm_cache_store_can_override_ttl_with_bounded_value() {
 }
 
 #[tokio::test]
+async fn native_wasm_cache_store_can_set_bounded_stored_response_header() {
+    let fixture = WasmRouteFixture::new(&[("cache", WasmPluginBody::CacheStoreHeader)]);
+    let upstream =
+        super::upstream_cacheable_sequence(&[("/static/header.png", "header-one")]).await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![wasm_attachment_phase(
+            "cache",
+            "route",
+            100,
+            fluxheim_config::WasmPluginPhase::CacheStore,
+        )],
+    );
+    config.vhosts[0].routes[0].path_exact = None;
+    config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].routes[0].redirect = None;
+    config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    config.vhosts[0].routes[0].cache = Some(native_proxy_memory_cache_config());
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let first = downstream_get(proxy, "/static/header.png").await;
+    let hit = downstream_get(proxy, "/static/header.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("header-one"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(response_header(&first, "x-fluxheim-cache-policy"), None);
+    assert!(hit.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(hit.ends_with("header-one"));
+    assert_eq!(
+        response_header(&hit, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+    assert_eq!(
+        response_header(&hit, "x-fluxheim-cache-policy").as_deref(),
+        Some("wasm")
+    );
+}
+
+#[tokio::test]
+async fn native_wasm_cache_store_forbidden_header_fails_closed() {
+    let fixture = WasmRouteFixture::new(&[("cache", WasmPluginBody::CacheStoreForbiddenHeader)]);
+    let upstream =
+        super::upstream_cacheable_sequence(&[("/static/forbidden-header.png", "hidden-origin")])
+            .await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![wasm_attachment_phase(
+            "cache",
+            "route",
+            100,
+            fluxheim_config::WasmPluginPhase::CacheStore,
+        )],
+    );
+    config.vhosts[0].routes[0].path_exact = None;
+    config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].routes[0].redirect = None;
+    config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    config.vhosts[0].routes[0].cache = Some(native_proxy_memory_cache_config());
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, "/static/forbidden-header.png").await;
+
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(response.ends_with("wasm cache store trap\n"));
+    assert_eq!(
+        response_header(&response, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+}
+
+#[tokio::test]
 async fn native_wasm_cache_store_deny_wins_over_earlier_skip() {
     let fixture = WasmRouteFixture::new(&[
         ("skip", WasmPluginBody::CacheStoreSkip),
@@ -1075,6 +1160,8 @@ enum WasmPluginBody {
     CacheStoreSkip,
     CacheStoreDeny,
     CacheStoreShortTtl,
+    CacheStoreHeader,
+    CacheStoreForbiddenHeader,
     Trap,
     BusyLoop,
 }
@@ -1255,6 +1342,32 @@ impl WasmPluginBody {
                 "#
                 .to_owned()
             }
+            Self::CacheStoreHeader => {
+                r#"
+                (module
+                  (import "fluxheim_policy_v1" "set_cache_store_header" (func $set_cache_store_header (param i32 i32) (result i32)))
+                  (func (export "fluxheim_cache_store") (result i32)
+                    i32.const 1
+                    i32.const 1
+                    call $set_cache_store_header
+                    drop
+                    i32.const 0))
+                "#
+                .to_owned()
+            }
+            Self::CacheStoreForbiddenHeader => {
+                r#"
+                (module
+                  (import "fluxheim_policy_v1" "set_cache_store_header" (func $set_cache_store_header (param i32 i32) (result i32)))
+                  (func (export "fluxheim_cache_store") (result i32)
+                    i32.const 99
+                    i32.const 99
+                    call $set_cache_store_header
+                    drop
+                    i32.const 0))
+                "#
+                .to_owned()
+            }
             Self::Trap => {
                 r#"(module (func (export "fluxheim_access_decision") (result i32) unreachable))"#
                     .to_owned()
@@ -1319,7 +1432,11 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         }
         WasmPluginBody::CacheStoreSkip
         | WasmPluginBody::CacheStoreDeny
-        | WasmPluginBody::CacheStoreShortTtl => vec![fluxheim_config::WasmPluginPhase::CacheStore],
+        | WasmPluginBody::CacheStoreShortTtl
+        | WasmPluginBody::CacheStoreHeader
+        | WasmPluginBody::CacheStoreForbiddenHeader => {
+            vec![fluxheim_config::WasmPluginPhase::CacheStore]
+        }
         WasmPluginBody::Decision(_) | WasmPluginBody::Trap | WasmPluginBody::BusyLoop => {
             vec![fluxheim_config::WasmPluginPhase::AccessDecision]
         }

@@ -146,9 +146,9 @@ Required live test:
 
 Target line: starts in `v1.7.4` with cache lookup/pass/bypass/deny decisions
 and cache-store skip/deny decisions. `v1.7.5` adds bounded symbolic cache-key
-components with live low-cardinality variant tests plus fixed-ID TTL/tag store
-metadata with live TTL expiry coverage. Richer store-admission mutation remains
-follow-up `1.7.x` cache-policy work.
+components with live low-cardinality variant tests plus fixed-ID TTL/tag/header
+store metadata with live TTL expiry and stored-header HIT coverage. Richer
+store-admission mutation remains follow-up `1.7.x` cache-policy work.
 
 ## Stabilization Requirements
 

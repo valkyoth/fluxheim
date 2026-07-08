@@ -198,6 +198,13 @@ impl NativeProxyMemoryCache {
         mode: NativeCacheStoreMode,
         metadata: NativeProxyCacheStoreMetadata,
     ) -> Result<(), &'static str> {
+        let stored_response;
+        let response = if metadata.response_headers.is_empty() {
+            response
+        } else {
+            stored_response = native_cache_store_response_with_metadata(response, &metadata);
+            &stored_response
+        };
         let body_len = response.body().len() as u64;
         if body_len > self.config.max_object_bytes.as_u64() {
             return Err("object-too-large");
@@ -367,4 +374,16 @@ impl NativeProxyMemoryCache {
         }
         Ok(())
     }
+}
+
+fn native_cache_store_response_with_metadata(
+    response: &NativeHttp1Response,
+    metadata: &NativeProxyCacheStoreMetadata,
+) -> NativeHttp1Response {
+    let mut response = response.clone();
+    for (name, value) in &metadata.response_headers {
+        response.remove_header(name);
+        response.push_header(*name, *value);
+    }
+    response
 }

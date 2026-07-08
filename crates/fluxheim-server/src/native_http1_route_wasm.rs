@@ -35,6 +35,7 @@ const WASM_HOST_MODULE: &str = "fluxheim_policy_v1";
 const MAX_WASM_HEADER_MUTATIONS: usize = 16;
 const MAX_WASM_CACHE_KEY_COMPONENTS: usize = 4;
 const MAX_WASM_CACHE_TAGS: usize = 4;
+const MAX_WASM_CACHE_STORE_HEADER_MUTATIONS: usize = 4;
 
 const HOST_CONTEXT_PATH_CLASS: i32 = 1;
 const HOST_CONTEXT_CANARY_HEADER: i32 = 2;
@@ -49,6 +50,9 @@ const CACHE_TTL_SHORT: i32 = 1;
 const CACHE_TTL_MEDIUM: i32 = 2;
 const CACHE_TAG_WASM_POLICY: i32 = 1;
 const CACHE_TAG_WASM_GOLD: i32 = 2;
+const CACHE_STORE_HEADER_POLICY: i32 = 1;
+const CACHE_STORE_HEADER_VALUE_WASM: i32 = 1;
+const CACHE_STORE_HEADER_VALUE_GOLD: i32 = 2;
 const VALUE_STANDARD: i32 = 1;
 const VALUE_API: i32 = 2;
 const VALUE_STATIC: i32 = 3;
@@ -1264,10 +1268,11 @@ fn wasm_cache_store_host_functions(
             state.ttl_override = Some(ttl);
             Ok(0)
         });
+    let tag_state = Arc::clone(&state);
     let add_tag_function =
         WasmI32HostFunction::new(WASM_HOST_MODULE, "add_cache_tag", move |tag_id, _unused| {
             let tag = wasm_cache_tag(tag_id)?;
-            let mut state = state
+            let mut state = tag_state
                 .lock()
                 .map_err(|_| "wasm cache store metadata lock poisoned".to_owned())?;
             if state.cache_tags.len() >= MAX_WASM_CACHE_TAGS {
@@ -1278,7 +1283,35 @@ fn wasm_cache_store_host_functions(
             }
             Ok(0)
         });
-    vec![context_function, set_ttl_function, add_tag_function]
+    let header_state = Arc::clone(&state);
+    let set_store_header_function = WasmI32HostFunction::new(
+        WASM_HOST_MODULE,
+        "set_cache_store_header",
+        move |name_id, value_id| {
+            let header = wasm_cache_store_header(name_id, value_id)?;
+            let mut state = header_state
+                .lock()
+                .map_err(|_| "wasm cache store metadata lock poisoned".to_owned())?;
+            if state.response_headers.len() >= MAX_WASM_CACHE_STORE_HEADER_MUTATIONS {
+                return Err("wasm cache store header mutation limit reached".to_owned());
+            }
+            if state
+                .response_headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case(header.0))
+            {
+                return Err("duplicate wasm cache store header mutation".to_owned());
+            }
+            state.response_headers.push(header);
+            Ok(0)
+        },
+    );
+    vec![
+        context_function,
+        set_ttl_function,
+        add_tag_function,
+        set_store_header_function,
+    ]
 }
 
 fn wasm_default_outcome_label(value: i32) -> &'static str {
@@ -1440,6 +1473,21 @@ fn wasm_cache_tag(tag_id: i32) -> Result<&'static str, String> {
     }
 }
 
+fn wasm_cache_store_header(
+    name_id: i32,
+    value_id: i32,
+) -> Result<(&'static str, &'static str), String> {
+    match (name_id, value_id) {
+        (CACHE_STORE_HEADER_POLICY, CACHE_STORE_HEADER_VALUE_WASM) => {
+            Ok(("x-fluxheim-cache-policy", "wasm"))
+        }
+        (CACHE_STORE_HEADER_POLICY, CACHE_STORE_HEADER_VALUE_GOLD) => {
+            Ok(("x-fluxheim-cache-policy", "gold"))
+        }
+        _ => Err("forbidden wasm cache store header mutation".to_owned()),
+    }
+}
+
 fn locked_wasm_cache_store_metadata(
     state: &Arc<Mutex<NativeProxyCacheStoreMetadata>>,
 ) -> NativeProxyCacheStoreMetadata {
@@ -1468,6 +1516,18 @@ fn merge_wasm_cache_store_metadata(
         }
         if !target.cache_tags.contains(&tag) {
             target.cache_tags.push(tag);
+        }
+    }
+    for header in source.response_headers {
+        if target.response_headers.len() >= MAX_WASM_CACHE_STORE_HEADER_MUTATIONS {
+            return;
+        }
+        if !target
+            .response_headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(header.0))
+        {
+            target.response_headers.push(header);
         }
     }
 }
