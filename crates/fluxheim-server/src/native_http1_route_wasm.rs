@@ -451,7 +451,17 @@ impl NativeWasmHooks {
         let mut key_components = Vec::new();
         for hook in &self.cache_lookup {
             let decision = hook.run_cache_lookup(context).await;
-            key_components.extend(decision.key_components);
+            if let Err(reason) =
+                merge_wasm_cache_key_components(&mut key_components, decision.key_components)
+            {
+                return NativeWasmCacheLookupDecision {
+                    outcome: NativeWasmCacheLookupOutcome::Deny {
+                        status: 503,
+                        reason,
+                    },
+                    key_components: Vec::new(),
+                };
+            }
             match decision.outcome {
                 NativeWasmCacheLookupOutcome::Continue => {}
                 NativeWasmCacheLookupOutcome::Pass(reason) => {
@@ -1492,6 +1502,25 @@ fn locked_wasm_cache_key_components(
     }
 }
 
+fn merge_wasm_cache_key_components(
+    target: &mut Vec<NativeProxyCacheKeyComponent>,
+    source: Vec<NativeProxyCacheKeyComponent>,
+) -> Result<(), String> {
+    for component in source {
+        if target.len() >= MAX_WASM_CACHE_KEY_COMPONENTS {
+            return Err("wasm cache key component limit reached".to_owned());
+        }
+        if target
+            .iter()
+            .any(|existing| existing.label == component.label)
+        {
+            return Err("duplicate wasm cache key component".to_owned());
+        }
+        target.push(component);
+    }
+    Ok(())
+}
+
 fn wasm_cache_ttl(ttl_id: i32) -> Result<Duration, String> {
     match ttl_id {
         CACHE_TTL_SHORT => Ok(Duration::from_secs(1)),
@@ -1547,7 +1576,7 @@ fn merge_wasm_cache_store_metadata(
     }
     for tag in source.cache_tags {
         if target.cache_tags.len() >= MAX_WASM_CACHE_TAGS {
-            return;
+            break;
         }
         if !target.cache_tags.contains(&tag) {
             target.cache_tags.push(tag);
@@ -1555,7 +1584,7 @@ fn merge_wasm_cache_store_metadata(
     }
     for header in source.response_headers {
         if target.response_headers.len() >= MAX_WASM_CACHE_STORE_HEADER_MUTATIONS {
-            return;
+            break;
         }
         if !target
             .response_headers

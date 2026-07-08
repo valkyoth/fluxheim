@@ -98,10 +98,6 @@ impl NativeProxyMemoryCache {
         }
     }
 
-    pub(super) fn key(&self, request: &NativeHttp1Request) -> Option<String> {
-        self.key_with_components(request, &[])
-    }
-
     pub(super) fn key_with_components(
         &self,
         request: &NativeHttp1Request,

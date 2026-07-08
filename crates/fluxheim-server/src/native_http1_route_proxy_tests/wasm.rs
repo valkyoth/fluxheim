@@ -1185,6 +1185,218 @@ async fn native_wasm_cache_policy_example_leaves_non_image_store_metadata_unchan
 }
 
 #[tokio::test]
+async fn native_wasm_cache_slice_key_includes_bounded_key_components() {
+    let fixture = WasmRouteFixture::new(&[("cache", WasmPluginBody::CacheLookupDeviceKey)]);
+    let upstream = super::upstream_slice_response_sequence(&[
+        (
+            "/static/slice.png",
+            "bytes=0-3",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"mobile-v1\"\r\ncontent-range: bytes 0-3/10\r\ncontent-length: 4\r\n\r\nM012",
+        ),
+        (
+            "/static/slice.png",
+            "bytes=4-7",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"mobile-v1\"\r\ncontent-range: bytes 4-7/10\r\ncontent-length: 4\r\n\r\n3456",
+        ),
+        (
+            "/static/slice.png",
+            "bytes=0-3",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"desktop-v1\"\r\ncontent-range: bytes 0-3/10\r\ncontent-length: 4\r\n\r\nDABC",
+        ),
+        (
+            "/static/slice.png",
+            "bytes=4-7",
+            "HTTP/1.1 206 Partial Content\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\netag: \"desktop-v1\"\r\ncontent-range: bytes 4-7/10\r\ncontent-length: 4\r\n\r\nDEFG",
+        ),
+    ])
+    .await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![wasm_attachment_phase(
+            "cache",
+            "route",
+            100,
+            fluxheim_config::WasmPluginPhase::CacheLookup,
+        )],
+    );
+    config.vhosts[0].routes[0].path_exact = None;
+    config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].routes[0].redirect = None;
+    config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    let mut cache = native_proxy_memory_cache_config();
+    cache.range.enabled = true;
+    cache.range.slice.enabled = true;
+    cache.range.slice.fill_missing = true;
+    cache.range.slice.size_bytes = fluxheim_config::ByteSize::from_bytes(4);
+    cache.range.slice.max_slices = 4;
+    config.vhosts[0].routes[0].cache = Some(cache);
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let mobile = downstream_request(
+        proxy,
+        "GET /static/slice.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: mobile\r\nRange: bytes=2-5\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let desktop = downstream_request(
+        proxy,
+        "GET /static/slice.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: desktop\r\nRange: bytes=2-5\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let mobile_hit = downstream_request(
+        proxy,
+        "GET /static/slice.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: mobile\r\nRange: bytes=2-5\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(mobile.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+    assert!(mobile.ends_with("1234"));
+    assert_eq!(
+        response_header(&mobile, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(
+        response_header(&mobile, "x-cache-reason").as_deref(),
+        Some("slice-fill")
+    );
+    assert!(desktop.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+    assert!(desktop.ends_with("BCDE"));
+    assert_eq!(
+        response_header(&desktop, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(
+        response_header(&desktop, "x-cache-reason").as_deref(),
+        Some("slice-fill")
+    );
+    assert!(mobile_hit.starts_with("HTTP/1.1 206 Partial Content\r\n"));
+    assert!(mobile_hit.ends_with("1234"));
+    assert_eq!(
+        response_header(&mobile_hit, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+    assert_eq!(
+        response_header(&mobile_hit, "x-cache-reason").as_deref(),
+        Some("slice")
+    );
+}
+
+#[tokio::test]
+async fn native_wasm_cache_lookup_forbidden_key_component_fails_closed() {
+    let fixture = WasmRouteFixture::new(&[("cache", WasmPluginBody::CacheLookupForbiddenKey)]);
+    let upstream =
+        super::upstream_cacheable_sequence(&[("/static/forbidden-key.png", "hidden")]).await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![wasm_attachment_phase(
+            "cache",
+            "route",
+            100,
+            fluxheim_config::WasmPluginPhase::CacheLookup,
+        )],
+    );
+    config.vhosts[0].routes[0].path_exact = None;
+    config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].routes[0].redirect = None;
+    config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    config.vhosts[0].routes[0].cache = Some(native_proxy_memory_cache_config());
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, "/static/forbidden-key.png").await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"),
+        "unexpected forbidden key response: {response:?}"
+    );
+    assert!(response.ends_with("wasm cache lookup trap\n"));
+    assert_eq!(
+        response_header(&response, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+}
+
+#[tokio::test]
+async fn native_wasm_cache_lookup_duplicate_key_component_across_hooks_fails_closed() {
+    let fixture = WasmRouteFixture::new(&[
+        ("left", WasmPluginBody::CacheLookupDeviceKey),
+        ("right", WasmPluginBody::CacheLookupDeviceKey),
+    ]);
+    let upstream =
+        super::upstream_cacheable_sequence(&[("/static/duplicate-key.png", "hidden")]).await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![
+            wasm_attachment_phase(
+                "left",
+                "route",
+                100,
+                fluxheim_config::WasmPluginPhase::CacheLookup,
+            ),
+            wasm_attachment_phase(
+                "right",
+                "route",
+                101,
+                fluxheim_config::WasmPluginPhase::CacheLookup,
+            ),
+        ],
+    );
+    config.vhosts[0].routes[0].path_exact = None;
+    config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].routes[0].redirect = None;
+    config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    config.vhosts[0].routes[0].cache = Some(native_proxy_memory_cache_config());
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_request(
+        proxy,
+        "GET /static/duplicate-key.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(response.ends_with("duplicate wasm cache key component\n"));
+    assert_eq!(
+        response_header(&response, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+}
+
+#[tokio::test]
+async fn native_wasm_cache_store_forbidden_ttl_fails_closed() {
+    wasm_cache_store_failure_response(WasmPluginBody::CacheStoreForbiddenTtl, "ttl")
+        .await
+        .assert_service_unavailable();
+}
+
+#[tokio::test]
+async fn native_wasm_cache_store_duplicate_ttl_fails_closed() {
+    wasm_cache_store_failure_response(WasmPluginBody::CacheStoreDuplicateTtl, "ttl-duplicate")
+        .await
+        .assert_service_unavailable();
+}
+
+#[tokio::test]
+async fn native_wasm_cache_store_forbidden_tag_fails_closed() {
+    wasm_cache_store_failure_response(WasmPluginBody::CacheStoreForbiddenTag, "tag")
+        .await
+        .assert_service_unavailable();
+}
+
+#[tokio::test]
 async fn native_wasm_cache_store_deny_wins_over_earlier_skip() {
     let fixture = WasmRouteFixture::new(&[
         ("skip", WasmPluginBody::CacheStoreSkip),
@@ -1288,6 +1500,59 @@ async fn native_wasm_response_headers_apply_to_php_fpm_fallback() {
     assert!(response.ends_with("php-policy"));
 }
 
+struct WasmCacheStoreFailureResponse(String);
+
+impl WasmCacheStoreFailureResponse {
+    fn assert_service_unavailable(&self) {
+        assert!(
+            self.0.starts_with("HTTP/1.1 503 Service Unavailable\r\n"),
+            "unexpected wasm cache-store failure response: {:?}",
+            self.0
+        );
+        assert!(self.0.ends_with("wasm cache store trap\n"));
+        assert_eq!(
+            response_header(&self.0, "x-cache-status").as_deref(),
+            Some("BYPASS")
+        );
+    }
+}
+
+async fn wasm_cache_store_failure_response(
+    body: WasmPluginBody,
+    path_suffix: &str,
+) -> WasmCacheStoreFailureResponse {
+    let fixture = WasmRouteFixture::new(&[("cache", body)]);
+    let responses: &'static [(&'static str, &'static str)] = match path_suffix {
+        "ttl" => &[("/static/store-ttl.png", "hidden")],
+        "ttl-duplicate" => &[("/static/store-ttl-duplicate.png", "hidden")],
+        "tag" => &[("/static/store-tag.png", "hidden")],
+        _ => &[("/static/store-failure.png", "hidden")],
+    };
+    let path = responses[0].0;
+    let upstream = super::upstream_cacheable_sequence(responses).await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![wasm_attachment_phase(
+            "cache",
+            "route",
+            100,
+            fluxheim_config::WasmPluginPhase::CacheStore,
+        )],
+    );
+    config.vhosts[0].routes[0].path_exact = None;
+    config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].routes[0].redirect = None;
+    config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    config.vhosts[0].routes[0].cache = Some(native_proxy_memory_cache_config());
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+    WasmCacheStoreFailureResponse(downstream_get(proxy, path).await)
+}
+
 struct WasmRouteFixture {
     _directory: TempDir,
     root: PathBuf,
@@ -1342,11 +1607,15 @@ enum WasmPluginBody {
     RouteDecision,
     CacheLookup,
     CacheLookupDeviceKey,
+    CacheLookupForbiddenKey,
     CacheLookupDeny,
     CacheLookupBusy,
     CacheStoreSkip,
     CacheStoreDeny,
     CacheStoreShortTtl,
+    CacheStoreForbiddenTtl,
+    CacheStoreDuplicateTtl,
+    CacheStoreForbiddenTag,
     CacheStoreHeader,
     CacheStoreForbiddenHeader,
     CacheLookupPolicyExample,
@@ -1487,6 +1756,19 @@ impl WasmPluginBody {
                 "#
                 .to_owned()
             }
+            Self::CacheLookupForbiddenKey => {
+                r#"
+                (module
+                  (import "fluxheim_policy_v1" "set_cache_key_component" (func $set_cache_key_component (param i32 i32) (result i32)))
+                  (func (export "fluxheim_cache_lookup") (result i32)
+                    i32.const 99
+                    i32.const 99
+                    call $set_cache_key_component
+                    drop
+                    i32.const 0))
+                "#
+                .to_owned()
+            }
             Self::CacheLookupBusy => {
                 r#"(module (func (export "fluxheim_cache_lookup") (result i32) (loop br 0) i32.const 0))"#
                     .to_owned()
@@ -1524,6 +1806,49 @@ impl WasmPluginBody {
                     call $set_cache_ttl
                     drop
                     i32.const 1
+                    i32.const 0
+                    call $add_cache_tag
+                    drop
+                    i32.const 0))
+                "#
+                .to_owned()
+            }
+            Self::CacheStoreForbiddenTtl => {
+                r#"
+                (module
+                  (import "fluxheim_policy_v1" "set_cache_ttl" (func $set_cache_ttl (param i32 i32) (result i32)))
+                  (func (export "fluxheim_cache_store") (result i32)
+                    i32.const 99
+                    i32.const 0
+                    call $set_cache_ttl
+                    drop
+                    i32.const 0))
+                "#
+                .to_owned()
+            }
+            Self::CacheStoreDuplicateTtl => {
+                r#"
+                (module
+                  (import "fluxheim_policy_v1" "set_cache_ttl" (func $set_cache_ttl (param i32 i32) (result i32)))
+                  (func (export "fluxheim_cache_store") (result i32)
+                    i32.const 1
+                    i32.const 0
+                    call $set_cache_ttl
+                    drop
+                    i32.const 2
+                    i32.const 0
+                    call $set_cache_ttl
+                    drop
+                    i32.const 0))
+                "#
+                .to_owned()
+            }
+            Self::CacheStoreForbiddenTag => {
+                r#"
+                (module
+                  (import "fluxheim_policy_v1" "add_cache_tag" (func $add_cache_tag (param i32 i32) (result i32)))
+                  (func (export "fluxheim_cache_store") (result i32)
+                    i32.const 99
                     i32.const 0
                     call $add_cache_tag
                     drop
@@ -1621,6 +1946,7 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         WasmPluginBody::RouteDecision => vec![fluxheim_config::WasmPluginPhase::RouteDecision],
         WasmPluginBody::CacheLookup
         | WasmPluginBody::CacheLookupDeviceKey
+        | WasmPluginBody::CacheLookupForbiddenKey
         | WasmPluginBody::CacheLookupDeny
         | WasmPluginBody::CacheLookupBusy => {
             vec![fluxheim_config::WasmPluginPhase::CacheLookup]
@@ -1628,6 +1954,9 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         WasmPluginBody::CacheStoreSkip
         | WasmPluginBody::CacheStoreDeny
         | WasmPluginBody::CacheStoreShortTtl
+        | WasmPluginBody::CacheStoreForbiddenTtl
+        | WasmPluginBody::CacheStoreDuplicateTtl
+        | WasmPluginBody::CacheStoreForbiddenTag
         | WasmPluginBody::CacheStoreHeader
         | WasmPluginBody::CacheStoreForbiddenHeader => {
             vec![fluxheim_config::WasmPluginPhase::CacheStore]

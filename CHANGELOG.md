@@ -21,6 +21,8 @@ behavior when the change improves security or project direction.
   response-header exposure.
 - Add live listener tests proving separate mobile and desktop cache variants
   MISS independently and HIT the original variant on repeat.
+- Add live listener tests proving Wasm-selected cache-key components isolate
+  fixed-slice range-cache objects for ranged responses.
 - Add live listener tests proving a plugin TTL override expires an otherwise
   longer-lived origin response.
 - Add live listener tests proving fixed stored response-header metadata appears
@@ -35,11 +37,16 @@ behavior when the change improves security or project direction.
 
 - Reject unknown cache-key component IDs, unknown values, duplicate labels, and
   component counts above the hard cap through the plugin fail mode.
+- Enforce duplicate-label rejection and the aggregate component cap across the
+  full `cache-lookup` hook chain.
 - Reject unknown TTL IDs, duplicate TTL overrides, unknown tag IDs, and tag
   counts above the hard cap through the plugin fail mode.
 - Reject unknown stored-header IDs, duplicate stored-header mutations, and
   stored-header mutation counts above the hard cap through the plugin fail
   mode.
+- Scope cache-store tag and stored-header mutation caps independently, and
+  reject oversized cache-store candidates before cloning response bodies for
+  stored-header metadata.
 - Keep arbitrary request headers, raw cache-key bytes, request bodies, cached
   objects, arbitrary TTLs, arbitrary tag strings, arbitrary response-header
   inspection, and arbitrary stored response headers unavailable in this slice.

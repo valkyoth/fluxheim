@@ -163,8 +163,11 @@ fi
 - Add symbolic WebAssembly cache-store content-type inspection without raw
   response-header exposure.
 - Add live listener coverage proving separate mobile/desktop cache variants
-  HIT independently, fixed TTL overrides expire as expected, and bounded
-  stored-header metadata appears only on cache hits.
+  HIT independently, fixed-slice range-cache variants stay isolated, fixed TTL
+  overrides expire as expected, and bounded stored-header metadata appears only
+  on cache hits.
+- Enforce chained-hook cache-key component caps and duplicate-label rejection
+  across the full WebAssembly cache-lookup hook chain.
 - Add a checked-in WebAssembly cache-policy example and matching config
   template.
 

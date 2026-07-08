@@ -179,7 +179,9 @@ still cannot emit arbitrary cache-key bytes or raw request headers. The lookup
 hook runs before native proxy-cache slice lookup, normal lookup, peer-fill,
 request collapsing, origin-fill protection, and store admission, but after
 Fluxheim's built-in access, route, rate-limit, concurrency, and header policy
-gates.
+gates. Wasm-selected cache-key components are part of the complete-object,
+single-range, and fixed-slice range-cache keys, so a bounded variant selected
+by a plugin cannot share slice objects with another variant for the same URL.
 
 Plugins attached to `cache-store` export `fluxheim_cache_store() -> i32`:
 
@@ -209,7 +211,11 @@ names or values through this cache-store surface.
 
 Cache-store chains use the same restrictive aggregation model as other hook
 families: every hook runs unless a hook returns `deny`; an earlier `skip` does
-not mask a later `deny`.
+not mask a later `deny`. Cache-key components are also aggregated across the
+full chain with duplicate-label rejection and a hard total component cap; one
+plugin cannot silently overwrite or multiply another plugin's cache-key
+variant. Cache-store tag and stored-header caps are scoped to their own
+metadata families so exhausting one family cannot drop the other.
 
 `examples/wasm/cache-lookup-policy.wat` and
 `examples/wasm/cache-store-policy.wat` show the shipped `1.7.5` cache-policy

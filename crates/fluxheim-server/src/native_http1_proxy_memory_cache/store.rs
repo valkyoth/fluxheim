@@ -198,6 +198,10 @@ impl NativeProxyMemoryCache {
         mode: NativeCacheStoreMode,
         metadata: NativeProxyCacheStoreMetadata,
     ) -> Result<(), &'static str> {
+        let body_len = response.body().len() as u64;
+        if body_len > self.config.max_object_bytes.as_u64() {
+            return Err("object-too-large");
+        }
         let stored_response;
         let response = if metadata.response_headers.is_empty() {
             response
@@ -205,10 +209,6 @@ impl NativeProxyMemoryCache {
             stored_response = native_cache_store_response_with_metadata(response, &metadata);
             &stored_response
         };
-        let body_len = response.body().len() as u64;
-        if body_len > self.config.max_object_bytes.as_u64() {
-            return Err("object-too-large");
-        }
         let headers = native_response_header_map(response);
         let vary_fields = match cache_vary_policy(&headers, &self.config) {
             VaryCachePolicy::None => None,

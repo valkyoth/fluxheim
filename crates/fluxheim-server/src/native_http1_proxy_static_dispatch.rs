@@ -92,7 +92,14 @@ impl NativeHttp1Proxy {
                 }
             }
             if proxy_cache_status.is_none()
-                && let Some(slice) = cache.slice_response(&request, self).await
+                && let Some(slice) = cache
+                    .slice_response(
+                        &request,
+                        self,
+                        #[cfg(feature = "wasm")]
+                        &wasm_cache_key_components,
+                    )
+                    .await
             {
                 return self.finish_response(
                     &request,

@@ -24,12 +24,16 @@ mutate arbitrary cached response headers.
   `context(6, 0)` class, without exposing raw response headers.
 - Thread Wasm-selected key components through native static-upstream and
   load-balanced proxy cache lookup paths.
+- Thread Wasm-selected key components through fixed-slice range-cache keys so
+  ranged mobile and desktop variants cannot share slice objects.
 - Thread Wasm-selected TTL/tag metadata through native cache storage without
   exposing arbitrary response-header mutation.
 - Thread fixed stored response-header metadata into the cached object while
   leaving the immediate origin MISS response unchanged.
 - Add live native HTTP/1 listener coverage proving one URL can cache separate
   mobile and desktop variants, then HIT the original variant.
+- Add live native HTTP/1 listener coverage proving Wasm-selected key
+  components also isolate fixed-slice range-cache objects.
 - Add live native HTTP/1 listener coverage proving a plugin TTL override
   expires an otherwise `max-age=60` object and refills from origin.
 - Add live native HTTP/1 listener coverage proving a plugin can set the fixed
@@ -46,10 +50,18 @@ mutate arbitrary cached response headers.
 
 - Unknown component IDs, unknown values, duplicate component labels, and
   component counts above the hard cap fail through the plugin fail mode.
+- Duplicate cache-key component labels and aggregate component counts are
+  enforced across the full `cache-lookup` hook chain, not only within a single
+  plugin invocation.
 - Unknown TTL IDs, duplicate TTL overrides, unknown tag IDs, and tag counts
   above the hard cap fail through the plugin fail mode.
 - Unknown stored-header IDs, duplicate stored-header mutations, and stored
   header mutation counts above the hard cap fail through the plugin fail mode.
+- Cache-store metadata caps are scoped independently to TTL, tag, and stored
+  header metadata so one exhausted metadata family cannot silently drop a later
+  family.
+- Oversized cache-store candidates are rejected before cloning response bodies
+  for stored-header metadata mutation.
 - Store hooks receive only symbolic content-type classes for response-header
   inspection; raw response header names and values remain unavailable.
 - The hook does not expose arbitrary request headers, raw cache-key bytes,

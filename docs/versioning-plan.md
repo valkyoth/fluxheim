@@ -3130,7 +3130,9 @@ Stable scope:
   components, TTL override, tag assignment, symbolic store-admission
   content-type inspection, and safe fixed response-header mutation, with live
   tests for TTL bounds, tag assignment, image-only store metadata, and
-  low-cardinality key validation.
+  low-cardinality key validation. Ensure cache-key components are applied to
+  complete-object, single-range, and fixed-slice range-cache keys, and enforce
+  aggregate component caps across chained hooks.
 - `v1.7.6`: harden the mature plugin runtime after the request, response,
   routing, and cache hook families exist. Finish atomic compiled-module reload
   generation handling, broaden admin and metrics visibility across all hook
