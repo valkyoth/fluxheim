@@ -27,6 +27,8 @@ behavior when the change improves security or project direction.
   longer-lived origin response.
 - Add live listener tests proving fixed stored response-header metadata appears
   on cache HIT and forbidden stored-header IDs fail closed.
+- Add live listener coverage proving duplicate stored-header mutations fail
+  closed, plus unit coverage for stored-header mutation-count caps.
 - Add a checked-in Wasm cache-policy example plus a config template for the
   bounded `1.7.5` cache ABI.
 - Add live listener coverage that compiles the checked-in example sources and

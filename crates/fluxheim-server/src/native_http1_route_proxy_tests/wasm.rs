@@ -1397,6 +1397,16 @@ async fn native_wasm_cache_store_forbidden_tag_fails_closed() {
 }
 
 #[tokio::test]
+async fn native_wasm_cache_store_duplicate_header_fails_closed() {
+    wasm_cache_store_failure_response(
+        WasmPluginBody::CacheStoreDuplicateHeader,
+        "header-duplicate",
+    )
+    .await
+    .assert_service_unavailable();
+}
+
+#[tokio::test]
 async fn native_wasm_cache_store_deny_wins_over_earlier_skip() {
     let fixture = WasmRouteFixture::new(&[
         ("skip", WasmPluginBody::CacheStoreSkip),
@@ -1526,6 +1536,7 @@ async fn wasm_cache_store_failure_response(
         "ttl" => &[("/static/store-ttl.png", "hidden")],
         "ttl-duplicate" => &[("/static/store-ttl-duplicate.png", "hidden")],
         "tag" => &[("/static/store-tag.png", "hidden")],
+        "header-duplicate" => &[("/static/store-header-duplicate.png", "hidden")],
         _ => &[("/static/store-failure.png", "hidden")],
     };
     let path = responses[0].0;
@@ -1618,6 +1629,7 @@ enum WasmPluginBody {
     CacheStoreForbiddenTag,
     CacheStoreHeader,
     CacheStoreForbiddenHeader,
+    CacheStoreDuplicateHeader,
     CacheLookupPolicyExample,
     CacheStorePolicyExample,
     Trap,
@@ -1882,6 +1894,23 @@ impl WasmPluginBody {
                 "#
                 .to_owned()
             }
+            Self::CacheStoreDuplicateHeader => {
+                r#"
+                (module
+                  (import "fluxheim_policy_v1" "set_cache_store_header" (func $set_cache_store_header (param i32 i32) (result i32)))
+                  (func (export "fluxheim_cache_store") (result i32)
+                    i32.const 1
+                    i32.const 1
+                    call $set_cache_store_header
+                    drop
+                    i32.const 1
+                    i32.const 2
+                    call $set_cache_store_header
+                    drop
+                    i32.const 0))
+                "#
+                .to_owned()
+            }
             Self::CacheLookupPolicyExample => {
                 include_str!("../../../../examples/wasm/cache-lookup-policy.wat").to_owned()
             }
@@ -1958,7 +1987,8 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         | WasmPluginBody::CacheStoreDuplicateTtl
         | WasmPluginBody::CacheStoreForbiddenTag
         | WasmPluginBody::CacheStoreHeader
-        | WasmPluginBody::CacheStoreForbiddenHeader => {
+        | WasmPluginBody::CacheStoreForbiddenHeader
+        | WasmPluginBody::CacheStoreDuplicateHeader => {
             vec![fluxheim_config::WasmPluginPhase::CacheStore]
         }
         WasmPluginBody::CacheLookupPolicyExample => {

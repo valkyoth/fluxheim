@@ -1650,3 +1650,42 @@ impl NativeWasmAdmissionScope {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_store_metadata_merge_caps_stored_headers_without_dropping_tags() {
+        let mut target = NativeProxyCacheStoreMetadata {
+            ttl_override: None,
+            cache_tags: Vec::new(),
+            response_headers: vec![
+                ("x-one", "1"),
+                ("x-two", "2"),
+                ("x-three", "3"),
+                ("x-four", "4"),
+            ],
+        };
+        let source = NativeProxyCacheStoreMetadata {
+            ttl_override: Some(Duration::from_secs(1)),
+            cache_tags: vec!["wasm-policy"],
+            response_headers: vec![("x-five", "5")],
+        };
+
+        merge_wasm_cache_store_metadata(&mut target, source);
+
+        assert_eq!(target.ttl_override, Some(Duration::from_secs(1)));
+        assert_eq!(target.cache_tags, vec!["wasm-policy"]);
+        assert_eq!(
+            target.response_headers.len(),
+            MAX_WASM_CACHE_STORE_HEADER_MUTATIONS
+        );
+        assert!(
+            !target
+                .response_headers
+                .iter()
+                .any(|(name, _)| *name == "x-five")
+        );
+    }
+}

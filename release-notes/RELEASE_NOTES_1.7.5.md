@@ -39,6 +39,8 @@ mutate arbitrary cached response headers.
 - Add live native HTTP/1 listener coverage proving a plugin can set the fixed
   stored response header on cache HIT and that forbidden header IDs fail
   closed.
+- Add negative coverage proving duplicate stored-header mutations fail closed
+  and stored-header mutation caps are enforced.
 - Add `examples/wasm/cache-lookup-policy.wat`,
   `examples/wasm/cache-store-policy.wat`, and a matching config template for
   the bounded cache-policy ABI.
