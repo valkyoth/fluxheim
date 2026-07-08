@@ -859,6 +859,60 @@ async fn native_wasm_cache_store_can_deny_after_origin_response_before_storage()
 }
 
 #[tokio::test]
+async fn native_wasm_cache_store_can_override_ttl_with_bounded_value() {
+    let fixture = WasmRouteFixture::new(&[("cache", WasmPluginBody::CacheStoreShortTtl)]);
+    let upstream = super::upstream_cacheable_sequence(&[
+        ("/static/ttl.png", "ttl-one"),
+        ("/static/ttl.png", "ttl-two"),
+    ])
+    .await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![wasm_attachment_phase(
+            "cache",
+            "route",
+            100,
+            fluxheim_config::WasmPluginPhase::CacheStore,
+        )],
+    );
+    config.vhosts[0].routes[0].path_exact = None;
+    config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].routes[0].redirect = None;
+    config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    config.vhosts[0].routes[0].cache = Some(native_proxy_memory_cache_config());
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let first = downstream_get(proxy, "/static/ttl.png").await;
+    let immediate = downstream_get(proxy, "/static/ttl.png").await;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    let expired = downstream_get(proxy, "/static/ttl.png").await;
+
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("ttl-one"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(immediate.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(immediate.ends_with("ttl-one"));
+    assert_eq!(
+        response_header(&immediate, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+    assert!(expired.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(expired.ends_with("ttl-two"));
+    assert_eq!(
+        response_header(&expired, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+}
+
+#[tokio::test]
 async fn native_wasm_cache_store_deny_wins_over_earlier_skip() {
     let fixture = WasmRouteFixture::new(&[
         ("skip", WasmPluginBody::CacheStoreSkip),
@@ -1020,6 +1074,7 @@ enum WasmPluginBody {
     CacheLookupBusy,
     CacheStoreSkip,
     CacheStoreDeny,
+    CacheStoreShortTtl,
     Trap,
     BusyLoop,
 }
@@ -1182,6 +1237,24 @@ impl WasmPluginBody {
                 r#"(module (func (export "fluxheim_cache_store") (result i32) i32.const 2))"#
                     .to_owned()
             }
+            Self::CacheStoreShortTtl => {
+                r#"
+                (module
+                  (import "fluxheim_policy_v1" "set_cache_ttl" (func $set_cache_ttl (param i32 i32) (result i32)))
+                  (import "fluxheim_policy_v1" "add_cache_tag" (func $add_cache_tag (param i32 i32) (result i32)))
+                  (func (export "fluxheim_cache_store") (result i32)
+                    i32.const 1
+                    i32.const 0
+                    call $set_cache_ttl
+                    drop
+                    i32.const 1
+                    i32.const 0
+                    call $add_cache_tag
+                    drop
+                    i32.const 0))
+                "#
+                .to_owned()
+            }
             Self::Trap => {
                 r#"(module (func (export "fluxheim_access_decision") (result i32) unreachable))"#
                     .to_owned()
@@ -1244,9 +1317,9 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         | WasmPluginBody::CacheLookupBusy => {
             vec![fluxheim_config::WasmPluginPhase::CacheLookup]
         }
-        WasmPluginBody::CacheStoreSkip | WasmPluginBody::CacheStoreDeny => {
-            vec![fluxheim_config::WasmPluginPhase::CacheStore]
-        }
+        WasmPluginBody::CacheStoreSkip
+        | WasmPluginBody::CacheStoreDeny
+        | WasmPluginBody::CacheStoreShortTtl => vec![fluxheim_config::WasmPluginPhase::CacheStore],
         WasmPluginBody::Decision(_) | WasmPluginBody::Trap | WasmPluginBody::BusyLoop => {
             vec![fluxheim_config::WasmPluginPhase::AccessDecision]
         }

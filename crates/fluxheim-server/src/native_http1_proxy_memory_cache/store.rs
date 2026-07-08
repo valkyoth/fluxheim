@@ -14,12 +14,13 @@ use crate::native_http1_proxy_cache_headers::{
 use crate::native_http1_proxy_cache_policy::native_cache_expiry_times;
 use crate::{NativeHttp1Request, NativeHttp1Response};
 use fluxheim_cache::{
-    CacheRequestView, VaryCachePolicy, cache_vary_policy, range_response_cache_admission_rejection,
-    response_age_secs, response_cache_admission_rejection,
-    response_range_cache_admission_rejection, selected_cache_range_request,
+    CacheRequestView, VaryCachePolicy, cache_vary_policy, collect_cache_tags,
+    range_response_cache_admission_rejection, response_age_secs,
+    response_cache_admission_rejection, response_range_cache_admission_rejection,
+    selected_cache_range_request,
 };
 
-use super::NativeProxyMemoryCache;
+use super::{NativeProxyCacheStoreMetadata, NativeProxyMemoryCache};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NativeCacheStoreMode {
@@ -35,8 +36,30 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
+        self.store_with_metadata(
+            key,
+            request,
+            response,
+            NativeProxyCacheStoreMetadata::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn store_with_metadata(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+        response: &NativeHttp1Response,
+        metadata: NativeProxyCacheStoreMetadata,
+    ) -> Result<(), &'static str> {
         let result = self
-            .store_inner(key, request, response, NativeCacheStoreMode::Origin)
+            .store_inner(
+                key,
+                request,
+                response,
+                NativeCacheStoreMode::Origin,
+                metadata,
+            )
             .await;
         if let Err(reason) = result
             && reason != "cache-min-uses"
@@ -52,8 +75,30 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
+        self.store_revalidated_with_metadata(
+            key,
+            request,
+            response,
+            NativeProxyCacheStoreMetadata::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn store_revalidated_with_metadata(
+        &self,
+        key: &str,
+        request: &NativeHttp1Request,
+        response: &NativeHttp1Response,
+        metadata: NativeProxyCacheStoreMetadata,
+    ) -> Result<(), &'static str> {
         let result = self
-            .store_inner(key, request, response, NativeCacheStoreMode::Revalidated)
+            .store_inner(
+                key,
+                request,
+                response,
+                NativeCacheStoreMode::Revalidated,
+                metadata,
+            )
             .await;
         if let Err(reason) = result
             && reason != "cache-min-uses"
@@ -116,6 +161,7 @@ impl NativeProxyMemoryCache {
             request,
             &refreshed_entry.to_response(),
             NativeCacheStoreMode::Revalidated,
+            NativeProxyCacheStoreMetadata::default(),
         )
         .await?;
         Ok(refreshed_entry)
@@ -128,7 +174,13 @@ impl NativeProxyMemoryCache {
         response: &NativeHttp1Response,
     ) -> Result<(), &'static str> {
         let result = self
-            .store_inner(key, request, response, NativeCacheStoreMode::PeerFill)
+            .store_inner(
+                key,
+                request,
+                response,
+                NativeCacheStoreMode::PeerFill,
+                NativeProxyCacheStoreMetadata::default(),
+            )
             .await;
         if let Err(reason) = result
             && reason != "cache-min-uses"
@@ -144,6 +196,7 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         response: &NativeHttp1Response,
         mode: NativeCacheStoreMode,
+        metadata: NativeProxyCacheStoreMetadata,
     ) -> Result<(), &'static str> {
         let body_len = response.body().len() as u64;
         if body_len > self.config.max_object_bytes.as_u64() {
@@ -178,9 +231,9 @@ impl NativeProxyMemoryCache {
             }
         }
         let ttl = match mode {
-            NativeCacheStoreMode::Origin | NativeCacheStoreMode::Revalidated => {
-                native_cache_ttl(response.status(), &headers, &self.config)
-            }
+            NativeCacheStoreMode::Origin | NativeCacheStoreMode::Revalidated => metadata
+                .ttl_override
+                .or_else(|| native_cache_ttl(response.status(), &headers, &self.config)),
             NativeCacheStoreMode::PeerFill => {
                 native_peer_fill_cache_ttl(response.status(), &headers, &self.config)
             }
@@ -237,7 +290,11 @@ impl NativeProxyMemoryCache {
             stored_at,
             weight,
         };
-        let cache_tags = native_response_cache_tags(response, &self.config);
+        let mut cache_tags = native_response_cache_tags(response, &self.config);
+        let mut cache_tag_bytes = cache_tags.iter().map(String::len).sum();
+        for tag in metadata.cache_tags {
+            collect_cache_tags(tag, &mut cache_tags, &mut cache_tag_bytes);
+        }
         let disk_key = NativeDiskCacheStoreKey {
             combined: store_key.clone(),
             primary: key.to_owned(),

@@ -363,19 +363,33 @@ impl NativeHttp1Proxy {
                         }
                         #[cfg(feature = "wasm")]
                         let store_result = if let Some(hooks) = wasm_hooks {
-                            match hooks
+                            let decision = hooks
                                 .cache_store_decision(
                                     NativeWasmCacheStoreContext::from_request_response(
                                         &request, &response,
                                     ),
                                 )
-                                .await
-                            {
+                                .await;
+                            match decision.outcome {
                                 NativeWasmCacheStoreOutcome::Continue => {
                                     if *status == "REVALIDATED" {
-                                        cache.store_revalidated(key, &request, &response).await
+                                        cache
+                                            .store_revalidated_with_metadata(
+                                                key,
+                                                &request,
+                                                &response,
+                                                decision.metadata,
+                                            )
+                                            .await
                                     } else {
-                                        cache.store(key, &request, &response).await
+                                        cache
+                                            .store_with_metadata(
+                                                key,
+                                                &request,
+                                                &response,
+                                                decision.metadata,
+                                            )
+                                            .await
                                     }
                                 }
                                 NativeWasmCacheStoreOutcome::Skip(reason) => Err(reason),

@@ -15,15 +15,20 @@ behavior when the change improves security or project direction.
   `cache-lookup` hooks.
 - Add symbolic `X-Device-Class` context and fixed
   `wasm-device-class=mobile|desktop` cache-key variants.
+- Add fixed-ID Wasm cache-store TTL overrides and cache tag assignment.
 - Add live listener tests proving separate mobile and desktop cache variants
   MISS independently and HIT the original variant on repeat.
+- Add live listener tests proving a plugin TTL override expires an otherwise
+  longer-lived origin response.
 
 ### Security
 
 - Reject unknown cache-key component IDs, unknown values, duplicate labels, and
   component counts above the hard cap through the plugin fail mode.
+- Reject unknown TTL IDs, duplicate TTL overrides, unknown tag IDs, and tag
+  counts above the hard cap through the plugin fail mode.
 - Keep arbitrary request headers, raw cache-key bytes, request bodies, cached
-  objects, TTL override, and tag assignment unavailable in this slice.
+  objects, arbitrary TTLs, and arbitrary tag strings unavailable in this slice.
 
 ## 1.7.4 - 2026-07-07
 

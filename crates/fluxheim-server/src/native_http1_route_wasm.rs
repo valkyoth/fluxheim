@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use fluxheim_config::{Config, WasmAttachmentConfig, WasmPluginFailMode, WasmPluginPhase};
 use fluxheim_wasm::{
@@ -9,7 +9,9 @@ use fluxheim_wasm::{
     load_plugin_from_manifest,
 };
 
-use crate::native_http1_proxy_memory_cache::NativeProxyCacheKeyComponent;
+use crate::native_http1_proxy_memory_cache::{
+    NativeProxyCacheKeyComponent, NativeProxyCacheStoreMetadata,
+};
 use crate::native_http1_proxy_metrics::{
     record_native_wasm_admission_rejection, record_native_wasm_execution,
 };
@@ -32,6 +34,7 @@ const CACHE_STORE_FUNCTION: &str = "fluxheim_cache_store";
 const WASM_HOST_MODULE: &str = "fluxheim_policy_v1";
 const MAX_WASM_HEADER_MUTATIONS: usize = 16;
 const MAX_WASM_CACHE_KEY_COMPONENTS: usize = 4;
+const MAX_WASM_CACHE_TAGS: usize = 4;
 
 const HOST_CONTEXT_PATH_CLASS: i32 = 1;
 const HOST_CONTEXT_CANARY_HEADER: i32 = 2;
@@ -42,6 +45,10 @@ const HEADER_X_POLICY_TIER: i32 = 1;
 const HEADER_X_FLUXHEIM_POLICY_BRANCH: i32 = 2;
 const HEADER_X_POWERED_BY: i32 = 3;
 const CACHE_KEY_DEVICE_CLASS: i32 = 1;
+const CACHE_TTL_SHORT: i32 = 1;
+const CACHE_TTL_MEDIUM: i32 = 2;
+const CACHE_TAG_WASM_POLICY: i32 = 1;
+const CACHE_TAG_WASM_GOLD: i32 = 2;
 const VALUE_STANDARD: i32 = 1;
 const VALUE_API: i32 = 2;
 const VALUE_STATIC: i32 = 3;
@@ -140,6 +147,12 @@ pub(crate) enum NativeWasmCacheStoreOutcome {
     Continue,
     Skip(&'static str),
     Deny { status: u16, reason: String },
+}
+
+#[derive(Debug)]
+pub(crate) struct NativeWasmCacheStoreDecision {
+    pub(crate) outcome: NativeWasmCacheStoreOutcome,
+    pub(crate) metadata: NativeProxyCacheStoreMetadata,
 }
 
 #[derive(Debug)]
@@ -459,25 +472,38 @@ impl NativeWasmHooks {
     pub(crate) async fn cache_store_decision(
         &self,
         context: NativeWasmCacheStoreContext,
-    ) -> NativeWasmCacheStoreOutcome {
+    ) -> NativeWasmCacheStoreDecision {
         if self.cache_store.is_empty() {
-            return NativeWasmCacheStoreOutcome::Continue;
+            return NativeWasmCacheStoreDecision {
+                outcome: NativeWasmCacheStoreOutcome::Continue,
+                metadata: NativeProxyCacheStoreMetadata::default(),
+            };
         }
         let mut selected = NativeWasmCacheStoreOutcome::Continue;
+        let mut selected_metadata = NativeProxyCacheStoreMetadata::default();
         for hook in &self.cache_store {
-            match hook.run_cache_store(context).await {
-                NativeWasmCacheStoreOutcome::Continue => {}
+            let decision = hook.run_cache_store(context).await;
+            match decision.outcome {
+                NativeWasmCacheStoreOutcome::Continue => {
+                    merge_wasm_cache_store_metadata(&mut selected_metadata, decision.metadata);
+                }
                 NativeWasmCacheStoreOutcome::Skip(reason) => {
                     if matches!(selected, NativeWasmCacheStoreOutcome::Continue) {
                         selected = NativeWasmCacheStoreOutcome::Skip(reason);
                     }
                 }
                 NativeWasmCacheStoreOutcome::Deny { status, reason } => {
-                    return NativeWasmCacheStoreOutcome::Deny { status, reason };
+                    return NativeWasmCacheStoreDecision {
+                        outcome: NativeWasmCacheStoreOutcome::Deny { status, reason },
+                        metadata: NativeProxyCacheStoreMetadata::default(),
+                    };
                 }
             }
         }
-        selected
+        NativeWasmCacheStoreDecision {
+            outcome: selected,
+            metadata: selected_metadata,
+        }
     }
 
     pub(crate) async fn apply_request_headers(
@@ -850,8 +876,9 @@ impl NativeWasmHook {
     async fn run_cache_store(
         &self,
         context: NativeWasmCacheStoreContext,
-    ) -> NativeWasmCacheStoreOutcome {
-        let host_functions = wasm_cache_store_host_functions(context);
+    ) -> NativeWasmCacheStoreDecision {
+        let metadata = Arc::new(Mutex::new(NativeProxyCacheStoreMetadata::default()));
+        let host_functions = wasm_cache_store_host_functions(context, Arc::clone(&metadata));
         match self
             .run_i32_with_hosts(
                 CACHE_STORE_PHASE,
@@ -861,11 +888,20 @@ impl NativeWasmHook {
             )
             .await
         {
-            Ok(CACHE_STORE_CONTINUE) => NativeWasmCacheStoreOutcome::Continue,
-            Ok(CACHE_STORE_SKIP) => NativeWasmCacheStoreOutcome::Skip("wasm-store-skip"),
-            Ok(CACHE_STORE_DENY) => NativeWasmCacheStoreOutcome::Deny {
-                status: 403,
-                reason: "wasm cache store denied".to_owned(),
+            Ok(CACHE_STORE_CONTINUE) => NativeWasmCacheStoreDecision {
+                outcome: NativeWasmCacheStoreOutcome::Continue,
+                metadata: locked_wasm_cache_store_metadata(&metadata),
+            },
+            Ok(CACHE_STORE_SKIP) => NativeWasmCacheStoreDecision {
+                outcome: NativeWasmCacheStoreOutcome::Skip("wasm-store-skip"),
+                metadata: NativeProxyCacheStoreMetadata::default(),
+            },
+            Ok(CACHE_STORE_DENY) => NativeWasmCacheStoreDecision {
+                outcome: NativeWasmCacheStoreOutcome::Deny {
+                    status: 403,
+                    reason: "wasm cache store denied".to_owned(),
+                },
+                metadata: NativeProxyCacheStoreMetadata::default(),
             },
             Ok(_) => self.failed_cache_store("error"),
             Err(error) => {
@@ -919,13 +955,17 @@ impl NativeWasmHook {
         }
     }
 
-    fn failed_cache_store(&self, outcome: &'static str) -> NativeWasmCacheStoreOutcome {
-        match self.plugin.fail_mode {
+    fn failed_cache_store(&self, outcome: &'static str) -> NativeWasmCacheStoreDecision {
+        let outcome = match self.plugin.fail_mode {
             WasmPluginFailMode::FailOpen => NativeWasmCacheStoreOutcome::Continue,
             WasmPluginFailMode::FailClosed => NativeWasmCacheStoreOutcome::Deny {
                 status: 503,
                 reason: format!("wasm cache store {outcome}"),
             },
+        };
+        NativeWasmCacheStoreDecision {
+            outcome,
+            metadata: NativeProxyCacheStoreMetadata::default(),
         }
     }
 
@@ -1200,8 +1240,9 @@ fn wasm_cache_lookup_host_functions(
 
 fn wasm_cache_store_host_functions(
     context: NativeWasmCacheStoreContext,
+    state: Arc<Mutex<NativeProxyCacheStoreMetadata>>,
 ) -> Vec<WasmI32HostFunction> {
-    vec![WasmI32HostFunction::new(
+    let context_function = WasmI32HostFunction::new(
         WASM_HOST_MODULE,
         "context",
         move |kind, _unused| match kind {
@@ -1209,7 +1250,35 @@ fn wasm_cache_store_host_functions(
             HOST_CONTEXT_RESPONSE_STATUS => Ok(context.response_status),
             _ => Err("unknown wasm context field".to_owned()),
         },
-    )]
+    );
+    let ttl_state = Arc::clone(&state);
+    let set_ttl_function =
+        WasmI32HostFunction::new(WASM_HOST_MODULE, "set_cache_ttl", move |ttl_id, _unused| {
+            let ttl = wasm_cache_ttl(ttl_id)?;
+            let mut state = ttl_state
+                .lock()
+                .map_err(|_| "wasm cache store metadata lock poisoned".to_owned())?;
+            if state.ttl_override.is_some() {
+                return Err("duplicate wasm cache ttl override".to_owned());
+            }
+            state.ttl_override = Some(ttl);
+            Ok(0)
+        });
+    let add_tag_function =
+        WasmI32HostFunction::new(WASM_HOST_MODULE, "add_cache_tag", move |tag_id, _unused| {
+            let tag = wasm_cache_tag(tag_id)?;
+            let mut state = state
+                .lock()
+                .map_err(|_| "wasm cache store metadata lock poisoned".to_owned())?;
+            if state.cache_tags.len() >= MAX_WASM_CACHE_TAGS {
+                return Err("wasm cache tag limit reached".to_owned());
+            }
+            if !state.cache_tags.contains(&tag) {
+                state.cache_tags.push(tag);
+            }
+            Ok(0)
+        });
+    vec![context_function, set_ttl_function, add_tag_function]
 }
 
 fn wasm_default_outcome_label(value: i32) -> &'static str {
@@ -1351,6 +1420,54 @@ fn locked_wasm_cache_key_components(
                 "wasm cache key component lock poisoned: {error}"
             );
             std::process::abort();
+        }
+    }
+}
+
+fn wasm_cache_ttl(ttl_id: i32) -> Result<Duration, String> {
+    match ttl_id {
+        CACHE_TTL_SHORT => Ok(Duration::from_secs(1)),
+        CACHE_TTL_MEDIUM => Ok(Duration::from_secs(300)),
+        _ => Err("forbidden wasm cache ttl override".to_owned()),
+    }
+}
+
+fn wasm_cache_tag(tag_id: i32) -> Result<&'static str, String> {
+    match tag_id {
+        CACHE_TAG_WASM_POLICY => Ok("wasm-policy"),
+        CACHE_TAG_WASM_GOLD => Ok("wasm-gold"),
+        _ => Err("forbidden wasm cache tag".to_owned()),
+    }
+}
+
+fn locked_wasm_cache_store_metadata(
+    state: &Arc<Mutex<NativeProxyCacheStoreMetadata>>,
+) -> NativeProxyCacheStoreMetadata {
+    match state.lock() {
+        Ok(metadata) => metadata.clone(),
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::security",
+                "wasm cache store metadata lock poisoned: {error}"
+            );
+            std::process::abort();
+        }
+    }
+}
+
+fn merge_wasm_cache_store_metadata(
+    target: &mut NativeProxyCacheStoreMetadata,
+    source: NativeProxyCacheStoreMetadata,
+) {
+    if target.ttl_override.is_none() {
+        target.ttl_override = source.ttl_override;
+    }
+    for tag in source.cache_tags {
+        if target.cache_tags.len() >= MAX_WASM_CACHE_TAGS {
+            return;
+        }
+        if !target.cache_tags.contains(&tag) {
+            target.cache_tags.push(tag);
         }
     }
 }

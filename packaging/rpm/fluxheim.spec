@@ -158,8 +158,9 @@ fi
 - Add bounded WebAssembly cache-key component hooks for native HTTP/1 cache
   lookup.
 - Add symbolic device-class cache variants with low-cardinality enforcement.
+- Add fixed-ID WebAssembly cache-store TTL and tag metadata hooks.
 - Add live listener coverage proving separate mobile/desktop cache variants
-  HIT independently.
+  HIT independently and fixed TTL overrides expire as expected.
 
 * Tue Jul 07 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.4-1
 - Add bounded native HTTP/1 Wasm cache-lookup hooks.

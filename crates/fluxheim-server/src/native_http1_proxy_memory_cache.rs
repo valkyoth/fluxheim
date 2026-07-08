@@ -88,6 +88,12 @@ pub(crate) struct NativeProxyCacheKeyComponent {
     pub(crate) value: &'static str,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct NativeProxyCacheStoreMetadata {
+    pub(crate) ttl_override: Option<Duration>,
+    pub(crate) cache_tags: Vec<&'static str>,
+}
+
 #[derive(Debug)]
 pub(crate) enum NativePeerFillDecision {
     Skip,
