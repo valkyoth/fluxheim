@@ -20,6 +20,8 @@ mutate arbitrary cached response headers.
 - Allow only fixed TTL classes and fixed cache tags in this slice.
 - Add bounded `set_cache_store_header(name_id, value_id)` for cache-store
   hooks, limited to fixed `x-fluxheim-cache-policy` values.
+- Add bounded cache-store response content-type inspection through a symbolic
+  `context(6, 0)` class, without exposing raw response headers.
 - Thread Wasm-selected key components through native static-upstream and
   load-balanced proxy cache lookup paths.
 - Thread Wasm-selected TTL/tag metadata through native cache storage without
@@ -36,8 +38,9 @@ mutate arbitrary cached response headers.
 - Add `examples/wasm/cache-lookup-policy.wat`,
   `examples/wasm/cache-store-policy.wat`, and a matching config template for
   the bounded cache-policy ABI.
-- Add a live native HTTP/1 listener test that compiles the checked-in example
-  Wasm source and proves its cache-key, TTL, and stored-header behavior.
+- Add live native HTTP/1 listener tests that compile the checked-in example
+  Wasm sources and prove image-only cache-store metadata, cache-key, TTL, and
+  stored-header behavior.
 
 ## Security Notes
 
@@ -47,6 +50,8 @@ mutate arbitrary cached response headers.
   above the hard cap fail through the plugin fail mode.
 - Unknown stored-header IDs, duplicate stored-header mutations, and stored
   header mutation counts above the hard cap fail through the plugin fail mode.
+- Store hooks receive only symbolic content-type classes for response-header
+  inspection; raw response header names and values remain unavailable.
 - The hook does not expose arbitrary request headers, raw cache-key bytes,
   request bodies, response bodies, filesystem access, network access, or cached
   object contents.

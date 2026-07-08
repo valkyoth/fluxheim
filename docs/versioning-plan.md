@@ -3127,9 +3127,10 @@ Stable scope:
   without storing while normal requests still produce MISS then HIT, and that a
   plugin can skip or deny storage before memory/disk writes.
 - `v1.7.5`: add the next bounded cache-policy ABI slice for cache-key
-  components, TTL override, tag assignment, store-admission header inspection,
-  and safe response-header mutation, with live tests for TTL bounds, tag
-  assignment, and low-cardinality key validation.
+  components, TTL override, tag assignment, symbolic store-admission
+  content-type inspection, and safe fixed response-header mutation, with live
+  tests for TTL bounds, tag assignment, image-only store metadata, and
+  low-cardinality key validation.
 - `v1.7.6`: harden the mature plugin runtime after the request, response,
   routing, and cache hook families exist. Finish atomic compiled-module reload
   generation handling, broaden admin and metrics visibility across all hook
@@ -4776,9 +4777,10 @@ circular dependencies.
   lookup/pass/bypass/deny and store continue/skip/deny decisions, with live
   cache HIT/MISS and skip-store tests.
 - `v1.7.5`: VCL-like cache policy mutation hooks for bounded symbolic
-  cache-key components and fixed-ID TTL/tag store metadata, with live
-  low-cardinality key and TTL expiry tests. Richer store-admission mutation
-  remains staged for a later cache-policy slice.
+  cache-key components, fixed-ID TTL/tag store metadata, symbolic content-type
+  inspection, and fixed stored response-header metadata, with live
+  low-cardinality key, image-only metadata, and TTL expiry tests. Richer
+  store-admission mutation remains staged for a later cache-policy slice.
 - `v1.7.6`: mature-runtime hardening across all hook families: compiled-module
   cache isolation, cross-family chain regression tests, reload hash-change
   tests, metrics/admin completeness, and secret-safe labels. The initial

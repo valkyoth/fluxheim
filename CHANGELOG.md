@@ -17,6 +17,8 @@ behavior when the change improves security or project direction.
   `wasm-device-class=mobile|desktop` cache-key variants.
 - Add fixed-ID Wasm cache-store TTL overrides and cache tag assignment.
 - Add fixed-ID Wasm cache-store response-header metadata for stored objects.
+- Add symbolic cache-store response content-type class inspection without raw
+  response-header exposure.
 - Add live listener tests proving separate mobile and desktop cache variants
   MISS independently and HIT the original variant on repeat.
 - Add live listener tests proving a plugin TTL override expires an otherwise
@@ -25,8 +27,9 @@ behavior when the change improves security or project direction.
   on cache HIT and forbidden stored-header IDs fail closed.
 - Add a checked-in Wasm cache-policy example plus a config template for the
   bounded `1.7.5` cache ABI.
-- Add live listener coverage that compiles the checked-in example source and
-  validates its documented cache-key, TTL, and stored-header behavior.
+- Add live listener coverage that compiles the checked-in example sources and
+  validates their documented image-only cache-key, TTL, and stored-header
+  behavior.
 
 ### Security
 
@@ -38,8 +41,8 @@ behavior when the change improves security or project direction.
   stored-header mutation counts above the hard cap through the plugin fail
   mode.
 - Keep arbitrary request headers, raw cache-key bytes, request bodies, cached
-  objects, arbitrary TTLs, arbitrary tag strings, and arbitrary stored response
-  headers unavailable in this slice.
+  objects, arbitrary TTLs, arbitrary tag strings, arbitrary response-header
+  inspection, and arbitrary stored response headers unavailable in this slice.
 
 ## 1.7.4 - 2026-07-07
 

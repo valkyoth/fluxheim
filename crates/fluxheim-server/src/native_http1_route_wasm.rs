@@ -42,6 +42,7 @@ const HOST_CONTEXT_CANARY_HEADER: i32 = 2;
 const HOST_CONTEXT_MIRROR_HEADER: i32 = 3;
 const HOST_CONTEXT_RESPONSE_STATUS: i32 = 4;
 const HOST_CONTEXT_DEVICE_CLASS_HEADER: i32 = 5;
+const HOST_CONTEXT_RESPONSE_CONTENT_TYPE_CLASS: i32 = 6;
 const HEADER_X_POLICY_TIER: i32 = 1;
 const HEADER_X_FLUXHEIM_POLICY_BRANCH: i32 = 2;
 const HEADER_X_POWERED_BY: i32 = 3;
@@ -59,6 +60,10 @@ const VALUE_STATIC: i32 = 3;
 const VALUE_GOLD: i32 = 4;
 const VALUE_MOBILE: i32 = 5;
 const VALUE_DESKTOP: i32 = 6;
+const VALUE_CONTENT_TYPE_IMAGE: i32 = 7;
+const VALUE_CONTENT_TYPE_HTML: i32 = 8;
+const VALUE_CONTENT_TYPE_JSON: i32 = 9;
+const VALUE_CONTENT_TYPE_TEXT: i32 = 10;
 const PATH_CLASS_OTHER: i32 = 0;
 const PATH_CLASS_API: i32 = 1;
 const PATH_CLASS_STATIC: i32 = 2;
@@ -1012,6 +1017,7 @@ pub(crate) struct NativeWasmCacheLookupContext {
 pub(crate) struct NativeWasmCacheStoreContext {
     path_class: i32,
     response_status: i32,
+    response_content_type_class: i32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1081,6 +1087,7 @@ impl NativeWasmCacheStoreContext {
         Self {
             path_class,
             response_status: i32::from(response.status()),
+            response_content_type_class: wasm_response_content_type_class(response),
         }
     }
 }
@@ -1252,6 +1259,7 @@ fn wasm_cache_store_host_functions(
         move |kind, _unused| match kind {
             HOST_CONTEXT_PATH_CLASS => Ok(context.path_class),
             HOST_CONTEXT_RESPONSE_STATUS => Ok(context.response_status),
+            HOST_CONTEXT_RESPONSE_CONTENT_TYPE_CLASS => Ok(context.response_content_type_class),
             _ => Err("unknown wasm context field".to_owned()),
         },
     );
@@ -1440,6 +1448,33 @@ fn wasm_device_class_header(request: &NativeHttp1Request) -> i32 {
             }
         })
         .unwrap_or(0)
+}
+
+fn wasm_response_content_type_class(response: &NativeHttp1Response) -> i32 {
+    let Some((_, value)) = response
+        .headers()
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+    else {
+        return 0;
+    };
+    let media_type = value
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if media_type.starts_with("image/") {
+        VALUE_CONTENT_TYPE_IMAGE
+    } else if media_type == "text/html" || media_type == "application/xhtml+xml" {
+        VALUE_CONTENT_TYPE_HTML
+    } else if media_type == "application/json" || media_type.ends_with("+json") {
+        VALUE_CONTENT_TYPE_JSON
+    } else if media_type.starts_with("text/") {
+        VALUE_CONTENT_TYPE_TEXT
+    } else {
+        0
+    }
 }
 
 fn locked_wasm_cache_key_components(

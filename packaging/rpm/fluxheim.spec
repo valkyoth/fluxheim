@@ -160,6 +160,8 @@ fi
 - Add symbolic device-class cache variants with low-cardinality enforcement.
 - Add fixed-ID WebAssembly cache-store TTL and tag metadata hooks.
 - Add fixed-ID WebAssembly cache-store stored-header metadata hooks.
+- Add symbolic WebAssembly cache-store content-type inspection without raw
+  response-header exposure.
 - Add live listener coverage proving separate mobile/desktop cache variants
   HIT independently, fixed TTL overrides expire as expected, and bounded
   stored-header metadata appears only on cache hits.

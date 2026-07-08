@@ -188,7 +188,8 @@ Plugins attached to `cache-store` export `fluxheim_cache_store() -> i32`:
 - `2`: deny with `403`.
 
 The cache store host-call surface exposes only the path class, response status,
-fixed TTL IDs, fixed tag IDs, and one fixed stored response-header family.
+symbolic response content-type class, fixed TTL IDs, fixed tag IDs, and one
+fixed stored response-header family.
 Plugins can call `set_cache_ttl(1, 0)` for a short bounded TTL,
 `set_cache_ttl(2, 0)` for a medium bounded TTL, `add_cache_tag(1, 0)` for
 `wasm-policy`, `add_cache_tag(2, 0)` for `wasm-gold`,
@@ -201,6 +202,11 @@ request bodies, arbitrary cache-key bytes, arbitrary TTLs, arbitrary tag
 strings, arbitrary stored response headers, cached objects, and response-store
 body mutation are not exposed in `1.7.5`.
 
+Cache-store response-header inspection is also symbolic. `context(6, 0)`
+returns `0` for unset/other, `7` for image media types, `8` for HTML, `9` for
+JSON, and `10` for text media types. Plugins cannot read raw response header
+names or values through this cache-store surface.
+
 Cache-store chains use the same restrictive aggregation model as other hook
 families: every hook runs unless a hook returns `deny`; an earlier `skip` does
 not mask a later `deny`.
@@ -210,8 +216,8 @@ not mask a later `deny`.
 subset as concrete Wasm Text modules, and `examples/wasm/cache-policy.toml`
 shows the matching plugin/attachment config shape. The example is test-backed
 by a live native HTTP/1 listener test that compiles the checked-in sources and
-verifies mobile/desktop cache variants, short TTL expiry, and fixed stored
-response headers.
+verifies mobile/desktop cache variants, image-only store metadata, short TTL
+expiry, and fixed stored response headers.
 
 Allowed hooks:
 

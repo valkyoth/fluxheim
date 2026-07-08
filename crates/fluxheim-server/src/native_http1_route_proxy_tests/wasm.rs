@@ -1116,6 +1116,75 @@ async fn native_wasm_cache_policy_example_matches_documented_behavior() {
 }
 
 #[tokio::test]
+async fn native_wasm_cache_policy_example_leaves_non_image_store_metadata_unchanged() {
+    let fixture = WasmRouteFixture::new(&[
+        ("cache_lookup", WasmPluginBody::CacheLookupPolicyExample),
+        ("cache_store", WasmPluginBody::CacheStorePolicyExample),
+    ]);
+    let upstream = super::upstream_cacheable_content_type_sequence(&[(
+        "/static/non-image.png",
+        "text/plain",
+        "text-body",
+    )])
+    .await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![
+            wasm_attachment_phase(
+                "cache_lookup",
+                "route",
+                100,
+                fluxheim_config::WasmPluginPhase::CacheLookup,
+            ),
+            wasm_attachment_phase(
+                "cache_store",
+                "route",
+                100,
+                fluxheim_config::WasmPluginPhase::CacheStore,
+            ),
+        ],
+    );
+    config.vhosts[0].routes[0].path_exact = None;
+    config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].routes[0].redirect = None;
+    config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
+        upstreams: vec![upstream.to_string()],
+        ..Default::default()
+    });
+    let mut cache = native_proxy_memory_cache_config();
+    cache.content_types.push("text/plain".to_owned());
+    config.vhosts[0].routes[0].cache = Some(cache);
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let first = downstream_get(proxy, "/static/non-image.png").await;
+    let hit = downstream_get(proxy, "/static/non-image.png").await;
+
+    assert!(
+        first.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected text first response: {first:?}"
+    );
+    assert!(first.ends_with("text-body"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(response_header(&first, "x-fluxheim-cache-policy"), None);
+
+    assert!(
+        hit.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected text hit response: {hit:?}"
+    );
+    assert!(hit.ends_with("text-body"));
+    assert_eq!(
+        response_header(&hit, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+    assert_eq!(response_header(&hit, "x-fluxheim-cache-policy"), None);
+}
+
+#[tokio::test]
 async fn native_wasm_cache_store_deny_wins_over_earlier_skip() {
     let fixture = WasmRouteFixture::new(&[
         ("skip", WasmPluginBody::CacheStoreSkip),

@@ -147,7 +147,8 @@ Required live test:
 Target line: starts in `v1.7.4` with cache lookup/pass/bypass/deny decisions
 and cache-store skip/deny decisions. `v1.7.5` adds bounded symbolic cache-key
 components with live low-cardinality variant tests plus fixed-ID TTL/tag/header
-store metadata with live TTL expiry and stored-header HIT coverage. The
+store metadata and symbolic response content-type inspection with live TTL
+expiry and stored-header HIT coverage. The
 checked-in `examples/wasm/cache-lookup-policy.wat` and
 `examples/wasm/cache-store-policy.wat` fixtures plus the
 `examples/wasm/cache-policy.toml` config template document this subset, and the

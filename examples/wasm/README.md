@@ -12,6 +12,8 @@ production.
 - apply a bounded short TTL;
 - add the fixed `wasm-policy` cache tag;
 - add the fixed stored response header `x-fluxheim-cache-policy: wasm`.
+- apply those store mutations only when Fluxheim reports the response
+  content-type as the symbolic image class.
 
 The example intentionally uses separate modules for lookup and store phases
 because Fluxheim links only the host calls valid for the current phase. It also
