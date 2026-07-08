@@ -14,8 +14,6 @@ use crate::native_http1_proxy_cache_slice::{
     native_slice_cache_key, native_slice_identity, native_slice_not_satisfiable_response,
     native_slice_object_from_entry, native_slice_request_within_policy,
 };
-#[cfg(feature = "wasm")]
-use crate::native_http1_proxy_memory_cache::NativeProxyCacheKeyComponent;
 use crate::{NativeHttp1Request, NativeHttp1Response};
 use fluxheim_cache::{
     CacheRequestView, CacheSliceBounds, request_cache_bypass_reason, resolve_client_slice_ranges,
@@ -29,7 +27,7 @@ impl NativeProxyMemoryCache {
         &self,
         request: &NativeHttp1Request,
         proxy: &NativeHttp1Proxy,
-        #[cfg(feature = "wasm")] key_components: &[NativeProxyCacheKeyComponent],
+        #[cfg(feature = "wasm")] key_components: &[super::NativeProxyCacheKeyComponent],
     ) -> Option<NativeCacheSliceResponse> {
         if !self.config.range.enabled || !self.config.range.slice.enabled {
             return None;
