@@ -1656,6 +1656,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cache_key_component_merge_rejects_aggregate_limit() {
+        let mut target = vec![
+            NativeProxyCacheKeyComponent {
+                label: "one",
+                value: "1",
+            },
+            NativeProxyCacheKeyComponent {
+                label: "two",
+                value: "2",
+            },
+            NativeProxyCacheKeyComponent {
+                label: "three",
+                value: "3",
+            },
+            NativeProxyCacheKeyComponent {
+                label: "four",
+                value: "4",
+            },
+        ];
+        let source = vec![NativeProxyCacheKeyComponent {
+            label: "five",
+            value: "5",
+        }];
+
+        let error = merge_wasm_cache_key_components(&mut target, source).unwrap_err();
+
+        assert_eq!(error, "wasm cache key component limit reached");
+        assert_eq!(target.len(), MAX_WASM_CACHE_KEY_COMPONENTS);
+        assert!(!target.iter().any(|component| component.label == "five"));
+    }
+
+    #[test]
+    fn cache_store_metadata_merge_caps_tags_without_dropping_headers() {
+        let mut target = NativeProxyCacheStoreMetadata {
+            ttl_override: None,
+            cache_tags: vec!["one", "two", "three", "four"],
+            response_headers: Vec::new(),
+        };
+        let source = NativeProxyCacheStoreMetadata {
+            ttl_override: Some(Duration::from_secs(1)),
+            cache_tags: vec!["five"],
+            response_headers: vec![("x-fluxheim-cache-policy", "wasm")],
+        };
+
+        merge_wasm_cache_store_metadata(&mut target, source);
+
+        assert_eq!(target.ttl_override, Some(Duration::from_secs(1)));
+        assert_eq!(target.cache_tags.len(), MAX_WASM_CACHE_TAGS);
+        assert!(!target.cache_tags.contains(&"five"));
+        assert_eq!(
+            target.response_headers,
+            vec![("x-fluxheim-cache-policy", "wasm")]
+        );
+    }
+
+    #[test]
     fn cache_store_metadata_merge_caps_stored_headers_without_dropping_tags() {
         let mut target = NativeProxyCacheStoreMetadata {
             ttl_override: None,
@@ -1686,6 +1742,29 @@ mod tests {
                 .response_headers
                 .iter()
                 .any(|(name, _)| *name == "x-five")
+        );
+    }
+
+    #[test]
+    fn cache_store_metadata_merge_keeps_first_ttl_override() {
+        let mut target = NativeProxyCacheStoreMetadata {
+            ttl_override: Some(Duration::from_secs(1)),
+            cache_tags: Vec::new(),
+            response_headers: Vec::new(),
+        };
+        let source = NativeProxyCacheStoreMetadata {
+            ttl_override: Some(Duration::from_secs(300)),
+            cache_tags: vec!["wasm-policy"],
+            response_headers: vec![("x-fluxheim-cache-policy", "wasm")],
+        };
+
+        merge_wasm_cache_store_metadata(&mut target, source);
+
+        assert_eq!(target.ttl_override, Some(Duration::from_secs(1)));
+        assert_eq!(target.cache_tags, vec!["wasm-policy"]);
+        assert_eq!(
+            target.response_headers,
+            vec![("x-fluxheim-cache-policy", "wasm")]
         );
     }
 }

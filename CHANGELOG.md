@@ -29,6 +29,8 @@ behavior when the change improves security or project direction.
   on cache HIT and forbidden stored-header IDs fail closed.
 - Add live listener coverage proving duplicate stored-header mutations fail
   closed, plus unit coverage for stored-header mutation-count caps.
+- Add unit coverage for aggregate cache-key component caps, cache-tag caps, and
+  TTL singleton merge behavior.
 - Add a checked-in Wasm cache-policy example plus a config template for the
   bounded `1.7.5` cache ABI.
 - Add live listener coverage that compiles the checked-in example sources and

@@ -41,6 +41,8 @@ mutate arbitrary cached response headers.
   closed.
 - Add negative coverage proving duplicate stored-header mutations fail closed
   and stored-header mutation caps are enforced.
+- Add negative coverage for aggregate cache-key component caps, cache-tag caps,
+  and TTL singleton merge behavior.
 - Add `examples/wasm/cache-lookup-policy.wat`,
   `examples/wasm/cache-store-policy.wat`, and a matching config template for
   the bounded cache-policy ABI.
