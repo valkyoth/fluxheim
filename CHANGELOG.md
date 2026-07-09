@@ -13,6 +13,11 @@ behavior when the change improves security or project direction.
 
 - Add explicit compiled WebAssembly module identities covering plugin SHA-256
   digest, ABI version, native hook feature surface, and Fluxheim crate version.
+- Add complete bounded Prometheus labels for the current Wasm hook outcomes,
+  including route selection, cache-store skip, and cache-specific global
+  admission rejection.
+- Add the cache-policy process-wide Wasm admission budget to authenticated
+  admin status output.
 - Add runtime tests proving identical plugin bytes get distinct identities when
   ABI or feature surfaces differ.
 
@@ -23,6 +28,8 @@ behavior when the change improves security or project direction.
 - Wire the native HTTP/1 hook registry through manifest-derived module
   identities so future compile-cache reuse cannot cross ABI, feature, or
   release boundaries.
+- Keep Wasm metrics labels bounded while preserving visibility for every
+  current hook family and admission scope.
 
 ## 1.7.5 - 2026-07-08
 

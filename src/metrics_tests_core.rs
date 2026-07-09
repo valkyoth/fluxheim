@@ -190,7 +190,24 @@ fn records_wasm_plugin_metrics_with_bounded_labels() {
         "attacker-outcome",
         std::time::Duration::from_millis(3),
     );
+    for (phase, outcome) in [
+        ("request-headers", "continue"),
+        ("response-headers", "continue"),
+        ("route-decision", "select"),
+        ("cache-lookup", "pass"),
+        ("cache-lookup", "bypass"),
+        ("cache-store", "skip"),
+        ("cache-store", "deny"),
+    ] {
+        record_wasm_plugin_execution(
+            "cache_policy",
+            phase,
+            outcome,
+            std::time::Duration::from_millis(1),
+        );
+    }
     record_wasm_plugin_admission_rejection("access_gate", "access-decision", "global");
+    record_wasm_plugin_admission_rejection("cache_policy", "cache-store", "cache-global");
     record_wasm_plugin_admission_rejection("access_gate", "access-decision", "plugin");
     record_wasm_plugin_admission_rejection("access_gate", "access-decision", "attachment");
     record_wasm_plugin_admission_rejection("bad/plugin/name", "attacker-phase", "attacker-scope");
@@ -205,12 +222,24 @@ fn records_wasm_plugin_metrics_with_bounded_labels() {
     assert!(output.contains("fluxheim_wasm_plugin_execution_seconds"));
     assert!(output.contains("fluxheim_wasm_plugin_admission_rejections_total"));
     assert!(output.contains(r#"plugin="access_gate""#));
+    assert!(output.contains(r#"plugin="cache_policy""#));
     assert!(output.contains(r#"plugin="other""#));
     assert!(output.contains(r#"phase="access-decision""#));
+    assert!(output.contains(r#"phase="request-headers""#));
+    assert!(output.contains(r#"phase="response-headers""#));
+    assert!(output.contains(r#"phase="route-decision""#));
+    assert!(output.contains(r#"phase="cache-lookup""#));
+    assert!(output.contains(r#"phase="cache-store""#));
     assert!(output.contains(r#"phase="other""#));
     assert!(output.contains(r#"outcome="deny""#));
+    assert!(output.contains(r#"outcome="continue""#));
+    assert!(output.contains(r#"outcome="select""#));
+    assert!(output.contains(r#"outcome="pass""#));
+    assert!(output.contains(r#"outcome="bypass""#));
+    assert!(output.contains(r#"outcome="skip""#));
     assert!(output.contains(r#"outcome="other""#));
     assert!(output.contains(r#"scope="global""#));
+    assert!(output.contains(r#"scope="cache-global""#));
     assert!(output.contains(r#"scope="plugin""#));
     assert!(output.contains(r#"scope="attachment""#));
     assert!(output.contains(r#"scope="other""#));

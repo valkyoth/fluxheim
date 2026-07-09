@@ -13,6 +13,11 @@ initial live hook families landed in 1.7.1 through 1.7.5.
   release boundaries.
 - The runtime rejects a compile request when the supplied compiled-module
   identity does not match the loaded plugin digest.
+- Prometheus Wasm plugin metrics now preserve bounded labels for every current
+  hook family, including route selection, cache lookup pass/bypass, cache-store
+  skip/deny, and the cache-specific global admission scope.
+- Authenticated admin status now reports both the general Wasm process-wide
+  admission budget and the separate cache-policy process-wide admission budget.
 
 ## Test Coverage
 
@@ -20,3 +25,5 @@ initial live hook families landed in 1.7.1 through 1.7.5.
   compiled-module identities for the same plugin bytes.
 - Add runtime coverage for digest-mismatch rejection before module compilation
   can be accepted under the wrong identity.
+- Extend metrics and admin-status tests for the mature hook-family visibility
+  fields added in this release.

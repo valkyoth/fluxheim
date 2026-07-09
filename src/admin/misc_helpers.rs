@@ -183,6 +183,7 @@ pub(super) fn wasm_status_json(config: &Config) -> Value {
         "enabled": config.wasm.enabled,
         "allow_preview_abi": config.wasm.allow_preview_abi,
         "max_total_concurrent_executions": config.wasm.max_total_concurrent_executions,
+        "max_total_cache_concurrent_executions": config.wasm.max_total_cache_concurrent_executions,
         "plugin_root_count": config.wasm.plugin_roots.len(),
         "plugin_count": plugins.len(),
         "attachment_count": attachments.len(),

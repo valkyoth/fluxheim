@@ -466,8 +466,10 @@ fn wasm_outcome_metric_label(outcome: &str) -> &'static str {
         "deny" => "deny",
         "continue" => "continue",
         "mutate" => "mutate",
+        "select" => "select",
         "bypass" => "bypass",
         "pass" => "pass",
+        "skip" => "skip",
         "synthetic" => "synthetic",
         "timeout" => "timeout",
         "trap" => "trap",
@@ -482,6 +484,7 @@ fn wasm_outcome_metric_label(outcome: &str) -> &'static str {
 fn wasm_admission_scope_metric_label(scope: &str) -> &'static str {
     match scope {
         "global" => "global",
+        "cache-global" => "cache-global",
         "plugin" => "plugin",
         "attachment" => "attachment",
         _ => "other",
