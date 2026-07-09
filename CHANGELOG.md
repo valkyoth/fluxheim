@@ -7,6 +7,23 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.7.6 - 2026-07-09
+
+### Added
+
+- Add explicit compiled WebAssembly module identities covering plugin SHA-256
+  digest, ABI version, native hook feature surface, and Fluxheim crate version.
+- Add runtime tests proving identical plugin bytes get distinct identities when
+  ABI or feature surfaces differ.
+
+### Security
+
+- Reject attempts to compile a WebAssembly module with an identity whose digest
+  does not match the loaded plugin file.
+- Wire the native HTTP/1 hook registry through manifest-derived module
+  identities so future compile-cache reuse cannot cross ABI, feature, or
+  release boundaries.
+
 ## 1.7.5 - 2026-07-08
 
 ### Added

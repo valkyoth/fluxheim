@@ -14,7 +14,9 @@ or deny before cache lookup and storage, plus cache-store decisions that can
 continue, skip storage, or deny after origin response and before cache write.
 Fluxheim `1.7.5` adds the first bounded symbolic cache-key component hook for
 low-cardinality cache variants plus fixed-ID cache-store TTL/tag/header
-metadata.
+metadata. Fluxheim `1.7.6` starts the mature-runtime hardening pass by giving
+compiled modules explicit cache identities scoped by plugin SHA-256 digest, ABI
+version, native feature surface, and Fluxheim version.
 Direct backend choice, plugin-provided persistence keys, dynamic mirror/shadow
 target choice, richer store policy hooks, Proxy-ABI compatibility, and WASI
 capabilities remain staged for later `1.7.x` releases.
@@ -74,6 +76,12 @@ ABI, phase, fail-mode, and per-plugin sandbox limits. The manifest-backed
 loader validates the manifest and then loads the exact approved plugin path
 with the validated limits; production hook execution still starts later in the
 `1.7` line.
+
+Compiled modules carry a stable identity that includes the loaded plugin digest,
+the manifest ABI version, the native hook feature surface used to compile it,
+and the Fluxheim crate version. Any future compile cache must use that full
+identity as the cache key so module reuse cannot cross ABI, feature, or release
+boundaries.
 
 The first useful policy-hook scope should cover the common extension cases
 without exposing request bodies or arbitrary I/O.

@@ -9,9 +9,12 @@ use wasmtime::{
     UpdateDeadline,
 };
 
-use crate::{WasmPluginError, WasmPluginFile, WasmSandboxLimits};
+use crate::{
+    FLUXHEIM_WASM_ABI_VERSION, LoadedWasmPlugin, WasmPluginError, WasmPluginFile, WasmSandboxLimits,
+};
 
 const MAX_CONCURRENT_COMPILES: usize = 16;
+const DEFAULT_RUNTIME_FEATURE_SET: &str = "fluxheim-policy-v1";
 
 #[derive(Debug)]
 pub struct FluxWasmRuntime {
@@ -22,7 +25,15 @@ pub struct FluxWasmRuntime {
 #[derive(Debug, Clone)]
 pub struct FluxWasmCompiledModule {
     module: Module,
+    cache_identity: FluxWasmCompiledModuleIdentity,
+}
+
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+pub struct FluxWasmCompiledModuleIdentity {
     plugin_sha256: String,
+    abi_version: u32,
+    fluxheim_version: String,
+    feature_set: String,
 }
 
 #[derive(Clone)]
@@ -113,6 +124,55 @@ impl WasmI32HostFunction {
             name,
             callback: Arc::new(callback),
         }
+    }
+}
+
+impl FluxWasmCompiledModule {
+    pub fn cache_identity(&self) -> &FluxWasmCompiledModuleIdentity {
+        &self.cache_identity
+    }
+
+    pub fn plugin_sha256(&self) -> &str {
+        self.cache_identity.plugin_sha256()
+    }
+}
+
+impl FluxWasmCompiledModuleIdentity {
+    pub fn new(
+        plugin_sha256: impl Into<String>,
+        abi_version: u32,
+        feature_set: impl Into<String>,
+    ) -> Self {
+        Self {
+            plugin_sha256: plugin_sha256.into().to_ascii_lowercase(),
+            abi_version,
+            fluxheim_version: env!("CARGO_PKG_VERSION").to_owned(),
+            feature_set: feature_set.into(),
+        }
+    }
+
+    pub fn for_loaded_plugin(plugin: &LoadedWasmPlugin, feature_set: impl Into<String>) -> Self {
+        Self::new(
+            plugin.file().sha256_hex(),
+            plugin.manifest().abi().abi_version(),
+            feature_set,
+        )
+    }
+
+    pub fn plugin_sha256(&self) -> &str {
+        &self.plugin_sha256
+    }
+
+    pub fn abi_version(&self) -> u32 {
+        self.abi_version
+    }
+
+    pub fn fluxheim_version(&self) -> &str {
+        &self.fluxheim_version
+    }
+
+    pub fn feature_set(&self) -> &str {
+        &self.feature_set
     }
 }
 
@@ -263,9 +323,32 @@ impl FluxWasmRuntime {
         &self,
         plugin: &WasmPluginFile,
     ) -> Result<FluxWasmCompiledModule, WasmExecutionError> {
+        self.compile_plugin_module_with_identity(
+            plugin,
+            FluxWasmCompiledModuleIdentity::new(
+                plugin.sha256_hex(),
+                FLUXHEIM_WASM_ABI_VERSION,
+                DEFAULT_RUNTIME_FEATURE_SET,
+            ),
+        )
+    }
+
+    pub fn compile_plugin_module_with_identity(
+        &self,
+        plugin: &WasmPluginFile,
+        cache_identity: FluxWasmCompiledModuleIdentity,
+    ) -> Result<FluxWasmCompiledModule, WasmExecutionError> {
+        if !cache_identity
+            .plugin_sha256()
+            .eq_ignore_ascii_case(plugin.sha256_hex())
+        {
+            return Err(WasmExecutionError::RuntimeSetup(
+                "wasm compiled-module identity digest mismatch".to_owned(),
+            ));
+        }
         Ok(FluxWasmCompiledModule {
             module: self.compile_module(plugin)?,
-            plugin_sha256: plugin.sha256_hex().to_owned(),
+            cache_identity,
         })
     }
 
@@ -369,7 +452,7 @@ impl FluxWasmRuntime {
         Ok(WasmExecutionOutcome {
             function: function.to_owned(),
             result,
-            plugin_sha256: module.plugin_sha256.clone(),
+            plugin_sha256: module.cache_identity.plugin_sha256.clone(),
         })
     }
 
@@ -487,7 +570,11 @@ mod tests {
             module: runtime
                 .compile_module_with_counter(&plugin, counter, 1)
                 .unwrap(),
-            plugin_sha256: plugin.sha256_hex().to_owned(),
+            cache_identity: FluxWasmCompiledModuleIdentity::new(
+                plugin.sha256_hex(),
+                FLUXHEIM_WASM_ABI_VERSION,
+                "test",
+            ),
         };
         let permit = acquire_counter_permit(counter, 1).unwrap();
 
@@ -501,6 +588,43 @@ mod tests {
         assert_eq!(outcome.result, 7);
         assert!(matches!(error, WasmExecutionError::CompileConcurrencyLimit));
         drop(permit);
+    }
+
+    #[test]
+    fn compiled_module_identity_separates_abi_features_and_version() {
+        let sha = "a".repeat(64);
+        let base = FluxWasmCompiledModuleIdentity::new(&sha, 1, "native-http1:access-decision");
+        let different_abi =
+            FluxWasmCompiledModuleIdentity::new(&sha, 2, "native-http1:access-decision");
+        let different_features =
+            FluxWasmCompiledModuleIdentity::new(&sha, 1, "native-http1:cache-store");
+
+        assert_eq!(base.plugin_sha256(), sha);
+        assert_eq!(base.abi_version(), 1);
+        assert_eq!(base.fluxheim_version(), env!("CARGO_PKG_VERSION"));
+        assert_eq!(base.feature_set(), "native-http1:access-decision");
+        assert_ne!(base, different_abi);
+        assert_ne!(base, different_features);
+    }
+
+    #[test]
+    fn compile_rejects_mismatched_module_identity_digest() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"(module (func (export "decision") (result i32) i32.const 7))"#,
+        );
+        let limits = WasmSandboxLimits::default();
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+        let identity = FluxWasmCompiledModuleIdentity::new("0".repeat(64), 1, "test");
+
+        let error = runtime
+            .compile_plugin_module_with_identity(&plugin, identity)
+            .unwrap_err();
+
+        assert!(matches!(error, WasmExecutionError::RuntimeSetup(_)));
     }
 
     #[test]

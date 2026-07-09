@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 
 use fluxheim_config::{Config, WasmAttachmentConfig, WasmPluginFailMode, WasmPluginPhase};
 use fluxheim_wasm::{
-    FluxWasmAdmissionController, FluxWasmCompiledModule, FluxWasmRuntime, WasmAccessDecision,
-    WasmAccessDeny, WasmExecutionError, WasmI32HostFunction, WasmPluginLoadError,
-    load_plugin_from_manifest,
+    FluxWasmAdmissionController, FluxWasmCompiledModule, FluxWasmCompiledModuleIdentity,
+    FluxWasmRuntime, ValidatedWasmPluginManifest, WasmAccessDecision, WasmAccessDeny,
+    WasmExecutionError, WasmI32HostFunction, WasmPluginLoadError, load_plugin_from_manifest,
 };
 
 use crate::native_http1_proxy_memory_cache::{
@@ -229,8 +229,12 @@ impl NativeWasmHookRegistry {
             )?;
             let runtime = FluxWasmRuntime::new(loaded.manifest().limits())
                 .map_err(|_| NativeWasmRegistryError::Runtime)?;
+            let cache_identity = FluxWasmCompiledModuleIdentity::for_loaded_plugin(
+                &loaded,
+                native_wasm_module_feature_set(loaded.manifest()),
+            );
             let module = runtime
-                .compile_plugin_module(loaded.file())
+                .compile_plugin_module_with_identity(loaded.file(), cache_identity)
                 .map_err(|_| NativeWasmRegistryError::Runtime)?;
             let name = loaded.manifest().name().to_owned();
             let plugin_config = config
@@ -378,6 +382,27 @@ impl NativeWasmHookRegistry {
             cache_lookup,
             cache_store,
         }
+    }
+}
+
+fn native_wasm_module_feature_set(manifest: &ValidatedWasmPluginManifest) -> String {
+    let mut phases = manifest
+        .phases()
+        .iter()
+        .map(wasm_phase_name)
+        .collect::<Vec<_>>();
+    phases.sort_unstable();
+    format!("native-http1:{}", phases.join("+"))
+}
+
+fn wasm_phase_name(phase: &fluxheim_wasm::WasmPluginPhase) -> &'static str {
+    match phase {
+        fluxheim_wasm::WasmPluginPhase::RequestHeaders => REQUEST_HEADERS_PHASE,
+        fluxheim_wasm::WasmPluginPhase::ResponseHeaders => RESPONSE_HEADERS_PHASE,
+        fluxheim_wasm::WasmPluginPhase::AccessDecision => ACCESS_DECISION_PHASE,
+        fluxheim_wasm::WasmPluginPhase::RouteDecision => ROUTE_DECISION_PHASE,
+        fluxheim_wasm::WasmPluginPhase::CacheLookup => CACHE_LOOKUP_PHASE,
+        fluxheim_wasm::WasmPluginPhase::CacheStore => CACHE_STORE_PHASE,
     }
 }
 

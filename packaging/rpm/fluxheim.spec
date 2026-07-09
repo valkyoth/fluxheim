@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.7.5
+Version:        1.7.6
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,13 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu Jul 09 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.6-1
+- Add explicit compiled WebAssembly module identities covering plugin digest,
+  ABI version, native hook feature surface, and Fluxheim crate version.
+- Reject WebAssembly compile requests whose supplied identity digest does not
+  match the loaded plugin file.
+- Wire native HTTP/1 Wasm hook compilation through manifest-derived identities.
+
 * Wed Jul 08 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.5-1
 - Add bounded WebAssembly cache-key component hooks for native HTTP/1 cache
   lookup.
