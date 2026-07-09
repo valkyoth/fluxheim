@@ -31,3 +31,6 @@ initial live hook families landed in 1.7.1 through 1.7.5.
   access-decision, request-header mutation, route-decision branch selection,
   cache-key mutation, cache-store metadata, cached HIT behavior, and
   response-header mutation in one request flow.
+- Add reload classification regressions for Wasm plugin digest changes and
+  attachment phase changes so module/hash and hook-chain updates remain
+  process-upgrade events.

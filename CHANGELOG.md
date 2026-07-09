@@ -21,6 +21,9 @@ behavior when the change improves security or project direction.
 - Add a live native HTTP/1 regression test proving access decision, request
   headers, route selection, cache-key mutation, cache-store metadata, and
   response headers compose on one request chain.
+- Add reload classification regressions proving Wasm plugin digest changes and
+  attachment phase changes require a process upgrade rather than a snapshot
+  reload.
 - Add runtime tests proving identical plugin bytes get distinct identities when
   ABI or feature surfaces differ.
 

@@ -2,7 +2,8 @@ use crate::config::{
     AdminConfig, Config, HttpsRedirectConfig, LoggingConfig, LoggingFileConfig, LoggingFormat,
     LoggingLevel, LoggingTarget, MetricsConfig, ProxyConfig, ServerConfig, ServerProcessConfig,
     TlsBackend, TlsCipherSuite, TlsConfig, TlsCurvePreference, TlsFipsConfig, TlsPolicyProfile,
-    VhostConfig, WasmConfig, WebConfig,
+    VhostConfig, WasmAttachmentConfig, WasmConfig, WasmHostCallNamespace, WasmPluginAbi,
+    WasmPluginConfig, WasmPluginFailMode, WasmPluginPhase, WebConfig,
 };
 use crate::reload::{ReloadImpact, ReloadReason, classify_reload};
 
@@ -403,4 +404,84 @@ fn wasm_runtime_change_requires_process_upgrade() {
         "process-upgrade: wasm-runtime-changed"
     );
     assert!(!classify_reload(&old, &new).is_snapshot_safe());
+}
+
+#[test]
+fn wasm_plugin_hash_change_requires_process_upgrade() {
+    let old = Config {
+        wasm: wasm_reload_config(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            vec![WasmPluginPhase::RequestHeaders],
+        ),
+        ..Config::default()
+    };
+    let new = Config {
+        wasm: wasm_reload_config(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            vec![WasmPluginPhase::RequestHeaders],
+        ),
+        ..Config::default()
+    };
+
+    assert_eq!(
+        classify_reload(&old, &new),
+        ReloadImpact::ProcessUpgrade {
+            reasons: vec![ReloadReason::WasmRuntimeChanged]
+        }
+    );
+}
+
+#[test]
+fn wasm_attachment_phase_change_requires_process_upgrade() {
+    let old = Config {
+        wasm: wasm_reload_config(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            vec![WasmPluginPhase::RequestHeaders],
+        ),
+        ..Config::default()
+    };
+    let new = Config {
+        wasm: wasm_reload_config(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            vec![WasmPluginPhase::ResponseHeaders],
+        ),
+        ..Config::default()
+    };
+
+    assert_eq!(
+        classify_reload(&old, &new),
+        ReloadImpact::ProcessUpgrade {
+            reasons: vec![ReloadReason::WasmRuntimeChanged]
+        }
+    );
+}
+
+fn wasm_reload_config(sha256: &str, attachment_phases: Vec<WasmPluginPhase>) -> WasmConfig {
+    WasmConfig {
+        enabled: true,
+        plugin_roots: vec!["/srv/fluxheim/plugins".into()],
+        plugins: vec![WasmPluginConfig {
+            name: "policy".to_owned(),
+            path: "/srv/fluxheim/plugins/policy.wasm".into(),
+            sha256: Some(sha256.to_owned()),
+            abi: WasmPluginAbi::FluxheimPolicyV1,
+            host_call_namespace: WasmHostCallNamespace::FluxheimPolicyV1,
+            phases: vec![
+                WasmPluginPhase::RequestHeaders,
+                WasmPluginPhase::ResponseHeaders,
+            ],
+            fail_mode: WasmPluginFailMode::FailClosed,
+            limits: None,
+            admission: None,
+        }],
+        attachments: vec![WasmAttachmentConfig {
+            plugin: "policy".to_owned(),
+            vhost: "app".to_owned(),
+            route: None,
+            phases: attachment_phases,
+            priority: 100,
+            admission: None,
+        }],
+        ..WasmConfig::default()
+    }
 }
