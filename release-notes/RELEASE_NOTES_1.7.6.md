@@ -27,3 +27,7 @@ initial live hook families landed in 1.7.1 through 1.7.5.
   can be accepted under the wrong identity.
 - Extend metrics and admin-status tests for the mature hook-family visibility
   fields added in this release.
+- Add a live native HTTP/1 cross-family chain regression test that exercises
+  access-decision, request-header mutation, route-decision branch selection,
+  cache-key mutation, cache-store metadata, cached HIT behavior, and
+  response-header mutation in one request flow.

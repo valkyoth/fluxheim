@@ -18,6 +18,9 @@ behavior when the change improves security or project direction.
   admission rejection.
 - Add the cache-policy process-wide Wasm admission budget to authenticated
   admin status output.
+- Add a live native HTTP/1 regression test proving access decision, request
+  headers, route selection, cache-key mutation, cache-store metadata, and
+  response headers compose on one request chain.
 - Add runtime tests proving identical plugin bytes get distinct identities when
   ABI or feature surfaces differ.
 

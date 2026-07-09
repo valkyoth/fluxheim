@@ -970,6 +970,98 @@ async fn native_wasm_cache_store_can_set_bounded_stored_response_header() {
 }
 
 #[tokio::test]
+async fn native_wasm_cross_family_chain_runs_in_order_with_cache_hit_metadata() {
+    let fixture = WasmRouteFixture::new(&[
+        ("access", WasmPluginBody::Decision(1)),
+        ("headers", WasmPluginBody::HeaderPolicy),
+        ("router", WasmPluginBody::RouteDecision),
+        ("cache_key", WasmPluginBody::CacheLookupDeviceKey),
+        ("cache_store", WasmPluginBody::CacheStoreHeader),
+    ]);
+    let stable = super::upstream_expect_path("/never", "unexpected").await;
+    let canary =
+        upstream_expect_policy_header_cacheable_sequence(&[("/gold/item.png", "canary-one")]).await;
+    let mut config = fixture.config_with_attachments(
+        stable,
+        vec![
+            wasm_vhost_attachment_phase(
+                "access",
+                100,
+                fluxheim_config::WasmPluginPhase::AccessDecision,
+            ),
+            wasm_vhost_attachment_all_phases(
+                "headers",
+                110,
+                &[
+                    fluxheim_config::WasmPluginPhase::RequestHeaders,
+                    fluxheim_config::WasmPluginPhase::ResponseHeaders,
+                ],
+            ),
+            wasm_vhost_attachment_phase(
+                "router",
+                120,
+                fluxheim_config::WasmPluginPhase::RouteDecision,
+            ),
+            wasm_vhost_attachment_phase(
+                "cache_key",
+                130,
+                fluxheim_config::WasmPluginPhase::CacheLookup,
+            ),
+            wasm_vhost_attachment_phase(
+                "cache_store",
+                140,
+                fluxheim_config::WasmPluginPhase::CacheStore,
+            ),
+        ],
+    );
+    let mut stable_route = named_proxy_route("standard", "/gold", stable);
+    stable_route.cache = Some(native_proxy_memory_cache_config());
+    let mut canary_route = named_proxy_route("canary", "/gold", canary);
+    canary_route.cache = Some(native_proxy_memory_cache_config());
+    config.vhosts[0].routes = vec![stable_route, canary_route];
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+    let request = "GET /gold/item.png HTTP/1.1\r\nHost: route.test\r\nX-Canary: 1\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n";
+
+    let first = downstream_request(proxy, request).await;
+    let hit = downstream_request(proxy, request).await;
+
+    assert!(
+        first.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected first response: {first:?}"
+    );
+    assert!(first.ends_with("canary-one"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(
+        response_header(&first, "x-fluxheim-policy-branch").as_deref(),
+        Some("gold")
+    );
+    assert_eq!(response_header(&first, "x-powered-by"), None);
+    assert_eq!(response_header(&first, "x-fluxheim-cache-policy"), None);
+    assert!(
+        hit.starts_with("HTTP/1.1 200 OK\r\n"),
+        "unexpected hit response: {hit:?}"
+    );
+    assert!(hit.ends_with("canary-one"));
+    assert_eq!(
+        response_header(&hit, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+    assert_eq!(
+        response_header(&hit, "x-fluxheim-policy-branch").as_deref(),
+        Some("gold")
+    );
+    assert_eq!(
+        response_header(&hit, "x-fluxheim-cache-policy").as_deref(),
+        Some("wasm")
+    );
+}
+
+#[tokio::test]
 async fn native_wasm_cache_store_forbidden_header_fails_closed() {
     let fixture = WasmRouteFixture::new(&[("cache", WasmPluginBody::CacheStoreForbiddenHeader)]);
     let upstream =
@@ -2061,6 +2153,21 @@ fn wasm_vhost_attachment_phase(
     }
 }
 
+fn wasm_vhost_attachment_all_phases(
+    plugin: &str,
+    priority: u32,
+    phases: &[fluxheim_config::WasmPluginPhase],
+) -> fluxheim_config::WasmAttachmentConfig {
+    fluxheim_config::WasmAttachmentConfig {
+        plugin: plugin.to_owned(),
+        vhost: "route.test".to_owned(),
+        route: None,
+        phases: phases.to_vec(),
+        priority,
+        admission: None,
+    }
+}
+
 fn wasm_attachment_phase(
     plugin: &str,
     route: &str,
@@ -2254,6 +2361,53 @@ async fn upstream_expect_policy_header(expected_path: &'static str) -> std::net:
             )
             .await
             .unwrap();
+    });
+    addr
+}
+
+async fn upstream_expect_policy_header_cacheable_sequence(
+    responses: &'static [(&'static str, &'static str)],
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        for (expected_path, body) in responses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(
+                request.starts_with(&format!("GET {expected_path} HTTP/1.1\r\n")),
+                "unexpected upstream request: {request:?}"
+            );
+            assert!(
+                request
+                    .lines()
+                    .any(|line| line.eq_ignore_ascii_case("x-policy-tier: gold")),
+                "missing wasm policy header in upstream request: {request:?}"
+            );
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\nx-powered-by: origin\r\ncontent-length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        }
     });
     addr
 }
