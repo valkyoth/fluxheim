@@ -485,6 +485,7 @@ fn wasm_admission_scope_metric_label(scope: &str) -> &'static str {
     match scope {
         "global" => "global",
         "cache-global" => "cache-global",
+        "cache-vhost" => "cache-vhost",
         "plugin" => "plugin",
         "attachment" => "attachment",
         _ => "other",

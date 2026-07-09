@@ -15,9 +15,11 @@ behavior when the change improves security or project direction.
   digest, ABI version, native hook feature surface, and Fluxheim crate version.
 - Add complete bounded Prometheus labels for the current Wasm hook outcomes,
   including route selection, cache-store skip, and cache-specific global
-  admission rejection.
+  admission and per-vhost cache admission rejection.
 - Add the cache-policy process-wide Wasm admission budget to authenticated
   admin status output.
+- Add a derived per-vhost Wasm cache-hook admission layer under the process-wide
+  cache budget.
 - Add a live native HTTP/1 regression test proving access decision, request
   headers, route selection, cache-key mutation, cache-store metadata, and
   response headers compose on one request chain.
@@ -29,11 +31,14 @@ behavior when the change improves security or project direction.
 
 ### Security
 
-- Reject attempts to compile a WebAssembly module with an identity whose digest
-  does not match the loaded plugin file.
+- Guard the compiled WebAssembly module API against identity digest mismatches
+  so future compile-cache lookups cannot reuse a module under the wrong plugin
+  digest.
 - Wire the native HTTP/1 hook registry through manifest-derived module
   identities so future compile-cache reuse cannot cross ABI, feature, or
   release boundaries.
+- Prevent one vhost's cache-lookup/cache-store hooks from exhausting the whole
+  process-wide Wasm cache-hook budget for other vhosts.
 - Keep Wasm metrics labels bounded while preserving visibility for every
   current hook family and admission scope.
 

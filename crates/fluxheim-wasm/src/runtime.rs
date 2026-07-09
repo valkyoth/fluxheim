@@ -609,19 +609,38 @@ mod tests {
 
     #[test]
     fn compile_rejects_mismatched_module_identity_digest() {
-        let directory = tempfile::tempdir().unwrap();
-        let plugin_path = write_wat_plugin(
-            &directory,
+        let plugin_a_directory = tempfile::tempdir().unwrap();
+        let plugin_a_path = write_wat_plugin(
+            &plugin_a_directory,
             r#"(module (func (export "decision") (result i32) i32.const 7))"#,
         );
+        let plugin_b_directory = tempfile::tempdir().unwrap();
+        let plugin_b_path = write_wat_plugin(
+            &plugin_b_directory,
+            r#"(module (func (export "decision") (result i32) i32.const 8))"#,
+        );
         let limits = WasmSandboxLimits::default();
-        let plugin =
-            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let plugin_a = load_plugin_file(
+            &plugin_a_path,
+            &[plugin_a_directory.path().to_path_buf()],
+            limits,
+        )
+        .unwrap();
+        let plugin_b = load_plugin_file(
+            &plugin_b_path,
+            &[plugin_b_directory.path().to_path_buf()],
+            limits,
+        )
+        .unwrap();
         let runtime = FluxWasmRuntime::new(limits).unwrap();
-        let identity = FluxWasmCompiledModuleIdentity::new("0".repeat(64), 1, "test");
+        let identity = FluxWasmCompiledModuleIdentity::new(
+            plugin_b.sha256_hex(),
+            FLUXHEIM_WASM_ABI_VERSION,
+            "test",
+        );
 
         let error = runtime
-            .compile_plugin_module_with_identity(&plugin, identity)
+            .compile_plugin_module_with_identity(&plugin_a, identity)
             .unwrap_err();
 
         assert!(matches!(error, WasmExecutionError::RuntimeSetup(_)));

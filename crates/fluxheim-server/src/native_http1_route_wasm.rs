@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -85,6 +85,7 @@ pub(crate) struct NativeWasmHookRegistry {
     attachments: Vec<NativeWasmAttachment>,
     admission: FluxWasmAdmissionController,
     cache_admission: FluxWasmAdmissionController,
+    cache_vhost_admissions: HashMap<String, FluxWasmAdmissionController>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -121,6 +122,7 @@ struct NativeWasmHook {
     phase: WasmPluginPhase,
     global_admission: FluxWasmAdmissionController,
     global_admission_scope: NativeWasmAdmissionScope,
+    vhost_admission: Option<FluxWasmAdmissionController>,
     attachment_admission: FluxWasmAdmissionController,
 }
 
@@ -175,6 +177,7 @@ pub(crate) enum NativeWasmHookError {
 pub(crate) enum NativeWasmAdmissionScope {
     Global,
     CacheGlobal,
+    CacheVhost,
     Plugin,
     Attachment,
 }
@@ -210,11 +213,11 @@ impl NativeWasmHookRegistry {
                 .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?,
         )
         .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?;
-        let cache_admission = FluxWasmAdmissionController::new(
+        let cache_total_concurrent =
             usize::try_from(config.wasm.max_total_cache_concurrent_executions)
-                .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?,
-        )
-        .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?;
+                .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?;
+        let cache_admission = FluxWasmAdmissionController::new(cache_total_concurrent)
+            .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?;
 
         let manifests = config
             .wasm
@@ -284,10 +287,27 @@ impl NativeWasmHookRegistry {
             });
         }
 
+        let cache_vhosts = attachments
+            .iter()
+            .filter(|attachment| attachment_has_cache_phase(&attachment.phases))
+            .map(|attachment| attachment.vhost.clone())
+            .collect::<HashSet<_>>();
+        let cache_vhost_limit =
+            cache_vhost_admission_limit(cache_total_concurrent, cache_vhosts.len());
+        let mut cache_vhost_admissions = HashMap::with_capacity(cache_vhosts.len());
+        for vhost in cache_vhosts {
+            cache_vhost_admissions.insert(
+                vhost,
+                FluxWasmAdmissionController::new(cache_vhost_limit)
+                    .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?,
+            );
+        }
+
         Ok(Some(Self {
             attachments,
             admission,
             cache_admission,
+            cache_vhost_admissions,
         }))
     }
 
@@ -302,6 +322,7 @@ impl NativeWasmHookRegistry {
                 phase: WasmPluginPhase::AccessDecision,
                 global_admission: self.admission.clone(),
                 global_admission_scope: NativeWasmAdmissionScope::Global,
+                vhost_admission: None,
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -315,6 +336,7 @@ impl NativeWasmHookRegistry {
                 phase: WasmPluginPhase::RequestHeaders,
                 global_admission: self.admission.clone(),
                 global_admission_scope: NativeWasmAdmissionScope::Global,
+                vhost_admission: None,
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -332,6 +354,7 @@ impl NativeWasmHookRegistry {
                 phase: WasmPluginPhase::ResponseHeaders,
                 global_admission: self.admission.clone(),
                 global_admission_scope: NativeWasmAdmissionScope::Global,
+                vhost_admission: None,
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -345,6 +368,7 @@ impl NativeWasmHookRegistry {
                 phase: WasmPluginPhase::RouteDecision,
                 global_admission: self.admission.clone(),
                 global_admission_scope: NativeWasmAdmissionScope::Global,
+                vhost_admission: None,
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -358,6 +382,7 @@ impl NativeWasmHookRegistry {
                 phase: WasmPluginPhase::CacheLookup,
                 global_admission: self.cache_admission.clone(),
                 global_admission_scope: NativeWasmAdmissionScope::CacheGlobal,
+                vhost_admission: self.cache_vhost_admissions.get(&attachment.vhost).cloned(),
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -371,6 +396,7 @@ impl NativeWasmHookRegistry {
                 phase: WasmPluginPhase::CacheStore,
                 global_admission: self.cache_admission.clone(),
                 global_admission_scope: NativeWasmAdmissionScope::CacheGlobal,
+                vhost_admission: self.cache_vhost_admissions.get(&attachment.vhost).cloned(),
                 attachment_admission: attachment.admission.clone(),
             })
             .collect();
@@ -717,6 +743,7 @@ impl NativeWasmHook {
         let plugin = self.plugin.clone();
         let global_admission = self.global_admission.clone();
         let global_admission_scope = self.global_admission_scope;
+        let vhost_admission = self.vhost_admission.clone();
         let attachment_admission = self.attachment_admission.clone();
         let started = Instant::now();
         let plugin_name = plugin.name.clone();
@@ -724,6 +751,12 @@ impl NativeWasmHook {
             let _global_permit = global_admission
                 .try_acquire()
                 .map_err(|_| NativeWasmHookError::Admission(global_admission_scope))?;
+            let _vhost_permit = match vhost_admission {
+                Some(admission) => Some(admission.try_acquire().map_err(|_| {
+                    NativeWasmHookError::Admission(NativeWasmAdmissionScope::CacheVhost)
+                })?),
+                None => None,
+            };
             let _plugin_permit = plugin
                 .admission
                 .try_acquire()
@@ -1655,6 +1688,22 @@ fn attachment_phases(
     }
 }
 
+fn attachment_has_cache_phase(phases: &[WasmPluginPhase]) -> bool {
+    phases.iter().any(|phase| {
+        matches!(
+            phase,
+            WasmPluginPhase::CacheLookup | WasmPluginPhase::CacheStore
+        )
+    })
+}
+
+fn cache_vhost_admission_limit(total_concurrent: usize, cache_vhost_count: usize) -> usize {
+    if cache_vhost_count == 0 {
+        return total_concurrent.max(1);
+    }
+    total_concurrent.div_ceil(cache_vhost_count).max(1)
+}
+
 fn admission_controller(
     budget: fluxheim_config::WasmAdmissionBudgetConfig,
 ) -> Result<FluxWasmAdmissionController, NativeWasmRegistryError> {
@@ -1670,6 +1719,7 @@ impl NativeWasmAdmissionScope {
         match self {
             Self::Global => "global",
             Self::CacheGlobal => "cache-global",
+            Self::CacheVhost => "cache-vhost",
             Self::Plugin => "plugin",
             Self::Attachment => "attachment",
         }
@@ -1679,6 +1729,15 @@ impl NativeWasmAdmissionScope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_vhost_admission_limit_splits_global_budget() {
+        assert_eq!(cache_vhost_admission_limit(8, 0), 8);
+        assert_eq!(cache_vhost_admission_limit(8, 1), 8);
+        assert_eq!(cache_vhost_admission_limit(8, 2), 4);
+        assert_eq!(cache_vhost_admission_limit(8, 3), 3);
+        assert_eq!(cache_vhost_admission_limit(1, 8), 1);
+    }
 
     #[test]
     fn cache_key_component_merge_rejects_aggregate_limit() {

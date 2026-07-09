@@ -446,10 +446,12 @@ including live coverage for selected native load-balanced and managed-cookie
 persistent routes. `1.7.4` adds bounded cache-lookup decisions before cache
 lookup/storage and bounded cache-store skip/deny decisions before cache writes.
 `1.7.5` adds bounded symbolic cache-key components with low-cardinality live
-variant coverage plus fixed-ID TTL/tag/header store metadata. Direct backend
-pool/member choice, plugin-provided persistence-key choice, dynamic
-mirror/shadow target choice, and richer store policy hooks remain staged for
-later `1.7.x` releases.
+variant coverage plus fixed-ID TTL/tag/header store metadata. `1.7.6` adds
+compiled-module identities and a derived per-vhost cache-hook admission layer
+under `wasm.max_total_cache_concurrent_executions`, so one vhost cannot consume
+the whole cache-hook process budget. Direct backend pool/member choice,
+plugin-provided persistence-key choice, dynamic mirror/shadow target choice,
+and richer store policy hooks remain staged for later `1.7.x` releases.
 
 ## Reload Semantics
 
@@ -476,7 +478,8 @@ Required metrics include:
 - plugin invocations and completed decisions;
 - execution duration;
 - traps, panics, timeouts, compile timeouts, and fuel exhaustion;
-- global and per-plugin admission rejections;
+- global, cache-global, cache-vhost, per-plugin, and per-attachment admission
+  rejections;
 - fail-open and fail-closed outcomes;
 - loaded module count and module-cache generation/hash changes;
 - reload validation, load, swap, and rejection outcomes.
@@ -502,6 +505,8 @@ Required metrics include:
   traffic before upstream forwarding.
 - Verify process-wide admission rejects excess concurrent plugin executions
   even when each plugin's individual budget has not been exhausted.
+- Verify cache-hook admission applies a process-wide ceiling and a per-vhost
+  fair-share ceiling so one vhost cannot starve another vhost's cache hooks.
 - Verify WASM registry changes are classified by reload impact and do not fall
   through to the generic snapshot bucket.
 - Verify per-plugin metrics are emitted for success, deny, timeout, trap, fuel

@@ -283,6 +283,96 @@ async fn native_wasm_cache_admission_budget_does_not_starve_access_hooks() {
 }
 
 #[tokio::test]
+async fn native_wasm_cache_admission_budget_is_fair_across_vhosts() {
+    let fixture = WasmRouteFixture::new(&[
+        ("cache_busy", WasmPluginBody::CacheLookupBusy),
+        ("cache_ok", WasmPluginBody::CacheLookupDeviceKey),
+    ]);
+    let left_upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let right_upstream = upstream_expect_body("/cache/item", "right-ok").await;
+    let mut left_route = named_proxy_route("cache", "/cache", left_upstream);
+    left_route.cache = Some(native_proxy_memory_cache_config());
+    let mut right_route = named_proxy_route("cache", "/cache", right_upstream);
+    right_route.cache = Some(native_proxy_memory_cache_config());
+
+    let mut left_vhost = native_route_proxy_test_vhost();
+    left_vhost.name = "tenant-a".to_owned();
+    left_vhost.hosts = vec!["tenant-a.test".to_owned()];
+    left_vhost.routes = vec![left_route];
+
+    let mut right_vhost = native_route_proxy_test_vhost();
+    right_vhost.name = "tenant-b".to_owned();
+    right_vhost.hosts = vec!["tenant-b.test".to_owned()];
+    right_vhost.routes = vec![right_route];
+
+    let mut config = fluxheim_config::Config {
+        vhosts: vec![left_vhost, right_vhost],
+        ..Default::default()
+    };
+    config.server.default_vhost = Some("tenant-a".to_owned());
+    config.wasm = fluxheim_config::WasmConfig {
+        enabled: true,
+        plugin_roots: vec![fixture.root.clone()],
+        plugins: fixture.plugins.clone(),
+        attachments: vec![
+            fluxheim_config::WasmAttachmentConfig {
+                plugin: "cache_busy".to_owned(),
+                vhost: "tenant-a".to_owned(),
+                route: Some("cache".to_owned()),
+                phases: vec![fluxheim_config::WasmPluginPhase::CacheLookup],
+                priority: 100,
+                admission: None,
+            },
+            fluxheim_config::WasmAttachmentConfig {
+                plugin: "cache_ok".to_owned(),
+                vhost: "tenant-b".to_owned(),
+                route: Some("cache".to_owned()),
+                phases: vec![fluxheim_config::WasmPluginPhase::CacheLookup],
+                priority: 100,
+                admission: None,
+            },
+        ],
+        max_total_cache_concurrent_executions: 2,
+        ..Default::default()
+    };
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let first_left = tokio::spawn(async move {
+        downstream_request(
+            proxy,
+            "GET /cache/item HTTP/1.1\r\nHost: tenant-a.test\r\nConnection: close\r\n\r\n",
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    let second_left = downstream_request(
+        proxy,
+        "GET /cache/item HTTP/1.1\r\nHost: tenant-a.test\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let right = downstream_request(
+        proxy,
+        "GET /cache/item HTTP/1.1\r\nHost: tenant-b.test\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let first_left = first_left.await.unwrap();
+
+    assert!(
+        second_left.starts_with("HTTP/1.1 503 Service Unavailable\r\n"),
+        "unexpected same-vhost cache admission response: {second_left:?}"
+    );
+    assert!(second_left.ends_with("wasm cache lookup fail_closed\n"));
+    assert!(right.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(right.ends_with("right-ok"));
+    assert!(
+        first_left.starts_with("HTTP/1.1 503 Service Unavailable\r\n"),
+        "unexpected first cache response: {first_left:?}"
+    );
+}
+
+#[tokio::test]
 async fn native_wasm_request_and_response_headers_use_bounded_host_calls() {
     let fixture = WasmRouteFixture::new(&[("headers", WasmPluginBody::HeaderPolicy)]);
     let upstream = upstream_expect_policy_header("/item").await;
