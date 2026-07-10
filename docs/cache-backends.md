@@ -240,9 +240,10 @@ internal cache implementation.
   cooperating Fluxheim process fails to open or initialize the root while that
   lease is held. The lease is advisory: unrelated software can ignore it, and
   some NFS/CSI implementations do not provide reliable cross-node advisory
-  locking. Admin and CLI inspection resolve the registered live cache by
-  vhost/route and never construct a temporary allocator or write an independent
-  index.
+  locking. Storage-bin admin and CLI inspection resolve the registered live
+  cache by vhost/route and never construct a temporary allocator or write an
+  independent index. The filesystem backend has no shared allocator and may
+  rebuild a bounded read index for standalone CLI inspection.
 - Production HA deployments should use one storage-bin root per replica on
   local, `ReadWriteOnce`, or `ReadWriteOncePod` storage. Share cache warmth with
   peer fill rather than mounting one `ReadWriteMany` root into multiple

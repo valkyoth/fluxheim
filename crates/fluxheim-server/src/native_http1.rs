@@ -177,7 +177,7 @@ where
     let mut buffer = Vec::with_capacity(READ_CHUNK_BYTES);
 
     loop {
-        let Some(head_len) = timeout(
+        let head_result = timeout(
             policy.request_head_timeout(),
             read_until_head(&mut stream, &mut buffer, limits),
         )
@@ -187,8 +187,15 @@ where
                 std::io::ErrorKind::TimedOut,
                 "request head timeout",
             ))
-        })??
-        else {
+        })?;
+        let Some(head_len) = (match head_result {
+            Ok(head_len) => head_len,
+            Err(NativeHttp1Error::Parse(error)) => {
+                write_request_head_error(&mut stream, &error).await?;
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        }) else {
             return Ok(());
         };
         let (close_after_response, body_framing, request) = {
@@ -336,6 +343,30 @@ where
         true,
     )
     .await
+}
+
+async fn write_request_head_error<S>(
+    stream: &mut S,
+    error: &Http1ParseError,
+) -> Result<(), NativeHttp1Error>
+where
+    S: AsyncWrite + Unpin,
+{
+    let response = match error {
+        Http1ParseError::HeaderCountExceeded
+        | Http1ParseError::HeaderLineTooLong
+        | Http1ParseError::HeadTooLarge => NativeHttp1Response::new(
+            431,
+            "Request Header Fields Too Large",
+            b"request header fields too large\n",
+        ),
+        Http1ParseError::StartLineTooLong => {
+            NativeHttp1Response::new(414, "URI Too Long", b"uri too long\n")
+        }
+        _ => NativeHttp1Response::new(400, "Bad Request", b"bad request\n"),
+    }
+    .close_connection();
+    write_response(stream, response, true).await
 }
 
 async fn read_until_head<S>(

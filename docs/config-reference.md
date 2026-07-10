@@ -3391,6 +3391,10 @@ retry_statuses = [500, 502, 503, 504]
 # group = "fluxheim"
 # Generated socket/config/pid/log files live under socket_dir. Forced process
 # termination can leave stale files; remove them only while Fluxheim is stopped.
+# Fluxheim keeps generated names compact and validates the complete Unix socket
+# address before spawn. Keep socket_dir short enough for the platform's Unix
+# socket path limit; an oversized final address fails startup instead of being
+# truncated by php-fpm.
 
 [vhosts.acme_challenge]
 enabled = true

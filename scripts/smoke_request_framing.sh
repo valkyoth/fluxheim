@@ -2,7 +2,8 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-framing-smoke.XXXXXX")
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
+TMP_DIR=$(mktemp -d "$SMOKE_TMP_ROOT/fluxheim-framing-smoke.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_FRAMING_KEEP_LOGS:-0}
 BUILD_RELEASE=${FLUXHEIM_FRAMING_BUILD:-1}
 
@@ -178,7 +179,10 @@ many_headers = b"GET / HTTP/1.1\r\nHost: static.test\r\n" + b"".join(
 cases.append(("too_many_headers", many_headers, {431}))
 
 for name, raw, expected_statuses in cases:
-    actual = status_code(raw)
+    try:
+        actual = status_code(raw)
+    except AssertionError as error:
+        raise AssertionError(f"{name}: {error}") from error
     if actual not in expected_statuses:
         expected = ", ".join(str(status) for status in sorted(expected_statuses))
         raise AssertionError(f"{name}: expected one of {expected}, got {actual}")

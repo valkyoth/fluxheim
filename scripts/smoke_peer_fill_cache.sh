@@ -2,7 +2,8 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-peer-fill-smoke.XXXXXX")
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
+TMP_DIR=$(mktemp -d "$SMOKE_TMP_ROOT/fluxheim-peer-fill-smoke.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_SMOKE_KEEP_LOGS:-0}
 CURL_MAX_TIME=${FLUXHEIM_SMOKE_CURL_MAX_TIME:-5}
 

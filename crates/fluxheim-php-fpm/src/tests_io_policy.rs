@@ -169,20 +169,19 @@ fn managed_php_fpm_restart_backoff_is_bounded() {
 }
 
 #[test]
-fn managed_php_fpm_instance_names_are_sanitized_and_bounded() {
+fn managed_php_fpm_instance_names_are_compact_and_bounded() {
     assert_eq!(
         managed_php_fpm_instance_name_from_parts("pool/main:php", 42, 7, 0xfeed).unwrap(),
-        "fluxheim-php-fpm-pool-main-php-42-7-000000000000feed"
+        "fh-fpm-2a-7-000000000000feed"
     );
     assert_eq!(
         managed_php_fpm_instance_name_from_parts("", 42, 7, 0xfeed).unwrap(),
-        "fluxheim-php-fpm-php-42-7-000000000000feed"
+        "fh-fpm-2a-7-000000000000feed"
     );
 
     let long_name =
         managed_php_fpm_instance_name_from_parts(&"a".repeat(96), 42, 7, 0xfeed).unwrap();
-    assert!(long_name.contains(&"a".repeat(48)));
-    assert!(!long_name.contains(&"a".repeat(49)));
+    assert!(long_name.len() <= 48);
 }
 
 #[test]

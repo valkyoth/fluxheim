@@ -41,27 +41,12 @@ fn managed_php_fpm_instance_random() -> io::Result<u64> {
 }
 
 pub(crate) fn managed_php_fpm_instance_name_from_parts(
-    metric_pool: &str,
+    _metric_pool: &str,
     pid: u32,
     counter: usize,
     random: u64,
 ) -> io::Result<String> {
-    let sanitized = metric_pool
-        .bytes()
-        .map(|byte| match byte {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' => byte as char,
-            _ => '-',
-        })
-        .take(48)
-        .collect::<String>();
-    let sanitized = if sanitized.is_empty() {
-        "php".to_owned()
-    } else {
-        sanitized
-    };
-    Ok(format!(
-        "fluxheim-php-fpm-{sanitized}-{pid}-{counter}-{random:016x}"
-    ))
+    Ok(format!("fh-fpm-{pid:x}-{counter:x}-{random:016x}"))
 }
 
 pub fn managed_php_fpm_config(

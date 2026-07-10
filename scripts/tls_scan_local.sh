@@ -2,7 +2,8 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-tls-scan.XXXXXX")
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
+TMP_DIR=$(mktemp -d "$SMOKE_TMP_ROOT/fluxheim-tls-scan.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_TLS_SCAN_KEEP_LOGS:-0}
 BUILD_RELEASE=${FLUXHEIM_TLS_SCAN_BUILD:-1}
 TESTSSL_TAG=${FLUXHEIM_TESTSSL_TAG:-v3.2.3}

@@ -3,10 +3,10 @@ use std::time::Instant;
 use fluxheim_cache::{
     CacheObjectFreshnessState, VaryRequestHashField, collect_cache_tags, vary_request_hash_material,
 };
-use fluxheim_config::CacheConfig;
+use fluxheim_config::{CacheConfig, CacheDiskBackend};
 
 use super::native_http1_cache_purge::registered_native_disk_cache;
-use super::{NativeDiskCacheObjectMetadata, native_instant_to_unix_secs};
+use super::{NativeDiskCache, NativeDiskCacheObjectMetadata, native_instant_to_unix_secs};
 
 pub fn inspect_native_disk_cache_object(
     vhost: &str,
@@ -15,7 +15,12 @@ pub fn inspect_native_disk_cache_object(
     primary_key: &str,
     request_headers: &[(String, String)],
 ) -> Option<NativeDiskCacheObjectMetadata> {
-    let cache = registered_native_disk_cache(vhost, route)?;
+    let cache = registered_native_disk_cache(vhost, route).or_else(|| {
+        matches!(config.disk.backend, CacheDiskBackend::Filesystem)
+            .then(|| NativeDiskCache::from_config(config))
+            .flatten()
+            .map(std::sync::Arc::new)
+    })?;
     let entry = cache.get(primary_key, |fields| {
         native_inspection_vary_cache_key(primary_key, fields, request_headers)
     })?;

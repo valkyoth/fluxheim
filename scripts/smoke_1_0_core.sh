@@ -2,7 +2,8 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-1-0-core-smoke.XXXXXX")
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
+TMP_DIR=$(mktemp -d "$SMOKE_TMP_ROOT/fluxheim-1-0-core-smoke.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_SMOKE_KEEP_LOGS:-0}
 
 if ! command -v openssl >/dev/null 2>&1; then

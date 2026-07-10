@@ -2,7 +2,8 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-udp-smoke.XXXXXX")
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
+TMP_DIR=$(mktemp -d "$SMOKE_TMP_ROOT/fluxheim-udp-smoke.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_SMOKE_KEEP_LOGS:-0}
 UDP_SMOKE_ITERATIONS=${FLUXHEIM_UDP_SMOKE_ITERATIONS:-25}
 

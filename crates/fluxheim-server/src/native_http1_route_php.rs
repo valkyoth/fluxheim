@@ -85,7 +85,11 @@ impl NativePhpFpmRoute {
         let mut runtime_config = config.clone();
         let managed_fpm =
             fluxheim_php_fpm::managed_php_fpm_from_config(&scope, metric_pool, &mut runtime_config)
-                .map_err(|_| {
+                .map_err(|error| {
+                    log::error!(
+                        target: "fluxheim::php_fpm",
+                        "{scope}: managed PHP-FPM startup failed: {error}"
+                    );
                     NativeHttp1RouteProxyConfigError::Proxy(NativeHttp1ProxyConfigError::PhpFpm)
                 })?;
         let pools = fluxheim_php_fpm::php_fpm_keepalive_pools_from_config(

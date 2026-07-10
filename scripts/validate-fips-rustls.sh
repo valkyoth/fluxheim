@@ -45,6 +45,27 @@ if ! command -v go >/dev/null 2>&1; then
 fi
 
 if [ "$mode" = "release" ] && [ "${FLUXHEIM_ALLOW_EXPERIMENTAL_AWS_LC_FIPS_TOOLCHAIN:-0}" != "1" ]; then
+    if [ -z "${CC:-}" ]; then
+        default_cc_macros="$(cc -dM -E - </dev/null 2>/dev/null || true)"
+        default_clang_major="$(printf '%s\n' "$default_cc_macros" | sed -n 's/^#define __clang_major__ \([0-9][0-9]*\).*/\1/p' | head -1)"
+        default_gcc_major="$(printf '%s\n' "$default_cc_macros" | sed -n 's/^#define __GNUC__ \([0-9][0-9]*\).*/\1/p' | head -1)"
+        if { [ -n "$default_clang_major" ] && [ "$default_clang_major" -ge 19 ]; } \
+            || { [ -z "$default_clang_major" ] && [ -n "$default_gcc_major" ] && [ "$default_gcc_major" -ge 14 ]; }
+        then
+            for version in 13 12 11; do
+                if command -v "gcc-$version" >/dev/null 2>&1 \
+                    && command -v "g++-$version" >/dev/null 2>&1
+                then
+                    CC="gcc-$version"
+                    CXX="g++-$version"
+                    export CC CXX
+                    echo "fips rustls: selected supported compiler pair CC=$CC CXX=$CXX"
+                    break
+                fi
+            done
+        fi
+    fi
+
     cc_bin="${CC:-cc}"
     cc_line="$($cc_bin --version 2>/dev/null | sed -n '1p' || true)"
     cc_macros="$($cc_bin -dM -E - </dev/null 2>/dev/null || true)"

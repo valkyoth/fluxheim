@@ -321,6 +321,60 @@ fn live_cache_inspection_uses_registered_allocator_during_inserts() {
     assert_eq!(cache.stats().entries, 2);
 }
 
+#[test]
+fn filesystem_cache_inspection_rebuilds_index_without_live_allocator() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = CacheConfig {
+        enabled: true,
+        max_object_bytes: ByteSize::from_bytes(1024),
+        disk: fluxheim_config::CacheDiskConfig {
+            enabled: true,
+            path: Some(directory.path().join("cache")),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let cache = NativeDiskCache::from_config(&config).unwrap();
+    cache
+        .store(
+            disk_cache_store_key("standalone"),
+            &disk_cache_entry(b"body"),
+        )
+        .unwrap();
+    drop(cache);
+
+    let metadata = super::inspect_native_disk_cache_object(
+        "standalone-inspection.test",
+        None,
+        &config,
+        "standalone",
+        &[],
+    )
+    .unwrap();
+
+    assert_eq!(metadata.body_bytes, 4);
+}
+
+#[test]
+fn storage_bin_inspection_does_not_construct_unregistered_allocator() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("cache");
+    let config = storage_bin_config(&root);
+
+    assert!(
+        super::inspect_native_disk_cache_object(
+            "unregistered-storage-bin.test",
+            None,
+            &config,
+            "missing",
+            &[],
+        )
+        .is_none()
+    );
+    assert!(!root.exists());
+}
+
 const STORAGE_BIN_LEASE_CHILD_ROOT: &str = "FLUXHEIM_STORAGE_BIN_LEASE_CHILD_ROOT";
 const STORAGE_BIN_LEASE_CHILD_MAX_BYTES: &str = "FLUXHEIM_STORAGE_BIN_LEASE_CHILD_MAX_BYTES";
 const STORAGE_BIN_LEASE_CHILD_CONFIRMED: &str = "fluxheim-storage-bin-lease-child-confirmed";

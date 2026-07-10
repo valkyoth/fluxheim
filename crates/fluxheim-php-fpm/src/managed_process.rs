@@ -156,6 +156,15 @@ impl ManagedPhpFpmProcess {
         })?;
         let name = managed_php_fpm_instance_name(metric_pool)?;
         let socket = socket_dir.join(format!("{name}.sock"));
+        rustix::net::SocketAddrUnix::new(&socket).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "{scope}: managed php-fpm socket path {} is not supported: {error}",
+                    socket.display()
+                ),
+            )
+        })?;
         let config_path = socket_dir.join(format!("{name}.conf"));
         let pid_path = socket_dir.join(format!("{name}.pid"));
         let error_log = socket_dir.join(format!("{name}.log"));

@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh" short)
 mode="${FLUXHEIM_WORDPRESS_SMOKE_MODE:-${1:-both}}"
 port_base="${FLUXHEIM_WORDPRESS_SMOKE_PORT:-18132}"
 fpm_port_base="${FLUXHEIM_WORDPRESS_SMOKE_FPM_PORT:-19000}"
@@ -9,7 +11,7 @@ php_fpm_binary="${FLUXHEIM_WORDPRESS_SMOKE_PHP_FPM:-/usr/sbin/php-fpm}"
 wordpress_db_image="${FLUXHEIM_WORDPRESS_DB_IMAGE:-docker.io/library/mariadb:12.3}"
 wordpress_fpm_image="${FLUXHEIM_WORDPRESS_FPM_IMAGE:-docker.io/library/wordpress:php8.3-fpm-alpine}"
 run_id="$$"
-tmp="${TMPDIR:-/tmp}/fh-wp-$run_id"
+tmp=$(mktemp -d "$SMOKE_TMP_ROOT/w.XXXXXX")
 admin_password="FluxheimSmoke-12345!"
 server_pid=""
 
@@ -33,6 +35,10 @@ cleanup() {
     podman network rm "fh_wp_${run_id}_my" >/dev/null 2>&1 || true
     podman network rm "fh_wp_${run_id}_mo" >/dev/null 2>&1 || true
     podman network rm "fh_wp_${run_id}_mr" >/dev/null 2>&1 || true
+    if [ "${FLUXHEIM_SMOKE_KEEP_ARTIFACTS:-0}" = "1" ]; then
+        echo "wordpress php-fpm smoke artifacts kept in $tmp" >&2
+        return
+    fi
     rm -rf "$tmp"
 }
 
@@ -149,7 +155,7 @@ run_wordpress_smoke() {
     fpm_container="fh_wp_${run_id}_${smoke_slug}_fpm"
     mode_tmp="$tmp/$smoke_slug"
     site="$mode_tmp/wordpress"
-    run_dir="$mode_tmp/run"
+    run_dir="$mode_tmp/r"
     config="$mode_tmp/fluxheim.toml"
     cookie_jar="$mode_tmp/cookies.txt"
     table_prefix="fh${run_id}_${offset}_"
@@ -200,9 +206,9 @@ default_vhost = "$wp_host"
 trusted_proxies = []
 
 [server.process]
-pid_file = "$run_dir/fluxheim.pid"
-upgrade_sock = "$run_dir/fluxheim-upgrade.sock"
-certificate_reload_sock = "$run_dir/fluxheim-cert-reload.sock"
+pid_file = "$run_dir/pid"
+upgrade_sock = "$run_dir/up.sock"
+certificate_reload_sock = "$run_dir/reload.sock"
 daemon = false
 threads = 2
 
@@ -249,7 +255,7 @@ EOF
         cat >> "$config" <<EOF
 mode = "managed"
 php_fpm_binary = "$php_fpm_binary"
-socket_dir = "$run_dir/php-fpm"
+socket_dir = "$run_dir/f"
 workers = 3
 max_requests_per_worker = 100
 process_manager = "$process_manager"
@@ -258,8 +264,8 @@ request_terminate_timeout_secs = 30
 request_slowlog_timeout_secs = 10
 request_slowlog_trace_depth = 16
 decorate_workers_output = false
-session_save_path = "$run_dir/php-session"
-upload_tmp_dir = "$run_dir/php-upload"
+session_save_path = "$run_dir/s"
+upload_tmp_dir = "$run_dir/u"
 EOF
         case "$process_manager" in
             dynamic)
@@ -441,7 +447,7 @@ EOF
 
     if [ "$smoke_mode" = "managed-respawn" ]; then
         managed_pid_file=""
-        for candidate in "$run_dir"/php-fpm/*.pid; do
+        for candidate in "$run_dir"/f/*.pid; do
             [ -f "$candidate" ] || continue
             managed_pid_file="$candidate"
             break

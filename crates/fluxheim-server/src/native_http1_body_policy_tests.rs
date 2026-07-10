@@ -135,17 +135,12 @@ async fn rejects_header_bytes_over_global_limit() {
         )
         .await
         .unwrap();
-    let mut response = [0u8; 1];
-    let read = stream.read(&mut response).await.unwrap();
+    let response = read_response(&mut stream).await;
     let result = result_rx.await.unwrap();
 
-    assert_eq!(read, 0);
-    assert!(matches!(
-        result,
-        Err(NativeHttp1Error::Parse(
-            fluxheim_protocol::Http1ParseError::HeadTooLarge
-        ))
-    ));
+    assert!(response.starts_with("HTTP/1.1 431 Request Header Fields Too Large\r\n"));
+    assert!(response.ends_with("request header fields too large\n"));
+    assert!(result.is_ok());
 }
 
 #[tokio::test]

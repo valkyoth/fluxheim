@@ -2,7 +2,8 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-1-0-load-smoke.XXXXXX")
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
+TMP_DIR=$(mktemp -d "$SMOKE_TMP_ROOT/fluxheim-1-0-load-smoke.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_LOAD_KEEP_LOGS:-0}
 BUILD_RELEASE=${FLUXHEIM_LOAD_BUILD:-1}
 DURATION=${FLUXHEIM_LOAD_DURATION:-15s}

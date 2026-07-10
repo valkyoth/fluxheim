@@ -1,8 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
-tmp="$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-observability-smoke.XXXXXX")"
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
+tmp="$(mktemp -d "$SMOKE_TMP_ROOT/fluxheim-observability-smoke.XXXXXX")"
 config="$tmp/fluxheim.toml"
 body="$tmp/body.txt"
 cache_body="$tmp/cache-body.txt"

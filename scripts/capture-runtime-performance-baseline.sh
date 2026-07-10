@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
+
 mode="${1:-release}"
 
 case "$mode" in
@@ -20,7 +23,7 @@ fi
 out_dir="${FLUXHEIM_RUNTIME_BASELINE_DIR:-target/release-evidence/runtime-baseline}"
 sample_count="${FLUXHEIM_RUNTIME_BASELINE_SAMPLES:-20}"
 keepalive_count="${FLUXHEIM_RUNTIME_BASELINE_KEEPALIVE_REQUESTS:-100}"
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-runtime-baseline.XXXXXX")"
+tmp_dir="$(mktemp -d "$SMOKE_TMP_ROOT/fluxheim-runtime-baseline.XXXXXX")"
 
 fluxheim_pid=""
 origin_one_pid=""

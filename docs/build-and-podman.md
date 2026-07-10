@@ -75,7 +75,9 @@ Use an AWS-LC-supported FIPS builder for
 `scripts/validate-fips-rustls.sh release`. Rolling distribution compilers can be
 ahead of AWS-LC FIPS support; newer GCC/Clang families may fail inside
 `aws-lc-fips-sys` before Fluxheim code is compiled. The helper fails early for
-known newer compiler families and documents the investigation-only override in
+known newer compiler families. If available, it automatically selects a
+matching GCC 13, 12, or 11 `gcc`/`g++` pair; an explicit `CC` remains
+authoritative. The investigation-only override is documented in
 [FIPS-Capable Deployments](fips.md).
 
 The FIPS/ISO profile aliases are narrow proof profiles, not a limitation of the

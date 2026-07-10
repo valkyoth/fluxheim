@@ -1,10 +1,13 @@
 #!/usr/bin/env sh
 set -eu
 
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
+
 echo "1.0 fixtures: validate representative gateway config set"
 # Gateway fixtures use placeholder /srv roots and upstreams. Keep this as a
 # static config check; deployment preflight uses --validate-config.
-FIXTURES_TMP_DIR="${TMPDIR:-/tmp}/fluxheim-1-0-fixtures-$$"
+FIXTURES_TMP_DIR="$SMOKE_TMP_ROOT/fluxheim-1-0-fixtures-$$"
 export FIXTURES_TMP_DIR
 mkdir -p \
     "$FIXTURES_TMP_DIR/config" \

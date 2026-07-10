@@ -23,6 +23,9 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Select an installed GCC 13/12/11 compiler pair automatically for
+  release-mode rustls/AWS-LC FIPS validation when the system default compiler
+  is outside the supported range.
 - Update direct dependency baselines to `base64-ng 1.3.7`, `bytes 1.12.1`,
   `regex 1.13.0`, `sanitization 1.2.4`, and test-only `wat 1.253.0`.
 - Update the workspace MSRV, pinned toolchain, and container builders to Rust
@@ -43,6 +46,8 @@ behavior when the change improves security or project direction.
 - Restore `fuzz/` as an intentionally standalone cargo-fuzz workspace, remove
   its obsolete Pingora patch, refresh its dependency lockfile, and make the
   fuzz validation gate compile every target automatically.
+- Run filesystem-sensitive smoke fixtures below private repository-owned roots
+  and use compact paths for Unix-socket integration tests.
 
 ### Security
 
@@ -69,8 +74,13 @@ behavior when the change improves security or project direction.
   encryption keys in `sanitization::SecretBytes<32>`.
 - Reject duplicate canonical storage-bin roots, verify persisted cache object
   keys before serving, and record strict Host-routing rejections in metrics.
-- Route cache inspection through registered live allocators and hold an
-  exclusive filesystem lease for every active storage-bin root.
+- Route storage-bin cache inspection through registered live allocators and
+  hold an exclusive filesystem lease for every active storage-bin root, while
+  retaining standalone filesystem-backend CLI inspection.
+- Shorten generated managed PHP-FPM socket names and validate the complete Unix
+  socket address before spawn instead of permitting PHP-FPM path truncation.
+- Map native HTTP/1 request-head limit and syntax failures to explicit `431`,
+  `414`, and `400` responses before closing the connection.
 - Bound aggregate request-driven blocking work across Wasm, auth, mirrors,
   disk cache, and ACME at 256 beneath an explicit 384-thread Tokio blocking
   pool, preserving operational headroom.

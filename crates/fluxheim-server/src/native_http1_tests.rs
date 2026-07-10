@@ -446,3 +446,29 @@ async fn native_http1_rejects_missing_http11_host() {
     assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     assert!(response.ends_with("bad request\n"));
 }
+
+#[tokio::test]
+async fn native_http1_returns_431_when_request_header_count_exceeds_limit() {
+    let policy = DownstreamHttp1Policy::from_server_limits(fluxheim_config::ServerLimitsConfig {
+        max_request_header_bytes: fluxheim_config::ByteSize::from_bytes(2048),
+        max_uri_bytes: fluxheim_config::ByteSize::from_bytes(512),
+        max_request_headers: 1,
+        max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(16),
+    });
+    let addr = spawn_server_with_policy(policy, |_| {
+        NativeHttp1Response::new(200, "OK", b"unexpected")
+    })
+    .await;
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+
+    stream
+        .write_all(
+            b"GET / HTTP/1.1\r\nHost: local.test\r\nX-Extra: value\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let response = read_response(&mut stream).await;
+
+    assert!(response.starts_with("HTTP/1.1 431 Request Header Fields Too Large\r\n"));
+    assert!(response.ends_with("request header fields too large\n"));
+}

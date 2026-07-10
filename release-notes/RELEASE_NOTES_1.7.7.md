@@ -43,6 +43,10 @@ deterministic unsupported-call rejection.
 - Use Tokio semaphore admission in narrow-to-global order, preventing a
   saturated plugin or attachment from reserving broader process capacity, and
   cap active/queued Wasm budgets at `256`.
+- Select an installed GCC 13/12/11 compiler pair automatically for release-mode
+  rustls/AWS-LC FIPS validation when a rolling distribution's default compiler
+  is outside the supported range; explicit compiler selections remain
+  authoritative.
 - Bound external-auth work before blocking-pool submission with
   `max_in_flight = 64` by default and a `256` process-wide ceiling shared by
   all routes. Saturation fails closed with `503`.
@@ -59,9 +63,14 @@ deterministic unsupported-call rejection.
   cross-policy allocator corruption from becoming cache disclosure.
 - Record strict Host/authority routing rejections through the native metrics
   bridge.
-- Inspect disk objects through the registered live cache instead of constructing
-  a temporary allocator, and hold a lifetime-exclusive storage-bin lock file so
-  separate Fluxheim processes cannot allocate the same root concurrently.
+- Inspect storage-bin objects only through the registered live cache and hold a
+  lifetime-exclusive lock file so separate Fluxheim processes cannot allocate
+  the same root concurrently. Standalone CLI inspection retains a bounded
+  filesystem-backend index rebuild because that backend has no shared allocator.
+- Keep generated managed PHP-FPM Unix socket names compact and reject a final
+  socket path that exceeds the platform address limit before spawning PHP-FPM.
+- Return explicit `431`, `414`, or `400` responses for bounded request-head
+  parser failures instead of closing the HTTP/1 connection without a response.
 - Add one shared `256`-slot request-driven blocking-work budget across Wasm,
   external auth, traffic mirrors, disk-cache operations, and ACME challenge
   reads. Explicitly cap Tokio's blocking pool at `384`, leaving `128` slots
@@ -122,6 +131,9 @@ deterministic unsupported-call rejection.
   object map.
 - Add `fluxheim-base-images.txt` to generated release evidence beside SPDX and
   CycloneDX output so reviewed image digests are recorded for each build input.
+- Run filesystem-sensitive local release fixtures below private repository-owned
+  smoke roots, using a compact root for Unix-socket tests, so the suite exercises
+  the same full-ancestor trust policy enforced in production.
 
 ## Operator Notes
 

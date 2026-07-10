@@ -67,7 +67,9 @@ expect_feature_validation_failure() {
     esac
 }
 
-CHECKS_TMP_DIR="${TMPDIR:-/tmp}/fluxheim-checks-$$"
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
+CHECKS_TMP_DIR="$SMOKE_TMP_ROOT/fluxheim-checks-$$"
 export CHECKS_TMP_DIR
 mkdir -p \
     "$CHECKS_TMP_DIR/configs" \

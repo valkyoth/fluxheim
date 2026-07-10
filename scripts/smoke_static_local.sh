@@ -1,8 +1,10 @@
 #!/usr/bin/env sh
 set -eu
 
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
 port="${FLUXHEIM_SMOKE_PORT:-18080}"
-tmp="${TMPDIR:-/tmp}/fluxheim-static-smoke-$$"
+tmp="$SMOKE_TMP_ROOT/fluxheim-static-smoke-$$"
 config="$tmp/fluxheim.toml"
 body="$tmp/body.txt"
 

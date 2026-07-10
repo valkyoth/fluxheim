@@ -115,6 +115,7 @@ dependencies = [
  "fluxheim-protocol",
  "log",
  "regex",
+ "rustix",
  "serde",
  "toml",
 ]

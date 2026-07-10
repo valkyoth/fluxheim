@@ -1,13 +1,15 @@
 #!/usr/bin/env sh
 set -eu
 
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
 http_port="${FLUXHEIM_WORDPRESS_PROXY_TLS_SMOKE_HTTP_PORT:-18140}"
 tls_port="${FLUXHEIM_WORDPRESS_PROXY_TLS_SMOKE_TLS_PORT:-18443}"
 backend_port="${FLUXHEIM_WORDPRESS_PROXY_TLS_SMOKE_BACKEND_PORT:-18080}"
 network="fluxheim_wp_proxy_tls_smoke_$$"
 db_container="fluxheim_wp_proxy_tls_smoke_db_$$"
 wp_container="fluxheim_wp_proxy_tls_smoke_wp_$$"
-tmp="${TMPDIR:-/tmp}/fluxheim-wordpress-proxy-tls-smoke-$$"
+tmp="$SMOKE_TMP_ROOT/fluxheim-wordpress-proxy-tls-smoke-$$"
 config="$tmp/fluxheim.toml"
 cookie_jar="$tmp/cookies.txt"
 host="wp.test"

@@ -2,7 +2,8 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-admin-smoke.XXXXXX")
+SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh" short)
+TMP_DIR=$(mktemp -d "$SMOKE_TMP_ROOT/a.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_SMOKE_KEEP_LOGS:-0}
 
 ports=$(python3 - <<'PY'
@@ -59,9 +60,9 @@ trusted_proxies = []
 
 [server.process]
 daemon = false
-pid_file = "$TMP_DIR/run/fluxheim.pid"
-upgrade_sock = "$TMP_DIR/run/fluxheim-upgrade.sock"
-certificate_reload_sock = "$TMP_DIR/run/fluxheim-cert-reload.sock"
+pid_file = "$TMP_DIR/run/pid"
+upgrade_sock = "$TMP_DIR/run/up.sock"
+certificate_reload_sock = "$TMP_DIR/run/reload.sock"
 grace_period_seconds = 1
 graceful_shutdown_timeout_seconds = 2
 
@@ -82,7 +83,7 @@ snapshot_store = "$TMP_DIR/admin-snapshots"
 
 [admin.ops_socket]
 enabled = true
-path = "$TMP_DIR/run/fluxheim-ops.sock"
+path = "$TMP_DIR/run/ops.sock"
 mode = "0600"
 require_bearer_token = false
 
@@ -159,7 +160,7 @@ if ! grep -q '"status":"ok"' "$TMP_DIR/admin-status.json"; then
     exit 1
 fi
 
-ops_status_code=$(curl -fsS --unix-socket "$TMP_DIR/run/fluxheim-ops.sock" \
+ops_status_code=$(curl -fsS --unix-socket "$TMP_DIR/run/ops.sock" \
     -o "$TMP_DIR/admin-ops-status.json" -w '%{http_code}' \
     "http://fluxheim/_fluxheim/status")
 if [ "$ops_status_code" != "200" ]; then
@@ -174,7 +175,7 @@ if ! grep -q '"status":"ok"' "$TMP_DIR/admin-ops-status.json"; then
     exit 1
 fi
 
-ops_post_code=$(curl -sS --unix-socket "$TMP_DIR/run/fluxheim-ops.sock" \
+ops_post_code=$(curl -sS --unix-socket "$TMP_DIR/run/ops.sock" \
     -o "$TMP_DIR/admin-ops-post.txt" -w '%{http_code}' \
     -X POST "http://fluxheim/_fluxheim/status")
 if [ "$ops_post_code" != "405" ]; then

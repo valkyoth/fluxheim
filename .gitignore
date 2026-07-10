@@ -53,6 +53,7 @@ temp/
 *.zst
 *.img
 *.qcow2
+/*.rpm
 
 # Editor and OS noise
 .DS_Store
