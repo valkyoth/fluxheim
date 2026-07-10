@@ -385,7 +385,7 @@ mod tests {
             reason: "OK".to_owned(),
             headers: Vec::new(),
             content_length: Some(1),
-            body: Arc::from([b'x']),
+            body: Arc::from(*b"x"),
             expires_at,
             stale_while_revalidate_until: None,
             stale_if_error_until: None,

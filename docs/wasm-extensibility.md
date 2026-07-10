@@ -29,12 +29,12 @@ Cargo features:
 - `wasm-proxy-abi`
 - `wasm-wasi`
 
-Latest crate candidates checked on 2026-07-03:
+Latest crate candidates checked on 2026-07-10:
 
 - `wasmtime 46.0.1`
 - `wasmtime-wasi 46.0.1`
 - `proxy-wasm 0.2.4`
-- `wat 1.252.0`
+- `wat 1.253.0`
 
 WASM extensibility gives Fluxheim a sandboxed way to run operator-provided
 logic without compiling that logic into the Fluxheim binary. It should be

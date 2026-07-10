@@ -4,15 +4,16 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
+[workspace]
+
 [package.metadata]
 cargo-fuzz = true
 
 [dependencies]
-fluxheim = { path = "..", features = ["php-fpm"] }
+fluxheim-cache = { path = "../crates/fluxheim-cache" }
+fluxheim-config = { path = "../crates/fluxheim-config" }
+fluxheim-php-fpm = { path = "../crates/fluxheim-php-fpm" }
 libfuzzer-sys = "0.4"
-
-[patch.crates-io]
-pingora-core = { path = "../vendor/pingora-core" }
 
 [[bin]]
 name = "host_normalization"

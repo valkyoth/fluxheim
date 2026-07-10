@@ -32,6 +32,18 @@ deterministic unsupported-call rejection.
   so future compile-cache reuse cannot cross from `fluxheim-policy-v1` to
   `proxy-wasm-preview`.
 
+## Changed
+
+- Update `base64-ng` to 1.3.6, `bytes` to 1.12.1, `regex` to 1.13.0,
+  `sanitization` to 1.2.3, and test-only `wat` to 1.253.0.
+- Update the workspace MSRV, pinned toolchain, and container builders to Rust
+  1.97.0.
+- Exercise current MariaDB 12.3 LTS, PostgreSQL 18, and Valkey 9.1 container
+  lines in the database and health-check smoke defaults.
+- Restore the standalone cargo-fuzz workspace and remove its obsolete Pingora
+  dependency patch so the checked-in fuzz targets build against their current
+  owning crates again. The fuzz validation gate now compiles every target.
+
 ## Operator Notes
 
 - Existing `wasm` configs using `fluxheim-policy-v1` continue unchanged.

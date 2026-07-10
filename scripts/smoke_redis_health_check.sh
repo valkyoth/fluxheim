@@ -7,7 +7,7 @@ mkdir -p "$TMP_ROOT"
 TMP_DIR=$(mktemp -d "$TMP_ROOT/run.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_SMOKE_KEEP_LOGS:-0}
 KEEP_REDIS=${FLUXHEIM_SMOKE_KEEP_REDIS:-0}
-REDIS_IMAGE=${FLUXHEIM_REDIS_IMAGE:-docker.io/valkey/valkey:8-alpine}
+REDIS_IMAGE=${FLUXHEIM_REDIS_IMAGE:-docker.io/valkey/valkey:9.1-alpine}
 REDIS_NAME="fluxheim-redis-health-smoke-$$"
 CURL_MAX_TIME=${FLUXHEIM_SMOKE_CURL_MAX_TIME:-5}
 

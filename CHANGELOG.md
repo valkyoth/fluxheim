@@ -21,6 +21,18 @@ behavior when the change improves security or project direction.
   `env.proxy_log(i32, i32, i32) -> i32` import, proving that an unsupported
   proxy-oriented call fails closed before reaching the upstream.
 
+### Changed
+
+- Update direct dependency baselines to `base64-ng 1.3.6`, `bytes 1.12.1`,
+  `regex 1.13.0`, `sanitization 1.2.3`, and test-only `wat 1.253.0`.
+- Update the workspace MSRV, pinned toolchain, and container builders to Rust
+  1.97.0.
+- Update container-backed compatibility smoke defaults to MariaDB 12.3 LTS,
+  PostgreSQL 18, and Valkey 9.1.
+- Restore `fuzz/` as an intentionally standalone cargo-fuzz workspace, remove
+  its obsolete Pingora patch, refresh its dependency lockfile, and make the
+  fuzz validation gate compile every target automatically.
+
 ### Security
 
 - Include the host-call namespace in native WebAssembly compiled-module

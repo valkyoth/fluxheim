@@ -2,7 +2,7 @@
 name = "fluxheim-config"
 version = "1.7.7"
 edition = "2024"
-rust-version = "1.96.1"
+rust-version = "1.97.0"
 license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim configuration schema, parsing, and validation."
@@ -33,7 +33,7 @@ wasm-proxy-abi = ["wasm", "fluxheim-wasm/proxy-abi"]
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 fluxheim-wasm = { path = "../fluxheim-wasm", optional = true }
 log = "0.4.33"
-regex = "1.12.4"
+regex = "1.13.0"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"
 

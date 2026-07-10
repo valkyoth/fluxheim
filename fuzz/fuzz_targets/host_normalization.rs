@@ -4,7 +4,7 @@ use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     let input = String::from_utf8_lossy(data);
-    let normalized = fluxheim::config::normalize_host(&input);
+    let normalized = fluxheim_config::normalize_host(&input);
 
     if let Some(host) = normalized {
         assert!(!host.is_empty());

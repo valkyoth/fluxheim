@@ -14,7 +14,7 @@ host="wp.test"
 base_url="https://$host:$tls_port"
 backend_url="http://127.0.0.1:$backend_port"
 admin_password="FluxheimSmoke-12345!"
-wordpress_db_image="${FLUXHEIM_WORDPRESS_DB_IMAGE:-docker.io/library/mariadb:12.2}"
+wordpress_db_image="${FLUXHEIM_WORDPRESS_DB_IMAGE:-docker.io/library/mariadb:12.3}"
 wordpress_apache_image="${FLUXHEIM_WORDPRESS_APACHE_IMAGE:-docker.io/library/wordpress:php8.3-apache}"
 
 cleanup() {
