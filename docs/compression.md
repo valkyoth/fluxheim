@@ -88,8 +88,8 @@ The first codec implementation is intentionally bounded:
 - encoded output must stay within `compression.max_output_bytes`;
 - `compression.max_input_bytes` is capped at 64 MiB by config validation;
 - `compression.max_output_bytes` is capped at 128 MiB by config validation;
-- every codec writes through a bounded sink that rejects output before buffer
-  growth would cross `compression.max_output_bytes`;
+- every codec writes through a bounded sink that rejects a write before the
+  logical encoded length would cross `compression.max_output_bytes`;
 - emitted chunks transfer their owned allocation into `Bytes` without copying,
   and a codec is discarded permanently after an output or allocation failure;
 - gzip levels are restricted to `0..=9`;
@@ -100,6 +100,13 @@ The first codec implementation is intentionally bounded:
 
 A later implementation may add bounded compression worker pools, per-vhost
 concurrency, and precompressed static asset variants.
+
+`max_output_bytes` is an encoded-byte limit, not an exact per-request RSS
+ceiling. The Rust allocator may reserve more `Vec` capacity than the current
+logical length, and each codec has internal CPU and working-memory costs that
+are separate from its output sink. Use route/vhost concurrency controls to
+bound aggregate request pressure until a dedicated compression worker pool is
+available.
 
 ## Cache Integration
 

@@ -94,9 +94,10 @@ deterministic unsupported-call rejection.
   descriptor identity and reject config files modified during bounded reads.
 - Restore the all-feature config security suite, including tracing/privacy and
   dual-FIPS-backend feature combinations.
-- Bound Brotli, gzip, and Zstandard output before allocation growth, transfer
-  emitted codec buffers into response bytes without copying, and permanently
-  discard a codec after an output or allocation failure.
+- Bound Brotli, gzip, and Zstandard logical output before accepting excess
+  encoded bytes, transfer emitted codec buffers into response bytes without
+  copying, and permanently discard a codec after an output or allocation
+  failure.
 - Fail response compression closed for malformed `Accept-Encoding` fields,
   honor explicit coding rejection over wildcard acceptance, and suppress
   compression for qualified `Cache-Control: private="..."` responses.

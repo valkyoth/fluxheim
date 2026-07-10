@@ -5,7 +5,7 @@ use super::{
 };
 
 #[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
-use std::io;
+use std::io::{self, Read as _};
 
 #[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
 use bytes::Bytes;
@@ -99,6 +99,40 @@ fn gzip_encoder_releases_retained_output_between_chunks() {
 
 #[cfg(feature = "gzip")]
 #[test]
+fn gzip_encoder_finalizes_decodable_multi_chunk_stream() {
+    let compressed = encode_multi_chunk_stream(ResponseCompressionEncoder::gzip(4, 64 * 1024));
+    let mut decoded = Vec::new();
+    flate2::read::GzDecoder::new(compressed.as_slice())
+        .read_to_end(&mut decoded)
+        .unwrap();
+
+    assert_eq!(decoded, multi_chunk_plaintext());
+}
+
+#[cfg(feature = "brotli")]
+#[test]
+fn brotli_encoder_finalizes_decodable_multi_chunk_stream() {
+    let compressed = encode_multi_chunk_stream(ResponseCompressionEncoder::brotli(5, 64 * 1024));
+    let mut decoded = Vec::new();
+    brotli::Decompressor::new(compressed.as_slice(), 4096)
+        .read_to_end(&mut decoded)
+        .unwrap();
+
+    assert_eq!(decoded, multi_chunk_plaintext());
+}
+
+#[cfg(feature = "zstd")]
+#[test]
+fn zstd_encoder_finalizes_decodable_multi_chunk_stream() {
+    let compressed =
+        encode_multi_chunk_stream(ResponseCompressionEncoder::zstd(3, 64 * 1024).unwrap());
+    let decoded = zstd::stream::decode_all(compressed.as_slice()).unwrap();
+
+    assert_eq!(decoded, multi_chunk_plaintext());
+}
+
+#[cfg(feature = "gzip")]
+#[test]
 fn gzip_limit_failure_discards_encoder() {
     let mut encoder = ResponseCompressionEncoder::gzip(0, 1);
     assert_limit_failure_discards_encoder(&mut encoder);
@@ -138,4 +172,26 @@ fn assert_limit_failure_discards_encoder(encoder: &mut ResponseCompressionEncode
         .expect_err("encoded output must be rejected before exceeding the limit");
     assert_eq!(error.io_kind(), Some(io::ErrorKind::InvalidData));
     assert!(encoder.encode_chunk(Some(&input), true).unwrap().is_empty());
+}
+
+#[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
+fn encode_multi_chunk_stream(mut encoder: ResponseCompressionEncoder) -> Vec<u8> {
+    let mut compressed = Vec::new();
+    compressed.extend_from_slice(
+        &encoder
+            .encode_chunk(Some(b"first response segment; "), false)
+            .unwrap(),
+    );
+    compressed.extend_from_slice(
+        &encoder
+            .encode_chunk(Some(b"second response segment; "), false)
+            .unwrap(),
+    );
+    compressed.extend_from_slice(&encoder.encode_chunk(None, true).unwrap());
+    compressed
+}
+
+#[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
+fn multi_chunk_plaintext() -> &'static [u8] {
+    b"first response segment; second response segment; "
 }

@@ -2006,10 +2006,12 @@ response rather than enabling an encoding.
 
 `min_bytes` and `max_input_bytes` bound the original response size.
 `max_output_bytes` bounds the encoded response size with a codec sink that
-rejects writes before allocating beyond the limit. Emitted output allocations
-are transferred without a second body copy, and an encoder is discarded after
-any output-limit or allocation failure. The configured input maximum cannot
-exceed 64 MiB and the output maximum cannot exceed 128 MiB.
+rejects a write before its logical output length exceeds the limit. It is not
+an exact RSS ceiling: the allocator may reserve additional `Vec` capacity and
+codec-internal working memory is separate. Emitted output allocations are
+transferred without a second body copy, and an encoder is discarded after any
+output-limit or allocation failure. The configured input maximum cannot exceed
+64 MiB and the output maximum cannot exceed 128 MiB.
 `gzip_level` must be between `0` and `9`, `zstd_level` between `1` and `19`,
 and `brotli_quality` between `0` and `11`.
 
