@@ -40,8 +40,12 @@ deterministic unsupported-call rejection.
 - Acquire process, cache-vhost, plugin, and attachment Wasm admission before
   `spawn_blocking`; honor bounded `queue_limit` waiters and replace per-request
   watchdog threads with one process-wide shared epoch ticker.
+- Use Tokio semaphore admission in narrow-to-global order, preventing a
+  saturated plugin or attachment from reserving broader process capacity, and
+  cap active/queued Wasm budgets at `256`.
 - Bound external-auth work before blocking-pool submission with
-  `max_in_flight = 64` by default. Saturation fails closed with `503`.
+  `max_in_flight = 64` by default and a `256` process-wide ceiling shared by
+  all routes. Saturation fails closed with `503`.
 - Keep source-specific admin lockouts fail closed while allowing correctly
   authenticated operators through a global invalid-attempt lockout.
 - Bound persistent storage-bin index files, entry/key counts, cache metadata,
@@ -50,6 +54,11 @@ deterministic unsupported-call rejection.
 - Pin third-party GitHub Actions to reviewed commit SHAs, pin `cargo-deny` and
   `cargo-audit` installs, and pin every container builder/runtime base image to
   a reviewed digest.
+- Reject duplicate canonical storage-bin roots during native router
+  construction and verify persisted object identity before serving, preventing
+  cross-policy allocator corruption from becoming cache disclosure.
+- Record strict Host/authority routing rejections through the native metrics
+  bridge.
 
 ## Changed
 
@@ -63,8 +72,9 @@ deterministic unsupported-call rejection.
   dependency patch so the checked-in fuzz targets build against their current
   owning crates again. The fuzz validation gate now compiles every target.
 - Replace storage-bin request-path full-index sorting, rewriting, and syncing
-  with a capacity-one coalescing background writer. Maintain ordered eviction
-  state so selecting the oldest object no longer scans the complete object map.
+  with one fallibly-created process-wide persistence worker. Maintain ordered
+  eviction state so selecting the oldest object no longer scans the complete
+  object map.
 - Add `fluxheim-base-images.txt` to generated release evidence beside SPDX and
   CycloneDX output so reviewed image digests are recorded for each build input.
 

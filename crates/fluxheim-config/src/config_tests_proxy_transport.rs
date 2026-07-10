@@ -70,7 +70,27 @@ fn rejects_invalid_proxy_upstream_policy() {
         saturated_auth_request.validate(),
         Err(ConfigError::InvalidProxyUpstreamPolicy {
             field: "proxy.auth_request",
-            reason: "max_in_flight must be between 1 and 100000",
+            reason: "max_in_flight must be between 1 and 256",
+        })
+    );
+
+    let oversized_auth_request: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+
+            [proxy.auth_request]
+            enabled = true
+            url = "http://127.0.0.1:4180/auth"
+            max_in_flight = 257
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        oversized_auth_request.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.auth_request",
+            reason: "max_in_flight must be between 1 and 256",
         })
     );
 

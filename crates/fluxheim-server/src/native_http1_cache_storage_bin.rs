@@ -1,7 +1,9 @@
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex};
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use fluxheim_cache::{
     StorageBinFreeMap, StorageBinIndexEntry, StorageBinLayoutPlan, StorageBinObjectLocation,
@@ -15,90 +17,106 @@ use super::{
 };
 
 const NATIVE_STORAGE_BIN_INDEX_DEBOUNCE: Duration = Duration::from_secs(1);
+static NATIVE_STORAGE_BIN_INDEX_SERVICE: OnceLock<
+    Result<Arc<NativeStorageBinIndexService>, String>,
+> = OnceLock::new();
+#[cfg(test)]
+static NATIVE_STORAGE_BIN_INDEX_WORKERS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug)]
-enum NativeStorageBinIndexFlushCommand {
-    Dirty,
-    Shutdown,
+struct NativeStorageBinIndexService {
+    tasks: Arc<Mutex<Vec<Weak<NativeStorageBinIndexTask>>>>,
 }
 
 #[derive(Debug)]
 pub(super) struct NativeStorageBinIndexFlush {
-    sender: SyncSender<NativeStorageBinIndexFlushCommand>,
-    worker: Option<thread::JoinHandle<()>>,
+    task: Arc<NativeStorageBinIndexTask>,
+}
+
+#[derive(Debug)]
+struct NativeStorageBinIndexTask {
+    layout: StorageBinLayoutPlan,
+    state: Arc<Mutex<NativeDiskCacheState>>,
+    dirty: AtomicBool,
+    flush_lock: Mutex<()>,
 }
 
 impl NativeStorageBinIndexFlush {
     pub(super) fn start(
         backend: &NativeDiskCacheBackend,
         state: &Arc<Mutex<NativeDiskCacheState>>,
-    ) -> Option<Self> {
+    ) -> std::io::Result<Option<Self>> {
         let NativeDiskCacheBackend::StorageBin(storage_bin) = backend else {
-            return None;
+            return Ok(None);
         };
-        let layout = storage_bin.layout.clone();
-        let state = Arc::clone(state);
-        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-        let worker = thread::spawn(move || {
-            native_storage_bin_index_flush_worker(receiver, layout, state);
+        let service = native_storage_bin_index_service()?;
+        let task = Arc::new(NativeStorageBinIndexTask {
+            layout: storage_bin.layout.clone(),
+            state: Arc::clone(state),
+            dirty: AtomicBool::new(false),
+            flush_lock: Mutex::new(()),
         });
-        Some(Self {
-            sender,
-            worker: Some(worker),
-        })
+        service.register(&task);
+        Ok(Some(Self { task }))
     }
 
     pub(super) fn mark_dirty(&self) {
-        match self
-            .sender
-            .try_send(NativeStorageBinIndexFlushCommand::Dirty)
-        {
-            Ok(()) | Err(TrySendError::Full(_)) => {}
-            Err(TrySendError::Disconnected(_)) => log::warn!(
-                target: "fluxheim::native_http1",
-                "native storage-bin index flush worker is unavailable"
-            ),
-        }
+        self.task.dirty.store(true, Ordering::Release);
     }
 }
 
 impl Drop for NativeStorageBinIndexFlush {
     fn drop(&mut self) {
-        let _ = self
-            .sender
-            .send(NativeStorageBinIndexFlushCommand::Shutdown);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+        self.task.flush(true);
     }
 }
 
-fn native_storage_bin_index_flush_worker(
-    receiver: Receiver<NativeStorageBinIndexFlushCommand>,
-    layout: StorageBinLayoutPlan,
-    state: Arc<Mutex<NativeDiskCacheState>>,
-) {
-    while let Ok(command) = receiver.recv() {
-        if matches!(command, NativeStorageBinIndexFlushCommand::Shutdown) {
+impl NativeStorageBinIndexService {
+    fn start() -> Result<Arc<Self>, String> {
+        let tasks = Arc::new(Mutex::new(Vec::<Weak<NativeStorageBinIndexTask>>::new()));
+        let worker_tasks = Arc::clone(&tasks);
+        let worker = thread::Builder::new()
+            .name("fluxheim-cache-index".to_owned())
+            .spawn(move || native_storage_bin_index_flush_worker(&worker_tasks))
+            .map_err(|error| format!("start process-wide cache index worker: {error}"))?;
+        drop(worker);
+        #[cfg(test)]
+        NATIVE_STORAGE_BIN_INDEX_WORKERS.fetch_add(1, Ordering::AcqRel);
+        Ok(Arc::new(Self { tasks }))
+    }
+
+    fn register(&self, task: &Arc<NativeStorageBinIndexTask>) {
+        let mut tasks = self.tasks.lock().unwrap_or_else(|error| {
+            log::error!(
+                target: "fluxheim::security",
+                "native storage-bin index registry lock poisoned: {error}; aborting"
+            );
+            std::process::abort();
+        });
+        tasks.retain(|task| task.strong_count() > 0);
+        tasks.push(Arc::downgrade(task));
+    }
+}
+
+#[cfg(test)]
+pub(super) fn native_storage_bin_index_worker_count() -> usize {
+    NATIVE_STORAGE_BIN_INDEX_WORKERS.load(Ordering::Acquire)
+}
+
+impl NativeStorageBinIndexTask {
+    fn flush(&self, force: bool) {
+        let _flush = self.flush_lock.lock().unwrap_or_else(|error| {
+            log::error!(
+                target: "fluxheim::security",
+                "native storage-bin index flush lock poisoned: {error}; aborting"
+            );
+            std::process::abort();
+        });
+        let was_dirty = self.dirty.swap(false, Ordering::AcqRel);
+        if !force && !was_dirty {
             return;
         }
-        let flush_at = Instant::now() + NATIVE_STORAGE_BIN_INDEX_DEBOUNCE;
-        let mut shutdown = false;
-        loop {
-            let remaining = flush_at.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-            match receiver.recv_timeout(remaining) {
-                Ok(NativeStorageBinIndexFlushCommand::Dirty) => {}
-                Ok(NativeStorageBinIndexFlushCommand::Shutdown) => {
-                    shutdown = true;
-                    break;
-                }
-                Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
-            }
-        }
-        let entries = match state.lock() {
+        let entries = match self.state.lock() {
             Ok(state) => native_storage_bin_index_entries(&state),
             Err(error) => {
                 log::error!(
@@ -108,15 +126,50 @@ fn native_storage_bin_index_flush_worker(
                 std::process::abort();
             }
         };
-        if let Err(error) = write_storage_bin_index(&layout, &entries) {
+        if let Err(error) = write_storage_bin_index(&self.layout, &entries) {
+            self.dirty.store(true, Ordering::Release);
             log::warn!(
                 target: "fluxheim::native_http1",
                 "native storage-bin index write {}: {error}",
-                layout.root.display()
+                self.layout.root.display()
             );
         }
-        if shutdown {
-            return;
+    }
+}
+
+fn native_storage_bin_index_service() -> std::io::Result<Arc<NativeStorageBinIndexService>> {
+    match NATIVE_STORAGE_BIN_INDEX_SERVICE.get_or_init(NativeStorageBinIndexService::start) {
+        Ok(service) => Ok(Arc::clone(service)),
+        Err(error) => Err(std::io::Error::other(error.clone())),
+    }
+}
+
+pub(crate) fn ensure_native_storage_bin_index_service() -> std::io::Result<()> {
+    native_storage_bin_index_service().map(drop)
+}
+
+fn native_storage_bin_index_flush_worker(
+    registry: &Arc<Mutex<Vec<Weak<NativeStorageBinIndexTask>>>>,
+) {
+    loop {
+        thread::sleep(NATIVE_STORAGE_BIN_INDEX_DEBOUNCE);
+        let tasks = {
+            let mut registry = registry.lock().unwrap_or_else(|error| {
+                log::error!(
+                    target: "fluxheim::security",
+                    "native storage-bin index registry lock poisoned: {error}; aborting"
+                );
+                std::process::abort();
+            });
+            let tasks = registry
+                .iter()
+                .filter_map(Weak::upgrade)
+                .collect::<Vec<_>>();
+            registry.retain(|task| task.strong_count() > 0);
+            tasks
+        };
+        for task in tasks {
+            task.flush(false);
         }
     }
 }

@@ -273,6 +273,10 @@ mod native_http1_client_proxy_protocol_tests;
 mod native_http1_host_router_tests;
 
 #[cfg(test)]
+#[path = "native_http1_host_router_cache_tests.rs"]
+mod native_http1_host_router_cache_tests;
+
+#[cfg(test)]
 #[path = "native_http1_proxy_tests.rs"]
 mod native_http1_proxy_tests;
 

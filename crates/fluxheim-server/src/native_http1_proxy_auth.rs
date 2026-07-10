@@ -1,9 +1,12 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use sanitization::SecretString;
 
 use crate::NativeHttp1Request;
+
+const MAX_GLOBAL_AUTH_REQUESTS_IN_FLIGHT: usize = 256;
+static GLOBAL_AUTH_REQUESTS_IN_FLIGHT: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
 
 #[derive(Clone, Debug)]
 pub(crate) struct NativeAuthRequest {
@@ -14,6 +17,7 @@ pub(crate) struct NativeAuthRequest {
     max_response_bytes: u64,
     max_in_flight: usize,
     inflight: Arc<tokio::sync::Semaphore>,
+    global_inflight: Arc<tokio::sync::Semaphore>,
 }
 
 impl PartialEq for NativeAuthRequest {
@@ -62,6 +66,7 @@ impl NativeAuthRequest {
             max_response_bytes: config.max_response_bytes.as_u64(),
             max_in_flight: config.max_in_flight,
             inflight: Arc::new(tokio::sync::Semaphore::new(config.max_in_flight)),
+            global_inflight: global_auth_request_inflight(),
         })
     }
 
@@ -71,14 +76,24 @@ impl NativeAuthRequest {
     ) -> std::io::Result<NativeAuthRequestDecision> {
         let auth = self.clone();
         let input = self.input(request);
-        let permit = self.inflight.clone().try_acquire_owned().map_err(|_| {
+        let service_permit = self.inflight.clone().try_acquire_owned().map_err(|_| {
             std::io::Error::new(
                 std::io::ErrorKind::WouldBlock,
                 "authorization service saturated",
             )
         })?;
+        let global_permit = self
+            .global_inflight
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "process-wide authorization capacity saturated",
+                )
+            })?;
         tokio::task::spawn_blocking(move || {
-            let _permit = permit;
+            let _permits = (service_permit, global_permit);
             auth.fetch_decision(&input)
         })
         .await
@@ -179,6 +194,74 @@ impl NativeAuthRequest {
                 })
             })
             .collect()
+    }
+}
+
+fn global_auth_request_inflight() -> Arc<tokio::sync::Semaphore> {
+    GLOBAL_AUTH_REQUESTS_IN_FLIGHT
+        .get_or_init(|| {
+            Arc::new(tokio::sync::Semaphore::new(
+                MAX_GLOBAL_AUTH_REQUESTS_IN_FLIGHT,
+            ))
+        })
+        .clone()
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    use fluxheim_protocol::Http1Version;
+    use zeroize::Zeroizing;
+
+    #[test]
+    fn auth_request_instances_share_process_wide_admission() {
+        let config = fluxheim_config::AuthRequestConfig {
+            enabled: true,
+            url: Some("http://127.0.0.1:4180/auth".to_owned()),
+            ..Default::default()
+        };
+        let first = NativeAuthRequest::from_config(&config).unwrap();
+        let second = NativeAuthRequest::from_config(&config).unwrap();
+
+        assert!(Arc::ptr_eq(&first.global_inflight, &second.global_inflight));
+        assert_eq!(
+            first.global_inflight.available_permits(),
+            MAX_GLOBAL_AUTH_REQUESTS_IN_FLIGHT
+        );
+    }
+
+    #[tokio::test]
+    async fn process_wide_auth_admission_rejects_across_service_instances() {
+        let config = fluxheim_config::AuthRequestConfig {
+            enabled: true,
+            url: Some("http://127.0.0.1:4180/auth".to_owned()),
+            ..Default::default()
+        };
+        let shared = Arc::new(tokio::sync::Semaphore::new(1));
+        let mut first = NativeAuthRequest::from_config(&config).unwrap();
+        let mut second = NativeAuthRequest::from_config(&config).unwrap();
+        first.global_inflight = Arc::clone(&shared);
+        second.global_inflight = Arc::clone(&shared);
+        let _occupied = first.global_inflight.clone().try_acquire_owned().unwrap();
+        let request = NativeHttp1Request {
+            method: "GET".to_owned(),
+            peer_addr: None,
+            local_addr: None,
+            effective_client_addr: None,
+            downstream_tls: false,
+            tls_identity: None,
+            geo_context: None,
+            target: "/".to_owned(),
+            version: Http1Version::Http11,
+            headers: vec![("host".to_owned(), "app.test".to_owned())],
+            body: Zeroizing::new(Vec::new()),
+            trailers: Vec::new(),
+        };
+
+        let error = second.authorize(&request).await.unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+        assert_eq!(second.inflight.available_permits(), second.max_in_flight);
     }
 }
 

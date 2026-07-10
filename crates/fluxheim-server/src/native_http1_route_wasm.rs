@@ -809,41 +809,29 @@ impl NativeWasmHook {
         let attachment_admission = self.attachment_admission.clone();
         let started = Instant::now();
         let plugin_name = plugin.name.clone();
-        let global_permit = global_admission
-            .acquire()
-            .await
-            .map_err(|_| NativeWasmHookError::Admission(global_admission_scope));
-        let vhost_permit =
-            match (global_permit.as_ref(), vhost_admission) {
-                (Ok(_), Some(admission)) => admission.acquire().await.map(Some).map_err(|_| {
+        // Acquire the narrowest budgets first so a saturated plugin or attachment cannot
+        // reserve process-wide capacity while it waits for its own policy limit.
+        let permits = async {
+            let attachment = attachment_admission.acquire().await.map_err(|_| {
+                NativeWasmHookError::Admission(NativeWasmAdmissionScope::Attachment)
+            })?;
+            let plugin_permit =
+                plugin.admission.acquire().await.map_err(|_| {
+                    NativeWasmHookError::Admission(NativeWasmAdmissionScope::Plugin)
+                })?;
+            let vhost = match vhost_admission {
+                Some(admission) => Some(admission.acquire().await.map_err(|_| {
                     NativeWasmHookError::Admission(NativeWasmAdmissionScope::CacheVhost)
-                }),
-                (Ok(_), None) => Ok(None),
-                (Err(_), _) => Ok(None),
+                })?),
+                None => None,
             };
-        let plugin_permit = if global_permit.is_ok() && vhost_permit.is_ok() {
-            plugin
-                .admission
+            let global = global_admission
                 .acquire()
                 .await
-                .map_err(|_| NativeWasmHookError::Admission(NativeWasmAdmissionScope::Plugin))
-        } else {
-            Err(NativeWasmHookError::Admission(global_admission_scope))
-        };
-        let attachment_permit = if plugin_permit.is_ok() {
-            attachment_admission
-                .acquire()
-                .await
-                .map_err(|_| NativeWasmHookError::Admission(NativeWasmAdmissionScope::Attachment))
-        } else {
-            Err(NativeWasmHookError::Admission(global_admission_scope))
-        };
-        let permits = global_permit
-            .and_then(|global| vhost_permit.map(|vhost| (global, vhost)))
-            .and_then(|(global, vhost)| plugin_permit.map(|plugin| (global, vhost, plugin)))
-            .and_then(|(global, vhost, plugin)| {
-                attachment_permit.map(|attachment| (global, vhost, plugin, attachment))
-            });
+                .map_err(|_| NativeWasmHookError::Admission(global_admission_scope))?;
+            Ok::<_, NativeWasmHookError>((attachment, plugin_permit, vhost, global))
+        }
+        .await;
         let permits = match permits {
             Ok(permits) => permits,
             Err(error) => {

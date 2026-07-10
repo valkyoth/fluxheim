@@ -1,8 +1,10 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
-use tokio::sync::Notify;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use thiserror::Error;
 use wasmtime::{
@@ -63,26 +65,17 @@ pub struct WasmExecutionOutcome {
 
 #[derive(Debug, Clone)]
 pub struct FluxWasmAdmissionController {
-    state: Arc<WasmAdmissionState>,
+    active: Arc<Semaphore>,
+    total: Arc<Semaphore>,
     max_total_concurrent_executions: usize,
+    total_capacity: usize,
     queue_limit: usize,
 }
 
 #[derive(Debug)]
 pub struct FluxWasmAdmissionPermit {
-    state: Arc<WasmAdmissionState>,
-}
-
-#[derive(Debug)]
-struct WasmAdmissionState {
-    active: AtomicUsize,
-    queued: AtomicUsize,
-    capacity_available: Notify,
-}
-
-#[derive(Debug)]
-struct WasmAdmissionQueuePermit {
-    state: Arc<WasmAdmissionState>,
+    _active: OwnedSemaphorePermit,
+    _total: OwnedSemaphorePermit,
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -93,19 +86,6 @@ pub enum WasmAdmissionError {
     GlobalLimitReached,
     #[error("wasm execution admission queue is full")]
     QueueFull,
-}
-
-impl Drop for FluxWasmAdmissionPermit {
-    fn drop(&mut self) {
-        self.state.active.fetch_sub(1, Ordering::AcqRel);
-        self.state.capacity_available.notify_one();
-    }
-}
-
-impl Drop for WasmAdmissionQueuePermit {
-    fn drop(&mut self) {
-        self.state.queued.fetch_sub(1, Ordering::AcqRel);
-    }
 }
 
 impl FluxWasmAdmissionController {
@@ -120,82 +100,66 @@ impl FluxWasmAdmissionController {
         if max_total_concurrent_executions == 0 {
             return Err(WasmAdmissionError::InvalidLimit);
         }
+        let total_capacity = max_total_concurrent_executions
+            .checked_add(queue_limit)
+            .ok_or(WasmAdmissionError::InvalidLimit)?;
         Ok(Self {
-            state: Arc::new(WasmAdmissionState {
-                active: AtomicUsize::new(0),
-                queued: AtomicUsize::new(0),
-                capacity_available: Notify::new(),
-            }),
+            active: Arc::new(Semaphore::new(max_total_concurrent_executions)),
+            total: Arc::new(Semaphore::new(total_capacity)),
             max_total_concurrent_executions,
+            total_capacity,
             queue_limit,
         })
     }
 
     pub fn active_executions(&self) -> usize {
-        self.state.active.load(Ordering::Acquire)
+        self.max_total_concurrent_executions
+            .saturating_sub(self.active.available_permits())
     }
 
     pub fn queued_executions(&self) -> usize {
-        self.state.queued.load(Ordering::Acquire)
+        self.total_capacity
+            .saturating_sub(self.total.available_permits())
+            .saturating_sub(self.active_executions())
     }
 
     pub fn try_acquire(&self) -> Result<FluxWasmAdmissionPermit, WasmAdmissionError> {
-        let mut current = self.state.active.load(Ordering::Acquire);
-        loop {
-            if current >= self.max_total_concurrent_executions {
-                return Err(WasmAdmissionError::GlobalLimitReached);
+        let total = self.total.clone().try_acquire_owned().map_err(|_| {
+            if self.queue_limit == 0 {
+                WasmAdmissionError::GlobalLimitReached
+            } else {
+                WasmAdmissionError::QueueFull
             }
-            match self.state.active.compare_exchange_weak(
-                current,
-                current + 1,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => {
-                    return Ok(FluxWasmAdmissionPermit {
-                        state: Arc::clone(&self.state),
-                    });
-                }
-                Err(observed) => current = observed,
-            }
-        }
+        })?;
+        let active = self
+            .active
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| WasmAdmissionError::GlobalLimitReached)?;
+        Ok(FluxWasmAdmissionPermit {
+            _active: active,
+            _total: total,
+        })
     }
 
     pub async fn acquire(&self) -> Result<FluxWasmAdmissionPermit, WasmAdmissionError> {
-        if let Ok(permit) = self.try_acquire() {
-            return Ok(permit);
-        }
-        let queue_permit = self.try_enter_queue()?;
-        loop {
-            let capacity_available = self.state.capacity_available.notified();
-            if let Ok(permit) = self.try_acquire() {
-                drop(queue_permit);
-                return Ok(permit);
+        let total = self.total.clone().try_acquire_owned().map_err(|_| {
+            if self.queue_limit == 0 {
+                WasmAdmissionError::GlobalLimitReached
+            } else {
+                WasmAdmissionError::QueueFull
             }
-            capacity_available.await;
-        }
-    }
-
-    fn try_enter_queue(&self) -> Result<WasmAdmissionQueuePermit, WasmAdmissionError> {
-        let mut current = self.state.queued.load(Ordering::Acquire);
-        loop {
-            if current >= self.queue_limit {
-                return Err(WasmAdmissionError::QueueFull);
-            }
-            match self.state.queued.compare_exchange_weak(
-                current,
-                current + 1,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => {
-                    return Ok(WasmAdmissionQueuePermit {
-                        state: Arc::clone(&self.state),
-                    });
-                }
-                Err(observed) => current = observed,
-            }
-        }
+        })?;
+        let active = self
+            .active
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| WasmAdmissionError::GlobalLimitReached)?;
+        Ok(FluxWasmAdmissionPermit {
+            _active: active,
+            _total: total,
+        })
     }
 }
 
@@ -1036,6 +1000,7 @@ mod tests {
     #[test]
     fn admission_controller_bounds_and_releases_queued_executions() {
         let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
             .build()
             .unwrap();
         runtime.block_on(async {
@@ -1056,6 +1021,41 @@ mod tests {
             assert_eq!(controller.queued_executions(), 0);
             drop(admitted);
             assert_eq!(controller.active_executions(), 0);
+        });
+    }
+
+    #[test]
+    fn admission_controller_wakes_all_queued_executions_without_lost_notifications() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let controller = FluxWasmAdmissionController::new_with_queue(1, 4).unwrap();
+            let active = controller.try_acquire().unwrap();
+            let mut jobs = Vec::new();
+            for _ in 0..4 {
+                let queued = controller.clone();
+                jobs.push(tokio::spawn(async move {
+                    let permit = queued.acquire().await.unwrap();
+                    drop(permit);
+                }));
+            }
+            while controller.queued_executions() < 4 {
+                tokio::task::yield_now().await;
+            }
+
+            drop(active);
+            tokio::time::timeout(Duration::from_secs(1), async {
+                for job in jobs {
+                    job.await.unwrap();
+                }
+            })
+            .await
+            .unwrap();
+
+            assert_eq!(controller.active_executions(), 0);
+            assert_eq!(controller.queued_executions(), 0);
         });
     }
 }

@@ -31,6 +31,7 @@ mod native_http1_cache_state;
 mod native_http1_cache_storage_bin;
 
 pub(crate) use native_http1_cache_backend::NativeDiskCacheStoreKey;
+pub(crate) use native_http1_cache_backend::prepare_native_storage_bin_layout;
 use native_http1_cache_backend::{
     NativeDiskCacheBackend, NativeDiskCacheLocation, NativeDiskCacheRecord, NativeDiskCacheState,
 };
@@ -61,6 +62,7 @@ pub use native_http1_cache_purge::{
 };
 use native_http1_cache_state::native_disk_cache_mutation_locks;
 use native_http1_cache_storage_bin::NativeStorageBinIndexFlush;
+pub(crate) use native_http1_cache_storage_bin::ensure_native_storage_bin_index_service;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeDiskCacheObjectMetadata {
@@ -151,7 +153,11 @@ impl NativeDiskCache {
                 cache.root.display()
             );
         }
-        cache.index_flush = NativeStorageBinIndexFlush::start(&cache.backend, &cache.state);
+        cache.index_flush = NativeStorageBinIndexFlush::start(&cache.backend, &cache.state)
+            .inspect_err(|error| {
+                log::error!(target: "fluxheim::native_http1", "cache index service: {error}");
+            })
+            .ok()?;
         cache.persist_storage_bin_index();
         Some(cache)
     }
@@ -366,6 +372,14 @@ impl NativeDiskCache {
                 return None;
             }
         };
+        if object.combined_key.as_deref() != Some(combined_key) {
+            log::error!(
+                target: "fluxheim::security",
+                "native disk cache object identity mismatch; discarding requested cache record"
+            );
+            self.remove_combined(combined_key);
+            return None;
+        }
         let entry = match native_memory_entry_from_disk_object(&object) {
             Some(entry) => entry,
             None => {

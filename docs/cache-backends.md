@@ -218,14 +218,20 @@ internal cache implementation.
   and its `(bin_id, offset, len)` location. On startup Fluxheim reads the index,
   validates each referenced object by parsing the v5 cache object bytes, rebuilds
   the purge index, and reconstructs free ranges from the occupied locations.
-- Storage-bin index writes are coalesced by a capacity-one background worker
-  and limited to one flush per second during insert, eviction, and purge bursts.
-  Request workers only mark the index dirty; sorting, atomic replacement, and
-  `sync_all` run off the request path. A crash can drop the newest cache entries
-  from the durable index, but
+- Storage-bin index writes are coalesced by one fallibly-created process-wide
+  persistence worker and limited to one flush per second per cache root during
+  insert, eviction, and purge bursts. Cache policies register weak persistence
+  tasks rather than creating an OS thread each. Request workers only mark the
+  index dirty; sorting, atomic replacement, and `sync_all` run off the request
+  path. A crash can drop the newest cache entries from the durable index, but
   the affected bin ranges are then treated as free on restart rather than
   becoming unbounded orphaned files. Clean storage teardown performs a
   best-effort flush when the debounced index is still dirty.
+- Every enabled storage-bin cache policy must use a unique canonical
+  `cache.disk.path`. Fluxheim rejects startup when two vhost or route policies
+  resolve to the same root; shared-root allocator semantics are not supported.
+  Persisted objects also carry their combined cache key, which must match the
+  requested index key before an object can be served.
 - The allocator model uses first-fit free-range reuse within bounded bins and
   refuses allocations once the configured disk-cache byte budget is exhausted.
   Free ranges are merged after release so evictions can make space without

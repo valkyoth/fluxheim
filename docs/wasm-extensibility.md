@@ -445,12 +445,16 @@ does not match.
 
 `wasm.max_total_concurrent_executions` caps total concurrent plugin executions
 across the whole process. Per-plugin and per-attachment admission budgets are
-still enforced inside that global ceiling. Admission is acquired before work
-is submitted to Tokio's blocking pool. `queue_limit = 0` rejects immediately
-at the configured concurrency limit; a positive value permits only that many
-async waiters and never enlarges the blocking-work queue. Runtime wall-time
-enforcement uses one process-wide shared epoch ticker rather than one OS
-watchdog thread per invocation.
+still enforced inside that global ceiling. Fluxheim acquires attachment,
+plugin, optional cache-vhost, and finally process-wide permits, so requests
+waiting on a narrow policy cannot reserve broader process capacity. Admission
+is implemented with Tokio semaphores and is complete before work is submitted
+to Tokio's blocking pool. `queue_limit = 0` rejects immediately at the
+configured concurrency limit; a positive value permits only that many async
+waiters and never enlarges the blocking-work queue. Active and queued budgets
+are each hard-capped at `256`. Runtime wall-time enforcement uses one
+process-wide shared epoch ticker rather than one OS watchdog thread per
+invocation.
 
 `wasm.max_total_cache_concurrent_executions` caps total concurrent
 `cache-lookup` and `cache-store` plugin executions across the whole process.

@@ -23,6 +23,8 @@ pub trait NativeCacheMetricsRecorder: Send + Sync + 'static {
 
 pub trait NativeProxyMetricsRecorder: Send + Sync + 'static {
     fn record_outcome(&self, vhost: &str, method: &str, status: u16);
+
+    fn record_host_routing_rejection(&self, _reason: &str) {}
 }
 
 pub trait NativeWasmMetricsRecorder: Send + Sync + 'static {
@@ -81,6 +83,12 @@ pub(crate) fn record_native_cache_operation_duration(
 pub(crate) fn record_native_proxy_outcome(vhost: &str, method: &str, status: u16) {
     if let Some(recorder) = NATIVE_PROXY_METRICS_RECORDER.get() {
         recorder.record_outcome(vhost, method, status);
+    }
+}
+
+pub(crate) fn record_native_host_routing_rejection(reason: &'static str) {
+    if let Some(recorder) = NATIVE_PROXY_METRICS_RECORDER.get() {
+        recorder.record_host_routing_rejection(reason);
     }
 }
 

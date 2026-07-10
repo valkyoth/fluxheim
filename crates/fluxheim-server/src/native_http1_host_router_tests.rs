@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use tempfile::TempDir;
@@ -10,6 +11,26 @@ use crate::{
     NativeHttp1HostRouterConfigError, NativeHttp1ProxyConfigError, NativeHttp1RequestContext,
     NativeHttp1RouteProxyConfigError, NativeHttp2RouteAdapter, serve_native_http1_listener,
 };
+
+static HOST_REJECTION_MISSING: AtomicUsize = AtomicUsize::new(0);
+static HOST_REJECTION_INVALID: AtomicUsize = AtomicUsize::new(0);
+static HOST_REJECTION_UNKNOWN: AtomicUsize = AtomicUsize::new(0);
+
+struct HostRoutingTestRecorder;
+
+impl crate::NativeProxyMetricsRecorder for HostRoutingTestRecorder {
+    fn record_outcome(&self, _vhost: &str, _method: &str, _status: u16) {}
+
+    fn record_host_routing_rejection(&self, reason: &str) {
+        match reason {
+            "missing" => &HOST_REJECTION_MISSING,
+            "invalid" => &HOST_REJECTION_INVALID,
+            "unknown" => &HOST_REJECTION_UNKNOWN,
+            _ => return,
+        }
+        .fetch_add(1, Ordering::AcqRel);
+    }
+}
 
 async fn upstream_response(body: &'static str) -> std::net::SocketAddr {
     upstream_response_count(body, 1).await
@@ -361,6 +382,10 @@ async fn native_host_router_falls_back_for_missing_and_invalid_host() {
 
 #[tokio::test]
 async fn native_host_router_strict_mode_rejects_missing_invalid_and_unknown_hosts() {
+    let _ = crate::install_native_proxy_metrics_recorder(Arc::new(HostRoutingTestRecorder));
+    HOST_REJECTION_MISSING.store(0, Ordering::Release);
+    HOST_REJECTION_INVALID.store(0, Ordering::Release);
+    HOST_REJECTION_UNKNOWN.store(0, Ordering::Release);
     let known = upstream_response("known").await;
     let mut config = fluxheim_config::Config::default();
     config.server.default_vhost = Some("known".to_owned());
@@ -380,6 +405,9 @@ async fn native_host_router_strict_mode_rejects_missing_invalid_and_unknown_host
     assert!(missing.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     assert!(invalid.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     assert!(unknown.starts_with("HTTP/1.1 421 Misdirected Request\r\n"));
+    assert!(HOST_REJECTION_MISSING.load(Ordering::Acquire) >= 1);
+    assert!(HOST_REJECTION_INVALID.load(Ordering::Acquire) >= 1);
+    assert!(HOST_REJECTION_UNKNOWN.load(Ordering::Acquire) >= 1);
 }
 
 #[tokio::test]

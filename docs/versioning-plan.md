@@ -3149,9 +3149,11 @@ Stable scope:
   compatibility groundwork, not a promise that arbitrary existing proxy-wasm
   plugins run unchanged; mapping reviewed proxy-oriented calls to Fluxheim's
   typed host calls remains a later reviewed slice. Close the release with
-  pre-submission bounded Wasm/auth-request admission, shared epoch ticking,
-  strict native host routing, coalesced storage-bin persistence, bounded
-  persistent cache parsing, and immutable CI/container build inputs.
+  semaphore-based narrow-to-global Wasm admission, per-service plus
+  process-wide auth-request admission, shared epoch ticking, strict native host
+  routing with rejection metrics, unique storage-bin roots and one
+  process-wide persistence worker, bounded persistent cache parsing, and
+  immutable CI/container build inputs.
 - `v1.7.8`: optional `wasm-wasi` capability preview for non-request-body
   policy plugins. Keep filesystem, network, clocks, randomness, environment,
   and inherited process state disabled unless explicitly granted and tested.
@@ -4795,7 +4797,8 @@ circular dependencies.
   per-plugin metrics must already exist from `v1.7.1`.
 - `v1.7.7`: optional `wasm-proxy-abi` compatibility preview with deterministic
   unsupported-call rejection plus request-path resource admission, host
-  routing, cache persistence/parser, and immutable build-input hardening.
+  routing/metrics, unique-root cache isolation, process-wide cache persistence,
+  bounded cache parsing, and immutable build-input hardening.
 - `v1.7.8`: optional `wasm-wasi` capability preview with explicit grants only.
 - `v1.7.9`: documentation and example parity release with runnable examples
   and tests for F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-like

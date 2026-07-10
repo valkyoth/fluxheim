@@ -46,19 +46,26 @@ behavior when the change improves security or project direction.
 - Enforce strict host routing in native HTTP/1 and HTTP/2, returning `400` for
   missing/invalid identity and `421` for unknown hosts.
 - Acquire bounded Wasm admission before blocking-work submission, honor
-  `queue_limit`, and replace per-invocation watchdog threads with one epoch
+  `queue_limit`, and replace per-invocation watchdog threads with one
   process-wide epoch ticker.
+- Replace custom Wasm waiter notification with Tokio semaphores, acquire narrow
+  policy permits before global capacity, and cap active/queued budgets at 256.
 - Add bounded pre-submission external-auth admission and preserve valid
   operator access during global invalid-credential throttling.
+- Add a process-wide 256-request external-auth ceiling across route-specific
+  service limits.
 - Bound persistent cache index/metadata parsing and keep decoded local cache
   encryption keys in `sanitization::SecretBytes<32>`.
+- Reject duplicate canonical storage-bin roots, verify persisted cache object
+  keys before serving, and record strict Host-routing rejections in metrics.
 - Pin publishing actions, security-tool installs, and container base images to
   immutable reviewed versions and digests.
 
 ### Fixed
 
 - Replace storage-bin request-path full-index rewrites and map-scanning LRU
-  selection with a coalescing persistence worker and ordered eviction index.
+  selection with one process-wide coalescing persistence worker and ordered
+  eviction index.
 
 ## 1.7.6 - 2026-07-09
 

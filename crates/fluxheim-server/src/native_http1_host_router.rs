@@ -8,6 +8,14 @@ use std::time::Duration;
 use fluxheim_config::config_net::{normalize_host, normalize_host_pattern};
 use fluxheim_config::{Config, VhostConfig};
 
+#[path = "native_http1_host_router_cache.rs"]
+mod native_http1_host_router_cache;
+use native_http1_host_router_cache::validate_unique_storage_bin_roots;
+#[path = "native_http1_host_router_trust.rs"]
+mod native_http1_host_router_trust;
+use native_http1_host_router_trust::trusted_sources_from_config;
+
+use crate::native_http1_proxy_metrics::record_native_host_routing_rejection;
 use crate::native_http1_route_proxy::NativeRouteProxyBuildContext;
 #[cfg(feature = "load-balancer")]
 use crate::native_http1_route_proxy_upstream::NativeLoadBalancerCollectors;
@@ -16,7 +24,7 @@ use crate::native_http1_route_wasm::NativeWasmHookRegistry;
 use crate::{
     DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler,
     NativeHttp1Request, NativeHttp1Response, NativeHttp1RouteProxy,
-    NativeHttp1RouteProxyConfigError, ProxyProtocolTrustedSource,
+    NativeHttp1RouteProxyConfigError,
 };
 
 #[cfg(feature = "load-balancer")]
@@ -44,14 +52,15 @@ struct NativeHttp1WildcardHost {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeHostRouteError {
-    MissingOrInvalid,
+    Missing,
+    Invalid,
     Unknown,
 }
 
 impl NativeHostRouteError {
     fn response(self) -> NativeHttp1Response {
         match self {
-            Self::MissingOrInvalid => {
+            Self::Missing | Self::Invalid => {
                 NativeHttp1Response::new(400, "Bad Request", b"missing or invalid host identity\n")
             }
             Self::Unknown => {
@@ -60,15 +69,40 @@ impl NativeHostRouteError {
         }
         .close_connection()
     }
+
+    fn metric_reason(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::Invalid => "invalid",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NativeHttp1HostRouterConfigError {
-    InvalidHostPattern { vhost: String, host: String },
-    MissingDefaultVhost { name: String },
+    InvalidHostPattern {
+        vhost: String,
+        host: String,
+    },
+    MissingDefaultVhost {
+        name: String,
+    },
     MissingVhost,
     RouteProxy(NativeHttp1RouteProxyConfigError),
-    TrustedProxy { source: String, reason: String },
+    TrustedProxy {
+        source: String,
+        reason: String,
+    },
+    StorageBinRoot {
+        scope: String,
+        reason: String,
+    },
+    DuplicateStorageBinRoot {
+        path: String,
+        first_scope: String,
+        second_scope: String,
+    },
 }
 
 impl std::fmt::Display for NativeHttp1HostRouterConfigError {
@@ -94,6 +128,20 @@ impl std::fmt::Display for NativeHttp1HostRouterConfigError {
                     "invalid server.trusted_proxies source {source:?}: {reason}"
                 )
             }
+            Self::StorageBinRoot { scope, reason } => {
+                write!(
+                    formatter,
+                    "invalid storage-bin cache root for {scope}: {reason}"
+                )
+            }
+            Self::DuplicateStorageBinRoot {
+                path,
+                first_scope,
+                second_scope,
+            } => write!(
+                formatter,
+                "storage-bin cache root {path:?} is shared by {first_scope} and {second_scope}; each cache policy requires a unique root"
+            ),
         }
     }
 }
@@ -157,6 +205,7 @@ impl NativeHttp1HostRouter {
         ),
         NativeHttp1HostRouterConfigError,
     > {
+        validate_unique_storage_bin_roots(config)?;
         #[cfg(not(feature = "load-balancer"))]
         let _ = config;
         #[cfg_attr(not(feature = "load-balancer"), allow(unused_mut))]
@@ -277,9 +326,16 @@ impl NativeHttp1HostRouter {
         &self,
         host: Option<&str>,
     ) -> Result<&NativeHttp1RouteProxy, NativeHostRouteError> {
-        let Some(host) = host.and_then(normalize_host) else {
+        let Some(host) = host else {
             return if self.strict {
-                Err(NativeHostRouteError::MissingOrInvalid)
+                Err(NativeHostRouteError::Missing)
+            } else {
+                Ok(&self.default_proxy)
+            };
+        };
+        let Some(host) = normalize_host(host) else {
+            return if self.strict {
+                Err(NativeHostRouteError::Invalid)
             } else {
                 Ok(&self.default_proxy)
             };
@@ -319,7 +375,10 @@ impl NativeHttp1Handler for NativeHttp1HostRouter {
         Box::pin(async move {
             match selected {
                 Ok(proxy) => proxy.handle(request).await,
-                Err(error) => error.response(),
+                Err(error) => {
+                    record_native_host_routing_rejection(error.metric_reason());
+                    error.response()
+                }
             }
         })
     }
@@ -429,28 +488,4 @@ fn wildcard_matches(host: &str, suffix: &str) -> bool {
     host.len() > suffix.len() + 1
         && host.ends_with(suffix)
         && host.as_bytes()[host.len() - suffix.len() - 1] == b'.'
-}
-
-fn trusted_sources_from_config(
-    config: &Config,
-) -> Result<Vec<ProxyProtocolTrustedSource>, NativeHttp1HostRouterConfigError> {
-    config
-        .server
-        .trusted_proxies
-        .iter()
-        .map(
-            |source| match fluxheim_protocol::parse_proxy_protocol_trusted_source(source) {
-                Ok(fluxheim_protocol::ProxyProtocolTrustedSource::Ip(address)) => {
-                    Ok(ProxyProtocolTrustedSource::Ip(address))
-                }
-                Ok(fluxheim_protocol::ProxyProtocolTrustedSource::Cidr { network, prefix }) => {
-                    Ok(ProxyProtocolTrustedSource::Cidr { network, prefix })
-                }
-                Err(error) => Err(NativeHttp1HostRouterConfigError::TrustedProxy {
-                    source: source.clone(),
-                    reason: error.to_string(),
-                }),
-            },
-        )
-        .collect()
 }

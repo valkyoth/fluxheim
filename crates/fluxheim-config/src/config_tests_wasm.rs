@@ -595,6 +595,73 @@ fn wasm_registry_rejects_invalid_total_admission_budget() {
 
 #[cfg(feature = "wasm")]
 #[test]
+fn wasm_registry_rejects_execution_budgets_above_runtime_ceiling() {
+    let config: Config = toml::from_str(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+        plugin_roots = ["/srv/fluxheim/plugins"]
+        max_total_concurrent_executions = 257
+
+        [[wasm.plugins]]
+        name = "headers"
+        path = "/srv/fluxheim/plugins/headers.wasm"
+        phases = ["request-headers"]
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::InvalidWasmPolicy {
+            field: "max_total_concurrent_executions",
+            ..
+        })
+    ));
+
+    let queued: Config = toml::from_str(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+        plugin_roots = ["/srv/fluxheim/plugins"]
+
+        [wasm.default_admission]
+        queue_limit = 257
+
+        [[wasm.plugins]]
+        name = "headers"
+        path = "/srv/fluxheim/plugins/headers.wasm"
+        phases = ["request-headers"]
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        queued.validate(),
+        Err(ConfigError::InvalidWasmPolicy {
+            field: "queue_limit",
+            ..
+        })
+    ));
+}
+
+#[cfg(feature = "wasm")]
+#[test]
 fn wasm_registry_rejects_invalid_total_cache_admission_budget() {
     let config: Config = toml::from_str(
         r#"

@@ -1,15 +1,17 @@
 use super::native_http1_cache_purge::{
     native_disk_cache_purge_registry_is_unlocked_for_test, purge_native_disk_cache,
 };
+use super::native_http1_cache_storage_bin::native_storage_bin_index_worker_count;
 use super::{
     NativeDiskCache, NativeDiskCacheBackend, NativeDiskCacheLocation, NativeDiskCacheRecord,
-    NativeDiskCacheState, native_disk_cache_mutation_locks, native_peer_fill_cache_ttl,
+    NativeDiskCacheState, NativeDiskCacheStoreKey, NativeMemoryCacheEntry,
+    native_disk_cache_mutation_locks, native_peer_fill_cache_ttl,
     register_native_disk_cache_purge_handle,
 };
 use fluxheim_config::{ByteSize, CacheConfig, CacheDiskBackend, CacheDiskStorageBinConfig};
 use http::HeaderMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 fn headers(values: &[(&str, &str)]) -> HeaderMap {
     let mut headers = HeaderMap::new();
@@ -157,6 +159,12 @@ fn storage_bin_index_flush_coalesces_and_flushes_on_shutdown() {
         ..Default::default()
     };
     let cache = NativeDiskCache::from_config(&config).unwrap();
+    let second_directory = tempfile::tempdir().unwrap();
+    let mut second_config = config.clone();
+    second_config.disk.path = Some(second_directory.path().join("cache"));
+    let second_cache = NativeDiskCache::from_config(&second_config).unwrap();
+    assert_eq!(native_storage_bin_index_worker_count(), 1);
+    drop(second_cache);
     let NativeDiskCacheBackend::StorageBin(storage_bin) = &cache.backend else {
         return;
     };
@@ -185,4 +193,54 @@ fn storage_bin_index_flush_coalesces_and_flushes_on_shutdown() {
     let entries = fluxheim_cache::read_storage_bin_index(&layout).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].combined_key, "coalesced");
+}
+
+#[test]
+fn disk_cache_rejects_record_whose_embedded_key_does_not_match_lookup() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = CacheConfig {
+        enabled: true,
+        max_object_bytes: ByteSize::from_bytes(1024),
+        disk: fluxheim_config::CacheDiskConfig {
+            enabled: true,
+            path: Some(directory.path().join("cache")),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let cache = NativeDiskCache::from_config(&config).unwrap();
+    let now = Instant::now();
+    let entry = NativeMemoryCacheEntry {
+        status: 200,
+        reason: "OK".to_owned(),
+        headers: vec![("cache-control".to_owned(), "max-age=60".to_owned())],
+        content_length: Some(4),
+        body: Arc::from(&b"safe"[..]),
+        expires_at: now + Duration::from_secs(60),
+        stale_while_revalidate_until: None,
+        stale_if_error_until: None,
+        stored_at: now,
+        weight: 64,
+    };
+    cache
+        .store(
+            NativeDiskCacheStoreKey {
+                combined: "expected-key".to_owned(),
+                primary: "expected-key".to_owned(),
+                user_tag: "cache.test".to_owned(),
+                index_path: Some("/asset".to_owned()),
+                cache_tags: Vec::new(),
+                vary_fields: Vec::new(),
+            },
+            &entry,
+        )
+        .unwrap();
+    let record = cache
+        .with_state(|state| state.objects.get("expected-key").cloned())
+        .unwrap();
+    cache.with_state_mut(|state| state.insert_object("wrong-key".to_owned(), record));
+
+    assert!(cache.get("wrong-key", |_| None).is_none());
+    assert!(cache.with_state(|state| !state.objects.contains_key("wrong-key")));
 }

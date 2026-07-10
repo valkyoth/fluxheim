@@ -596,7 +596,11 @@ the process-wide `max_total_concurrent_executions` ceiling, the cache-specific
 configured expected SHA-256 digests, declared ABI and host-call namespace,
 phases, fail mode, attachment priority, and whether each plugin or attachment
 overrides the default admission/limit policy. Runtime loaded plugin hashes are
-added by later `1.7.x` hook releases. `1.7.1` enables the first live
+added by later `1.7.x` hook releases. All Wasm active-execution and queued
+admission values are bounded to `0..=256`, with active limits required to be
+non-zero. Runtime acquisition proceeds from attachment and plugin scopes toward
+the process-wide scope so a narrow backlog cannot consume global permits.
+`1.7.1` enables the first live
 native HTTP/1 request-path hook family: `access-decision`. The current preview
 ABI calls `fluxheim_access_decision() -> i32`, where `0` continues the chain,
 `1` allows/continues, and `2` denies with `403`. Built-in Fluxheim access
@@ -1881,8 +1885,10 @@ configured globally, per vhost proxy, or per route proxy block.
 `max_in_flight` bounds active synchronous authorization calls for each
 configured auth service. Fluxheim acquires this permit before submitting work
 to Tokio's blocking pool; saturation fails closed with `503` instead of
-growing the blocking queue. Valid values are `1..=100000` and the default is
-`64`. In
+growing the blocking queue. A second process-wide semaphore caps aggregate
+authorization work across every vhost and route at `256`; per-service permits
+are acquired first so one saturated service cannot reserve global capacity.
+Valid per-service values are `1..=256` and the default is `64`. In
 FIPS/ISO-required mode, auth subrequests are limited to numeric local
 `http://127.0.0.1/...` or `http://[::1]/...` sidecars until outbound TLS client
 evidence is routed through the selected validated provider. With metrics

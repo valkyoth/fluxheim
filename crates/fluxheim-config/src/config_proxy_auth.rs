@@ -10,7 +10,7 @@ use crate::config_http::valid_http_endpoint_url;
 
 const MAX_AUTH_REQUEST_HEADERS: usize = 32;
 const MAX_AUTH_REQUEST_RESPONSE_BYTES: u64 = 1024 * 1024;
-const MAX_AUTH_REQUEST_IN_FLIGHT: usize = 100_000;
+const MAX_AUTH_REQUEST_IN_FLIGHT: usize = 256;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -154,7 +154,7 @@ impl AuthRequestConfig {
         if self.max_in_flight == 0 || self.max_in_flight > MAX_AUTH_REQUEST_IN_FLIGHT {
             return Err(ConfigError::InvalidProxyUpstreamPolicy {
                 field: scope,
-                reason: "max_in_flight must be between 1 and 100000",
+                reason: "max_in_flight must be between 1 and 256",
             });
         }
         Ok(())

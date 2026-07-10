@@ -153,6 +153,10 @@ impl fluxheim_server::NativeProxyMetricsRecorder for NativeProxyPrometheusRecord
     fn record_outcome(&self, vhost: &str, method: &str, status: u16) {
         record_proxy_outcome(vhost, method, Some(status), false);
     }
+
+    fn record_host_routing_rejection(&self, reason: &str) {
+        crate::metrics::record_host_routing_rejection(reason);
+    }
 }
 
 #[cfg(all(feature = "proxy", feature = "wasm"))]

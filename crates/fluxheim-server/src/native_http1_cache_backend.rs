@@ -115,29 +115,8 @@ impl NativeDiskCacheBackend {
                 Ok((root, Self::Filesystem))
             }
             CacheDiskBackend::StorageBin => {
-                let plan = DiskTierPlan {
-                    backend: CacheDiskBackend::StorageBin,
-                    path: path.clone(),
-                    max_size_bytes: config.disk.max_size_bytes,
-                    max_object_bytes: config.max_object_bytes,
-                    cache_tag_headers: Vec::new(),
-                    storage_bin: config.disk.storage_bin.clone(),
-                    encryption: config.disk.encryption.clone(),
-                };
-                let mut layout = StorageBinLayoutPlan::from_disk_plan(&plan).ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "native storage-bin cache requires a storage-bin disk plan",
-                    )
-                })?;
-                prepare_storage_bin_layout(&layout)?;
-                let root = layout.root.canonicalize()?;
-                layout = StorageBinLayoutPlan {
-                    root: root.clone(),
-                    manifest_path: root.join(STORAGE_BIN_MANIFEST_FILENAME),
-                    data_dir: root.join(STORAGE_BIN_DATA_DIR),
-                    ..layout
-                };
+                let layout = prepare_native_storage_bin_layout(config)?;
+                let root = layout.root.clone();
                 let free_map = StorageBinFreeMap::new(&layout);
                 let files = StorageBinFileSet::new(layout.clone());
                 Ok((
@@ -151,4 +130,39 @@ impl NativeDiskCacheBackend {
             }
         }
     }
+}
+
+pub(crate) fn prepare_native_storage_bin_layout(
+    config: &CacheConfig,
+) -> std::io::Result<StorageBinLayoutPlan> {
+    let path = config.disk.path.as_ref().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "native storage-bin cache requires cache.disk.path",
+        )
+    })?;
+    let plan = DiskTierPlan {
+        backend: CacheDiskBackend::StorageBin,
+        path: path.clone(),
+        max_size_bytes: config.disk.max_size_bytes,
+        max_object_bytes: config.max_object_bytes,
+        cache_tag_headers: Vec::new(),
+        storage_bin: config.disk.storage_bin.clone(),
+        encryption: config.disk.encryption.clone(),
+    };
+    let mut layout = StorageBinLayoutPlan::from_disk_plan(&plan).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "native storage-bin cache requires a storage-bin disk plan",
+        )
+    })?;
+    prepare_storage_bin_layout(&layout)?;
+    let root = layout.root.canonicalize()?;
+    layout = StorageBinLayoutPlan {
+        root: root.clone(),
+        manifest_path: root.join(STORAGE_BIN_MANIFEST_FILENAME),
+        data_dir: root.join(STORAGE_BIN_DATA_DIR),
+        ..layout
+    };
+    Ok(layout)
 }
