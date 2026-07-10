@@ -6,9 +6,10 @@ use crate::{
 };
 
 use super::{
-    downstream_get, downstream_request, proxy_for, response_header, route_proxy_listener,
-    route_test_request, upstream_expect_path,
+    downstream_get, proxy_for, route_proxy_listener, route_test_request, upstream_expect_path,
 };
+#[cfg(not(feature = "privacy-mode"))]
+use super::{downstream_request, response_header};
 
 #[tokio::test]
 async fn native_route_proxy_vhost_access_denies_before_redirect() {

@@ -23,15 +23,15 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install Rust toolchain
         run: rustup show
 
       - name: Install security tools
         run: |
-          cargo install --locked cargo-deny
-          cargo install --locked cargo-audit
+          cargo install --locked cargo-deny --version 0.20.2
+          cargo install --locked cargo-audit --version 0.22.2
 
       - name: Install SBOM tool
         run: cargo install --locked cargo-sbom --version 0.10.0
@@ -232,7 +232,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install Rust toolchain
         run: rustup show

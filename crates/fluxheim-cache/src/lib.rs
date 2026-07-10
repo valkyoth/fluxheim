@@ -23,6 +23,7 @@ pub mod storage;
 pub mod storage_bin;
 mod storage_bin_alloc;
 mod storage_bin_fs;
+mod storage_bin_index;
 mod storage_bin_manifest;
 pub mod tags;
 

@@ -809,23 +809,63 @@ impl NativeWasmHook {
         let attachment_admission = self.attachment_admission.clone();
         let started = Instant::now();
         let plugin_name = plugin.name.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            let _global_permit = global_admission
-                .try_acquire()
-                .map_err(|_| NativeWasmHookError::Admission(global_admission_scope))?;
-            let _vhost_permit = match vhost_admission {
-                Some(admission) => Some(admission.try_acquire().map_err(|_| {
+        let global_permit = global_admission
+            .acquire()
+            .await
+            .map_err(|_| NativeWasmHookError::Admission(global_admission_scope));
+        let vhost_permit =
+            match (global_permit.as_ref(), vhost_admission) {
+                (Ok(_), Some(admission)) => admission.acquire().await.map(Some).map_err(|_| {
                     NativeWasmHookError::Admission(NativeWasmAdmissionScope::CacheVhost)
-                })?),
-                None => None,
+                }),
+                (Ok(_), None) => Ok(None),
+                (Err(_), _) => Ok(None),
             };
-            let _plugin_permit = plugin
+        let plugin_permit = if global_permit.is_ok() && vhost_permit.is_ok() {
+            plugin
                 .admission
-                .try_acquire()
-                .map_err(|_| NativeWasmHookError::Admission(NativeWasmAdmissionScope::Plugin))?;
-            let _attachment_permit = attachment_admission.try_acquire().map_err(|_| {
-                NativeWasmHookError::Admission(NativeWasmAdmissionScope::Attachment)
-            })?;
+                .acquire()
+                .await
+                .map_err(|_| NativeWasmHookError::Admission(NativeWasmAdmissionScope::Plugin))
+        } else {
+            Err(NativeWasmHookError::Admission(global_admission_scope))
+        };
+        let attachment_permit = if plugin_permit.is_ok() {
+            attachment_admission
+                .acquire()
+                .await
+                .map_err(|_| NativeWasmHookError::Admission(NativeWasmAdmissionScope::Attachment))
+        } else {
+            Err(NativeWasmHookError::Admission(global_admission_scope))
+        };
+        let permits = global_permit
+            .and_then(|global| vhost_permit.map(|vhost| (global, vhost)))
+            .and_then(|(global, vhost)| plugin_permit.map(|plugin| (global, vhost, plugin)))
+            .and_then(|(global, vhost, plugin)| {
+                attachment_permit.map(|attachment| (global, vhost, plugin, attachment))
+            });
+        let permits = match permits {
+            Ok(permits) => permits,
+            Err(error) => {
+                record_native_wasm_admission_rejection(
+                    &plugin_name,
+                    phase_label,
+                    match error {
+                        NativeWasmHookError::Admission(scope) => scope.as_label(),
+                        NativeWasmHookError::Execution(_) | NativeWasmHookError::Join => "global",
+                    },
+                );
+                record_native_wasm_execution(
+                    &plugin_name,
+                    phase_label,
+                    "fail_closed",
+                    started.elapsed(),
+                );
+                return Err(error);
+            }
+        };
+        let result = tokio::task::spawn_blocking(move || {
+            let _permits = permits;
             plugin
                 .runtime
                 .run_compiled_i32_no_args_with_hosts(&plugin.module, function, host_functions)
@@ -1794,9 +1834,10 @@ fn cache_vhost_admission_limit(total_concurrent: usize, cache_vhost_count: usize
 fn admission_controller(
     budget: fluxheim_config::WasmAdmissionBudgetConfig,
 ) -> Result<FluxWasmAdmissionController, NativeWasmRegistryError> {
-    FluxWasmAdmissionController::new(
+    FluxWasmAdmissionController::new_with_queue(
         usize::try_from(budget.max_concurrent_executions)
             .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?,
+        usize::try_from(budget.queue_limit).map_err(|_| NativeWasmRegistryError::AdmissionLimit)?,
     )
     .map_err(|_| NativeWasmRegistryError::AdmissionLimit)
 }
@@ -1863,6 +1904,28 @@ mod tests {
         assert_eq!(cache_vhost_admission_limit(8, 2), 4);
         assert_eq!(cache_vhost_admission_limit(8, 3), 3);
         assert_eq!(cache_vhost_admission_limit(1, 8), 1);
+    }
+
+    #[tokio::test]
+    async fn configured_wasm_queue_limit_bounds_async_waiters() {
+        let controller = admission_controller(fluxheim_config::WasmAdmissionBudgetConfig {
+            max_concurrent_executions: 1,
+            queue_limit: 1,
+        })
+        .unwrap();
+        let active = controller.try_acquire().unwrap();
+        let queued_controller = controller.clone();
+        let queued = tokio::spawn(async move { queued_controller.acquire().await });
+        while controller.queued_executions() == 0 {
+            tokio::task::yield_now().await;
+        }
+
+        assert!(controller.acquire().await.is_err());
+        drop(active);
+        let admitted = queued.await.unwrap().unwrap();
+        drop(admitted);
+        assert_eq!(controller.active_executions(), 0);
+        assert_eq!(controller.queued_executions(), 0);
     }
 
     #[test]

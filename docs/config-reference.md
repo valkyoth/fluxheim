@@ -739,8 +739,14 @@ values.
 explicitly configured for loopback-only unauthenticated probes. Repeated failed
 bearer-token attempts are tracked per direct socket source and globally over
 `window_secs`; once either limit is reached, Fluxheim returns `429` until the
-progressive lockout expires. `max_sources` bounds the in-memory per-source
-failure table. With metrics enabled,
+progressive lockout expires. Source-specific lockouts are enforced before
+credential validation. A valid token and, when configured, valid client
+certificate can still use the admin API during a global invalid-attempt
+lockout; the global lockout continues to reject invalid credentials. This
+prevents remote failures from disabling incident response. Keep the local
+owner-restricted `[admin.ops_socket]` available as a recovery/status channel
+for deployments with strict operational requirements. `max_sources` bounds
+the in-memory per-source failure table. With metrics enabled,
 `fluxheim_admin_auth_events_total{event,scope}` records failed and throttled
 admin authentication events, and security logs are emitted without reflecting
 the attempted token.
@@ -1165,6 +1171,7 @@ allow_response_headers = ["x-auth-request-user", "x-auth-request-email"]
 connect_timeout_secs = 2
 read_timeout_secs = 5
 max_response_bytes = "64KiB"
+max_in_flight = 64
 
 [proxy.mirror]
 enabled = false
@@ -1870,7 +1877,12 @@ Any 2xx auth response allows the request and headers listed in
 `allow_response_headers` are copied into the upstream request; 4xx/5xx auth
 responses stop the request and return the auth status with a bounded text body.
 Other auth statuses are treated as a gateway-side auth failure. The hook can be
-configured globally, per vhost proxy, or per route proxy block. In
+configured globally, per vhost proxy, or per route proxy block.
+`max_in_flight` bounds active synchronous authorization calls for each
+configured auth service. Fluxheim acquires this permit before submitting work
+to Tokio's blocking pool; saturation fails closed with `503` instead of
+growing the blocking queue. Valid values are `1..=100000` and the default is
+`64`. In
 FIPS/ISO-required mode, auth subrequests are limited to numeric local
 `http://127.0.0.1/...` or `http://[::1]/...` sidecars until outbound TLS client
 evidence is routed through the selected validated provider. With metrics

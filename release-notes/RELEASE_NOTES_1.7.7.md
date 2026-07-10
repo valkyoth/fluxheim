@@ -34,6 +34,22 @@ deterministic unsupported-call rejection.
 - Restrict proxy-ABI preview manifests to `access-decision`, and independently
   prevent native request-header, route, and cache host functions from being
   linked into the preview namespace.
+- Enforce `[server.host_routing].strict = true` for native HTTP/1 Host and
+  HTTP/2 authority routing. Missing or invalid identity returns `400`; an
+  unknown host returns `421` instead of reaching the default tenant.
+- Acquire process, cache-vhost, plugin, and attachment Wasm admission before
+  `spawn_blocking`; honor bounded `queue_limit` waiters and replace per-request
+  watchdog threads with one process-wide shared epoch ticker.
+- Bound external-auth work before blocking-pool submission with
+  `max_in_flight = 64` by default. Saturation fails closed with `503`.
+- Keep source-specific admin lockouts fail closed while allowing correctly
+  authenticated operators through a global invalid-attempt lockout.
+- Bound persistent storage-bin index files, entry/key counts, cache metadata,
+  header counts, and fallible allocations. Decoded local AES cache keys now
+  remain in `sanitization::SecretBytes<32>` through key construction.
+- Pin third-party GitHub Actions to reviewed commit SHAs, pin `cargo-deny` and
+  `cargo-audit` installs, and pin every container builder/runtime base image to
+  a reviewed digest.
 
 ## Changed
 
@@ -46,6 +62,11 @@ deterministic unsupported-call rejection.
 - Restore the standalone cargo-fuzz workspace and remove its obsolete Pingora
   dependency patch so the checked-in fuzz targets build against their current
   owning crates again. The fuzz validation gate now compiles every target.
+- Replace storage-bin request-path full-index sorting, rewriting, and syncing
+  with a capacity-one coalescing background writer. Maintain ordered eviction
+  state so selecting the oldest object no longer scans the complete object map.
+- Add `fluxheim-base-images.txt` to generated release evidence beside SPDX and
+  CycloneDX output so reviewed image digests are recorded for each build input.
 
 ## Operator Notes
 

@@ -5,6 +5,11 @@ use fluxheim_cache::SerializedCacheObject;
 
 use super::NativeMemoryCacheEntry;
 
+const MAX_NATIVE_DISK_CACHE_META_BYTES: usize = 1024 * 1024;
+const MAX_NATIVE_DISK_CACHE_VARY_FIELDS: usize = 64;
+const MAX_NATIVE_DISK_CACHE_RESPONSE_HEADERS: usize = 256;
+const MAX_NATIVE_DISK_CACHE_REASON_BYTES: usize = 1024;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct NativeDiskCacheMeta {
     pub(super) status: u16,
@@ -75,6 +80,9 @@ impl NativeDiskCacheMeta {
     }
 
     pub(super) fn decode(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() > MAX_NATIVE_DISK_CACHE_META_BYTES {
+            return None;
+        }
         let mut offset = 0_usize;
         let magic = native_disk_meta_line(bytes, &mut offset)?;
         if magic != "FLUXHEIM-NATIVE-PROXY-CACHE-v1" {
@@ -86,6 +94,9 @@ impl NativeDiskCacheMeta {
         let reason_len = native_disk_meta_line(bytes, &mut offset)?
             .parse::<usize>()
             .ok()?;
+        if reason_len > MAX_NATIVE_DISK_CACHE_REASON_BYTES {
+            return None;
+        }
         let content_length =
             native_disk_meta_optional_u64(native_disk_meta_line(bytes, &mut offset)?)?;
         let expires_at_unix_secs = native_disk_meta_line(bytes, &mut offset)?
@@ -101,7 +112,13 @@ impl NativeDiskCacheMeta {
         let vary_count = native_disk_meta_line(bytes, &mut offset)?
             .parse::<usize>()
             .ok()?;
-        let mut vary_lens = Vec::with_capacity(vary_count);
+        if vary_count > MAX_NATIVE_DISK_CACHE_VARY_FIELDS
+            || vary_count > bytes.len().saturating_sub(offset)
+        {
+            return None;
+        }
+        let mut vary_lens = Vec::new();
+        vary_lens.try_reserve_exact(vary_count).ok()?;
         for _ in 0..vary_count {
             vary_lens.push(
                 native_disk_meta_line(bytes, &mut offset)?
@@ -114,7 +131,8 @@ impl NativeDiskCacheMeta {
             .ok()?
             .to_owned();
         offset = reason_end;
-        let mut vary_fields = Vec::with_capacity(vary_count);
+        let mut vary_fields = Vec::new();
+        vary_fields.try_reserve_exact(vary_count).ok()?;
         for len in vary_lens {
             let end = offset.checked_add(len)?;
             vary_fields.push(
@@ -170,11 +188,19 @@ pub(super) fn native_disk_response_header_bytes(entry: &NativeMemoryCacheEntry) 
 }
 
 fn native_disk_response_headers(bytes: &[u8]) -> Option<Vec<(String, String)>> {
+    if bytes.len() > MAX_NATIVE_DISK_CACHE_META_BYTES {
+        return None;
+    }
     let mut offset = 0_usize;
     let count = native_disk_meta_line(bytes, &mut offset)?
         .parse::<usize>()
         .ok()?;
-    let mut lengths = Vec::with_capacity(count);
+    if count > MAX_NATIVE_DISK_CACHE_RESPONSE_HEADERS || count > bytes.len().saturating_sub(offset)
+    {
+        return None;
+    }
+    let mut lengths = Vec::new();
+    lengths.try_reserve_exact(count).ok()?;
     for _ in 0..count {
         let name_len = native_disk_meta_line(bytes, &mut offset)?
             .parse::<usize>()
@@ -184,7 +210,8 @@ fn native_disk_response_headers(bytes: &[u8]) -> Option<Vec<(String, String)>> {
             .ok()?;
         lengths.push((name_len, value_len));
     }
-    let mut headers = Vec::with_capacity(count);
+    let mut headers = Vec::new();
+    headers.try_reserve_exact(count).ok()?;
     for (name_len, value_len) in lengths {
         let name_end = offset.checked_add(name_len)?;
         let name = std::str::from_utf8(bytes.get(offset..name_end)?)
@@ -270,5 +297,21 @@ fn native_unix_secs_to_instant(secs: u64, now_system: SystemTime, now_instant: I
         now_instant
             .checked_sub(now_system.duration_since(target).unwrap_or_default())
             .unwrap_or(now_instant)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NativeDiskCacheMeta, native_disk_response_headers};
+
+    #[test]
+    fn disk_cache_metadata_rejects_unbounded_persistent_counts() {
+        let metadata = format!(
+            "FLUXHEIM-NATIVE-PROXY-CACHE-v1\n200\n0\n-\n0\n-\n-\n0\n{}\n",
+            usize::MAX
+        );
+
+        assert!(NativeDiskCacheMeta::decode(metadata.as_bytes()).is_none());
+        assert!(native_disk_response_headers(format!("{}\n", usize::MAX).as_bytes()).is_none());
     }
 }

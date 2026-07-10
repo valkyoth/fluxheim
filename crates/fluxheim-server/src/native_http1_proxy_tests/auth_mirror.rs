@@ -73,6 +73,29 @@ async fn auth_endpoint(
     (addr, rx)
 }
 
+#[cfg(feature = "auth-request")]
+async fn stalled_auth_endpoint() -> (
+    std::net::SocketAddr,
+    tokio::sync::oneshot::Receiver<()>,
+    tokio::sync::oneshot::Sender<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let _ = read_request_head(&mut stream).await;
+        let _ = accepted_tx.send(());
+        let _ = release_rx.await;
+        stream
+            .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    });
+    (addr, accepted_rx, release_tx)
+}
+
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 #[tokio::test]
 async fn native_proxy_mirrors_safe_requests_without_changing_origin_response() {
@@ -163,6 +186,7 @@ async fn native_proxy_auth_request_allows_and_injects_response_headers() {
             connect_timeout_secs: 1,
             read_timeout_secs: 1,
             max_response_bytes: fluxheim_config::ByteSize::from_bytes(1024),
+            max_in_flight: 64,
         },
         ..Default::default()
     };
@@ -233,4 +257,49 @@ async fn native_proxy_auth_request_denies_before_upstream_forwarding() {
     assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
     assert!(response.ends_with("denied\n"));
     assert_eq!(upstream_hits.load(Ordering::Relaxed), 0);
+}
+
+#[cfg(feature = "auth-request")]
+#[tokio::test]
+async fn native_proxy_auth_request_rejects_before_submitting_saturated_blocking_work() {
+    let origin = upstream(|_request, mut stream| async move {
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")
+            .await
+            .unwrap();
+    })
+    .await;
+    let (auth, accepted, release) = stalled_auth_endpoint().await;
+    let proxy = fluxheim_config::ProxyConfig {
+        upstream: Some(origin.to_string()),
+        auth_request: fluxheim_config::AuthRequestConfig {
+            enabled: true,
+            url: Some(format!("http://{auth}/auth")),
+            connect_timeout_secs: 1,
+            read_timeout_secs: 2,
+            max_in_flight: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let proxy = NativeHttp1Proxy::from_proxy_config(&proxy, DownstreamHttp1Policy::default())
+        .unwrap()
+        .unwrap();
+    let proxy = proxy_listener_for(proxy).await;
+
+    let first = tokio::spawn(async move { downstream_get(proxy, "/private").await });
+    tokio::time::timeout(Duration::from_secs(1), accepted)
+        .await
+        .unwrap()
+        .unwrap();
+    let second = tokio::time::timeout(Duration::from_secs(1), downstream_get(proxy, "/private"))
+        .await
+        .unwrap();
+    assert!(second.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(second.ends_with("auth_request failed\n"));
+
+    let _ = release.send(());
+    let first = first.await.unwrap();
+    assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(first.ends_with("ok"));
 }

@@ -43,6 +43,22 @@ behavior when the change improves security or project direction.
 - Restrict `proxy-wasm-preview` manifests to `access-decision` and prevent the
   server from binding `fluxheim_policy_v1` phase capabilities into preview
   namespaces.
+- Enforce strict host routing in native HTTP/1 and HTTP/2, returning `400` for
+  missing/invalid identity and `421` for unknown hosts.
+- Acquire bounded Wasm admission before blocking-work submission, honor
+  `queue_limit`, and replace per-invocation watchdog threads with one epoch
+  process-wide epoch ticker.
+- Add bounded pre-submission external-auth admission and preserve valid
+  operator access during global invalid-credential throttling.
+- Bound persistent cache index/metadata parsing and keep decoded local cache
+  encryption keys in `sanitization::SecretBytes<32>`.
+- Pin publishing actions, security-tool installs, and container base images to
+  immutable reviewed versions and digests.
+
+### Fixed
+
+- Replace storage-bin request-path full-index rewrites and map-scanning LRU
+  selection with a coalescing persistence worker and ordered eviction index.
 
 ## 1.7.6 - 2026-07-09
 

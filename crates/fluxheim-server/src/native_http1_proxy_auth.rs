@@ -1,17 +1,33 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use sanitization::SecretString;
 
 use crate::NativeHttp1Request;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct NativeAuthRequest {
     url: String,
     forward_headers: Vec<String>,
     allow_response_headers: Vec<String>,
     timeout: Duration,
     max_response_bytes: u64,
+    max_in_flight: usize,
+    inflight: Arc<tokio::sync::Semaphore>,
 }
+
+impl PartialEq for NativeAuthRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.url == other.url
+            && self.forward_headers == other.forward_headers
+            && self.allow_response_headers == other.allow_response_headers
+            && self.timeout == other.timeout
+            && self.max_response_bytes == other.max_response_bytes
+            && self.max_in_flight == other.max_in_flight
+    }
+}
+
+impl Eq for NativeAuthRequest {}
 
 #[derive(Debug)]
 pub(crate) enum NativeAuthRequestDecision {
@@ -44,6 +60,8 @@ impl NativeAuthRequest {
                     .saturating_add(config.read_timeout_secs),
             ),
             max_response_bytes: config.max_response_bytes.as_u64(),
+            max_in_flight: config.max_in_flight,
+            inflight: Arc::new(tokio::sync::Semaphore::new(config.max_in_flight)),
         })
     }
 
@@ -53,9 +71,18 @@ impl NativeAuthRequest {
     ) -> std::io::Result<NativeAuthRequestDecision> {
         let auth = self.clone();
         let input = self.input(request);
-        tokio::task::spawn_blocking(move || auth.fetch_decision(&input))
-            .await
-            .map_err(|error| std::io::Error::other(error.to_string()))?
+        let permit = self.inflight.clone().try_acquire_owned().map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "authorization service saturated",
+            )
+        })?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            auth.fetch_decision(&input)
+        })
+        .await
+        .map_err(|error| std::io::Error::other(error.to_string()))?
     }
 
     fn input(&self, request: &NativeHttp1Request) -> NativeAuthRequestInput {

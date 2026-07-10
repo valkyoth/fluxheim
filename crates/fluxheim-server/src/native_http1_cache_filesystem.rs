@@ -66,7 +66,7 @@ impl NativeDiskCache {
                 }
                 let weight = bytes.len() as u64;
                 state.bytes = state.bytes.saturating_add(weight);
-                state.objects.insert(
+                state.insert_object(
                     combined.clone(),
                     NativeDiskCacheRecord {
                         location: NativeDiskCacheLocation::Filesystem(path),

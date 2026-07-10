@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use fluxheim_config::{CacheDiskEncryptionConfig, CacheDiskEncryptionProvider};
 use ring::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
+use sanitization::SecretBytes;
 use zeroize::Zeroizing;
 
 use super::native_http1_cache_disk_path::NativeSafeDiskCachePath;
@@ -67,12 +68,14 @@ impl NativeDiskCacheEncryption {
                         ));
                     }
                 };
-                let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|_| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "invalid native disk cache encryption key",
-                    )
-                })?;
+                let unbound = key_bytes
+                    .expose_secret(|key_bytes| UnboundKey::new(&AES_256_GCM, key_bytes))
+                    .map_err(|_| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "invalid native disk cache encryption key",
+                        )
+                    })?;
                 NativeDiskCacheEncryptionProvider::Local {
                     key: Arc::new(LessSafeKey::new(unbound)),
                 }
@@ -338,7 +341,7 @@ fn native_cache_encryption_credential_path(credential_name: &str) -> PathBuf {
         .join(credential_name)
 }
 
-fn read_native_cache_encryption_key_file(path: &Path) -> std::io::Result<[u8; 32]> {
+fn read_native_cache_encryption_key_file(path: &Path) -> std::io::Result<SecretBytes<32>> {
     let contents = read_native_cache_encryption_secret_file(path)?;
     parse_native_cache_encryption_hex_key(contents.trim())
 }
@@ -357,20 +360,19 @@ fn read_native_cache_encryption_secret_file(path: &Path) -> std::io::Result<Zero
     Ok(contents)
 }
 
-fn parse_native_cache_encryption_hex_key(value: &str) -> std::io::Result<[u8; 32]> {
+fn parse_native_cache_encryption_hex_key(value: &str) -> std::io::Result<SecretBytes<32>> {
     if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "native cache disk encryption key must be 64 hex characters",
         ));
     }
-    let mut key = [0_u8; 32];
-    for (index, chunk) in value.as_bytes().chunks_exact(2).enumerate() {
-        let high = native_hex_value(chunk[0])?;
-        let low = native_hex_value(chunk[1])?;
-        key[index] = (high << 4) | low;
-    }
-    Ok(key)
+    SecretBytes::try_from_fn(|index| {
+        let offset = index.saturating_mul(2);
+        let high = native_hex_value(value.as_bytes()[offset])?;
+        let low = native_hex_value(value.as_bytes()[offset + 1])?;
+        Ok((high << 4) | low)
+    })
 }
 
 fn native_hex_value(byte: u8) -> std::io::Result<u8> {

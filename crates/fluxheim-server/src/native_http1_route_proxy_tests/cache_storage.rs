@@ -143,6 +143,7 @@ async fn native_route_proxy_caches_proxy_response_on_storage_bin_disk() {
         response_header(&first, "x-cache-status").as_deref(),
         Some("MISS")
     );
+    wait_for_storage_bin_index(root.path()).await;
     assert!(root.path().join(".fluxheim-storage-bin-v1").is_file());
     assert!(root.path().join(".fluxheim-storage-bin-index-v1").is_file());
     assert!(root.path().join("bins").is_dir());
@@ -186,6 +187,7 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_storage_bin_disk(
         response_header(&first, "x-cache-status").as_deref(),
         Some("MISS")
     );
+    wait_for_storage_bin_index(&cache_root).await;
     let bin_bytes = native_storage_bin_bytes(&cache_root);
     assert!(!bin_bytes.is_empty());
     assert!(bin_bytes.iter().all(|bytes| {
@@ -235,6 +237,7 @@ async fn native_route_proxy_caches_proxy_response_on_openbao_storage_bin_disk() 
         response_header(&first, "x-cache-status").as_deref(),
         Some("MISS")
     );
+    wait_for_storage_bin_index(&cache_root).await;
     let bin_bytes = native_storage_bin_bytes(&cache_root);
     assert!(!bin_bytes.is_empty());
     assert!(
@@ -349,6 +352,17 @@ fn native_storage_bin_bytes(root: &std::path::Path) -> Vec<Vec<u8>> {
         .flatten()
         .filter_map(|entry| std::fs::read(entry.path()).ok())
         .collect()
+}
+
+async fn wait_for_storage_bin_index(root: &std::path::Path) {
+    let index = root.join(".fluxheim-storage-bin-index-v1");
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while !index.is_file() {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
 }
 
 #[cfg(feature = "openbao-cache-encryption")]

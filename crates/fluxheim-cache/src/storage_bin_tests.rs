@@ -177,3 +177,36 @@ fn storage_bin_layout_and_index_io_round_trip() {
     assert!(storage_bin_index_path(&root).is_file());
     assert_eq!(read_storage_bin_index(&layout).unwrap(), entries);
 }
+
+#[test]
+fn storage_bin_index_rejects_oversized_persistent_file_before_reading_it() {
+    let root = tempfile::tempdir().unwrap();
+    let plan = DiskTierPlan {
+        path: root.path().join("cache"),
+        max_size_bytes: ByteSize::from_bytes(128),
+        max_object_bytes: ByteSize::from_bytes(64),
+        backend: CacheDiskBackend::StorageBin,
+        storage_bin: CacheDiskStorageBinConfig {
+            bin_size_bytes: ByteSize::from_bytes(64),
+            preallocate: false,
+            max_open_bins: 4,
+        },
+        encryption: CacheDiskEncryptionConfig::default(),
+        cache_tag_headers: Vec::new(),
+    };
+    let mut layout = StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+    prepare_storage_bin_layout(&layout).unwrap();
+    let canonical_root = layout.root.canonicalize().unwrap();
+    layout = StorageBinLayoutPlan {
+        root: canonical_root.clone(),
+        manifest_path: canonical_root.join(STORAGE_BIN_MANIFEST_FILENAME),
+        data_dir: canonical_root.join(STORAGE_BIN_DATA_DIR),
+        ..layout
+    };
+    let path = storage_bin_index_path(&canonical_root);
+    let file = std::fs::File::create(path).unwrap();
+    file.set_len(64 * 1024 * 1024 + 1).unwrap();
+
+    let error = read_storage_bin_index(&layout).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+}

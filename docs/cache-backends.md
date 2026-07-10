@@ -218,8 +218,11 @@ internal cache implementation.
   and its `(bin_id, offset, len)` location. On startup Fluxheim reads the index,
   validates each referenced object by parsing the v5 cache object bytes, rebuilds
   the purge index, and reconstructs free ranges from the occupied locations.
-- Storage-bin index writes are debounced after insert, eviction, and purge
-  bursts. A crash can drop the newest cache entries from the durable index, but
+- Storage-bin index writes are coalesced by a capacity-one background worker
+  and limited to one flush per second during insert, eviction, and purge bursts.
+  Request workers only mark the index dirty; sorting, atomic replacement, and
+  `sync_all` run off the request path. A crash can drop the newest cache entries
+  from the durable index, but
   the affected bin ranges are then treated as free on restart rather than
   becoming unbounded orphaned files. Clean storage teardown performs a
   best-effort flush when the debounced index is still dirty.
@@ -229,7 +232,9 @@ internal cache implementation.
   growing the number of bin files. When purge or eviction frees the
   highest-numbered bin files completely, Fluxheim reclaims those tail bins
   without moving live objects.
-- Storage-bin eviction follows the same basic LRU contract as the filesystem
+- Storage-bin eviction maintains an ordered `(access time, key)` index, so
+  selecting the oldest object does not scan and clone the whole object map.
+  It follows the same basic LRU contract as the filesystem
   disk cache: before admitting a new object it removes the oldest tracked
   objects until the projected encoded-byte total fits under
   `cache.disk.max_size_bytes`, releases their bin ranges, removes purge-index

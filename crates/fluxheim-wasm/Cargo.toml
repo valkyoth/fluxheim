@@ -10,7 +10,7 @@ description = "Internal Fluxheim sandboxed WebAssembly extension runtime boundar
 [features]
 default = []
 proxy-abi = []
-runtime = ["dep:wasmtime"]
+runtime = ["dep:tokio", "dep:wasmtime"]
 
 [[example]]
 name = "wasm_sandbox_smoke"
@@ -19,6 +19,7 @@ required-features = ["runtime"]
 [dependencies]
 sha2 = "0.11.0"
 thiserror = "2.0.18"
+tokio = { version = "1.52.3", default-features = false, features = ["rt", "sync"], optional = true }
 wasmtime = { version = "46.0.1", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
 
 [dev-dependencies]

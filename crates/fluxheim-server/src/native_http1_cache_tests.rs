@@ -6,7 +6,7 @@ use super::{
     NativeDiskCacheState, native_disk_cache_mutation_locks, native_peer_fill_cache_ttl,
     register_native_disk_cache_purge_handle,
 };
-use fluxheim_config::{ByteSize, CacheConfig};
+use fluxheim_config::{ByteSize, CacheConfig, CacheDiskBackend, CacheDiskStorageBinConfig};
 use http::HeaderMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -54,8 +54,9 @@ fn disk_cache_purge_callback_runs_outside_registry_lock() {
         max_object_bytes: ByteSize::from_bytes(1024),
         backend: NativeDiskCacheBackend::Filesystem,
         encryption: None,
-        state: Mutex::new(NativeDiskCacheState::default()),
+        state: Arc::new(Mutex::new(NativeDiskCacheState::default())),
         mutation_locks: native_disk_cache_mutation_locks(),
+        index_flush: None,
     });
     let vhost: Arc<str> = Arc::from(format!("purge-lock-test-{}", std::process::id()));
     register_native_disk_cache_purge_handle(vhost.clone(), None, &cache);
@@ -81,12 +82,13 @@ fn disk_cache_remove_combined_waits_for_key_mutation_lock() {
         max_object_bytes: ByteSize::from_bytes(1024),
         backend: NativeDiskCacheBackend::Filesystem,
         encryption: None,
-        state: Mutex::new(NativeDiskCacheState::default()),
+        state: Arc::new(Mutex::new(NativeDiskCacheState::default())),
         mutation_locks: native_disk_cache_mutation_locks(),
+        index_flush: None,
     });
     let combined = "same-key-race";
     cache.with_state_mut(|state| {
-        state.objects.insert(
+        state.insert_object(
             combined.to_owned(),
             NativeDiskCacheRecord {
                 location: NativeDiskCacheLocation::Filesystem(cache.root.join("object.fhc")),
@@ -109,4 +111,78 @@ fn disk_cache_remove_combined_waits_for_key_mutation_lock() {
     drop(guard);
     assert_eq!(receiver.recv_timeout(Duration::from_secs(5)), Ok(true));
     handle.join().expect("join removal thread");
+}
+
+#[test]
+fn disk_cache_eviction_order_updates_without_scanning_objects() {
+    let mut state = NativeDiskCacheState::default();
+    let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+    let new = SystemTime::UNIX_EPOCH + Duration::from_secs(2);
+    for (key, accessed_at) in [("old", old), ("new", new)] {
+        state.insert_object(
+            key.to_owned(),
+            NativeDiskCacheRecord {
+                location: NativeDiskCacheLocation::Filesystem(std::path::PathBuf::from(key)),
+                weight: 1,
+                accessed_at,
+            },
+        );
+    }
+
+    assert_eq!(state.oldest_key().as_deref(), Some("old"));
+    state.touch_object("old", new + Duration::from_secs(1));
+    assert_eq!(state.oldest_key().as_deref(), Some("new"));
+    state.remove_object("new");
+    assert_eq!(state.oldest_key().as_deref(), Some("old"));
+}
+
+#[test]
+fn storage_bin_index_flush_coalesces_and_flushes_on_shutdown() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = CacheConfig {
+        enabled: true,
+        max_object_bytes: ByteSize::from_bytes(64),
+        disk: fluxheim_config::CacheDiskConfig {
+            enabled: true,
+            backend: CacheDiskBackend::StorageBin,
+            path: Some(directory.path().join("cache")),
+            max_size_bytes: ByteSize::from_bytes(128),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(64),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let cache = NativeDiskCache::from_config(&config).unwrap();
+    let NativeDiskCacheBackend::StorageBin(storage_bin) = &cache.backend else {
+        return;
+    };
+    let layout = storage_bin.layout.clone();
+    cache.with_state_mut(|state| {
+        state.insert_object(
+            "coalesced".to_owned(),
+            NativeDiskCacheRecord {
+                location: NativeDiskCacheLocation::StorageBin(
+                    fluxheim_cache::StorageBinObjectLocation {
+                        bin_id: 0,
+                        offset: 0,
+                        len: 8,
+                    },
+                ),
+                weight: 8,
+                accessed_at: SystemTime::UNIX_EPOCH,
+            },
+        );
+    });
+    for _ in 0..100 {
+        cache.persist_storage_bin_index();
+    }
+    drop(cache);
+
+    let entries = fluxheim_cache::read_storage_bin_index(&layout).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].combined_key, "coalesced");
 }

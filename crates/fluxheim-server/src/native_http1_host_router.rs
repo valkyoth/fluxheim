@@ -33,12 +33,33 @@ pub struct NativeHttp1HostRouter {
     exact_hosts: HashMap<String, Arc<NativeHttp1RouteProxy>>,
     wildcard_hosts: Vec<NativeHttp1WildcardHost>,
     default_proxy: Arc<NativeHttp1RouteProxy>,
+    strict: bool,
 }
 
 #[derive(Clone, Debug)]
 struct NativeHttp1WildcardHost {
     suffix: String,
     proxy: Arc<NativeHttp1RouteProxy>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeHostRouteError {
+    MissingOrInvalid,
+    Unknown,
+}
+
+impl NativeHostRouteError {
+    fn response(self) -> NativeHttp1Response {
+        match self {
+            Self::MissingOrInvalid => {
+                NativeHttp1Response::new(400, "Bad Request", b"missing or invalid host identity\n")
+            }
+            Self::Unknown => {
+                NativeHttp1Response::new(421, "Misdirected Request", b"unknown host identity\n")
+            }
+        }
+        .close_connection()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -210,6 +231,7 @@ impl NativeHttp1HostRouter {
                 exact_hosts,
                 wildcard_hosts,
                 default_proxy,
+                strict: config.server.host_routing.strict,
             },
             load_balancer_services,
             load_balancer_admin_pools,
@@ -247,24 +269,43 @@ impl NativeHttp1HostRouter {
             exact_hosts: HashMap::new(),
             wildcard_hosts: Vec::new(),
             default_proxy,
+            strict: false,
         })
     }
 
-    pub fn select(&self, host: Option<&str>) -> &NativeHttp1RouteProxy {
+    pub fn select(
+        &self,
+        host: Option<&str>,
+    ) -> Result<&NativeHttp1RouteProxy, NativeHostRouteError> {
         let Some(host) = host.and_then(normalize_host) else {
-            return &self.default_proxy;
+            return if self.strict {
+                Err(NativeHostRouteError::MissingOrInvalid)
+            } else {
+                Ok(&self.default_proxy)
+            };
         };
         if let Some(proxy) = self.exact_hosts.get(&host) {
-            return proxy;
+            return Ok(proxy);
         }
-        self.wildcard_hosts
+        if let Some(proxy) = self
+            .wildcard_hosts
             .iter()
             .find(|wildcard| wildcard_matches(&host, &wildcard.suffix))
             .map(|wildcard| wildcard.proxy.as_ref())
-            .unwrap_or(&self.default_proxy)
+        {
+            return Ok(proxy);
+        }
+        if self.strict {
+            Err(NativeHostRouteError::Unknown)
+        } else {
+            Ok(&self.default_proxy)
+        }
     }
 
-    fn select_request(&self, request: &NativeHttp1Request) -> &NativeHttp1RouteProxy {
+    fn select_request(
+        &self,
+        request: &NativeHttp1Request,
+    ) -> Result<&NativeHttp1RouteProxy, NativeHostRouteError> {
         self.select(request_host(request))
     }
 }
@@ -274,22 +315,30 @@ impl NativeHttp1Handler for NativeHttp1HostRouter {
         &'a self,
         request: NativeHttp1Request,
     ) -> Pin<Box<dyn Future<Output = NativeHttp1Response> + Send + 'a>> {
-        let proxy = self.select_request(&request).clone();
-        Box::pin(async move { proxy.handle(request).await })
+        let selected = self.select_request(&request).cloned();
+        Box::pin(async move {
+            match selected {
+                Ok(proxy) => proxy.handle(request).await,
+                Err(error) => error.response(),
+            }
+        })
     }
 
     fn prepare_request_context(&self, request: &mut NativeHttp1Request) {
-        self.select_request(request)
-            .prepare_request_context(request);
+        if let Ok(proxy) = self.select_request(request) {
+            proxy.prepare_request_context(request);
+        }
     }
 
     fn request_body_timeout(&self, request: &NativeHttp1Request) -> Option<Duration> {
-        self.select_request(request).request_body_timeout(request)
+        self.select_request(request)
+            .ok()
+            .and_then(|proxy| proxy.request_body_timeout(request))
     }
 
     fn handles_connection_takeover(&self, request: &NativeHttp1Request) -> bool {
         self.select_request(request)
-            .handles_connection_takeover(request)
+            .is_ok_and(|proxy| proxy.handles_connection_takeover(request))
     }
 
     fn handle_connection_takeover<'a>(
@@ -298,11 +347,20 @@ impl NativeHttp1Handler for NativeHttp1HostRouter {
         prebuffered: Vec<u8>,
         stream: NativeHttp1ConnectionStream,
     ) -> Pin<Box<dyn Future<Output = Result<(), NativeHttp1Error>> + Send + 'a>> {
-        let proxy = self.select_request(&request).clone();
+        let selected = self.select_request(&request).cloned();
         Box::pin(async move {
-            proxy
-                .handle_connection_takeover(request, prebuffered, stream)
-                .await
+            match selected {
+                Ok(proxy) => {
+                    proxy
+                        .handle_connection_takeover(request, prebuffered, stream)
+                        .await
+                }
+                Err(_) => Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "strict host routing rejected connection takeover",
+                )
+                .into()),
+            }
         })
     }
 }

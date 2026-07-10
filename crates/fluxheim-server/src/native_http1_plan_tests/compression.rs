@@ -1,4 +1,10 @@
-use crate::{NativeHttp1ProxyConfigError, ServerPlan};
+#[cfg(not(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+)))]
+use crate::NativeHttp1ProxyConfigError;
+use crate::ServerPlan;
 use fluxheim_config::{CacheConfig, Config, RouteConfig, VhostConfig};
 
 #[test]

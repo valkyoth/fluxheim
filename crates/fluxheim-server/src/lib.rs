@@ -127,7 +127,9 @@ pub use native_http1_cache::{
     purge_native_disk_cache_user_tag,
 };
 pub use native_http1_client::{NativeHttp1Upstream, NativeTcpKeepalivePolicy};
-pub use native_http1_host_router::{NativeHttp1HostRouter, NativeHttp1HostRouterConfigError};
+pub use native_http1_host_router::{
+    NativeHostRouteError, NativeHttp1HostRouter, NativeHttp1HostRouterConfigError,
+};
 pub use native_http1_plan::{
     NativeHttp1ProxyCandidate, NativeHttp1ProxyCutoverStatus, NativeHttp1ProxyCutoverSummary,
 };

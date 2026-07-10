@@ -97,9 +97,14 @@ impl NativeHttp1Proxy {
                         target: "fluxheim::auth_request",
                         "native auth_request failed: {error}"
                     );
+                    let (status, reason) = if error.kind() == std::io::ErrorKind::WouldBlock {
+                        (503, "Service Unavailable")
+                    } else {
+                        (502, "Bad Gateway")
+                    };
                     return NativeHttp1Response::new(
-                        502,
-                        "Bad Gateway",
+                        status,
+                        reason,
                         b"auth_request failed\n".as_slice(),
                     )
                     .close_connection();

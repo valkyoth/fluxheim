@@ -10,6 +10,7 @@ use crate::config_http::valid_http_endpoint_url;
 
 const MAX_AUTH_REQUEST_HEADERS: usize = 32;
 const MAX_AUTH_REQUEST_RESPONSE_BYTES: u64 = 1024 * 1024;
+const MAX_AUTH_REQUEST_IN_FLIGHT: usize = 100_000;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -28,6 +29,8 @@ pub struct AuthRequestConfig {
     pub read_timeout_secs: u64,
     #[serde(default = "default_auth_request_max_response_bytes")]
     pub max_response_bytes: ByteSize,
+    #[serde(default = "default_auth_request_max_in_flight")]
+    pub max_in_flight: usize,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -40,6 +43,7 @@ pub struct AuthRequestConfigFragment {
     connect_timeout_secs: Option<u64>,
     read_timeout_secs: Option<u64>,
     max_response_bytes: Option<ByteSize>,
+    max_in_flight: Option<usize>,
 }
 
 impl Default for AuthRequestConfig {
@@ -52,6 +56,7 @@ impl Default for AuthRequestConfig {
             connect_timeout_secs: default_auth_request_connect_timeout_secs(),
             read_timeout_secs: default_auth_request_read_timeout_secs(),
             max_response_bytes: default_auth_request_max_response_bytes(),
+            max_in_flight: default_auth_request_max_in_flight(),
         }
     }
 }
@@ -78,6 +83,9 @@ impl AuthRequestConfig {
         }
         if let Some(bytes) = fragment.max_response_bytes {
             self.max_response_bytes = bytes;
+        }
+        if let Some(max_in_flight) = fragment.max_in_flight {
+            self.max_in_flight = max_in_flight;
         }
     }
 
@@ -143,6 +151,12 @@ impl AuthRequestConfig {
                 reason: "max_response_bytes must be between 1 byte and 1 MiB",
             });
         }
+        if self.max_in_flight == 0 || self.max_in_flight > MAX_AUTH_REQUEST_IN_FLIGHT {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: scope,
+                reason: "max_in_flight must be between 1 and 100000",
+            });
+        }
         Ok(())
     }
 }
@@ -157,4 +171,8 @@ fn default_auth_request_read_timeout_secs() -> u64 {
 
 fn default_auth_request_max_response_bytes() -> ByteSize {
     ByteSize::from_bytes(64 * 1024)
+}
+
+const fn default_auth_request_max_in_flight() -> usize {
+    64
 }

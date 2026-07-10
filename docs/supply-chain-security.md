@@ -17,6 +17,12 @@ roadmap for Fluxheim release work.
   versioned.
 - GitHub CI runs formatting, clippy, tests, CodeQL, `cargo deny`, `cargo
   audit`, OWASP baseline checks, feature builds, and smoke tests.
+- Third-party GitHub Actions are pinned to reviewed 40-character commit SHAs;
+  human-readable release tags remain in comments for update review.
+- Container builder and runtime images retain readable tags but are pinned to
+  reviewed manifest digests in every Containerfile. The SBOM evidence step
+  emits `fluxheim-base-images.txt` so release evidence records those exact
+  inputs alongside SPDX and CycloneDX output.
 - Stable releases generate SPDX and CycloneDX SBOMs from the tagged source
   tree.
 - Stable releases record source archive checksums, binary checksums, SBOM
@@ -64,6 +70,10 @@ For each update:
    when an advisory exception or license exception changes.
 
 Do not hide dependency churn inside unrelated feature commits.
+
+GitHub Action and base-image updates follow the same rule: update the readable
+version and immutable SHA/digest together, review the upstream diff or image
+provenance, and let the OWASP baseline reject mutable references.
 
 ## Build Isolation
 

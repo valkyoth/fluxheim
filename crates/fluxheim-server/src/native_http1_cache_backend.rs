@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -29,9 +29,41 @@ pub(super) struct NativeStorageBinBackend {
 #[derive(Debug, Default)]
 pub(crate) struct NativeDiskCacheState {
     pub(super) objects: HashMap<String, NativeDiskCacheRecord>,
+    pub(super) eviction_order: BTreeSet<(SystemTime, String)>,
     pub(super) variants: HashMap<String, Vec<NativeMemoryCacheVariant>>,
     pub(super) purge_index: CachePurgeIndex,
     pub(super) bytes: u64,
+}
+
+impl NativeDiskCacheState {
+    pub(super) fn insert_object(&mut self, key: String, record: NativeDiskCacheRecord) {
+        if let Some(previous) = self.objects.insert(key.clone(), record.clone()) {
+            self.eviction_order
+                .remove(&(previous.accessed_at, key.clone()));
+        }
+        self.eviction_order.insert((record.accessed_at, key));
+    }
+
+    pub(super) fn remove_object(&mut self, key: &str) -> Option<NativeDiskCacheRecord> {
+        let record = self.objects.remove(key)?;
+        self.eviction_order
+            .remove(&(record.accessed_at, key.to_owned()));
+        Some(record)
+    }
+
+    pub(super) fn touch_object(&mut self, key: &str, accessed_at: SystemTime) {
+        let Some(record) = self.objects.get_mut(key) else {
+            return;
+        };
+        self.eviction_order
+            .remove(&(record.accessed_at, key.to_owned()));
+        record.accessed_at = accessed_at;
+        self.eviction_order.insert((accessed_at, key.to_owned()));
+    }
+
+    pub(super) fn oldest_key(&self) -> Option<String> {
+        self.eviction_order.first().map(|(_, key)| key.to_owned())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

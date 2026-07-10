@@ -1,5 +1,5 @@
-ARG RUST_IMAGE=docker.io/library/rust:1.97.0-alpine3.23
-ARG RUNTIME_IMAGE=docker.io/library/alpine:3.23
+ARG RUST_IMAGE=docker.io/library/rust:1.97.0-alpine3.23@sha256:ca0daf101eef0c8cd1e49dfc137154a220efb8c458c85a3eacacc7dfd5d9e04c
+ARG RUNTIME_IMAGE=docker.io/library/alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml
 
 FROM ${RUST_IMAGE} AS builder

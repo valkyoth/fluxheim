@@ -52,6 +52,27 @@ fn rejects_invalid_proxy_upstream_policy() {
     .unwrap();
     assert!(auth_request.validate().is_ok());
     assert!(auth_request.proxy.auth_request.enabled);
+    assert_eq!(auth_request.proxy.auth_request.max_in_flight, 64);
+
+    let saturated_auth_request: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+
+            [proxy.auth_request]
+            enabled = true
+            url = "http://127.0.0.1:4180/auth"
+            max_in_flight = 0
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        saturated_auth_request.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.auth_request",
+            reason: "max_in_flight must be between 1 and 100000",
+        })
+    );
 
     let auth_request_without_url: Config = toml::from_str(
         r#"

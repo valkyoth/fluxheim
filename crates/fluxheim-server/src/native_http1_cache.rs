@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use fluxheim_cache::{
@@ -60,6 +60,7 @@ pub use native_http1_cache_purge::{
     purge_native_disk_cache_user_tag,
 };
 use native_http1_cache_state::native_disk_cache_mutation_locks;
+use native_http1_cache_storage_bin::NativeStorageBinIndexFlush;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeDiskCacheObjectMetadata {
@@ -89,8 +90,9 @@ pub(crate) struct NativeDiskCache {
     max_object_bytes: fluxheim_config::ByteSize,
     backend: NativeDiskCacheBackend,
     encryption: Option<NativeDiskCacheEncryption>,
-    state: Mutex<NativeDiskCacheState>,
+    state: Arc<Mutex<NativeDiskCacheState>>,
     mutation_locks: Box<[Mutex<()>]>,
+    index_flush: Option<NativeStorageBinIndexFlush>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -138,8 +140,9 @@ impl NativeDiskCache {
             max_object_bytes: config.max_object_bytes,
             backend,
             encryption,
-            state: Mutex::new(NativeDiskCacheState::default()),
+            state: Arc::new(Mutex::new(NativeDiskCacheState::default())),
             mutation_locks: native_disk_cache_mutation_locks(),
+            index_flush: None,
         };
         if let Err(error) = cache.rebuild_index() {
             log::warn!(
@@ -148,6 +151,8 @@ impl NativeDiskCache {
                 cache.root.display()
             );
         }
+        cache.index_flush = NativeStorageBinIndexFlush::start(&cache.backend, &cache.state);
+        cache.persist_storage_bin_index();
         Some(cache)
     }
 
@@ -255,7 +260,7 @@ impl NativeDiskCache {
                 let user_tag = key.user_tag.clone();
                 let index_path = key.index_path.clone();
                 let cache_tags = key.cache_tags.clone();
-                state.objects.insert(
+                state.insert_object(
                     key.combined.clone(),
                     NativeDiskCacheRecord {
                         location,
@@ -369,10 +374,9 @@ impl NativeDiskCache {
             }
         };
         self.with_state_mut(|state| {
-            if let Some(record) = state.objects.get_mut(combined_key) {
-                record.accessed_at = SystemTime::now();
-            }
+            state.touch_object(combined_key, SystemTime::now());
         });
+        self.persist_storage_bin_index();
         Some(entry)
     }
 
@@ -384,7 +388,7 @@ impl NativeDiskCache {
                 self.rebuild_storage_bin_backend(&mut state)?
             }
         }
-        self.state = Mutex::new(state);
+        self.with_state_mut(|current| *current = state);
         self.prune();
         Ok(())
     }

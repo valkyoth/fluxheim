@@ -61,7 +61,7 @@ fn admin_auth_throttle_locks_repeated_failures_by_source() {
 }
 
 #[test]
-fn admin_auth_throttle_can_lock_globally() {
+fn admin_auth_global_throttle_rejects_invalid_attempts_but_allows_valid_operator() {
     let mut config = Config::default();
     config.admin.auth_throttle = AdminAuthThrottleConfig {
         enabled: true,
@@ -95,6 +95,15 @@ fn admin_auth_throttle_can_lock_globally() {
         None,
         &auth_headers(),
         Some("192.0.2.22".parse().unwrap()),
+    );
+    assert_eq!(response.status, StatusCode::OK);
+
+    let response = app.handle_with_source(
+        "GET",
+        "/_fluxheim/status",
+        None,
+        &HeaderMap::new(),
+        Some("192.0.2.23".parse().unwrap()),
     );
     assert_eq!(response.status, StatusCode::TOO_MANY_REQUESTS);
 }

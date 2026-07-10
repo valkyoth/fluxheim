@@ -6,8 +6,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1HostRouter, NativeHttp1HostRouterConfigError,
-    NativeHttp1ProxyConfigError, NativeHttp1RouteProxyConfigError, serve_native_http1_listener,
+    DownstreamHttp1Policy, DownstreamHttp2Policy, NativeHttp1HostRouter,
+    NativeHttp1HostRouterConfigError, NativeHttp1ProxyConfigError, NativeHttp1RequestContext,
+    NativeHttp1RouteProxyConfigError, NativeHttp2RouteAdapter, serve_native_http1_listener,
 };
 
 async fn upstream_response(body: &'static str) -> std::net::SocketAddr {
@@ -356,6 +357,69 @@ async fn native_host_router_falls_back_for_missing_and_invalid_host() {
 
     assert!(missing.ends_with("fallback"));
     assert!(unknown.ends_with("fallback"));
+}
+
+#[tokio::test]
+async fn native_host_router_strict_mode_rejects_missing_invalid_and_unknown_hosts() {
+    let known = upstream_response("known").await;
+    let mut config = fluxheim_config::Config::default();
+    config.server.default_vhost = Some("known".to_owned());
+    config.server.host_routing.strict = true;
+    config.vhosts = vec![vhost("known", &["known.test"], known)];
+
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let known = downstream_get(proxy, Some("known.test")).await;
+    let missing = downstream_get_http10(proxy).await;
+    let invalid = downstream_get(proxy, Some("%invalid.test")).await;
+    let unknown = downstream_get(proxy, Some("unknown.test")).await;
+
+    assert!(known.ends_with("known"));
+    assert!(missing.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    assert!(invalid.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    assert!(unknown.starts_with("HTTP/1.1 421 Misdirected Request\r\n"));
+}
+
+#[tokio::test]
+async fn native_host_router_strict_mode_rejects_unknown_http2_authority() {
+    let upstream = upstream_response("unexpected").await;
+    let mut config = fluxheim_config::Config::default();
+    config.server.default_vhost = Some("known".to_owned());
+    config.server.host_routing.strict = true;
+    config.vhosts = vec![vhost("known", &["known.test"], upstream)];
+    let router = Arc::new(
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap(),
+    );
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let adapter = Arc::new(NativeHttp2RouteAdapter::new(
+        router,
+        None,
+        NativeHttp1RequestContext::default(),
+    ));
+    let server = tokio::spawn(
+        crate::native_http2_stack::serve_native_http2_connection_until_idle(
+            server_io,
+            DownstreamHttp2Policy::default(),
+            adapter,
+            Duration::from_millis(50),
+        ),
+    );
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let connection = tokio::spawn(async move { connection.await.unwrap() });
+    let request = http::Request::builder()
+        .uri("https://unknown.test/")
+        .body(())
+        .unwrap();
+
+    let (response, _) = client.send_request(request, true).unwrap();
+    let response = response.await.unwrap();
+
+    assert_eq!(response.status(), http::StatusCode::MISDIRECTED_REQUEST);
+    drop(client);
+    connection.await.unwrap();
+    server.await.unwrap().unwrap();
 }
 
 #[tokio::test]

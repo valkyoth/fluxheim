@@ -120,19 +120,19 @@ jobs:
 
       - name: Checkout repository
         if: ${{ steps.profile.outputs.build == 'true' }}
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up QEMU
         if: ${{ steps.profile.outputs.build == 'true' }}
-        uses: docker/setup-qemu-action@v4.2.0
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
       - name: Set up Buildx
         if: ${{ steps.profile.outputs.build == 'true' }}
-        uses: docker/setup-buildx-action@v4.2.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Log in to GitHub Container Registry
         if: ${{ steps.profile.outputs.build == 'true' }}
-        uses: docker/login-action@v4.4.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -140,7 +140,7 @@ jobs:
 
       - name: Log in to Docker Hub
         if: ${{ steps.profile.outputs.build == 'true' && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
-        uses: docker/login-action@v4.4.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: docker.io
           username: ${{ env.DOCKERHUB_USERNAME }}
@@ -148,7 +148,7 @@ jobs:
 
       - name: Log in to Quay
         if: ${{ steps.profile.outputs.build == 'true' && env.QUAY_USERNAME != '' && env.QUAY_TOKEN != '' }}
-        uses: docker/login-action@v4.4.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: quay.io
           username: ${{ env.QUAY_USERNAME }}
@@ -301,7 +301,7 @@ jobs:
 
       - name: Build and publish image
         if: ${{ steps.profile.outputs.build == 'true' }}
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: containers/Containerfile.${{ matrix.variant }}
@@ -337,14 +337,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4.2.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Log in to Quay
         if: ${{ env.QUAY_USERNAME != '' && env.QUAY_TOKEN != '' }}
-        uses: docker/login-action@v4.4.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: quay.io
           username: ${{ env.QUAY_USERNAME }}
@@ -366,7 +366,7 @@ jobs:
 
       - name: Build and publish dev-wolfi
         if: ${{ env.QUAY_USERNAME != '' && env.QUAY_TOKEN != '' }}
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: containers/Containerfile.wolfi

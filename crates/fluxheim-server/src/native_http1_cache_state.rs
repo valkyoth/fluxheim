@@ -15,7 +15,7 @@ impl NativeDiskCache {
 
     pub(crate) fn remove_combined_locked(&self, combined_key: &str) -> bool {
         let removed = self.with_state_mut(|state| {
-            let removed = state.objects.remove(combined_key);
+            let removed = state.remove_object(combined_key);
             if let Some(record) = &removed {
                 state.bytes = state.bytes.saturating_sub(record.weight);
                 state.purge_index.remove_combined(combined_key);
@@ -35,13 +35,7 @@ impl NativeDiskCache {
     }
 
     pub(crate) fn evict_oldest(&self) -> std::io::Result<bool> {
-        let Some(key) = self.with_state(|state| {
-            state
-                .objects
-                .iter()
-                .min_by_key(|(key, record)| (record.accessed_at, (*key).clone()))
-                .map(|(key, _)| key.clone())
-        }) else {
+        let Some(key) = self.with_state(NativeDiskCacheState::oldest_key) else {
             return Ok(false);
         };
         Ok(self.remove_combined(&key))

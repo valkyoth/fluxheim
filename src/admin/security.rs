@@ -138,9 +138,6 @@ impl AdminAuthThrottle {
         let mut state = self.lock_state();
         state.prune(now, &self.config);
 
-        if state.global_locked_until > now {
-            return Some(AdminAuthThrottleScope::Global);
-        }
         if source == AuthSource::Unknown {
             return None;
         }
@@ -157,6 +154,9 @@ impl AdminAuthThrottle {
         let source = AuthSource::from(source);
         let mut state = self.lock_state();
         state.prune(now, &self.config);
+        if state.global_locked_until > now {
+            return Some(AdminAuthThrottleScope::Global);
+        }
         state.global_failures.push_back(now);
         if source == AuthSource::Unknown {
             log::warn!(

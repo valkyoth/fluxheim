@@ -30,6 +30,25 @@ require_test() {
     fi
 }
 
+require_pinned_supply_chain_inputs() {
+    unpinned_actions="$(
+        grep -REh '^[[:space:]]*uses:[[:space:]]*[^[:space:]]+' .github/workflows \
+            | grep -Ev '@[0-9a-f]{40}([[:space:]]|$)' || true
+    )"
+    if [ -n "$unpinned_actions" ]; then
+        echo "owasp baseline failed: GitHub Actions must use reviewed full commit SHAs" >&2
+        printf '%s\n' "$unpinned_actions" >&2
+        exit 1
+    fi
+    for file in Containerfile containers/Containerfile.*; do
+        if grep -E '^ARG (RUST|RUNTIME)_IMAGE=' "$file" \
+            | grep -Ev '@sha256:[0-9a-f]{64}$' >/dev/null; then
+            echo "owasp baseline failed: mutable base image in $file" >&2
+            exit 1
+        fi
+    done
+}
+
 run_test() {
     name="$1"
     echo "owasp baseline: running $name"
@@ -55,6 +74,7 @@ require_file_contains examples/admin.toml 'token_env = "FLUXHEIM_ADMIN_TOKEN"' "
 require_file_contains docs/fips.md 'FIPS PUB 140-3' "FIPS documentation"
 require_file_contains docs/production-readiness.md 'FLUXHEIM_GATE_FIPS_OPENSSL=1' "release FIPS gate documentation"
 require_file_contains docs/production-readiness.md 'profile-fips-rustls' "rustls/AWS-LC FIPS documentation"
+require_pinned_supply_chain_inputs
 
 echo "owasp baseline: collecting test inventory"
 test_list="$(cargo test --workspace -- --list)"
@@ -92,7 +112,7 @@ A06|chunked_decoder_enforces_output_and_body_limits
 A07|admin_token_file_has_size_limit
 A07|bearer_token_comparison_checks_full_string
 A07|admin_auth_throttle_locks_repeated_failures_by_source
-A07|admin_auth_throttle_can_lock_globally
+A07|admin_auth_global_throttle_rejects_invalid_attempts_but_allows_valid_operator
 A08|rejects_snapshot_store_root_below_world_writable_directory
 A08|rejects_symlinked_configs_directory
 A08|reload_endpoint_rejects_process_upgrade_config
@@ -140,7 +160,7 @@ A06|chunked_decoder_enforces_output_and_body_limits
 A07|admin_token_file_has_size_limit
 A07|bearer_token_comparison_checks_full_string
 A07|admin_auth_throttle_locks_repeated_failures_by_source
-A07|admin_auth_throttle_can_lock_globally
+A07|admin_auth_global_throttle_rejects_invalid_attempts_but_allows_valid_operator
 A08|rejects_snapshot_store_root_below_world_writable_directory
 A08|rejects_symlinked_configs_directory
 A08|reload_endpoint_rejects_process_upgrade_config
