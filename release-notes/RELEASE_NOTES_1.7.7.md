@@ -68,6 +68,10 @@ deterministic unsupported-call rejection.
   outside request admission for operational work.
 - Acquire storage-bin ownership before any manifest or data-layout mutation,
   preventing a losing process from modifying first-start metadata.
+- Document that storage-bin ownership uses advisory filesystem locking: use a
+  per-replica local/RWO volume by default, and require verified cross-node
+  `flock` behavior plus orchestration-level single-writer enforcement before
+  using shared RWX storage in high-assurance deployments.
 - Partition blocking work by class under `224` non-critical and `256` total
   ceilings, reserve `32` critical slots, and return `503` rather than contacting
   origin when disk-cache lookup admission is saturated and no stale memory

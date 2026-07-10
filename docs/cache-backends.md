@@ -235,11 +235,23 @@ internal cache implementation.
 - Each allocator acquires an exclusive `.fluxheim-storage-bin.lock` filesystem
   lease immediately after creating and canonicalizing the empty root, before
   creating or validating the manifest, data directory, index, or bins. The
-  lease remains held for the allocator's complete lifetime. Another Fluxheim
-  process, including a second replica pointed at the same persistent volume,
-  fails to open or initialize the root while that lease is held. Admin and CLI
-  inspection resolve the registered live cache by vhost/route and never
-  construct a temporary allocator or write an independent index.
+  lease remains held for the allocator's complete lifetime. On local filesystems
+  and shared filesystems with reliable cross-node `flock` semantics, another
+  cooperating Fluxheim process fails to open or initialize the root while that
+  lease is held. The lease is advisory: unrelated software can ignore it, and
+  some NFS/CSI implementations do not provide reliable cross-node advisory
+  locking. Admin and CLI inspection resolve the registered live cache by
+  vhost/route and never construct a temporary allocator or write an independent
+  index.
+- Production HA deployments should use one storage-bin root per replica on
+  local, `ReadWriteOnce`, or `ReadWriteOncePod` storage. Share cache warmth with
+  peer fill rather than mounting one `ReadWriteMany` root into multiple
+  replicas. Use shared RWX storage only after a deployment acceptance test has
+  started two Fluxheim replicas simultaneously, confirmed that the loser fails
+  before changing the manifest, stopped the winner, and confirmed that the
+  remaining replica can acquire the lease without changing persisted metadata.
+  High-assurance deployments must also enforce single-writer ownership at the
+  orchestration layer.
 - Native disk-cache lookup is admitted through a dedicated blocking-work class.
   Saturation is distinct from a cache miss: Fluxheim serves an eligible stale
   memory object when available and otherwise returns `503` without contacting

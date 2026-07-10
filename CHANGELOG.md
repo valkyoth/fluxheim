@@ -66,6 +66,8 @@ behavior when the change improves security or project direction.
 - Acquire storage-bin leases before layout initialization, partition blocking
   work by subsystem with critical capacity reserved, and fail closed when a
   disk lookup cannot obtain blocking admission.
+- Qualify storage-bin leases as advisory and require per-replica storage or
+  verified cross-node locking plus orchestration-level single-writer controls.
 - Pin publishing actions, security-tool installs, and container base images to
   immutable reviewed versions and digests.
 
