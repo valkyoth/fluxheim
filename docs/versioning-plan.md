@@ -3142,11 +3142,13 @@ Stable scope:
   the first point where access-decision ordering, process-wide admission, reload
   classification, or per-plugin metrics appear; those are prerequisites for
   `v1.7.1`.
-- `v1.7.7`: optional `wasm-proxy-abi` compatibility preview. Map a reviewed
-  safe subset of proxy-oriented ABI calls to Fluxheim's typed host calls,
-  reject unsupported calls deterministically, and add compatibility fixtures.
-  This is capability compatibility, not a promise that arbitrary existing
-  proxy-wasm plugins run unchanged.
+- `v1.7.7`: optional `wasm-proxy-abi` compatibility preview. Establish a
+  separate `proxy-wasm-preview` ABI and host-call namespace, validate that
+  namespace independently from `fluxheim-policy-v1`, reject unsupported calls
+  deterministically, and add compatibility fixtures. This is capability
+  compatibility groundwork, not a promise that arbitrary existing proxy-wasm
+  plugins run unchanged; mapping reviewed proxy-oriented calls to Fluxheim's
+  typed host calls remains a later reviewed slice.
 - `v1.7.8`: optional `wasm-wasi` capability preview for non-request-body
   policy plugins. Keep filesystem, network, clocks, randomness, environment,
   and inherited process state disabled unless explicitly granted and tested.
