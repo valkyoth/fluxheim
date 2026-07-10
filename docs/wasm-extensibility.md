@@ -66,6 +66,14 @@ unchanged. Unsupported preview host calls are rejected deterministically through
 the plugin fail mode, and security-decision plugins still fail closed. Fluxheim
 keeps this namespace separate from `fluxheim-policy-v1` so native policy hooks
 cannot accidentally bind to a future proxy-oriented compatibility surface.
+The `1.7.7` compatibility fixture imports the canonical proxy-wasm
+`env.proxy_log(i32, i32, i32) -> i32` function and verifies that invoking it is
+rejected before the origin is reached. This deliberately tests a real ABI shape
+without claiming logging or guest-memory access semantics that are not yet
+implemented.
+Imports that are not explicitly bound for the selected namespace are rejected
+before module instantiation. A plugin therefore cannot obtain a host capability
+by declaring an unexpected module or function name.
 
 ## Design Goals
 

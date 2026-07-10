@@ -17,9 +17,12 @@ deterministic unsupported-call rejection.
 - Add native HTTP/1 proxy-ABI preview host-call stubs that reject unsupported
   calls deterministically instead of silently binding to Fluxheim's native
   policy namespace.
-- Add a live native HTTP/1 test proving a proxy-ABI preview plugin that calls an
-  unsupported host function fails closed with `503` before the upstream is
-  reached.
+- Reject module imports that are not explicitly bound for the selected
+  host-call namespace before Wasm instantiation, with a stable import-specific
+  error.
+- Add a live native HTTP/1 compatibility fixture using the canonical
+  proxy-wasm `env.proxy_log(i32, i32, i32) -> i32` import and prove that the
+  unsupported call fails closed with `503` before the upstream is reached.
 
 ## Security
 

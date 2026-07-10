@@ -16,9 +16,10 @@ behavior when the change improves security or project direction.
 - Add explicit host-call namespace validation so `fluxheim-policy-v1` and
   `proxy-wasm-preview` plugins cannot accidentally share host-call surfaces.
 - Add deterministic unsupported-call rejection stubs for the proxy-ABI preview
-  namespace in native HTTP/1 Wasm hook execution.
-- Add live native HTTP/1 coverage proving a proxy-ABI preview plugin that calls
-  an unsupported host function fails closed before reaching the upstream.
+  namespace and reject unbound host imports before Wasm instantiation.
+- Add live native HTTP/1 coverage using the canonical proxy-wasm
+  `env.proxy_log(i32, i32, i32) -> i32` import, proving that an unsupported
+  proxy-oriented call fails closed before reaching the upstream.
 
 ### Security
 

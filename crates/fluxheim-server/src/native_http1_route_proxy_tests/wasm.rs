@@ -134,9 +134,8 @@ async fn native_wasm_access_decision_fails_closed_on_trap() {
 
 #[cfg(feature = "wasm-proxy-abi")]
 #[tokio::test]
-async fn native_wasm_proxy_preview_unsupported_call_fails_closed() {
-    let fixture =
-        WasmRouteFixture::new(&[("proxy_preview", WasmPluginBody::ProxyPreviewUnsupportedCall)]);
+async fn native_wasm_proxy_preview_log_call_fails_closed() {
+    let fixture = WasmRouteFixture::new(&[("proxy_preview", WasmPluginBody::ProxyPreviewLogCall)]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
     let mut config = fixture.config_with_attachments(
         upstream,
@@ -1836,7 +1835,7 @@ enum WasmPluginBody {
     CacheLookupPolicyExample,
     CacheStorePolicyExample,
     Trap,
-    ProxyPreviewUnsupportedCall,
+    ProxyPreviewLogCall,
     BusyLoop,
 }
 
@@ -2125,14 +2124,15 @@ impl WasmPluginBody {
                 r#"(module (func (export "fluxheim_access_decision") (result i32) unreachable))"#
                     .to_owned()
             }
-            Self::ProxyPreviewUnsupportedCall => {
+            Self::ProxyPreviewLogCall => {
                 r#"
                 (module
-                  (import "proxy_wasm_preview" "unsupported_call" (func $unsupported (param i32 i32) (result i32)))
+                  (import "env" "proxy_log" (func $proxy_log (param i32 i32 i32) (result i32)))
                   (func (export "fluxheim_access_decision") (result i32)
                     i32.const 1
                     i32.const 0
-                    call $unsupported
+                    i32.const 0
+                    call $proxy_log
                     drop
                     i32.const 1))
                 "#
@@ -2167,7 +2167,7 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
             ..Default::default()
         })
     };
-    let proxy_preview = matches!(body, WasmPluginBody::ProxyPreviewUnsupportedCall);
+    let proxy_preview = matches!(body, WasmPluginBody::ProxyPreviewLogCall);
     fluxheim_config::WasmPluginConfig {
         name: name.to_owned(),
         path,
@@ -2225,7 +2225,7 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         }
         WasmPluginBody::Decision(_)
         | WasmPluginBody::Trap
-        | WasmPluginBody::ProxyPreviewUnsupportedCall
+        | WasmPluginBody::ProxyPreviewLogCall
         | WasmPluginBody::BusyLoop => vec![fluxheim_config::WasmPluginPhase::AccessDecision],
     }
 }

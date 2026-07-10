@@ -34,7 +34,7 @@ const CACHE_STORE_PHASE: &str = "cache-store";
 const CACHE_STORE_FUNCTION: &str = "fluxheim_cache_store";
 const WASM_HOST_MODULE: &str = "fluxheim_policy_v1";
 #[cfg(feature = "wasm-proxy-abi")]
-const PROXY_WASM_PREVIEW_HOST_MODULE: &str = "proxy_wasm_preview";
+const PROXY_WASM_HOST_MODULE: &str = "env";
 const MAX_WASM_HEADER_MUTATIONS: usize = 16;
 const MAX_WASM_CACHE_KEY_COMPONENTS: usize = 4;
 const MAX_WASM_CACHE_TAGS: usize = 4;
@@ -467,10 +467,12 @@ fn wasm_host_call_namespace_functions(
 
 #[cfg(feature = "wasm-proxy-abi")]
 fn wasm_proxy_preview_host_functions() -> Vec<WasmI32HostFunction> {
-    vec![WasmI32HostFunction::new(
-        PROXY_WASM_PREVIEW_HOST_MODULE,
-        "unsupported_call",
-        |_call_id, _arg| Err("unsupported proxy-wasm preview host call".to_owned()),
+    vec![WasmI32HostFunction::new_i32x3(
+        PROXY_WASM_HOST_MODULE,
+        "proxy_log",
+        |_level, _message_data, _message_size| {
+            Err("unsupported proxy-wasm preview host call: env.proxy_log".to_owned())
+        },
     )]
 }
 

@@ -40,7 +40,16 @@ pub struct FluxWasmCompiledModuleIdentity {
 pub struct WasmI32HostFunction {
     module: &'static str,
     name: &'static str,
-    callback: Arc<dyn Fn(i32, i32) -> Result<i32, String> + Send + Sync>,
+    callback: WasmI32HostCallback,
+}
+
+type WasmI32HostCallback2 = dyn Fn(i32, i32) -> Result<i32, String> + Send + Sync;
+type WasmI32HostCallback3 = dyn Fn(i32, i32, i32) -> Result<i32, String> + Send + Sync;
+
+#[derive(Clone)]
+enum WasmI32HostCallback {
+    Two(Arc<WasmI32HostCallback2>),
+    Three(Arc<WasmI32HostCallback3>),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -122,7 +131,19 @@ impl WasmI32HostFunction {
         Self {
             module,
             name,
-            callback: Arc::new(callback),
+            callback: WasmI32HostCallback::Two(Arc::new(callback)),
+        }
+    }
+
+    pub fn new_i32x3(
+        module: &'static str,
+        name: &'static str,
+        callback: impl Fn(i32, i32, i32) -> Result<i32, String> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            module,
+            name,
+            callback: WasmI32HostCallback::Three(Arc::new(callback)),
         }
     }
 }
@@ -192,6 +213,8 @@ pub enum WasmExecutionError {
     ExecutionTimeout { timeout_ms: u128 },
     #[error("wasm module instantiation failed: {0}")]
     Instantiate(String),
+    #[error("wasm host import {module}.{name} is not available in the selected namespace")]
+    UnsupportedHostImport { module: String, name: String },
     #[error("wasm exported function {function:?} is missing or has the wrong type: {message}")]
     FunctionType { function: String, message: String },
     #[error("wasm execution trapped or exceeded limits: {0}")]
@@ -366,6 +389,16 @@ impl FluxWasmRuntime {
         function: &str,
         host_functions: Vec<WasmI32HostFunction>,
     ) -> Result<WasmExecutionOutcome, WasmExecutionError> {
+        if let Some(import) = module.module.imports().find(|import| {
+            !host_functions.iter().any(|host_function| {
+                host_function.module == import.module() && host_function.name == import.name()
+            })
+        }) {
+            return Err(WasmExecutionError::UnsupportedHostImport {
+                module: import.module().to_owned(),
+                name: import.name().to_owned(),
+            });
+        }
         let state = RuntimeStoreState {
             limits: StoreLimitsBuilder::new()
                 .memory_size(self.limits.max_memory_bytes)
@@ -406,16 +439,26 @@ impl FluxWasmRuntime {
             let mut linker = Linker::new(&self.engine);
             let has_host_functions = !host_functions.is_empty();
             for host_function in host_functions {
-                let callback = host_function.callback.clone();
-                linker
-                    .func_wrap(
-                        host_function.module,
-                        host_function.name,
-                        move |left: i32, right: i32| -> wasmtime::Result<i32> {
-                            callback(left, right).map_err(wasmtime::Error::msg)
-                        },
-                    )
-                    .map_err(|error| WasmExecutionError::RuntimeSetup(error.to_string()))?;
+                match host_function.callback {
+                    WasmI32HostCallback::Two(callback) => linker
+                        .func_wrap(
+                            host_function.module,
+                            host_function.name,
+                            move |left: i32, right: i32| -> wasmtime::Result<i32> {
+                                callback(left, right).map_err(wasmtime::Error::msg)
+                            },
+                        )
+                        .map_err(|error| WasmExecutionError::RuntimeSetup(error.to_string()))?,
+                    WasmI32HostCallback::Three(callback) => linker
+                        .func_wrap(
+                            host_function.module,
+                            host_function.name,
+                            move |first: i32, second: i32, third: i32| -> wasmtime::Result<i32> {
+                                callback(first, second, third).map_err(wasmtime::Error::msg)
+                            },
+                        )
+                        .map_err(|error| WasmExecutionError::RuntimeSetup(error.to_string()))?,
+                };
             }
             let instance = if has_host_functions {
                 linker
@@ -552,6 +595,37 @@ mod tests {
         assert_eq!(outcome.function, "decision");
         assert_eq!(outcome.result, 7);
         assert_eq!(outcome.plugin_sha256.len(), 64);
+    }
+
+    #[test]
+    fn runtime_rejects_unbound_host_import_before_instantiation() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"
+            (module
+              (import "env" "unexpected_host_call" (func $unexpected (param i32 i32) (result i32)))
+              (func (export "decision") (result i32)
+                i32.const 0
+                i32.const 0
+                call $unexpected))
+            "#,
+        );
+        let limits = WasmSandboxLimits::default();
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+        let module = runtime.compile_plugin_module(&plugin).unwrap();
+
+        let error = runtime
+            .run_compiled_i32_no_args(&module, "decision")
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            WasmExecutionError::UnsupportedHostImport { module, name }
+                if module == "env" && name == "unexpected_host_call"
+        ));
     }
 
     #[test]
