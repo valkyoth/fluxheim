@@ -16,7 +16,7 @@ acme-client = [
 ]
 
 [dependencies]
-base64-ng = { version = "1.3.6", optional = true }
+base64-ng = { version = "1.3.7", optional = true }
 fluxheim-config = { path = "../fluxheim-config", features = ["acme"] }
 instant-acme = { version = "0.8.5", default-features = false, features = ["ring"] }
 log = "0.4.33"

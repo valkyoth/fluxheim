@@ -23,7 +23,7 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
-- Update direct dependency baselines to `base64-ng 1.3.6`, `bytes 1.12.1`,
+- Update direct dependency baselines to `base64-ng 1.3.7`, `bytes 1.12.1`,
   `regex 1.13.0`, `sanitization 1.2.4`, and test-only `wat 1.253.0`.
 - Update the workspace MSRV, pinned toolchain, and container builders to Rust
   1.97.0.

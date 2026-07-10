@@ -17,7 +17,7 @@ tls-openssl-backend = ["dep:openssl", "dep:tokio-openssl"]
 [dependencies]
 arc-swap = "1.9.2"
 async-trait = "0.1.89"
-base64-ng = "1.3.6"
+base64-ng = "1.3.7"
 bytes = "1.12.1"
 crc32fast = "1.5.0"
 fluxheim-common = { path = "../fluxheim-common" }

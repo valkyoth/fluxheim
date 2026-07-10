@@ -37,7 +37,7 @@ deterministic unsupported-call rejection.
 
 ## Changed
 
-- Update `base64-ng` to 1.3.6, `bytes` to 1.12.1, `regex` to 1.13.0,
+- Update `base64-ng` to 1.3.7, `bytes` to 1.12.1, `regex` to 1.13.0,
   `sanitization` to 1.2.4, and test-only `wat` to 1.253.0.
 - Update the workspace MSRV, pinned toolchain, and container builders to Rust
   1.97.0.
