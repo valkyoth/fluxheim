@@ -132,6 +132,27 @@ async fn native_wasm_access_decision_fails_closed_on_trap() {
     assert!(response.ends_with("wasm access decision trap\n"));
 }
 
+#[cfg(feature = "wasm-proxy-abi")]
+#[tokio::test]
+async fn native_wasm_proxy_preview_unsupported_call_fails_closed() {
+    let fixture =
+        WasmRouteFixture::new(&[("proxy_preview", WasmPluginBody::ProxyPreviewUnsupportedCall)]);
+    let upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![wasm_attachment("proxy_preview", "route", 100)],
+    );
+    config.wasm.allow_preview_abi = true;
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, "/route").await;
+
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(response.ends_with("wasm access decision trap\n"));
+}
+
 #[tokio::test]
 async fn native_wasm_access_decision_fails_closed_on_timeout() {
     let fixture = WasmRouteFixture::new(&[("busy", WasmPluginBody::BusyLoop)]);
@@ -1815,6 +1836,7 @@ enum WasmPluginBody {
     CacheLookupPolicyExample,
     CacheStorePolicyExample,
     Trap,
+    ProxyPreviewUnsupportedCall,
     BusyLoop,
 }
 
@@ -2103,6 +2125,19 @@ impl WasmPluginBody {
                 r#"(module (func (export "fluxheim_access_decision") (result i32) unreachable))"#
                     .to_owned()
             }
+            Self::ProxyPreviewUnsupportedCall => {
+                r#"
+                (module
+                  (import "proxy_wasm_preview" "unsupported_call" (func $unsupported (param i32 i32) (result i32)))
+                  (func (export "fluxheim_access_decision") (result i32)
+                    i32.const 1
+                    i32.const 0
+                    call $unsupported
+                    drop
+                    i32.const 1))
+                "#
+                .to_owned()
+            }
             Self::BusyLoop => {
                 r#"(module (func (export "fluxheim_access_decision") (result i32) (loop br 0) i32.const 1))"#
                     .to_owned()
@@ -2132,12 +2167,21 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
             ..Default::default()
         })
     };
+    let proxy_preview = matches!(body, WasmPluginBody::ProxyPreviewUnsupportedCall);
     fluxheim_config::WasmPluginConfig {
         name: name.to_owned(),
         path,
         sha256: Some(sha256_hex(&bytes)),
-        abi: fluxheim_config::WasmPluginAbi::FluxheimPolicyV1,
-        host_call_namespace: fluxheim_config::WasmHostCallNamespace::FluxheimPolicyV1,
+        abi: if proxy_preview {
+            fluxheim_config::WasmPluginAbi::ProxyWasmPreview
+        } else {
+            fluxheim_config::WasmPluginAbi::FluxheimPolicyV1
+        },
+        host_call_namespace: if proxy_preview {
+            fluxheim_config::WasmHostCallNamespace::ProxyWasmPreview
+        } else {
+            fluxheim_config::WasmHostCallNamespace::FluxheimPolicyV1
+        },
         phases: wasm_plugin_phases(body),
         fail_mode: fluxheim_config::WasmPluginFailMode::FailClosed,
         limits,
@@ -2179,9 +2223,10 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         WasmPluginBody::CacheStorePolicyExample => {
             vec![fluxheim_config::WasmPluginPhase::CacheStore]
         }
-        WasmPluginBody::Decision(_) | WasmPluginBody::Trap | WasmPluginBody::BusyLoop => {
-            vec![fluxheim_config::WasmPluginPhase::AccessDecision]
-        }
+        WasmPluginBody::Decision(_)
+        | WasmPluginBody::Trap
+        | WasmPluginBody::ProxyPreviewUnsupportedCall
+        | WasmPluginBody::BusyLoop => vec![fluxheim_config::WasmPluginPhase::AccessDecision],
     }
 }
 

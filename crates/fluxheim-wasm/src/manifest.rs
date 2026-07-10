@@ -30,6 +30,12 @@ impl WasmPluginAbi {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum WasmHostCallNamespace {
+    FluxheimPolicyV1,
+    ProxyWasmPreview,
+}
+
 #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
 pub enum WasmPluginPhase {
     RequestHeaders,
@@ -52,6 +58,7 @@ pub struct WasmPluginManifest {
     pub path: PathBuf,
     pub expected_sha256: Option<String>,
     pub abi: WasmPluginAbi,
+    pub host_call_namespace: WasmHostCallNamespace,
     pub phases: Vec<WasmPluginPhase>,
     pub limits: WasmSandboxLimits,
     pub fail_mode: WasmPluginFailMode,
@@ -63,6 +70,7 @@ pub struct ValidatedWasmPluginManifest {
     path: PathBuf,
     expected_sha256: Option<String>,
     abi: WasmPluginAbi,
+    host_call_namespace: WasmHostCallNamespace,
     phases: Vec<WasmPluginPhase>,
     limits: WasmSandboxLimits,
     fail_mode: WasmPluginFailMode,
@@ -101,6 +109,10 @@ impl ValidatedWasmPluginManifest {
         self.abi
     }
 
+    pub fn host_call_namespace(&self) -> WasmHostCallNamespace {
+        self.host_call_namespace
+    }
+
     pub fn phases(&self) -> &[WasmPluginPhase] {
         &self.phases
     }
@@ -136,6 +148,11 @@ pub enum WasmManifestError {
     DuplicatePhase { phase: WasmPluginPhase },
     #[error("wasm plugin uses preview ABI {abi:?} without explicit preview allowance")]
     PreviewAbiDisabled { abi: WasmPluginAbi },
+    #[error("wasm plugin host-call namespace {namespace:?} is incompatible with ABI {abi:?}")]
+    IncompatibleHostCallNamespace {
+        abi: WasmPluginAbi,
+        namespace: WasmHostCallNamespace,
+    },
     #[error("wasm plugin fail_open is not allowed for security decision phases")]
     UnsafeFailOpen,
     #[error("invalid wasm sandbox limit {field}: {reason}")]
@@ -172,6 +189,7 @@ pub fn validate_plugin_manifest(
     if manifest.abi.is_preview() && !allow_preview_abi {
         return Err(WasmManifestError::PreviewAbiDisabled { abi: manifest.abi });
     }
+    validate_host_call_namespace(manifest.abi, manifest.host_call_namespace)?;
     validate_phases(&manifest.phases)?;
     validate_fail_mode(manifest.fail_mode, &manifest.phases)?;
 
@@ -180,10 +198,22 @@ pub fn validate_plugin_manifest(
         path: manifest.path,
         expected_sha256: manifest.expected_sha256,
         abi: manifest.abi,
+        host_call_namespace: manifest.host_call_namespace,
         phases: manifest.phases,
         limits,
         fail_mode: manifest.fail_mode,
     })
+}
+
+fn validate_host_call_namespace(
+    abi: WasmPluginAbi,
+    namespace: WasmHostCallNamespace,
+) -> Result<(), WasmManifestError> {
+    match (abi, namespace) {
+        (WasmPluginAbi::FluxheimPolicyV1, WasmHostCallNamespace::FluxheimPolicyV1)
+        | (WasmPluginAbi::ProxyWasmPreview, WasmHostCallNamespace::ProxyWasmPreview) => Ok(()),
+        _ => Err(WasmManifestError::IncompatibleHostCallNamespace { abi, namespace }),
+    }
 }
 
 pub fn load_plugin_from_manifest(
@@ -317,6 +347,7 @@ mod tests {
             path: PathBuf::from("/srv/fluxheim/plugins/security_headers.wasm"),
             expected_sha256: None,
             abi: WasmPluginAbi::FluxheimPolicyV1,
+            host_call_namespace: WasmHostCallNamespace::FluxheimPolicyV1,
             phases: vec![WasmPluginPhase::RequestHeaders],
             limits: WasmSandboxLimits::default(),
             fail_mode: WasmPluginFailMode::FailClosed,
@@ -415,10 +446,31 @@ mod tests {
     fn accepts_preview_abi_when_allowed() {
         let mut manifest = valid_manifest();
         manifest.abi = WasmPluginAbi::ProxyWasmPreview;
+        manifest.host_call_namespace = WasmHostCallNamespace::ProxyWasmPreview;
 
         let validated = validate_plugin_manifest(manifest, true).unwrap();
 
         assert_eq!(validated.abi(), WasmPluginAbi::ProxyWasmPreview);
+        assert_eq!(
+            validated.host_call_namespace(),
+            WasmHostCallNamespace::ProxyWasmPreview
+        );
+    }
+
+    #[test]
+    fn rejects_mismatched_host_call_namespace() {
+        let mut manifest = valid_manifest();
+        manifest.abi = WasmPluginAbi::ProxyWasmPreview;
+
+        let error = validate_plugin_manifest(manifest, true).unwrap_err();
+
+        assert_eq!(
+            error,
+            WasmManifestError::IncompatibleHostCallNamespace {
+                abi: WasmPluginAbi::ProxyWasmPreview,
+                namespace: WasmHostCallNamespace::FluxheimPolicyV1,
+            }
+        );
     }
 
     #[test]

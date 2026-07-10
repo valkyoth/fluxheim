@@ -591,7 +591,6 @@ Successful and rejected weight operations are counted as `member_weight`,
 When compiled with `wasm`, `GET /_fluxheim/status` includes a read-only `wasm`
 object for the validation-stage plugin registry. It reports whether `[wasm]` is
 enabled, whether preview ABIs are allowed, plugin root/plugin/attachment counts,
-the process-wide `max_total_concurrent_executions` ceiling, plugin names,
 the process-wide `max_total_concurrent_executions` ceiling, the cache-specific
 `max_total_cache_concurrent_executions` ceiling, plugin names, plugin paths,
 configured expected SHA-256 digests, declared ABI and host-call namespace,
@@ -657,6 +656,28 @@ metadata family cannot suppress the other. The current cache hooks still do not
 expose raw headers, request bodies, arbitrary cache-key bytes, arbitrary TTLs,
 arbitrary tag strings, arbitrary stored response headers, or response-store
 body mutation; those stay staged behind later bounded cache-policy ABIs.
+
+`1.7.7` adds the opt-in `wasm-proxy-abi` compatibility preview boundary. A
+plugin may use the proxy preview host-call namespace only when all of these are
+true: the binary was built with `wasm-proxy-abi`, `[wasm].allow_preview_abi =
+true`, the plugin declares `abi = "proxy-wasm-preview"`, and the plugin declares
+`host_call_namespace = "proxy-wasm-preview"`. The preview namespace is separate
+from `fluxheim-policy-v1`; mismatched ABI/namespace pairs are rejected during
+config validation. Unsupported preview host calls fail deterministically through
+the plugin fail mode.
+
+```toml
+[wasm]
+enabled = true
+allow_preview_abi = true
+
+[[wasm.plugins]]
+name = "proxy_preview"
+path = "/etc/fluxheim/plugins/proxy-preview.wasm"
+abi = "proxy-wasm-preview"
+host_call_namespace = "proxy-wasm-preview"
+phases = ["access-decision"]
+```
 
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:

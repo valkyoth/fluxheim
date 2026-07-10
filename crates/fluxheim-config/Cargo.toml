@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-config"
-version = "1.7.6"
+version = "1.7.7"
 edition = "2024"
 rust-version = "1.96.1"
 license = "EUPL-1.2"
@@ -27,6 +27,7 @@ tls-rustls-fips = []
 traffic-mirror = []
 udp-proxy = []
 wasm = ["dep:fluxheim-wasm"]
+wasm-proxy-abi = ["wasm", "fluxheim-wasm/proxy-abi"]
 
 [dependencies]
 fluxheim-protocol = { path = "../fluxheim-protocol" }

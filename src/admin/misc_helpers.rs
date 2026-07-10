@@ -205,6 +205,7 @@ fn wasm_abi_label(abi: crate::config::WasmPluginAbi) -> &'static str {
 fn wasm_host_call_namespace_label(namespace: crate::config::WasmHostCallNamespace) -> &'static str {
     match namespace {
         crate::config::WasmHostCallNamespace::FluxheimPolicyV1 => "fluxheim-policy-v1",
+        crate::config::WasmHostCallNamespace::ProxyWasmPreview => "proxy-wasm-preview",
     }
 }
 

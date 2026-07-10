@@ -7,6 +7,27 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.7.7 - 2026-07-10
+
+### Added
+
+- Add an opt-in `wasm-proxy-abi` compatibility preview boundary for
+  `proxy-wasm-preview` plugin manifests.
+- Add explicit host-call namespace validation so `fluxheim-policy-v1` and
+  `proxy-wasm-preview` plugins cannot accidentally share host-call surfaces.
+- Add deterministic unsupported-call rejection stubs for the proxy-ABI preview
+  namespace in native HTTP/1 Wasm hook execution.
+- Add live native HTTP/1 coverage proving a proxy-ABI preview plugin that calls
+  an unsupported host function fails closed before reaching the upstream.
+
+### Security
+
+- Include the host-call namespace in native WebAssembly compiled-module
+  feature identities, preventing future compile-cache reuse across ABI
+  compatibility surfaces.
+- Keep `proxy-wasm-preview` disabled unless both the config opts into preview
+  ABIs and the binary is built with `wasm-proxy-abi`.
+
 ## 1.7.6 - 2026-07-09
 
 ### Added

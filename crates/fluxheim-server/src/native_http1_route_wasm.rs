@@ -6,7 +6,8 @@ use fluxheim_config::{Config, WasmAttachmentConfig, WasmPluginFailMode, WasmPlug
 use fluxheim_wasm::{
     FluxWasmAdmissionController, FluxWasmCompiledModule, FluxWasmCompiledModuleIdentity,
     FluxWasmRuntime, ValidatedWasmPluginManifest, WasmAccessDecision, WasmAccessDeny,
-    WasmExecutionError, WasmI32HostFunction, WasmPluginLoadError, load_plugin_from_manifest,
+    WasmExecutionError, WasmHostCallNamespace, WasmI32HostFunction, WasmPluginLoadError,
+    load_plugin_from_manifest,
 };
 
 use crate::native_http1_proxy_memory_cache::{
@@ -32,6 +33,8 @@ const CACHE_LOOKUP_FUNCTION: &str = "fluxheim_cache_lookup";
 const CACHE_STORE_PHASE: &str = "cache-store";
 const CACHE_STORE_FUNCTION: &str = "fluxheim_cache_store";
 const WASM_HOST_MODULE: &str = "fluxheim_policy_v1";
+#[cfg(feature = "wasm-proxy-abi")]
+const PROXY_WASM_PREVIEW_HOST_MODULE: &str = "proxy_wasm_preview";
 const MAX_WASM_HEADER_MUTATIONS: usize = 16;
 const MAX_WASM_CACHE_KEY_COMPONENTS: usize = 4;
 const MAX_WASM_CACHE_TAGS: usize = 4;
@@ -113,6 +116,7 @@ struct NativeWasmPlugin {
     runtime: FluxWasmRuntime,
     module: FluxWasmCompiledModule,
     fail_mode: WasmPluginFailMode,
+    host_call_namespace: WasmHostCallNamespace,
     admission: FluxWasmAdmissionController,
 }
 
@@ -251,6 +255,7 @@ impl NativeWasmHookRegistry {
                 Arc::new(NativeWasmPlugin {
                     name,
                     fail_mode: plugin_config.fail_mode,
+                    host_call_namespace: loaded.manifest().host_call_namespace(),
                     admission: admission_controller(
                         plugin_config
                             .admission
@@ -418,7 +423,18 @@ fn native_wasm_module_feature_set(manifest: &ValidatedWasmPluginManifest) -> Str
         .map(wasm_phase_name)
         .collect::<Vec<_>>();
     phases.sort_unstable();
-    format!("native-http1:{}", phases.join("+"))
+    format!(
+        "native-http1:{}:{}",
+        wasm_host_call_namespace_name(manifest.host_call_namespace()),
+        phases.join("+")
+    )
+}
+
+fn wasm_host_call_namespace_name(namespace: WasmHostCallNamespace) -> &'static str {
+    match namespace {
+        WasmHostCallNamespace::FluxheimPolicyV1 => "fluxheim-policy-v1",
+        WasmHostCallNamespace::ProxyWasmPreview => "proxy-wasm-preview",
+    }
 }
 
 fn wasm_phase_name(phase: &fluxheim_wasm::WasmPluginPhase) -> &'static str {
@@ -430,6 +446,37 @@ fn wasm_phase_name(phase: &fluxheim_wasm::WasmPluginPhase) -> &'static str {
         fluxheim_wasm::WasmPluginPhase::CacheLookup => CACHE_LOOKUP_PHASE,
         fluxheim_wasm::WasmPluginPhase::CacheStore => CACHE_STORE_PHASE,
     }
+}
+
+fn with_namespace_host_functions(
+    mut namespace_functions: Vec<WasmI32HostFunction>,
+    host_functions: Vec<WasmI32HostFunction>,
+) -> Vec<WasmI32HostFunction> {
+    namespace_functions.extend(host_functions);
+    namespace_functions
+}
+
+fn wasm_host_call_namespace_functions(
+    namespace: WasmHostCallNamespace,
+) -> Vec<WasmI32HostFunction> {
+    match namespace {
+        WasmHostCallNamespace::FluxheimPolicyV1 => Vec::new(),
+        WasmHostCallNamespace::ProxyWasmPreview => wasm_proxy_preview_host_functions(),
+    }
+}
+
+#[cfg(feature = "wasm-proxy-abi")]
+fn wasm_proxy_preview_host_functions() -> Vec<WasmI32HostFunction> {
+    vec![WasmI32HostFunction::new(
+        PROXY_WASM_PREVIEW_HOST_MODULE,
+        "unsupported_call",
+        |_call_id, _arg| Err("unsupported proxy-wasm preview host call".to_owned()),
+    )]
+}
+
+#[cfg(not(feature = "wasm-proxy-abi"))]
+fn wasm_proxy_preview_host_functions() -> Vec<WasmI32HostFunction> {
+    Vec::new()
 }
 
 impl NativeWasmHooks {
@@ -727,7 +774,7 @@ impl NativeWasmHook {
         self.run_i32_with_hosts(
             phase_label,
             function,
-            Vec::new(),
+            self.host_call_namespace_functions(),
             wasm_default_outcome_label,
         )
         .await
@@ -818,6 +865,10 @@ impl NativeWasmHook {
         result
     }
 
+    fn host_call_namespace_functions(&self) -> Vec<WasmI32HostFunction> {
+        wasm_host_call_namespace_functions(self.plugin.host_call_namespace)
+    }
+
     async fn run_header_mutations(
         &self,
         phase_label: &'static str,
@@ -826,7 +877,10 @@ impl NativeWasmHook {
         phase: NativeWasmHeaderPhase,
     ) -> Result<NativeWasmHeaderMutations, NativeWasmHeaderError> {
         let state = Arc::new(Mutex::new(NativeWasmHeaderMutations::default()));
-        let host_functions = wasm_header_host_functions(context, phase, Arc::clone(&state));
+        let host_functions = with_namespace_host_functions(
+            self.host_call_namespace_functions(),
+            wasm_header_host_functions(context, phase, Arc::clone(&state)),
+        );
         match self
             .run_i32_with_hosts(
                 phase_label,
@@ -859,7 +913,10 @@ impl NativeWasmHook {
     }
 
     async fn run_route_decision(&self, context: NativeWasmRouteContext) -> NativeWasmRouteOutcome {
-        let host_functions = wasm_route_host_functions(context);
+        let host_functions = with_namespace_host_functions(
+            self.host_call_namespace_functions(),
+            wasm_route_host_functions(context),
+        );
         match self
             .run_i32_with_hosts(
                 ROUTE_DECISION_PHASE,
@@ -903,7 +960,10 @@ impl NativeWasmHook {
         context: NativeWasmCacheLookupContext,
     ) -> NativeWasmCacheLookupDecision {
         let key_components = Arc::new(Mutex::new(Vec::new()));
-        let host_functions = wasm_cache_lookup_host_functions(context, Arc::clone(&key_components));
+        let host_functions = with_namespace_host_functions(
+            self.host_call_namespace_functions(),
+            wasm_cache_lookup_host_functions(context, Arc::clone(&key_components)),
+        );
         match self
             .run_i32_with_hosts(
                 CACHE_LOOKUP_PHASE,
@@ -955,7 +1015,10 @@ impl NativeWasmHook {
         context: NativeWasmCacheStoreContext,
     ) -> NativeWasmCacheStoreDecision {
         let metadata = Arc::new(Mutex::new(NativeProxyCacheStoreMetadata::default()));
-        let host_functions = wasm_cache_store_host_functions(context, Arc::clone(&metadata));
+        let host_functions = with_namespace_host_functions(
+            self.host_call_namespace_functions(),
+            wasm_cache_store_host_functions(context, Arc::clone(&metadata)),
+        );
         match self
             .run_i32_with_hosts(
                 CACHE_STORE_PHASE,

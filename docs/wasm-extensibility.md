@@ -16,10 +16,12 @@ Fluxheim `1.7.5` adds the first bounded symbolic cache-key component hook for
 low-cardinality cache variants plus fixed-ID cache-store TTL/tag/header
 metadata. Fluxheim `1.7.6` starts the mature-runtime hardening pass by giving
 compiled modules explicit cache identities scoped by plugin SHA-256 digest, ABI
-version, native feature surface, and Fluxheim version.
+version, native feature surface, and Fluxheim version. Fluxheim `1.7.7` adds
+the opt-in `wasm-proxy-abi` compatibility preview boundary with explicit
+host-call namespace validation and deterministic unsupported-call rejection.
 Direct backend choice, plugin-provided persistence keys, dynamic mirror/shadow
-target choice, richer store policy hooks, Proxy-ABI compatibility, and WASI
-capabilities remain staged for later `1.7.x` releases.
+target choice, richer store policy hooks, broader Proxy-ABI compatibility, and
+WASI capabilities remain staged for later `1.7.x` releases.
 
 Cargo features:
 
@@ -48,6 +50,22 @@ The end-of-line example and test requirements for F5 iRules-style policy,
 nginx Lua/OpenResty-style header policy, HAProxy Lua/SPOE-style routing and
 load-balancer policy, and VCL-like cache policy are tracked in
 [Wasm Policy Example Parity](wasm-policy-example-parity.md).
+
+## Proxy-ABI Compatibility Preview
+
+Fluxheim `1.7.7` reserves a separate `proxy-wasm-preview` ABI and host-call
+namespace for compatibility work. This path is intentionally opt-in:
+
+- the binary must be built with `wasm-proxy-abi`;
+- config must set `[wasm].allow_preview_abi = true`;
+- the plugin must declare `abi = "proxy-wasm-preview"`;
+- the plugin must declare `host_call_namespace = "proxy-wasm-preview"`.
+
+The preview namespace does not mean arbitrary existing proxy-wasm plugins run
+unchanged. Unsupported preview host calls are rejected deterministically through
+the plugin fail mode, and security-decision plugins still fail closed. Fluxheim
+keeps this namespace separate from `fluxheim-policy-v1` so native policy hooks
+cannot accidentally bind to a future proxy-oriented compatibility surface.
 
 ## Design Goals
 
@@ -78,10 +96,10 @@ with the validated limits; production hook execution still starts later in the
 `1.7` line.
 
 Compiled modules carry a stable identity that includes the loaded plugin digest,
-the manifest ABI version, the native hook feature surface used to compile it,
-and the Fluxheim crate version. Any future compile cache must use that full
-identity as the cache key so module reuse cannot cross ABI, feature, or release
-boundaries.
+the manifest ABI version, the host-call namespace, the native hook feature
+surface used to compile it, and the Fluxheim crate version. Any future compile
+cache must use that full identity as the cache key so module reuse cannot cross
+ABI, namespace, feature, or release boundaries.
 
 The first useful policy-hook scope should cover the common extension cases
 without exposing request bodies or arbitrary I/O.

@@ -4,8 +4,8 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use fluxheim_wasm::{
-    FluxWasmRuntime, WasmExecutionError, WasmManifestError, WasmPluginAbi, WasmPluginFailMode,
-    WasmPluginManifest, WasmPluginPhase, WasmSandboxLimits, load_plugin_file,
+    FluxWasmRuntime, WasmExecutionError, WasmHostCallNamespace, WasmManifestError, WasmPluginAbi,
+    WasmPluginFailMode, WasmPluginManifest, WasmPluginPhase, WasmSandboxLimits, load_plugin_file,
     load_plugin_from_manifest, validate_plugin_manifest,
 };
 
@@ -43,6 +43,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         path: plugin.clone(),
         expected_sha256: None,
         abi: WasmPluginAbi::FluxheimPolicyV1,
+        host_call_namespace: WasmHostCallNamespace::FluxheimPolicyV1,
         phases: vec![WasmPluginPhase::RequestHeaders],
         limits,
         fail_mode: WasmPluginFailMode::FailClosed,
@@ -58,6 +59,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         path: plugin.clone(),
         expected_sha256: None,
         abi: WasmPluginAbi::FluxheimPolicyV1,
+        host_call_namespace: WasmHostCallNamespace::FluxheimPolicyV1,
         phases: vec![WasmPluginPhase::AccessDecision],
         limits,
         fail_mode: WasmPluginFailMode::FailOpen,

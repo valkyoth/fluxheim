@@ -34,6 +34,34 @@ fn base_wasm_config(extra: &str) -> Config {
 }
 
 #[cfg(feature = "wasm")]
+fn proxy_preview_wasm_config(plugin_fields: &str) -> Config {
+    toml::from_str(&format!(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+        allow_preview_abi = true
+        plugin_roots = ["/srv/fluxheim/plugins"]
+
+        [[wasm.plugins]]
+        name = "proxy_preview"
+        path = "/srv/fluxheim/plugins/proxy_preview.wasm"
+        sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        {plugin_fields}
+        phases = ["access-decision"]
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#
+    ))
+    .unwrap()
+}
+
+#[cfg(feature = "wasm")]
 #[test]
 fn wasm_registry_and_attachments_validate() {
     let config = base_wasm_config(
@@ -230,6 +258,68 @@ fn wasm_registry_builds_loader_manifest_with_plugin_overrides() {
         std::time::Duration::from_millis(700)
     );
     fluxheim_wasm::validate_plugin_manifest(manifests[0].clone(), false).unwrap();
+}
+
+#[cfg(all(feature = "wasm", not(feature = "wasm-proxy-abi")))]
+#[test]
+fn wasm_proxy_preview_namespace_requires_feature() {
+    let config = proxy_preview_wasm_config(
+        r#"
+        abi = "proxy-wasm-preview"
+        host_call_namespace = "proxy-wasm-preview"
+        "#,
+    );
+
+    let error = config.validate().unwrap_err();
+
+    assert!(
+        matches!(error, ConfigError::InvalidWasmPolicy { field, reason, .. }
+        if field == "host_call_namespace"
+            && reason == "proxy-wasm-preview host calls require the wasm-proxy-abi feature")
+    );
+}
+
+#[cfg(all(feature = "wasm", feature = "wasm-proxy-abi"))]
+#[test]
+fn wasm_proxy_preview_namespace_builds_loader_manifest() {
+    let config = proxy_preview_wasm_config(
+        r#"
+        abi = "proxy-wasm-preview"
+        host_call_namespace = "proxy-wasm-preview"
+        "#,
+    );
+
+    config.validate().unwrap();
+    let manifests = config.wasm.plugin_manifests().unwrap();
+    let manifest = manifests
+        .iter()
+        .find(|manifest| manifest.name == "proxy_preview")
+        .unwrap();
+
+    assert_eq!(manifest.abi, fluxheim_wasm::WasmPluginAbi::ProxyWasmPreview);
+    assert_eq!(
+        manifest.host_call_namespace,
+        fluxheim_wasm::WasmHostCallNamespace::ProxyWasmPreview
+    );
+    fluxheim_wasm::validate_plugin_manifest(manifest.clone(), true).unwrap();
+}
+
+#[cfg(feature = "wasm")]
+#[test]
+fn wasm_proxy_preview_namespace_requires_proxy_preview_abi() {
+    let config = proxy_preview_wasm_config(
+        r#"
+        host_call_namespace = "proxy-wasm-preview"
+        "#,
+    );
+
+    let error = config.validate().unwrap_err();
+
+    assert!(
+        matches!(error, ConfigError::InvalidWasmPolicy { field, reason, .. }
+        if field == "host_call_namespace"
+            && reason == "proxy-wasm-preview host calls require abi = \"proxy-wasm-preview\"")
+    );
 }
 
 #[cfg(feature = "wasm")]

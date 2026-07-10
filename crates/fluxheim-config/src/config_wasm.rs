@@ -304,6 +304,24 @@ impl WasmPluginConfig {
                 reason: "fluxheim-policy-v1 host calls require abi = \"fluxheim-policy-v1\"",
             });
         }
+        if self.host_call_namespace.requires_proxy_wasm_preview()
+            && self.abi != WasmPluginAbi::ProxyWasmPreview
+        {
+            return Err(ConfigError::InvalidWasmPolicy {
+                scope: format!("wasm plugin {:?}", self.name),
+                field: "host_call_namespace",
+                reason: "proxy-wasm-preview host calls require abi = \"proxy-wasm-preview\"",
+            });
+        }
+        if self.host_call_namespace.requires_proxy_wasm_preview()
+            && !cfg!(feature = "wasm-proxy-abi")
+        {
+            return Err(ConfigError::InvalidWasmPolicy {
+                scope: format!("wasm plugin {:?}", self.name),
+                field: "host_call_namespace",
+                reason: "proxy-wasm-preview host calls require the wasm-proxy-abi feature",
+            });
+        }
         validate_wasm_phases(&self.phases, &format!("wasm plugin {:?}", self.name))?;
         validate_wasm_fail_mode(
             self.fail_mode,
@@ -330,6 +348,7 @@ impl WasmPluginConfig {
             path: self.path.clone(),
             expected_sha256: self.sha256.clone(),
             abi: self.abi.to_wasm_abi(),
+            host_call_namespace: self.host_call_namespace.to_wasm_host_call_namespace(),
             phases: self
                 .phases
                 .iter()
@@ -465,11 +484,24 @@ impl WasmPluginFailMode {
 pub enum WasmHostCallNamespace {
     #[default]
     FluxheimPolicyV1,
+    ProxyWasmPreview,
 }
 
 impl WasmHostCallNamespace {
     fn requires_fluxheim_policy_v1(self) -> bool {
         matches!(self, Self::FluxheimPolicyV1)
+    }
+
+    fn requires_proxy_wasm_preview(self) -> bool {
+        matches!(self, Self::ProxyWasmPreview)
+    }
+
+    #[cfg(feature = "wasm")]
+    fn to_wasm_host_call_namespace(self) -> fluxheim_wasm::WasmHostCallNamespace {
+        match self {
+            Self::FluxheimPolicyV1 => fluxheim_wasm::WasmHostCallNamespace::FluxheimPolicyV1,
+            Self::ProxyWasmPreview => fluxheim_wasm::WasmHostCallNamespace::ProxyWasmPreview,
+        }
     }
 }
 

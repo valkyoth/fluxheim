@@ -13,8 +13,8 @@ mod policy;
 mod runtime;
 pub use file::{WasmPluginError, WasmPluginFile, load_plugin_file, validate_plugin_path};
 pub use manifest::{
-    LoadedWasmPlugin, ValidatedWasmPluginManifest, WasmManifestError, WasmPluginAbi,
-    WasmPluginFailMode, WasmPluginLoadError, WasmPluginManifest, WasmPluginPhase,
+    LoadedWasmPlugin, ValidatedWasmPluginManifest, WasmHostCallNamespace, WasmManifestError,
+    WasmPluginAbi, WasmPluginFailMode, WasmPluginLoadError, WasmPluginManifest, WasmPluginPhase,
     load_plugin_from_manifest, validate_plugin_manifest,
 };
 pub use policy::{
