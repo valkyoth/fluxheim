@@ -89,6 +89,8 @@ behavior when the change improves security or project direction.
 - Fail malformed `Accept-Encoding` negotiation closed, honor explicit coding
   rejection over wildcard acceptance, and treat qualified `private` cache
   directives as compression-blocking security policy.
+- Move config trust traversal to no-follow `statat` inspection and remove the
+  environment-derived marker-file write from storage-lease subprocess tests.
 
 ### Fixed
 

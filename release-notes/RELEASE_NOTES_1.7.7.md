@@ -100,6 +100,9 @@ deterministic unsupported-call rejection.
 - Fail response compression closed for malformed `Accept-Encoding` fields,
   honor explicit coding rejection over wildcard acceptance, and suppress
   compression for qualified `Cache-Control: private="..."` responses.
+- Perform config ownership, permission, and symlink traversal checks through
+  no-follow `statat` metadata inspection, and remove environment-derived
+  filesystem writes from storage-lease subprocess coverage.
 
 ## Changed
 

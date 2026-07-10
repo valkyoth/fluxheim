@@ -37,7 +37,7 @@ fn existing_path_has_insecure_write_permissions(current: &Path) -> std::io::Resu
     let mut inspected_depth = 0usize;
     loop {
         check_inspection_depth(&mut inspected_depth)?;
-        match std::fs::symlink_metadata(&current) {
+        match path_stat_no_follow(&current) {
             Ok(_) => break,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if !current.pop() {
@@ -51,11 +51,13 @@ fn existing_path_has_insecure_write_permissions(current: &Path) -> std::io::Resu
         }
     }
 
+    let process_uid = rustix::process::geteuid().as_raw();
+    let root_uid = path_stat_no_follow(Path::new("/"))?.st_uid;
     loop {
         check_inspection_depth(&mut inspected_depth)?;
-        let metadata = std::fs::symlink_metadata(&current)?;
-        if metadata.file_type().is_symlink()
-            || metadata_has_insecure_owner_or_write_permissions(&metadata)?
+        let stat = path_stat_no_follow(&current)?;
+        if rustix::fs::FileType::from_raw_mode(stat.st_mode).is_symlink()
+            || stat_has_insecure_owner_or_write_permissions(&stat, process_uid, root_uid)
         {
             return Ok(true);
         }
@@ -66,13 +68,29 @@ fn existing_path_has_insecure_write_permissions(current: &Path) -> std::io::Resu
 }
 
 #[cfg(unix)]
+fn path_stat_no_follow(path: &Path) -> std::io::Result<rustix::fs::Stat> {
+    rustix::fs::statat(rustix::fs::CWD, path, rustix::fs::AtFlags::SYMLINK_NOFOLLOW)
+        .map_err(std::io::Error::from)
+}
+
+#[cfg(unix)]
+fn stat_has_insecure_owner_or_write_permissions(
+    stat: &rustix::fs::Stat,
+    process_uid: u32,
+    root_uid: u32,
+) -> bool {
+    (stat.st_uid != 0 && stat.st_uid != process_uid && stat.st_uid != root_uid)
+        || stat.st_mode & 0o022 != 0
+}
+
+#[cfg(unix)]
 pub(crate) fn metadata_has_insecure_owner_or_write_permissions(
     metadata: &std::fs::Metadata,
 ) -> std::io::Result<bool> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
     let process_uid = rustix::process::geteuid().as_raw();
-    let root_uid = std::fs::symlink_metadata(Path::new("/"))?.uid();
+    let root_uid = path_stat_no_follow(Path::new("/"))?.st_uid;
     Ok(
         (metadata.uid() != 0 && metadata.uid() != process_uid && metadata.uid() != root_uid)
             || metadata.permissions().mode() & 0o022 != 0,
