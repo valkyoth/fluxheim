@@ -9,9 +9,13 @@ description = "Internal Fluxheim GeoIP and Geo-Context boundary."
 
 [features]
 default = []
-runtime = ["dep:fluxheim-config", "dep:maxminddb"]
+runtime = ["dep:fluxheim-config", "dep:maxminddb", "dep:rustix"]
 
 [dependencies]
 fluxheim-config = { path = "../fluxheim-config", features = ["geoip"], optional = true }
 log = "0.4.33"
 maxminddb = { version = "0.29.0", optional = true }
+rustix = { version = "1.1.4", features = ["process"], optional = true }
+
+[dev-dependencies]
+fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }

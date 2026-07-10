@@ -1050,9 +1050,11 @@ dependencies = [
 name = "fluxheim-geoip"
 version = "1.7.7"
 dependencies = [
+ "fluxheim-common",
  "fluxheim-config",
  "log",
  "maxminddb",
+ "rustix",
 ]
 
 [[package]]

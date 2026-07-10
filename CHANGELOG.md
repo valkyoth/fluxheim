@@ -68,6 +68,9 @@ behavior when the change improves security or project direction.
   disk lookup cannot obtain blocking admission.
 - Qualify storage-bin leases as advisory and require per-replica storage or
   verified cross-node locking plus orchestration-level single-writer controls.
+- Pre-admit bounded GeoIP database descriptors before allocation/parsing,
+  enforce the eight-database runtime ceiling, decode bounded borrowed country
+  values, and require trusted immutable MMDB file paths during loading.
 - Pin publishing actions, security-tool installs, and container base images to
   immutable reviewed versions and digests.
 

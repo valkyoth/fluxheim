@@ -76,6 +76,10 @@ deterministic unsupported-call rejection.
   ceilings, reserve `32` critical slots, and return `503` rather than contacting
   origin when disk-cache lookup admission is saturated and no stale memory
   object is available.
+- Harden the GeoIP runtime boundary: cap fallback databases at eight before
+  allocation, admit aggregate descriptor sizes before reading/parsing, decode
+  bounded borrowed country strings, require trusted ownership and non-writable
+  modes for MMDB files and all parents, and reject files changed during loading.
 
 ## Changed
 

@@ -7,7 +7,7 @@ use crate::config::ConfigError;
 use crate::config::validate_config_list_len;
 
 #[cfg(feature = "geoip")]
-const MAX_GEOIP_DATABASES: usize = 8;
+pub const MAX_GEOIP_DATABASES: usize = 8;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

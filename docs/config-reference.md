@@ -3099,9 +3099,15 @@ supplied in MMDB-compatible form. Databases are ordered local fallbacks when
 `fallback_enabled = true`; Fluxheim fills missing country or ASN fields from
 later databases when possible.
 Fluxheim does not download GeoIP databases in-process. Each MMDB file is capped
-at 512 MiB at read time and each loaded GeoIP runtime is capped at 1 GiB total.
-GeoIP update jobs should write and verify a replacement file, then atomically
-rename it into place before reloading Fluxheim.
+at 512 MiB, each loaded GeoIP runtime is capped at 1 GiB total, and at most
+eight databases are accepted. Aggregate capacity is checked from the verified
+open descriptor before its contents are allocated, read, or parsed. Paths must
+be absolute and symlink-free; the file and every parent directory must be owned
+by root, the effective service user, or the platform root-equivalent owner and
+must not be group- or world-writable. Fluxheim rejects descriptor identity or
+metadata changes during loading. GeoIP update jobs should prepare and verify a
+replacement under a trusted directory, apply safe ownership and modes, then
+atomically rename it into place before reloading Fluxheim.
 
 Vhost and route access policies can then use:
 
