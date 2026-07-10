@@ -248,7 +248,10 @@ fn parses_tls_iso19790_config_as_required_compliance_alias() {
 }
 
 #[test]
-#[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
+#[cfg(any(
+    all(feature = "tls-rustls-fips", not(feature = "tls-openssl-fips")),
+    all(feature = "tls-openssl-fips", not(feature = "tls-rustls-fips"))
+))]
 fn rejects_tls_fips_policy_with_unsupported_backend_for_build() {
     #[cfg(feature = "tls-openssl-fips")]
     let backend = "rustls";

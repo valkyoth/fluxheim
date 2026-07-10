@@ -35,14 +35,23 @@ impl ReloadImpact {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ReloadReason {
     ListenerChanged,
+    ListenerSecurityChanged,
     ProcessSettingsChanged,
     LoggingRuntimeChanged,
     TlsModeChanged,
     TlsBackendChanged,
+    TlsClientAuthChanged,
+    ComplianceModeChanged,
+    AcmeServiceChanged,
     AdminServiceChanged,
     MetricsServiceChanged,
+    TracingServiceChanged,
+    CachePurgerServiceChanged,
+    StreamServiceChanged,
+    UdpServiceChanged,
     LoadBalancerServicesChanged,
     WasmRuntimeChanged,
+    UnclassifiedProcessStateChanged,
 }
 
 impl std::fmt::Display for ReloadImpact {
@@ -71,14 +80,23 @@ impl std::fmt::Display for ReloadReason {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::ListenerChanged => "listener-changed",
+            Self::ListenerSecurityChanged => "listener-security-changed",
             Self::ProcessSettingsChanged => "process-settings-changed",
             Self::LoggingRuntimeChanged => "logging-runtime-changed",
             Self::TlsModeChanged => "tls-mode-changed",
             Self::TlsBackendChanged => "tls-backend-changed",
+            Self::TlsClientAuthChanged => "tls-client-auth-changed",
+            Self::ComplianceModeChanged => "compliance-mode-changed",
+            Self::AcmeServiceChanged => "acme-service-changed",
             Self::AdminServiceChanged => "admin-service-changed",
             Self::MetricsServiceChanged => "metrics-service-changed",
+            Self::TracingServiceChanged => "tracing-service-changed",
+            Self::CachePurgerServiceChanged => "cache-purger-service-changed",
+            Self::StreamServiceChanged => "stream-service-changed",
+            Self::UdpServiceChanged => "udp-service-changed",
             Self::LoadBalancerServicesChanged => "load-balancer-services-changed",
             Self::WasmRuntimeChanged => "wasm-runtime-changed",
+            Self::UnclassifiedProcessStateChanged => "unclassified-process-state-changed",
         })
     }
 }
@@ -92,6 +110,13 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
 
     if old.server.listen != new.server.listen || old.server.tls_listen != new.server.tls_listen {
         reasons.push(ReloadReason::ListenerChanged);
+    }
+
+    if old.server.trusted_proxies != new.server.trusted_proxies
+        || old.server.proxy_protocol != new.server.proxy_protocol
+        || old.server.limits != new.server.limits
+    {
+        reasons.push(ReloadReason::ListenerSecurityChanged);
     }
 
     if old.server.process != new.server.process {
@@ -114,6 +139,18 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
         reasons.push(ReloadReason::TlsBackendChanged);
     }
 
+    if old.tls.client_auth != new.tls.client_auth {
+        reasons.push(ReloadReason::TlsClientAuthChanged);
+    }
+
+    if old.tls.iso19790 != new.tls.iso19790 {
+        reasons.push(ReloadReason::ComplianceModeChanged);
+    }
+
+    if old.tls.acme != new.tls.acme {
+        reasons.push(ReloadReason::AcmeServiceChanged);
+    }
+
     if old.tls.profile != new.tls.profile
         || old.tls.min_protocol != new.tls.min_protocol
         || old.tls.alpn != new.tls.alpn
@@ -132,6 +169,22 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
         reasons.push(ReloadReason::MetricsServiceChanged);
     }
 
+    if old.tracing != new.tracing {
+        reasons.push(ReloadReason::TracingServiceChanged);
+    }
+
+    if old.cache_purger != new.cache_purger {
+        reasons.push(ReloadReason::CachePurgerServiceChanged);
+    }
+
+    if old.stream != new.stream {
+        reasons.push(ReloadReason::StreamServiceChanged);
+    }
+
+    if old.udp != new.udp {
+        reasons.push(ReloadReason::UdpServiceChanged);
+    }
+
     if old.wasm != new.wasm {
         reasons.push(ReloadReason::WasmRuntimeChanged);
     }
@@ -141,11 +194,109 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
         reasons.push(ReloadReason::LoadBalancerServicesChanged);
     }
 
+    if reasons.is_empty() && !only_snapshot_safe_fields_changed(old, new) {
+        reasons.push(ReloadReason::UnclassifiedProcessStateChanged);
+    }
+
     if reasons.is_empty() {
         ReloadImpact::Snapshot
     } else {
         ReloadImpact::ProcessUpgrade { reasons }
     }
+}
+
+fn only_snapshot_safe_fields_changed(old: &Config, new: &Config) -> bool {
+    // These exhaustive destructures make future schema fields fail compilation until their
+    // reload ownership is classified explicitly.
+    let Config {
+        server: _,
+        admin: _,
+        metrics: _,
+        tracing: _,
+        logging: _,
+        headers: _,
+        tls: _,
+        proxy: _,
+        compression: _,
+        cache: _,
+        cache_purger: _,
+        web: _,
+        geoip: _,
+        stream: _,
+        udp: _,
+        wasm: _,
+        vhosts: _,
+    } = new;
+
+    let mut candidate = old.clone();
+    copy_snapshot_safe_server_fields(&mut candidate.server, &new.server);
+    copy_snapshot_safe_logging_fields(&mut candidate.logging, &new.logging);
+    copy_snapshot_safe_tls_fields(&mut candidate.tls, &new.tls);
+    candidate.headers = new.headers.clone();
+    candidate.proxy = new.proxy.clone();
+    candidate.compression = new.compression.clone();
+    candidate.cache = new.cache.clone();
+    candidate.web = new.web.clone();
+    candidate.geoip = new.geoip.clone();
+    candidate.vhosts = new.vhosts.clone();
+    candidate == *new
+}
+
+fn copy_snapshot_safe_server_fields(
+    candidate: &mut crate::config::ServerConfig,
+    new: &crate::config::ServerConfig,
+) {
+    let crate::config::ServerConfig {
+        listen: _,
+        tls_listen: _,
+        default_vhost,
+        trusted_proxies: _,
+        proxy_protocol: _,
+        regex_enabled,
+        limits: _,
+        process: _,
+        https_redirect,
+        host_routing,
+    } = new;
+    candidate.default_vhost = default_vhost.clone();
+    candidate.regex_enabled = *regex_enabled;
+    candidate.https_redirect = *https_redirect;
+    candidate.host_routing = *host_routing;
+}
+
+fn copy_snapshot_safe_logging_fields(
+    candidate: &mut crate::config::LoggingConfig,
+    new: &crate::config::LoggingConfig,
+) {
+    let crate::config::LoggingConfig {
+        level: _,
+        format: _,
+        target: _,
+        file: _,
+        access,
+    } = new;
+    candidate.access = access.clone();
+}
+
+fn copy_snapshot_safe_tls_fields(
+    candidate: &mut crate::config::TlsConfig,
+    new: &crate::config::TlsConfig,
+) {
+    let crate::config::TlsConfig {
+        enabled: _,
+        backend: _,
+        profile: _,
+        min_protocol: _,
+        alpn: _,
+        curve_preferences: _,
+        cipher_suites: _,
+        client_auth: _,
+        certificates,
+        fips: _,
+        iso19790: _,
+        acme: _,
+    } = new;
+    candidate.certificates = certificates.clone();
 }
 
 #[cfg(feature = "load-balancer")]

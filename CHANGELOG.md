@@ -29,6 +29,14 @@ behavior when the change improves security or project direction.
   1.97.0.
 - Update container-backed compatibility smoke defaults to MariaDB 12.3 LTS,
   PostgreSQL 18, and Valkey 9.1.
+- Make reload safety allowlist-based and require process replacement for
+  startup-owned TLS, listener, stream, UDP, ACME, cache-purger, and tracing
+  changes.
+- Enforce trusted ownership and non-writable permissions across complete config
+  source and sensitive-path ancestor chains, with descriptor identity and
+  mid-read modification checks for TOML sources.
+- Repair all-feature config tests across tracing/privacy and dual FIPS backend
+  combinations.
 - Restore `fuzz/` as an intentionally standalone cargo-fuzz workspace, remove
   its obsolete Pingora patch, refresh its dependency lockfile, and make the
   fuzz validation gate compile every target automatically.

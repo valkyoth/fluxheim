@@ -122,7 +122,15 @@ fn rejects_invalid_proxy_upstream_policy() {
             "#,
     )
     .unwrap();
-    #[cfg(feature = "traffic-mirror")]
+    #[cfg(feature = "privacy-mode")]
+    assert_eq!(
+        mirror_without_url.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.mirror",
+            reason: "traffic mirroring is not available in privacy-mode builds",
+        })
+    );
+    #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
     assert_eq!(
         mirror_without_url.validate(),
         Err(ConfigError::InvalidProxyUpstreamPolicy {
@@ -130,7 +138,7 @@ fn rejects_invalid_proxy_upstream_policy() {
             reason: "enabled traffic mirroring requires base_url",
         })
     );
-    #[cfg(not(feature = "traffic-mirror"))]
+    #[cfg(all(not(feature = "traffic-mirror"), not(feature = "privacy-mode")))]
     assert_eq!(
         mirror_without_url.validate(),
         Err(ConfigError::InvalidProxyUpstreamPolicy {
@@ -139,7 +147,7 @@ fn rejects_invalid_proxy_upstream_policy() {
         })
     );
 
-    #[cfg(feature = "traffic-mirror")]
+    #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
     {
         let mirror: Config = toml::from_str(
             r#"

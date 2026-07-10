@@ -34,13 +34,14 @@ fn php_request_body_replays_memory_body() {
 
 #[test]
 fn php_request_body_spool_replays_and_cleans_up_file() {
-    let spool_dir = tempfile::TempDir::new().expect("spool dir");
+    let spool_dir = fluxheim_common::test_support::unique_temp_path("php-fpm-spool");
+    std::fs::create_dir_all(&spool_dir).expect("spool dir");
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .build()
         .expect("test runtime");
     let (path, mut file) = runtime
-        .block_on(create_php_request_body_spool_file(spool_dir.path()))
+        .block_on(create_php_request_body_spool_file(&spool_dir))
         .expect("create spool file");
     runtime.block_on(async {
         use tokio::io::AsyncWriteExt;
@@ -64,6 +65,7 @@ fn php_request_body_spool_replays_and_cleans_up_file() {
     drop(reader);
     drop(body);
     assert!(!path.exists());
+    std::fs::remove_dir(&spool_dir).expect("remove spool dir");
 }
 
 #[test]

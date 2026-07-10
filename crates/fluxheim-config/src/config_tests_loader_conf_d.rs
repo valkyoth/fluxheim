@@ -53,6 +53,7 @@ fn conf_d_proxy_fragment_extends_without_replacing_main_trust_policy() {
 }
 
 #[test]
+#[cfg(not(feature = "privacy-mode"))]
 fn conf_d_proxy_nested_fragments_merge_without_replacing_security_policy() {
     let dir = TestDir::new("config-file-with-conf-d-proxy-nested-fragment");
     let runtime_state_file = safe_child_path(

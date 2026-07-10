@@ -94,6 +94,8 @@ pub mod reload;
 #[cfg(all(test, feature = "load-balancer"))]
 mod reload_load_balancer_tests;
 #[cfg(test)]
+mod reload_security_tests;
+#[cfg(test)]
 mod reload_tests;
 
 pub use config::*;

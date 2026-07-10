@@ -13,6 +13,13 @@ use crate::config_net::valid_authority;
 #[cfg(feature = "load-balancer")]
 use crate::config_proxy::MAX_PROXY_UPSTREAMS;
 
+#[path = "config_loader_trust.rs"]
+mod config_loader_trust;
+use config_loader_trust::{
+    ConfigFileState, ensure_trusted_config_path, ensure_trusted_opened_config_file,
+    same_config_file,
+};
+
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
@@ -107,7 +114,10 @@ pub fn canonical_config_source(path: &Path) -> Result<PathBuf, ConfigLoadError> 
         });
     }
 
+    ensure_trusted_config_path(path)?;
+
     let path = path.canonicalize().map_err(ConfigLoadError::Read)?;
+    ensure_trusted_config_path(&path)?;
     let metadata = fs::symlink_metadata(&path).map_err(ConfigLoadError::Read)?;
     if metadata.file_type().is_symlink() {
         return Err(ConfigLoadError::InvalidPath { path });
@@ -120,6 +130,7 @@ pub fn canonical_config_source(path: &Path) -> Result<PathBuf, ConfigLoadError> 
 }
 
 pub fn toml_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
+    ensure_trusted_config_path(dir)?;
     let entries = fs::read_dir(dir).map_err(ConfigLoadError::Read)?;
     let mut files = Vec::new();
 
@@ -131,6 +142,7 @@ pub fn toml_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
             continue;
         }
         if is_visible_toml_file(&path) {
+            ensure_trusted_config_path(&path)?;
             files.push(path);
             if files.len() > MAX_CONFIG_DIRECTORY_FILES {
                 return Err(ConfigLoadError::Read(std::io::Error::new(
@@ -181,13 +193,15 @@ pub fn regular_visible_toml_file(path: &Path) -> Result<bool, ConfigLoadError> {
     if !is_visible_toml_file(path) {
         return Ok(false);
     }
+    ensure_trusted_config_path(path)?;
     let metadata = fs::symlink_metadata(path).map_err(ConfigLoadError::Read)?;
     Ok(!metadata.file_type().is_symlink() && metadata.is_file())
 }
 
 pub fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigLoadError> {
-    let metadata = fs::symlink_metadata(path).map_err(ConfigLoadError::Read)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    ensure_trusted_config_path(path)?;
+    let path_metadata = fs::symlink_metadata(path).map_err(ConfigLoadError::Read)?;
+    if path_metadata.file_type().is_symlink() || !path_metadata.is_file() {
         return Err(ConfigLoadError::InvalidPath {
             path: path.to_path_buf(),
         });
@@ -198,14 +212,15 @@ pub fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigL
     #[cfg(unix)]
     options.custom_flags(O_NOFOLLOW);
 
-    let file = options.open(path).map_err(ConfigLoadError::Read)?;
-    let metadata = file.metadata().map_err(ConfigLoadError::Read)?;
-    if !metadata.is_file() {
+    let mut file = options.open(path).map_err(ConfigLoadError::Read)?;
+    let opened_metadata = file.metadata().map_err(ConfigLoadError::Read)?;
+    if !opened_metadata.is_file() || !same_config_file(&path_metadata, &opened_metadata) {
         return Err(ConfigLoadError::InvalidPath {
             path: path.to_path_buf(),
         });
     }
-    if metadata.len() > MAX_CONFIG_FILE_BYTES {
+    ensure_trusted_opened_config_file(&opened_metadata, path)?;
+    if opened_metadata.len() > MAX_CONFIG_FILE_BYTES {
         return Err(ConfigLoadError::Read(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!(
@@ -216,8 +231,9 @@ pub fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigL
         )));
     }
 
+    let opened_state = ConfigFileState::from_metadata(&opened_metadata);
     let mut contents = String::new();
-    let mut limited = file.take(MAX_CONFIG_FILE_BYTES.saturating_add(1));
+    let mut limited = file.by_ref().take(MAX_CONFIG_FILE_BYTES.saturating_add(1));
     limited
         .read_to_string(&mut contents)
         .map_err(ConfigLoadError::Read)?;
@@ -229,6 +245,14 @@ pub fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigL
                 path.display(),
                 MAX_CONFIG_FILE_BYTES
             ),
+        )));
+    }
+    let final_state =
+        ConfigFileState::from_metadata(&file.metadata().map_err(ConfigLoadError::Read)?);
+    if final_state != opened_state {
+        return Err(ConfigLoadError::Read(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("config file changed while reading: {}", path.display()),
         )));
     }
     Ok(contents)

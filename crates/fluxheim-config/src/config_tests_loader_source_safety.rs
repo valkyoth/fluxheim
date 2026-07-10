@@ -275,3 +275,59 @@ fn ignores_symlinked_config_directory_entries() {
     assert_eq!(config.server.listen, ["127.0.0.1:19090"]);
     assert!(config.vhosts.is_empty());
 }
+
+#[cfg(unix)]
+#[test]
+fn rejects_config_below_writable_higher_ancestor() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = TestDir::new("config-writable-higher-ancestor");
+    let safe = dir.child("safe");
+    fs::create_dir(&safe).unwrap();
+    fs::set_permissions(&safe, fs::Permissions::from_mode(0o755)).unwrap();
+    let config_path = safe_child_path(&safe, "fluxheim.toml");
+    fs::write(&config_path, "[server]\n").unwrap();
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o777)).unwrap();
+
+    let error = Config::load(Some(&config_path)).unwrap_err();
+
+    assert!(
+        matches!(error, ConfigLoadError::Read(error) if error.kind() == std::io::ErrorKind::PermissionDenied)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_writable_config_file() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = TestDir::new("config-writable-file");
+    let config_path = dir.child("fluxheim.toml");
+    fs::write(&config_path, "[server]\n").unwrap();
+    fs::set_permissions(&config_path, fs::Permissions::from_mode(0o666)).unwrap();
+
+    let error = Config::load(Some(&config_path)).unwrap_err();
+
+    assert!(
+        matches!(error, ConfigLoadError::Read(error) if error.kind() == std::io::ErrorKind::PermissionDenied)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_writable_conf_d_directory() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = TestDir::new("config-writable-conf-d");
+    let conf_d = dir.child("conf.d");
+    fs::create_dir(&conf_d).unwrap();
+    fs::write(dir.child("fluxheim.toml"), "include_conf_d = true\n").unwrap();
+    fs::write(safe_child_path(&conf_d, "site.toml"), "[server]\n").unwrap();
+    fs::set_permissions(&conf_d, fs::Permissions::from_mode(0o777)).unwrap();
+
+    let error = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap_err();
+
+    assert!(
+        matches!(error, ConfigLoadError::Read(error) if error.kind() == std::io::ErrorKind::PermissionDenied)
+    );
+}

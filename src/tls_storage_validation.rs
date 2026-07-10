@@ -330,6 +330,11 @@ fn push_acme_eab_world_writable_parent_issue(
 }
 
 fn path_has_insecure_writable_parent(path: &Path) -> io::Result<bool> {
+    // Preserve the more precise symlink diagnostic below; the full-chain
+    // permission helper also treats symlink components as untrusted.
+    if path_contains_symlink(path)? {
+        return Ok(false);
+    }
     fluxheim_config::fs_trust::existing_parent_has_insecure_write_permissions(path)
 }
 

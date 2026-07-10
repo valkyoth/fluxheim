@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(all(feature = "otel-tracing", not(feature = "privacy-mode")))]
+use crate::config::TracingMode;
 
 #[test]
 fn parses_metrics_config() {
@@ -132,7 +134,7 @@ fn rejects_otlp_metrics_export_without_feature() {
     );
 }
 
-#[cfg(feature = "otel-tracing")]
+#[cfg(all(feature = "otel-tracing", not(feature = "privacy-mode")))]
 #[test]
 fn parses_trace_context_config() {
     let config: Config = toml::from_str(
@@ -148,10 +150,14 @@ fn parses_trace_context_config() {
 
     config.validate().unwrap();
     assert!(config.tracing.enabled);
-    assert_eq!(config.tracing.mode, super::TracingMode::PropagateOnly);
+    assert_eq!(config.tracing.mode, TracingMode::PropagateOnly);
 }
 
-#[cfg(all(feature = "otel-tracing", feature = "otel-otlp"))]
+#[cfg(all(
+    feature = "otel-tracing",
+    feature = "otel-otlp",
+    not(feature = "privacy-mode")
+))]
 #[test]
 fn parses_otlp_trace_export_config() {
     let config: Config = toml::from_str(
@@ -180,7 +186,11 @@ fn parses_otlp_trace_export_config() {
     assert_eq!(config.tracing.otlp.queue_size, 64);
 }
 
-#[cfg(all(feature = "otel-tracing", feature = "otel-otlp"))]
+#[cfg(all(
+    feature = "otel-tracing",
+    feature = "otel-otlp",
+    not(feature = "privacy-mode")
+))]
 #[test]
 fn accepts_https_otlp_trace_endpoint() {
     let config: Config = toml::from_str(

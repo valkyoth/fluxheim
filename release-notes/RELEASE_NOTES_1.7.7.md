@@ -80,6 +80,15 @@ deterministic unsupported-call rejection.
   allocation, admit aggregate descriptor sizes before reading/parsing, decode
   bounded borrowed country strings, require trusted ownership and non-writable
   modes for MMDB files and all parents, and reject files changed during loading.
+- Make reload classification fail closed through an explicit snapshot-safe
+  allowlist. Client-authentication, compliance, listener trust/limits, stream,
+  UDP, ACME, cache-purger, tracing, and other startup-owned changes now require
+  process replacement instead of being accepted as snapshot reloads.
+- Require config sources, split-config directories, and every existing ancestor
+  to have trusted ownership and non-writable group/other modes. Verify path and
+  descriptor identity and reject config files modified during bounded reads.
+- Restore the all-feature config security suite, including tracing/privacy and
+  dual-FIPS-backend feature combinations.
 
 ## Changed
 

@@ -10,48 +10,85 @@ compile_error!(
 
 #[cfg(unix)]
 pub fn existing_parent_has_insecure_write_permissions(path: &Path) -> std::io::Result<bool> {
-    let mut current = path
+    let current = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
 
-    existing_path_has_insecure_write_permissions(&mut current)
+    existing_path_has_insecure_write_permissions(&current)
 }
 
 #[cfg(unix)]
 pub fn existing_path_or_parent_has_insecure_write_permissions(
     path: &Path,
 ) -> std::io::Result<bool> {
-    let mut current = path.to_path_buf();
-    existing_path_has_insecure_write_permissions(&mut current)
+    existing_path_has_insecure_write_permissions(path)
 }
 
 #[cfg(unix)]
-fn existing_path_has_insecure_write_permissions(
-    current: &mut std::path::PathBuf,
-) -> std::io::Result<bool> {
-    use std::os::unix::fs::PermissionsExt;
+fn existing_path_has_insecure_write_permissions(current: &Path) -> std::io::Result<bool> {
+    let mut current = if current.is_absolute() {
+        current.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(current)
+    };
 
     let mut inspected_depth = 0usize;
     loop {
-        inspected_depth = inspected_depth.saturating_add(1);
-        if inspected_depth > MAX_PERMISSION_INSPECTION_DEPTH {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "path exceeds maximum depth for permission inspection",
-            ));
-        }
-        match std::fs::metadata(&current) {
-            Ok(metadata) => return Ok(metadata.permissions().mode() & 0o022 != 0),
+        check_inspection_depth(&mut inspected_depth)?;
+        match std::fs::symlink_metadata(&current) {
+            Ok(_) => break,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if !current.pop() {
-                    return Ok(false);
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "path has no existing ancestor",
+                    ));
                 }
             }
             Err(error) => return Err(error),
         }
     }
+
+    loop {
+        check_inspection_depth(&mut inspected_depth)?;
+        let metadata = std::fs::symlink_metadata(&current)?;
+        if metadata.file_type().is_symlink()
+            || metadata_has_insecure_owner_or_write_permissions(&metadata)?
+        {
+            return Ok(true);
+        }
+        if !current.pop() {
+            return Ok(false);
+        }
+    }
+}
+
+#[cfg(unix)]
+pub(crate) fn metadata_has_insecure_owner_or_write_permissions(
+    metadata: &std::fs::Metadata,
+) -> std::io::Result<bool> {
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+
+    let process_uid = rustix::process::geteuid().as_raw();
+    let root_uid = std::fs::symlink_metadata(Path::new("/"))?.uid();
+    Ok(
+        (metadata.uid() != 0 && metadata.uid() != process_uid && metadata.uid() != root_uid)
+            || metadata.permissions().mode() & 0o022 != 0,
+    )
+}
+
+#[cfg(unix)]
+fn check_inspection_depth(inspected_depth: &mut usize) -> std::io::Result<()> {
+    *inspected_depth = inspected_depth.saturating_add(1);
+    if *inspected_depth > MAX_PERMISSION_INSPECTION_DEPTH {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path exceeds maximum depth for permission inspection",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(all(test, unix))]
@@ -69,18 +106,28 @@ mod tests {
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o777)).unwrap();
         symlink(&target, &link).unwrap();
 
-        let mut current = link;
-        assert!(existing_path_has_insecure_write_permissions(&mut current).unwrap());
+        assert!(existing_path_has_insecure_write_permissions(&link).unwrap());
+    }
+
+    #[test]
+    fn rejects_writable_higher_ancestor() {
+        let ancestor = unique_temp_path("fs-trust-writable-higher-ancestor");
+        let leaf = fluxheim_common::test_support::safe_child_path(&ancestor, "safe");
+        std::fs::create_dir_all(&leaf).unwrap();
+        std::fs::set_permissions(&leaf, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&ancestor, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+        assert!(existing_path_has_insecure_write_permissions(&leaf).unwrap());
     }
 
     #[test]
     fn rejects_excessive_path_depth_for_permission_checks() {
-        let mut current = PathBuf::new();
+        let mut current = PathBuf::from("missing-root");
         for _ in 0..=super::MAX_PERMISSION_INSPECTION_DEPTH {
             current.push("missing");
         }
 
-        let error = existing_path_has_insecure_write_permissions(&mut current).unwrap_err();
+        let error = existing_path_has_insecure_write_permissions(&current).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }
 }

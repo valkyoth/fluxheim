@@ -602,8 +602,8 @@ upstream, cache, and static web policy snapshots. This model applies to:
 - cache policies
 - certificate lookup maps
 
-Listener changes are process-level changes and should use Pingora's
-zero-downtime upgrade path rather than in-place mutation.
+Listener changes are process-level changes and should use Fluxheim's supervised
+zero-downtime process replacement path rather than in-place mutation.
 
 ## Reload Classification
 
@@ -611,7 +611,7 @@ Fluxheim classifies a config change before applying it:
 
 - `Noop`: old and new config are identical.
 - `Snapshot`: safe for in-place snapshot swap.
-- `ProcessUpgrade`: requires Pingora's process-level zero-downtime upgrade path.
+- `ProcessUpgrade`: requires supervised zero-downtime process replacement.
 
 Operators can check the impact of a planned config change:
 
@@ -626,11 +626,19 @@ Snapshot reload is intended for routing, cache policy, static web policy, and
 certificate lookup changes that do not alter listeners or startup-owned
 background services.
 
+The classifier uses an explicit snapshot-safe allowlist. Any changed field that
+has not been assigned snapshot ownership fails closed as `ProcessUpgrade`; new
+schema fields cannot silently inherit snapshot-safe behavior.
+
 Process upgrade is required when:
 
 - listener addresses change
+- listener trust, PROXY protocol, or request limits change
 - downstream TLS mode changes
+- downstream client authentication or compliance mode changes
 - the configured TLS backend changes
+- stream or UDP service definitions change
+- ACME, cache-purger, tracing, admin, metrics, or Wasm services change
 - load-balancer background service registration/ownership changes
 
 This keeps the hot-reload path conservative until Fluxheim has explicit runtime

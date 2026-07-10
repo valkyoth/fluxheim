@@ -27,7 +27,7 @@ mod tests {
 
         let error = store.list().unwrap_err();
 
-        assert!(matches!(error, SnapshotError::UnsafeSnapshotPath { .. }));
+        assert!(matches!(error, SnapshotError::UnsafeStoreRoot { .. }));
         let _ = std::fs::remove_file(root);
     }
 

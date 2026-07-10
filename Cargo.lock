@@ -1042,6 +1042,7 @@ dependencies = [
  "log",
  "proptest",
  "regex",
+ "rustix",
  "serde",
  "toml",
 ]
@@ -1125,6 +1126,7 @@ name = "fluxheim-php-fpm"
 version = "1.7.7"
 dependencies = [
  "fastcgi-client",
+ "fluxheim-common",
  "fluxheim-config",
  "fluxheim-protocol",
  "getrandom 0.4.3",

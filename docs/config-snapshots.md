@@ -280,7 +280,7 @@ The self-healing path uses these state transitions:
    local watchdog.
 5. Automatically swap back to the previous known-good runtime snapshot when the
    new snapshot is unhealthy.
-6. Leave process-upgrade-only changes to the supervisor/Pingora upgrade path.
+6. Leave process-upgrade-only changes to the supervised process replacement path.
 
 The first implementation should be conservative. It should prefer keeping the
 old known-good config over guessing that a risky new config is healthy.

@@ -59,12 +59,16 @@ Config sources must be real TOML files or real directories. Fluxheim rejects a
 symlink used as the top-level config source, rejects config sources below a
 symlinked directory, and ignores symlinked TOML entries inside split config
 directories, so a reload cannot be redirected through an unexpected filesystem
-pointer. Each TOML file is size-limited to 1 MiB; large deployments should use
-a split config directory instead of one huge file. Split config directories are
-limited to 256 visible TOML files. Configured filesystem paths are also rejected
-when any existing path component is a symlink; missing final directories may
-still be created by the owning runtime module, but never through a symlinked
-prefix.
+pointer. On Unix, each config file, config directory, `conf.d` directory, and
+every existing ancestor must be owned by root or the Fluxheim service user and
+must not be group- or world-writable. Each TOML file is opened without following
+a final symlink, its checked path identity must match the opened descriptor, and
+in-place changes during the bounded read are rejected. Each TOML file is
+size-limited to 1 MiB; large deployments should use a split config directory
+instead of one huge file. Split config directories are limited to 256 visible
+TOML files. Configured filesystem paths are also rejected when any existing path
+component is a symlink; missing final directories may still be created by the
+owning runtime module, but never through a symlinked prefix.
 
 ## Server
 
@@ -909,8 +913,9 @@ path prefixes are rejected during config validation, and Linux opens the log fil
 without following a final symlink. Runtime log-file open also rejects symlinked
 path components before creating or appending the file, so restart and rotation
 paths apply the same trust boundary as config validation. On Unix, file logs
-must use a dedicated log directory and are rejected when the nearest existing
-parent is group- or world-writable, such as `/tmp`.
+must use a dedicated log directory and are rejected when any existing parent is
+not owned by root or the service user, or is group- or world-writable, such as
+`/tmp`.
 
 In `privacy-mode` builds, access logging and file logging must stay disabled.
 Fluxheim rejects `logging.access.enabled = true` and
@@ -2138,10 +2143,10 @@ If `cache.enabled = true`, at least one storage tier must be enabled.
 Each enabled tier must be at least as large as `max_object_bytes`.
 Disk cache requires `cache.disk.path`. The disk cache root must be a real
 directory and must not sit below a symlinked parent directory. On Unix,
-Fluxheim also rejects disk cache roots whose nearest existing parent is
-group- or world-writable, such as creating a cache root directly below `/tmp`; use a
-dedicated cache directory such as `/var/cache/fluxheim` or a pre-created private
-runtime directory.
+Fluxheim also rejects disk cache roots when any existing parent is not owned by
+root or the service user, or is group- or world-writable, such as creating a
+cache root directly below `/tmp`; use a dedicated cache directory such as
+`/var/cache/fluxheim` or a pre-created private runtime directory.
 
 `[cache.range]` is disabled by default. When enabled, Fluxheim can cache safe
 bounded single `Range: bytes=start-end` proxy responses under a range-specific
@@ -2807,8 +2812,9 @@ symlinked or group- or world-writable directories; mount or configure the real p
 directly. If Fluxheim cannot inspect any TLS path prefix for symlinks,
 validation fails closed and reports the path as unreadable. Config validation
 also rejects static certificate paths, ACME storage paths, and ACME EAB secret
-files when their nearest existing parent directory is group- or world-writable. EAB secret
-files are checked with the same owner-only permission rule as private keys.
+files when any existing ancestor has an untrusted owner or is group- or
+world-writable. EAB secret files are checked with the same owner-only permission
+rule as private keys.
 
 ## ACME
 
