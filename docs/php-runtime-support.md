@@ -299,6 +299,13 @@ a short deadline. A per-pool watchdog monitors the php-fpm master after startup
 and respawns it with bounded backoff if it crashes, so managed PHP service can
 recover without a Fluxheim config reload.
 
+Adding or removing a managed pool, or changing its executable, socket
+directory, identity, environment isolation, process-manager, worker, or
+supervision settings requires supervised Fluxheim process replacement. Routing,
+request limits, FastCGI transport timeouts, and response policy remain eligible
+for snapshot reload because they do not mutate the already-running php-fpm
+master.
+
 When a managed php-fpm pool drops workers to a different `user`/`group`,
 configure `listen_owner` and `listen_group` when the php-fpm master should chown
 the private socket for Fluxheim, and use `listen_mode = "0660"` only when a

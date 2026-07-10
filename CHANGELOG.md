@@ -32,6 +32,9 @@ behavior when the change improves security or project direction.
 - Make reload safety allowlist-based and require process replacement for
   startup-owned TLS, listener, stream, UDP, ACME, cache-purger, and tracing
   changes.
+- Classify nested managed ACME targets and managed vhost/route PHP-FPM process
+  definitions as startup-owned while retaining snapshot reload for ordinary
+  routing and request-time PHP policy.
 - Enforce trusted ownership and non-writable permissions across complete config
   source and sensitive-path ancestor chains, with descriptor identity and
   mid-read modification checks for TOML sources.

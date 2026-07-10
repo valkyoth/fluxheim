@@ -84,6 +84,11 @@ deterministic unsupported-call rejection.
   allowlist. Client-authentication, compliance, listener trust/limits, stream,
   UDP, ACME, cache-purger, tracing, and other startup-owned changes now require
   process replacement instead of being accepted as snapshot reloads.
+- Extend reload ownership into nested vhosts and routes: managed ACME target
+  identity/domain changes and managed PHP-FPM pool/process changes require
+  process replacement, while ordinary routing and request-time PHP policy stay
+  snapshot-safe. Exhaustive vhost, route, and PHP-FPM schema audits prevent new
+  nested fields from silently bypassing review.
 - Require config sources, split-config directories, and every existing ancestor
   to have trusted ownership and non-writable group/other modes. Verify path and
   descriptor identity and reject config files modified during bounded reads.

@@ -4,6 +4,10 @@ use crate::config::{ProxyConfig, VhostConfig};
 #[cfg(feature = "load-balancer")]
 use std::path::PathBuf;
 
+#[path = "reload_service_signatures.rs"]
+mod reload_service_signatures;
+use reload_service_signatures::{managed_acme_services, managed_php_services};
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ReloadImpact {
     Noop,
@@ -43,6 +47,7 @@ pub enum ReloadReason {
     TlsClientAuthChanged,
     ComplianceModeChanged,
     AcmeServiceChanged,
+    ManagedPhpServiceChanged,
     AdminServiceChanged,
     MetricsServiceChanged,
     TracingServiceChanged,
@@ -88,6 +93,7 @@ impl std::fmt::Display for ReloadReason {
             Self::TlsClientAuthChanged => "tls-client-auth-changed",
             Self::ComplianceModeChanged => "compliance-mode-changed",
             Self::AcmeServiceChanged => "acme-service-changed",
+            Self::ManagedPhpServiceChanged => "managed-php-service-changed",
             Self::AdminServiceChanged => "admin-service-changed",
             Self::MetricsServiceChanged => "metrics-service-changed",
             Self::TracingServiceChanged => "tracing-service-changed",
@@ -147,8 +153,12 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
         reasons.push(ReloadReason::ComplianceModeChanged);
     }
 
-    if old.tls.acme != new.tls.acme {
+    if old.tls.acme != new.tls.acme || managed_acme_services(old) != managed_acme_services(new) {
         reasons.push(ReloadReason::AcmeServiceChanged);
+    }
+
+    if managed_php_services(old) != managed_php_services(new) {
+        reasons.push(ReloadReason::ManagedPhpServiceChanged);
     }
 
     if old.tls.profile != new.tls.profile
@@ -206,8 +216,9 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
 }
 
 fn only_snapshot_safe_fields_changed(old: &Config, new: &Config) -> bool {
-    // These exhaustive destructures make future schema fields fail compilation until their
-    // reload ownership is classified explicitly.
+    // This exhaustive top-level destructure makes future Config fields fail compilation until
+    // their reload ownership is classified explicitly. Nested startup-owned fields are audited
+    // by the service-signature module.
     let Config {
         server: _,
         admin: _,

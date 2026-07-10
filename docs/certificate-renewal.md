@@ -638,7 +638,9 @@ Process upgrade is required when:
 - downstream client authentication or compliance mode changes
 - the configured TLS backend changes
 - stream or UDP service definitions change
-- ACME, cache-purger, tracing, admin, metrics, or Wasm services change
+- global ACME settings or managed vhost ACME identity, issuer, or domain targets change
+- managed PHP-FPM pools or their process/supervision settings change
+- cache-purger, tracing, admin, metrics, or Wasm services change
 - load-balancer background service registration/ownership changes
 
 This keeps the hot-reload path conservative until Fluxheim has explicit runtime

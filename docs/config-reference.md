@@ -3425,6 +3425,9 @@ Managed PHP-FPM validates `php_fpm_binary` at config load and again immediately
 before each supervised spawn. The binary path must be absolute, must not contain
 parent traversal, must not be or be below a symlink, must point directly to a
 regular file, and must not be below a group/world-writable parent directory.
+Adding or removing a managed vhost/route pool, or changing its process and
+supervision settings, is classified as a process-upgrade change. Request-time
+PHP routing, limits, FastCGI transport, and response policy remain snapshot-safe.
 
 For PHP actions, `max_request_body_bytes` bounds the request sent to php-fpm
 and `max_response_bytes` bounds the FastCGI STDOUT/STDERR bytes accepted from
