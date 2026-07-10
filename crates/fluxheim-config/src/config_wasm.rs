@@ -322,6 +322,18 @@ impl WasmPluginConfig {
                 reason: "proxy-wasm-preview host calls require the wasm-proxy-abi feature",
             });
         }
+        if self.host_call_namespace.requires_proxy_wasm_preview()
+            && self
+                .phases
+                .iter()
+                .any(|phase| *phase != WasmPluginPhase::AccessDecision)
+        {
+            return Err(ConfigError::InvalidWasmPolicy {
+                scope: format!("wasm plugin {:?}", self.name),
+                field: "phases",
+                reason: "proxy-wasm-preview currently supports only the access-decision phase",
+            });
+        }
         validate_wasm_phases(&self.phases, &format!("wasm plugin {:?}", self.name))?;
         validate_wasm_fail_mode(
             self.fail_mode,

@@ -60,6 +60,7 @@ namespace for compatibility work. This path is intentionally opt-in:
 - config must set `[wasm].allow_preview_abi = true`;
 - the plugin must declare `abi = "proxy-wasm-preview"`;
 - the plugin must declare `host_call_namespace = "proxy-wasm-preview"`.
+- the plugin may currently declare only the `access-decision` phase.
 
 The preview namespace does not mean arbitrary existing proxy-wasm plugins run
 unchanged. Unsupported preview host calls are rejected deterministically through
@@ -74,6 +75,10 @@ implemented.
 Imports that are not explicitly bound for the selected namespace are rejected
 before module instantiation. A plugin therefore cannot obtain a host capability
 by declaring an unexpected module or function name.
+Fluxheim also scopes phase-specific native host functions by namespace in the
+server. Preview plugins never receive `fluxheim_policy_v1` request-header,
+routing, or cache capabilities, even if a future construction path bypasses
+configuration validation.
 
 ## Design Goals
 

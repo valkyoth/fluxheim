@@ -153,6 +153,11 @@ pub enum WasmManifestError {
         abi: WasmPluginAbi,
         namespace: WasmHostCallNamespace,
     },
+    #[error("wasm plugin host-call namespace {namespace:?} does not support phase {phase:?}")]
+    UnsupportedNamespacePhase {
+        namespace: WasmHostCallNamespace,
+        phase: WasmPluginPhase,
+    },
     #[error("wasm plugin fail_open is not allowed for security decision phases")]
     UnsafeFailOpen,
     #[error("invalid wasm sandbox limit {field}: {reason}")]
@@ -189,8 +194,8 @@ pub fn validate_plugin_manifest(
     if manifest.abi.is_preview() && !allow_preview_abi {
         return Err(WasmManifestError::PreviewAbiDisabled { abi: manifest.abi });
     }
-    validate_host_call_namespace(manifest.abi, manifest.host_call_namespace)?;
     validate_phases(&manifest.phases)?;
+    validate_host_call_namespace(manifest.abi, manifest.host_call_namespace, &manifest.phases)?;
     validate_fail_mode(manifest.fail_mode, &manifest.phases)?;
 
     Ok(ValidatedWasmPluginManifest {
@@ -208,10 +213,22 @@ pub fn validate_plugin_manifest(
 fn validate_host_call_namespace(
     abi: WasmPluginAbi,
     namespace: WasmHostCallNamespace,
+    phases: &[WasmPluginPhase],
 ) -> Result<(), WasmManifestError> {
     match (abi, namespace) {
-        (WasmPluginAbi::FluxheimPolicyV1, WasmHostCallNamespace::FluxheimPolicyV1)
-        | (WasmPluginAbi::ProxyWasmPreview, WasmHostCallNamespace::ProxyWasmPreview) => Ok(()),
+        (WasmPluginAbi::FluxheimPolicyV1, WasmHostCallNamespace::FluxheimPolicyV1) => Ok(()),
+        (WasmPluginAbi::ProxyWasmPreview, WasmHostCallNamespace::ProxyWasmPreview) => {
+            if let Some(phase) = phases
+                .iter()
+                .find(|phase| **phase != WasmPluginPhase::AccessDecision)
+            {
+                return Err(WasmManifestError::UnsupportedNamespacePhase {
+                    namespace,
+                    phase: *phase,
+                });
+            }
+            Ok(())
+        }
         _ => Err(WasmManifestError::IncompatibleHostCallNamespace { abi, namespace }),
     }
 }
@@ -447,6 +464,7 @@ mod tests {
         let mut manifest = valid_manifest();
         manifest.abi = WasmPluginAbi::ProxyWasmPreview;
         manifest.host_call_namespace = WasmHostCallNamespace::ProxyWasmPreview;
+        manifest.phases = vec![WasmPluginPhase::AccessDecision];
 
         let validated = validate_plugin_manifest(manifest, true).unwrap();
 
@@ -455,6 +473,32 @@ mod tests {
             validated.host_call_namespace(),
             WasmHostCallNamespace::ProxyWasmPreview
         );
+    }
+
+    #[test]
+    fn rejects_unreviewed_phases_for_proxy_preview_namespace() {
+        for phase in [
+            WasmPluginPhase::RequestHeaders,
+            WasmPluginPhase::ResponseHeaders,
+            WasmPluginPhase::RouteDecision,
+            WasmPluginPhase::CacheLookup,
+            WasmPluginPhase::CacheStore,
+        ] {
+            let mut manifest = valid_manifest();
+            manifest.abi = WasmPluginAbi::ProxyWasmPreview;
+            manifest.host_call_namespace = WasmHostCallNamespace::ProxyWasmPreview;
+            manifest.phases = vec![phase];
+
+            let error = validate_plugin_manifest(manifest, true).unwrap_err();
+
+            assert_eq!(
+                error,
+                WasmManifestError::UnsupportedNamespacePhase {
+                    namespace: WasmHostCallNamespace::ProxyWasmPreview,
+                    phase,
+                }
+            );
+        }
     }
 
     #[test]

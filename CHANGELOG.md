@@ -40,6 +40,9 @@ behavior when the change improves security or project direction.
   compatibility surfaces.
 - Keep `proxy-wasm-preview` disabled unless both the config opts into preview
   ABIs and the binary is built with `wasm-proxy-abi`.
+- Restrict `proxy-wasm-preview` manifests to `access-decision` and prevent the
+  server from binding `fluxheim_policy_v1` phase capabilities into preview
+  namespaces.
 
 ## 1.7.6 - 2026-07-09
 

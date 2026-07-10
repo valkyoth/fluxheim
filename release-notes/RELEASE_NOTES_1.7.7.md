@@ -31,6 +31,9 @@ deterministic unsupported-call rejection.
 - Compiled WebAssembly module identities now include the host-call namespace,
   so future compile-cache reuse cannot cross from `fluxheim-policy-v1` to
   `proxy-wasm-preview`.
+- Restrict proxy-ABI preview manifests to `access-decision`, and independently
+  prevent native request-header, route, and cache host functions from being
+  linked into the preview namespace.
 
 ## Changed
 

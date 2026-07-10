@@ -322,6 +322,31 @@ fn wasm_proxy_preview_namespace_requires_proxy_preview_abi() {
     );
 }
 
+#[cfg(all(feature = "wasm", feature = "wasm-proxy-abi"))]
+#[test]
+fn wasm_proxy_preview_namespace_rejects_unreviewed_phase() {
+    for phase in [
+        crate::WasmPluginPhase::RouteDecision,
+        crate::WasmPluginPhase::CacheStore,
+    ] {
+        let mut config = proxy_preview_wasm_config(
+            r#"
+            abi = "proxy-wasm-preview"
+            host_call_namespace = "proxy-wasm-preview"
+            "#,
+        );
+        config.wasm.plugins[0].phases = vec![phase];
+
+        let error = config.validate().unwrap_err();
+
+        assert!(
+            matches!(error, ConfigError::InvalidWasmPolicy { field, reason, .. }
+            if field == "phases"
+                && reason == "proxy-wasm-preview currently supports only the access-decision phase")
+        );
+    }
+}
+
 #[cfg(feature = "wasm")]
 #[test]
 fn wasm_attachment_rejects_unknown_plugin() {
