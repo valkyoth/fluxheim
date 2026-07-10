@@ -84,6 +84,11 @@ behavior when the change improves security or project direction.
   values, and require trusted immutable MMDB file paths during loading.
 - Pin publishing actions, security-tool installs, and container base images to
   immutable reviewed versions and digests.
+- Bound Brotli, gzip, and Zstandard output before allocation growth, avoid a
+  second body copy when draining codec buffers, and discard failed encoders.
+- Fail malformed `Accept-Encoding` negotiation closed, honor explicit coding
+  rejection over wildcard acceptance, and treat qualified `private` cache
+  directives as compression-blocking security policy.
 
 ### Fixed
 

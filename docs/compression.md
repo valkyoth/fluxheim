@@ -1,6 +1,6 @@
 # Compression
 
-Status: initial optional `1.4` module.
+Status: optional production response-compression module.
 
 Cargo features:
 
@@ -37,8 +37,11 @@ Fluxheim negotiates response compression from `Accept-Encoding` when
 `compression.enabled = true` and the binary is built with at least one codec
 feature. Gzip is available through `compression-gzip`, Zstandard through
 `compression-zstd`, and Brotli through `compression-brotli`. `q=0` is respected
-for each coding. When multiple accepted codings are enabled, Fluxheim prefers
-`br`, then `zstd`, then `gzip`.
+for each coding, and an explicit coding always takes precedence over `*`.
+Malformed parameters, unknown parameters, duplicate quality parameters, and
+empty list members fail closed to identity. When multiple accepted codings are
+enabled, Fluxheim prefers `br`, then `zstd`, then `gzip` when their quality
+values are equal.
 
 Identity is served when no enabled coding is accepted by the client, the
 response is already encoded, the response is too small or too large, the
@@ -57,7 +60,8 @@ Do not compress by default:
 
 - JPEG, PNG, GIF, WebP, AVIF, MP4, WebM, MP3, OGG, WOFF2, ZIP, gzip, Brotli,
   Zstandard, or other already-compressed formats;
-- responses with `Cache-Control: no-transform`;
+- responses with `Cache-Control: no-transform`, `private`, or `no-store`,
+  including qualified directives such as `private="Set-Cookie"`;
 - responses carrying sensitive per-user content unless the operator explicitly
   allows it and cache admission remains disabled;
 - partial/range responses unless a future range-aware design exists;
@@ -84,6 +88,10 @@ The first codec implementation is intentionally bounded:
 - encoded output must stay within `compression.max_output_bytes`;
 - `compression.max_input_bytes` is capped at 64 MiB by config validation;
 - `compression.max_output_bytes` is capped at 128 MiB by config validation;
+- every codec writes through a bounded sink that rejects output before buffer
+  growth would cross `compression.max_output_bytes`;
+- emitted chunks transfer their owned allocation into `Bytes` without copying,
+  and a codec is discarded permanently after an output or allocation failure;
 - gzip levels are restricted to `0..=9`;
 - zstd levels are restricted to `1..=19`;
 - Brotli quality is restricted to `0..=11`;
@@ -208,8 +216,12 @@ such as JPEG, PNG, WebP, AVIF, and most archives are served as identity.
 
 - Negotiates `br`, `zstd`, `gzip`, and identity correctly for compiled codecs.
 - Adds `Vary: Accept-Encoding`.
-- Does not compress excluded MIME types or `no-transform` responses.
+- Does not compress excluded MIME types or `no-transform`, `private`, and
+  `no-store` responses, including qualified directives.
 - Does not compress cookie, authorization, `Set-Cookie`, range, or already
   encoded responses.
-- Enforces input size and level limits.
+- Enforces input, encoded-output, and level limits before excess output can be
+  allocated.
+- Fails closed for malformed `Accept-Encoding` parameters and proves explicit
+  coding rejection takes precedence over wildcard acceptance.
 - Proves compression code is absent from default and `privacy-mode` builds.

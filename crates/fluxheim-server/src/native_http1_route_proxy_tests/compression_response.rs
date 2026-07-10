@@ -179,6 +179,94 @@ async fn native_route_proxy_prefers_higher_accept_encoding_quality() {
     );
 }
 
+#[cfg(feature = "compression-gzip")]
+#[tokio::test]
+async fn native_route_proxy_honors_explicit_encoding_rejection_over_wildcard() {
+    let upstream = upstream_response(
+        "HTTP/1.1 200 OK\r\n\
+         content-type: text/plain\r\n\r\n\
+         wildcard precedence must leave this response uncompressed",
+    )
+    .await;
+    let route = NativeHttp1RouteProxyRoute::prefix("/asset/", Vec::new(), proxy_for(upstream))
+        .with_compression_config(gzip_test_config());
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_request_bytes(
+        proxy,
+        "GET /asset/text HTTP/1.1\r\nHost: route.test\r\nAccept-Encoding: gzip;q=0, *;q=1\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let response = String::from_utf8(response).unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(response_header(&response, "content-encoding"), None);
+    assert!(response.ends_with("wildcard precedence must leave this response uncompressed"));
+}
+
+#[cfg(feature = "compression-gzip")]
+#[tokio::test]
+async fn native_route_proxy_rejects_malformed_accept_encoding_parameters() {
+    let upstream = upstream_response(
+        "HTTP/1.1 200 OK\r\n\
+         content-type: text/plain\r\n\r\n\
+         malformed negotiation must leave this response uncompressed",
+    )
+    .await;
+    let route = NativeHttp1RouteProxyRoute::prefix("/asset/", Vec::new(), proxy_for(upstream))
+        .with_compression_config(gzip_test_config());
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_request_bytes(
+        proxy,
+        "GET /asset/text HTTP/1.1\r\nHost: route.test\r\nAccept-Encoding: gzip;q\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let response = String::from_utf8(response).unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(response_header(&response, "content-encoding"), None);
+    assert!(response.ends_with("malformed negotiation must leave this response uncompressed"));
+}
+
+#[cfg(feature = "compression-gzip")]
+#[tokio::test]
+async fn native_route_proxy_does_not_compress_qualified_private_responses() {
+    let upstream = upstream_response(
+        "HTTP/1.1 200 OK\r\n\
+         content-type: text/plain\r\n\
+         cache-control: private=\"Set-Cookie\"\r\n\r\n\
+         qualified private must leave this response uncompressed",
+    )
+    .await;
+    let route = NativeHttp1RouteProxyRoute::prefix("/asset/", Vec::new(), proxy_for(upstream))
+        .with_compression_config(gzip_test_config());
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    let response = downstream_request_bytes(
+        proxy,
+        "GET /asset/text HTTP/1.1\r\nHost: route.test\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let response = String::from_utf8(response).unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert_eq!(response_header(&response, "content-encoding"), None);
+    assert!(response.ends_with("qualified private must leave this response uncompressed"));
+}
+
+#[cfg(feature = "compression-gzip")]
+fn gzip_test_config() -> fluxheim_config::CompressionConfig {
+    fluxheim_config::CompressionConfig {
+        enabled: true,
+        gzip: true,
+        min_bytes: fluxheim_config::ByteSize::from_bytes(1),
+        max_input_bytes: fluxheim_config::ByteSize::from_bytes(4096),
+        max_output_bytes: fluxheim_config::ByteSize::from_bytes(4096),
+        ..Default::default()
+    }
+}
+
 #[tokio::test]
 async fn native_route_proxy_skips_disabled_route_response_headers() {
     let mut set = BTreeMap::new();

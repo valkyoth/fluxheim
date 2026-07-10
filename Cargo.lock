@@ -1029,6 +1029,7 @@ dependencies = [
  "bytes",
  "flate2",
  "fluxheim-common",
+ "fluxheim-protocol",
  "zstd",
 ]
 

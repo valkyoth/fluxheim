@@ -1,8 +1,7 @@
-use bytes::Bytes;
 use fluxheim_compression::{
-    ResponseCompressionEncoder, cache_control_directive_blocks_compression,
-    content_encoding_value_is_active, content_type_is_compressible,
-    input_length_within_compression_bounds, parse_accept_encoding_qvalue,
+    ResponseCompressionEncoder, accept_encoding_quality,
+    cache_control_directive_blocks_compression, content_encoding_value_is_active,
+    content_type_is_compressible, input_length_within_compression_bounds,
 };
 
 use crate::{NativeHttp1Request, NativeHttp1Response};
@@ -23,15 +22,14 @@ pub(crate) fn apply_native_response_compression(
     let Some(mut encoder) = selected_route_compression(request, response, config) else {
         return;
     };
-    let input = Bytes::copy_from_slice(response.body());
-    match encoder.encode_chunk(Some(&input), true) {
+    match encoder.encode_chunk(Some(response.body()), true) {
         Ok(encoded) => {
             response.remove_header("content-encoding");
             response.remove_header("content-length");
             response.remove_header("etag");
             response.push_header("content-encoding", encoder.encoding);
             append_vary_accept_encoding(response);
-            response.replace_body(encoded.to_vec());
+            response.replace_body(encoded);
         }
         Err(error) => {
             log::debug!(
@@ -122,44 +120,14 @@ fn compression_max_output_bytes(config: &fluxheim_config::CompressionConfig) -> 
 }
 
 fn request_accept_encoding_quality(request: &NativeHttp1Request, expected: &str) -> Option<u16> {
-    let mut wildcard_quality = None;
-    for token in request
-        .headers
-        .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("accept-encoding"))
-        .flat_map(|(_, value)| value.split(','))
-    {
-        let Some((coding, quality)) = accept_encoding_token_quality(token) else {
-            continue;
-        };
-        if coding.eq_ignore_ascii_case(expected) {
-            return (quality > 0).then_some(quality);
-        }
-        if coding == "*" && quality > 0 {
-            wildcard_quality = Some(wildcard_quality.unwrap_or(0).max(quality));
-        }
-    }
-    wildcard_quality
-}
-
-fn accept_encoding_token_quality(token: &str) -> Option<(&str, u16)> {
-    let mut parts = token.split(';');
-    let coding = parts.next().unwrap_or_default().trim();
-    if coding.is_empty() {
-        return None;
-    }
-    let mut quality = 1000u16;
-    for (name, value) in parts
-        .map(str::trim)
-        .filter_map(|parameter| parameter.split_once('='))
-    {
-        if !name.trim().eq_ignore_ascii_case("q") {
-            continue;
-        }
-        quality = parse_accept_encoding_qvalue(value.trim())?;
-        break;
-    }
-    Some((coding, quality))
+    accept_encoding_quality(
+        request
+            .headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("accept-encoding"))
+            .map(|(_, value)| value.as_str()),
+        expected,
+    )
 }
 
 fn response_has_content_encoding(response: &NativeHttp1Response) -> bool {

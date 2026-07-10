@@ -1993,17 +1993,23 @@ The compression path compresses only eligible `GET` responses with known
 `Content-Length`, status `200`, a matching client `Accept-Encoding`, no
 existing `Content-Encoding`, no `Set-Cookie`, no request `Cookie` or
 `Authorization`, no `Content-Range`, no `Cache-Control: no-transform`, and a
-conservative text, JavaScript, JSON, XML, or SVG media type. Fluxheim prefers
+conservative text, JavaScript, JSON, XML, or SVG media type. `Cache-Control:
+private` and `no-store` also suppress compression, including qualified forms
+such as `private="Set-Cookie"`. Fluxheim prefers
 `br`, then `zstd`, then `gzip` when those codecs are enabled and accepted by
 the client. Fluxheim removes `Content-Length` and `ETag` from compressed
 responses and adds `Vary: Accept-Encoding`. `Accept-Encoding` q-values are
 parsed as finite RFC-style values from `0` through `1` with at most three
-decimal digits; malformed values such as `NaN` or `Infinity` do not enable an
-encoding token.
+decimal digits. Explicit coding entries take precedence over `*`; malformed,
+unknown, duplicate, or empty parameter/list forms fail closed to an identity
+response rather than enabling an encoding.
 
 `min_bytes` and `max_input_bytes` bound the original response size.
-`max_output_bytes` bounds the encoded response size. The configured input
-maximum cannot exceed 64 MiB and the output maximum cannot exceed 128 MiB.
+`max_output_bytes` bounds the encoded response size with a codec sink that
+rejects writes before allocating beyond the limit. Emitted output allocations
+are transferred without a second body copy, and an encoder is discarded after
+any output-limit or allocation failure. The configured input maximum cannot
+exceed 64 MiB and the output maximum cannot exceed 128 MiB.
 `gzip_level` must be between `0` and `9`, `zstd_level` between `1` and `19`,
 and `brotli_quality` between `0` and `11`.
 

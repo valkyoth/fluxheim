@@ -5,8 +5,6 @@
 )]
 
 #[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
-use std::io;
-#[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
 use std::io::Write as _;
 
 #[cfg(feature = "brotli")]
@@ -19,36 +17,60 @@ use flate2::{Compression, write::GzEncoder};
 use fluxheim_common::{FluxError, FluxResult};
 
 #[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
+mod limited_output;
+#[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
+use limited_output::LimitedOutput;
+
+#[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
 pub struct ResponseCompressionEncoder {
     pub encoding: &'static str,
     inner: ResponseCompressionEncoderInner,
-    emitted: usize,
     total_output_bytes: usize,
-    max_output_bytes: usize,
 }
 
-pub fn encoding_token_allows(token: &str, expected: &str) -> bool {
-    let mut parts = token.split(';');
-    let coding = parts.next().unwrap_or_default().trim();
-    if !coding.eq_ignore_ascii_case(expected) && coding != "*" {
-        return false;
+pub fn accept_encoding_quality<'a>(
+    header_values: impl IntoIterator<Item = &'a str>,
+    expected: &str,
+) -> Option<u16> {
+    let mut specific = None;
+    let mut wildcard = None;
+
+    for header in header_values {
+        for item in header.split(',') {
+            let (coding, quality) = parse_accept_encoding_item(item)?;
+            if coding.eq_ignore_ascii_case(expected) {
+                specific = Some(specific.map_or(quality, |current: u16| current.min(quality)));
+            } else if coding == "*" {
+                wildcard = Some(wildcard.map_or(quality, |current: u16| current.min(quality)));
+            }
+        }
     }
 
-    for (name, value) in parts
-        .map(str::trim)
-        .filter_map(|parameter| parameter.split_once('='))
-    {
-        if !name.trim().eq_ignore_ascii_case("q") {
-            continue;
-        }
-        let Some(quality_per_mille) = parse_accept_encoding_qvalue(value.trim()) else {
-            return false;
-        };
-        if quality_per_mille == 0 {
-            return false;
-        }
+    specific.or(wildcard).filter(|quality| *quality > 0)
+}
+
+pub fn accept_encoding_allows(header: &str, expected: &str) -> bool {
+    accept_encoding_quality(std::iter::once(header), expected).is_some()
+}
+
+fn parse_accept_encoding_item(item: &str) -> Option<(&str, u16)> {
+    let mut parts = item.split(';');
+    let coding = parts.next()?.trim();
+    if coding.is_empty() || !fluxheim_protocol::http_token_valid(coding) {
+        return None;
     }
-    true
+
+    let mut quality = 1000u16;
+    let mut saw_quality = false;
+    for parameter in parts {
+        let (name, value) = parameter.trim().split_once('=')?;
+        if saw_quality || !name.trim().eq_ignore_ascii_case("q") {
+            return None;
+        }
+        quality = parse_accept_encoding_qvalue(value.trim())?;
+        saw_quality = true;
+    }
+    Some((coding, quality))
 }
 
 pub fn parse_accept_encoding_qvalue(value: &str) -> Option<u16> {
@@ -77,9 +99,13 @@ pub fn parse_accept_encoding_qvalue(value: &str) -> Option<u16> {
 }
 
 pub fn cache_control_directive_blocks_compression(directive: &str) -> bool {
-    directive.eq_ignore_ascii_case("no-transform")
-        || directive.eq_ignore_ascii_case("private")
-        || directive.eq_ignore_ascii_case("no-store")
+    let name = directive
+        .split_once('=')
+        .map_or(directive, |(name, _)| name)
+        .trim();
+    name.eq_ignore_ascii_case("no-transform")
+        || name.eq_ignore_ascii_case("private")
+        || name.eq_ignore_ascii_case("no-store")
 }
 
 pub fn content_type_is_compressible(content_type: &str) -> bool {
@@ -112,11 +138,11 @@ pub fn input_length_within_compression_bounds(length: u64, min_bytes: u64, max_b
 #[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
 enum ResponseCompressionEncoderInner {
     #[cfg(feature = "brotli")]
-    Brotli(Box<Option<CompressorWriter<Vec<u8>>>>),
+    Brotli(Box<Option<CompressorWriter<LimitedOutput>>>),
     #[cfg(feature = "gzip")]
-    Gzip(GzEncoder<Vec<u8>>),
+    Gzip(Option<GzEncoder<LimitedOutput>>),
     #[cfg(feature = "zstd")]
-    Zstd(Option<zstd::stream::write::Encoder<'static, Vec<u8>>>),
+    Zstd(Option<zstd::stream::write::Encoder<'static, LimitedOutput>>),
 }
 
 #[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
@@ -125,7 +151,6 @@ impl std::fmt::Debug for ResponseCompressionEncoder {
         formatter
             .debug_struct("ResponseCompressionEncoder")
             .field("encoding", &self.encoding)
-            .field("emitted", &self.emitted)
             .field("total_output_bytes", &self.total_output_bytes)
             .finish_non_exhaustive()
     }
@@ -138,14 +163,12 @@ impl ResponseCompressionEncoder {
         Self {
             encoding: "br",
             inner: ResponseCompressionEncoderInner::Brotli(Box::new(Some(CompressorWriter::new(
-                Vec::new(),
+                LimitedOutput::new(max_output_bytes),
                 4096,
                 quality,
                 22,
             )))),
-            emitted: 0,
             total_output_bytes: 0,
-            max_output_bytes,
         }
     }
 
@@ -153,13 +176,11 @@ impl ResponseCompressionEncoder {
     pub fn gzip(level: u32, max_output_bytes: usize) -> Self {
         Self {
             encoding: "gzip",
-            inner: ResponseCompressionEncoderInner::Gzip(GzEncoder::new(
-                Vec::new(),
+            inner: ResponseCompressionEncoderInner::Gzip(Some(GzEncoder::new(
+                LimitedOutput::new(max_output_bytes),
                 Compression::new(level),
-            )),
-            emitted: 0,
+            ))),
             total_output_bytes: 0,
-            max_output_bytes,
         }
     }
 
@@ -168,21 +189,16 @@ impl ResponseCompressionEncoder {
         Ok(Self {
             encoding: "zstd",
             inner: ResponseCompressionEncoderInner::Zstd(Some(
-                zstd::stream::write::Encoder::new(Vec::new(), level).map_err(|error| {
-                    FluxError::io("initialize zstd response compression", error)
-                })?,
+                zstd::stream::write::Encoder::new(LimitedOutput::new(max_output_bytes), level)
+                    .map_err(|error| {
+                        FluxError::io("initialize zstd response compression", error)
+                    })?,
             )),
-            emitted: 0,
             total_output_bytes: 0,
-            max_output_bytes,
         })
     }
 
-    pub fn encode_chunk(
-        &mut self,
-        input: Option<&Bytes>,
-        end_of_stream: bool,
-    ) -> FluxResult<Bytes> {
+    pub fn encode_chunk(&mut self, input: Option<&[u8]>, end_of_stream: bool) -> FluxResult<Bytes> {
         match &mut self.inner {
             #[cfg(feature = "brotli")]
             ResponseCompressionEncoderInner::Brotli(encoder_slot) => {
@@ -200,44 +216,37 @@ impl ResponseCompressionEncoder {
                     encoder
                         .flush()
                         .map_err(|error| FluxError::io("flush brotli response chunk", error))?;
-                    let bytes = take_new_compression_bytes(
-                        encoder.get_mut(),
-                        &mut self.emitted,
-                        &mut self.total_output_bytes,
-                        self.max_output_bytes,
-                    )?;
+                    let bytes =
+                        take_compression_bytes(encoder.get_mut(), &mut self.total_output_bytes)?;
                     *encoder_slot.as_mut() = Some(encoder);
                     return Ok(bytes);
                 };
-                take_final_compression_bytes(
-                    output,
-                    &mut self.emitted,
-                    &mut self.total_output_bytes,
-                    self.max_output_bytes,
-                )
+                take_final_compression_bytes(output, &mut self.total_output_bytes)
             }
             #[cfg(feature = "gzip")]
-            ResponseCompressionEncoderInner::Gzip(encoder) => {
+            ResponseCompressionEncoderInner::Gzip(encoder_slot) => {
+                let Some(mut encoder) = encoder_slot.take() else {
+                    return Ok(Bytes::new());
+                };
                 if let Some(input) = input {
                     encoder
                         .write_all(input)
                         .map_err(|error| FluxError::io("write gzip response chunk", error))?;
                 }
                 if end_of_stream {
-                    encoder
-                        .try_finish()
+                    let output = encoder
+                        .finish()
                         .map_err(|error| FluxError::io("finish gzip response stream", error))?;
+                    take_final_compression_bytes(output, &mut self.total_output_bytes)
                 } else {
                     encoder
                         .flush()
                         .map_err(|error| FluxError::io("flush gzip response chunk", error))?;
+                    let bytes =
+                        take_compression_bytes(encoder.get_mut(), &mut self.total_output_bytes)?;
+                    *encoder_slot = Some(encoder);
+                    Ok(bytes)
                 }
-                take_new_compression_bytes(
-                    encoder.get_mut(),
-                    &mut self.emitted,
-                    &mut self.total_output_bytes,
-                    self.max_output_bytes,
-                )
             }
             #[cfg(feature = "zstd")]
             ResponseCompressionEncoderInner::Zstd(encoder_slot) => {
@@ -257,182 +266,41 @@ impl ResponseCompressionEncoder {
                     encoder
                         .flush()
                         .map_err(|error| FluxError::io("flush zstd response chunk", error))?;
-                    let bytes = take_new_compression_bytes(
-                        encoder.get_mut(),
-                        &mut self.emitted,
-                        &mut self.total_output_bytes,
-                        self.max_output_bytes,
-                    )?;
+                    let bytes =
+                        take_compression_bytes(encoder.get_mut(), &mut self.total_output_bytes)?;
                     *encoder_slot = Some(encoder);
                     return Ok(bytes);
                 };
-                take_final_compression_bytes(
-                    output,
-                    &mut self.emitted,
-                    &mut self.total_output_bytes,
-                    self.max_output_bytes,
-                )
+                take_final_compression_bytes(output, &mut self.total_output_bytes)
             }
         }
     }
 }
 
 #[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
-fn take_new_compression_bytes(
-    output: &mut Vec<u8>,
-    emitted: &mut usize,
+fn take_compression_bytes(
+    output: &mut LimitedOutput,
     total_output_bytes: &mut usize,
-    max_output_bytes: usize,
 ) -> FluxResult<Bytes> {
-    let Some(new_len) = output.len().checked_sub(*emitted) else {
-        return Err(compressed_response_exceeds_limit_error());
-    };
-    ensure_compressed_output_within_limit(new_len, total_output_bytes, max_output_bytes)?;
-    let bytes = Bytes::copy_from_slice(&output[*emitted..]);
-    *output = Vec::new();
-    *emitted = 0;
+    let bytes = output
+        .take_bytes()
+        .map_err(|error| FluxError::io("collect compressed response output", error))?;
+    *total_output_bytes = output.total_written();
     Ok(bytes)
 }
 
-#[cfg(any(feature = "brotli", feature = "zstd"))]
+#[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
 fn take_final_compression_bytes(
-    output: Vec<u8>,
-    emitted: &mut usize,
+    output: LimitedOutput,
     total_output_bytes: &mut usize,
-    max_output_bytes: usize,
 ) -> FluxResult<Bytes> {
-    let Some(new_len) = output.len().checked_sub(*emitted) else {
-        return Err(compressed_response_exceeds_limit_error());
-    };
-    ensure_compressed_output_within_limit(new_len, total_output_bytes, max_output_bytes)?;
-    let bytes = Bytes::copy_from_slice(&output[*emitted..]);
-    *emitted = 0;
+    let (bytes, total_written) = output
+        .into_bytes()
+        .map_err(|error| FluxError::io("collect final compressed response output", error))?;
+    *total_output_bytes = total_written;
     Ok(bytes)
-}
-
-#[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
-fn ensure_compressed_output_within_limit(
-    new_len: usize,
-    total_output_bytes: &mut usize,
-    max_output_bytes: usize,
-) -> FluxResult<()> {
-    let Some(next_total) = total_output_bytes.checked_add(new_len) else {
-        return Err(compressed_response_exceeds_limit_error());
-    };
-    if next_total > max_output_bytes {
-        return Err(compressed_response_exceeds_limit_error());
-    }
-    *total_output_bytes = next_total;
-    Ok(())
-}
-
-#[cfg(any(feature = "brotli", feature = "gzip", feature = "zstd"))]
-fn compressed_response_exceeds_limit_error() -> FluxError {
-    FluxError::io(
-        "compressed response exceeds max_output_bytes",
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "compressed response exceeds max_output_bytes",
-        ),
-    )
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        cache_control_directive_blocks_compression, content_encoding_value_is_active,
-        content_type_is_compressible, encoding_token_allows,
-        input_length_within_compression_bounds, parse_accept_encoding_qvalue,
-    };
-
-    #[cfg(feature = "gzip")]
-    use std::io;
-
-    #[cfg(feature = "gzip")]
-    use bytes::Bytes;
-
-    #[cfg(feature = "gzip")]
-    use super::{ResponseCompressionEncoder, ResponseCompressionEncoderInner};
-
-    #[test]
-    fn parses_accept_encoding_qvalues() {
-        assert_eq!(parse_accept_encoding_qvalue("0"), Some(0));
-        assert_eq!(parse_accept_encoding_qvalue("0.125"), Some(125));
-        assert_eq!(parse_accept_encoding_qvalue("1"), Some(1000));
-        assert_eq!(parse_accept_encoding_qvalue("1.000"), Some(1000));
-        assert_eq!(parse_accept_encoding_qvalue("1.001"), None);
-        assert_eq!(parse_accept_encoding_qvalue("0.0000"), None);
-        assert_eq!(parse_accept_encoding_qvalue("NaN"), None);
-    }
-
-    #[test]
-    fn parses_accept_encoding_tokens() {
-        assert!(encoding_token_allows("gzip", "gzip"));
-        assert!(encoding_token_allows("GZIP;q=1.0", "gzip"));
-        assert!(encoding_token_allows("*;q=0.5", "br"));
-        assert!(!encoding_token_allows("br;q=0", "br"));
-        assert!(!encoding_token_allows("gzip;q=banana", "gzip"));
-        assert!(!encoding_token_allows("br", "gzip"));
-    }
-
-    #[test]
-    fn classifies_compression_response_policy_tokens() {
-        assert!(cache_control_directive_blocks_compression("no-transform"));
-        assert!(cache_control_directive_blocks_compression("PRIVATE"));
-        assert!(!cache_control_directive_blocks_compression("max-age=60"));
-
-        assert!(content_type_is_compressible("text/plain; charset=utf-8"));
-        assert!(content_type_is_compressible("application/json"));
-        assert!(content_type_is_compressible("image/svg+xml"));
-        assert!(!content_type_is_compressible("image/png"));
-
-        assert!(!content_encoding_value_is_active("identity"));
-        assert!(!content_encoding_value_is_active(" IDENTITY "));
-        assert!(content_encoding_value_is_active("gzip"));
-
-        assert!(input_length_within_compression_bounds(1024, 512, 2048));
-        assert!(!input_length_within_compression_bounds(128, 512, 2048));
-        assert!(!input_length_within_compression_bounds(4096, 512, 2048));
-    }
-
-    #[cfg(feature = "gzip")]
-    #[test]
-    fn gzip_encoder_releases_retained_output_between_chunks() {
-        let mut encoder = ResponseCompressionEncoder::gzip(0, 4096);
-        let first = encoder
-            .encode_chunk(Some(&Bytes::from(vec![b'a'; 1024])), false)
-            .expect("first gzip chunk should encode");
-        assert!(!first.is_empty());
-        assert!(encoder.total_output_bytes >= first.len());
-        let ResponseCompressionEncoderInner::Gzip(gzip) = &encoder.inner else {
-            panic!("expected gzip encoder");
-        };
-        assert_eq!(gzip.get_ref().len(), 0);
-
-        let second = encoder
-            .encode_chunk(Some(&Bytes::from(vec![b'b'; 1024])), false)
-            .expect("second gzip chunk should encode");
-        assert!(!second.is_empty());
-        assert!(encoder.total_output_bytes >= first.len() + second.len());
-        let ResponseCompressionEncoderInner::Gzip(gzip) = &encoder.inner else {
-            panic!("expected gzip encoder");
-        };
-        assert_eq!(gzip.get_ref().len(), 0);
-    }
-
-    #[cfg(feature = "gzip")]
-    #[test]
-    fn gzip_encoder_limit_counts_released_output_cumulatively() {
-        let mut encoder = ResponseCompressionEncoder::gzip(0, 4096);
-        let first = encoder
-            .encode_chunk(Some(&Bytes::from(vec![b'a'; 1024])), false)
-            .expect("first gzip chunk should encode");
-        assert!(!first.is_empty());
-        encoder.max_output_bytes = encoder.total_output_bytes + 1;
-
-        let error = encoder
-            .encode_chunk(Some(&Bytes::from(vec![b'b'; 1024])), true)
-            .expect_err("gzip output should exceed configured limit");
-        assert_eq!(error.io_kind(), Some(io::ErrorKind::InvalidData));
-    }
-}
+#[path = "compression_tests.rs"]
+mod tests;
