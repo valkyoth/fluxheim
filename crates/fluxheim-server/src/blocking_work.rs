@@ -4,6 +4,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const MAX_REQUEST_BLOCKING_WORK: usize = 256;
 const MAX_NON_CRITICAL_BLOCKING_WORK: usize = 224;
+#[cfg(any(test, feature = "auth-request"))]
 const MAX_AUTH_BLOCKING_WORK: usize = 96;
 #[cfg(any(test, feature = "wasm"))]
 const MAX_WASM_BLOCKING_WORK: usize = 96;
@@ -16,6 +17,7 @@ static REQUEST_BLOCKING_WORK: OnceLock<NativeRequestBlockingWorkBudgets> = OnceL
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum NativeBlockingWorkClass {
+    #[cfg(any(test, feature = "auth-request"))]
     Auth,
     #[cfg(any(test, feature = "wasm"))]
     Wasm,
@@ -35,6 +37,7 @@ pub(crate) struct NativeRequestBlockingWorkPermit {
 struct NativeRequestBlockingWorkBudgets {
     total: Arc<Semaphore>,
     non_critical: Arc<Semaphore>,
+    #[cfg(any(test, feature = "auth-request"))]
     auth: Arc<Semaphore>,
     #[cfg(any(test, feature = "wasm"))]
     wasm: Arc<Semaphore>,
@@ -49,6 +52,7 @@ impl NativeRequestBlockingWorkBudgets {
         Self {
             total: Arc::new(Semaphore::new(MAX_REQUEST_BLOCKING_WORK)),
             non_critical: Arc::new(Semaphore::new(MAX_NON_CRITICAL_BLOCKING_WORK)),
+            #[cfg(any(test, feature = "auth-request"))]
             auth: Arc::new(Semaphore::new(MAX_AUTH_BLOCKING_WORK)),
             #[cfg(any(test, feature = "wasm"))]
             wasm: Arc::new(Semaphore::new(MAX_WASM_BLOCKING_WORK)),
@@ -61,6 +65,7 @@ impl NativeRequestBlockingWorkBudgets {
 
     fn class_budget(&self, class: NativeBlockingWorkClass) -> &Arc<Semaphore> {
         match class {
+            #[cfg(any(test, feature = "auth-request"))]
             NativeBlockingWorkClass::Auth => &self.auth,
             #[cfg(any(test, feature = "wasm"))]
             NativeBlockingWorkClass::Wasm => &self.wasm,
