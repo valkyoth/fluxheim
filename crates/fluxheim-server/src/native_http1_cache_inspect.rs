@@ -5,14 +5,17 @@ use fluxheim_cache::{
 };
 use fluxheim_config::CacheConfig;
 
-use super::{NativeDiskCache, NativeDiskCacheObjectMetadata, native_instant_to_unix_secs};
+use super::native_http1_cache_purge::registered_native_disk_cache;
+use super::{NativeDiskCacheObjectMetadata, native_instant_to_unix_secs};
 
 pub fn inspect_native_disk_cache_object(
+    vhost: &str,
+    route: Option<&str>,
     config: &CacheConfig,
     primary_key: &str,
     request_headers: &[(String, String)],
 ) -> Option<NativeDiskCacheObjectMetadata> {
-    let cache = NativeDiskCache::from_config(config)?;
+    let cache = registered_native_disk_cache(vhost, route)?;
     let entry = cache.get(primary_key, |fields| {
         native_inspection_vary_cache_key(primary_key, fields, request_headers)
     })?;

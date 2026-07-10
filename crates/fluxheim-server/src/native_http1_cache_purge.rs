@@ -395,6 +395,16 @@ fn native_disk_cache_purge_targets_for(
         .collect()
 }
 
+pub(super) fn registered_native_disk_cache(
+    vhost: &str,
+    route: Option<&str>,
+) -> Option<Arc<NativeDiskCache>> {
+    native_disk_cache_purge_targets_for(vhost, route)
+        .into_iter()
+        .next()
+        .map(|target| target.cache)
+}
+
 fn native_disk_cache_purge_targets() -> Vec<NativeDiskCachePurgeTarget> {
     let Some(registry) = NATIVE_DISK_CACHE_PURGE_REGISTRY.get() else {
         return Vec::new();

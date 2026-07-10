@@ -356,7 +356,16 @@ impl NativeProxyMemoryCache {
         if let Some(disk) = &self.disk {
             let disk = Arc::clone(disk);
             let entry = entry.clone();
-            match tokio::task::spawn_blocking(move || disk.store(disk_key, &entry)).await {
+            let Ok(blocking_permit) = crate::blocking_work::try_acquire_request_blocking_work()
+            else {
+                return Ok(());
+            };
+            match tokio::task::spawn_blocking(move || {
+                let _blocking_permit = blocking_permit;
+                disk.store(disk_key, &entry)
+            })
+            .await
+            {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
                     log::debug!(

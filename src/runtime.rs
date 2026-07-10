@@ -86,6 +86,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 }
 
 #[cfg(feature = "proxy")]
+const NATIVE_RUNTIME_MAX_BLOCKING_THREADS: usize = 384;
+
+#[cfg(feature = "proxy")]
 fn run_native_runtime(
     config: Config,
     server_plan: fluxheim_server::ServerPlan,
@@ -98,6 +101,7 @@ fn run_native_runtime(
     let threads = server_plan.process().threads().max(1);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(threads)
+        .max_blocking_threads(NATIVE_RUNTIME_MAX_BLOCKING_THREADS)
         .enable_all()
         .build()?;
     runtime.block_on(run_native_runtime_async(config, server_plan))

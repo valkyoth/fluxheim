@@ -146,8 +146,21 @@ impl NativeProxySnapshot {
                 .vhosts
                 .iter()
                 .find(|vhost| vhost.name == preview.vhost)
+            && let Some(cache_config) = preview
+                .route
+                .as_deref()
+                .and_then(|route_name| {
+                    vhost
+                        .routes
+                        .iter()
+                        .find(|route| route.name == route_name)
+                        .and_then(|route| route.cache.as_ref())
+                })
+                .or(Some(&vhost.cache))
             && let Some(metadata) = fluxheim_server::inspect_native_disk_cache_object(
-                &vhost.cache,
+                &vhost.name,
+                preview.route.as_deref(),
+                cache_config,
                 primary_key,
                 &native_cache_lookup_request_headers(request),
             )

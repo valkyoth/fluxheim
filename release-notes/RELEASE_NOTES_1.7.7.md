@@ -59,6 +59,13 @@ deterministic unsupported-call rejection.
   cross-policy allocator corruption from becoming cache disclosure.
 - Record strict Host/authority routing rejections through the native metrics
   bridge.
+- Inspect disk objects through the registered live cache instead of constructing
+  a temporary allocator, and hold a lifetime-exclusive storage-bin lock file so
+  separate Fluxheim processes cannot allocate the same root concurrently.
+- Add one shared `256`-slot request-driven blocking-work budget across Wasm,
+  external auth, traffic mirrors, disk-cache operations, and ACME challenge
+  reads. Explicitly cap Tokio's blocking pool at `384`, leaving `128` slots
+  outside request admission for operational work.
 
 ## Changed
 

@@ -452,9 +452,11 @@ is implemented with Tokio semaphores and is complete before work is submitted
 to Tokio's blocking pool. `queue_limit = 0` rejects immediately at the
 configured concurrency limit; a positive value permits only that many async
 waiters and never enlarges the blocking-work queue. Active and queued budgets
-are each hard-capped at `256`. Runtime wall-time enforcement uses one
-process-wide shared epoch ticker rather than one OS watchdog thread per
-invocation.
+are each hard-capped at `256`. Immediately before blocking submission, Wasm
+also acquires Fluxheim's shared `256`-slot request-driven blocking-work budget,
+which is shared with external auth, traffic mirrors, disk-cache work, and ACME
+challenge reads. Runtime wall-time enforcement uses one process-wide shared
+epoch ticker rather than one OS watchdog thread per invocation.
 
 `wasm.max_total_cache_concurrent_executions` caps total concurrent
 `cache-lookup` and `cache-store` plugin executions across the whole process.

@@ -26,6 +26,53 @@ fn headers(values: &[(&str, &str)]) -> HeaderMap {
     headers
 }
 
+fn storage_bin_config(path: &std::path::Path) -> CacheConfig {
+    CacheConfig {
+        enabled: true,
+        max_object_bytes: ByteSize::from_bytes(1024),
+        disk: fluxheim_config::CacheDiskConfig {
+            enabled: true,
+            backend: CacheDiskBackend::StorageBin,
+            path: Some(path.to_path_buf()),
+            max_size_bytes: ByteSize::from_bytes(1024 * 1024),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(64 * 1024),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn disk_cache_entry(body: &'static [u8]) -> NativeMemoryCacheEntry {
+    let now = Instant::now();
+    NativeMemoryCacheEntry {
+        status: 200,
+        reason: "OK".to_owned(),
+        headers: vec![("cache-control".to_owned(), "max-age=60".to_owned())],
+        content_length: Some(body.len() as u64),
+        body: Arc::from(body),
+        expires_at: now + Duration::from_secs(60),
+        stale_while_revalidate_until: None,
+        stale_if_error_until: None,
+        stored_at: now,
+        weight: 64,
+    }
+}
+
+fn disk_cache_store_key(key: &str) -> NativeDiskCacheStoreKey {
+    NativeDiskCacheStoreKey {
+        combined: key.to_owned(),
+        primary: key.to_owned(),
+        user_tag: "cache.test".to_owned(),
+        index_path: Some(format!("/{key}")),
+        cache_tags: Vec::new(),
+        vary_fields: Vec::new(),
+    }
+}
+
 #[test]
 fn native_peer_fill_cache_ttl_subtracts_upstream_age() {
     let cache = CacheConfig::default();
@@ -243,4 +290,66 @@ fn disk_cache_rejects_record_whose_embedded_key_does_not_match_lookup() {
 
     assert!(cache.get("wrong-key", |_| None).is_none());
     assert!(cache.with_state(|state| !state.objects.contains_key("wrong-key")));
+}
+
+#[test]
+fn live_cache_inspection_uses_registered_allocator_during_inserts() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = storage_bin_config(&directory.path().join("cache"));
+    let cache = Arc::new(NativeDiskCache::from_config(&config).unwrap());
+    let vhost: Arc<str> = Arc::from(format!("inspect-live-{}", std::process::id()));
+    register_native_disk_cache_purge_handle(vhost.clone(), None, &cache);
+    cache
+        .store(disk_cache_store_key("first"), &disk_cache_entry(b"first"))
+        .unwrap();
+
+    let writer = Arc::clone(&cache);
+    let insert = std::thread::spawn(move || {
+        writer
+            .store(disk_cache_store_key("second"), &disk_cache_entry(b"second"))
+            .unwrap();
+    });
+    let first = super::inspect_native_disk_cache_object(&vhost, None, &config, "first", &[]);
+    insert.join().unwrap();
+    let second = super::inspect_native_disk_cache_object(&vhost, None, &config, "second", &[]);
+
+    assert_eq!(first.unwrap().body_bytes, 5);
+    assert_eq!(second.unwrap().body_bytes, 6);
+    assert_eq!(cache.stats().entries, 2);
+}
+
+const STORAGE_BIN_LEASE_CHILD_ROOT: &str = "FLUXHEIM_STORAGE_BIN_LEASE_CHILD_ROOT";
+const STORAGE_BIN_LEASE_CHILD_MARKER: &str = "FLUXHEIM_STORAGE_BIN_LEASE_CHILD_MARKER";
+
+#[test]
+fn storage_bin_lease_child_process() {
+    let Some(root) = std::env::var_os(STORAGE_BIN_LEASE_CHILD_ROOT) else {
+        return;
+    };
+    let marker = std::env::var_os(STORAGE_BIN_LEASE_CHILD_MARKER).unwrap();
+    let config = storage_bin_config(std::path::Path::new(&root));
+
+    let error = NativeDiskCacheBackend::from_config(&config).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+    std::fs::write(marker, b"locked").unwrap();
+}
+
+#[test]
+fn storage_bin_lease_rejects_second_process() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("cache");
+    let marker = directory.path().join("child-confirmed");
+    let config = storage_bin_config(&root);
+    let _cache = NativeDiskCache::from_config(&config).unwrap();
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--exact")
+        .arg("native_http1_cache::tests::storage_bin_lease_child_process")
+        .arg("--nocapture")
+        .env(STORAGE_BIN_LEASE_CHILD_ROOT, &root)
+        .env(STORAGE_BIN_LEASE_CHILD_MARKER, &marker)
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert_eq!(std::fs::read(marker).unwrap(), b"locked");
 }

@@ -73,7 +73,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | --- | --- | --- |
 | Proxy cache | ✅ | Vhost and route-scoped cache policies. |
 | Memory cache | ✅ | Bounded in-memory cache tier. |
-| Disk cache | ✅ | Filesystem and storage-bin disk backends with ordered eviction, one process-wide persistence worker, unique-root enforcement, and coalesced durable index writes. |
+| Disk cache | ✅ | Filesystem and storage-bin disk backends with ordered eviction, one process-wide persistence worker, unique-root and cross-process lease enforcement, live inspection, and coalesced durable index writes. |
 | Tiered cache | ✅ | Memory plus disk storage plans. |
 | Encrypted disk cache | ✅ | Optional local-key and OpenBao transit encryption paths. |
 | Static-file cache | ✅ | Optional local static-file caching. |
@@ -107,7 +107,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | HTTP/2 origins | ✅ | Upstream HTTP version controls and bounded HTTP/2 settings. |
 | gRPC pass-through | ✅ | Route-scoped HTTP/2 gRPC policy; no transcoding. |
 | WebSocket / HTTP upgrade | ✅ | `1.4.1`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
-| External auth subrequests | ✅ | `1.4.1`; `[proxy.auth_request]` with bounded header/body forwarding plus per-service and process-wide pre-submission admission. |
+| External auth subrequests | ✅ | `1.4.1`; `[proxy.auth_request]` with bounded header/body forwarding plus per-service, process-wide, and shared blocking-work admission. |
 | Traffic mirroring | ✅ | `1.4.1`; `traffic-mirror` feature with safe bodyless shadow requests. |
 | TCP stream proxying | ✅ | Optional `stream-proxy` feature with Fluxheim-owned L4 TCP listener/data-path and upstream TLS connector boundaries, source IP/CIDR allow/deny policy, hostname-upstream DNS-rebinding guards, weighted upstream selection, drain/backup policy, bounded idle/lifetime/byte/connect controls, route-local PROXY protocol receive/send, and stream upstream TLS/mTLS controls. |
 | UDP/GSLB beta boundary | Limited | `1.5.16`; separate `[udp]` config namespace and `udp-proxy` feature gate with beta DNS-style request/response forwarding, bounded response waits, oversized-response drops, drop-log rate limiting, and syslog one-way forwarding. Public DNS reflector hardening, QUIC pass-through, game proxying, production UDP support, and generic UDP/GSLB platform behavior are not included yet. |

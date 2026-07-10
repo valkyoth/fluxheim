@@ -64,7 +64,9 @@ impl NativeProxyMemoryCache {
         let disk = self.disk.as_ref()?.clone();
         let key = key.to_owned();
         let request = request.clone();
+        let blocking_permit = crate::blocking_work::try_acquire_request_blocking_work().ok()?;
         match tokio::task::spawn_blocking(move || {
+            let _blocking_permit = blocking_permit;
             disk.get(&key, |fields| native_vary_cache_key(&key, fields, &request))
         })
         .await

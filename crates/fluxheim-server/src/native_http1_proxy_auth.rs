@@ -92,8 +92,15 @@ impl NativeAuthRequest {
                     "process-wide authorization capacity saturated",
                 )
             })?;
+        let blocking_permit =
+            crate::blocking_work::try_acquire_request_blocking_work().map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "process-wide request blocking-work capacity saturated",
+                )
+            })?;
         tokio::task::spawn_blocking(move || {
-            let _permits = (service_permit, global_permit);
+            let _permits = (service_permit, global_permit, blocking_permit);
             auth.fetch_decision(&input)
         })
         .await

@@ -311,10 +311,26 @@ async fn upstream_hold_response(
 }
 
 async fn route_proxy_listener(route_proxy: NativeHttp1RouteProxy) -> std::net::SocketAddr {
+    let (addr, shutdown_tx, task) = route_proxy_listener_with_shutdown(route_proxy).await;
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let _ = shutdown_tx.send(());
+        let _ = task.await;
+    });
+    addr
+}
+
+async fn route_proxy_listener_with_shutdown(
+    route_proxy: NativeHttp1RouteProxy,
+) -> (
+    std::net::SocketAddr,
+    tokio::sync::oneshot::Sender<()>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         serve_native_http1_listener(
             listener,
             DownstreamHttp1Policy::default(),
@@ -326,11 +342,7 @@ async fn route_proxy_listener(route_proxy: NativeHttp1RouteProxy) -> std::net::S
         .await
         .unwrap();
     });
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        let _ = shutdown_tx.send(());
-    });
-    addr
+    (addr, shutdown_tx, task)
 }
 
 async fn downstream_get(proxy: std::net::SocketAddr, path: &str) -> String {

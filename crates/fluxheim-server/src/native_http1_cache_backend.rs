@@ -9,6 +9,7 @@ use fluxheim_cache::{
     prepare_storage_bin_layout,
 };
 use fluxheim_config::{CacheConfig, CacheDiskBackend};
+use fs2::FileExt as _;
 
 use super::native_http1_cache_disk_path::prepare_native_disk_cache_root;
 use super::native_http1_cache_memory::NativeMemoryCacheVariant;
@@ -24,6 +25,12 @@ pub(super) struct NativeStorageBinBackend {
     pub(super) layout: StorageBinLayoutPlan,
     pub(super) files: StorageBinFileSet,
     pub(super) free_map: Mutex<StorageBinFreeMap>,
+    _lease: NativeStorageBinLease,
+}
+
+#[derive(Debug)]
+struct NativeStorageBinLease {
+    _file: std::fs::File,
 }
 
 #[derive(Debug, Default)]
@@ -117,6 +124,7 @@ impl NativeDiskCacheBackend {
             CacheDiskBackend::StorageBin => {
                 let layout = prepare_native_storage_bin_layout(config)?;
                 let root = layout.root.clone();
+                let lease = acquire_native_storage_bin_lease(&root)?;
                 let free_map = StorageBinFreeMap::new(&layout);
                 let files = StorageBinFileSet::new(layout.clone());
                 Ok((
@@ -125,11 +133,74 @@ impl NativeDiskCacheBackend {
                         layout,
                         files,
                         free_map: Mutex::new(free_map),
+                        _lease: lease,
                     })),
                 ))
             }
         }
     }
+}
+
+fn acquire_native_storage_bin_lease(
+    root: &std::path::Path,
+) -> std::io::Result<NativeStorageBinLease> {
+    let file = open_native_storage_bin_lease_file(root)?;
+    file.try_lock_exclusive().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("storage-bin root is already owned: {}", root.display()),
+            )
+        } else {
+            error
+        }
+    })?;
+    Ok(NativeStorageBinLease { _file: file })
+}
+
+#[cfg(unix)]
+fn open_native_storage_bin_lease_file(root: &std::path::Path) -> std::io::Result<std::fs::File> {
+    let root_fd = rustix::fs::open(
+        root,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(native_storage_bin_rustix_error)?;
+    let fd = rustix::fs::openat(
+        &root_fd,
+        ".fluxheim-storage-bin.lock",
+        rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::RDWR
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+    )
+    .map_err(native_storage_bin_rustix_error)?;
+    Ok(fd.into())
+}
+
+#[cfg(unix)]
+fn native_storage_bin_rustix_error(error: rustix::io::Errno) -> std::io::Error {
+    std::io::Error::from_raw_os_error(error.raw_os_error())
+}
+
+#[cfg(not(unix))]
+fn open_native_storage_bin_lease_file(root: &std::path::Path) -> std::io::Result<std::fs::File> {
+    let path = root.join(".fluxheim-storage-bin.lock");
+    if std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "storage-bin lease file must not be a symlink",
+        ));
+    }
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(path)
 }
 
 pub(crate) fn prepare_native_storage_bin_layout(

@@ -58,6 +58,11 @@ behavior when the change improves security or project direction.
   encryption keys in `sanitization::SecretBytes<32>`.
 - Reject duplicate canonical storage-bin roots, verify persisted cache object
   keys before serving, and record strict Host-routing rejections in metrics.
+- Route cache inspection through registered live allocators and hold an
+  exclusive filesystem lease for every active storage-bin root.
+- Bound aggregate request-driven blocking work across Wasm, auth, mirrors,
+  disk cache, and ACME at 256 beneath an explicit 384-thread Tokio blocking
+  pool, preserving operational headroom.
 - Pin publishing actions, security-tool installs, and container base images to
   immutable reviewed versions and digests.
 

@@ -232,6 +232,12 @@ internal cache implementation.
   resolve to the same root; shared-root allocator semantics are not supported.
   Persisted objects also carry their combined cache key, which must match the
   requested index key before an object can be served.
+- Each allocator holds an exclusive `.fluxheim-storage-bin.lock` filesystem
+  lease for its complete lifetime. Another Fluxheim process, including a second
+  replica pointed at the same persistent volume, fails to open the root while
+  that lease is held. Admin and CLI inspection resolve the registered live
+  cache by vhost/route and never construct a temporary allocator or write an
+  independent index.
 - The allocator model uses first-fit free-range reuse within bounded bins and
   refuses allocations once the configured disk-cache byte budget is exhausted.
   Free ranges are merged after release so evictions can make space without

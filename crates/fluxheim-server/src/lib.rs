@@ -7,6 +7,7 @@
 use fluxheim_runtime::ShutdownView;
 
 mod background;
+mod blocking_work;
 mod control;
 mod http1;
 mod http2;

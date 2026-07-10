@@ -18,34 +18,41 @@ pub(crate) async fn native_acme_http_01_response(
     let Some(token) = http_01_token_from_path(&path).map(str::to_owned) else {
         return NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection();
     };
+    let Ok(blocking_permit) = crate::blocking_work::try_acquire_request_blocking_work() else {
+        return NativeHttp1Response::new(503, "Service Unavailable", b"service unavailable\n")
+            .close_connection();
+    };
 
     let store = store.clone();
-    let key_authorization =
-        match tokio::task::spawn_blocking(move || store.load_key_authorization(&token)).await {
-            Ok(Ok(Some(value))) => value,
-            Ok(Ok(None)) => {
-                return NativeHttp1Response::new(404, "Not Found", b"not found\n")
-                    .close_connection();
-            }
-            Ok(Err(error)) => {
-                log::error!("failed to load ACME HTTP-01 challenge token: {error}");
-                return NativeHttp1Response::new(
-                    500,
-                    "Internal Server Error",
-                    b"internal server error\n",
-                )
-                .close_connection();
-            }
-            Err(error) => {
-                log::error!("ACME HTTP-01 challenge token loader failed: {error}");
-                return NativeHttp1Response::new(
-                    500,
-                    "Internal Server Error",
-                    b"internal server error\n",
-                )
-                .close_connection();
-            }
-        };
+    let key_authorization = match tokio::task::spawn_blocking(move || {
+        let _blocking_permit = blocking_permit;
+        store.load_key_authorization(&token)
+    })
+    .await
+    {
+        Ok(Ok(Some(value))) => value,
+        Ok(Ok(None)) => {
+            return NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection();
+        }
+        Ok(Err(error)) => {
+            log::error!("failed to load ACME HTTP-01 challenge token: {error}");
+            return NativeHttp1Response::new(
+                500,
+                "Internal Server Error",
+                b"internal server error\n",
+            )
+            .close_connection();
+        }
+        Err(error) => {
+            log::error!("ACME HTTP-01 challenge token loader failed: {error}");
+            return NativeHttp1Response::new(
+                500,
+                "Internal Server Error",
+                b"internal server error\n",
+            )
+            .close_connection();
+        }
+    };
 
     let content_length = key_authorization.len() as u64;
     let body = if request.method == "HEAD" {

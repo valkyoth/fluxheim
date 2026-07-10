@@ -53,14 +53,17 @@ impl NativeTrafficMirror {
         let Some(mirror_request) = self.request(request) else {
             return;
         };
-        let Some(_slot) = acquire_native_traffic_mirror_slot(
+        let Some(slot) = acquire_native_traffic_mirror_slot(
             &mirror_request.slot_key,
             mirror_request.max_in_flight,
         ) else {
             return;
         };
+        let Ok(blocking_permit) = crate::blocking_work::try_acquire_request_blocking_work() else {
+            return;
+        };
         tokio::task::spawn_blocking(move || {
-            let _slot = _slot;
+            let _permits = (slot, blocking_permit);
             if let Err(error) = send_native_traffic_mirror_request(&mirror_request) {
                 log::debug!(
                     target: "fluxheim::traffic_mirror",

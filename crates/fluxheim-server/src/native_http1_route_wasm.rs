@@ -179,6 +179,7 @@ pub(crate) enum NativeWasmHookError {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum NativeWasmAdmissionScope {
+    BlockingWork,
     Global,
     CacheGlobal,
     CacheVhost,
@@ -829,7 +830,11 @@ impl NativeWasmHook {
                 .acquire()
                 .await
                 .map_err(|_| NativeWasmHookError::Admission(global_admission_scope))?;
-            Ok::<_, NativeWasmHookError>((attachment, plugin_permit, vhost, global))
+            let blocking =
+                crate::blocking_work::try_acquire_request_blocking_work().map_err(|_| {
+                    NativeWasmHookError::Admission(NativeWasmAdmissionScope::BlockingWork)
+                })?;
+            Ok::<_, NativeWasmHookError>((attachment, plugin_permit, vhost, global, blocking))
         }
         .await;
         let permits = match permits {
@@ -1833,6 +1838,7 @@ fn admission_controller(
 impl NativeWasmAdmissionScope {
     fn as_label(self) -> &'static str {
         match self {
+            Self::BlockingWork => "blocking-work",
             Self::Global => "global",
             Self::CacheGlobal => "cache-global",
             Self::CacheVhost => "cache-vhost",

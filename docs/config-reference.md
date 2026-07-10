@@ -1888,7 +1888,11 @@ to Tokio's blocking pool; saturation fails closed with `503` instead of
 growing the blocking queue. A second process-wide semaphore caps aggregate
 authorization work across every vhost and route at `256`; per-service permits
 are acquired first so one saturated service cannot reserve global capacity.
-Valid per-service values are `1..=256` and the default is `64`. In
+Authorization then shares Fluxheim's `256`-slot request-driven blocking-work
+budget with Wasm, traffic mirrors, disk-cache work, and ACME challenge reads.
+The native Tokio runtime explicitly permits `384` blocking threads, reserving
+at least `128` slots outside request-driven admission for lifecycle, admin, and
+recovery work. Valid per-service values are `1..=256` and the default is `64`. In
 FIPS/ISO-required mode, auth subrequests are limited to numeric local
 `http://127.0.0.1/...` or `http://[::1]/...` sidecars until outbound TLS client
 evidence is routed through the selected validated provider. With metrics
