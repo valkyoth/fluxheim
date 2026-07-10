@@ -27,5 +27,5 @@ fluxheim-openssl-fips-support = { path = "../../vendor/fluxheim-openssl-fips-sup
 log = "0.4.33"
 openssl = { version = "0.10.81", optional = true }
 rustls = { version = "0.23.41", optional = true }
-sanitization = { version = "1.2.3", features = ["alloc"], optional = true }
+sanitization = { version = "1.2.4", features = ["alloc"], optional = true }
 thiserror = "2.0.18"
