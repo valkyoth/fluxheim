@@ -31,7 +31,7 @@ mod native_http1_cache_state;
 mod native_http1_cache_storage_bin;
 
 pub(crate) use native_http1_cache_backend::NativeDiskCacheStoreKey;
-pub(crate) use native_http1_cache_backend::prepare_native_storage_bin_layout;
+pub(crate) use native_http1_cache_backend::prepare_native_storage_bin_root_for_lease;
 use native_http1_cache_backend::{
     NativeDiskCacheBackend, NativeDiskCacheLocation, NativeDiskCacheRecord, NativeDiskCacheState,
 };

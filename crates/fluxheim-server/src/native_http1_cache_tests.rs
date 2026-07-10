@@ -1,3 +1,6 @@
+use super::native_http1_cache_backend::{
+    acquire_native_storage_bin_lease, prepare_native_storage_bin_layout_locked,
+};
 use super::native_http1_cache_purge::{
     native_disk_cache_purge_registry_is_unlocked_for_test, purge_native_disk_cache,
 };
@@ -320,6 +323,7 @@ fn live_cache_inspection_uses_registered_allocator_during_inserts() {
 
 const STORAGE_BIN_LEASE_CHILD_ROOT: &str = "FLUXHEIM_STORAGE_BIN_LEASE_CHILD_ROOT";
 const STORAGE_BIN_LEASE_CHILD_MARKER: &str = "FLUXHEIM_STORAGE_BIN_LEASE_CHILD_MARKER";
+const STORAGE_BIN_LEASE_CHILD_MAX_BYTES: &str = "FLUXHEIM_STORAGE_BIN_LEASE_CHILD_MAX_BYTES";
 
 #[test]
 fn storage_bin_lease_child_process() {
@@ -327,7 +331,10 @@ fn storage_bin_lease_child_process() {
         return;
     };
     let marker = std::env::var_os(STORAGE_BIN_LEASE_CHILD_MARKER).unwrap();
-    let config = storage_bin_config(std::path::Path::new(&root));
+    let mut config = storage_bin_config(std::path::Path::new(&root));
+    if let Ok(max_bytes) = std::env::var(STORAGE_BIN_LEASE_CHILD_MAX_BYTES) {
+        config.disk.max_size_bytes = ByteSize::from_bytes(max_bytes.parse().unwrap());
+    }
 
     let error = NativeDiskCacheBackend::from_config(&config).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
@@ -352,4 +359,37 @@ fn storage_bin_lease_rejects_second_process() {
 
     assert!(status.success());
     assert_eq!(std::fs::read(marker).unwrap(), b"locked");
+}
+
+#[test]
+fn storage_bin_loser_cannot_mutate_winner_layout() {
+    let directory = tempfile::tempdir().unwrap();
+    let configured_root = directory.path().join("cache");
+    let marker = directory.path().join("child-confirmed");
+    let winner_config = storage_bin_config(&configured_root);
+    let root = super::prepare_native_storage_bin_root_for_lease(&winner_config).unwrap();
+    let _lease = acquire_native_storage_bin_lease(&root).unwrap();
+
+    assert!(!root.join(".fluxheim-storage-bin-v1").exists());
+    assert!(!root.join("bins").exists());
+    prepare_native_storage_bin_layout_locked(&winner_config, &root).unwrap();
+    let manifest_path = root.join(".fluxheim-storage-bin-v1");
+    let winning_manifest = std::fs::read(&manifest_path).unwrap();
+
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--exact")
+        .arg("native_http1_cache::tests::storage_bin_lease_child_process")
+        .arg("--nocapture")
+        .env(STORAGE_BIN_LEASE_CHILD_ROOT, &root)
+        .env(STORAGE_BIN_LEASE_CHILD_MARKER, &marker)
+        .env(
+            STORAGE_BIN_LEASE_CHILD_MAX_BYTES,
+            (2 * 1024 * 1024).to_string(),
+        )
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert_eq!(std::fs::read(marker).unwrap(), b"locked");
+    assert_eq!(std::fs::read(manifest_path).unwrap(), winning_manifest);
 }

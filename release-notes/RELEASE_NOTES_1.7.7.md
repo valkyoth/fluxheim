@@ -66,6 +66,12 @@ deterministic unsupported-call rejection.
   external auth, traffic mirrors, disk-cache operations, and ACME challenge
   reads. Explicitly cap Tokio's blocking pool at `384`, leaving `128` slots
   outside request admission for operational work.
+- Acquire storage-bin ownership before any manifest or data-layout mutation,
+  preventing a losing process from modifying first-start metadata.
+- Partition blocking work by class under `224` non-critical and `256` total
+  ceilings, reserve `32` critical slots, and return `503` rather than contacting
+  origin when disk-cache lookup admission is saturated and no stale memory
+  object is available.
 
 ## Changed
 

@@ -35,15 +35,14 @@ pub(super) fn validate_unique_storage_bin_roots(
                 reason: error.to_string(),
             }
         })?;
-        let layout = crate::native_http1_cache::prepare_native_storage_bin_layout(cache).map_err(
-            |error| NativeHttp1HostRouterConfigError::StorageBinRoot {
+        let root = crate::native_http1_cache::prepare_native_storage_bin_root_for_lease(cache)
+            .map_err(|error| NativeHttp1HostRouterConfigError::StorageBinRoot {
                 scope: scope.clone(),
                 reason: error.to_string(),
-            },
-        )?;
-        if let Some(first_scope) = roots.insert(layout.root.clone(), scope.clone()) {
+            })?;
+        if let Some(first_scope) = roots.insert(root.clone(), scope.clone()) {
             return Err(NativeHttp1HostRouterConfigError::DuplicateStorageBinRoot {
-                path: layout.root.display().to_string(),
+                path: root.display().to_string(),
                 first_scope,
                 second_scope: scope,
             });

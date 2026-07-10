@@ -73,7 +73,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | --- | --- | --- |
 | Proxy cache | ✅ | Vhost and route-scoped cache policies. |
 | Memory cache | ✅ | Bounded in-memory cache tier. |
-| Disk cache | ✅ | Filesystem and storage-bin disk backends with ordered eviction, one process-wide persistence worker, unique-root and cross-process lease enforcement, live inspection, and coalesced durable index writes. |
+| Disk cache | ✅ | Filesystem and storage-bin disk backends with ordered eviction, one process-wide persistence worker, pre-initialization cross-process lease enforcement, live inspection, fail-closed lookup admission, and coalesced durable index writes. |
 | Tiered cache | ✅ | Memory plus disk storage plans. |
 | Encrypted disk cache | ✅ | Optional local-key and OpenBao transit encryption paths. |
 | Static-file cache | ✅ | Optional local static-file caching. |

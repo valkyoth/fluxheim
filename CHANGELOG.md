@@ -63,6 +63,9 @@ behavior when the change improves security or project direction.
 - Bound aggregate request-driven blocking work across Wasm, auth, mirrors,
   disk cache, and ACME at 256 beneath an explicit 384-thread Tokio blocking
   pool, preserving operational headroom.
+- Acquire storage-bin leases before layout initialization, partition blocking
+  work by subsystem with critical capacity reserved, and fail closed when a
+  disk lookup cannot obtain blocking admission.
 - Pin publishing actions, security-tool installs, and container base images to
   immutable reviewed versions and digests.
 

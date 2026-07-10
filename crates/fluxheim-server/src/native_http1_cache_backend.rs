@@ -4,9 +4,8 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 
 use fluxheim_cache::{
-    CachePurgeIndex, DiskTierPlan, STORAGE_BIN_DATA_DIR, STORAGE_BIN_MANIFEST_FILENAME,
-    StorageBinFileSet, StorageBinFreeMap, StorageBinLayoutPlan, StorageBinObjectLocation,
-    prepare_storage_bin_layout,
+    CachePurgeIndex, DiskTierPlan, StorageBinFileSet, StorageBinFreeMap, StorageBinLayoutPlan,
+    StorageBinObjectLocation, prepare_storage_bin_layout,
 };
 use fluxheim_config::{CacheConfig, CacheDiskBackend};
 use fs2::FileExt as _;
@@ -29,7 +28,7 @@ pub(super) struct NativeStorageBinBackend {
 }
 
 #[derive(Debug)]
-struct NativeStorageBinLease {
+pub(super) struct NativeStorageBinLease {
     _file: std::fs::File,
 }
 
@@ -122,9 +121,9 @@ impl NativeDiskCacheBackend {
                 Ok((root, Self::Filesystem))
             }
             CacheDiskBackend::StorageBin => {
-                let layout = prepare_native_storage_bin_layout(config)?;
-                let root = layout.root.clone();
+                let root = prepare_native_storage_bin_root_for_lease(config)?;
                 let lease = acquire_native_storage_bin_lease(&root)?;
+                let layout = prepare_native_storage_bin_layout_locked(config, &root)?;
                 let free_map = StorageBinFreeMap::new(&layout);
                 let files = StorageBinFileSet::new(layout.clone());
                 Ok((
@@ -141,7 +140,7 @@ impl NativeDiskCacheBackend {
     }
 }
 
-fn acquire_native_storage_bin_lease(
+pub(super) fn acquire_native_storage_bin_lease(
     root: &std::path::Path,
 ) -> std::io::Result<NativeStorageBinLease> {
     let file = open_native_storage_bin_lease_file(root)?;
@@ -203,37 +202,37 @@ fn open_native_storage_bin_lease_file(root: &std::path::Path) -> std::io::Result
         .open(path)
 }
 
-pub(crate) fn prepare_native_storage_bin_layout(
+pub(crate) fn prepare_native_storage_bin_root_for_lease(
     config: &CacheConfig,
-) -> std::io::Result<StorageBinLayoutPlan> {
+) -> std::io::Result<PathBuf> {
     let path = config.disk.path.as_ref().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "native storage-bin cache requires cache.disk.path",
         )
     })?;
+    prepare_native_disk_cache_root(path)
+}
+
+pub(super) fn prepare_native_storage_bin_layout_locked(
+    config: &CacheConfig,
+    root: &std::path::Path,
+) -> std::io::Result<StorageBinLayoutPlan> {
     let plan = DiskTierPlan {
         backend: CacheDiskBackend::StorageBin,
-        path: path.clone(),
+        path: root.to_path_buf(),
         max_size_bytes: config.disk.max_size_bytes,
         max_object_bytes: config.max_object_bytes,
         cache_tag_headers: Vec::new(),
         storage_bin: config.disk.storage_bin.clone(),
         encryption: config.disk.encryption.clone(),
     };
-    let mut layout = StorageBinLayoutPlan::from_disk_plan(&plan).ok_or_else(|| {
+    let layout = StorageBinLayoutPlan::from_disk_plan(&plan).ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "native storage-bin cache requires a storage-bin disk plan",
         )
     })?;
     prepare_storage_bin_layout(&layout)?;
-    let root = layout.root.canonicalize()?;
-    layout = StorageBinLayoutPlan {
-        root: root.clone(),
-        manifest_path: root.join(STORAGE_BIN_MANIFEST_FILENAME),
-        data_dir: root.join(STORAGE_BIN_DATA_DIR),
-        ..layout
-    };
     Ok(layout)
 }

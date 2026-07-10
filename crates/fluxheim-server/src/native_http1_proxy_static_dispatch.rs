@@ -187,6 +187,26 @@ impl NativeHttp1Proxy {
                         cache.record_policy_activity("bypass");
                         proxy_cache_status = Some((&cache.config, "BYPASS", Some(reason), None));
                     }
+                    NativeProxyCacheLookup::Unavailable(reason) => {
+                        cache.record_policy_activity("error");
+                        let response = NativeHttp1Response::new(
+                            503,
+                            "Service Unavailable",
+                            b"cache temporarily unavailable\n",
+                        )
+                        .close_connection();
+                        return self.finish_response(
+                            &request,
+                            response,
+                            Some((&cache.config, "BYPASS", Some(reason), None)),
+                            #[cfg(any(
+                                feature = "compression-brotli",
+                                feature = "compression-gzip",
+                                feature = "compression-zstd"
+                            ))]
+                            compression_request,
+                        );
+                    }
                 }
             }
         }
@@ -245,21 +265,44 @@ impl NativeHttp1Proxy {
                     NativeCacheFillGate::Disabled => break None,
                     NativeCacheFillGate::Writer(permit) => break Some(permit),
                     NativeCacheFillGate::Waiter { notify, timeout } => {
-                        if let Some(entry) = cache
+                        match cache
                             .wait_for_cache_fill(notify, timeout, key, &request)
                             .await
                         {
-                            return self.finish_response(
-                                &request,
-                                entry.to_response(),
-                                Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
-                                #[cfg(any(
-                                    feature = "compression-brotli",
-                                    feature = "compression-gzip",
-                                    feature = "compression-zstd"
-                                ))]
-                                compression_request,
-                            );
+                            Ok(Some(entry)) => {
+                                return self.finish_response(
+                                    &request,
+                                    entry.to_response(),
+                                    Some((&cache.config, "HIT", None, Some(entry.age_secs()))),
+                                    #[cfg(any(
+                                        feature = "compression-brotli",
+                                        feature = "compression-gzip",
+                                        feature = "compression-zstd"
+                                    ))]
+                                    compression_request,
+                                );
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                cache.record_policy_activity("error");
+                                let response = NativeHttp1Response::new(
+                                    503,
+                                    "Service Unavailable",
+                                    b"cache temporarily unavailable\n",
+                                )
+                                .close_connection();
+                                return self.finish_response(
+                                    &request,
+                                    response,
+                                    Some((&cache.config, "BYPASS", Some(error.reason()), None)),
+                                    #[cfg(any(
+                                        feature = "compression-brotli",
+                                        feature = "compression-gzip",
+                                        feature = "compression-zstd"
+                                    ))]
+                                    compression_request,
+                                );
+                            }
                         }
                     }
                 }

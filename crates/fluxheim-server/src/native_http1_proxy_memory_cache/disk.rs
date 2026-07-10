@@ -11,73 +11,106 @@ use fluxheim_cache::{VaryCachePolicy, cache_vary_policy};
 
 use super::NativeProxyMemoryCache;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NativeDiskCacheLookupError {
+    Saturated,
+    WorkerFailed,
+}
+
+impl NativeDiskCacheLookupError {
+    pub(crate) fn reason(self) -> &'static str {
+        match self {
+            Self::Saturated => "disk-cache-saturated",
+            Self::WorkerFailed => "disk-cache-worker-failed",
+        }
+    }
+}
+
 impl NativeProxyMemoryCache {
     pub(super) async fn get_disk_fresh(
         &self,
         key: &str,
         request: &NativeHttp1Request,
-    ) -> Option<NativeMemoryCacheEntry> {
-        let entry = self.disk_entry(key, request).await?;
-        (entry.expires_at > std::time::Instant::now()).then(|| {
+    ) -> Result<Option<NativeMemoryCacheEntry>, NativeDiskCacheLookupError> {
+        let Some(entry) = self.disk_entry(key, request).await? else {
+            return Ok(None);
+        };
+        Ok((entry.expires_at > std::time::Instant::now()).then(|| {
             self.record_activity("disk", "hit");
             self.record_activity_scope("disk", "hit");
             self.promote_disk_entry(key, request, &entry);
             entry
-        })
+        }))
     }
 
     pub(super) async fn get_disk_stale_while_revalidate(
         &self,
         key: &str,
         request: &NativeHttp1Request,
-    ) -> Option<NativeMemoryCacheEntry> {
-        let entry = self.disk_entry(key, request).await?;
-        native_cache_entry_serve_stale_while_revalidate(&entry, std::time::Instant::now())
-            .then_some(entry)
+    ) -> Result<Option<NativeMemoryCacheEntry>, NativeDiskCacheLookupError> {
+        let Some(entry) = self.disk_entry(key, request).await? else {
+            return Ok(None);
+        };
+        Ok(
+            native_cache_entry_serve_stale_while_revalidate(&entry, std::time::Instant::now())
+                .then_some(entry),
+        )
     }
 
     pub(super) async fn get_disk_stale_if_error(
         &self,
         key: &str,
         request: &NativeHttp1Request,
-    ) -> Option<NativeMemoryCacheEntry> {
-        let entry = self.disk_entry(key, request).await?;
+    ) -> Result<Option<NativeMemoryCacheEntry>, NativeDiskCacheLookupError> {
+        let Some(entry) = self.disk_entry(key, request).await? else {
+            return Ok(None);
+        };
         let now = std::time::Instant::now();
-        (entry.expires_at <= now && entry.stale_if_error_until.is_some_and(|until| until > now))
-            .then_some(entry)
+        Ok(
+            (entry.expires_at <= now
+                && entry.stale_if_error_until.is_some_and(|until| until > now))
+            .then_some(entry),
+        )
     }
 
     pub(super) async fn get_disk_revalidatable(
         &self,
         key: &str,
         request: &NativeHttp1Request,
-    ) -> Option<NativeMemoryCacheEntry> {
-        let entry = self.disk_entry(key, request).await?;
-        native_cache_entry_revalidatable(&entry, std::time::Instant::now()).then_some(entry)
+    ) -> Result<Option<NativeMemoryCacheEntry>, NativeDiskCacheLookupError> {
+        let Some(entry) = self.disk_entry(key, request).await? else {
+            return Ok(None);
+        };
+        Ok(native_cache_entry_revalidatable(&entry, std::time::Instant::now()).then_some(entry))
     }
 
     async fn disk_entry(
         &self,
         key: &str,
         request: &NativeHttp1Request,
-    ) -> Option<NativeMemoryCacheEntry> {
-        let disk = self.disk.as_ref()?.clone();
+    ) -> Result<Option<NativeMemoryCacheEntry>, NativeDiskCacheLookupError> {
+        let Some(disk) = self.disk.as_ref().cloned() else {
+            return Ok(None);
+        };
         let key = key.to_owned();
         let request = request.clone();
-        let blocking_permit = crate::blocking_work::try_acquire_request_blocking_work().ok()?;
+        let blocking_permit = crate::blocking_work::try_acquire_request_blocking_work(
+            crate::blocking_work::NativeBlockingWorkClass::DiskCache,
+        )
+        .map_err(|_| NativeDiskCacheLookupError::Saturated)?;
         match tokio::task::spawn_blocking(move || {
             let _blocking_permit = blocking_permit;
             disk.get(&key, |fields| native_vary_cache_key(&key, fields, &request))
         })
         .await
         {
-            Ok(entry) => entry,
+            Ok(entry) => Ok(entry),
             Err(error) => {
                 log::debug!(
                     target: "fluxheim::native_http1",
                     "native disk cache lookup task failed: {error}"
                 );
-                None
+                Err(NativeDiskCacheLookupError::WorkerFailed)
             }
         }
     }

@@ -20,6 +20,8 @@ mod cache_freshness_tests;
 mod cache_peer_tests;
 #[path = "native_http1_route_proxy_tests/cache_range.rs"]
 mod cache_range_tests;
+#[path = "native_http1_route_proxy_tests/cache_saturation.rs"]
+mod cache_saturation_tests;
 #[path = "native_http1_route_proxy_tests/cache_storage.rs"]
 mod cache_storage_tests;
 #[path = "native_http1_route_proxy_tests/compression_response.rs"]

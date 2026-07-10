@@ -63,6 +63,7 @@ impl PartialEq for NativeProxyMemoryCache {
 #[derive(Debug)]
 pub(crate) enum NativeProxyCacheLookup {
     Bypass(&'static str),
+    Unavailable(&'static str),
     Miss {
         key: String,
         status: &'static str,
@@ -267,7 +268,7 @@ impl NativeProxyMemoryCache {
         timeout: Duration,
         key: &str,
         request: &NativeHttp1Request,
-    ) -> Option<NativeMemoryCacheEntry> {
+    ) -> Result<Option<NativeMemoryCacheEntry>, self::disk::NativeDiskCacheLookupError> {
         let _ = tokio::time::timeout(timeout, notify.notified()).await;
         self.get(key, request).await
     }

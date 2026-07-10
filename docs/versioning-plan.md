@@ -3152,10 +3152,10 @@ Stable scope:
   semaphore-based narrow-to-global Wasm admission, per-service plus
   process-wide auth-request admission, shared epoch ticking, strict native host
   routing with rejection metrics, unique storage-bin roots and one
-  process-wide persistence worker, live cache inspection and cross-process
-  storage leases, a shared request-driven blocking-work budget with reserved
-  operational headroom, bounded persistent cache parsing, and immutable
-  CI/container build inputs.
+  process-wide persistence worker, live cache inspection and pre-initialization
+  cross-process storage leases, hierarchical per-class request blocking budgets
+  with critical and operational headroom, fail-closed disk lookup admission,
+  bounded persistent cache parsing, and immutable CI/container build inputs.
 - `v1.7.8`: optional `wasm-wasi` capability preview for non-request-body
   policy plugins. Keep filesystem, network, clocks, randomness, environment,
   and inherited process state disabled unless explicitly granted and tested.

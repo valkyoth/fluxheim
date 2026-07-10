@@ -19,6 +19,7 @@ use fluxheim_cache::{
 };
 
 use super::{NativeProxyCacheKeyComponent, NativeProxyCacheLookup, NativeProxyMemoryCache};
+use crate::native_http1_proxy_memory_cache::disk::NativeDiskCacheLookupError;
 
 impl NativeProxyMemoryCache {
     pub(crate) async fn lookup_with_key_components(
@@ -48,35 +49,55 @@ impl NativeProxyMemoryCache {
             return NativeProxyCacheLookup::Bypass("range-unsupported");
         }
         let revalidation = request_cache_revalidation_requested(request, &self.config);
-        if !revalidation && let Some(hit) = self.get(&key, request).await {
-            self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
-            return NativeProxyCacheLookup::Hit { entry: hit, range };
+        let mut disk_error = None;
+        if !revalidation {
+            match self.get(&key, request).await {
+                Ok(Some(hit)) => {
+                    self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
+                    return NativeProxyCacheLookup::Hit { entry: hit, range };
+                }
+                Ok(None) => {}
+                Err(error) => disk_error = Some(error),
+            }
         }
         let range_key =
             range.map(|range| cache_key_with_component(&key, "range", &range.component()));
-        if !revalidation
-            && let Some(range_key) = range_key.as_deref()
-            && let Some(hit) = self.get(range_key, request).await
-        {
-            self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
-            return NativeProxyCacheLookup::Hit {
-                entry: hit,
-                range: None,
-            };
+        if !revalidation && let Some(range_key) = range_key.as_deref() {
+            match self.get(range_key, request).await {
+                Ok(Some(hit)) => {
+                    self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
+                    return NativeProxyCacheLookup::Hit {
+                        entry: hit,
+                        range: None,
+                    };
+                }
+                Ok(None) => {}
+                Err(error) => disk_error = Some(error),
+            }
         }
-        if !revalidation
-            && !range_requested
-            && let Some(stale) = self.get_stale_while_revalidate(&key, request).await
-        {
-            self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
-            return NativeProxyCacheLookup::StaleWhileRevalidate { key, entry: stale };
+        if !revalidation && !range_requested {
+            match self.get_stale_while_revalidate(&key, request).await {
+                Ok(Some(stale)) => {
+                    self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
+                    return NativeProxyCacheLookup::StaleWhileRevalidate { key, entry: stale };
+                }
+                Ok(None) => {}
+                Err(error) => disk_error = Some(error),
+            }
         }
-        if !revalidation
-            && !range_requested
-            && let Some(entry) = self.get_revalidatable(&key, request).await
-        {
-            self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
-            return NativeProxyCacheLookup::Revalidate { key, entry };
+        if !revalidation && !range_requested {
+            match self.get_revalidatable(&key, request).await {
+                Ok(Some(entry)) => {
+                    self.record_operation_duration("hit", "lookup", lookup_started_at.elapsed());
+                    return NativeProxyCacheLookup::Revalidate { key, entry };
+                }
+                Ok(None) => {}
+                Err(error) => disk_error = Some(error),
+            }
+        }
+        if let Some(error) = disk_error {
+            self.record_operation_duration("error", "lookup", lookup_started_at.elapsed());
+            return NativeProxyCacheLookup::Unavailable(error.reason());
         }
         if range_key.is_some() && !self.config.range.slice.enabled {
             self.record_operation_duration("miss", "lookup", lookup_started_at.elapsed());
@@ -123,7 +144,7 @@ impl NativeProxyMemoryCache {
         &self,
         key: &str,
         request: &NativeHttp1Request,
-    ) -> Option<NativeMemoryCacheEntry> {
+    ) -> Result<Option<NativeMemoryCacheEntry>, NativeDiskCacheLookupError> {
         let now = std::time::Instant::now();
         if self.memory_enabled() {
             let mut state = lock_native_memory_cache(&self.state, "proxy");
@@ -138,7 +159,7 @@ impl NativeProxyMemoryCache {
                         continue;
                     }
                     match state.objects.get(&variant.key) {
-                        Some(entry) if entry.expires_at > now => return Some(entry.clone()),
+                        Some(entry) if entry.expires_at > now => return Ok(Some(entry.clone())),
                         Some(entry) => {
                             if !native_cache_entry_has_stale_window(entry, now) {
                                 let weight = entry.weight;
@@ -154,7 +175,7 @@ impl NativeProxyMemoryCache {
 
             if !state.variants.contains_key(key) {
                 match state.objects.get(key) {
-                    Some(entry) if entry.expires_at > now => return Some(entry.clone()),
+                    Some(entry) if entry.expires_at > now => return Ok(Some(entry.clone())),
                     Some(entry) if !native_cache_entry_has_stale_window(entry, now) => {
                         let weight = entry.weight;
                         remove_native_memory_cache_entry(&mut state, key);
@@ -171,7 +192,7 @@ impl NativeProxyMemoryCache {
         &self,
         key: &str,
         request: &NativeHttp1Request,
-    ) -> Option<NativeMemoryCacheEntry> {
+    ) -> Result<Option<NativeMemoryCacheEntry>, NativeDiskCacheLookupError> {
         let now = std::time::Instant::now();
         if self.memory_enabled() {
             let state = lock_native_memory_cache(&self.state, "proxy");
@@ -187,7 +208,7 @@ impl NativeProxyMemoryCache {
                     if let Some(entry) = state.objects.get(&variant.key)
                         && native_cache_entry_serve_stale_while_revalidate(entry, now)
                     {
-                        return Some(entry.clone());
+                        return Ok(Some(entry.clone()));
                     }
                 }
             }
@@ -196,7 +217,7 @@ impl NativeProxyMemoryCache {
                 && let Some(entry) = state.objects.get(key)
                 && native_cache_entry_serve_stale_while_revalidate(entry, now)
             {
-                return Some(entry.clone());
+                return Ok(Some(entry.clone()));
             }
         }
         self.get_disk_stale_while_revalidate(key, request).await
@@ -261,14 +282,23 @@ impl NativeProxyMemoryCache {
                 }
             }
         }
-        self.get_disk_stale_if_error(key, request).await
+        match self.get_disk_stale_if_error(key, request).await {
+            Ok(entry) => entry,
+            Err(error) => {
+                log::debug!(
+                    target: "fluxheim::native_http1",
+                    "native disk stale lookup unavailable: {error:?}"
+                );
+                None
+            }
+        }
     }
 
     async fn get_revalidatable(
         &self,
         key: &str,
         request: &NativeHttp1Request,
-    ) -> Option<NativeMemoryCacheEntry> {
+    ) -> Result<Option<NativeMemoryCacheEntry>, NativeDiskCacheLookupError> {
         let now = std::time::Instant::now();
         if self.memory_enabled() {
             let state = lock_native_memory_cache(&self.state, "proxy");
@@ -284,7 +314,7 @@ impl NativeProxyMemoryCache {
                     if let Some(entry) = state.objects.get(&variant.key)
                         && native_cache_entry_revalidatable(entry, now)
                     {
-                        return Some(entry.clone());
+                        return Ok(Some(entry.clone()));
                     }
                 }
             }
@@ -293,7 +323,7 @@ impl NativeProxyMemoryCache {
                 && let Some(entry) = state.objects.get(key)
                 && native_cache_entry_revalidatable(entry, now)
             {
-                return Some(entry.clone());
+                return Ok(Some(entry.clone()));
             }
         }
         self.get_disk_revalidatable(key, request).await

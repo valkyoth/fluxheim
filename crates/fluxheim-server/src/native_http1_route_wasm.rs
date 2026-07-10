@@ -830,10 +830,10 @@ impl NativeWasmHook {
                 .acquire()
                 .await
                 .map_err(|_| NativeWasmHookError::Admission(global_admission_scope))?;
-            let blocking =
-                crate::blocking_work::try_acquire_request_blocking_work().map_err(|_| {
-                    NativeWasmHookError::Admission(NativeWasmAdmissionScope::BlockingWork)
-                })?;
+            let blocking = crate::blocking_work::try_acquire_request_blocking_work(
+                crate::blocking_work::NativeBlockingWorkClass::Wasm,
+            )
+            .map_err(|_| NativeWasmHookError::Admission(NativeWasmAdmissionScope::BlockingWork))?;
             Ok::<_, NativeWasmHookError>((attachment, plugin_permit, vhost, global, blocking))
         }
         .await;

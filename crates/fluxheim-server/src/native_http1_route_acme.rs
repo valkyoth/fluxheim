@@ -18,7 +18,9 @@ pub(crate) async fn native_acme_http_01_response(
     let Some(token) = http_01_token_from_path(&path).map(str::to_owned) else {
         return NativeHttp1Response::new(404, "Not Found", b"not found\n").close_connection();
     };
-    let Ok(blocking_permit) = crate::blocking_work::try_acquire_request_blocking_work() else {
+    let Ok(blocking_permit) = crate::blocking_work::try_acquire_request_blocking_work(
+        crate::blocking_work::NativeBlockingWorkClass::Critical,
+    ) else {
         return NativeHttp1Response::new(503, "Service Unavailable", b"service unavailable\n")
             .close_connection();
     };
