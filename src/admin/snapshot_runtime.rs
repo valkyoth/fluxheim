@@ -56,18 +56,16 @@ impl AdminApp {
             };
         }
 
-        let snapshot = match self.store.rollback_candidate(target) {
-            Ok(snapshot) => snapshot,
+        let verified = match self.store.rollback_candidate(target) {
+            Ok(verified) => verified,
             Err(error) => return error_response(StatusCode::BAD_REQUEST, &error.to_string()),
         };
-        let new_config = match Config::load(Some(&snapshot.config_path)) {
-            Ok(config) => config,
-            Err(error) => return error_response(StatusCode::BAD_REQUEST, &error.to_string()),
-        };
-        let impact = match self.apply_snapshot(&snapshot, new_config, SnapshotApplyMode::Rollback) {
-            Ok(impact) => impact,
-            Err(response) => return response,
-        };
+        let snapshot = verified.snapshot;
+        let impact =
+            match self.apply_snapshot(&snapshot, verified.config, SnapshotApplyMode::Rollback) {
+                Ok(impact) => impact,
+                Err(response) => return response,
+            };
         if let Err(error) = self.store.set_current_snapshot(&snapshot.id) {
             return internal_error_response(&error);
         }
@@ -288,28 +286,25 @@ impl AdminApp {
             self.record_failed_rollback(pending);
             return error_response(StatusCode::BAD_REQUEST, "no previous known-good snapshot");
         };
-        let snapshot = match self.store.rollback_candidate(Some(target)) {
-            Ok(snapshot) => snapshot,
+        let verified = match self.store.rollback_candidate(Some(target)) {
+            Ok(verified) => verified,
             Err(error) => {
                 self.record_failed_rollback(pending);
                 return error_response(StatusCode::BAD_REQUEST, &error.to_string());
             }
         };
-        let new_config = match Config::load(Some(&snapshot.config_path)) {
-            Ok(config) => config,
-            Err(error) => {
+        let snapshot = verified.snapshot;
+        let impact = match self.apply_snapshot(
+            &snapshot,
+            verified.config,
+            SnapshotApplyMode::SelfHealRollback,
+        ) {
+            Ok(impact) => impact,
+            Err(response) => {
                 self.record_failed_rollback(pending);
-                return error_response(StatusCode::BAD_REQUEST, &error.to_string());
+                return response;
             }
         };
-        let impact =
-            match self.apply_snapshot(&snapshot, new_config, SnapshotApplyMode::SelfHealRollback) {
-                Ok(impact) => impact,
-                Err(response) => {
-                    self.record_failed_rollback(pending);
-                    return response;
-                }
-            };
         if let Err(error) = self.store.set_current_snapshot(&snapshot.id) {
             self.record_failed_rollback(pending);
             return internal_error_response(&error);

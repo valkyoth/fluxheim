@@ -42,6 +42,16 @@ behavior when the change improves security or project direction.
   with create-new semantics, clean failed transactions, retain rollback state
   until completion, authenticate configured stores with HMAC-SHA-256, redact
   invalid IDs, and return clock failures without terminating the data plane.
+- Require owner-only snapshot state and integrity-key files, keep integrity keys
+  outside the store, parse the exact authenticated bytes, preserve published
+  snapshots when current-pointer durability fails, and escape corrupt filenames
+  before operator output.
+- Persist an authenticated generation high-water mark so pruning cannot reuse
+  audit generations, and authenticate explicit pruning boundaries so intentional
+  history retention does not appear as snapshot corruption.
+- Route snapshot SHA-256 and HMAC-SHA-256 through Fluxheim's selected Ring,
+  OpenSSL-FIPS, or AWS-LC-FIPS provider without duplicating snapshot plaintext
+  into a concatenation buffer.
 - Make OpenSSL cipher allow-lists deterministic across protocol families:
   omitting all TLS 1.2 or TLS 1.3 suites now disables that protocol version
   instead of retaining Mozilla acceptor defaults. Use the current Mozilla v5

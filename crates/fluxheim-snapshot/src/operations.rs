@@ -4,12 +4,13 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+use crate::prune_boundary::PruneBoundary;
 use crate::store::{
     MAX_SNAPSHOT_STORE_ENTRIES, SnapshotEntryStatus, SnapshotError, SnapshotIntegrityStatus,
     SnapshotStore,
 };
 use crate::store_fs::{
-    MAX_SNAPSHOT_FILE_BYTES, read_regular_file_to_string_with_limit, sync_directory,
+    path_exists_without_following_symlinks, require_private_regular_file, sync_directory,
 };
 use crate::store_support::unix_duration;
 
@@ -50,10 +51,10 @@ impl SnapshotStore {
     }
 
     pub fn diff(&self, old: &str, new: &str) -> Result<SnapshotDiff, SnapshotError> {
-        let old = self.snapshot(old)?;
-        let new = self.snapshot(new)?;
-        let old_value = read_snapshot_toml(&old.config_path)?;
-        let new_value = read_snapshot_toml(&new.config_path)?;
+        let (old, old_bytes) = self.load_snapshot_config_bytes(old)?;
+        let (new, new_bytes) = self.load_snapshot_config_bytes(new)?;
+        let old_value = read_snapshot_toml(&old_bytes)?;
+        let new_value = read_snapshot_toml(&new_bytes)?;
         let old_table = old_value.as_table().ok_or_else(invalid_snapshot_toml)?;
         let new_table = new_value.as_table().ok_or_else(invalid_snapshot_toml)?;
         let fields = old_table
@@ -81,11 +82,27 @@ impl SnapshotStore {
         if !self.root().exists() {
             return Ok(report);
         }
-        let current = self.current_id()?;
+        let current = match self.current_id() {
+            Ok(current) => current,
+            Err(_) => {
+                push_issue(&mut report, "current pointer failed validation".to_owned());
+                None
+            }
+        };
         let ids = entries
             .iter()
             .map(|entry| entry.id.clone())
             .collect::<BTreeSet<_>>();
+        let prune_boundaries = match self.load_prune_boundaries() {
+            Ok(boundaries) => boundaries,
+            Err(_) => {
+                push_issue(
+                    &mut report,
+                    "snapshot pruning boundary state failed validation".to_owned(),
+                );
+                BTreeSet::new()
+            }
+        };
         if let Some(current) = current.as_deref()
             && !ids.contains(current)
         {
@@ -120,6 +137,10 @@ impl SnapshotStore {
             }
             if let Some(parent) = snapshot.metadata.parent_id.as_deref()
                 && !ids.contains(parent)
+                && !prune_boundaries.contains(&PruneBoundary {
+                    child_id: snapshot.id.clone(),
+                    removed_parent_id: parent.to_owned(),
+                })
             {
                 push_issue(
                     &mut report,
@@ -142,6 +163,38 @@ impl SnapshotStore {
             push_issue(
                 &mut report,
                 "snapshot store exceeds its capacity".to_owned(),
+            );
+        }
+        for path in [
+            self.root().join(".snapshot.lock"),
+            self.current_path(),
+            self.runtime_state_path(),
+            self.generation_path(),
+            self.prune_boundary_path(),
+        ] {
+            if path_exists_without_following_symlinks(&path).unwrap_or(true)
+                && require_private_regular_file(&path).is_err()
+            {
+                push_issue(
+                    &mut report,
+                    "snapshot store contains unsafe state-file permissions".to_owned(),
+                );
+            }
+        }
+        if self
+            .integrity
+            .as_deref()
+            .is_some_and(|key| require_private_regular_file(key.source_path()).is_err())
+        {
+            push_issue(
+                &mut report,
+                "snapshot integrity key permissions are unsafe".to_owned(),
+            );
+        }
+        if self.verify_generation_state().is_err() {
+            push_issue(
+                &mut report,
+                "snapshot generation state failed validation".to_owned(),
             );
         }
         report.healthy = report.issues.is_empty();
@@ -195,12 +248,37 @@ impl SnapshotStore {
         let now = unix_duration()?.as_secs();
         let keep_from = snapshots.len().saturating_sub(options.keep.unwrap_or(0));
         let mut deleted = Vec::new();
+        let mut delete_ids = BTreeSet::new();
         for (index, snapshot) in snapshots.iter().enumerate() {
             let outside_keep = options.keep.is_some_and(|_| index < keep_from);
             let old = options.older_than.is_some_and(|age| {
                 now.saturating_sub(snapshot.metadata.created_unix_secs) >= age.as_secs()
             });
             if !protected.contains(&snapshot.id) && (outside_keep || old) {
+                delete_ids.insert(snapshot.id.clone());
+            }
+        }
+        let retained_ids = snapshots
+            .iter()
+            .filter(|snapshot| !delete_ids.contains(&snapshot.id))
+            .map(|snapshot| snapshot.id.clone())
+            .collect::<BTreeSet<_>>();
+        let mut boundaries = self.load_prune_boundaries()?;
+        boundaries.retain(|boundary| retained_ids.contains(&boundary.child_id));
+        for snapshot in &snapshots {
+            if retained_ids.contains(&snapshot.id)
+                && let Some(parent) = snapshot.metadata.parent_id.as_ref()
+                && delete_ids.contains(parent)
+            {
+                boundaries.insert(PruneBoundary {
+                    child_id: snapshot.id.clone(),
+                    removed_parent_id: parent.clone(),
+                });
+            }
+        }
+        self.save_prune_boundaries(&boundaries)?;
+        for snapshot in &snapshots {
+            if delete_ids.contains(&snapshot.id) {
                 remove_if_present(&snapshot.config_path)?;
                 remove_if_present(&snapshot.metadata_path)?;
                 remove_if_present(&self.integrity_path(&snapshot.id))?;
@@ -215,9 +293,11 @@ impl SnapshotStore {
     }
 }
 
-fn read_snapshot_toml(path: &std::path::Path) -> Result<toml::Value, SnapshotError> {
-    let raw = read_regular_file_to_string_with_limit(path, MAX_SNAPSHOT_FILE_BYTES)?;
-    toml::from_str(&raw).map_err(SnapshotError::Decode)
+fn read_snapshot_toml(bytes: &[u8]) -> Result<toml::Value, SnapshotError> {
+    let raw = std::str::from_utf8(bytes).map_err(|error| {
+        SnapshotError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+    })?;
+    toml::from_str(raw).map_err(SnapshotError::Decode)
 }
 
 fn invalid_snapshot_toml() -> SnapshotError {

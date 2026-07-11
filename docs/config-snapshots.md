@@ -20,6 +20,8 @@ Use an operator-chosen state directory, for example
 /var/lib/fluxheim/snapshots
 ├── .snapshot.lock
 ├── current
+├── generation.toml
+├── prune-boundaries.toml
 ├── self-healing.toml
 └── configs
     ├── s1777900000-123456789-00000000000000000001-00000000000000000042.toml
@@ -40,6 +42,10 @@ trimmed and limited to 4096 bytes of non-control text before they are written or
 loaded. Rollback without `--to` follows explicit parent ancestry rather than
 wall-clock filename ordering. Fixed-width generations and create-new file
 publication prevent collisions from replacing existing history.
+`generation.toml` is a durable high-water mark, so deleting a newer snapshot
+cannot make a later snapshot reuse its audit generation. `prune-boundaries.toml`
+records intentional ancestry cuts when retention removes an old parent while
+keeping its child. Both files are authenticated when an integrity key is set.
 
 Every mutation holds the private `.snapshot.lock` advisory lock across capacity
 validation and publication. For NFS, CSI, or another shared filesystem, verify
@@ -63,8 +69,14 @@ metadata file.
 
 On Unix, Fluxheim normalizes the snapshot store root and `configs` directory to
 mode `0700`, and writes the lock, current pointer, recovery state, snapshots,
-metadata, and integrity manifests as mode `0600`. Operators should still run the service with a restrictive umask
-such as `0077` or `0027` as defense in depth for any future state files.
+metadata, integrity manifests, generation state, and pruning boundaries as mode
+`0600`. Reads reject existing state with any group or other permission bit; the
+doctor command reports such state as unhealthy instead of silently accepting
+it. The integrity key must also be a private regular file and must remain
+outside the snapshot store. Operators should still run the service with a
+restrictive umask such as `0077` or `0027` as defense in depth for any future
+state files. Non-Unix deployments should additionally use platform ACLs to
+grant access only to the Fluxheim service identity.
 
 Snapshot TOML remains plaintext. Mode `0600` does not protect offline disks,
 backups, or privileged support tooling. Encrypt the snapshot volume or backup
@@ -79,8 +91,13 @@ chmod 0600 /etc/fluxheim/snapshot-integrity.key
 ```
 
 The HMAC-SHA-256 manifest binds the exact config bytes, metadata, snapshot ID,
-and external key identity. The same key authenticates persisted self-healing
-state. Rollback verifies snapshot data before parsing or applying the config.
+and external key identity. The same key authenticates persisted self-healing,
+generation, and pruning-boundary state. Rollback and diff read once, verify,
+and parse the same owned bytes; they do not reopen a verified pathname.
+Fluxheim streams fields into the selected internal crypto provider without a
+second concatenated config allocation. Normal builds use Ring, while
+OpenSSL-FIPS and AWS-LC-FIPS profiles route snapshot cryptography through their
+selected validated provider.
 Existing stores remain readable as `Unverified`; configuring a key makes
 missing or invalid manifests and recovery-state authentication fail closed.
 
@@ -115,6 +132,9 @@ fluxheim snapshots --store /var/lib/fluxheim/snapshots prune --older-than-days 9
 
 Pruning protects the durable current snapshot, persisted runtime and known-good
 snapshots, pending validation and rollback targets, and their immediate parents.
+When pruning removes an older ancestor of another retained snapshot, Fluxheim
+writes an authenticated history-start boundary so `doctor` can distinguish the
+intentional retention cut from filesystem damage.
 
 Move the current pointer back to the previous snapshot:
 

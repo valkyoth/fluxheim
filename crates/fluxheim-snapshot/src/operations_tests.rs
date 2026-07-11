@@ -9,6 +9,40 @@ use crate::{
     SnapshotIntegrityStatus, SnapshotPruneOptions, SnapshotRuntimeState, SnapshotStore,
 };
 
+#[derive(Debug)]
+struct TestCryptoProvider;
+
+impl crate::SnapshotCryptoProvider for TestCryptoProvider {
+    fn label(&self) -> &'static str {
+        "test-ring"
+    }
+
+    fn compliance_capable(&self) -> bool {
+        false
+    }
+
+    fn sha256(&self, chunks: &[&[u8]]) -> Result<[u8; 32], String> {
+        let mut context = ring::digest::Context::new(&ring::digest::SHA256);
+        for chunk in chunks {
+            context.update(chunk);
+        }
+        let mut output = [0_u8; 32];
+        output.copy_from_slice(context.finish().as_ref());
+        Ok(output)
+    }
+
+    fn hmac_sha256(&self, key: &[u8], chunks: &[&[u8]]) -> Result<[u8; 32], String> {
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, key);
+        let mut context = ring::hmac::Context::with_key(&key);
+        for chunk in chunks {
+            context.update(chunk);
+        }
+        let mut output = [0_u8; 32];
+        output.copy_from_slice(context.sign().as_ref());
+        Ok(output)
+    }
+}
+
 #[test]
 fn concurrent_snapshot_creation_cannot_exceed_capacity() {
     let dir = TestDir::new("snapshot-concurrent-capacity");
@@ -65,7 +99,10 @@ fn snapshots_record_explicit_parent_and_generation() {
         Some(first.id.as_str())
     );
     assert_eq!(second.metadata.generation, 2);
-    assert_eq!(store.rollback_candidate(None).unwrap().id, first.id);
+    assert_eq!(
+        store.rollback_candidate(None).unwrap().snapshot.id,
+        first.id
+    );
 }
 
 #[test]
@@ -73,7 +110,13 @@ fn authenticated_snapshot_rejects_modified_config() {
     let dir = TestDir::new("snapshot-integrity");
     let key = dir.child("snapshot.key");
     std::fs::write(&key, [7u8; 32]).unwrap();
-    let store = SnapshotStore::with_integrity_key_file(dir.child("store"), &key).unwrap();
+    set_private_test_file(&key);
+    let store = SnapshotStore::with_integrity_key_file(
+        dir.child("store"),
+        &key,
+        Arc::new(TestCryptoProvider),
+    )
+    .unwrap();
     let snapshot = store.snapshot_config(&Config::default(), None).unwrap();
 
     assert_eq!(
@@ -109,6 +152,140 @@ fn authenticated_snapshot_rejects_modified_config() {
         store.verify(&snapshot.id),
         Err(SnapshotError::IntegrityVerificationFailed { .. })
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_world_readable_integrity_key_and_key_inside_store() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = TestDir::new("snapshot-private-key");
+    let key = dir.child("snapshot.key");
+    std::fs::write(&key, [9u8; 32]).unwrap();
+    std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(matches!(
+        SnapshotStore::with_integrity_key_file(
+            dir.child("store"),
+            &key,
+            Arc::new(TestCryptoProvider)
+        ),
+        Err(SnapshotError::UnsafeIntegrityKey { .. })
+    ));
+
+    let store_root = dir.child("inside-store");
+    std::fs::create_dir(&store_root).unwrap();
+    let inside_key = safe_child_path(&store_root, "snapshot.key");
+    std::fs::write(&inside_key, [9u8; 32]).unwrap();
+    set_private_test_file(&inside_key);
+    assert!(matches!(
+        SnapshotStore::with_integrity_key_file(
+            &store_root,
+            &inside_key,
+            Arc::new(TestCryptoProvider)
+        ),
+        Err(SnapshotError::UnsafeIntegrityKey { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_rejects_world_readable_snapshot_state() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = TestDir::new("snapshot-doctor-private");
+    let store = SnapshotStore::new(dir.path());
+    let snapshot = store.snapshot_config(&Config::default(), None).unwrap();
+    std::fs::set_permissions(
+        &snapshot.config_path,
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+
+    let entries = store.list_entries().unwrap();
+    assert_eq!(entries[0].status, SnapshotEntryStatus::Corrupt);
+    assert!(!store.doctor().unwrap().healthy);
+}
+
+#[test]
+fn verified_rollback_config_is_not_reopened_after_verification() {
+    let dir = TestDir::new("snapshot-verified-bytes");
+    let store = SnapshotStore::new(dir.path());
+    let first = store.snapshot_config(&Config::default(), None).unwrap();
+    store.snapshot_config(&Config::default(), None).unwrap();
+
+    let verified = store.rollback_candidate(None).unwrap();
+    std::fs::write(
+        &first.config_path,
+        "[server]\nlisten = [\"127.0.0.1:65535\"]\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        toml::to_string(&verified.config).unwrap(),
+        toml::to_string(&Config::default()).unwrap()
+    );
+}
+
+#[test]
+fn published_snapshot_survives_current_pointer_failure() {
+    let dir = TestDir::new("snapshot-current-failure");
+    let store = SnapshotStore::new(dir.path());
+    SnapshotStore::fail_next_current_update();
+
+    let error = store.snapshot_config(&Config::default(), None).unwrap_err();
+    let id = match error {
+        SnapshotError::SnapshotPublishedButCurrentUpdateFailed { id } => id,
+        other => panic!("unexpected snapshot error: {other}"),
+    };
+
+    assert!(store.snapshot(&id).is_ok());
+    assert_eq!(store.current_id().unwrap(), None);
+}
+
+#[test]
+fn generation_high_water_survives_pruning_latest_snapshot() {
+    let dir = TestDir::new("snapshot-generation-high-water");
+    let store = SnapshotStore::new(dir.path());
+    let _first = store.snapshot_config(&Config::default(), None).unwrap();
+    let second = store.snapshot_config(&Config::default(), None).unwrap();
+    let third = store.snapshot_config(&Config::default(), None).unwrap();
+    store.set_current_snapshot(&second.id).unwrap();
+    let report = store
+        .prune(&SnapshotPruneOptions {
+            keep: Some(0),
+            older_than: None,
+            protected_ids: Vec::new(),
+        })
+        .unwrap();
+    assert!(report.deleted.contains(&third.id));
+
+    let replacement = store.snapshot_config(&Config::default(), None).unwrap();
+    assert_eq!(replacement.metadata.generation, 4);
+}
+
+#[test]
+fn invalid_snapshot_filename_is_escaped_in_reports() {
+    let dir = TestDir::new("snapshot-safe-label");
+    let store = SnapshotStore::new(dir.path());
+    store.snapshot_config(&Config::default(), None).unwrap();
+    let malicious = store.root().join("configs").join("forged\n\u{1b}[31m.toml");
+    std::fs::write(&malicious, b"").unwrap();
+    set_private_test_file(&malicious);
+
+    let entries = store.list_entries().unwrap();
+    let invalid = entries
+        .iter()
+        .find(|entry| entry.id.contains("forged"))
+        .unwrap();
+    assert!(!invalid.id.contains('\n'));
+    assert!(!invalid.id.contains('\u{1b}'));
+    let doctor = store.doctor().unwrap();
+    assert!(
+        doctor
+            .issues
+            .iter()
+            .all(|issue| { !issue.contains('\n') && !issue.contains('\u{1b}') })
+    );
 }
 
 #[test]
@@ -170,6 +347,7 @@ fn prune_keeps_current_and_its_parent() {
     assert_eq!(report.deleted, vec![first.id]);
     assert!(store.snapshot(&second.id).is_ok());
     assert!(store.snapshot(&third.id).is_ok());
+    assert!(store.doctor().unwrap().healthy);
 }
 
 #[test]
@@ -291,4 +469,14 @@ impl Drop for TestDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
     }
+}
+
+fn set_private_test_file(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }

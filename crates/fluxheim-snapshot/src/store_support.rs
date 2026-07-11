@@ -67,6 +67,27 @@ impl Display for SnapshotError {
             Self::RuntimeStateIntegrityFailed => {
                 formatter.write_str("snapshot self-healing state failed integrity verification")
             }
+            Self::PublishedButNotDurable { path } => write!(
+                formatter,
+                "snapshot file was published but final durability failed: {}",
+                path.display()
+            ),
+            Self::SnapshotPublishedButCurrentUpdateFailed { id } => write!(
+                formatter,
+                "snapshot {id} was published but the current pointer update failed"
+            ),
+            Self::GenerationExhausted => {
+                formatter.write_str("snapshot generation counter is exhausted")
+            }
+            Self::GenerationStateInvalid => {
+                formatter.write_str("snapshot generation state failed validation")
+            }
+            Self::PruneBoundaryInvalid => {
+                formatter.write_str("snapshot pruning boundary state failed validation")
+            }
+            Self::CryptoProvider(error) => {
+                write!(formatter, "snapshot cryptographic provider failed: {error}")
+            }
         }
     }
 }

@@ -1,22 +1,34 @@
 use std::fs::File;
 use std::io::{self, Read as _};
 use std::path::Path;
+use std::sync::Arc;
 
-use ring::{digest, hmac};
-use sanitization::SecretVec;
+use sanitization::{SecretVec, ct::ConstantTimeEq as _};
 use serde::{Deserialize, Serialize};
 
 use crate::store::SnapshotError;
+use crate::store_fs::require_private_regular_file;
 
 pub(crate) const MAX_INTEGRITY_KEY_BYTES: u64 = 4096;
 const MIN_INTEGRITY_KEY_BYTES: usize = 32;
 const SNAPSHOT_MAC_LABEL: &[u8] = b"fluxheim-snapshot-v1\0";
 const RECOVERY_MAC_LABEL: &[u8] = b"fluxheim-snapshot-recovery-v1\0";
+pub(crate) const GENERATION_MAC_LABEL: &[u8] = b"fluxheim-snapshot-generation-v1\0";
+pub(crate) const PRUNE_BOUNDARY_MAC_LABEL: &[u8] = b"fluxheim-snapshot-prune-boundary-v1\0";
+
+pub trait SnapshotCryptoProvider: std::fmt::Debug + Send + Sync {
+    fn label(&self) -> &'static str;
+    fn compliance_capable(&self) -> bool;
+    fn sha256(&self, chunks: &[&[u8]]) -> Result<[u8; 32], String>;
+    fn hmac_sha256(&self, key: &[u8], chunks: &[&[u8]]) -> Result<[u8; 32], String>;
+}
 
 #[derive(Debug)]
 pub(crate) struct SnapshotIntegrityKey {
     secret: SecretVec,
     key_id: String,
+    provider: Arc<dyn SnapshotCryptoProvider>,
+    source_path: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -29,7 +41,10 @@ pub(crate) struct SnapshotIntegrityManifest {
 }
 
 impl SnapshotIntegrityKey {
-    pub(crate) fn load(path: &Path) -> Result<Self, SnapshotError> {
+    pub(crate) fn load(
+        path: &Path,
+        provider: Arc<dyn SnapshotCryptoProvider>,
+    ) -> Result<Self, SnapshotError> {
         if fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(path)
             .unwrap_or(true)
         {
@@ -38,6 +53,9 @@ impl SnapshotIntegrityKey {
             });
         }
         let mut file = open_secret_file(path)?;
+        require_private_regular_file(path).map_err(|_| SnapshotError::UnsafeIntegrityKey {
+            path: path.to_path_buf(),
+        })?;
         let metadata = file.metadata().map_err(SnapshotError::Io)?;
         if !metadata.is_file() || metadata.len() > MAX_INTEGRITY_KEY_BYTES {
             return Err(SnapshotError::InvalidIntegrityKey);
@@ -54,9 +72,16 @@ impl SnapshotIntegrityKey {
         if grew || secret.with_secret(|bytes| bytes.len()) < MIN_INTEGRITY_KEY_BYTES {
             return Err(SnapshotError::InvalidIntegrityKey);
         }
-        let key_id =
-            secret.with_secret(|bytes| hex(digest::digest(&digest::SHA256, bytes).as_ref()));
-        Ok(Self { secret, key_id })
+        let key_id = secret
+            .with_secret(|bytes| provider.sha256(&[bytes]))
+            .map_err(SnapshotError::CryptoProvider)
+            .map(|digest| hex(&digest))?;
+        Ok(Self {
+            secret,
+            key_id,
+            provider,
+            source_path: path.to_path_buf(),
+        })
     }
 
     pub(crate) fn manifest(
@@ -68,8 +93,12 @@ impl SnapshotIntegrityKey {
         SnapshotIntegrityManifest {
             algorithm: "hmac-sha256".to_owned(),
             key_id: self.key_id.clone(),
-            config_sha256: hex(digest::digest(&digest::SHA256, config).as_ref()),
-            metadata_hmac_sha256: hex(self.sign(id, config, metadata).as_ref()),
+            config_sha256: self
+                .provider
+                .sha256(&[config])
+                .map(|digest| hex(&digest))
+                .unwrap_or_else(|error| crypto_provider_abort(self.provider.label(), &error)),
+            metadata_hmac_sha256: hex(&self.sign(id, config, metadata)),
         }
     }
 
@@ -77,28 +106,41 @@ impl SnapshotIntegrityKey {
         &self.key_id
     }
 
+    pub(crate) fn source_path(&self) -> &Path {
+        &self.source_path
+    }
+
     pub(crate) fn sign_recovery(&self, state: &[u8]) -> String {
-        self.secret.with_secret(|secret| {
-            let key = hmac::Key::new(hmac::HMAC_SHA256, secret);
-            let mut context = hmac::Context::with_key(&key);
-            context.update(RECOVERY_MAC_LABEL);
-            context.update(&(state.len() as u64).to_be_bytes());
-            context.update(state);
-            hex(context.sign().as_ref())
-        })
+        self.sign_state(RECOVERY_MAC_LABEL, state)
     }
 
     pub(crate) fn verify_recovery(&self, state: &[u8], signature: &str) -> bool {
         let Some(signature) = decode_hex_32(signature) else {
             return false;
         };
+        self.verify_state(RECOVERY_MAC_LABEL, state, &signature)
+    }
+
+    pub(crate) fn sign_state(&self, label: &[u8], state: &[u8]) -> String {
+        let length = (state.len() as u64).to_be_bytes();
         self.secret.with_secret(|secret| {
-            let key = hmac::Key::new(hmac::HMAC_SHA256, secret);
-            let mut input = Vec::with_capacity(RECOVERY_MAC_LABEL.len() + state.len() + 8);
-            input.extend_from_slice(RECOVERY_MAC_LABEL);
-            input.extend_from_slice(&(state.len() as u64).to_be_bytes());
-            input.extend_from_slice(state);
-            hmac::verify(&key, &input, &signature).is_ok()
+            self.provider
+                .hmac_sha256(secret, &[label, &length, state])
+                .map(|digest| hex(&digest))
+                .unwrap_or_else(|error| crypto_provider_abort(self.provider.label(), &error))
+        })
+    }
+
+    pub(crate) fn verify_state(&self, label: &[u8], state: &[u8], signature: &[u8; 32]) -> bool {
+        let length = (state.len() as u64).to_be_bytes();
+        self.secret.with_secret(|secret| {
+            self.provider
+                .hmac_sha256(secret, &[label, &length, state])
+                .is_ok_and(|digest| {
+                    digest
+                        .ct_eq(signature)
+                        .declassify("snapshot state signature result is public")
+                })
         })
     }
 
@@ -112,47 +154,65 @@ impl SnapshotIntegrityKey {
         if manifest.algorithm != "hmac-sha256" || manifest.key_id != self.key_id {
             return Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() });
         }
-        let config_digest = hex(digest::digest(&digest::SHA256, config).as_ref());
+        let config_digest = self
+            .provider
+            .sha256(&[config])
+            .map_err(SnapshotError::CryptoProvider)
+            .map(|digest| hex(&digest))?;
         if config_digest != manifest.config_sha256 {
             return Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() });
         }
         let expected = decode_hex_32(&manifest.metadata_hmac_sha256)
             .ok_or_else(|| SnapshotError::IntegrityVerificationFailed { id: id.to_owned() })?;
+        if self
+            .sign_result(id, config, metadata)?
+            .ct_eq(&expected)
+            .declassify("snapshot integrity signature result is public")
+        {
+            Ok(())
+        } else {
+            Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() })
+        }
+    }
+
+    fn sign(&self, id: &str, config: &[u8], metadata: &[u8]) -> [u8; 32] {
+        self.sign_result(id, config, metadata)
+            .unwrap_or_else(|error| {
+                crypto_provider_abort(self.provider.label(), &error.to_string())
+            })
+    }
+
+    fn sign_result(
+        &self,
+        id: &str,
+        config: &[u8],
+        metadata: &[u8],
+    ) -> Result<[u8; 32], SnapshotError> {
+        let id_length = (id.len() as u64).to_be_bytes();
+        let config_length = (config.len() as u64).to_be_bytes();
+        let metadata_length = (metadata.len() as u64).to_be_bytes();
         self.secret
             .with_secret(|secret| {
-                hmac::verify(
-                    &hmac::Key::new(hmac::HMAC_SHA256, secret),
-                    &mac_input(id, config, metadata),
-                    &expected,
+                self.provider.hmac_sha256(
+                    secret,
+                    &[
+                        SNAPSHOT_MAC_LABEL,
+                        &id_length,
+                        id.as_bytes(),
+                        &config_length,
+                        config,
+                        &metadata_length,
+                        metadata,
+                    ],
                 )
             })
-            .map_err(|_| SnapshotError::IntegrityVerificationFailed { id: id.to_owned() })
-    }
-
-    fn sign(&self, id: &str, config: &[u8], metadata: &[u8]) -> hmac::Tag {
-        self.secret.with_secret(|secret| {
-            hmac::sign(
-                &hmac::Key::new(hmac::HMAC_SHA256, secret),
-                &mac_input(id, config, metadata),
-            )
-        })
+            .map_err(SnapshotError::CryptoProvider)
     }
 }
 
-fn mac_input(id: &str, config: &[u8], metadata: &[u8]) -> Vec<u8> {
-    let mut input = Vec::with_capacity(
-        SNAPSHOT_MAC_LABEL.len() + id.len() + config.len() + metadata.len() + 24,
-    );
-    input.extend_from_slice(SNAPSHOT_MAC_LABEL);
-    append_field(&mut input, id.as_bytes());
-    append_field(&mut input, config);
-    append_field(&mut input, metadata);
-    input
-}
-
-fn append_field(output: &mut Vec<u8>, value: &[u8]) {
-    output.extend_from_slice(&(value.len() as u64).to_be_bytes());
-    output.extend_from_slice(value);
+fn crypto_provider_abort(provider: &str, error: &str) -> ! {
+    log::error!("fatal: snapshot cryptography failed through {provider}: {error}");
+    std::process::abort()
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -165,7 +225,7 @@ fn hex(bytes: &[u8]) -> String {
     output
 }
 
-fn decode_hex_32(value: &str) -> Option<[u8; 32]> {
+pub(crate) fn decode_hex_32(value: &str) -> Option<[u8; 32]> {
     if value.len() != 64 {
         return None;
     }

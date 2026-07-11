@@ -282,9 +282,16 @@ fn snapshot_store(
     key_file: Option<&std::path::Path>,
 ) -> Result<fluxheim_snapshot::SnapshotStore, Box<dyn Error + Send + Sync>> {
     match key_file {
+        #[cfg(feature = "proxy")]
         Some(key_file) => Ok(fluxheim_snapshot::SnapshotStore::with_integrity_key_file(
-            root, key_file,
+            root,
+            key_file,
+            std::sync::Arc::new(crate::internal_crypto::FluxheimSnapshotCryptoProvider(
+                crate::internal_crypto::admin_mac_provider(),
+            )),
         )?),
+        #[cfg(not(feature = "proxy"))]
+        Some(_) => Err("authenticated snapshots require a proxy-enabled Fluxheim build".into()),
         None => Ok(fluxheim_snapshot::SnapshotStore::new(root)),
     }
 }

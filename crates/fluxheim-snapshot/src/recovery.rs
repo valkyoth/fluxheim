@@ -57,7 +57,7 @@ impl SnapshotStore {
         self.with_store_lock(|| write_atomically(&self.runtime_state_path(), raw.as_bytes()))
     }
 
-    fn runtime_state_path(&self) -> std::path::PathBuf {
+    pub(crate) fn runtime_state_path(&self) -> std::path::PathBuf {
         self.root().join("self-healing.toml")
     }
 

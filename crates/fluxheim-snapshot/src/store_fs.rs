@@ -99,13 +99,23 @@ fn write_atomically_with_mode(
 
     if create_new {
         fs::hard_link(&temp_path, path).map_err(SnapshotError::Io)?;
-        fs::remove_file(&temp_path).map_err(SnapshotError::Io)?;
+        fs::remove_file(&temp_path).map_err(|_| SnapshotError::PublishedButNotDurable {
+            path: path.to_path_buf(),
+        })?;
         cleanup.disarm();
     } else {
         fs::rename(&temp_path, path).map_err(SnapshotError::Io)?;
         cleanup.disarm();
     }
-    sync_directory(parent)?;
+    sync_directory(parent).map_err(|error| {
+        if create_new {
+            SnapshotError::PublishedButNotDurable {
+                path: path.to_path_buf(),
+            }
+        } else {
+            error
+        }
+    })?;
     Ok(())
 }
 
@@ -118,6 +128,9 @@ pub(crate) fn open_private_lock_file(path: &Path) -> Result<File, SnapshotError>
     })?;
     require_real_directory(parent)?;
     require_plain_write_destination(path)?;
+    if path_exists_without_following_symlinks(path)? {
+        require_private_regular_file(path)?;
+    }
 
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true);
@@ -126,14 +139,13 @@ pub(crate) fn open_private_lock_file(path: &Path) -> Result<File, SnapshotError>
         options.custom_flags(O_NOFOLLOW).mode(SNAPSHOT_FILE_MODE);
     }
     let file = options.open(path).map_err(SnapshotError::Io)?;
-    #[cfg(unix)]
-    fs::set_permissions(path, fs::Permissions::from_mode(SNAPSHOT_FILE_MODE))
-        .map_err(SnapshotError::Io)?;
-    if !file.metadata().map_err(SnapshotError::Io)?.is_file() {
+    let metadata = file.metadata().map_err(SnapshotError::Io)?;
+    if !metadata.is_file() {
         return Err(SnapshotError::UnsafeSnapshotPath {
             path: path.to_path_buf(),
         });
     }
+    require_private_metadata(path, &metadata)?;
     Ok(file)
 }
 
@@ -173,7 +185,18 @@ pub(crate) fn regular_snapshot_file_exists(path: &Path) -> Result<bool, Snapshot
             path: path.to_path_buf(),
         });
     }
+    require_private_metadata(path, &metadata)?;
     Ok(true)
+}
+
+pub(crate) fn require_private_regular_file(path: &Path) -> Result<(), SnapshotError> {
+    let metadata = fs::symlink_metadata(path).map_err(SnapshotError::Io)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(SnapshotError::UnsafeSnapshotPath {
+            path: path.to_path_buf(),
+        });
+    }
+    require_private_metadata(path, &metadata)
 }
 
 pub(crate) fn read_optional_regular_file_to_string(
@@ -183,6 +206,16 @@ pub(crate) fn read_optional_regular_file_to_string(
         return Ok(None);
     }
     read_regular_file_to_string(path).map(Some)
+}
+
+pub(crate) fn read_optional_regular_file_to_string_with_limit(
+    path: &Path,
+    max_bytes: u64,
+) -> Result<Option<String>, SnapshotError> {
+    if !path_exists_without_following_symlinks(path)? {
+        return Ok(None);
+    }
+    read_regular_file_to_string_with_limit(path, max_bytes).map(Some)
 }
 
 pub(crate) fn read_regular_file_to_string_with_limit(
@@ -325,6 +358,7 @@ fn open_regular_file(path: &Path) -> Result<File, SnapshotError> {
             path: path.to_path_buf(),
         });
     }
+    require_private_metadata(path, &metadata)?;
 
     let mut options = OpenOptions::new();
     options.read(true);
@@ -338,7 +372,22 @@ fn open_regular_file(path: &Path) -> Result<File, SnapshotError> {
             path: path.to_path_buf(),
         });
     }
+    require_private_metadata(path, &metadata)?;
     Ok(file)
+}
+
+fn require_private_metadata(path: &Path, metadata: &fs::Metadata) -> Result<(), SnapshotError> {
+    #[cfg(unix)]
+    {
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(SnapshotError::UnsafeSnapshotPath {
+                path: path.to_path_buf(),
+            });
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (path, metadata);
+    Ok(())
 }
 
 fn require_plain_write_destination(path: &Path) -> Result<(), SnapshotError> {

@@ -14,6 +14,12 @@ pub struct ConfigSnapshot {
     pub integrity: SnapshotIntegrityStatus,
 }
 
+#[derive(Debug, Clone)]
+pub struct VerifiedConfigSnapshot {
+    pub snapshot: ConfigSnapshot,
+    pub config: fluxheim_config::Config,
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SnapshotIntegrityStatus {
     Authenticated,
@@ -75,4 +81,10 @@ pub enum SnapshotError {
     IntegrityVerificationFailed { id: String },
     InvalidPrunePolicy,
     RuntimeStateIntegrityFailed,
+    PublishedButNotDurable { path: PathBuf },
+    SnapshotPublishedButCurrentUpdateFailed { id: String },
+    GenerationExhausted,
+    GenerationStateInvalid,
+    PruneBoundaryInvalid,
+    CryptoProvider(String),
 }

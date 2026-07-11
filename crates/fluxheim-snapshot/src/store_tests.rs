@@ -367,7 +367,7 @@ mod tests {
 
         let candidate = store.rollback_candidate(None).unwrap();
 
-        assert_eq!(candidate.id, first.id);
+        assert_eq!(candidate.snapshot.id, first.id);
         assert_eq!(store.current_id().unwrap(), Some(second.id));
     }
 

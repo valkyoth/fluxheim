@@ -442,7 +442,10 @@ If `admin.enabled = true`, configure `token_env` or `token_file`. Snapshot and
 rollback endpoints also require `snapshot_store`.
 `snapshot_integrity_key_file` is optional; when set, snapshot creation writes
 HMAC-SHA-256 manifests and rollback requires a valid manifest. Keep the key
-outside the store in a private regular file containing 32..=4096 bytes.
+outside the store in a private regular file containing 32..=4096 bytes. On
+Unix, the key and every snapshot state file must have no group or other access
+bits; Fluxheim rejects them otherwise. Snapshot HMAC and SHA-256 operations use
+the selected Ring, OpenSSL-FIPS, or AWS-LC-FIPS internal crypto provider.
 `token_file`, `snapshot_store`, and the integrity key path must not contain
 parent traversal, must not sit below a
 symlinked parent directory, and on Unix must not use a group- or world-writable

@@ -74,3 +74,11 @@ pub(crate) fn validate_snapshot_id(id: &str) -> Result<(), SnapshotError> {
 
     Ok(())
 }
+
+pub(crate) fn safe_snapshot_label(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(char::escape_default)
+        .take(256)
+        .collect()
+}

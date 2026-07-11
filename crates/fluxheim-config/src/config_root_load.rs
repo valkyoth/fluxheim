@@ -16,6 +16,19 @@ impl Config {
         Self::load_with_runtime_path_validation(path, false)
     }
 
+    pub fn load_snapshot_bytes(bytes: &[u8]) -> Result<Self, ConfigLoadError> {
+        let text = std::str::from_utf8(bytes).map_err(|error| {
+            ConfigLoadError::Read(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+        })?;
+        let mut config: Self = toml::from_str(text).map_err(|source| ConfigLoadError::Parse {
+            path: std::path::PathBuf::from("<authenticated-snapshot>"),
+            source,
+        })?;
+        config.apply_presets();
+        config.validate().map_err(ConfigLoadError::Validate)?;
+        Ok(config)
+    }
+
     fn load_with_runtime_path_validation(
         path: Option<&Path>,
         validate_runtime_paths: bool,

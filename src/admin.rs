@@ -174,7 +174,15 @@ impl AdminApp {
             .ok_or("admin.snapshot_store is required when admin.enabled = true")?;
 
         let store = match config.admin.snapshot_integrity_key_file.as_deref() {
-            Some(key_file) => SnapshotStore::with_integrity_key_file(snapshot_store, key_file)?,
+            Some(key_file) => SnapshotStore::with_integrity_key_file(
+                snapshot_store,
+                key_file,
+                std::sync::Arc::new(crate::internal_crypto::FluxheimSnapshotCryptoProvider(
+                    crate::internal_crypto::admin_mac_provider_for_compliance_required(
+                        config.tls.compliance_mode().required(),
+                    ),
+                )),
+            )?,
             None => SnapshotStore::new(snapshot_store),
         };
         let runtime_snapshot = store.current_id().ok().flatten();
