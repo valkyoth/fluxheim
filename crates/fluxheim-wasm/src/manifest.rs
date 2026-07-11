@@ -34,6 +34,19 @@ impl WasmPluginAbi {
 pub enum WasmHostCallNamespace {
     FluxheimPolicyV1,
     ProxyWasmPreview,
+    WasiPreview,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, Hash, PartialEq)]
+pub struct WasmWasiCapabilities {
+    pub clocks: bool,
+    pub randomness: bool,
+}
+
+impl WasmWasiCapabilities {
+    pub fn is_empty(self) -> bool {
+        !self.clocks && !self.randomness
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
@@ -59,6 +72,7 @@ pub struct WasmPluginManifest {
     pub expected_sha256: Option<String>,
     pub abi: WasmPluginAbi,
     pub host_call_namespace: WasmHostCallNamespace,
+    pub wasi_capabilities: WasmWasiCapabilities,
     pub phases: Vec<WasmPluginPhase>,
     pub limits: WasmSandboxLimits,
     pub fail_mode: WasmPluginFailMode,
@@ -71,6 +85,7 @@ pub struct ValidatedWasmPluginManifest {
     expected_sha256: Option<String>,
     abi: WasmPluginAbi,
     host_call_namespace: WasmHostCallNamespace,
+    wasi_capabilities: WasmWasiCapabilities,
     phases: Vec<WasmPluginPhase>,
     limits: WasmSandboxLimits,
     fail_mode: WasmPluginFailMode,
@@ -111,6 +126,10 @@ impl ValidatedWasmPluginManifest {
 
     pub fn host_call_namespace(&self) -> WasmHostCallNamespace {
         self.host_call_namespace
+    }
+
+    pub fn wasi_capabilities(&self) -> WasmWasiCapabilities {
+        self.wasi_capabilities
     }
 
     pub fn phases(&self) -> &[WasmPluginPhase] {
@@ -158,6 +177,8 @@ pub enum WasmManifestError {
         namespace: WasmHostCallNamespace,
         phase: WasmPluginPhase,
     },
+    #[error("wasm plugin declares WASI capabilities for non-WASI ABI {abi:?}")]
+    WasiCapabilitiesWithoutWasiAbi { abi: WasmPluginAbi },
     #[error("wasm plugin fail_open is not allowed for security decision phases")]
     UnsafeFailOpen,
     #[error("invalid wasm sandbox limit {field}: {reason}")]
@@ -196,6 +217,9 @@ pub fn validate_plugin_manifest(
     }
     validate_phases(&manifest.phases)?;
     validate_host_call_namespace(manifest.abi, manifest.host_call_namespace, &manifest.phases)?;
+    if manifest.abi != WasmPluginAbi::WasiPreview && !manifest.wasi_capabilities.is_empty() {
+        return Err(WasmManifestError::WasiCapabilitiesWithoutWasiAbi { abi: manifest.abi });
+    }
     validate_fail_mode(manifest.fail_mode, &manifest.phases)?;
 
     Ok(ValidatedWasmPluginManifest {
@@ -204,6 +228,7 @@ pub fn validate_plugin_manifest(
         expected_sha256: manifest.expected_sha256,
         abi: manifest.abi,
         host_call_namespace: manifest.host_call_namespace,
+        wasi_capabilities: manifest.wasi_capabilities,
         phases: manifest.phases,
         limits,
         fail_mode: manifest.fail_mode,
@@ -218,6 +243,18 @@ fn validate_host_call_namespace(
     match (abi, namespace) {
         (WasmPluginAbi::FluxheimPolicyV1, WasmHostCallNamespace::FluxheimPolicyV1) => Ok(()),
         (WasmPluginAbi::ProxyWasmPreview, WasmHostCallNamespace::ProxyWasmPreview) => {
+            if let Some(phase) = phases
+                .iter()
+                .find(|phase| **phase != WasmPluginPhase::AccessDecision)
+            {
+                return Err(WasmManifestError::UnsupportedNamespacePhase {
+                    namespace,
+                    phase: *phase,
+                });
+            }
+            Ok(())
+        }
+        (WasmPluginAbi::WasiPreview, WasmHostCallNamespace::WasiPreview) => {
             if let Some(phase) = phases
                 .iter()
                 .find(|phase| **phase != WasmPluginPhase::AccessDecision)
@@ -365,6 +402,7 @@ mod tests {
             expected_sha256: None,
             abi: WasmPluginAbi::FluxheimPolicyV1,
             host_call_namespace: WasmHostCallNamespace::FluxheimPolicyV1,
+            wasi_capabilities: WasmWasiCapabilities::default(),
             phases: vec![WasmPluginPhase::RequestHeaders],
             limits: WasmSandboxLimits::default(),
             fail_mode: WasmPluginFailMode::FailClosed,
@@ -472,6 +510,48 @@ mod tests {
         assert_eq!(
             validated.host_call_namespace(),
             WasmHostCallNamespace::ProxyWasmPreview
+        );
+    }
+
+    #[test]
+    fn accepts_wasi_preview_with_explicit_capabilities() {
+        let mut manifest = valid_manifest();
+        manifest.abi = WasmPluginAbi::WasiPreview;
+        manifest.host_call_namespace = WasmHostCallNamespace::WasiPreview;
+        manifest.phases = vec![WasmPluginPhase::AccessDecision];
+        manifest.wasi_capabilities = WasmWasiCapabilities {
+            clocks: true,
+            randomness: true,
+        };
+
+        let validated = validate_plugin_manifest(manifest, true).unwrap();
+
+        assert_eq!(validated.abi(), WasmPluginAbi::WasiPreview);
+        assert_eq!(
+            validated.host_call_namespace(),
+            WasmHostCallNamespace::WasiPreview
+        );
+        assert_eq!(
+            validated.wasi_capabilities(),
+            WasmWasiCapabilities {
+                clocks: true,
+                randomness: true,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_wasi_capabilities_for_native_policy_abi() {
+        let mut manifest = valid_manifest();
+        manifest.wasi_capabilities.randomness = true;
+
+        let error = validate_plugin_manifest(manifest, true).unwrap_err();
+
+        assert_eq!(
+            error,
+            WasmManifestError::WasiCapabilitiesWithoutWasiAbi {
+                abi: WasmPluginAbi::FluxheimPolicyV1,
+            }
         );
     }
 

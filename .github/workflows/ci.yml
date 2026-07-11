@@ -128,6 +128,7 @@ jobs:
           cargo check --tests --no-default-features --features proxy,cache
           cargo check --tests --no-default-features --features cache
           cargo check --tests --no-default-features --features web
+          cargo check --tests --no-default-features --features wasm-wasi,wasm-proxy-abi
           cargo check --tests --no-default-features --features profile-core
           cargo check --no-default-features --features profile-core,acme-client
           cargo check --no-default-features --features profile-static-site

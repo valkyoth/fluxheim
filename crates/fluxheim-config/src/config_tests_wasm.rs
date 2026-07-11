@@ -62,6 +62,34 @@ fn proxy_preview_wasm_config(plugin_fields: &str) -> Config {
 }
 
 #[cfg(feature = "wasm")]
+fn wasi_preview_wasm_config(plugin_fields: &str) -> Config {
+    toml::from_str(&format!(
+        r#"
+        [server]
+        listen = ["127.0.0.1:8080"]
+        default_vhost = "app"
+
+        [wasm]
+        enabled = true
+        allow_preview_abi = true
+        plugin_roots = ["/srv/fluxheim/plugins"]
+
+        [[wasm.plugins]]
+        name = "wasi_preview"
+        path = "/srv/fluxheim/plugins/wasi_preview.wasm"
+        sha256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        phases = ["access-decision"]
+        {plugin_fields}
+
+        [[vhosts]]
+        name = "app"
+        hosts = ["app.test"]
+        "#
+    ))
+    .unwrap()
+}
+
+#[cfg(feature = "wasm")]
 #[test]
 fn wasm_registry_and_attachments_validate() {
     let config = base_wasm_config(
@@ -344,6 +372,113 @@ fn wasm_proxy_preview_namespace_rejects_unreviewed_phase() {
             if field == "phases"
                 && reason == "proxy-wasm-preview currently supports only the access-decision phase")
         );
+    }
+}
+
+#[cfg(all(feature = "wasm", not(feature = "wasm-wasi")))]
+#[test]
+fn wasm_wasi_preview_namespace_requires_feature() {
+    let config = wasi_preview_wasm_config(
+        r#"
+        abi = "wasi-preview"
+        host_call_namespace = "wasi-preview"
+        "#,
+    );
+
+    let error = config.validate().unwrap_err();
+
+    assert!(
+        matches!(error, ConfigError::InvalidWasmPolicy { field, reason, .. }
+        if field == "host_call_namespace"
+            && reason == "wasi-preview host calls require the wasm-wasi feature")
+    );
+}
+
+#[cfg(all(feature = "wasm", feature = "wasm-wasi"))]
+#[test]
+fn wasm_wasi_preview_builds_capability_manifest() {
+    let config = wasi_preview_wasm_config(
+        r#"
+        abi = "wasi-preview"
+        host_call_namespace = "wasi-preview"
+
+        [wasm.plugins.wasi]
+        clocks = true
+        randomness = true
+        "#,
+    );
+
+    config.validate().unwrap();
+    let manifests = config.wasm.plugin_manifests().unwrap();
+    let manifest = manifests
+        .iter()
+        .find(|manifest| manifest.name == "wasi_preview")
+        .unwrap();
+
+    assert_eq!(manifest.abi, fluxheim_wasm::WasmPluginAbi::WasiPreview);
+    assert_eq!(
+        manifest.host_call_namespace,
+        fluxheim_wasm::WasmHostCallNamespace::WasiPreview
+    );
+    assert!(manifest.wasi_capabilities.clocks);
+    assert!(manifest.wasi_capabilities.randomness);
+    fluxheim_wasm::validate_plugin_manifest(manifest.clone(), true).unwrap();
+}
+
+#[cfg(feature = "wasm")]
+#[test]
+fn wasm_wasi_grants_require_wasi_preview_abi() {
+    let config = base_wasm_config(
+        r#"
+        [wasm.plugins.wasi]
+        clocks = true
+        "#,
+    );
+
+    let error = config.validate().unwrap_err();
+
+    assert!(
+        matches!(error, ConfigError::InvalidWasmPolicy { field, reason, .. }
+        if field == "wasi" && reason == "WASI capability grants require abi = \"wasi-preview\"")
+    );
+}
+
+#[cfg(feature = "wasm-wasi")]
+#[test]
+fn wasm_wasi_rejects_unreviewed_capability_fields() {
+    for capability in ["environment", "filesystem", "network", "inherit_stdio"] {
+        let source = format!(
+            r#"
+            [server]
+            listen = ["127.0.0.1:8080"]
+            default_vhost = "app"
+
+            [wasm]
+            enabled = true
+            allow_preview_abi = true
+            plugin_roots = ["/srv/fluxheim/plugins"]
+
+            [[wasm.plugins]]
+            name = "wasi_preview"
+            path = "/srv/fluxheim/plugins/wasi_preview.wasm"
+            sha256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            abi = "wasi-preview"
+            host_call_namespace = "wasi-preview"
+            phases = ["access-decision"]
+
+            [wasm.plugins.wasi]
+            {capability} = true
+
+            [[vhosts]]
+            name = "app"
+            hosts = ["app.test"]
+            "#
+        );
+
+        let error = toml::from_str::<Config>(&source).unwrap_err();
+
+        assert!(error.to_string().contains("unknown field"));
+        assert!(error.to_string().contains(capability));
     }
 }
 

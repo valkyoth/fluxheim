@@ -7,6 +7,24 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.7.8 - Unreleased
+
+### Added
+
+- Start the opt-in WASI Preview 1 capability boundary for non-request-body
+  access-decision plugins with separate clock and randomness grants.
+- Add checked-in WASI randomness policy/config examples, standalone real-Wasm
+  smoke coverage, and live native HTTP/1 listener coverage.
+
+### Security
+
+- Validate every `wasi_snapshot_preview1` import against the plugin's explicit
+  capability grants before instantiation. Environment, arguments, inherited
+  stdio, filesystem, sockets/network, polling, and process state remain denied.
+- Include WASI capability grants in compiled-module identity equality and
+  preserve the existing digest, fuel, memory, table, timeout, admission, and
+  fail-closed controls.
+
 ## 1.7.7 - 2026-07-10
 
 ### Added

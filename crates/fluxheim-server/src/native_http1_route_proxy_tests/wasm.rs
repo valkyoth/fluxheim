@@ -152,6 +152,63 @@ async fn native_wasm_proxy_preview_log_call_fails_closed() {
     assert!(response.ends_with("wasm access decision trap\n"));
 }
 
+#[cfg(feature = "wasm-wasi")]
+#[tokio::test]
+async fn native_wasm_wasi_randomness_grant_executes_on_live_listener() {
+    let fixture = WasmRouteFixture::new(&[("wasi", WasmPluginBody::WasiRandomGranted)]);
+    let upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let mut config =
+        fixture.config_with_attachments(upstream, vec![wasm_attachment("wasi", "route", 100)]);
+    config.wasm.allow_preview_abi = true;
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, "/route").await;
+
+    assert!(response.starts_with("HTTP/1.1 302 Found\r\n"));
+    assert_eq!(
+        response_header(&response, "location").as_deref(),
+        Some("https://target.example/route")
+    );
+}
+
+#[cfg(feature = "wasm-wasi")]
+#[tokio::test]
+async fn native_wasm_wasi_randomness_without_grant_fails_closed() {
+    let fixture = WasmRouteFixture::new(&[("wasi", WasmPluginBody::WasiRandomDenied)]);
+    let upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let mut config =
+        fixture.config_with_attachments(upstream, vec![wasm_attachment("wasi", "route", 100)]);
+    config.wasm.allow_preview_abi = true;
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, "/route").await;
+
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(response.ends_with("wasm access decision error\n"));
+}
+
+#[cfg(feature = "wasm-wasi")]
+#[tokio::test]
+async fn native_wasm_wasi_stdio_import_remains_denied_with_other_grants() {
+    let fixture = WasmRouteFixture::new(&[("wasi", WasmPluginBody::WasiForbiddenFdWrite)]);
+    let upstream = super::upstream_expect_path("/never", "unexpected").await;
+    let mut config =
+        fixture.config_with_attachments(upstream, vec![wasm_attachment("wasi", "route", 100)]);
+    config.wasm.allow_preview_abi = true;
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let response = downstream_get(proxy, "/route").await;
+
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(response.ends_with("wasm access decision error\n"));
+}
+
 #[tokio::test]
 async fn native_wasm_access_decision_fails_closed_on_timeout() {
     let fixture = WasmRouteFixture::new(&[("busy", WasmPluginBody::BusyLoop)]);
@@ -1835,7 +1892,11 @@ enum WasmPluginBody {
     CacheLookupPolicyExample,
     CacheStorePolicyExample,
     Trap,
+    #[cfg(feature = "wasm-proxy-abi")]
     ProxyPreviewLogCall,
+    WasiRandomGranted,
+    WasiRandomDenied,
+    WasiForbiddenFdWrite,
     BusyLoop,
 }
 
@@ -2124,6 +2185,7 @@ impl WasmPluginBody {
                 r#"(module (func (export "fluxheim_access_decision") (result i32) unreachable))"#
                     .to_owned()
             }
+            #[cfg(feature = "wasm-proxy-abi")]
             Self::ProxyPreviewLogCall => {
                 r#"
                 (module
@@ -2135,6 +2197,34 @@ impl WasmPluginBody {
                     call $proxy_log
                     drop
                     i32.const 1))
+                "#
+                .to_owned()
+            }
+            Self::WasiRandomGranted | Self::WasiRandomDenied => {
+                r#"
+                (module
+                  (import "wasi_snapshot_preview1" "random_get"
+                    (func $random_get (param i32 i32) (result i32)))
+                  (memory (export "memory") 1)
+                  (func (export "fluxheim_access_decision") (result i32)
+                    i32.const 0
+                    i32.const 16
+                    call $random_get))
+                "#
+                .to_owned()
+            }
+            Self::WasiForbiddenFdWrite => {
+                r#"
+                (module
+                  (import "wasi_snapshot_preview1" "fd_write"
+                    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+                  (memory (export "memory") 1)
+                  (func (export "fluxheim_access_decision") (result i32)
+                    i32.const 1
+                    i32.const 0
+                    i32.const 0
+                    i32.const 0
+                    call $fd_write))
                 "#
                 .to_owned()
             }
@@ -2167,20 +2257,40 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
             ..Default::default()
         })
     };
+    #[cfg(feature = "wasm-proxy-abi")]
     let proxy_preview = matches!(body, WasmPluginBody::ProxyPreviewLogCall);
+    #[cfg(not(feature = "wasm-proxy-abi"))]
+    let proxy_preview = false;
+    let wasi_preview = matches!(
+        body,
+        WasmPluginBody::WasiRandomGranted
+            | WasmPluginBody::WasiRandomDenied
+            | WasmPluginBody::WasiForbiddenFdWrite
+    );
     fluxheim_config::WasmPluginConfig {
         name: name.to_owned(),
         path,
         sha256: Some(sha256_hex(&bytes)),
         abi: if proxy_preview {
             fluxheim_config::WasmPluginAbi::ProxyWasmPreview
+        } else if wasi_preview {
+            fluxheim_config::WasmPluginAbi::WasiPreview
         } else {
             fluxheim_config::WasmPluginAbi::FluxheimPolicyV1
         },
         host_call_namespace: if proxy_preview {
             fluxheim_config::WasmHostCallNamespace::ProxyWasmPreview
+        } else if wasi_preview {
+            fluxheim_config::WasmHostCallNamespace::WasiPreview
         } else {
             fluxheim_config::WasmHostCallNamespace::FluxheimPolicyV1
+        },
+        wasi: fluxheim_config::WasmWasiCapabilitiesConfig {
+            clocks: matches!(body, WasmPluginBody::WasiForbiddenFdWrite),
+            randomness: matches!(
+                body,
+                WasmPluginBody::WasiRandomGranted | WasmPluginBody::WasiForbiddenFdWrite
+            ),
         },
         phases: wasm_plugin_phases(body),
         fail_mode: fluxheim_config::WasmPluginFailMode::FailClosed,
@@ -2225,8 +2335,14 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         }
         WasmPluginBody::Decision(_)
         | WasmPluginBody::Trap
-        | WasmPluginBody::ProxyPreviewLogCall
+        | WasmPluginBody::WasiRandomGranted
+        | WasmPluginBody::WasiRandomDenied
+        | WasmPluginBody::WasiForbiddenFdWrite
         | WasmPluginBody::BusyLoop => vec![fluxheim_config::WasmPluginPhase::AccessDecision],
+        #[cfg(feature = "wasm-proxy-abi")]
+        WasmPluginBody::ProxyPreviewLogCall => {
+            vec![fluxheim_config::WasmPluginPhase::AccessDecision]
+        }
     }
 }
 

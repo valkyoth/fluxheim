@@ -1,0 +1,37 @@
+# Build with the optional wasm-wasi feature, compile wasi-random-policy.wat to
+# /etc/fluxheim/plugins/wasi-random-policy.wasm, and replace the digest.
+
+[wasm]
+enabled = true
+allow_preview_abi = true
+plugin_roots = ["/etc/fluxheim/plugins"]
+
+[[wasm.plugins]]
+name = "wasi_random_policy"
+path = "/etc/fluxheim/plugins/wasi-random-policy.wasm"
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+abi = "wasi-preview"
+host_call_namespace = "wasi-preview"
+phases = ["access-decision"]
+fail_mode = "fail-closed"
+
+[wasm.plugins.wasi]
+randomness = true
+
+[[wasm.attachments]]
+plugin = "wasi_random_policy"
+vhost = "example"
+route = "api"
+priority = 100
+phases = ["access-decision"]
+
+[[vhosts]]
+name = "example"
+hosts = ["example.com"]
+
+[[vhosts.routes]]
+name = "api"
+path_prefix = "/api/"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:3000"]

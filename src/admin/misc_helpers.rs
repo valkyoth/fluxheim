@@ -156,6 +156,10 @@ pub(super) fn wasm_status_json(config: &Config) -> Value {
                 "expected_sha256": plugin.sha256.as_deref(),
                 "abi": wasm_abi_label(plugin.abi),
                 "host_call_namespace": wasm_host_call_namespace_label(plugin.host_call_namespace),
+                "wasi_capabilities": {
+                    "clocks": plugin.wasi.clocks,
+                    "randomness": plugin.wasi.randomness,
+                },
                 "phases": plugin.phases.iter().map(|phase| wasm_phase_label(*phase)).collect::<Vec<_>>(),
                 "fail_mode": wasm_fail_mode_label(plugin.fail_mode),
                 "has_custom_limits": plugin.limits.is_some(),
@@ -206,6 +210,7 @@ fn wasm_host_call_namespace_label(namespace: crate::config::WasmHostCallNamespac
     match namespace {
         crate::config::WasmHostCallNamespace::FluxheimPolicyV1 => "fluxheim-policy-v1",
         crate::config::WasmHostCallNamespace::ProxyWasmPreview => "proxy-wasm-preview",
+        crate::config::WasmHostCallNamespace::WasiPreview => "wasi-preview",
     }
 }
 

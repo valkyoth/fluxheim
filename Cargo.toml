@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.7.7"
+version = "1.7.8"
 edition = "2024"
 rust-version = "1.97.0"
 license = "EUPL-1.2"
@@ -76,7 +76,7 @@ traffic-mirror = ["proxy", "fluxheim-config/traffic-mirror", "fluxheim-server/tr
 geoip = ["proxy", "fluxheim-config/geoip", "fluxheim-geoip/runtime"]
 wasm = ["dep:fluxheim-wasm", "fluxheim-config/wasm", "fluxheim-server/wasm", "fluxheim-wasm/runtime"]
 wasm-proxy-abi = ["wasm", "fluxheim-config/wasm-proxy-abi", "fluxheim-server/wasm-proxy-abi", "fluxheim-wasm/proxy-abi"]
-wasm-wasi = ["wasm"]
+wasm-wasi = ["wasm", "fluxheim-config/wasm-wasi", "fluxheim-server/wasm-wasi", "fluxheim-wasm/wasi"]
 cache = ["dep:bytes", "dep:moka", "dep:sha2", "fluxheim-config/cache", "fluxheim-server/openbao-cache-encryption"]
 web = [
     "dep:bytes",

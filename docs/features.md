@@ -47,7 +47,7 @@ before Cargo starts compiling Fluxheim.
 | `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream routes, source IP/CIDR allow/deny policy, DNS-rebinding guards for hostname upstreams, bounded idle/lifetime/byte caps, route-local PROXY protocol receive/send, stream upstream TLS/mTLS controls, and weighted/drain/backup policy. |
 | `wasm` | No | WebAssembly sandbox foundation with strict plugin-file loading, config-level plugin registry validation, typed loader manifests, authenticated registry status visibility, bounded Wasmtime execution, live access-decision hooks, bounded native HTTP/1 request/response header hooks, route-decision hooks, cache-lookup/cache-store hooks, compiled-module identities, and bounded host-call namespaces. |
 | `wasm-proxy-abi` | No | Opt-in Wasm proxy-ABI compatibility preview. Depends on `wasm`, requires `[wasm].allow_preview_abi = true`, and rejects unsupported preview calls deterministically. |
-| `wasm-wasi` | No | Reserved Wasm/WASI capability feature; currently depends on the sandbox foundation and remains disabled by default. |
+| `wasm-wasi` | No | Opt-in WASI Preview 1 capability boundary for access-decision plugins. Depends on `wasm`; clocks and randomness require independent explicit grants, while environment, arguments, inherited stdio, filesystem, sockets/network, and process state remain unavailable. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
 

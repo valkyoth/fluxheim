@@ -466,6 +466,7 @@ fn wasm_reload_config(sha256: &str, attachment_phases: Vec<WasmPluginPhase>) -> 
             sha256: Some(sha256.to_owned()),
             abi: WasmPluginAbi::FluxheimPolicyV1,
             host_call_namespace: WasmHostCallNamespace::FluxheimPolicyV1,
+            wasi: Default::default(),
             phases: vec![
                 WasmPluginPhase::RequestHeaders,
                 WasmPluginPhase::ResponseHeaders,

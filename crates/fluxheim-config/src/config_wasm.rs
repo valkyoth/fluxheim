@@ -265,6 +265,8 @@ pub struct WasmPluginConfig {
     #[serde(default)]
     pub host_call_namespace: WasmHostCallNamespace,
     #[serde(default)]
+    pub wasi: WasmWasiCapabilitiesConfig,
+    #[serde(default)]
     pub phases: Vec<WasmPluginPhase>,
     #[serde(default)]
     pub fail_mode: WasmPluginFailMode,
@@ -311,6 +313,41 @@ impl WasmPluginConfig {
                 scope: format!("wasm plugin {:?}", self.name),
                 field: "host_call_namespace",
                 reason: "proxy-wasm-preview host calls require abi = \"proxy-wasm-preview\"",
+            });
+        }
+        if self.host_call_namespace.requires_wasi_preview()
+            && self.abi != WasmPluginAbi::WasiPreview
+        {
+            return Err(ConfigError::InvalidWasmPolicy {
+                scope: format!("wasm plugin {:?}", self.name),
+                field: "host_call_namespace",
+                reason: "wasi-preview host calls require abi = \"wasi-preview\"",
+            });
+        }
+        if self.host_call_namespace.requires_wasi_preview() && !cfg!(feature = "wasm-wasi") {
+            return Err(ConfigError::InvalidWasmPolicy {
+                scope: format!("wasm plugin {:?}", self.name),
+                field: "host_call_namespace",
+                reason: "wasi-preview host calls require the wasm-wasi feature",
+            });
+        }
+        if self.host_call_namespace.requires_wasi_preview()
+            && self
+                .phases
+                .iter()
+                .any(|phase| *phase != WasmPluginPhase::AccessDecision)
+        {
+            return Err(ConfigError::InvalidWasmPolicy {
+                scope: format!("wasm plugin {:?}", self.name),
+                field: "phases",
+                reason: "wasi-preview currently supports only the access-decision phase",
+            });
+        }
+        if self.abi != WasmPluginAbi::WasiPreview && !self.wasi.is_empty() {
+            return Err(ConfigError::InvalidWasmPolicy {
+                scope: format!("wasm plugin {:?}", self.name),
+                field: "wasi",
+                reason: "WASI capability grants require abi = \"wasi-preview\"",
             });
         }
         if self.host_call_namespace.requires_proxy_wasm_preview()
@@ -361,6 +398,7 @@ impl WasmPluginConfig {
             expected_sha256: self.sha256.clone(),
             abi: self.abi.to_wasm_abi(),
             host_call_namespace: self.host_call_namespace.to_wasm_host_call_namespace(),
+            wasi_capabilities: self.wasi.to_wasm_capabilities(),
             phases: self
                 .phases
                 .iter()
@@ -497,6 +535,7 @@ pub enum WasmHostCallNamespace {
     #[default]
     FluxheimPolicyV1,
     ProxyWasmPreview,
+    WasiPreview,
 }
 
 impl WasmHostCallNamespace {
@@ -508,11 +547,39 @@ impl WasmHostCallNamespace {
         matches!(self, Self::ProxyWasmPreview)
     }
 
+    fn requires_wasi_preview(self) -> bool {
+        matches!(self, Self::WasiPreview)
+    }
+
     #[cfg(feature = "wasm")]
     fn to_wasm_host_call_namespace(self) -> fluxheim_wasm::WasmHostCallNamespace {
         match self {
             Self::FluxheimPolicyV1 => fluxheim_wasm::WasmHostCallNamespace::FluxheimPolicyV1,
             Self::ProxyWasmPreview => fluxheim_wasm::WasmHostCallNamespace::ProxyWasmPreview,
+            Self::WasiPreview => fluxheim_wasm::WasmHostCallNamespace::WasiPreview,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WasmWasiCapabilitiesConfig {
+    #[serde(default)]
+    pub clocks: bool,
+    #[serde(default)]
+    pub randomness: bool,
+}
+
+impl WasmWasiCapabilitiesConfig {
+    fn is_empty(self) -> bool {
+        !self.clocks && !self.randomness
+    }
+
+    #[cfg(feature = "wasm")]
+    fn to_wasm_capabilities(self) -> fluxheim_wasm::WasmWasiCapabilities {
+        fluxheim_wasm::WasmWasiCapabilities {
+            clocks: self.clocks,
+            randomness: self.randomness,
         }
     }
 }

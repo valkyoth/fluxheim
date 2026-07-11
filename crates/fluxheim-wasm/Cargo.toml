@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-wasm"
-version = "1.7.7"
+version = "1.7.8"
 edition = "2024"
 rust-version = "1.97.0"
 license = "EUPL-1.2"
@@ -11,6 +11,7 @@ description = "Internal Fluxheim sandboxed WebAssembly extension runtime boundar
 default = []
 proxy-abi = []
 runtime = ["dep:tokio", "dep:wasmtime"]
+wasi = ["runtime", "dep:wasmtime-wasi"]
 
 [[example]]
 name = "wasm_sandbox_smoke"
@@ -21,6 +22,7 @@ sha2 = "0.11.0"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", default-features = false, features = ["rt", "sync", "time"], optional = true }
 wasmtime = { version = "46.0.1", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
+wasmtime-wasi = { version = "46.0.1", default-features = false, features = ["p1"], optional = true }
 
 [dev-dependencies]
 tempfile = "3.27.0"

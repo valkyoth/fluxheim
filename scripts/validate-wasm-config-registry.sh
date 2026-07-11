@@ -3,10 +3,16 @@ set -eu
 
 cargo test --locked -p fluxheim-config wasm
 cargo test --locked -p fluxheim-config --features wasm wasm
+cargo test --locked -p fluxheim-config --features wasm-wasi wasm_wasi
 cargo test --locked --features wasm status_endpoint_reports_wasm_registry_summary
 cargo run --quiet --locked --no-default-features --features profile-development,wasm \
     --bin fluxheim-config-tester -- \
     --config tests/fixtures/wasm-config/accepted-registry.toml \
+    --profile development \
+    --no-runtime-paths >/dev/null
+cargo run --quiet --locked --no-default-features --features profile-development,wasm-wasi \
+    --bin fluxheim-config-tester -- \
+    --config examples/wasm/wasi-random-policy.toml \
     --profile development \
     --no-runtime-paths >/dev/null
 cargo run --quiet --locked --no-default-features --features profile-development,wasm \

@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-server"
-version = "1.7.7"
+version = "1.7.8"
 edition = "2024"
 rust-version = "1.97.0"
 license = "EUPL-1.2"
@@ -29,6 +29,7 @@ tls-openssl-fips = ["tls-openssl"]
 traffic-mirror = ["dep:ureq"]
 wasm = ["dep:fluxheim-wasm", "fluxheim-config/wasm", "fluxheim-wasm/runtime"]
 wasm-proxy-abi = ["wasm", "fluxheim-config/wasm-proxy-abi", "fluxheim-wasm/proxy-abi"]
+wasm-wasi = ["wasm", "fluxheim-config/wasm-wasi", "fluxheim-wasm/wasi"]
 
 [dependencies]
 bytes = "1.12.1"

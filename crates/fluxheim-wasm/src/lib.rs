@@ -15,7 +15,7 @@ pub use file::{WasmPluginError, WasmPluginFile, load_plugin_file, validate_plugi
 pub use manifest::{
     LoadedWasmPlugin, ValidatedWasmPluginManifest, WasmHostCallNamespace, WasmManifestError,
     WasmPluginAbi, WasmPluginFailMode, WasmPluginLoadError, WasmPluginManifest, WasmPluginPhase,
-    load_plugin_from_manifest, validate_plugin_manifest,
+    WasmWasiCapabilities, load_plugin_from_manifest, validate_plugin_manifest,
 };
 pub use policy::{
     WasmAccessChainDecision, WasmAccessDecision, WasmAccessDeny, combine_access_decisions,

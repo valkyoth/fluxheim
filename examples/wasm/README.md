@@ -20,3 +20,9 @@ because Fluxheim links only the host calls valid for the current phase. It also
 uses fixed Fluxheim host-call IDs. Plugins cannot emit arbitrary cache-key
 bytes, TTLs, tags, response headers, upstream targets, or filesystem paths
 through this ABI.
+
+`wasi-random-policy.wat` and `wasi-random-policy.toml` demonstrate the opt-in
+`1.7.8` WASI Preview 1 boundary. The module imports only `random_get`, and the
+config grants only randomness. Clocks require their own explicit grant.
+Environment, arguments, inherited stdio, filesystem, sockets/network, and
+process-exit imports remain unavailable and are rejected before instantiation.

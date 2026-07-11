@@ -687,6 +687,42 @@ host_call_namespace = "proxy-wasm-preview"
 phases = ["access-decision"]
 ```
 
+`1.7.8` adds the separate opt-in `wasm-wasi` capability preview for WASI
+Preview 1 core modules. The binary must be built with `wasm-wasi`, preview ABIs
+must be allowed, and the ABI/namespace pair must both be `wasi-preview`.
+Capabilities default to false and are part of the compiled-module identity.
+Only clock and randomness imports are currently reviewable grants:
+
+```toml
+[wasm]
+enabled = true
+allow_preview_abi = true
+
+[[wasm.plugins]]
+name = "wasi_random_policy"
+path = "/etc/fluxheim/plugins/wasi-random-policy.wasm"
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+abi = "wasi-preview"
+host_call_namespace = "wasi-preview"
+phases = ["access-decision"]
+fail_mode = "fail-closed"
+
+[wasm.plugins.wasi]
+clocks = false
+randomness = true
+```
+
+Fluxheim checks every declared `wasi_snapshot_preview1` import before module
+instantiation. `clock_res_get` and `clock_time_get` require `clocks = true`;
+`random_get` requires `randomness = true`. Environment and arguments,
+inherited stdin/stdout/stderr, filesystem descriptors and paths,
+sockets/network, polling, and process-exit imports are not configurable in this
+preview and fail closed. WASI plugins currently support only
+`access-decision`, do not receive request bodies, and remain subject to the
+normal Wasm digest pin, fuel, memory, table, timeout, admission, and fail-mode
+controls. Each `random_get` call is capped at 4096 bytes; a larger request
+traps and follows the plugin fail mode.
+
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:
 

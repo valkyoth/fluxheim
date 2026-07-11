@@ -435,6 +435,7 @@ fn wasm_host_call_namespace_name(namespace: WasmHostCallNamespace) -> &'static s
     match namespace {
         WasmHostCallNamespace::FluxheimPolicyV1 => "fluxheim-policy-v1",
         WasmHostCallNamespace::ProxyWasmPreview => "proxy-wasm-preview",
+        WasmHostCallNamespace::WasiPreview => "wasi-preview",
     }
 }
 
@@ -466,7 +467,9 @@ fn scoped_phase_host_functions(
         WasmHostCallNamespace::FluxheimPolicyV1 => {
             with_namespace_host_functions(namespace_functions, phase_functions)
         }
-        WasmHostCallNamespace::ProxyWasmPreview => namespace_functions,
+        WasmHostCallNamespace::ProxyWasmPreview | WasmHostCallNamespace::WasiPreview => {
+            namespace_functions
+        }
     }
 }
 
@@ -476,6 +479,7 @@ fn wasm_host_call_namespace_functions(
     match namespace {
         WasmHostCallNamespace::FluxheimPolicyV1 => Vec::new(),
         WasmHostCallNamespace::ProxyWasmPreview => wasm_proxy_preview_host_functions(),
+        WasmHostCallNamespace::WasiPreview => Vec::new(),
     }
 }
 

@@ -19,9 +19,11 @@ compiled modules explicit cache identities scoped by plugin SHA-256 digest, ABI
 version, native feature surface, and Fluxheim version. Fluxheim `1.7.7` adds
 the opt-in `wasm-proxy-abi` compatibility preview boundary with explicit
 host-call namespace validation and deterministic unsupported-call rejection.
+Fluxheim `1.7.8` starts the opt-in WASI Preview 1 capability boundary with
+independent clock and randomness grants and fail-closed import filtering.
 Direct backend choice, plugin-provided persistence keys, dynamic mirror/shadow
-target choice, richer store policy hooks, broader Proxy-ABI compatibility, and
-WASI capabilities remain staged for later `1.7.x` releases.
+target choice, richer store policy hooks, and broader Proxy-ABI/WASI capability
+coverage remain staged for later `1.7.x` releases.
 
 Cargo features:
 
@@ -29,7 +31,7 @@ Cargo features:
 - `wasm-proxy-abi`
 - `wasm-wasi`
 
-Latest crate candidates checked on 2026-07-10:
+Latest crate candidates checked on 2026-07-11:
 
 - `wasmtime 46.0.1`
 - `wasmtime-wasi 46.0.1`
@@ -79,6 +81,32 @@ Fluxheim also scopes phase-specific native host functions by namespace in the
 server. Preview plugins never receive `fluxheim_policy_v1` request-header,
 routing, or cache capabilities, even if a future construction path bypasses
 configuration validation.
+
+## WASI Capability Preview
+
+Fluxheim `1.7.8` supports WASI Preview 1 core-module imports only when the
+binary is built with `wasm-wasi`, `[wasm].allow_preview_abi = true`, and the
+plugin declares both `abi = "wasi-preview"` and
+`host_call_namespace = "wasi-preview"`. The initial namespace is restricted to
+`access-decision` and does not expose request bodies or Fluxheim's native
+policy host calls.
+
+The default capability set is empty. `[wasm.plugins.wasi] clocks = true` grants
+only `clock_res_get` and `clock_time_get`; `randomness = true` grants only
+`random_get`. Fluxheim validates every declared WASI import before
+instantiation, then builds a fresh per-execution WASI context without inherited
+arguments, environment, stdio, directories, sockets, or process state.
+Each granted randomness call is capped at 4096 bytes so guest-selected host
+work cannot scale to the full memory limit in one call; larger requests trap.
+Environment, filesystem, network, polling, stdio, and process-exit imports are
+therefore rejected even though the underlying Wasmtime WASI implementation can
+provide broader interfaces to less constrained embedders.
+
+Capability grants are included in compiled-module identity equality so a
+module prepared for an empty capability set cannot be reused as one prepared
+for clocks or randomness. Normal module digest pinning, fuel, memory, table,
+wall-time, admission, blocking-work, metrics, and fail-closed access-decision
+rules continue to apply.
 
 ## Design Goals
 

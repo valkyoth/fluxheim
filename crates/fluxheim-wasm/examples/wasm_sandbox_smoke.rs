@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
+#[cfg(feature = "wasi")]
+use fluxheim_wasm::WasmWasiCapabilities;
 use fluxheim_wasm::{
     FluxWasmRuntime, WasmExecutionError, WasmHostCallNamespace, WasmManifestError, WasmPluginAbi,
     WasmPluginFailMode, WasmPluginManifest, WasmPluginPhase, WasmSandboxLimits, load_plugin_file,
@@ -44,6 +46,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         expected_sha256: None,
         abi: WasmPluginAbi::FluxheimPolicyV1,
         host_call_namespace: WasmHostCallNamespace::FluxheimPolicyV1,
+        wasi_capabilities: Default::default(),
         phases: vec![WasmPluginPhase::RequestHeaders],
         limits,
         fail_mode: WasmPluginFailMode::FailClosed,
@@ -60,6 +63,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         expected_sha256: None,
         abi: WasmPluginAbi::FluxheimPolicyV1,
         host_call_namespace: WasmHostCallNamespace::FluxheimPolicyV1,
+        wasi_capabilities: Default::default(),
         phases: vec![WasmPluginPhase::AccessDecision],
         limits,
         fail_mode: WasmPluginFailMode::FailOpen,
@@ -128,6 +132,74 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("expected table growth denial -1, got {}", outcome.result).into());
     }
 
+    #[cfg(feature = "wasi")]
+    run_wasi_preview(&root, limits)?;
+
+    Ok(())
+}
+
+#[cfg(feature = "wasi")]
+fn run_wasi_preview(
+    root: &Path,
+    limits: WasmSandboxLimits,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let approved_roots = [root.to_path_buf()];
+    let plugin = write_wasm_fixture(
+        root,
+        "wasi-random-",
+        include_str!("../../../examples/wasm/wasi-random-policy.wat"),
+    )?;
+    let manifest = WasmPluginManifest {
+        name: "wasi-random".to_owned(),
+        path: plugin.clone(),
+        expected_sha256: None,
+        abi: WasmPluginAbi::WasiPreview,
+        host_call_namespace: WasmHostCallNamespace::WasiPreview,
+        wasi_capabilities: WasmWasiCapabilities {
+            randomness: true,
+            ..WasmWasiCapabilities::default()
+        },
+        phases: vec![WasmPluginPhase::AccessDecision],
+        limits,
+        fail_mode: WasmPluginFailMode::FailClosed,
+    };
+    let loaded = load_plugin_from_manifest(manifest, &approved_roots, true)?;
+    let runtime = FluxWasmRuntime::new(limits)?;
+    let identity = fluxheim_wasm::FluxWasmCompiledModuleIdentity::for_loaded_plugin(
+        &loaded,
+        "smoke:wasi-preview:randomness",
+    );
+    let compiled = runtime.compile_plugin_module_with_identity(loaded.file(), identity)?;
+    let outcome = runtime.run_compiled_i32_no_args(&compiled, "fluxheim_access_decision")?;
+    if outcome.result != 0 {
+        return Err(format!("expected WASI random_get success, got {}", outcome.result).into());
+    }
+
+    let denied_manifest = WasmPluginManifest {
+        name: "wasi-random-denied".to_owned(),
+        path: plugin,
+        expected_sha256: None,
+        abi: WasmPluginAbi::WasiPreview,
+        host_call_namespace: WasmHostCallNamespace::WasiPreview,
+        wasi_capabilities: WasmWasiCapabilities::default(),
+        phases: vec![WasmPluginPhase::AccessDecision],
+        limits,
+        fail_mode: WasmPluginFailMode::FailClosed,
+    };
+    let denied = load_plugin_from_manifest(denied_manifest, &approved_roots, true)?;
+    let identity = fluxheim_wasm::FluxWasmCompiledModuleIdentity::for_loaded_plugin(
+        &denied,
+        "smoke:wasi-preview:denied",
+    );
+    let compiled = runtime.compile_plugin_module_with_identity(denied.file(), identity)?;
+    match runtime.run_compiled_i32_no_args(&compiled, "fluxheim_access_decision") {
+        Err(WasmExecutionError::UnsupportedHostImport { module, name })
+            if module == "wasi_snapshot_preview1" && name == "random_get" => {}
+        Ok(_) => return Err("ungranted WASI randomness import unexpectedly executed".into()),
+        Err(error) => {
+            return Err(format!("expected ungranted WASI import rejection, got {error}").into());
+        }
+    }
     Ok(())
 }
 

@@ -11,14 +11,19 @@ use wasmtime::{
     Config, Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
     UpdateDeadline,
 };
+#[cfg(feature = "wasi")]
+use wasmtime_wasi::{WasiCtxBuilder, p1::WasiP1Ctx};
 
 use crate::{
-    FLUXHEIM_WASM_ABI_VERSION, LoadedWasmPlugin, WasmPluginError, WasmPluginFile, WasmSandboxLimits,
+    FLUXHEIM_WASM_ABI_VERSION, LoadedWasmPlugin, WasmPluginError, WasmPluginFile,
+    WasmSandboxLimits, WasmWasiCapabilities,
 };
 
 const MAX_CONCURRENT_COMPILES: usize = 16;
 const DEFAULT_RUNTIME_FEATURE_SET: &str = "fluxheim-policy-v1";
 const EPOCH_TICK_INTERVAL: Duration = Duration::from_millis(1);
+#[cfg(feature = "wasi")]
+const MAX_WASI_RANDOM_BYTES_PER_CALL: u64 = 4096;
 
 #[derive(Debug)]
 pub struct FluxWasmRuntime {
@@ -38,6 +43,7 @@ pub struct FluxWasmCompiledModuleIdentity {
     abi_version: u32,
     fluxheim_version: String,
     feature_set: String,
+    wasi_capabilities: WasmWasiCapabilities,
 }
 
 #[derive(Clone)]
@@ -210,15 +216,18 @@ impl FluxWasmCompiledModuleIdentity {
             abi_version,
             fluxheim_version: env!("CARGO_PKG_VERSION").to_owned(),
             feature_set: feature_set.into(),
+            wasi_capabilities: WasmWasiCapabilities::default(),
         }
     }
 
     pub fn for_loaded_plugin(plugin: &LoadedWasmPlugin, feature_set: impl Into<String>) -> Self {
-        Self::new(
+        let mut identity = Self::new(
             plugin.file().sha256_hex(),
             plugin.manifest().abi().abi_version(),
             feature_set,
-        )
+        );
+        identity.wasi_capabilities = plugin.manifest().wasi_capabilities();
+        identity
     }
 
     pub fn plugin_sha256(&self) -> &str {
@@ -235,6 +244,15 @@ impl FluxWasmCompiledModuleIdentity {
 
     pub fn feature_set(&self) -> &str {
         &self.feature_set
+    }
+
+    pub fn wasi_capabilities(&self) -> WasmWasiCapabilities {
+        self.wasi_capabilities
+    }
+
+    pub fn with_wasi_capabilities(mut self, capabilities: WasmWasiCapabilities) -> Self {
+        self.wasi_capabilities = capabilities;
+        self
     }
 }
 
@@ -264,6 +282,8 @@ pub enum WasmExecutionError {
 
 struct RuntimeStoreState {
     limits: StoreLimits,
+    #[cfg(feature = "wasi")]
+    wasi: WasiP1Ctx,
 }
 
 #[cfg(test)]
@@ -337,6 +357,25 @@ fn ensure_shared_epoch_ticker(engine: &Engine) -> Result<(), WasmExecutionError>
     }) {
         Ok(()) => Ok(()),
         Err(error) => Err(WasmExecutionError::RuntimeSetup(error.clone())),
+    }
+}
+
+fn wasi_import_allowed(module: &str, name: &str, capabilities: WasmWasiCapabilities) -> bool {
+    if module != "wasi_snapshot_preview1" {
+        return false;
+    }
+    #[cfg(feature = "wasi")]
+    {
+        match name {
+            "clock_res_get" | "clock_time_get" => capabilities.clocks,
+            "random_get" => capabilities.randomness,
+            _ => false,
+        }
+    }
+    #[cfg(not(feature = "wasi"))]
+    {
+        let _ = (name, capabilities);
+        false
     }
 }
 
@@ -460,10 +499,15 @@ impl FluxWasmRuntime {
         function: &str,
         host_functions: Vec<WasmI32HostFunction>,
     ) -> Result<WasmExecutionOutcome, WasmExecutionError> {
+        let wasi_capabilities = module.cache_identity.wasi_capabilities();
         if let Some(import) = module.module.imports().find(|import| {
-            !host_functions.iter().any(|host_function| {
+            if import.module() == "wasi_snapshot_preview1" {
+                return !wasi_import_allowed(import.module(), import.name(), wasi_capabilities);
+            }
+            let custom_host_available = host_functions.iter().any(|host_function| {
                 host_function.module == import.module() && host_function.name == import.name()
-            })
+            });
+            !custom_host_available
         }) {
             return Err(WasmExecutionError::UnsupportedHostImport {
                 module: import.module().to_owned(),
@@ -478,6 +522,10 @@ impl FluxWasmRuntime {
                 .memories(1)
                 .tables(2)
                 .build(),
+            #[cfg(feature = "wasi")]
+            wasi: WasiCtxBuilder::new()
+                .max_random_size(MAX_WASI_RANDOM_BYTES_PER_CALL)
+                .build_p1(),
         };
         let mut store = Store::new(&self.engine, state);
         store.limiter(|state| &mut state.limits);
@@ -497,8 +545,17 @@ impl FluxWasmRuntime {
             }
         });
         let result = (|| {
-            let mut linker = Linker::new(&self.engine);
-            let has_host_functions = !host_functions.is_empty();
+            let mut linker: Linker<RuntimeStoreState> = Linker::new(&self.engine);
+            let has_wasi_imports = module
+                .module
+                .imports()
+                .any(|import| import.module() == "wasi_snapshot_preview1");
+            #[cfg(feature = "wasi")]
+            if has_wasi_imports {
+                wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |state| &mut state.wasi)
+                    .map_err(|error| WasmExecutionError::RuntimeSetup(error.to_string()))?;
+            }
+            let has_host_functions = !host_functions.is_empty() || has_wasi_imports;
             for host_function in host_functions {
                 match host_function.callback {
                     WasmI32HostCallback::Two(callback) => linker
@@ -686,6 +743,200 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "wasi")]
+    #[test]
+    fn wasi_randomness_import_requires_explicit_grant() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"
+            (module
+              (import "wasi_snapshot_preview1" "random_get"
+                (func $random_get (param i32 i32) (result i32)))
+              (memory (export "memory") 1)
+              (func (export "decision") (result i32)
+                i32.const 0
+                i32.const 16
+                call $random_get))
+            "#,
+        );
+        let limits = WasmSandboxLimits::default();
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+        let denied = runtime.compile_plugin_module(&plugin).unwrap();
+
+        let error = runtime
+            .run_compiled_i32_no_args(&denied, "decision")
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            WasmExecutionError::UnsupportedHostImport { module, name }
+                if module == "wasi_snapshot_preview1" && name == "random_get"
+        ));
+        let error = runtime
+            .run_compiled_i32_no_args_with_hosts(
+                &denied,
+                "decision",
+                vec![WasmI32HostFunction::new(
+                    "wasi_snapshot_preview1",
+                    "random_get",
+                    |_pointer, _length| Ok(0),
+                )],
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            WasmExecutionError::UnsupportedHostImport { module, name }
+                if module == "wasi_snapshot_preview1" && name == "random_get"
+        ));
+
+        let identity = FluxWasmCompiledModuleIdentity::new(
+            plugin.sha256_hex(),
+            0,
+            "test:wasi-preview:randomness",
+        )
+        .with_wasi_capabilities(WasmWasiCapabilities {
+            randomness: true,
+            ..WasmWasiCapabilities::default()
+        });
+        let granted = runtime
+            .compile_plugin_module_with_identity(&plugin, identity)
+            .unwrap();
+        let outcome = runtime
+            .run_compiled_i32_no_args(&granted, "decision")
+            .unwrap();
+
+        assert_eq!(outcome.result, 0);
+    }
+
+    #[cfg(feature = "wasi")]
+    #[test]
+    fn wasi_clock_import_requires_explicit_grant() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"
+            (module
+              (import "wasi_snapshot_preview1" "clock_time_get"
+                (func $clock_time_get (param i32 i64 i32) (result i32)))
+              (memory (export "memory") 1)
+              (func (export "decision") (result i32)
+                i32.const 0
+                i64.const 1
+                i32.const 0
+                call $clock_time_get))
+            "#,
+        );
+        let limits = WasmSandboxLimits::default();
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+        let identity =
+            FluxWasmCompiledModuleIdentity::new(plugin.sha256_hex(), 0, "test:wasi-preview:clocks")
+                .with_wasi_capabilities(WasmWasiCapabilities {
+                    clocks: true,
+                    ..WasmWasiCapabilities::default()
+                });
+        let module = runtime
+            .compile_plugin_module_with_identity(&plugin, identity)
+            .unwrap();
+
+        let outcome = runtime
+            .run_compiled_i32_no_args(&module, "decision")
+            .unwrap();
+
+        assert_eq!(outcome.result, 0);
+    }
+
+    #[cfg(feature = "wasi")]
+    #[test]
+    fn wasi_filesystem_and_stdio_imports_remain_denied() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"
+            (module
+              (import "wasi_snapshot_preview1" "fd_write"
+                (func $fd_write (param i32 i32 i32 i32) (result i32)))
+              (memory (export "memory") 1)
+              (func (export "decision") (result i32)
+                i32.const 1
+                i32.const 0
+                i32.const 0
+                i32.const 0
+                call $fd_write))
+            "#,
+        );
+        let limits = WasmSandboxLimits::default();
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+        let identity = FluxWasmCompiledModuleIdentity::new(
+            plugin.sha256_hex(),
+            0,
+            "test:wasi-preview:bounded",
+        )
+        .with_wasi_capabilities(WasmWasiCapabilities {
+            clocks: true,
+            randomness: true,
+        });
+        let module = runtime
+            .compile_plugin_module_with_identity(&plugin, identity)
+            .unwrap();
+
+        let error = runtime
+            .run_compiled_i32_no_args(&module, "decision")
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            WasmExecutionError::UnsupportedHostImport { module, name }
+                if module == "wasi_snapshot_preview1" && name == "fd_write"
+        ));
+    }
+
+    #[cfg(feature = "wasi")]
+    #[test]
+    fn wasi_randomness_host_call_is_size_bounded() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"
+            (module
+              (import "wasi_snapshot_preview1" "random_get"
+                (func $random_get (param i32 i32) (result i32)))
+              (memory (export "memory") 1)
+              (func (export "decision") (result i32)
+                i32.const 0
+                i32.const 4097
+                call $random_get))
+            "#,
+        );
+        let limits = WasmSandboxLimits::default();
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+        let identity = FluxWasmCompiledModuleIdentity::new(
+            plugin.sha256_hex(),
+            0,
+            "test:wasi-preview:randomness-limit",
+        )
+        .with_wasi_capabilities(WasmWasiCapabilities {
+            randomness: true,
+            ..WasmWasiCapabilities::default()
+        });
+        let module = runtime
+            .compile_plugin_module_with_identity(&plugin, identity)
+            .unwrap();
+
+        let error = runtime
+            .run_compiled_i32_no_args(&module, "decision")
+            .unwrap_err();
+
+        assert!(matches!(error, WasmExecutionError::Trap(_)));
+    }
+
     #[test]
     fn compiled_module_execution_does_not_need_compile_slots() {
         let counter = Box::leak(Box::new(AtomicUsize::new(0)));
@@ -737,6 +988,14 @@ mod tests {
         assert_eq!(base.feature_set(), "native-http1:access-decision");
         assert_ne!(base, different_abi);
         assert_ne!(base, different_features);
+        assert_ne!(
+            base,
+            FluxWasmCompiledModuleIdentity::new(&sha, 1, "native-http1:access-decision")
+                .with_wasi_capabilities(WasmWasiCapabilities {
+                    clocks: true,
+                    ..WasmWasiCapabilities::default()
+                })
+        );
     }
 
     #[test]

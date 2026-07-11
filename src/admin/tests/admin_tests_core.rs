@@ -264,6 +264,14 @@ fn status_endpoint_reports_wasm_registry_summary() {
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     );
     assert_eq!(body["wasm"]["plugins"][0]["phases"][0], "request-headers");
+    assert_eq!(
+        body["wasm"]["plugins"][0]["wasi_capabilities"]["clocks"],
+        false
+    );
+    assert_eq!(
+        body["wasm"]["plugins"][0]["wasi_capabilities"]["randomness"],
+        false
+    );
     assert_eq!(body["wasm"]["attachments"][0]["vhost"], "app");
     assert_eq!(body["wasm"]["attachments"][0]["priority"], 25);
 }
