@@ -96,8 +96,8 @@ tls-rustls-backend = [
     "dep:tokio-rustls",
     "fluxheim-load-balancer?/tls-rustls-backend",
 ]
-tls-rustls = ["tls-rustls-backend", "rustls/ring", "fluxheim-server/tls-rustls", "fluxheim-tls/tls-rustls"]
-tls-rustls-fips = ["tls-rustls-backend", "dep:aws-lc-rs", "fluxheim-config/tls-rustls-fips", "fluxheim-server/tls-rustls-fips", "fluxheim-tls/tls-rustls-fips", "rustls/fips"]
+tls-rustls = ["tls-rustls-backend", "rustls/ring", "tokio-rustls/ring", "fluxheim-server/tls-rustls", "fluxheim-tls/tls-rustls"]
+tls-rustls-fips = ["tls-rustls-backend", "dep:aws-lc-rs", "fluxheim-config/tls-rustls-fips", "fluxheim-server/tls-rustls-fips", "fluxheim-tls/tls-rustls-fips", "rustls/fips", "tokio-rustls/fips"]
 tls-rustls-iso19790 = ["tls-rustls-fips"]
 tls-openssl = [
     "tls",
@@ -279,14 +279,14 @@ prometheus = { version = "0.14.0", optional = true }
 regex = "1.13.0"
 ring = { version = "0.17.14", optional = true }
 rpassword = { version = "7.5.4", optional = true }
-rustls = { version = "0.23.41", optional = true }
+rustls = { version = "0.23.41", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
 rustls-native-certs = { version = "0.8.4", optional = true }
 rustix = { version = "1.1.4", features = ["fs", "net", "process"], optional = true }
 sha2 = { version = "0.11.0", optional = true }
 sanitization = { version = "1.2.4", features = ["alloc"], optional = true }
 tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-util", "net", "process", "rt", "rt-multi-thread", "signal", "time"], optional = true }
 tokio-openssl = { version = "0.6.5", optional = true }
-tokio-rustls = { version = "0.26.4", optional = true }
+tokio-rustls = { version = "0.26.4", optional = true, default-features = false, features = ["logging", "tls12"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.150", optional = true }
 thiserror = "2.0.18"

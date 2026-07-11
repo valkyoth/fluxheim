@@ -23,6 +23,22 @@ behavior when the change improves security or project direction.
 
 ### Security
 
+- Make OpenSSL cipher allow-lists deterministic across protocol families:
+  omitting all TLS 1.2 or TLS 1.3 suites now disables that protocol version
+  instead of retaining Mozilla acceptor defaults. Use the current Mozilla v5
+  acceptor baseline so configured TLS 1.3 policy is not disabled by the legacy
+  v4 template.
+- Replace the rustls TLS-ALPN handshake loader callback with an atomically
+  published, bounded in-memory SNI certificate store.
+- Bound downstream certificate chains, private keys, and client-auth CA
+  bundles by bytes and certificate count for both rustls and OpenSSL.
+- Protect transient rustls private-key PEM and decoded DER allocations with
+  `sanitization::SecretVec` through provider key construction, including
+  partial-read and concurrent-growth error paths. Decode PEM key material with
+  staged constant-time-oriented Base64 and expose only redacted error classes.
+- Disable rustls and tokio-rustls default provider features so normal Ring
+  builds no longer compile AWS-LC; FIPS profiles continue to select AWS-LC
+  explicitly.
 - Validate every `wasi_snapshot_preview1` import against the plugin's explicit
   capability grants before instantiation. Environment, arguments, inherited
   stdio, filesystem, sockets/network, polling, and process state remain denied.

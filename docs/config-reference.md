@@ -2753,6 +2753,12 @@ policy, curve preferences, and cipher suite allow-list. BoringSSL and s2n are
 not part of the supported TLS matrix because their Fluxheim integrations did
 not provide the same complete policy, SNI, upstream TLS, and client-auth
 coverage.
+The allow-list is deterministic across protocol families: when an explicit or
+profile-derived list has no TLS 1.2 suites, TLS 1.2 is disabled; when it has no
+TLS 1.3 suites, TLS 1.3 is disabled. OpenSSL does not retain provider defaults
+for an omitted protocol family and starts from the current Mozilla v5 acceptor
+baseline rather than the legacy v4 template that disabled TLS 1.3. Release
+tests perform real handshakes against both one-family policy shapes.
 Explicit `curve_preferences` are capped at 16 entries, and explicit
 `cipher_suites` are capped at 32 entries.
 
@@ -2782,6 +2788,15 @@ backends use their native certificate callback APIs. TLS backends without SNI
 certificate selection support reject vhost-specific certificates at startup
 instead of silently serving the default certificate.
 The global `[[tls.certificates]]` table is capped at 1024 certificate pairs.
+Each loaded certificate-chain file is capped at 1 MiB and 16 certificates, and
+each private-key file is capped at 64 KiB. Fluxheim reads these inputs through
+one retained file descriptor and rejects growth beyond the admitted size.
+Private-key PEM buffers use `sanitization::SecretVec`; the rustls path also
+protects the transient decoded DER allocation until the selected crypto
+provider has constructed its signing key. Partial file reads and growth-race
+rejections remain inside clear-on-drop storage. Rustls PEM payloads use staged
+constant-time-oriented Base64 decoding, and parse errors expose only a redacted
+error class rather than an input byte or position.
 
 Downstream client certificate authentication is configured globally for TLS
 listeners:
@@ -2799,6 +2814,9 @@ bundle path uses the same safe-path validation as other TLS files: no
 parent-directory traversal, no symlinked path components, and no group- or
 world-writable existing parent directory. The supported TLS matrix wires rustls
 and OpenSSL listeners only.
+Client-auth CA bundles are capped at 8 MiB and 4096 certificates. Oversized or
+over-count bundles fail listener construction instead of consuming unbounded
+memory during startup or certificate reload.
 Verified client-certificate identity can be forwarded explicitly with
 request header templates such as `{tls.client_cert_sha256}`. Route decisions
 based on certificate identity remain future work; do not rely on client-cert

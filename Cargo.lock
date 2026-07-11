@@ -1320,12 +1320,14 @@ name = "fluxheim-tls"
 version = "1.7.8"
 dependencies = [
  "arc-swap",
+ "base64-ng",
  "fluxheim-config",
  "fluxheim-openssl-fips-support",
  "log",
  "openssl",
  "rustls",
  "sanitization",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

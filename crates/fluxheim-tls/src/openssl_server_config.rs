@@ -3,18 +3,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use fluxheim_config::{
-    StaticCertificateConfig, TlsAlpnPolicy, TlsClientAuthMode, TlsConfig, TlsProtocolVersion,
-};
+use fluxheim_config::{StaticCertificateConfig, TlsAlpnPolicy, TlsConfig, TlsProtocolVersion};
 use openssl::pkey::{PKey, Private};
-use openssl::ssl::{
-    AlpnError, NameType, SniError, SslAcceptor, SslMethod, SslVerifyMode, SslVersion,
-};
-use openssl::x509::{X509, X509Name};
-use sanitization::SecretVec;
+use openssl::ssl::{AlpnError, NameType, SniError, SslAcceptor, SslMethod, SslVersion};
+use openssl::x509::X509;
 use thiserror::Error;
 
+#[path = "openssl_client_auth.rs"]
+mod client_auth;
+
+use crate::tls_input::{
+    MAX_CERT_CHAIN_BYTES, MAX_CHAIN_CERTIFICATES, MAX_PRIVATE_KEY_BYTES, read_bounded_file,
+    read_bounded_secret,
+};
 use crate::{DownstreamCertificateSelector, openssl_cipher_lists, openssl_curve_list};
+use client_auth::apply_client_auth;
 
 const ALPN_HTTP1: &[u8] = b"\x08http/1.1";
 const ALPN_HTTP2: &[u8] = b"\x02h2";
@@ -38,6 +41,12 @@ pub enum OpenSslDownstreamAcceptorError {
     },
     #[error("TLS certificate chain {path} does not contain any certificates")]
     EmptyCertificate { path: PathBuf },
+    #[error("TLS certificate chain {path} contains {count} certificates; maximum is {maximum}")]
+    TooManyCertificates {
+        path: PathBuf,
+        count: usize,
+        maximum: usize,
+    },
     #[error("failed to read TLS private key {path}: {source}")]
     ReadPrivateKey {
         path: PathBuf,
@@ -64,9 +73,27 @@ pub enum OpenSslDownstreamAcceptorError {
     ApplyProtocol(#[source] openssl::error::ErrorStack),
     #[error("tls.client_auth.ca_path is required when client auth is enabled")]
     MissingClientAuthCa,
-    #[error("tls.client_auth.ca_path must be valid UTF-8 for OpenSSL: {path}")]
-    ClientAuthCaPathUtf8 { path: PathBuf },
-    #[error("OpenSSL rejected TLS client-auth CA file {path}: {source}")]
+    #[error("failed to read TLS client-auth CA bundle {path}: {source}")]
+    ReadClientAuthCa {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse TLS client-auth CA bundle {path}: {source}")]
+    ParseClientAuthCa {
+        path: PathBuf,
+        #[source]
+        source: openssl::error::ErrorStack,
+    },
+    #[error("TLS client-auth CA bundle {path} contains no certificates")]
+    EmptyClientAuthCa { path: PathBuf },
+    #[error("TLS client-auth CA bundle {path} contains {count} certificates; maximum is {maximum}")]
+    TooManyClientAuthCa {
+        path: PathBuf,
+        count: usize,
+        maximum: usize,
+    },
+    #[error("OpenSSL rejected TLS client-auth CA bundle {path}: {source}")]
     ApplyClientAuthCa {
         path: PathBuf,
         #[source]
@@ -201,7 +228,7 @@ pub fn build_openssl_downstream_acceptor(
     tls: &TlsConfig,
     certificate: &StaticCertificateConfig,
 ) -> Result<SslAcceptor, OpenSslDownstreamAcceptorError> {
-    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls_server())
+    let mut builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server())
         .map_err(OpenSslDownstreamAcceptorError::BuildAcceptor)?;
     apply_certificate(&mut builder, certificate)?;
     apply_tls_policy(&mut builder, tls)?;
@@ -213,7 +240,7 @@ pub fn build_openssl_downstream_acceptor_with_sni_store(
     certificate: &StaticCertificateConfig,
     store: Arc<OpenSslDownstreamCertificateStore>,
 ) -> Result<SslAcceptor, OpenSslDownstreamAcceptorError> {
-    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls_server())
+    let mut builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls_server())
         .map_err(OpenSslDownstreamAcceptorError::BuildAcceptor)?;
     apply_certificate(&mut builder, certificate)?;
     let store_for_callback = store.clone();
@@ -265,12 +292,13 @@ fn apply_certificate(
 fn load_certificate_chain(
     certificate: &StaticCertificateConfig,
 ) -> Result<Vec<X509>, OpenSslDownstreamAcceptorError> {
-    let bytes = fs::read(&certificate.cert_path).map_err(|source| {
-        OpenSslDownstreamAcceptorError::ReadCertificate {
-            path: certificate.cert_path.clone(),
-            source,
-        }
-    })?;
+    let bytes =
+        read_bounded_file(&certificate.cert_path, MAX_CERT_CHAIN_BYTES).map_err(|source| {
+            OpenSslDownstreamAcceptorError::ReadCertificate {
+                path: certificate.cert_path.clone(),
+                source,
+            }
+        })?;
     let chain = X509::stack_from_pem(&bytes).map_err(|source| {
         OpenSslDownstreamAcceptorError::ParseCertificate {
             path: certificate.cert_path.clone(),
@@ -282,18 +310,26 @@ fn load_certificate_chain(
             path: certificate.cert_path.clone(),
         });
     }
+    if chain.len() > MAX_CHAIN_CERTIFICATES {
+        return Err(OpenSslDownstreamAcceptorError::TooManyCertificates {
+            path: certificate.cert_path.clone(),
+            count: chain.len(),
+            maximum: MAX_CHAIN_CERTIFICATES,
+        });
+    }
     Ok(chain)
 }
 
 fn load_private_key(
     certificate: &StaticCertificateConfig,
 ) -> Result<PKey<Private>, OpenSslDownstreamAcceptorError> {
-    let bytes = SecretVec::from_vec(fs::read(&certificate.key_path).map_err(|source| {
-        OpenSslDownstreamAcceptorError::ReadPrivateKey {
-            path: certificate.key_path.clone(),
-            source,
-        }
-    })?);
+    let bytes =
+        read_bounded_secret(&certificate.key_path, MAX_PRIVATE_KEY_BYTES).map_err(|source| {
+            OpenSslDownstreamAcceptorError::ReadPrivateKey {
+                path: certificate.key_path.clone(),
+                source,
+            }
+        })?;
     bytes
         .with_secret(PKey::private_key_from_pem)
         .map_err(|source| OpenSslDownstreamAcceptorError::ParsePrivateKey {
@@ -376,12 +412,22 @@ fn apply_tls_policy(
             .set_ciphersuites(&tls13_ciphers)
             .map_err(OpenSslDownstreamAcceptorError::ApplyTls13Ciphers)?;
     }
-    let min_version = match tls.effective_min_protocol() {
+    let mut min_version = match tls.effective_min_protocol() {
         TlsProtocolVersion::Tls12 => SslVersion::TLS1_2,
         TlsProtocolVersion::Tls13 => SslVersion::TLS1_3,
     };
+    let mut max_version = None;
+    if tls12_ciphers.is_empty() {
+        min_version = SslVersion::TLS1_3;
+    }
+    if tls13_ciphers.is_empty() {
+        max_version = Some(SslVersion::TLS1_2);
+    }
     builder
         .set_min_proto_version(Some(min_version))
+        .map_err(OpenSslDownstreamAcceptorError::ApplyProtocol)?;
+    builder
+        .set_max_proto_version(max_version)
         .map_err(OpenSslDownstreamAcceptorError::ApplyProtocol)?;
     apply_client_auth(builder, tls)?;
     Ok(())
@@ -395,43 +441,6 @@ fn openssl_alpn_wire(policy: TlsAlpnPolicy) -> &'static [u8] {
     }
 }
 
-fn apply_client_auth(
-    builder: &mut openssl::ssl::SslAcceptorBuilder,
-    tls: &TlsConfig,
-) -> Result<(), OpenSslDownstreamAcceptorError> {
-    if tls.client_auth.mode == TlsClientAuthMode::Off {
-        return Ok(());
-    }
-    let ca_path = tls
-        .client_auth
-        .ca_path
-        .as_deref()
-        .ok_or(OpenSslDownstreamAcceptorError::MissingClientAuthCa)?;
-    let ca_path_str =
-        ca_path
-            .to_str()
-            .ok_or_else(|| OpenSslDownstreamAcceptorError::ClientAuthCaPathUtf8 {
-                path: ca_path.to_path_buf(),
-            })?;
-    let verify = match tls.client_auth.mode {
-        TlsClientAuthMode::Off => SslVerifyMode::NONE,
-        TlsClientAuthMode::Optional => SslVerifyMode::PEER,
-        TlsClientAuthMode::Required => SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT,
-    };
-    builder.set_verify(verify);
-    builder.set_ca_file(ca_path_str).map_err(|source| {
-        OpenSslDownstreamAcceptorError::ApplyClientAuthCa {
-            path: ca_path.to_path_buf(),
-            source,
-        }
-    })?;
-    builder.set_client_ca_list(
-        X509Name::load_client_ca_file(ca_path_str).map_err(|source| {
-            OpenSslDownstreamAcceptorError::ApplyClientAuthCaList {
-                path: ca_path.to_path_buf(),
-                source,
-            }
-        })?,
-    );
-    Ok(())
-}
+#[cfg(test)]
+#[path = "openssl_server_config_tests.rs"]
+mod tests;

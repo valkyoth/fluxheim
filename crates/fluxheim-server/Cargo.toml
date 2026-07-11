@@ -21,9 +21,9 @@ geoip = ["dep:fluxheim-geoip", "fluxheim-config/geoip", "fluxheim-geoip/runtime"
 load-balancer = ["dep:fluxheim-load-balancer"]
 otel-tracing = ["dep:fluxheim-observability", "fluxheim-config/otel-tracing"]
 php-fpm = ["dep:fastcgi-client", "dep:fluxheim-php-fpm", "tokio/fs"]
-tls-rustls-backend = ["dep:fluxheim-tls", "dep:rustls", "dep:rustls-native-certs", "dep:tokio-rustls", "fluxheim-tls/tls-rustls-backend", "rustls/ring", "sanitization/alloc"]
-tls-rustls = ["tls-rustls-backend", "fluxheim-tls/tls-rustls", "rustls/ring"]
-tls-rustls-fips = ["tls-rustls-backend", "fluxheim-tls/tls-rustls-fips", "rustls/fips"]
+tls-rustls-backend = ["dep:fluxheim-tls", "dep:rustls", "dep:rustls-native-certs", "dep:tokio-rustls", "fluxheim-tls/tls-rustls-backend", "sanitization/alloc"]
+tls-rustls = ["tls-rustls-backend", "fluxheim-tls/tls-rustls", "rustls/ring", "tokio-rustls/ring"]
+tls-rustls-fips = ["tls-rustls-backend", "fluxheim-tls/tls-rustls-fips", "rustls/fips", "tokio-rustls/fips"]
 tls-openssl-backend = ["dep:fluxheim-tls", "dep:openssl", "dep:tokio-openssl", "fluxheim-tls/tls-openssl", "sanitization/alloc"]
 tls-openssl = ["tls-openssl-backend"]
 tls-openssl-fips = ["tls-openssl"]
@@ -63,7 +63,7 @@ openssl = { version = "0.10.81", optional = true }
 percent-encoding = "2.3.2"
 regex = "1.13.0"
 ring = "0.17.14"
-rustls = { version = "0.23.41", optional = true }
+rustls = { version = "0.23.41", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
 rustls-native-certs = { version = "0.8.4", optional = true }
 sanitization = { version = "1.2.4", features = ["alloc"] }
 serde_json = { version = "1.0.150", optional = true }
@@ -71,7 +71,7 @@ sha2 = "0.11.0"
 socket2 = { version = "0.6.3", features = ["all"] }
 tokio = { version = "1.52.3", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-openssl = { version = "0.6.5", optional = true }
-tokio-rustls = { version = "0.26.4", optional = true }
+tokio-rustls = { version = "0.26.4", optional = true, default-features = false, features = ["logging", "tls12"] }
 ureq = { version = "3.3.0", default-features = false, features = ["rustls"], optional = true }
 zeroize = "1.9.0"
 

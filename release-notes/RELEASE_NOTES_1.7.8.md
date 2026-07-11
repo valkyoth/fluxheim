@@ -29,6 +29,28 @@ general-purpose WASI application hosting.
 
 ## Security
 
+- Enforce OpenSSL cipher allow-lists across protocol families. A policy with
+  only TLS 1.3 suites disables TLS 1.2, and a policy with only TLS 1.2 suites
+  disables TLS 1.3, preventing inherited acceptor defaults from negotiating an
+  unconfigured suite. Move to OpenSSL's Mozilla v5 acceptor baseline so the
+  legacy v4 template cannot suppress configured TLS 1.3 listeners.
+- Replace synchronous rustls TLS-ALPN challenge loading on ClientHello with a
+  bounded, atomically replaced in-memory SNI certificate table. Remote
+  handshakes perform lookup only and cannot trigger file parsing or loader
+  logging.
+- Limit certificate chains to 1 MiB and 16 certificates, private-key files to
+  64 KiB, and client-auth CA bundles to 8 MiB and 4096 certificates in both
+  downstream TLS providers.
+- Keep transient rustls private-key PEM and decoded DER bytes in
+  `sanitization::SecretVec` until provider parsing completes. Read key files
+  directly into protected storage so partial I/O and concurrent-growth errors
+  also wipe initialized key bytes.
+- Decode Rustls private-key PEM payloads through base64-ng's staged
+  constant-time-oriented decoder and report only the redacted decode-error
+  class, never an offending secret-adjacent byte or input index.
+- Disable default provider features for rustls and tokio-rustls. Normal Ring
+  builds no longer include AWS-LC; AWS-LC remains explicitly selected by the
+  rustls FIPS profile.
 - Validate each declared `wasi_snapshot_preview1` import before instantiation.
   Clock imports require `clocks = true`; `random_get` requires
   `randomness = true`.
@@ -94,6 +116,8 @@ general-purpose WASI application hosting.
 cargo test --locked -p fluxheim-wasm --features wasi
 cargo test --locked -p fluxheim-config --features wasm-wasi wasm_wasi
 cargo test --locked -p fluxheim-server --features wasm-wasi native_wasm_wasi
+cargo test --locked -p fluxheim-tls --no-default-features --features tls-rustls,acme
+cargo test --locked -p fluxheim-tls --no-default-features --features tls-openssl,acme
 scripts/smoke_wasm_sandbox.sh
 cargo test --locked -p fluxheim-php-fpm
 scripts/smoke_wordpress_php_fpm.sh

@@ -1,5 +1,4 @@
-use std::fs::File;
-use std::io::{self, BufReader};
+use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -10,6 +9,7 @@ use rustls::{RootCertStore, SupportedProtocolVersion};
 use thiserror::Error;
 
 use crate::rustls_kx_group;
+use crate::tls_input::{MAX_CA_BUNDLE_BYTES, MAX_CA_CERTIFICATES, read_bounded_file};
 use crate::{TlsRuntimeError, rustls_alpn_protocols, rustls_cipher_suite, rustls_crypto_provider};
 
 static TLS12_AND_13: [&SupportedProtocolVersion; 2] =
@@ -44,6 +44,12 @@ pub enum RustlsDownstreamServerConfigError {
     },
     #[error("TLS client-auth CA bundle {path} does not contain any certificates")]
     EmptyClientAuthCa { path: PathBuf },
+    #[error("TLS client-auth CA bundle {path} contains {count} certificates; maximum is {maximum}")]
+    TooManyClientAuthCa {
+        path: PathBuf,
+        count: usize,
+        maximum: usize,
+    },
     #[error("failed to build TLS client certificate verifier from {path}: {source}")]
     BuildClientAuthVerifier {
         path: PathBuf,
@@ -114,16 +120,15 @@ fn rustls_client_cert_verifier(
         .ca_path
         .as_deref()
         .ok_or(RustlsDownstreamServerConfigError::MissingClientAuthCa)?;
-    let file = File::open(ca_path).map_err(|source| {
+    let contents = read_bounded_file(ca_path, MAX_CA_BUNDLE_BYTES).map_err(|source| {
         RustlsDownstreamServerConfigError::OpenClientAuthCa {
             path: ca_path.to_path_buf(),
             source,
         }
     })?;
-    let mut reader = BufReader::new(file);
     let mut roots = RootCertStore::empty();
     let mut loaded = 0usize;
-    for certificate in CertificateDer::pem_reader_iter(&mut reader) {
+    for certificate in CertificateDer::pem_slice_iter(&contents) {
         let certificate =
             certificate.map_err(
                 |source| RustlsDownstreamServerConfigError::ParseClientAuthCa {
@@ -131,6 +136,13 @@ fn rustls_client_cert_verifier(
                     source,
                 },
             )?;
+        if loaded >= MAX_CA_CERTIFICATES {
+            return Err(RustlsDownstreamServerConfigError::TooManyClientAuthCa {
+                path: ca_path.to_path_buf(),
+                count: loaded + 1,
+                maximum: MAX_CA_CERTIFICATES,
+            });
+        }
         roots.add(certificate).map_err(|source| {
             RustlsDownstreamServerConfigError::AddClientAuthCa {
                 path: ca_path.to_path_buf(),
@@ -164,9 +176,12 @@ fn rustls_client_cert_verifier(
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write as _;
     use std::path::PathBuf;
 
-    use fluxheim_config::{Config, StaticCertificateConfig, TlsAlpnPolicy, TlsConfig};
+    use fluxheim_config::{
+        Config, StaticCertificateConfig, TlsAlpnPolicy, TlsClientAuthConfig, TlsConfig,
+    };
 
     use super::*;
     use crate::DownstreamCertificateSelector;
@@ -200,5 +215,29 @@ mod tests {
             vec![b"acme-tls/1".to_vec(), b"h2".to_vec(), b"http/1.1".to_vec()]
         );
         Ok(())
+    }
+
+    #[test]
+    fn client_auth_ca_certificate_count_is_bounded() {
+        let directory = tempfile::tempdir().unwrap();
+        let ca_path = directory.path().join("ca.pem");
+        let certificate = std::fs::read("../../tests/fixtures/tls/localhost-cert.pem").unwrap();
+        let mut file = std::fs::File::create(&ca_path).unwrap();
+        for _ in 0..=MAX_CA_CERTIFICATES {
+            file.write_all(&certificate).unwrap();
+        }
+        let tls = TlsConfig {
+            client_auth: TlsClientAuthConfig {
+                mode: TlsClientAuthMode::Required,
+                ca_path: Some(ca_path.clone()),
+            },
+            ..TlsConfig::default()
+        };
+
+        assert!(matches!(
+            rustls_client_cert_verifier(&tls),
+            Err(RustlsDownstreamServerConfigError::TooManyClientAuthCa { path, .. })
+                if path == ca_path
+        ));
     }
 }

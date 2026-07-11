@@ -11,7 +11,7 @@ description = "Internal Fluxheim load-balancer core."
 metrics = []
 privacy-mode = []
 test-support = ["fluxheim-common/test-support"]
-tls-rustls-backend = ["dep:rustls", "dep:rustls-native-certs", "dep:tokio-rustls", "rustls/ring"]
+tls-rustls-backend = ["dep:rustls", "dep:rustls-native-certs", "dep:tokio-rustls", "rustls/ring", "tokio-rustls/ring"]
 tls-openssl-backend = ["dep:openssl", "dep:tokio-openssl"]
 
 [dependencies]
@@ -30,18 +30,18 @@ http = "1.4.2"
 log = "0.4.33"
 openssl = { version = "0.10.81", optional = true }
 ring = "0.17.14"
-rustls = { version = "0.23.41", optional = true }
+rustls = { version = "0.23.41", optional = true, default-features = false, features = ["std", "tls12", "logging"] }
 rustls-native-certs = { version = "0.8.4", optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 sanitization = { version = "1.2.4", features = ["alloc"] }
 tokio = { version = "1.52.3", default-features = false, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
 tokio-openssl = { version = "0.6.5", optional = true }
-tokio-rustls = { version = "0.26.4", optional = true }
+tokio-rustls = { version = "0.26.4", optional = true, default-features = false, features = ["logging", "tls12"] }
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"] }
 zeroize = "1.9.0"
 
 [dev-dependencies]
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
 proptest = "1.6.0"
-rustls = { version = "0.23.41", features = ["ring"] }
+rustls = { version = "0.23.41", default-features = false, features = ["std", "tls12", "logging", "ring"] }

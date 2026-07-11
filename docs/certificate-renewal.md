@@ -16,6 +16,11 @@ renewal, Fluxheim writes short-lived challenge certificates under
 them only when the client offers the `acme-tls/1` ALPN protocol. DNS-01 remains
 future work because secure provider integrations need explicit, provider-specific
 secret handling rather than generic shell hooks.
+The `fluxheim-tls` challenge-capable resolver accepts only an atomically
+published, bounded in-memory SNI table; it no longer exposes a synchronous
+challenge loader to remote ClientHello processing. ACME state integrations
+must parse and validate challenge material before replacing that table, outside
+the handshake path.
 Challenge publication uses the same managed store: HTTP-01 tokens are restricted
 to one URL-safe path segment, key-authorizations are bounded and checked for
 control bytes, TLS-ALPN-01 certificates are generated with the ACME identifier

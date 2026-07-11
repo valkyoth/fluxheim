@@ -7,6 +7,10 @@ license = "EUPL-1.2"
 publish = false
 description = "Internal Fluxheim GeoIP and Geo-Context boundary."
 
+[[example]]
+name = "lookup"
+required-features = ["runtime"]
+
 [features]
 default = []
 runtime = ["dep:fluxheim-config", "dep:maxminddb", "dep:rustix"]
