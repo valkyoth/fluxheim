@@ -1228,9 +1228,9 @@ dependencies = [
  "log",
  "percent-encoding",
  "rustix",
+ "sanitization",
  "tempfile",
  "tokio",
- "zeroize",
 ]
 
 [[package]]

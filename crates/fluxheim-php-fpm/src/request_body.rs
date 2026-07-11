@@ -5,11 +5,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
-use zeroize::Zeroizing;
+use sanitization::SecretVec;
 
 static PHP_REQUEST_BODY_SPOOL_COUNTER: AtomicUsize = AtomicUsize::new(0);
 const PHP_SPOOL_POSITIONAL_READ_BYTES: usize = 64 * 1024;
-type PhpSpoolReadTask = tokio::task::JoinHandle<io::Result<(Vec<u8>, usize)>>;
+type PhpSpoolReadTask = tokio::task::JoinHandle<io::Result<(SecretVec, usize)>>;
 
 pub struct PhpRequestBody {
     inner: Arc<PhpRequestBodyInner>,
@@ -17,7 +17,7 @@ pub struct PhpRequestBody {
 }
 
 enum PhpRequestBodyInner {
-    Memory(Zeroizing<Vec<u8>>),
+    Memory(Arc<SecretVec>),
     Spool(PhpRequestBodySpool),
 }
 
@@ -29,19 +29,25 @@ struct PhpSpoolReader {
     file: Arc<std::fs::File>,
     offset: u64,
     pending: Option<PhpSpoolReadTask>,
-    ready: Vec<u8>,
+    ready: SecretVec,
     ready_start: usize,
+    ready_len: usize,
+}
+
+struct PhpMemoryReader {
+    body: Arc<SecretVec>,
+    offset: usize,
 }
 
 impl PhpRequestBody {
     pub fn memory(body: Vec<u8>) -> Self {
-        Self::memory_zeroizing(Zeroizing::new(body))
+        Self::memory_secret(SecretVec::from_vec(body))
     }
 
-    pub fn memory_zeroizing(body: Zeroizing<Vec<u8>>) -> Self {
+    pub fn memory_secret(body: SecretVec) -> Self {
         Self {
             len: body.len(),
-            inner: Arc::new(PhpRequestBodyInner::Memory(body)),
+            inner: Arc::new(PhpRequestBodyInner::Memory(Arc::new(body))),
         }
     }
 
@@ -67,17 +73,37 @@ impl PhpRequestBody {
         &self,
     ) -> io::Result<Box<dyn fastcgi_client::io::AsyncRead + Unpin + Send>> {
         match self.inner.as_ref() {
-            PhpRequestBodyInner::Memory(body) => {
-                Ok(Box::new(fastcgi_client::io::Cursor::new(body.clone())))
-            }
+            PhpRequestBodyInner::Memory(body) => Ok(Box::new(PhpMemoryReader {
+                body: Arc::clone(body),
+                offset: 0,
+            })),
             PhpRequestBodyInner::Spool(spool) => Ok(Box::new(PhpSpoolReader {
                 file: Arc::clone(&spool.file),
                 offset: 0,
                 pending: None,
-                ready: Vec::new(),
+                ready: SecretVec::empty(),
                 ready_start: 0,
+                ready_len: 0,
             })),
         }
+    }
+}
+
+impl fastcgi_client::io::AsyncRead for PhpMemoryReader {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _context: &mut Context<'_>,
+        buffer: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        let copied = this.body.with_secret(|body| {
+            let available = body.get(this.offset..).unwrap_or_default();
+            let copied = available.len().min(buffer.len());
+            buffer[..copied].copy_from_slice(&available[..copied]);
+            copied
+        });
+        this.offset = this.offset.saturating_add(copied);
+        Poll::Ready(Ok(copied))
     }
 }
 
@@ -94,14 +120,18 @@ impl fastcgi_client::io::AsyncRead for PhpSpoolReader {
             return Poll::Ready(Ok(0));
         }
         loop {
-            if this.ready_start < this.ready.len() {
-                let available = &this.ready[this.ready_start..];
-                let copied = available.len().min(buffer.len());
-                buffer[..copied].copy_from_slice(&available[..copied]);
+            if this.ready_start < this.ready_len {
+                let copied = this.ready.with_secret(|ready| {
+                    let available = &ready[this.ready_start..this.ready_len];
+                    let copied = available.len().min(buffer.len());
+                    buffer[..copied].copy_from_slice(&available[..copied]);
+                    copied
+                });
                 this.ready_start += copied;
-                if this.ready_start == this.ready.len() {
-                    this.ready.clear();
+                if this.ready_start == this.ready_len {
+                    this.ready.clear_secret();
                     this.ready_start = 0;
+                    this.ready_len = 0;
                 }
                 return Poll::Ready(Ok(copied));
             }
@@ -135,9 +165,10 @@ impl fastcgi_client::io::AsyncRead for PhpSpoolReader {
                 };
                 this.offset = next_offset;
                 this.ready = bytes;
-                this.ready.truncate(read_len);
                 this.ready_start = 0;
+                this.ready_len = read_len;
                 if read_len == 0 {
+                    this.ready.clear_secret();
                     return Poll::Ready(Ok(0));
                 }
                 continue;
@@ -149,8 +180,8 @@ impl fastcgi_client::io::AsyncRead for PhpSpoolReader {
             this.pending = Some(tokio::task::spawn_blocking(move || {
                 use std::os::unix::fs::FileExt as _;
 
-                let mut bytes = vec![0_u8; read_len];
-                let read = file.read_at(&mut bytes, offset)?;
+                let mut bytes = SecretVec::from_fn(read_len, |_| 0);
+                let read = bytes.with_secret_mut(|bytes| file.read_at(bytes, offset))?;
                 Ok((bytes, read))
             }));
         }

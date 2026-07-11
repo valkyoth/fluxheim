@@ -337,8 +337,11 @@ for single-user/rootless deployments.
   named plaintext request body behind. Every request or retry reader maintains
   an independent logical offset and uses bounded positional reads through the
   blocking-I/O pool, so overlapping readers cannot reset or consume each
-  other's stream position. Use encrypted storage or tmpfs when raw storage
-  remanence is in scope.
+  other's stream position. In-memory request bodies and positional-read buffers
+  are held in `sanitization::SecretVec`; consumed buffers are cleared
+  immediately, and cancellation, errors, and drop clear their full allocation
+  capacity. Use encrypted storage or tmpfs when raw storage remanence is in
+  scope.
 - Custom FastCGI params in config. Implemented as `[vhosts.php.params]` and
   `[vhosts.routes.php.params]` with protected core CGI params.
 - Path mapping for separate Fluxheim/php-fpm container filesystem roots.

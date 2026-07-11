@@ -51,6 +51,9 @@ general-purpose WASI application hosting.
   retaining a descriptor for retry replay. Give every reader an independent
   logical offset backed by bounded positional reads so overlapping readers
   cannot corrupt each other's request body stream.
+- Hold PHP memory bodies and bounded spool-read buffers in
+  `sanitization::SecretVec`, clear consumed spool buffers immediately, and
+  clear full buffer capacity on cancellation, error, or drop.
 - Replace inherited managed PHP-FPM `PATH` handling with a fixed allowlisted
   search path after clearing the child environment.
 

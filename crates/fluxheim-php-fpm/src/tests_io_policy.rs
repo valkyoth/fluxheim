@@ -19,17 +19,36 @@ fn php_request_body_replays_memory_body() {
         .expect("test runtime");
     let body = PhpRequestBody::memory(b"body".to_vec());
 
-    let mut reader = runtime.block_on(body.reader()).expect("memory reader");
-    let mut replayed = Vec::new();
-    runtime
-        .block_on(fastcgi_client::io::AsyncReadExt::read_to_end(
-            &mut reader,
-            &mut replayed,
-        ))
-        .expect("read memory body");
+    let mut first = runtime
+        .block_on(body.reader())
+        .expect("first memory reader");
+    let mut second = runtime
+        .block_on(body.reader())
+        .expect("second memory reader");
+    let mut first_prefix = [0_u8; 2];
+    let mut first_rest = Vec::new();
+    let mut second_replay = Vec::new();
+    runtime.block_on(async {
+        use fastcgi_client::io::AsyncReadExt as _;
+
+        first
+            .read_exact(&mut first_prefix)
+            .await
+            .expect("first memory prefix");
+        second
+            .read_to_end(&mut second_replay)
+            .await
+            .expect("second memory replay");
+        first
+            .read_to_end(&mut first_rest)
+            .await
+            .expect("first memory remainder");
+    });
 
     assert_eq!(body.len(), 4);
-    assert_eq!(replayed, b"body");
+    assert_eq!(first_prefix, *b"bo");
+    assert_eq!(first_rest, b"dy");
+    assert_eq!(second_replay, b"body");
 }
 
 #[test]

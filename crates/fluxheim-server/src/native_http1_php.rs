@@ -13,6 +13,7 @@ use std::time::Duration;
 use fluxheim_config::PhpConfig;
 use fluxheim_php_fpm::{PhpFpmPool, PhpRequestBody};
 use fluxheim_protocol::{Http1RequestTarget, Http1Version, http1_request_target};
+use sanitization::SecretVec;
 
 use crate::{NativeHttp1Request, NativeHttp1Response};
 
@@ -64,13 +65,13 @@ pub(crate) async fn native_php_request_body(
         ));
     }
     let Some(threshold) = php.request_body_spool_threshold_bytes else {
-        return Ok(fluxheim_php_fpm::PhpRequestBody::memory_zeroizing(
-            request.body.clone(),
+        return Ok(fluxheim_php_fpm::PhpRequestBody::memory_secret(
+            SecretVec::from_slice(&request.body),
         ));
     };
     if request.body.len() as u64 <= threshold.as_u64() {
-        return Ok(fluxheim_php_fpm::PhpRequestBody::memory_zeroizing(
-            request.body.clone(),
+        return Ok(fluxheim_php_fpm::PhpRequestBody::memory_secret(
+            SecretVec::from_slice(&request.body),
         ));
     }
     let Some(spool_dir) = php.request_body_spool_dir.as_deref() else {

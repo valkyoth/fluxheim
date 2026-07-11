@@ -3509,8 +3509,11 @@ created spool entry is unlinked immediately and Fluxheim retains its open file
 descriptor for request and retry readers, preventing a crash from leaving a
 named plaintext upload behind. Overlapping readers use independent logical
 offsets with bounded positional disk reads, so one reader cannot reset or
-consume another reader's body position. This does not guarantee raw-media
-erasure; use encrypted storage or tmpfs when storage remanence is in scope. When
+consume another reader's body position. Fluxheim keeps memory bodies and each
+bounded positional-read buffer in `sanitization::SecretVec`, clears consumed
+buffers immediately, and clears their full allocation capacity on cancellation,
+error, or drop. This does not guarantee raw-media erasure; use encrypted storage
+or tmpfs when storage remanence is in scope. When
 `php.max_request_body_bytes` is set on the same PHP action, the spool threshold
 must be lower than that body limit. Existing spool paths must be directories,
 and existing directories must not be group/world writable. Fluxheim rechecks
