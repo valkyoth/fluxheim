@@ -70,6 +70,12 @@ TOML files. Configured filesystem paths are also rejected when any existing path
 component is a symlink; missing final directories may still be created by the
 owning runtime module, but never through a symlinked prefix.
 
+Rootless Podman deployments must ensure bind-mounted config ownership maps to
+the image runtime UID/GID `65532:65532`; host-user or host-root ownership can
+appear as an unrelated UID inside the user namespace even on a read-only mount.
+See [Rootless Config Ownership](build-and-podman.md#rootless-config-ownership)
+for explicit `podman unshare chown`, permission, `:U`, and verification steps.
+
 ## Server
 
 `[server]` controls listeners, default vhost selection, trusted proxies, and

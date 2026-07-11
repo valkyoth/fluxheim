@@ -62,3 +62,6 @@ scripts/smoke_wasm_sandbox.sh
   stdio, arguments, or process-control access.
 - The clock grant exposes the full-resolution host clock. Avoid granting it to
   untrusted multi-tenant plugins colocated with secret-dependent computation.
+- Document the rootless Podman ownership mapping required for trusted read-only
+  config mounts, including explicit `podman unshare chown`, an opt-in `:U`
+  alternative, and an in-container verification command.
