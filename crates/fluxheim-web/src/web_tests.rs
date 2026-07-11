@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
 
@@ -52,10 +52,77 @@ fn directory_listing_local_time_uses_local_timestamp_shape() {
 }
 
 #[test]
+fn directory_listing_rejects_pre_epoch_timestamps_without_panicking() {
+    let modified = UNIX_EPOCH
+        .checked_sub(Duration::from_secs(1))
+        .expect("test platform should represent a pre-epoch timestamp");
+
+    for local_time in [false, true] {
+        let html = render_listing_with_timestamp(modified, local_time);
+        assert!(html.contains("<td>1</td><td>-</td>"), "{html}");
+    }
+}
+
+#[test]
+fn directory_listing_rejects_post_year_9999_timestamps_without_panicking() {
+    let modified = UNIX_EPOCH
+        .checked_add(Duration::from_secs(253_402_300_800))
+        .expect("test platform should represent a post-year-9999 timestamp");
+
+    for local_time in [false, true] {
+        let html = render_listing_with_timestamp(modified, local_time);
+        assert!(html.contains("<td>1</td><td>-</td>"), "{html}");
+    }
+}
+
+fn render_listing_with_timestamp(modified: SystemTime, local_time: bool) -> String {
+    render_directory_listing(&DirectoryListing {
+        path: "/".to_owned(),
+        entries: vec![DirectoryEntry {
+            name: "timestamp.txt".to_owned(),
+            is_dir: false,
+            size: Some(1),
+            modified: Some(modified),
+        }],
+        local_time,
+    })
+}
+
+#[test]
 fn safe_relative_path_rejects_non_normal_components() {
     assert!(SafeRelativePath::from_path(Path::new("assets/app.css")).is_some());
     assert!(SafeRelativePath::from_path(Path::new("../secret")).is_none());
     assert!(SafeRelativePath::from_path(Path::new("/absolute")).is_none());
+}
+
+#[test]
+fn safe_relative_path_try_push_preserves_component_invariant() {
+    let mut path = SafeRelativePath::default();
+    path.try_push("assets")
+        .expect("normal component should pass");
+
+    for invalid in [
+        "",
+        ".",
+        "..",
+        "../secret",
+        "a/b",
+        "/absolute",
+        "trailing/",
+        "nul\0byte",
+    ] {
+        assert!(path.try_push(invalid).is_err(), "accepted {invalid:?}");
+    }
+    assert_eq!(path.as_path(), Path::new("assets"));
+}
+
+#[cfg(windows)]
+#[test]
+fn safe_relative_path_try_push_rejects_windows_separators() {
+    let mut path = SafeRelativePath::default();
+    assert!(path.try_push(r"parent\child").is_err());
+    assert!(path.try_push(r"C:\absolute").is_err());
+    assert_eq!(path.as_path(), Path::new(""));
 }
 
 #[test]

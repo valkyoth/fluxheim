@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 
@@ -51,13 +51,12 @@ pub fn render_directory_listing(listing: &DirectoryListing) -> String {
                 .unwrap_or_else(|| "-".to_owned()),
         );
         html.push_str("</td><td>");
-        if let Some(modified) = entry.modified {
-            html.push_str(&html_escape(&format_directory_listing_time(
-                modified,
-                listing.local_time,
-            )));
-        } else {
-            html.push('-');
+        match entry
+            .modified
+            .and_then(|modified| format_directory_listing_time(modified, listing.local_time))
+        {
+            Some(timestamp) => html.push_str(&html_escape(&timestamp)),
+            None => html.push('-'),
         }
         html.push_str("</td></tr>");
     }
@@ -82,13 +81,25 @@ pub fn directory_listing_path(relative: &Path) -> String {
     path
 }
 
-fn format_directory_listing_time(modified: SystemTime, local_time: bool) -> String {
+fn format_directory_listing_time(modified: SystemTime, local_time: bool) -> Option<String> {
+    const MAX_HTTP_DATE_SECONDS: u64 = 253_402_300_799;
+
+    let duration = modified.duration_since(UNIX_EPOCH).ok()?;
+    if duration.as_secs() > MAX_HTTP_DATE_SECONDS {
+        return None;
+    }
     if local_time {
-        let local: chrono::DateTime<chrono::Local> = modified.into();
-        return local.format("%Y-%m-%d %H:%M:%S %z").to_string();
+        let seconds = i64::try_from(duration.as_secs()).ok()?;
+        let utc =
+            chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, duration.subsec_nanos())?;
+        return Some(
+            utc.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M:%S %z")
+                .to_string(),
+        );
     }
 
-    httpdate::fmt_http_date(modified)
+    Some(httpdate::fmt_http_date(modified))
 }
 
 fn html_escape(value: &str) -> String {

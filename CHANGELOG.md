@@ -41,6 +41,9 @@ behavior when the change improves security or project direction.
   its complete dedicated process group during shutdown and watchdog recovery.
 - Bound GeoIP database reads to an exact admitted-length allocation with a
   separate growth probe, and validate every publicly constructed `GeoContext`.
+- Make directory-listing timestamp formatting checked and preserve the
+  `SafeRelativePath` invariant through validated incremental components,
+  preventing panic-abort and latent traversal paths in static serving.
 
 ## 1.7.7 - 2026-07-10
 

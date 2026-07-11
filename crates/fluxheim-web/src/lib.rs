@@ -4,7 +4,7 @@
     deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -70,9 +70,30 @@ pub struct SafeRelativePath {
     components: Vec<OsString>,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct InvalidPathComponent;
+
+impl std::fmt::Display for InvalidPathComponent {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("path component must be one non-empty normal component")
+    }
+}
+
+impl std::error::Error for InvalidPathComponent {}
+
 impl SafeRelativePath {
-    pub fn push(&mut self, component: &str) {
-        self.components.push(OsString::from(component));
+    pub fn try_push(&mut self, component: &str) -> Result<(), InvalidPathComponent> {
+        if component.contains('\0') {
+            return Err(InvalidPathComponent);
+        }
+        let mut components = Path::new(component).components();
+        match (components.next(), components.next()) {
+            (Some(std::path::Component::Normal(value)), None) if value == OsStr::new(component) => {
+                self.components.push(value.to_os_string());
+                Ok(())
+            }
+            _ => Err(InvalidPathComponent),
+        }
     }
 
     pub fn as_path(&self) -> PathBuf {

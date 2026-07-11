@@ -68,6 +68,12 @@ general-purpose WASI application hosting.
   observe malformed security state.
 - Replace inherited managed PHP-FPM `PATH` handling with a fixed allowlisted
   search path after clearing the child environment.
+- Render unavailable directory-listing timestamps as `-` after checked epoch
+  and year-9999 bounds, preventing attacker-influenced file metadata from
+  reaching panic-prone timestamp formatters in release builds.
+- Replace unchecked `SafeRelativePath` component insertion with a validating
+  single-normal-component API so the public type preserves its traversal-safety
+  invariant for current and future static-serving callers.
 
 ## Validation
 

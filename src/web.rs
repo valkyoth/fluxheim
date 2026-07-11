@@ -157,7 +157,9 @@ impl StaticFileServer {
                 return Ok(None);
             }
 
-            relative.push(segment);
+            if relative.try_push(segment).is_err() {
+                return Ok(None);
+            }
         }
 
         Ok(Some(relative))
