@@ -17,6 +17,7 @@ compression = ["dep:fluxheim-compression"]
 compression-brotli = ["compression", "fluxheim-compression/brotli"]
 compression-gzip = ["compression", "fluxheim-compression/gzip"]
 compression-zstd = ["compression", "fluxheim-compression/zstd"]
+geoip = ["dep:fluxheim-geoip", "fluxheim-config/geoip", "fluxheim-geoip/runtime"]
 load-balancer = ["dep:fluxheim-load-balancer"]
 otel-tracing = ["dep:fluxheim-observability", "fluxheim-config/otel-tracing"]
 php-fpm = ["dep:fastcgi-client", "dep:fluxheim-php-fpm", "tokio/fs"]
@@ -38,6 +39,7 @@ fluxheim-common = { path = "../fluxheim-common" }
 fluxheim-cache = { path = "../fluxheim-cache" }
 fluxheim-compression = { path = "../fluxheim-compression", optional = true }
 fluxheim-config = { path = "../fluxheim-config" }
+fluxheim-geoip = { path = "../fluxheim-geoip", optional = true }
 fluxheim-headers = { path = "../fluxheim-headers" }
 fluxheim-load-balancer = { path = "../fluxheim-load-balancer", optional = true }
 fluxheim-observability = { path = "../fluxheim-observability", optional = true }

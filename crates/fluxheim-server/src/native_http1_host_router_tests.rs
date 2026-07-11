@@ -492,3 +492,25 @@ fn native_host_router_rejects_unknown_default_vhost() {
             if name == "missing"
     ));
 }
+
+#[cfg(feature = "geoip")]
+#[test]
+fn native_host_router_constructs_geoip_runtime_fail_closed() {
+    let root = TempDir::new().unwrap();
+    let config = fluxheim_config::Config {
+        geoip: fluxheim_config::GeoIpConfig {
+            enabled: true,
+            fallback_enabled: true,
+            databases: vec![fluxheim_config::GeoIpDatabaseConfig {
+                provider: fluxheim_config::GeoIpProvider::CirclGeoOpen,
+                path: root.path().join("missing.mmdb"),
+            }],
+        },
+        ..fluxheim_config::Config::default()
+    };
+
+    assert!(matches!(
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0),
+        Err(NativeHttp1HostRouterConfigError::GeoIp { .. })
+    ));
+}

@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use fluxheim_config::config_net::{normalize_host, normalize_host_pattern};
 use fluxheim_config::{Config, VhostConfig};
+#[cfg(feature = "geoip")]
+use fluxheim_geoip::{GeoIpPolicyUsage, GeoIpRuntime};
 
 #[path = "native_http1_host_router_cache.rs"]
 mod native_http1_host_router_cache;
@@ -42,6 +44,8 @@ pub struct NativeHttp1HostRouter {
     wildcard_hosts: Vec<NativeHttp1WildcardHost>,
     default_proxy: Arc<NativeHttp1RouteProxy>,
     strict: bool,
+    #[cfg(feature = "geoip")]
+    geoip: Option<Arc<GeoIpRuntime>>,
 }
 
 #[derive(Clone, Debug)]
@@ -103,6 +107,10 @@ pub enum NativeHttp1HostRouterConfigError {
         first_scope: String,
         second_scope: String,
     },
+    #[cfg(feature = "geoip")]
+    GeoIp {
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for NativeHttp1HostRouterConfigError {
@@ -142,6 +150,8 @@ impl std::fmt::Display for NativeHttp1HostRouterConfigError {
                 formatter,
                 "storage-bin cache root {path:?} is shared by {first_scope} and {second_scope}; each cache policy requires a unique root"
             ),
+            #[cfg(feature = "geoip")]
+            Self::GeoIp { reason } => write!(formatter, "GeoIP runtime: {reason}"),
         }
     }
 }
@@ -206,6 +216,12 @@ impl NativeHttp1HostRouter {
         NativeHttp1HostRouterConfigError,
     > {
         validate_unique_storage_bin_roots(config)?;
+        #[cfg(feature = "geoip")]
+        let geoip = GeoIpRuntime::from_config(&config.geoip, geoip_policy_usage(config))
+            .map_err(|error| NativeHttp1HostRouterConfigError::GeoIp {
+                reason: error.to_string(),
+            })?
+            .map(Arc::new);
         #[cfg(not(feature = "load-balancer"))]
         let _ = config;
         #[cfg_attr(not(feature = "load-balancer"), allow(unused_mut))]
@@ -221,6 +237,8 @@ impl NativeHttp1HostRouter {
                 collect_load_balancer_services.then_some(&mut load_balancer_services),
                 #[cfg(feature = "load-balancer")]
                 Some(&mut load_balancer_admin_pools),
+                #[cfg(feature = "geoip")]
+                geoip,
             )
             .map(|router| (router, load_balancer_services, load_balancer_admin_pools));
         }
@@ -281,6 +299,8 @@ impl NativeHttp1HostRouter {
                 wildcard_hosts,
                 default_proxy,
                 strict: config.server.host_routing.strict,
+                #[cfg(feature = "geoip")]
+                geoip,
             },
             load_balancer_services,
             load_balancer_admin_pools,
@@ -297,6 +317,7 @@ impl NativeHttp1HostRouter {
         #[cfg(feature = "load-balancer")] load_balancer_admin_pools: Option<
             &mut Vec<crate::NativeLoadBalancerAdminPool>,
         >,
+        #[cfg(feature = "geoip")] geoip: Option<Arc<GeoIpRuntime>>,
     ) -> Result<Self, NativeHttp1HostRouterConfigError> {
         let default_proxy =
             match NativeHttp1RouteProxy::from_root_config_with_load_balancer_services(
@@ -319,6 +340,8 @@ impl NativeHttp1HostRouter {
             wildcard_hosts: Vec::new(),
             default_proxy,
             strict: false,
+            #[cfg(feature = "geoip")]
+            geoip,
         })
     }
 
@@ -386,6 +409,16 @@ impl NativeHttp1Handler for NativeHttp1HostRouter {
     fn prepare_request_context(&self, request: &mut NativeHttp1Request) {
         if let Ok(proxy) = self.select_request(request) {
             proxy.prepare_request_context(request);
+            #[cfg(feature = "geoip")]
+            if let Some(geoip) = &self.geoip {
+                request.geo_context = proxy
+                    .access_client_ip(request)
+                    .and_then(|client_ip| geoip.lookup(client_ip))
+                    .map(|context| crate::NativeHttp1GeoContext {
+                        country_iso: context.country_iso().map(str::to_owned),
+                        asn: context.asn(),
+                    });
+            }
         }
     }
 
@@ -422,6 +455,27 @@ impl NativeHttp1Handler for NativeHttp1HostRouter {
             }
         })
     }
+}
+
+#[cfg(feature = "geoip")]
+fn geoip_policy_usage(config: &Config) -> GeoIpPolicyUsage {
+    let mut usage = GeoIpPolicyUsage::default();
+    for vhost in &config.vhosts {
+        record_geoip_policy_usage(&vhost.access, &mut usage);
+        for route in &vhost.routes {
+            record_geoip_policy_usage(&route.access, &mut usage);
+        }
+    }
+    usage
+}
+
+#[cfg(feature = "geoip")]
+fn record_geoip_policy_usage(
+    access: &fluxheim_config::AccessPolicyConfig,
+    usage: &mut GeoIpPolicyUsage,
+) {
+    usage.country |= !access.allow_countries.is_empty() || !access.deny_countries.is_empty();
+    usage.asn |= !access.allow_asns.is_empty() || !access.deny_asns.is_empty();
 }
 
 fn route_proxy_from_config(

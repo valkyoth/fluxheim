@@ -1,6 +1,7 @@
 use std::io;
 
 const MAX_RAW_COUNTRY_CODE_BYTES: usize = 8;
+const MAX_RAW_ASN_BYTES: usize = 10;
 
 pub(super) fn normalized_country(value: &str) -> Option<String> {
     if value.len() > MAX_RAW_COUNTRY_CODE_BYTES {
@@ -22,4 +23,14 @@ pub(super) fn admitted_geoip_total(current: u64, next: u64, maximum: u64) -> io:
         ));
     }
     Ok(total)
+}
+
+pub(super) fn normalized_asn(value: &str) -> Option<u32> {
+    if value.is_empty()
+        || value.len() > MAX_RAW_ASN_BYTES
+        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    value.parse::<u32>().ok().filter(|asn| *asn > 0)
 }

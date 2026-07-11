@@ -3159,9 +3159,14 @@ path = "/var/lib/fluxheim/geo/circl-country.mmdb"
 
 `provider = "maxmind"` covers MaxMind GeoIP2/GeoLite2 MMDB files.
 `provider = "circl-geo-open"` covers European CIRCL Geo Open datasets when
-supplied in MMDB-compatible form. Databases are ordered local fallbacks when
-`fallback_enabled = true`; Fluxheim fills missing country or ASN fields from
-later databases when possible.
+supplied in MMDB-compatible form. CIRCL's country-only database supplies the
+standard `country.iso_code` field. Its combined Country and ASN database stores
+the ASN as the string field `country.AutonomousSystemNumber`; the explicit
+`circl-geo-open` provider enables the bounded decoder for that schema. Databases
+are ordered local fallbacks when `fallback_enabled = true`; Fluxheim fills
+missing country or ASN fields from later databases when possible. The pinned
+real-database setup and opt-in static/proxy/load-balancer proof are documented
+in [`docs/geoip.md`](geoip.md).
 Fluxheim does not download GeoIP databases in-process. Each MMDB file is capped
 at 512 MiB, each loaded GeoIP runtime is capped at 1 GiB total, and at most
 eight databases are accepted. Aggregate capacity is checked from the verified

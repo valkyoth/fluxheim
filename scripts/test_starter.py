@@ -123,6 +123,13 @@ TESTS: tuple[TestEntry, ...] = (
         "Builds the load-balancer image and verifies native behavior in a container.",
     ),
     TestEntry(
+        "geoip-circl",
+        "CIRCL GeoIP integration smoke",
+        "geoip",
+        ("scripts/smoke_geoip_circl.sh",),
+        "Downloads a pinned CIRCL MMDB and proves country/ASN ACLs across static, proxy, and load-balanced serving.",
+    ),
+    TestEntry(
         "privacy",
         "Privacy-mode smoke",
         "privacy",

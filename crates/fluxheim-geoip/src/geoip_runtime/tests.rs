@@ -1,6 +1,6 @@
 use super::{
-    GeoIpLoadLimits, GeoIpPolicyUsage, GeoIpRuntime, admitted_geoip_total, normalized_country,
-    open_verified_mmdb, read_verified_mmdb_with_post_read,
+    GeoIpLoadLimits, GeoIpPolicyUsage, GeoIpRuntime, admitted_geoip_total, normalized_asn,
+    normalized_country, open_verified_mmdb, read_verified_mmdb_with_post_read,
 };
 use fluxheim_config::{GeoIpConfig, GeoIpDatabaseConfig, GeoIpProvider};
 
@@ -25,6 +25,16 @@ fn normalizes_country_codes() {
     assert_eq!(normalized_country(" USA "), None);
     assert_eq!(normalized_country("1A"), None);
     assert_eq!(normalized_country(&"A".repeat(4096)), None);
+}
+
+#[test]
+fn normalizes_circl_asn_strings() {
+    assert_eq!(normalized_asn("13335"), Some(13_335));
+    assert_eq!(normalized_asn("0"), None);
+    assert_eq!(normalized_asn("+13335"), None);
+    assert_eq!(normalized_asn("13335 "), None);
+    assert_eq!(normalized_asn("4294967296"), None);
+    assert_eq!(normalized_asn(&"1".repeat(11)), None);
 }
 
 #[test]

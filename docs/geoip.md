@@ -58,6 +58,79 @@ construction enforces the same invariant, canonicalizes accepted countries to
 uppercase, and rejects ASN zero so future policy consumers cannot introduce an
 invalid context through the crate API.
 
+### CIRCL Geo Open
+
+CIRCL publishes Geo Open through Luxembourg's official open-data portal under
+the ODC-By license. Review and retain the dataset attribution required by that
+license. Fluxheim supports both the country-only MMDB and the combined Country
+and ASN MMDB. The combined database stores its ASN as the string field
+`country.AutonomousSystemNumber`; selecting `provider = "circl-geo-open"`
+enables Fluxheim's bounded decoder for that CIRCL-specific schema.
+
+The reproducible repository smoke pins this dated combined database:
+
+```text
+URL: https://cra.circl.lu/opendata/geo-open/mmdb-country-asn/2026-06-26-GeoOpen-Country-ASN.mmdb
+SHA-256: dd2607402f0614e4d4ff7a4bd4627e5e0e9bdedc7a97492d57c6e6a5c91b8423
+```
+
+The [dataset page](https://data.public.lu/en/datasets/geo-open-ip-address-geolocation-per-country-in-mmdb-format/)
+also publishes newer dated files. Treat a database update as a controlled
+configuration change: download to a staging path, verify the checksum supplied
+by your deployment policy, validate lookups, set trusted ownership and modes,
+and atomically rename the file into the live directory. Do not replace the
+dated filename in automation without reviewing and recording the new digest.
+
+For example, install the verified combined file as a root-owned regular file:
+
+```bash
+install -d -o root -g root -m 0755 /var/lib/fluxheim/geo
+install -o root -g root -m 0444 \
+  2026-06-26-GeoOpen-Country-ASN.mmdb \
+  /var/lib/fluxheim/geo/2026-06-26-GeoOpen-Country-ASN.mmdb
+```
+
+Then configure it with an absolute path:
+
+```toml
+[geoip]
+enabled = true
+fallback_enabled = true
+
+[[geoip.databases]]
+provider = "circl-geo-open"
+path = "/var/lib/fluxheim/geo/2026-06-26-GeoOpen-Country-ASN.mmdb"
+```
+
+The following command performs direct lookups through the same runtime used by
+Fluxheim. It is useful after replacing a database:
+
+```bash
+cargo run --locked -p fluxheim-geoip --features runtime --example lookup -- \
+  circl-geo-open \
+  /var/lib/fluxheim/geo/2026-06-26-GeoOpen-Country-ASN.mmdb \
+  1.1.1.1 8.8.8.8
+```
+
+The opt-in end-to-end proof downloads and checksum-verifies the pinned database,
+caches it under the secure smoke directory, then exercises country and ASN ACLs
+for static web serving, direct proxying, and two-origin load balancing:
+
+```bash
+scripts/smoke_geoip_circl.sh
+```
+
+The approximately 79 MiB database download is why this smoke is available in
+`scripts/test_starter.py` but intentionally excluded from normal CI and release
+gates. Set `FLUXHEIM_GEOIP_CIRCL_CACHE_DIR` to retain the verified download in
+another trusted directory, or set `FLUXHEIM_GEOIP_CIRCL_DATABASE` to an existing
+regular file with the pinned digest. The latter is never chmodded by the script.
+
+CIRCL Geo Open maps an address to the country associated with the announcing
+BGP autonomous system. That can differ from an end user's physical location;
+evaluate whether those semantics are appropriate before using country policy as
+an authorization boundary.
+
 ```toml
 [geoip]
 enabled = true

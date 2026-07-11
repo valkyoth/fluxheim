@@ -73,7 +73,7 @@ load-balancer = [
 stream-proxy = ["proxy", "dep:fluxheim-stream", "fluxheim-config/stream-proxy"]
 udp-proxy = ["proxy", "fluxheim-config/udp-proxy"]
 traffic-mirror = ["proxy", "fluxheim-config/traffic-mirror", "fluxheim-server/traffic-mirror"]
-geoip = ["proxy", "fluxheim-config/geoip", "fluxheim-geoip/runtime"]
+geoip = ["proxy", "fluxheim-config/geoip", "fluxheim-server/geoip"]
 wasm = ["dep:fluxheim-wasm", "fluxheim-config/wasm", "fluxheim-server/wasm", "fluxheim-wasm/runtime"]
 wasm-proxy-abi = ["wasm", "fluxheim-config/wasm-proxy-abi", "fluxheim-server/wasm-proxy-abi", "fluxheim-wasm/proxy-abi"]
 wasm-wasi = ["wasm", "fluxheim-config/wasm-wasi", "fluxheim-server/wasm-wasi", "fluxheim-wasm/wasi"]
@@ -253,7 +253,6 @@ fluxheim-acme = { path = "crates/fluxheim-acme", optional = true }
 fluxheim-compression = { path = "crates/fluxheim-compression" }
 fluxheim-config = { path = "crates/fluxheim-config" }
 fluxheim-cache = { path = "crates/fluxheim-cache" }
-fluxheim-geoip = { path = "crates/fluxheim-geoip" }
 fluxheim-headers = { path = "crates/fluxheim-headers" }
 fluxheim-load-balancer = { path = "crates/fluxheim-load-balancer", optional = true }
 fluxheim-observability = { path = "crates/fluxheim-observability" }

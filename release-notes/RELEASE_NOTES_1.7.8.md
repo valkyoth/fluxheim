@@ -20,6 +20,12 @@ general-purpose WASI application hosting.
   dispatch.
 - Add a checked-in WASI randomness policy/config example and include it in the
   standalone Wasm smoke.
+- Restore native-request GeoIP context lookup using the trusted-proxy-aware
+  client address for HTTP/1 and HTTP/2 policy evaluation.
+- Decode CIRCL Geo Open combined Country and ASN databases, including their
+  provider-specific string ASN field.
+- Add an opt-in, checksum-pinned CIRCL real-database smoke proving country and
+  ASN policy on static, direct-proxy, and load-balanced request paths.
 
 ## Security
 
@@ -73,6 +79,7 @@ scripts/smoke_wasm_sandbox.sh
 cargo test --locked -p fluxheim-php-fpm
 scripts/smoke_wordpress_php_fpm.sh
 scripts/smoke_fluxheim_php_wolfi.sh
+scripts/smoke_geoip_circl.sh
 ```
 
 ## Operator Notes
@@ -90,3 +97,6 @@ scripts/smoke_fluxheim_php_wolfi.sh
 - Document the rootless Podman ownership mapping required for trusted read-only
   config mounts, including explicit `podman unshare chown`, an opt-in `:U`
   alternative, and an in-container verification command.
+- CIRCL Geo Open users should follow `docs/geoip.md` for dataset attribution,
+  trusted installation, pinned checksums, schema details, and the opt-in live
+  database proof. The large network download remains outside normal CI gates.

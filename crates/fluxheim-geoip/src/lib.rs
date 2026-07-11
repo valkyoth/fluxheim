@@ -78,7 +78,7 @@ mod geoip_runtime {
     mod value;
 
     use file_path::{O_NOFOLLOW, path_contains_symlink};
-    use value::{admitted_geoip_total, normalized_country};
+    use value::{admitted_geoip_total, normalized_asn, normalized_country};
 
     const MAX_GEOIP_DATABASE_BYTES: u64 = 512 * 1024 * 1024;
     const MAX_TOTAL_GEOIP_DATABASE_BYTES: u64 = 1024 * 1024 * 1024;
@@ -187,6 +187,7 @@ mod geoip_runtime {
 
     #[derive(Debug)]
     struct GeoIpDatabase {
+        provider: GeoIpProvider,
         reader: Reader<Vec<u8>>,
         database_type: String,
     }
@@ -205,6 +206,7 @@ mod geoip_runtime {
             })?;
             let database_type = reader.metadata().database_type.clone();
             Ok(Self {
+                provider,
                 reader,
                 database_type,
             })
@@ -228,7 +230,18 @@ mod geoip_runtime {
                 .decode::<geoip2::Asn<'_>>()
                 .ok()
                 .flatten()
-                .and_then(|asn| asn.autonomous_system_number.filter(|asn| *asn > 0));
+                .and_then(|asn| asn.autonomous_system_number.filter(|asn| *asn > 0))
+                .or_else(|| {
+                    (self.provider == GeoIpProvider::CirclGeoOpen)
+                        .then(|| {
+                            lookup
+                                .decode_path::<&str>(&path!["country", "AutonomousSystemNumber"])
+                                .ok()
+                                .flatten()
+                                .and_then(normalized_asn)
+                        })
+                        .flatten()
+                });
             (country.and_then(normalized_country), asn)
         }
 

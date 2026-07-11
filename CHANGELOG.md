@@ -15,6 +15,11 @@ behavior when the change improves security or project direction.
   access-decision plugins with separate clock and randomness grants.
 - Add checked-in WASI randomness policy/config examples, standalone real-Wasm
   smoke coverage, and live native HTTP/1 listener coverage.
+- Restore trusted-client GeoIP context lookup in the native HTTP router for
+  HTTP/1 and HTTP/2 access policy.
+- Support CIRCL Geo Open's combined Country and ASN MMDB schema and add an
+  opt-in checksum-pinned real-database smoke covering static, proxy, and
+  load-balanced country/ASN policy.
 
 ### Security
 
