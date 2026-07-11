@@ -16,6 +16,24 @@ pub const MAX_WASM_MAX_CONCURRENT_EXECUTIONS: u32 = 256;
 pub const MAX_WASM_MAX_TOTAL_PREVIEW_CONCURRENT_EXECUTIONS: u32 = 32;
 pub const MAX_WASM_QUEUE_LIMIT: u32 = 256;
 pub const MAX_WASM_ATTACHMENT_PRIORITY: u32 = 1_000_000;
+pub const MAX_WASM_MODULE_BYTES: u64 = 16 * 1024 * 1024;
+pub const MAX_WASM_MEMORY_BYTES: u64 = 256 * 1024 * 1024;
+pub const MAX_WASM_TABLE_ELEMENTS: u32 = 100_000;
+pub const MAX_WASM_FUEL: u64 = 100_000_000;
+pub const MAX_WASM_TIMEOUT_MS: u64 = 5_000;
+pub const MAX_WASM_COMPILE_TIMEOUT_MS: u64 = 10_000;
+
+#[cfg(feature = "wasm")]
+const _: () = {
+    assert!(MAX_WASM_MODULE_BYTES == fluxheim_wasm::HARD_MAX_MODULE_BYTES);
+    assert!(MAX_WASM_MEMORY_BYTES as usize == fluxheim_wasm::HARD_MAX_MEMORY_BYTES);
+    assert!(MAX_WASM_TABLE_ELEMENTS as usize == fluxheim_wasm::HARD_MAX_TABLE_ELEMENTS);
+    assert!(MAX_WASM_FUEL == fluxheim_wasm::HARD_MAX_FUEL);
+    assert!(MAX_WASM_TIMEOUT_MS == fluxheim_wasm::HARD_MAX_TIMEOUT.as_millis() as u64);
+    assert!(
+        MAX_WASM_COMPILE_TIMEOUT_MS == fluxheim_wasm::HARD_MAX_COMPILE_TIMEOUT.as_millis() as u64
+    );
+};
 
 const DEFAULT_WASM_MAX_MODULE_BYTES: u64 = 1_048_576;
 const DEFAULT_WASM_MAX_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
@@ -633,46 +651,50 @@ impl Default for WasmSandboxLimitsConfig {
 
 impl WasmSandboxLimitsConfig {
     fn validate(&self, field: &'static str) -> Result<(), ConfigError> {
-        if self.max_module_bytes.as_u64() == 0 {
+        if self.max_module_bytes.as_u64() == 0
+            || self.max_module_bytes.as_u64() > MAX_WASM_MODULE_BYTES
+        {
             return Err(ConfigError::InvalidWasmPolicy {
                 scope: field.to_owned(),
                 field: "max_module_bytes",
-                reason: "must be greater than zero",
+                reason: "must be between 1 byte and 16 MiB",
             });
         }
-        if self.max_memory_bytes.as_u64() == 0 {
+        if self.max_memory_bytes.as_u64() == 0
+            || self.max_memory_bytes.as_u64() > MAX_WASM_MEMORY_BYTES
+        {
             return Err(ConfigError::InvalidWasmPolicy {
                 scope: field.to_owned(),
                 field: "max_memory_bytes",
-                reason: "must be greater than zero",
+                reason: "must be between 1 byte and 256 MiB",
             });
         }
-        if self.max_table_elements == 0 {
+        if self.max_table_elements == 0 || self.max_table_elements > MAX_WASM_TABLE_ELEMENTS {
             return Err(ConfigError::InvalidWasmPolicy {
                 scope: field.to_owned(),
                 field: "max_table_elements",
-                reason: "must be greater than zero",
+                reason: "must be between 1 and 100000",
             });
         }
-        if self.fuel == 0 {
+        if self.fuel == 0 || self.fuel > MAX_WASM_FUEL {
             return Err(ConfigError::InvalidWasmPolicy {
                 scope: field.to_owned(),
                 field: "fuel",
-                reason: "must be greater than zero",
+                reason: "must be between 1 and 100000000",
             });
         }
-        if self.timeout_ms == 0 {
+        if self.timeout_ms == 0 || self.timeout_ms > MAX_WASM_TIMEOUT_MS {
             return Err(ConfigError::InvalidWasmPolicy {
                 scope: field.to_owned(),
                 field: "timeout_ms",
-                reason: "must be greater than zero",
+                reason: "must be between 1 and 5000",
             });
         }
-        if self.compile_timeout_ms == 0 {
+        if self.compile_timeout_ms == 0 || self.compile_timeout_ms > MAX_WASM_COMPILE_TIMEOUT_MS {
             return Err(ConfigError::InvalidWasmPolicy {
                 scope: field.to_owned(),
                 field: "compile_timeout_ms",
-                reason: "must be greater than zero",
+                reason: "must be between 1 and 10000",
             });
         }
         Ok(())

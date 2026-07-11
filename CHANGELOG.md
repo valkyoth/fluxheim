@@ -44,6 +44,9 @@ behavior when the change improves security or project direction.
 - Make directory-listing timestamp formatting checked and preserve the
   `SafeRelativePath` invariant through validated incremental components,
   preventing panic-abort and latent traversal paths in static serving.
+- Add crate-level Wasm resource ceilings, checked execution deadlines,
+  semaphore-capacity validation, fallible compile-worker creation, and
+  before/after deadline checks for the finite non-blocking host-call boundary.
 
 ## 1.7.7 - 2026-07-10
 

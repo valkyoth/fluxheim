@@ -3167,6 +3167,11 @@ Stable scope:
   families must run through `scripts/test_starter.py`, the stable/deep release
   gates must include the appropriate Wasm checks, and the docs must clearly
   describe supported capability parity and unsupported syntax/runtime parity.
+  Keep all in-process native host callbacks finite and non-blocking. Before any
+  host-call capability introduces blocking I/O, IPC, sleeps, contended waits,
+  or third-party native callback code, design and prove a killable subprocess
+  runner with bounded authenticated IPC, process admission, timeout termination,
+  and crash cleanup; do not represent thread timeouts as hard preemption.
 - `v1.7.11`: zero-downtime upgrade planning and first implementation slice
   after the Wasm line is stable. Add a documented design for native binary and
   Podman deployments that can swap Fluxheim versions without a listener gap:

@@ -143,6 +143,24 @@ loader validates the manifest and then loads the exact approved plugin path
 with the validated limits; production hook execution still starts later in the
 `1.7` line.
 
+The runtime crate enforces hard ceilings even when it is called without the
+configuration layer: modules are capped at 16 MiB, linear memory at 256 MiB,
+tables at 100000 elements, fuel at 100000000, execution timeout at 5 seconds,
+and compilation timeout at 10 seconds. Normal defaults remain substantially
+lower. Admission values are also checked against Tokio's semaphore capacity
+before semaphore construction, and execution deadlines use checked arithmetic.
+
+Native host callbacks execute synchronously while Wasmtime is inside native
+Rust and therefore cannot be forcibly preempted by epoch interruption. Every
+current Fluxheim callback is a finite in-memory operation; callbacks that
+perform filesystem/network I/O, IPC, sleeps, or potentially contended waits are
+prohibited. Fluxheim checks the absolute execution deadline before and after
+each callback, so a late result fails as a timeout. A callback that never
+returns still cannot be killed safely inside the process. Before Fluxheim adds
+any blocking or third-party native host callback, that capability requires a
+killable subprocess runner with bounded IPC; thread-based timeout wrappers are
+not an acceptable substitute.
+
 Compiled modules carry a stable identity that includes the loaded plugin digest,
 the manifest ABI version, the host-call namespace, the native hook feature
 surface used to compile it, and the Fluxheim crate version. Any future compile
@@ -421,6 +439,9 @@ native `fluxheim-policy-v1` admission or blocking capacity.
 - Host calls must never expose admin tokens, ACME/EAB secrets, private keys,
   authorization headers, cookies, raw request bodies, or filesystem paths unless
   explicitly allowed and redacted.
+- Host callbacks must remain finite and non-blocking. Adding I/O, IPC, sleeps,
+  or contended waits requires process isolation rather than an in-process
+  callback timeout.
 - Plugins must not control routing destinations or upstream TLS verification
   directly. Cache-key influence is allowed only through constrained typed hook
   outputs that Fluxheim validates, bounds, and records.

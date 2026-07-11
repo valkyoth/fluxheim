@@ -74,6 +74,15 @@ general-purpose WASI application hosting.
 - Replace unchecked `SafeRelativePath` component insertion with a validating
   single-normal-component API so the public type preserves its traversal-safety
   invariant for current and future static-serving callers.
+- Enforce crate-level hard ceilings for Wasm module, memory, table, fuel,
+  execution-timeout, and compile-timeout limits, with matching config rejection
+  and checked `Instant` deadline arithmetic.
+- Reject Wasm admission values above Tokio's semaphore capacity before
+  constructing a semaphore, and create compilation workers through the fallible
+  named thread builder instead of the panicking convenience API.
+- Check the absolute execution deadline before and after every synchronous host
+  callback so late callback results fail as timeouts. Keep blocking callbacks
+  prohibited until a killable subprocess runner exists.
 
 ## Validation
 

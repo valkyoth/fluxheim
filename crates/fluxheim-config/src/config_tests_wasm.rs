@@ -288,6 +288,44 @@ fn wasm_registry_builds_loader_manifest_with_plugin_overrides() {
     fluxheim_wasm::validate_plugin_manifest(manifests[0].clone(), false).unwrap();
 }
 
+#[cfg(feature = "wasm")]
+#[test]
+fn wasm_registry_rejects_limits_above_runtime_hard_ceiling() {
+    let mut cases = Vec::new();
+
+    let mut config = base_wasm_config("");
+    config.wasm.default_limits.max_module_bytes = super::ByteSize::from_bytes(16 * 1024 * 1024 + 1);
+    cases.push(("max_module_bytes", config));
+
+    let mut config = base_wasm_config("");
+    config.wasm.default_limits.max_memory_bytes =
+        super::ByteSize::from_bytes(256 * 1024 * 1024 + 1);
+    cases.push(("max_memory_bytes", config));
+
+    let mut config = base_wasm_config("");
+    config.wasm.default_limits.max_table_elements = 100_001;
+    cases.push(("max_table_elements", config));
+
+    let mut config = base_wasm_config("");
+    config.wasm.default_limits.fuel = 100_000_001;
+    cases.push(("fuel", config));
+
+    let mut config = base_wasm_config("");
+    config.wasm.default_limits.timeout_ms = 5_001;
+    cases.push(("timeout_ms", config));
+
+    let mut config = base_wasm_config("");
+    config.wasm.default_limits.compile_timeout_ms = 10_001;
+    cases.push(("compile_timeout_ms", config));
+
+    for (expected_field, config) in cases {
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::InvalidWasmPolicy { field, .. }) if field == expected_field
+        ));
+    }
+}
+
 #[cfg(all(feature = "wasm", not(feature = "wasm-proxy-abi")))]
 #[test]
 fn wasm_proxy_preview_namespace_requires_feature() {

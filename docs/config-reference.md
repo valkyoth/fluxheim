@@ -611,6 +611,11 @@ added by later `1.7.x` hook releases. All Wasm active-execution and queued
 admission values are bounded to `0..=256`, with active limits required to be
 non-zero. Runtime acquisition proceeds from attachment and plugin scopes toward
 the process-wide scope so a narrow backlog cannot consume global permits.
+Sandbox limits also have crate-enforced ceilings: `max_module_bytes` is at most
+16 MiB, `max_memory_bytes` at most 256 MiB, `max_table_elements` at most
+100000, `fuel` at most 100000000, `timeout_ms` at most 5000, and
+`compile_timeout_ms` at most 10000. These are hard safety ceilings, not
+recommended defaults.
 `1.7.1` enables the first live
 native HTTP/1 request-path hook family: `access-decision`. The current preview
 ABI calls `fluxheim_access_decision() -> i32`, where `0` continues the chain,

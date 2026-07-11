@@ -47,6 +47,11 @@ pub struct FluxWasmCompiledModuleIdentity {
 }
 
 #[derive(Clone)]
+/// Synchronous native host callback for Fluxheim's bounded policy ABI.
+///
+/// Callbacks must be finite, non-blocking, and free of I/O, sleeps, IPC, and
+/// contended lock acquisition. Wasmtime epoch interruption cannot preempt
+/// native Rust while a callback is running.
 pub struct WasmI32HostFunction {
     module: &'static str,
     name: &'static str,
@@ -103,11 +108,14 @@ impl FluxWasmAdmissionController {
         max_total_concurrent_executions: usize,
         queue_limit: usize,
     ) -> Result<Self, WasmAdmissionError> {
-        if max_total_concurrent_executions == 0 {
+        if max_total_concurrent_executions == 0
+            || max_total_concurrent_executions > Semaphore::MAX_PERMITS
+        {
             return Err(WasmAdmissionError::InvalidLimit);
         }
         let total_capacity = max_total_concurrent_executions
             .checked_add(queue_limit)
+            .filter(|total| *total <= Semaphore::MAX_PERMITS)
             .ok_or(WasmAdmissionError::InvalidLimit)?;
         Ok(Self {
             active: Arc::new(Semaphore::new(max_total_concurrent_executions)),
@@ -533,7 +541,7 @@ impl FluxWasmRuntime {
             .set_fuel(self.limits.fuel)
             .map_err(|error| WasmExecutionError::RuntimeSetup(error.to_string()))?;
         store.set_epoch_deadline(1);
-        let deadline = Instant::now() + self.limits.timeout;
+        let deadline = checked_execution_deadline(Instant::now(), self.limits.timeout)?;
         let timed_out = Arc::new(AtomicBool::new(false));
         let callback_timed_out = Arc::clone(&timed_out);
         store.epoch_deadline_callback(move |_store| {
@@ -558,24 +566,39 @@ impl FluxWasmRuntime {
             let has_host_functions = !host_functions.is_empty() || has_wasi_imports;
             for host_function in host_functions {
                 match host_function.callback {
-                    WasmI32HostCallback::Two(callback) => linker
-                        .func_wrap(
-                            host_function.module,
-                            host_function.name,
-                            move |left: i32, right: i32| -> wasmtime::Result<i32> {
-                                callback(left, right).map_err(wasmtime::Error::msg)
-                            },
-                        )
-                        .map_err(|error| WasmExecutionError::RuntimeSetup(error.to_string()))?,
-                    WasmI32HostCallback::Three(callback) => linker
-                        .func_wrap(
-                            host_function.module,
-                            host_function.name,
-                            move |first: i32, second: i32, third: i32| -> wasmtime::Result<i32> {
-                                callback(first, second, third).map_err(wasmtime::Error::msg)
-                            },
-                        )
-                        .map_err(|error| WasmExecutionError::RuntimeSetup(error.to_string()))?,
+                    WasmI32HostCallback::Two(callback) => {
+                        let host_timed_out = Arc::clone(&timed_out);
+                        linker
+                            .func_wrap(
+                                host_function.module,
+                                host_function.name,
+                                move |left: i32, right: i32| -> wasmtime::Result<i32> {
+                                    invoke_bounded_host_callback(deadline, &host_timed_out, || {
+                                        callback(left, right)
+                                    })
+                                    .map_err(wasmtime::Error::msg)
+                                },
+                            )
+                            .map_err(|error| WasmExecutionError::RuntimeSetup(error.to_string()))?
+                    }
+                    WasmI32HostCallback::Three(callback) => {
+                        let host_timed_out = Arc::clone(&timed_out);
+                        linker
+                            .func_wrap(
+                                host_function.module,
+                                host_function.name,
+                                move |first: i32,
+                                      second: i32,
+                                      third: i32|
+                                      -> wasmtime::Result<i32> {
+                                    invoke_bounded_host_callback(deadline, &host_timed_out, || {
+                                        callback(first, second, third)
+                                    })
+                                    .map_err(wasmtime::Error::msg)
+                                },
+                            )
+                            .map_err(|error| WasmExecutionError::RuntimeSetup(error.to_string()))?
+                    }
                 };
             }
             let instance = if has_host_functions {
@@ -658,12 +681,20 @@ impl FluxWasmRuntime {
         let engine = self.engine.clone();
         let bytes = plugin.bytes().to_vec();
         let (result_sender, result_receiver) = mpsc::sync_channel(1);
-        thread::spawn(move || {
-            let result = Module::new(&engine, &bytes)
-                .map_err(|error| WasmExecutionError::Compile(error.to_string()));
-            drop(compile_permit);
-            let _ = result_sender.send(result);
-        });
+        let worker = thread::Builder::new()
+            .name("fluxheim-wasm-compile".to_owned())
+            .spawn(move || {
+                let result = Module::new(&engine, &bytes)
+                    .map_err(|error| WasmExecutionError::Compile(error.to_string()));
+                drop(compile_permit);
+                let _ = result_sender.send(result);
+            })
+            .map_err(|error| {
+                WasmExecutionError::RuntimeSetup(format!(
+                    "failed to spawn wasm compilation worker: {error}"
+                ))
+            })?;
+        drop(worker);
 
         match result_receiver.recv_timeout(timeout) {
             Ok(result) => result,
@@ -675,6 +706,34 @@ impl FluxWasmRuntime {
             )),
         }
     }
+}
+
+fn checked_execution_deadline(
+    started: Instant,
+    timeout: Duration,
+) -> Result<Instant, WasmExecutionError> {
+    started.checked_add(timeout).ok_or_else(|| {
+        WasmExecutionError::RuntimeSetup(
+            "wasm execution timeout exceeds platform Instant range".to_owned(),
+        )
+    })
+}
+
+fn invoke_bounded_host_callback<T>(
+    deadline: Instant,
+    timed_out: &AtomicBool,
+    callback: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    if Instant::now() >= deadline {
+        timed_out.store(true, Ordering::Release);
+        return Err("wasm host callback started after the execution deadline".to_owned());
+    }
+    let result = callback();
+    if Instant::now() >= deadline {
+        timed_out.store(true, Ordering::Release);
+        return Err("wasm host callback exceeded the execution deadline".to_owned());
+    }
+    result
 }
 
 #[cfg(test)]
@@ -1076,7 +1135,7 @@ mod tests {
             "#,
         );
         let limits = WasmSandboxLimits {
-            fuel: 1_000_000_000,
+            fuel: crate::HARD_MAX_FUEL,
             timeout: Duration::from_millis(25),
             ..WasmSandboxLimits::default()
         };
@@ -1085,6 +1144,47 @@ mod tests {
         let runtime = FluxWasmRuntime::new(limits).unwrap();
 
         let error = runtime.run_i32_no_args(&plugin, "spin").unwrap_err();
+
+        assert!(matches!(error, WasmExecutionError::ExecutionTimeout { .. }));
+    }
+
+    #[test]
+    fn runtime_rejects_host_callback_result_after_execution_deadline() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"
+            (module
+              (import "fluxheim" "slow" (func $slow (param i32 i32) (result i32)))
+              (func (export "decision") (result i32)
+                i32.const 1
+                i32.const 2
+                call $slow))
+            "#,
+        );
+        let limits = WasmSandboxLimits {
+            timeout: Duration::from_millis(5),
+            ..WasmSandboxLimits::default()
+        };
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+        let module = runtime.compile_plugin_module(&plugin).unwrap();
+
+        let error = runtime
+            .run_compiled_i32_no_args_with_hosts(
+                &module,
+                "decision",
+                vec![WasmI32HostFunction::new(
+                    "fluxheim",
+                    "slow",
+                    |_left, _right| {
+                        thread::sleep(Duration::from_millis(15));
+                        Ok(7)
+                    },
+                )],
+            )
+            .unwrap_err();
 
         assert!(matches!(error, WasmExecutionError::ExecutionTimeout { .. }));
     }
@@ -1254,6 +1354,27 @@ mod tests {
         let error = FluxWasmAdmissionController::new(0).unwrap_err();
 
         assert_eq!(error, WasmAdmissionError::InvalidLimit);
+    }
+
+    #[test]
+    fn admission_controller_rejects_tokio_semaphore_overflow() {
+        assert_eq!(
+            FluxWasmAdmissionController::new(Semaphore::MAX_PERMITS + 1).unwrap_err(),
+            WasmAdmissionError::InvalidLimit
+        );
+        assert_eq!(
+            FluxWasmAdmissionController::new_with_queue(Semaphore::MAX_PERMITS, 1).unwrap_err(),
+            WasmAdmissionError::InvalidLimit
+        );
+    }
+
+    #[test]
+    fn execution_deadline_rejects_platform_instant_overflow() {
+        assert!(matches!(
+            checked_execution_deadline(Instant::now(), Duration::MAX),
+            Err(WasmExecutionError::RuntimeSetup(message))
+                if message.contains("Instant range")
+        ));
     }
 
     #[test]
