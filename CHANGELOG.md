@@ -47,6 +47,8 @@ behavior when the change improves security or project direction.
 - Add crate-level Wasm resource ceilings, checked execution deadlines,
   semaphore-capacity validation, fallible compile-worker creation, and
   before/after deadline checks for the finite non-blocking host-call boundary.
+- Make panic-free, total-over-`i32` behavior part of the native Wasm host-call
+  contract and property-test every current guest-ID decoder.
 
 ## 1.7.7 - 2026-07-10
 

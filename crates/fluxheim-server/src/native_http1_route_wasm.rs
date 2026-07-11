@@ -1892,6 +1892,20 @@ impl NativeWasmAdmissionScope {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn wasm_guest_id_decoders_are_total(first in any::<i32>(), second in any::<i32>()) {
+            let _ = wasm_request_header_mutation(first, second);
+            let _ = wasm_response_header_mutation(first, second);
+            let _ = wasm_response_removable_header(first);
+            let _ = wasm_cache_key_component(first, second);
+            let _ = wasm_cache_ttl(first);
+            let _ = wasm_cache_tag(first);
+            let _ = wasm_cache_store_header(first, second);
+        }
+    }
 
     #[test]
     fn proxy_preview_namespace_does_not_receive_native_phase_functions() {

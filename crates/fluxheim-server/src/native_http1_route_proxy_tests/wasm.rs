@@ -213,12 +213,15 @@ async fn native_wasm_wasi_stdio_import_remains_denied_with_other_grants() {
 async fn native_wasm_access_decision_fails_closed_on_timeout() {
     let fixture = WasmRouteFixture::new(&[("busy", WasmPluginBody::BusyLoop)]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
-    let router = NativeHttp1HostRouter::from_config(
-        &fixture.config_with_attachments(upstream, vec![wasm_attachment("busy", "route", 100)]),
-        DownstreamHttp1Policy::default(),
-        0,
-    )
-    .unwrap();
+    let mut config =
+        fixture.config_with_attachments(upstream, vec![wasm_attachment("busy", "route", 100)]);
+    config.wasm.plugins[0]
+        .limits
+        .as_mut()
+        .expect("busy-loop test plugin has explicit limits")
+        .timeout_ms = 5;
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
     let proxy = router_listener(router).await;
 
     let response = downstream_get(proxy, "/route").await;
@@ -2245,8 +2248,8 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
         WasmPluginBody::BusyLoop | WasmPluginBody::CacheLookupBusy
     ) {
         Some(fluxheim_config::WasmSandboxLimitsConfig {
-            fuel: 1_000_000_000,
-            timeout_ms: 150,
+            fuel: fluxheim_config::config_wasm::MAX_WASM_FUEL,
+            timeout_ms: 50,
             compile_timeout_ms: 5_000,
             ..Default::default()
         })

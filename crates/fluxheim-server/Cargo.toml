@@ -80,6 +80,7 @@ rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
 
 [dev-dependencies]
 flate2 = "1.1.5"
+proptest = "1.11.0"
 rcgen = { version = "0.14.8", default-features = false, features = ["pem", "ring"] }
 tempfile = "3.27.0"
 wat = "1.253.0"

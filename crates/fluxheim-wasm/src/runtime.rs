@@ -49,9 +49,12 @@ pub struct FluxWasmCompiledModuleIdentity {
 #[derive(Clone)]
 /// Synchronous native host callback for Fluxheim's bounded policy ABI.
 ///
-/// Callbacks must be finite, non-blocking, and free of I/O, sleeps, IPC, and
+/// Callbacks must be finite, non-blocking, panic-free, and total over every
+/// possible `i32` input. They must use checked arithmetic and bounds-checked
+/// access and remain free of I/O, sleeps, IPC, assertion-based APIs, and
 /// contended lock acquisition. Wasmtime epoch interruption cannot preempt
-/// native Rust while a callback is running.
+/// native Rust while a callback is running, and Fluxheim releases abort on
+/// panic rather than unwind.
 pub struct WasmI32HostFunction {
     module: &'static str,
     name: &'static str,

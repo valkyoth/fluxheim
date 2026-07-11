@@ -83,6 +83,10 @@ general-purpose WASI application hosting.
 - Check the absolute execution deadline before and after every synchronous host
   callback so late callback results fail as timeouts. Keep blocking callbacks
   prohibited until a killable subprocess runner exists.
+- Require in-process native Wasm callbacks to be panic-free and total for every
+  guest integer, and property-test all current guest-ID decoders over arbitrary
+  `i32` inputs. Keep panic-prone or third-party native callbacks behind the
+  future subprocess-isolation boundary.
 
 ## Validation
 
