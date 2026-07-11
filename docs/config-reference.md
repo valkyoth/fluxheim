@@ -3507,8 +3507,10 @@ FastCGI and lets retries replay the same upload without cloning a large memory
 buffer; both spool settings must be configured together. On Unix, the securely
 created spool entry is unlinked immediately and Fluxheim retains its open file
 descriptor for request and retry readers, preventing a crash from leaving a
-named plaintext upload behind. This does not guarantee raw-media erasure; use
-encrypted storage or tmpfs when storage remanence is in scope. When
+named plaintext upload behind. Overlapping readers use independent logical
+offsets with bounded positional disk reads, so one reader cannot reset or
+consume another reader's body position. This does not guarantee raw-media
+erasure; use encrypted storage or tmpfs when storage remanence is in scope. When
 `php.max_request_body_bytes` is set on the same PHP action, the spool threshold
 must be lower than that body limit. Existing spool paths must be directories,
 and existing directories must not be group/world writable. Fluxheim rechecks

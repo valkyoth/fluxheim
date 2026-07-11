@@ -48,7 +48,9 @@ general-purpose WASI application hosting.
 - Run each managed PHP-FPM pool in a dedicated process group and terminate the
   complete group on shutdown, failed status checks, and watchdog restarts.
 - Unlink request-body spool files immediately after secure creation while
-  retaining a rewindable descriptor for retry replay.
+  retaining a descriptor for retry replay. Give every reader an independent
+  logical offset backed by bounded positional reads so overlapping readers
+  cannot corrupt each other's request body stream.
 - Replace inherited managed PHP-FPM `PATH` handling with a fixed allowlisted
   search path after clearing the child environment.
 

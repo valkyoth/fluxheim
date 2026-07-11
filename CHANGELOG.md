@@ -29,7 +29,8 @@ behavior when the change improves security or project direction.
 - Document that the opt-in clock capability exposes full host clock resolution
   and is unsuitable for untrusted plugins colocated with secret-dependent work.
 - Bound complete FastCGI request/response operations with one deadline, retain
-  anonymous request-body spool descriptors, and fix the managed child `PATH`.
+  anonymous request-body spool descriptors with independent positional reader
+  offsets, and fix the managed child `PATH`.
 - Bind managed PHP-FPM spawn to a trusted executable descriptor and terminate
   its complete dedicated process group during shutdown and watchdog recovery.
 

@@ -334,8 +334,11 @@ for single-user/rootless deployments.
   writable, and runtime spool creation rechecks permissions before writing
   upload bodies. On Unix, Fluxheim unlinks each securely created spool entry
   immediately and retains only the open descriptor, so crashes do not leave a
-  named plaintext request body behind. Use encrypted storage or tmpfs when raw
-  storage remanence is in scope.
+  named plaintext request body behind. Every request or retry reader maintains
+  an independent logical offset and uses bounded positional reads through the
+  blocking-I/O pool, so overlapping readers cannot reset or consume each
+  other's stream position. Use encrypted storage or tmpfs when raw storage
+  remanence is in scope.
 - Custom FastCGI params in config. Implemented as `[vhosts.php.params]` and
   `[vhosts.routes.php.params]` with protected core CGI params.
 - Path mapping for separate Fluxheim/php-fpm container filesystem roots.

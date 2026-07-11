@@ -86,6 +86,69 @@ fn php_request_body_spool_replays_and_cleans_up_file() {
 }
 
 #[test]
+fn php_request_body_spool_readers_keep_independent_offsets() {
+    let spool_dir = fluxheim_common::test_support::unique_temp_path("php-fpm-spool-offsets");
+    std::fs::create_dir_all(&spool_dir).expect("spool dir");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()
+        .expect("test runtime");
+    let expected = (0..(PHP_TEST_SPOOL_BYTES + 17))
+        .map(|index| (index % 251) as u8)
+        .collect::<Vec<_>>();
+    let mut file = runtime
+        .block_on(create_php_request_body_spool_file(&spool_dir))
+        .expect("create spool file");
+    runtime.block_on(async {
+        use tokio::io::AsyncWriteExt as _;
+
+        file.write_all(&expected).await.expect("write spool");
+        file.flush().await.expect("flush spool");
+    });
+    let body = runtime
+        .block_on(PhpRequestBody::spooled(file, expected.len()))
+        .expect("retain anonymous spool file");
+    let mut first = runtime.block_on(body.reader()).expect("first reader");
+    let mut second = runtime.block_on(body.reader()).expect("second reader");
+    let mut first_prefix = vec![0_u8; 1_003];
+    let mut second_prefix = vec![0_u8; 70_001];
+    let mut first_rest = Vec::new();
+    let mut second_rest = Vec::new();
+
+    runtime.block_on(async {
+        use fastcgi_client::io::AsyncReadExt as _;
+
+        first
+            .read_exact(&mut first_prefix)
+            .await
+            .expect("first prefix");
+        second
+            .read_exact(&mut second_prefix)
+            .await
+            .expect("second prefix");
+        first
+            .read_to_end(&mut first_rest)
+            .await
+            .expect("first remainder");
+        second
+            .read_to_end(&mut second_rest)
+            .await
+            .expect("second remainder");
+    });
+
+    first_prefix.extend(first_rest);
+    second_prefix.extend(second_rest);
+    assert_eq!(first_prefix, expected);
+    assert_eq!(second_prefix, expected);
+    drop(first);
+    drop(second);
+    drop(body);
+    std::fs::remove_dir(&spool_dir).expect("remove spool dir");
+}
+
+const PHP_TEST_SPOOL_BYTES: usize = 128 * 1024;
+
+#[test]
 fn php_fpm_stream_chunk_limit_counts_stdout_and_stderr() {
     let mut total = 0;
     let mut stdout = Vec::new();
