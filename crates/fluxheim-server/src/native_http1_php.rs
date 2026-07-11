@@ -79,14 +79,10 @@ pub(crate) async fn native_php_request_body(
             "PHP request body spool directory is required",
         ));
     };
-    let (path, mut file) = fluxheim_php_fpm::create_php_request_body_spool_file(spool_dir).await?;
+    let mut file = fluxheim_php_fpm::create_php_request_body_spool_file(spool_dir).await?;
     tokio::io::AsyncWriteExt::write_all(&mut file, &request.body).await?;
     tokio::io::AsyncWriteExt::flush(&mut file).await?;
-    drop(file);
-    Ok(fluxheim_php_fpm::PhpRequestBody::spooled(
-        path,
-        request.body.len(),
-    ))
+    fluxheim_php_fpm::PhpRequestBody::spooled(file, request.body.len()).await
 }
 
 pub(crate) async fn native_php_execute_fpm(

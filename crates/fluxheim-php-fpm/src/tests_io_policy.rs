@@ -40,7 +40,7 @@ fn php_request_body_spool_replays_and_cleans_up_file() {
         .enable_io()
         .build()
         .expect("test runtime");
-    let (path, mut file) = runtime
+    let mut file = runtime
         .block_on(create_php_request_body_spool_file(&spool_dir))
         .expect("create spool file");
     runtime.block_on(async {
@@ -50,7 +50,16 @@ fn php_request_body_spool_replays_and_cleans_up_file() {
         file.flush().await.expect("flush spool");
     });
 
-    let body = PhpRequestBody::spooled(path.clone(), "spooled-body".len());
+    assert_eq!(
+        std::fs::read_dir(&spool_dir)
+            .expect("read spool dir")
+            .count(),
+        0,
+        "spool file must be unlinked immediately"
+    );
+    let body = runtime
+        .block_on(PhpRequestBody::spooled(file, "spooled-body".len()))
+        .expect("retain anonymous spool file");
     let mut reader = runtime.block_on(body.reader()).expect("spool reader");
     let mut replayed = Vec::new();
     runtime
@@ -61,10 +70,18 @@ fn php_request_body_spool_replays_and_cleans_up_file() {
         .expect("read spool body");
 
     assert_eq!(replayed, b"spooled-body");
-    assert!(path.exists());
     drop(reader);
+    let mut retry_reader = runtime.block_on(body.reader()).expect("retry spool reader");
+    let mut retry = Vec::new();
+    runtime
+        .block_on(fastcgi_client::io::AsyncReadExt::read_to_end(
+            &mut retry_reader,
+            &mut retry,
+        ))
+        .expect("re-read spool body");
+    assert_eq!(retry, b"spooled-body");
+    drop(retry_reader);
     drop(body);
-    assert!(!path.exists());
     std::fs::remove_dir(&spool_dir).expect("remove spool dir");
 }
 
@@ -121,6 +138,51 @@ fn managed_php_fpm_spawn_rejects_symlinked_binary() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn managed_php_fpm_spawn_rejects_writable_binary() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let root = tempfile::TempDir::new().expect("temp dir");
+    let binary = root.path().join("php-fpm");
+    std::fs::write(&binary, b"#!/bin/sh\n").expect("write binary");
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o777))
+        .expect("set writable mode");
+
+    let error = crate::ensure_managed_php_fpm_binary_spawn_safe("test", &binary)
+        .expect_err("writable php-fpm binary should be rejected");
+
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert!(error.to_string().contains("untrusted owner or mode"));
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_php_fpm_spawn_rejects_writable_ancestor() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let root = tempfile::TempDir::new().expect("temp dir");
+    let writable = root.path().join("writable");
+    let bin_dir = writable.join("bin");
+    std::fs::create_dir_all(&bin_dir).expect("create binary tree");
+    std::fs::set_permissions(&writable, std::fs::Permissions::from_mode(0o777))
+        .expect("set writable ancestor");
+    let binary = bin_dir.join("php-fpm");
+    std::fs::write(&binary, b"#!/bin/sh\n").expect("write binary");
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700))
+        .expect("set executable mode");
+
+    let error = crate::ensure_managed_php_fpm_binary_spawn_safe("test", &binary)
+        .expect_err("binary below writable ancestor should be rejected");
+
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert!(
+        error
+            .to_string()
+            .contains("untrusted or group/world-writable ancestor")
+    );
+}
+
 #[test]
 fn php_fpm_error_outcomes_are_bounded() {
     assert_eq!(
@@ -158,6 +220,21 @@ fn managed_php_fpm_path_env_falls_back_for_control_bytes() {
         managed_php_fpm_path_env_from(Some("/usr/bin\n/tmp".to_owned())),
         "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     );
+}
+
+#[test]
+fn managed_php_fpm_path_env_ignores_inherited_search_path() {
+    let expected = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+    assert_eq!(
+        managed_php_fpm_path_env_from(Some(".:/tmp/bin:/usr/bin".to_owned())),
+        expected
+    );
+    assert_eq!(
+        managed_php_fpm_path_env_from(Some(":/relative/bin".to_owned())),
+        expected
+    );
+    assert_eq!(managed_php_fpm_path_env_from(None), expected);
 }
 
 #[test]

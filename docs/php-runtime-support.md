@@ -278,9 +278,10 @@ for separate php-fpm containers, but must require explicit config.
 
 Current tests cover config validation, traversal rejection, disabled `PATH_INFO`
 behavior, safe CGI header translation with HTTPoxy mitigation, custom FastCGI
-param validation, malformed FastCGI response headers, php-fpm timeout
-classification, spooled request-body replay and cleanup, and bounded STDERR
-handling. Local WordPress php-fpm and proxied WordPress TLS smoke tests live in
+param validation, malformed FastCGI response headers, full-operation php-fpm
+request timeouts, anonymous spooled request-body replay, managed executable
+descriptor binding, managed process-group cleanup, and bounded STDERR handling.
+Local WordPress php-fpm and proxied WordPress TLS smoke tests live in
 `scripts/smoke_wordpress_php_fpm.sh` and
 `scripts/smoke_wordpress_proxy_tls.sh`; keep running them as release evidence
 when PHP behavior changes. The local WordPress smoke accepts `external`,
@@ -291,13 +292,16 @@ manager mode, and the managed php-fpm post-start crash respawn watchdog.
 `scripts/smoke_fluxheim_php_wolfi.sh` verifies the self-contained Wolfi PHP
 image path with bundled `php-8.5-fpm` and managed php-fpm enabled.
 
-Managed php-fpm starts the php-fpm master with a cleared environment and a
-minimal `PATH`, so Fluxheim process secrets such as admin tokens are not
-inherited by the child process. On reload/shutdown, Fluxheim asks the managed
-php-fpm master to terminate gracefully before escalating to a forced kill after
-a short deadline. A per-pool watchdog monitors the php-fpm master after startup
-and respawns it with bounded backoff if it crashes, so managed PHP service can
-recover without a Fluxheim config reload.
+Managed php-fpm starts the php-fpm master from a retained, owner/mode-validated
+executable descriptor with a cleared environment and a fixed minimal `PATH`, so
+path replacement cannot redirect the spawn and Fluxheim process secrets such as
+admin tokens are not inherited by the child process. Every executable ancestor
+must also have trusted ownership and non-writable group/other modes. The master
+and workers run in a dedicated process group. On reload/shutdown, Fluxheim asks
+the complete group to terminate gracefully before escalating to a group-wide
+forced kill after a short deadline. A per-pool watchdog cleans up the old group
+before respawning the master with bounded backoff, so managed PHP service can
+recover without accumulating orphaned workers or requiring a config reload.
 
 Adding or removing a managed pool, or changing its executable, socket
 directory, identity, environment isolation, process-manager, worker, or
@@ -328,7 +332,10 @@ for single-user/rootless deployments.
   threshold must be lower than `php.max_request_body_bytes` when both are set
   on the same PHP action. Existing spool directories must not be group/world
   writable, and runtime spool creation rechecks permissions before writing
-  upload bodies.
+  upload bodies. On Unix, Fluxheim unlinks each securely created spool entry
+  immediately and retains only the open descriptor, so crashes do not leave a
+  named plaintext request body behind. Use encrypted storage or tmpfs when raw
+  storage remanence is in scope.
 - Custom FastCGI params in config. Implemented as `[vhosts.php.params]` and
   `[vhosts.routes.php.params]` with protected core CGI params.
 - Path mapping for separate Fluxheim/php-fpm container filesystem roots.
@@ -391,7 +398,9 @@ for single-user/rootless deployments.
   methods. Implemented as `php.fpm.max_retries` and
   `php.fpm.retry_methods`, with `php.fpm.retry_timeout_secs` as an optional
   per-request retry window; php-fpm connect timeouts are bounded by
-  `php.request_timeout_secs`, and request timeouts are not retried to avoid
+  `php.request_timeout_secs`; one absolute request deadline covers FastCGI
+  transmission and complete STDOUT/STDERR collection, and timed-out pooled
+  connections are discarded. Request timeouts are not retried to avoid
   duplicating PHP side effects. With `tcp_upstreams`, Fluxheim tries enough
   endpoints to cover the configured list for safe methods even when
   `max_retries = 0`. Broader status/invalid-header retry policy is available

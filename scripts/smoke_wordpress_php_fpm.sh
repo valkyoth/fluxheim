@@ -121,6 +121,10 @@ if is_managed_smoke "$mode" || [ "$mode" = "managed-all" ] || [ "$mode" = "both"
         echo "wordpress php-fpm smoke failed: managed mode requires executable php-fpm at $php_fpm_binary" >&2
         exit 1
     fi
+    trusted_php_fpm_binary="$tmp/php-fpm"
+    cp "$php_fpm_binary" "$trusted_php_fpm_binary"
+    chmod 700 "$trusted_php_fpm_binary"
+    php_fpm_binary="$trusted_php_fpm_binary"
 fi
 
 mkdir -p "$tmp"

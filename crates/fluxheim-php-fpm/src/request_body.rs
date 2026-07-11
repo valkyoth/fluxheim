@@ -7,7 +7,6 @@ use zeroize::Zeroizing;
 
 static PHP_REQUEST_BODY_SPOOL_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Clone)]
 pub struct PhpRequestBody {
     inner: Arc<PhpRequestBodyInner>,
     len: usize,
@@ -19,13 +18,7 @@ enum PhpRequestBodyInner {
 }
 
 struct PhpRequestBodySpool {
-    path: PathBuf,
-}
-
-impl Drop for PhpRequestBodySpool {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
+    file: std::fs::File,
 }
 
 impl PhpRequestBody {
@@ -40,11 +33,12 @@ impl PhpRequestBody {
         }
     }
 
-    pub fn spooled(path: PathBuf, len: usize) -> Self {
-        Self {
+    pub async fn spooled(file: tokio::fs::File, len: usize) -> io::Result<Self> {
+        let file = file.into_std().await;
+        Ok(Self {
             len,
-            inner: Arc::new(PhpRequestBodyInner::Spool(PhpRequestBodySpool { path })),
-        }
+            inner: Arc::new(PhpRequestBodyInner::Spool(PhpRequestBodySpool { file })),
+        })
     }
 
     pub const fn len(&self) -> usize {
@@ -63,7 +57,11 @@ impl PhpRequestBody {
                 Ok(Box::new(fastcgi_client::io::Cursor::new(body.clone())))
             }
             PhpRequestBodyInner::Spool(spool) => {
-                let file = tokio::fs::File::open(&spool.path).await?;
+                use std::io::{Seek as _, SeekFrom};
+
+                let mut file = spool.file.try_clone()?;
+                file.seek(SeekFrom::Start(0))?;
+                let file = tokio::fs::File::from_std(file);
                 Ok(Box::new(
                     fastcgi_client::io::TokioAsyncReadCompatExt::compat(file),
                 ))
@@ -92,9 +90,7 @@ fn php_request_body_spool_filename() -> io::Result<String> {
     ))
 }
 
-pub async fn create_php_request_body_spool_file(
-    spool_dir: &Path,
-) -> io::Result<(PathBuf, tokio::fs::File)> {
+pub async fn create_php_request_body_spool_file(spool_dir: &Path) -> io::Result<tokio::fs::File> {
     create_php_request_body_spool_dir(spool_dir).await?;
     ensure_php_request_body_spool_dir(spool_dir)?;
 
@@ -145,14 +141,17 @@ pub fn create_php_request_body_spool_dir_sync(spool_dir: &Path) -> io::Result<()
 #[cfg(not(unix))]
 async fn create_php_request_body_spool_file_by_path(
     spool_dir: &Path,
-) -> io::Result<(PathBuf, tokio::fs::File)> {
+) -> io::Result<tokio::fs::File> {
     let mut last_error = None;
     for _ in 0..16 {
         let path = php_request_body_spool_path(spool_dir)?;
         let mut options = tokio::fs::OpenOptions::new();
-        options.write(true).create_new(true);
+        options.read(true).write(true).create_new(true);
         match options.open(&path).await {
-            Ok(file) => return Ok((path, file)),
+            Ok(file) => {
+                tokio::fs::remove_file(&path).await?;
+                return Ok(file);
+            }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 last_error = Some(error);
             }
@@ -168,9 +167,7 @@ async fn create_php_request_body_spool_file_by_path(
 }
 
 #[cfg(unix)]
-fn create_php_request_body_spool_file_at(
-    spool_dir: &Path,
-) -> io::Result<(PathBuf, tokio::fs::File)> {
+fn create_php_request_body_spool_file_at(spool_dir: &Path) -> io::Result<tokio::fs::File> {
     use rustix::fs::{Mode, OFlags};
 
     let directory = rustix::fs::openat(
@@ -185,16 +182,28 @@ fn create_php_request_body_spool_file_at(
     let mut last_error = None;
     for _ in 0..16 {
         let filename = php_request_body_spool_filename()?;
-        let path = spool_dir.join(&filename);
         match rustix::fs::openat(
             &directory,
             filename.as_str(),
-            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::from_raw_mode(0o600),
         ) {
             Ok(file) => {
+                if let Err(error) = rustix::fs::unlinkat(
+                    &directory,
+                    filename.as_str(),
+                    rustix::fs::AtFlags::empty(),
+                ) {
+                    drop(file);
+                    let _ = rustix::fs::unlinkat(
+                        &directory,
+                        filename.as_str(),
+                        rustix::fs::AtFlags::empty(),
+                    );
+                    return Err(io::Error::from(error));
+                }
                 let file = tokio::fs::File::from_std(std::fs::File::from(file));
-                return Ok((path, file));
+                return Ok(file);
             }
             Err(error) if error == rustix::io::Errno::EXIST => {
                 last_error = Some(io::Error::from(error));

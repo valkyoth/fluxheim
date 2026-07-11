@@ -40,6 +40,17 @@ general-purpose WASI application hosting.
 - Isolate preview hooks from native policy hooks with separate process-wide
   admission and 32-slot blocking-work pools, preventing preview saturation
   from consuming native `fluxheim-policy-v1` capacity.
+- Apply one absolute PHP-FPM request deadline to request transmission and full
+  FastCGI response collection, discarding timed-out pooled connections.
+- Open managed PHP-FPM executables without following symlinks, validate the
+  opened file and every ancestor for trusted ownership and modes, and execute
+  through the retained descriptor to close path-replacement races.
+- Run each managed PHP-FPM pool in a dedicated process group and terminate the
+  complete group on shutdown, failed status checks, and watchdog restarts.
+- Unlink request-body spool files immediately after secure creation while
+  retaining a rewindable descriptor for retry replay.
+- Replace inherited managed PHP-FPM `PATH` handling with a fixed allowlisted
+  search path after clearing the child environment.
 
 ## Validation
 
@@ -48,6 +59,9 @@ cargo test --locked -p fluxheim-wasm --features wasi
 cargo test --locked -p fluxheim-config --features wasm-wasi wasm_wasi
 cargo test --locked -p fluxheim-server --features wasm-wasi native_wasm_wasi
 scripts/smoke_wasm_sandbox.sh
+cargo test --locked -p fluxheim-php-fpm
+scripts/smoke_wordpress_php_fpm.sh
+scripts/smoke_fluxheim_php_wolfi.sh
 ```
 
 ## Operator Notes

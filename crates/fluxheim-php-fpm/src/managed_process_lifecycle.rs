@@ -7,8 +7,7 @@ use std::time::{Duration, Instant};
 use crate::managed_config::managed_php_fpm_restart_backoff_secs;
 use crate::managed_process::ManagedPhpFpmSpawnPlan;
 use crate::managed_spawn::{
-    ensure_managed_php_fpm_binary_spawn_safe, managed_php_fpm_path_env,
-    wait_for_managed_php_fpm_socket,
+    managed_php_fpm_path_env, open_managed_php_fpm_executable, wait_for_managed_php_fpm_socket,
 };
 
 const MANAGED_PHP_FPM_STABLE_RESTART_SECS: u64 = 30;
@@ -47,11 +46,11 @@ pub(super) fn spawn_managed_php_fpm_cleanup(
                 Ok(mut guard) => guard.take(),
                 Err(poisoned) => poisoned.into_inner().take(),
             };
-            if let Some(mut child) = child {
+            if let Some(child) = child {
                 // Drop can run on a Tokio worker after the last request releases an
                 // old runtime snapshot. If cleanup-thread creation fails, do not
                 // block that worker on Child::wait().
-                let _ = child.kill();
+                signal_managed_php_fpm_group(&child, rustix::process::Signal::KILL);
             }
             cleanup_managed_php_fpm_files(&socket, &config_path, &pid_path);
         }
@@ -66,28 +65,31 @@ pub(super) fn cleanup_managed_php_fpm_files(socket: &Path, config_path: &Path, p
 
 pub(super) fn terminate_managed_php_fpm_child(child: &mut std::process::Child) {
     match child.try_wait() {
-        Ok(Some(_)) => return,
+        Ok(Some(_)) => {
+            signal_managed_php_fpm_group(child, rustix::process::Signal::KILL);
+            return;
+        }
         Ok(None) => {}
         Err(_) => {
-            let _ = child.kill();
+            signal_managed_php_fpm_group(child, rustix::process::Signal::KILL);
             let _ = child.wait();
             return;
         }
     }
 
-    let _ = rustix::process::kill_process(
-        rustix::process::Pid::from_child(child),
-        rustix::process::Signal::TERM,
-    );
+    signal_managed_php_fpm_group(child, rustix::process::Signal::TERM);
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => return,
+            Ok(Some(_)) => {
+                signal_managed_php_fpm_group(child, rustix::process::Signal::KILL);
+                return;
+            }
             Ok(None) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(100));
             }
             _ => {
-                let _ = child.kill();
+                signal_managed_php_fpm_group(child, rustix::process::Signal::KILL);
                 let _ = child.wait();
                 return;
             }
@@ -95,15 +97,23 @@ pub(super) fn terminate_managed_php_fpm_child(child: &mut std::process::Child) {
     }
 }
 
+fn signal_managed_php_fpm_group(child: &std::process::Child, signal: rustix::process::Signal) {
+    let _ = rustix::process::kill_process_group(rustix::process::Pid::from_child(child), signal);
+}
+
 pub(super) fn spawn_managed_php_fpm_child(
     plan: &ManagedPhpFpmSpawnPlan,
     shutdown: Option<&AtomicBool>,
 ) -> io::Result<(std::process::Child, Instant)> {
-    ensure_managed_php_fpm_binary_spawn_safe(&plan.scope, &plan.binary)?;
+    use std::os::unix::process::CommandExt as _;
+
+    let executable = open_managed_php_fpm_executable(&plan.scope, &plan.binary)?;
     let _ = std::fs::remove_file(&plan.socket);
     let _ = std::fs::remove_file(&plan.pid_path);
 
-    let mut child = std::process::Command::new(&plan.binary)
+    let mut command = executable.command();
+    command
+        .process_group(0)
         .arg("-F")
         .arg("-y")
         .arg(&plan.config_path)
@@ -111,18 +121,17 @@ pub(super) fn spawn_managed_php_fpm_child(
         .env("PATH", managed_php_fpm_path_env())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!(
-                    "{}: failed to start managed php-fpm binary {}: {error}",
-                    plan.scope,
-                    plan.binary.display()
-                ),
-            )
-        })?;
+        .stderr(std::process::Stdio::null());
+    let mut child = command.spawn().map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "{}: failed to start managed php-fpm binary {}: {error}",
+                plan.scope,
+                plan.binary.display()
+            ),
+        )
+    })?;
 
     match wait_for_managed_php_fpm_socket(
         &mut child,
@@ -185,12 +194,16 @@ fn run_managed_php_fpm_watchdog(
             };
             match guard.as_mut().map(std::process::Child::try_wait) {
                 Some(Ok(Some(status))) => {
-                    *guard = None;
+                    if let Some(exited_child) = guard.take() {
+                        signal_managed_php_fpm_group(&exited_child, rustix::process::Signal::KILL);
+                    }
                     Some(format!("exited with status {status}"))
                 }
                 Some(Ok(None)) => None,
                 Some(Err(error)) => {
-                    *guard = None;
+                    if let Some(mut failed_child) = guard.take() {
+                        terminate_managed_php_fpm_child(&mut failed_child);
+                    }
                     Some(format!("status check failed: {error}"))
                 }
                 None => Some("missing child process handle".to_owned()),
@@ -272,5 +285,56 @@ fn managed_php_fpm_sleep_until_restart(shutdown: &AtomicBool, restart_failures: 
             return true;
         }
         std::thread::sleep((deadline - now).min(Duration::from_millis(100)));
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::terminate_managed_php_fpm_child;
+    use std::os::unix::process::CommandExt as _;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn forced_cleanup_terminates_managed_process_group() {
+        let pid_path = fluxheim_common::test_support::unique_temp_path("php-fpm-worker-pid");
+        let script = format!("sleep 30 & echo $! > '{}'; wait", pid_path.display());
+        let mut command = std::process::Command::new("/bin/sh");
+        command
+            .process_group(0)
+            .arg("-c")
+            .arg(script)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        let mut child = command.spawn().expect("spawn process group");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !pid_path.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let worker_pid = std::fs::read_to_string(&pid_path)
+            .expect("worker pid file")
+            .trim()
+            .parse::<u32>()
+            .expect("worker pid");
+
+        terminate_managed_php_fpm_child(&mut child);
+
+        assert!(child.try_wait().expect("master status").is_some());
+        let worker_proc = std::path::PathBuf::from(format!("/proc/{worker_pid}/stat"));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match std::fs::read_to_string(&worker_proc) {
+                Ok(stat) if !stat.contains(") Z ") && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Ok(stat) => {
+                    assert!(stat.contains(") Z "), "worker remained alive: {stat}");
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(error) => panic!("failed to inspect worker process: {error}"),
+            }
+        }
+        let _ = std::fs::remove_file(pid_path);
     }
 }

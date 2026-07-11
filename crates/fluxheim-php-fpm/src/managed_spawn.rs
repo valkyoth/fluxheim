@@ -8,7 +8,20 @@ use crate::request_body::{
     create_php_request_body_spool_dir_sync, ensure_php_request_body_spool_dir,
 };
 
+pub(super) struct ManagedPhpFpmExecutable {
+    file: std::fs::File,
+}
+
 pub fn ensure_managed_php_fpm_binary_spawn_safe(scope: &str, binary: &Path) -> io::Result<()> {
+    open_managed_php_fpm_executable(scope, binary).map(|_| ())
+}
+
+pub(super) fn open_managed_php_fpm_executable(
+    scope: &str,
+    binary: &Path,
+) -> io::Result<ManagedPhpFpmExecutable> {
+    use rustix::fs::{Mode, OFlags};
+
     if binary.as_os_str().is_empty() || !binary.is_absolute() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -39,34 +52,61 @@ pub fn ensure_managed_php_fpm_binary_spawn_safe(scope: &str, binary: &Path) -> i
             ),
         ));
     }
-    if existing_php_fpm_parent_has_insecure_write_permissions(binary)? {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!(
-                "{scope}: managed php-fpm binary {} is below a group/world-writable parent",
-                binary.display()
-            ),
-        ));
-    }
-    let metadata = std::fs::symlink_metadata(binary).map_err(|error| {
+    let file = rustix::fs::openat(
+        rustix::fs::CWD,
+        binary,
+        OFlags::RDONLY | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|error| {
         io::Error::new(
-            error.kind(),
+            io::Error::from(error).kind(),
             format!(
-                "{scope}: failed to inspect managed php-fpm binary {} before spawn: {error}",
+                "{scope}: failed to open managed php-fpm binary {} safely: {error}",
                 binary.display()
             ),
         )
     })?;
-    if !metadata.is_file() {
+    let stat = rustix::fs::fstat(&file).map_err(io::Error::from)?;
+    let effective_uid = rustix::process::geteuid().as_raw();
+    if !rustix::fs::FileType::from_raw_mode(stat.st_mode).is_file()
+        || (stat.st_uid != 0 && stat.st_uid != effective_uid)
+        || stat.st_mode & 0o022 != 0
+        || stat.st_mode & 0o111 == 0
+    {
         return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
+            io::ErrorKind::PermissionDenied,
             format!(
-                "{scope}: managed php-fpm binary {} must point directly to a regular file",
+                "{scope}: managed php-fpm binary {} has an untrusted owner or mode",
                 binary.display()
             ),
         ));
     }
-    Ok(())
+    let parent = binary.parent().unwrap_or_else(|| Path::new("/"));
+    if fluxheim_config::fs_trust::existing_path_or_parent_has_insecure_write_permissions(parent)? {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "{scope}: managed php-fpm binary {} is below an untrusted or group/world-writable ancestor",
+                binary.display()
+            ),
+        ));
+    }
+    Ok(ManagedPhpFpmExecutable {
+        file: std::fs::File::from(file),
+    })
+}
+
+impl ManagedPhpFpmExecutable {
+    pub(super) fn command(&self) -> std::process::Command {
+        use std::os::fd::AsRawFd as _;
+
+        #[cfg(target_os = "linux")]
+        let path = format!("/proc/self/fd/{}", self.file.as_raw_fd());
+        #[cfg(not(target_os = "linux"))]
+        let path = format!("/dev/fd/{}", self.file.as_raw_fd());
+        std::process::Command::new(path)
+    }
 }
 
 fn existing_php_fpm_path_prefix_contains_symlink(path: &Path) -> io::Result<bool> {
@@ -83,30 +123,8 @@ fn existing_php_fpm_path_prefix_contains_symlink(path: &Path) -> io::Result<bool
     Ok(false)
 }
 
-fn existing_php_fpm_parent_has_insecure_write_permissions(path: &Path) -> io::Result<bool> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mut current = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
-
-    loop {
-        match std::fs::metadata(&current) {
-            Ok(metadata) => return Ok(metadata.permissions().mode() & 0o022 != 0),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                if !current.pop() {
-                    return Ok(false);
-                }
-            }
-            Err(error) => return Err(error),
-        }
-    }
-}
-
 pub(super) fn managed_php_fpm_path_env() -> String {
-    managed_php_fpm_path_env_from(std::env::var("PATH").ok())
+    managed_php_fpm_path_env_from(None)
 }
 
 pub(super) fn write_managed_php_fpm_config_file(path: &Path, contents: &[u8]) -> io::Result<()> {
@@ -181,5 +199,46 @@ pub(super) fn wait_for_managed_php_fpm_socket(
             return Err(error);
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::ManagedPhpFpmExecutable;
+    use std::os::unix::fs::MetadataExt as _;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    #[test]
+    fn retained_executable_descriptor_survives_path_replacement() {
+        use rustix::fs::{Mode, OFlags};
+
+        let root = tempfile::TempDir::new().expect("temp dir");
+        let binary = root.path().join("php-fpm");
+        let moved = root.path().join("php-fpm.original");
+        std::fs::copy("/usr/bin/true", &binary).expect("copy original executable");
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700))
+            .expect("set executable mode");
+        let file = rustix::fs::openat(
+            rustix::fs::CWD,
+            &binary,
+            OFlags::RDONLY | OFlags::NOFOLLOW,
+            Mode::empty(),
+        )
+        .expect("open executable descriptor");
+        let executable = ManagedPhpFpmExecutable {
+            file: std::fs::File::from(file),
+        };
+        std::fs::rename(&binary, &moved).expect("move original executable");
+        std::fs::copy("/usr/bin/false", &binary).expect("copy replacement executable");
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700))
+            .expect("set replacement mode");
+
+        let retained_metadata = executable.file.metadata().expect("retained metadata");
+        let replacement_metadata = std::fs::metadata(&binary).expect("replacement metadata");
+        let command = executable.command();
+        let command_path = command.get_program().to_string_lossy();
+
+        assert_ne!(retained_metadata.ino(), replacement_metadata.ino());
+        assert!(command_path.starts_with("/proc/self/fd/"));
     }
 }

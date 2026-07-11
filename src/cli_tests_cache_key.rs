@@ -1,4 +1,16 @@
-use super::*;
+#[cfg(any(
+    all(feature = "proxy", not(feature = "web")),
+    all(feature = "proxy", not(feature = "cache")),
+    all(feature = "proxy", not(feature = "php-fpm"))
+))]
+use super::TestDir;
+#[cfg(any(
+    not(feature = "cache"),
+    all(feature = "proxy", not(feature = "web")),
+    all(feature = "proxy", not(feature = "php-fpm"))
+))]
+use super::run_from_args;
+
 #[cfg(all(feature = "cache", feature = "proxy"))]
 #[test]
 fn cache_key_uri_accepts_separate_query() {

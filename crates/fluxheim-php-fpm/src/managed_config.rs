@@ -11,13 +11,11 @@ pub fn managed_php_fpm_restart_backoff_secs(restart_failures: usize) -> u64 {
 }
 
 pub fn managed_php_fpm_path_env_from(value: Option<String>) -> String {
-    const DEFAULT_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+    const MANAGED_PHP_FPM_PATH: &str =
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
-    value
-        .filter(|value| {
-            !value.is_empty() && value.bytes().all(|byte| !matches!(byte, 0..=31 | 127))
-        })
-        .unwrap_or_else(|| DEFAULT_PATH.to_owned())
+    let _ = value;
+    MANAGED_PHP_FPM_PATH.to_owned()
 }
 
 pub fn managed_php_fpm_instance_name(metric_pool: &str) -> io::Result<String> {

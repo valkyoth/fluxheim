@@ -28,6 +28,10 @@ behavior when the change improves security or project direction.
   configurable admission pool and a fixed 32-slot blocking-work class.
 - Document that the opt-in clock capability exposes full host clock resolution
   and is unsuitable for untrusted plugins colocated with secret-dependent work.
+- Bound complete FastCGI request/response operations with one deadline, retain
+  anonymous request-body spool descriptors, and fix the managed child `PATH`.
+- Bind managed PHP-FPM spawn to a trusted executable descriptor and terminate
+  its complete dedicated process group during shutdown and watchdog recovery.
 
 ## 1.7.7 - 2026-07-10
 

@@ -3485,8 +3485,12 @@ to gRPC.
 
 Managed PHP-FPM validates `php_fpm_binary` at config load and again immediately
 before each supervised spawn. The binary path must be absolute, must not contain
-parent traversal, must not be or be below a symlink, must point directly to a
-regular file, and must not be below a group/world-writable parent directory.
+parent traversal, must not be or be below a symlink, must point directly to an
+executable regular file owned by root or the Fluxheim service user, and must
+not be group/world writable or below an untrusted or group/world-writable
+ancestor. Fluxheim opens and validates the executable once, retains that
+descriptor through spawn, supplies a fixed minimal `PATH`, and runs the managed
+master and workers in a dedicated process group for group-wide shutdown.
 Adding or removing a managed vhost/route pool, or changing its process and
 supervision settings, is classified as a process-upgrade change. Request-time
 PHP routing, limits, FastCGI transport, and response policy remain snapshot-safe.
@@ -3500,12 +3504,16 @@ responses held at once. Set `php.request_body_spool_threshold_bytes` with
 `php.request_body_spool_dir` to spill larger request bodies to an owner-safe
 temporary file before php-fpm dispatch. This keeps `CONTENT_LENGTH` exact for
 FastCGI and lets retries replay the same upload without cloning a large memory
-buffer; both spool settings must be configured together, and the spool file is
-removed when the request completes. When `php.max_request_body_bytes` is set on
-the same PHP action, the spool threshold must be lower than that body limit.
-Existing spool paths must be directories, and existing directories must not be
-group/world writable. Fluxheim rechecks those permissions after creating a
-missing spool directory and before writing upload bodies.
+buffer; both spool settings must be configured together. On Unix, the securely
+created spool entry is unlinked immediately and Fluxheim retains its open file
+descriptor for request and retry readers, preventing a crash from leaving a
+named plaintext upload behind. This does not guarantee raw-media erasure; use
+encrypted storage or tmpfs when storage remanence is in scope. When
+`php.max_request_body_bytes` is set on the same PHP action, the spool threshold
+must be lower than that body limit. Existing spool paths must be directories,
+and existing directories must not be group/world writable. Fluxheim rechecks
+those permissions after creating a missing spool directory and before writing
+upload bodies.
 `php.fpm_root` optionally rewrites `DOCUMENT_ROOT`,
 `SCRIPT_FILENAME`, and `PATH_TRANSLATED` for separate php-fpm container
 filesystem roots while Fluxheim still checks scripts under `php.root`.
@@ -3541,10 +3549,11 @@ that expect safe trailing `PATH_INFO` after an explicit PHP script such as
 `split`.
 `php.fpm.connect_timeout_secs` caps connecting to php-fpm and is also bounded
 by `php.request_timeout_secs`. `read_timeout_secs` and `write_timeout_secs`
-currently act as stricter caps on the buffered FastCGI request phase; the
+currently contribute to one stricter absolute FastCGI request deadline; the
 shortest of `php.request_timeout_secs`, `php.fpm.read_timeout_secs`, and
-`php.fpm.write_timeout_secs` is used until the future streaming FastCGI path
-can enforce separate per-direction timeouts.
+`php.fpm.write_timeout_secs` covers request transmission and complete response
+collection. A timed-out keepalive connection is discarded because its FastCGI
+protocol state is no longer reusable.
 `php.pass_request_headers` controls whether safe inbound request headers are
 translated to CGI `HTTP_*` params. `php.server_port` can override CGI
 `SERVER_PORT`; when omitted, Fluxheim uses an explicit port from the request

@@ -155,7 +155,9 @@ async fn native_php_request_body_uses_memory_below_spool_threshold() {
 
 #[tokio::test]
 async fn native_php_request_body_spools_and_cleans_up_large_body() {
-    let spool_dir = tempfile::TempDir::new().unwrap();
+    let test_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+    std::fs::create_dir_all(&test_root).unwrap();
+    let spool_dir = tempfile::TempDir::new_in(test_root).unwrap();
     let body = native_php_request_body(
         &request("/index.php"),
         &fluxheim_config::PhpConfig {
@@ -171,8 +173,8 @@ async fn native_php_request_body_spools_and_cleans_up_large_body() {
     assert_eq!(body.len(), b"name=fluxheim".len());
     assert_eq!(
         std::fs::read_dir(spool_dir.path()).unwrap().count(),
-        1,
-        "spool file should exist while the request body is alive"
+        0,
+        "spool file should be unlinked while the request body is alive"
     );
     drop(body);
     assert_eq!(

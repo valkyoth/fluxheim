@@ -304,13 +304,18 @@ async fn execute_php_fpm_stream<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    let client = fastcgi_client::Client::new_tokio(stream);
-    let request = fastcgi_client::Request::new(params, body.reader().await?);
-    let stream = tokio::time::timeout(timeout, client.execute_once_stream(request))
+    let operation = async {
+        let client = fastcgi_client::Client::new_tokio(stream);
+        let request = fastcgi_client::Request::new(params, body.reader().await?);
+        let stream = client
+            .execute_once_stream(request)
+            .await
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        collect_php_fpm_response_stream(stream, max_response_bytes).await
+    };
+    tokio::time::timeout(timeout, operation)
         .await
         .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Request))?
-        .map_err(|error| io::Error::other(error.to_string()))?;
-    collect_php_fpm_response_stream(stream, max_response_bytes).await
 }
 
 impl PhpFpmPooledClient {
@@ -321,23 +326,116 @@ impl PhpFpmPooledClient {
         timeout: Duration,
         max_response_bytes: u64,
     ) -> io::Result<fastcgi_client::Response> {
-        let request = fastcgi_client::Request::new(params, body.reader().await?);
         match self {
             Self::Tcp(client) => {
-                let stream = tokio::time::timeout(timeout, client.execute_stream(request))
+                let operation = async {
+                    let request = fastcgi_client::Request::new(params, body.reader().await?);
+                    let stream = client
+                        .execute_stream(request)
+                        .await
+                        .map_err(|error| io::Error::other(error.to_string()))?;
+                    collect_php_fpm_response_stream(stream, max_response_bytes).await
+                };
+                tokio::time::timeout(timeout, operation)
                     .await
                     .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Request))?
-                    .map_err(|error| io::Error::other(error.to_string()))?;
-                collect_php_fpm_response_stream(stream, max_response_bytes).await
             }
             #[cfg(unix)]
             Self::Unix(client) => {
-                let stream = tokio::time::timeout(timeout, client.execute_stream(request))
+                let operation = async {
+                    let request = fastcgi_client::Request::new(params, body.reader().await?);
+                    let stream = client
+                        .execute_stream(request)
+                        .await
+                        .map_err(|error| io::Error::other(error.to_string()))?;
+                    collect_php_fpm_response_stream(stream, max_response_bytes).await
+                };
+                tokio::time::timeout(timeout, operation)
                     .await
                     .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Request))?
-                    .map_err(|error| io::Error::other(error.to_string()))?;
-                collect_php_fpm_response_stream(stream, max_response_bytes).await
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PhpFpmPooledClient, execute_php_fpm_stream};
+    use crate::{PhpFpmTimeoutKind, PhpRequestBody, php_fpm_timeout_kind};
+    use std::time::Duration;
+    use tokio::io::AsyncReadExt as _;
+
+    #[test]
+    fn request_timeout_covers_stalled_fastcgi_response_reads() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("test runtime");
+
+        runtime.block_on(async {
+            let (client, mut backend) = tokio::io::duplex(16 * 1024);
+            let backend_task = tokio::spawn(async move {
+                let mut buffer = [0_u8; 1024];
+                while backend.read(&mut buffer).await.unwrap_or(0) != 0 {}
+            });
+            let error = execute_php_fpm_stream(
+                client,
+                fastcgi_client::Params::default(),
+                &PhpRequestBody::memory(Vec::new()),
+                Duration::from_millis(25),
+                1024,
+            )
+            .await
+            .expect_err("stalled FastCGI response must time out");
+
+            assert_eq!(
+                php_fpm_timeout_kind(&error),
+                Some(PhpFpmTimeoutKind::Request)
+            );
+            backend_task.abort();
+        });
+    }
+
+    #[test]
+    fn pooled_request_timeout_covers_stalled_fastcgi_response_reads() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("test runtime");
+
+        runtime.block_on(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind backend");
+            let address = listener.local_addr().expect("backend address");
+            let backend_task = tokio::spawn(async move {
+                let (mut backend, _) = listener.accept().await.expect("accept backend");
+                let mut buffer = [0_u8; 1024];
+                while backend.read(&mut buffer).await.unwrap_or(0) != 0 {}
+            });
+            let client_stream = tokio::net::TcpStream::connect(address)
+                .await
+                .expect("connect backend");
+            let mut client = PhpFpmPooledClient::Tcp(fastcgi_client::Client::new_keep_alive_tokio(
+                client_stream,
+            ));
+            let error = client
+                .execute(
+                    fastcgi_client::Params::default(),
+                    &PhpRequestBody::memory(Vec::new()),
+                    Duration::from_millis(25),
+                    1024,
+                )
+                .await
+                .expect_err("stalled pooled FastCGI response must time out");
+
+            assert_eq!(
+                php_fpm_timeout_kind(&error),
+                Some(PhpFpmTimeoutKind::Request)
+            );
+            backend_task.abort();
+        });
     }
 }
