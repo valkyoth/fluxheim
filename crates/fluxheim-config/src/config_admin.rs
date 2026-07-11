@@ -32,6 +32,8 @@ pub struct AdminConfig {
     #[serde(default)]
     pub snapshot_store: Option<PathBuf>,
     #[serde(default)]
+    pub snapshot_integrity_key_file: Option<PathBuf>,
+    #[serde(default)]
     pub transport: AdminTransportConfig,
     #[serde(default)]
     pub ops_socket: AdminOpsSocketConfig,
@@ -54,6 +56,7 @@ pub struct AdminConfigFragment {
     token_env: Option<String>,
     token_file: Option<PathBuf>,
     snapshot_store: Option<PathBuf>,
+    snapshot_integrity_key_file: Option<PathBuf>,
     transport: Option<AdminTransportConfigFragment>,
     ops_socket: Option<AdminOpsSocketConfigFragment>,
     health: Option<AdminHealthConfigFragment>,
@@ -71,6 +74,7 @@ impl Default for AdminConfig {
             token_env: None,
             token_file: None,
             snapshot_store: None,
+            snapshot_integrity_key_file: None,
             transport: AdminTransportConfig::default(),
             ops_socket: AdminOpsSocketConfig::default(),
             health: AdminHealthConfig::default(),
@@ -100,6 +104,9 @@ impl AdminConfig {
         }
         if let Some(snapshot_store) = fragment.snapshot_store {
             self.snapshot_store = Some(snapshot_store);
+        }
+        if let Some(key_file) = fragment.snapshot_integrity_key_file {
+            self.snapshot_integrity_key_file = Some(key_file);
         }
         if let Some(transport) = fragment.transport {
             self.transport.merge(transport);
@@ -136,6 +143,11 @@ impl AdminConfig {
         {
             *snapshot_store = base_dir.join(&snapshot_store);
         }
+        if let Some(key_file) = &mut self.snapshot_integrity_key_file
+            && key_file.is_relative()
+        {
+            *key_file = base_dir.join(&key_file);
+        }
         self.ops_socket.resolve_relative_paths(base_dir);
     }
 
@@ -149,10 +161,32 @@ impl AdminConfig {
         validate_optional_env("admin.token_env", self.token_env.as_deref())?;
         reject_empty_admin_path("admin.token_file", self.token_file.as_deref())?;
         reject_empty_admin_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
+        reject_empty_admin_path(
+            "admin.snapshot_integrity_key_file",
+            self.snapshot_integrity_key_file.as_deref(),
+        )?;
         validate_path("admin.token_file", self.token_file.as_deref())?;
         validate_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
+        validate_path(
+            "admin.snapshot_integrity_key_file",
+            self.snapshot_integrity_key_file.as_deref(),
+        )?;
         validate_non_world_writable_parent("admin.token_file", self.token_file.as_deref())?;
         validate_non_world_writable_parent("admin.snapshot_store", self.snapshot_store.as_deref())?;
+        validate_non_world_writable_parent(
+            "admin.snapshot_integrity_key_file",
+            self.snapshot_integrity_key_file.as_deref(),
+        )?;
+        if let (Some(store), Some(key_file)) = (
+            self.snapshot_store.as_deref(),
+            self.snapshot_integrity_key_file.as_deref(),
+        ) && key_file.starts_with(store)
+        {
+            return Err(ConfigError::UnsafePath {
+                field: "admin.snapshot_integrity_key_file".to_owned(),
+                path: key_file.to_path_buf(),
+            });
+        }
         self.auth_throttle.validate()?;
         self.self_healing.validate()?;
         self.client_certificate.validate()?;
@@ -221,6 +255,11 @@ impl AdminConfigFragment {
             && snapshot_store.is_relative()
         {
             *snapshot_store = base_dir.join(&snapshot_store);
+        }
+        if let Some(key_file) = &mut self.snapshot_integrity_key_file
+            && key_file.is_relative()
+        {
+            *key_file = base_dir.join(&key_file);
         }
         if let Some(ops_socket) = &mut self.ops_socket {
             ops_socket.resolve_relative_paths(base_dir);

@@ -64,6 +64,8 @@ fn self_healing_fail_rolls_back_to_previous_snapshot() {
             expires_unix_secs: 1,
             successful_checks: 0,
             failed_checks: 0,
+            rollback_attempts: 0,
+            last_rollback_failure: None,
         }),
     );
     app.proxy.reload_from_config(&candidate_config).unwrap();
@@ -142,6 +144,8 @@ fn expired_self_healing_validation_rolls_back_fail_closed() {
             expires_unix_secs: 0,
             successful_checks: 0,
             failed_checks: 0,
+            rollback_attempts: 0,
+            last_rollback_failure: None,
         }),
     );
     app.proxy.reload_from_config(&candidate_config).unwrap();

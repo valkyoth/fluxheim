@@ -1,58 +1,50 @@
-use std::error::Error;
-use std::fmt::{Display, Formatter};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
 
 use fluxheim_config::{Config, ConfigLoadError};
 
+use crate::integrity::{SnapshotIntegrityKey, SnapshotIntegrityManifest};
 use crate::metadata::{
-    MAX_SNAPSHOT_ID_BYTES, SnapshotMetadata, snapshot_message, validate_snapshot_id,
-    validate_snapshot_metadata,
+    SnapshotMetadata, snapshot_message, validate_snapshot_id, validate_snapshot_metadata,
+};
+pub(crate) use crate::model::{
+    ConfigSnapshot, SnapshotEntryStatus, SnapshotError, SnapshotIntegrityStatus, SnapshotListEntry,
 };
 use crate::store_fs::{
     MAX_CURRENT_SNAPSHOT_POINTER_BYTES, canonical_directory, ensure_real_directory, is_symlink,
-    optional_symlink_metadata, path_exists_without_following_symlinks,
+    open_private_lock_file, optional_symlink_metadata, path_exists_without_following_symlinks,
     read_optional_regular_file_to_string, read_regular_file_to_string_with_limit,
-    regular_snapshot_file_exists, snapshot_parent_path_contains_symlink, unique_sequence,
-    write_atomically,
+    regular_snapshot_file_exists, snapshot_parent_path_contains_symlink, write_atomically,
+    write_atomically_new,
 };
+use crate::store_support::{SnapshotTransaction, new_snapshot_id, unix_duration};
 
-const MAX_SNAPSHOT_STORE_ENTRIES: usize = 1024;
+pub(crate) const MAX_SNAPSHOT_STORE_ENTRIES: usize = 1024;
 
 #[derive(Debug, Clone)]
 pub struct SnapshotStore {
     root: PathBuf,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ConfigSnapshot {
-    pub id: String,
-    pub config_path: PathBuf,
-    pub metadata_path: PathBuf,
-    pub metadata: SnapshotMetadata,
-}
-
-#[derive(Debug)]
-pub enum SnapshotError {
-    Io(io::Error),
-    Encode(toml::ser::Error),
-    Decode(toml::de::Error),
-    Config(ConfigLoadError),
-    EmptyStore,
-    CurrentMissing,
-    NoPreviousSnapshot { current: String },
-    InvalidSnapshotId { id: String },
-    SnapshotNotFound { id: String },
-    InvalidSnapshotMessage { max_bytes: usize },
-    UnsafeStoreRoot { path: PathBuf },
-    UnsafeSnapshotPath { path: PathBuf },
+    pub(crate) integrity: Option<Arc<SnapshotIntegrityKey>>,
 }
 
 impl SnapshotStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            integrity: None,
+        }
+    }
+
+    pub fn with_integrity_key_file(
+        root: impl Into<PathBuf>,
+        key_file: &Path,
+    ) -> Result<Self, SnapshotError> {
+        Ok(Self {
+            root: root.into(),
+            integrity: Some(Arc::new(SnapshotIntegrityKey::load(key_file)?)),
+        })
     }
 
     pub fn root(&self) -> &Path {
@@ -64,39 +56,66 @@ impl SnapshotStore {
         config: &Config,
         message: Option<&str>,
     ) -> Result<ConfigSnapshot, SnapshotError> {
-        self.validate_root()?;
-        self.ensure_store_capacity()?;
         config
             .validate()
             .map_err(|error| SnapshotError::Config(ConfigLoadError::Validate(error)))?;
-        self.ensure_layout()?;
+        let message = snapshot_message(message)?;
+        self.with_store_lock(|| {
+            self.ensure_store_capacity()?;
+            let parent_id = self.current_id_unlocked()?;
+            let generation = self.next_generation_unlocked()?;
+            let created = unix_duration()?;
+            let id = new_snapshot_id(created, generation);
+            let config_path = self.config_path(&id);
+            let metadata_path = self.metadata_path(&id);
+            let integrity_path = self.integrity_path(&id);
+            let metadata = SnapshotMetadata {
+                id: id.clone(),
+                created_unix_secs: created.as_secs(),
+                parent_id,
+                generation,
+                message,
+            };
+            let raw_config = toml::to_string_pretty(config).map_err(SnapshotError::Encode)?;
+            let raw_metadata = toml::to_string_pretty(&metadata).map_err(SnapshotError::Encode)?;
 
-        let id = new_snapshot_id();
-        let config_path = self.config_path(&id);
-        let metadata_path = self.metadata_path(&id);
-        let metadata = SnapshotMetadata {
-            id: id.clone(),
-            created_unix_secs: unix_secs(),
-            message: snapshot_message(message)?,
-        };
+            let mut transaction = SnapshotTransaction::new();
+            write_atomically_new(&config_path, raw_config.as_bytes())?;
+            transaction.track(config_path.clone());
+            write_atomically_new(&metadata_path, raw_metadata.as_bytes())?;
+            transaction.track(metadata_path.clone());
+            let integrity = if let Some(key) = self.integrity.as_deref() {
+                let manifest = key.manifest(&id, raw_config.as_bytes(), raw_metadata.as_bytes());
+                let raw_manifest =
+                    toml::to_string_pretty(&manifest).map_err(SnapshotError::Encode)?;
+                write_atomically_new(&integrity_path, raw_manifest.as_bytes())?;
+                transaction.track(integrity_path);
+                SnapshotIntegrityStatus::Authenticated
+            } else {
+                SnapshotIntegrityStatus::Unverified
+            };
+            self.set_current_unlocked(&id)?;
+            transaction.commit();
 
-        let raw_config = toml::to_string_pretty(config).map_err(SnapshotError::Encode)?;
-        write_atomically(&config_path, raw_config.as_bytes())?;
-
-        let raw_metadata = toml::to_string_pretty(&metadata).map_err(SnapshotError::Encode)?;
-        write_atomically(&metadata_path, raw_metadata.as_bytes())?;
-
-        self.set_current(&id)?;
-
-        Ok(ConfigSnapshot {
-            id,
-            config_path,
-            metadata_path,
-            metadata,
+            Ok(ConfigSnapshot {
+                id,
+                config_path,
+                metadata_path,
+                metadata,
+                integrity,
+            })
         })
     }
 
     pub fn list(&self) -> Result<Vec<ConfigSnapshot>, SnapshotError> {
+        Ok(self
+            .list_entries()?
+            .into_iter()
+            .filter_map(|entry| entry.snapshot)
+            .collect())
+    }
+
+    pub fn list_entries(&self) -> Result<Vec<SnapshotListEntry>, SnapshotError> {
         self.validate_root()?;
         if !self.safe_existing_root()? {
             return Ok(Vec::new());
@@ -116,20 +135,38 @@ impl SnapshotStore {
             let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
                 continue;
             };
-            if stem.ends_with(".meta") {
+            if stem.ends_with(".meta") || stem.ends_with(".integrity") {
                 continue;
             }
             if snapshots.len() >= MAX_SNAPSHOT_STORE_ENTRIES {
-                return Err(SnapshotError::Io(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "snapshot store {} contains more than {} snapshots",
-                        self.root.display(),
-                        MAX_SNAPSHOT_STORE_ENTRIES
-                    ),
-                )));
+                snapshots.push(SnapshotListEntry {
+                    id: stem.to_owned(),
+                    snapshot: None,
+                    status: SnapshotEntryStatus::Corrupt,
+                    error: Some(format!(
+                        "snapshot store contains more than {MAX_SNAPSHOT_STORE_ENTRIES} snapshots"
+                    )),
+                });
+                break;
             }
-            snapshots.push(self.load_snapshot(stem)?);
+            let entry = match self.load_snapshot(stem) {
+                Ok(snapshot) => SnapshotListEntry {
+                    id: stem.to_owned(),
+                    status: match snapshot.integrity {
+                        SnapshotIntegrityStatus::Authenticated => SnapshotEntryStatus::Healthy,
+                        SnapshotIntegrityStatus::Unverified => SnapshotEntryStatus::Unverified,
+                    },
+                    snapshot: Some(snapshot),
+                    error: None,
+                },
+                Err(error) => SnapshotListEntry {
+                    id: stem.to_owned(),
+                    snapshot: None,
+                    status: SnapshotEntryStatus::Corrupt,
+                    error: Some(error.to_string()),
+                },
+            };
+            snapshots.push(entry);
         }
 
         snapshots.sort_by(|left, right| left.id.cmp(&right.id));
@@ -138,6 +175,10 @@ impl SnapshotStore {
 
     pub fn current_id(&self) -> Result<Option<String>, SnapshotError> {
         self.validate_root()?;
+        self.current_id_unlocked()
+    }
+
+    fn current_id_unlocked(&self) -> Result<Option<String>, SnapshotError> {
         if !self.safe_existing_root()? {
             return Ok(None);
         }
@@ -162,10 +203,17 @@ impl SnapshotStore {
         self.load_snapshot(&id).map(Some)
     }
 
+    pub fn snapshot(&self, id: &str) -> Result<ConfigSnapshot, SnapshotError> {
+        self.validate_root()?;
+        self.load_snapshot(id)
+    }
+
     pub fn rollback_target(&self, target: Option<&str>) -> Result<ConfigSnapshot, SnapshotError> {
-        let snapshot = self.rollback_candidate(target)?;
-        self.set_current(&snapshot.id)?;
-        Ok(snapshot)
+        self.with_store_lock(|| {
+            let snapshot = self.rollback_candidate_unlocked(target)?;
+            self.set_current_unlocked(&snapshot.id)?;
+            Ok(snapshot)
+        })
     }
 
     pub fn rollback_candidate(
@@ -173,32 +221,41 @@ impl SnapshotStore {
         target: Option<&str>,
     ) -> Result<ConfigSnapshot, SnapshotError> {
         self.validate_root()?;
-        let id = rollback_target_id(self, target)?;
+        self.rollback_candidate_unlocked(target)
+    }
+
+    fn rollback_candidate_unlocked(
+        &self,
+        target: Option<&str>,
+    ) -> Result<ConfigSnapshot, SnapshotError> {
+        let id = match target {
+            Some(id) => {
+                validate_snapshot_id(id)?;
+                id.to_owned()
+            }
+            None => self.previous_snapshot_id()?,
+        };
         let snapshot = self.load_snapshot(&id)?;
         Config::load(Some(&snapshot.config_path)).map_err(SnapshotError::Config)?;
         Ok(snapshot)
     }
 
     pub fn set_current_snapshot(&self, id: &str) -> Result<(), SnapshotError> {
-        self.validate_root()?;
-        self.set_current(id)
+        self.with_store_lock(|| {
+            self.load_snapshot(id)?;
+            self.set_current_unlocked(id)
+        })
     }
 
     fn previous_snapshot_id(&self) -> Result<String, SnapshotError> {
-        let current = self.current_id()?.ok_or(SnapshotError::CurrentMissing)?;
-        let snapshots = self.list()?;
-        if snapshots.is_empty() {
-            return Err(SnapshotError::EmptyStore);
-        }
-
-        let Some(position) = snapshots.iter().position(|snapshot| snapshot.id == current) else {
-            return Err(SnapshotError::SnapshotNotFound { id: current });
-        };
-        if position == 0 {
-            return Err(SnapshotError::NoPreviousSnapshot { current });
-        }
-
-        Ok(snapshots[position - 1].id.clone())
+        let current = self
+            .current_id_unlocked()?
+            .ok_or(SnapshotError::CurrentMissing)?;
+        let snapshot = self.load_snapshot(&current)?;
+        snapshot
+            .metadata
+            .parent_id
+            .ok_or(SnapshotError::NoPreviousSnapshot { current })
     }
 
     fn load_snapshot(&self, id: &str) -> Result<ConfigSnapshot, SnapshotError> {
@@ -209,7 +266,9 @@ impl SnapshotStore {
         }
 
         let metadata_path = self.metadata_path(id);
-        let metadata = if let Some(raw) = read_optional_regular_file_to_string(&metadata_path)? {
+        let raw_metadata = read_optional_regular_file_to_string(&metadata_path)?;
+        let integrity = self.verify_integrity(id, raw_metadata.as_deref())?;
+        let metadata = if let Some(raw) = raw_metadata {
             let metadata = toml::from_str(&raw).map_err(SnapshotError::Decode)?;
             validate_snapshot_metadata(&metadata, id)?;
             metadata
@@ -217,6 +276,8 @@ impl SnapshotStore {
             SnapshotMetadata {
                 id: id.to_owned(),
                 created_unix_secs: 0,
+                parent_id: None,
+                generation: 0,
                 message: None,
             }
         };
@@ -226,10 +287,11 @@ impl SnapshotStore {
             config_path,
             metadata_path,
             metadata,
+            integrity,
         })
     }
 
-    fn set_current(&self, id: &str) -> Result<(), SnapshotError> {
+    fn set_current_unlocked(&self, id: &str) -> Result<(), SnapshotError> {
         validate_snapshot_id(id)?;
         if !regular_snapshot_file_exists(&self.config_path(id))? {
             return Err(SnapshotError::SnapshotNotFound { id: id.to_owned() });
@@ -266,7 +328,7 @@ impl SnapshotStore {
             let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
                 continue;
             };
-            if stem.ends_with(".meta") {
+            if stem.ends_with(".meta") || stem.ends_with(".integrity") {
                 continue;
             }
             snapshots = snapshots.saturating_add(1);
@@ -282,6 +344,48 @@ impl SnapshotStore {
             }
         }
         Ok(())
+    }
+
+    fn next_generation_unlocked(&self) -> Result<u64, SnapshotError> {
+        let mut maximum = 0u64;
+        if !self.safe_existing_configs_dir()? {
+            return Ok(1);
+        }
+        for entry in fs::read_dir(self.configs_dir()).map_err(SnapshotError::Io)? {
+            let path = entry.map_err(SnapshotError::Io)?.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let Some(id) = name.strip_suffix(".meta.toml") else {
+                continue;
+            };
+            if let Ok(snapshot) = self.load_snapshot(id) {
+                maximum = maximum.max(snapshot.metadata.generation);
+            }
+        }
+        maximum.checked_add(1).ok_or_else(|| {
+            SnapshotError::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "snapshot generation counter overflowed",
+            ))
+        })
+    }
+
+    pub(crate) fn with_store_lock<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, SnapshotError>,
+    ) -> Result<T, SnapshotError> {
+        self.validate_root()?;
+        self.ensure_layout()?;
+        let lock = open_private_lock_file(&self.root.join(".snapshot.lock"))?;
+        lock.lock().map_err(SnapshotError::Io)?;
+        let result = operation();
+        let unlock = lock.unlock().map_err(SnapshotError::Io);
+        match (result, unlock) {
+            (Err(error), _) => Err(error),
+            (Ok(_), Err(error)) => Err(error),
+            (Ok(value), Ok(())) => Ok(value),
+        }
     }
 
     fn validate_root(&self) -> Result<(), SnapshotError> {
@@ -304,7 +408,7 @@ impl SnapshotStore {
         Ok(())
     }
 
-    fn configs_dir(&self) -> PathBuf {
+    pub(crate) fn configs_dir(&self) -> PathBuf {
         self.root.join("configs")
     }
 
@@ -312,12 +416,43 @@ impl SnapshotStore {
         self.root.join("current")
     }
 
-    fn config_path(&self, id: &str) -> PathBuf {
+    pub(crate) fn config_path(&self, id: &str) -> PathBuf {
         self.configs_dir().join(format!("{id}.toml"))
     }
 
-    fn metadata_path(&self, id: &str) -> PathBuf {
+    pub(crate) fn metadata_path(&self, id: &str) -> PathBuf {
         self.configs_dir().join(format!("{id}.meta.toml"))
+    }
+
+    pub(crate) fn integrity_path(&self, id: &str) -> PathBuf {
+        self.configs_dir().join(format!("{id}.integrity.toml"))
+    }
+
+    fn verify_integrity(
+        &self,
+        id: &str,
+        raw_metadata: Option<&str>,
+    ) -> Result<SnapshotIntegrityStatus, SnapshotError> {
+        let Some(key) = self.integrity.as_deref() else {
+            return Ok(SnapshotIntegrityStatus::Unverified);
+        };
+        let raw_metadata = raw_metadata
+            .ok_or_else(|| SnapshotError::IntegrityManifestMissing { id: id.to_owned() })?;
+        let raw_config = read_regular_file_to_string_with_limit(
+            &self.config_path(id),
+            crate::store_fs::MAX_SNAPSHOT_FILE_BYTES,
+        )?;
+        let raw_manifest = read_optional_regular_file_to_string(&self.integrity_path(id))?
+            .ok_or_else(|| SnapshotError::IntegrityManifestMissing { id: id.to_owned() })?;
+        let manifest: SnapshotIntegrityManifest =
+            toml::from_str(&raw_manifest).map_err(SnapshotError::Decode)?;
+        key.verify(
+            id,
+            raw_config.as_bytes(),
+            raw_metadata.as_bytes(),
+            &manifest,
+        )?;
+        Ok(SnapshotIntegrityStatus::Authenticated)
     }
 
     fn safe_existing_configs_dir(&self) -> Result<bool, SnapshotError> {
@@ -352,86 +487,6 @@ impl SnapshotStore {
             return Err(SnapshotError::UnsafeSnapshotPath { path: configs_dir });
         }
         Ok(())
-    }
-}
-
-fn rollback_target_id(
-    store: &SnapshotStore,
-    target: Option<&str>,
-) -> Result<String, SnapshotError> {
-    match target {
-        Some(id) => {
-            validate_snapshot_id(id)?;
-            Ok(id.to_owned())
-        }
-        None => store.previous_snapshot_id(),
-    }
-}
-
-impl Display for SnapshotError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(error) => write!(formatter, "snapshot I/O error: {error}"),
-            Self::Encode(error) => write!(formatter, "could not encode snapshot TOML: {error}"),
-            Self::Decode(error) => write!(formatter, "could not decode snapshot metadata: {error}"),
-            Self::Config(error) => write!(formatter, "snapshot config is invalid: {error}"),
-            Self::EmptyStore => formatter.write_str("snapshot store is empty"),
-            Self::CurrentMissing => formatter.write_str("snapshot store has no current pointer"),
-            Self::NoPreviousSnapshot { current } => {
-                write!(formatter, "snapshot {current} has no previous snapshot")
-            }
-            Self::InvalidSnapshotId { id } if id.len() > MAX_SNAPSHOT_ID_BYTES => write!(
-                formatter,
-                "invalid snapshot id: length {} exceeds {} bytes",
-                id.len(),
-                MAX_SNAPSHOT_ID_BYTES
-            ),
-            Self::InvalidSnapshotId { id } => write!(formatter, "invalid snapshot id: {id}"),
-            Self::SnapshotNotFound { id } => write!(formatter, "snapshot not found: {id}"),
-            Self::InvalidSnapshotMessage { max_bytes } => write!(
-                formatter,
-                "snapshot message must be non-control text no longer than {max_bytes} bytes"
-            ),
-            Self::UnsafeStoreRoot { path } => write!(
-                formatter,
-                "snapshot store root must not be empty, contain parent-directory traversal, sit below a symlinked directory, or use a group- or world-writable directory: {}",
-                path.display()
-            ),
-            Self::UnsafeSnapshotPath { path } => write!(
-                formatter,
-                "snapshot store path must be a regular file or directory inside the snapshot store: {}",
-                path.display()
-            ),
-        }
-    }
-}
-
-impl Error for SnapshotError {}
-
-fn new_snapshot_id() -> String {
-    let now = unix_duration();
-    format!(
-        "s{}-{:09}-{}",
-        now.as_secs(),
-        now.subsec_nanos(),
-        unique_sequence()
-    )
-}
-
-fn unix_secs() -> u64 {
-    unix_duration().as_secs()
-}
-
-fn unix_duration() -> Duration {
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(duration) => duration,
-        Err(error) => {
-            log::error!(
-                target: "fluxheim::security",
-                "system clock is before Unix epoch; aborting because snapshot identifiers require monotonic Unix-time input: {error}"
-            );
-            std::process::abort();
-        }
     }
 }
 

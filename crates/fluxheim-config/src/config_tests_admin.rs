@@ -190,3 +190,27 @@ fn rejects_invalid_admin_auth_throttle() {
         })
     );
 }
+
+#[test]
+fn snapshot_integrity_key_must_remain_outside_snapshot_store() {
+    let parent = secure_test_dir("config-admin-snapshot-integrity");
+    let snapshot_store = parent.join("snapshots");
+    let outside_key = parent.join("snapshot.key");
+    let valid = AdminConfig {
+        snapshot_store: Some(snapshot_store.clone()),
+        snapshot_integrity_key_file: Some(outside_key),
+        ..AdminConfig::default()
+    };
+    valid.validate().unwrap();
+
+    let invalid = AdminConfig {
+        snapshot_store: Some(snapshot_store.clone()),
+        snapshot_integrity_key_file: Some(snapshot_store.join("snapshot.key")),
+        ..AdminConfig::default()
+    };
+    assert!(matches!(
+        invalid.validate(),
+        Err(ConfigError::UnsafePath { field, .. })
+            if field == "admin.snapshot_integrity_key_file"
+    ));
+}

@@ -18,10 +18,13 @@ Use an operator-chosen state directory, for example
 
 ```text
 /var/lib/fluxheim/snapshots
+├── .snapshot.lock
 ├── current
+├── self-healing.toml
 └── configs
-    ├── s1777900000-123456789-42.toml
-    └── s1777900000-123456789-42.meta.toml
+    ├── s1777900000-123456789-00000000000000000001-00000000000000000042.toml
+    ├── s1777900000-123456789-00000000000000000001-00000000000000000042.meta.toml
+    └── s1777900000-123456789-00000000000000000001-00000000000000000042.integrity.toml
 ```
 
 `current` contains the active snapshot id. Fluxheim uses an atomically replaced
@@ -31,11 +34,17 @@ restricted volume mounts, and non-Unix development environments while still
 using write-temp-and-rename semantics.
 
 Snapshot config files contain the validated effective config, written back as
-TOML. Metadata files contain the snapshot id, creation time, and optional
-operator message. Operator messages are trimmed and limited to 4096 bytes of
-non-control text before they are written or loaded.
-Generated snapshot ids contain Unix time plus a process-local sequence; they do
-not include the Fluxheim process id.
+TOML. Metadata files contain the snapshot id, creation time, explicit parent,
+monotonic store generation, and optional operator message. Operator messages are
+trimmed and limited to 4096 bytes of non-control text before they are written or
+loaded. Rollback without `--to` follows explicit parent ancestry rather than
+wall-clock filename ordering. Fixed-width generations and create-new file
+publication prevent collisions from replacing existing history.
+
+Every mutation holds the private `.snapshot.lock` advisory lock across capacity
+validation and publication. For NFS, CSI, or another shared filesystem, verify
+that cross-node file locking is reliable; otherwise enforce one writer at the
+orchestration layer.
 
 The store is deliberately conservative about filesystem indirection. Snapshot
 ids may only contain ASCII letters, digits, `_`, and `-`, and are limited to
@@ -48,13 +57,32 @@ rejected so a rollback cannot be redirected to an operator-unapproved file.
 Atomic writes also require an already validated real parent directory and will
 not replace a symlinked destination. Snapshot reads are bounded: `current` is
 limited to 4 KiB and snapshot TOML/metadata reads are limited to 16 MiB.
-Snapshot stores are limited to 1024 snapshots; operators should export or prune
-old snapshots before that limit.
+Snapshot stores are limited to 1024 snapshots. Listing and doctor report corrupt
+entries individually instead of hiding healthy snapshots behind one malformed
+metadata file.
 
 On Unix, Fluxheim normalizes the snapshot store root and `configs` directory to
-mode `0700`, and writes `current`, config snapshots, and metadata snapshots as
-mode `0600`. Operators should still run the service with a restrictive umask
+mode `0700`, and writes the lock, current pointer, recovery state, snapshots,
+metadata, and integrity manifests as mode `0600`. Operators should still run the service with a restrictive umask
 such as `0077` or `0027` as defense in depth for any future state files.
+
+Snapshot TOML remains plaintext. Mode `0600` does not protect offline disks,
+backups, or privileged support tooling. Encrypt the snapshot volume or backup
+set when configurations contain secrets. Fluxheim authenticates but does not
+encrypt snapshot contents.
+
+For authenticated snapshots, create a random key outside the store:
+
+```bash
+openssl rand -out /etc/fluxheim/snapshot-integrity.key 32
+chmod 0600 /etc/fluxheim/snapshot-integrity.key
+```
+
+The HMAC-SHA-256 manifest binds the exact config bytes, metadata, snapshot ID,
+and external key identity. The same key authenticates persisted self-healing
+state. Rollback verifies snapshot data before parsing or applying the config.
+Existing stores remain readable as `Unverified`; configuring a key makes
+missing or invalid manifests and recovery-state authentication fail closed.
 
 ## Commands
 
@@ -72,6 +100,22 @@ List snapshots:
 fluxheim snapshots --store /var/lib/fluxheim/snapshots
 ```
 
+Inspect, compare, verify, diagnose, and safely prune snapshots:
+
+```bash
+fluxheim snapshots --store /var/lib/fluxheim/snapshots show SNAPSHOT_ID
+fluxheim snapshots --store /var/lib/fluxheim/snapshots diff OLD_ID NEW_ID
+fluxheim snapshots --store /var/lib/fluxheim/snapshots \
+  --integrity-key-file /etc/fluxheim/snapshot-integrity.key verify SNAPSHOT_ID
+fluxheim snapshots --store /var/lib/fluxheim/snapshots \
+  --integrity-key-file /etc/fluxheim/snapshot-integrity.key doctor
+fluxheim snapshots --store /var/lib/fluxheim/snapshots prune --keep 100
+fluxheim snapshots --store /var/lib/fluxheim/snapshots prune --older-than-days 90
+```
+
+Pruning protects the durable current snapshot, persisted runtime and known-good
+snapshots, pending validation and rollback targets, and their immediate parents.
+
 Move the current pointer back to the previous snapshot:
 
 ```bash
@@ -88,8 +132,9 @@ Rollback updates the durable current pointer by default. Before applying a
 rollback to a live process, classify the change:
 
 ```bash
-fluxheim --reload-from /var/lib/fluxheim/snapshots/configs/current.toml \
-  --config /var/lib/fluxheim/snapshots/configs/target.toml
+CURRENT_ID=$(cat /var/lib/fluxheim/snapshots/current)
+fluxheim --reload-from "/var/lib/fluxheim/snapshots/configs/${CURRENT_ID}.toml" \
+  --config /path/to/candidate.toml
 ```
 
 The admin reload endpoint performs this classification before it swaps runtime
@@ -106,6 +151,7 @@ listen = "127.0.0.1:9090"
 require_loopback = true
 token_env = "FLUXHEIM_ADMIN_TOKEN"
 snapshot_store = "/var/lib/fluxheim/snapshots"
+snapshot_integrity_key_file = "/etc/fluxheim/snapshot-integrity.key"
 
 [admin.transport]
 mode = "local_only"
@@ -260,10 +306,17 @@ Successful reports confirm the pending snapshot once
 when the observed error rate exceeds
 `admin.self_healing.max_error_rate_per_mille`.
 
-Pending validation fails closed. If the validation window expires before a
-confirm request, the Pingora self-healing watchdog attempts the same known-good
-rollback without waiting for operator traffic. Admin requests also enforce the
-deadline as a secondary guard.
+Pending validation fails closed and is persisted in `self-healing.toml`,
+including health counters and failed rollback attempts. If the validation
+window expires before confirmation, the native watchdog retries the same
+known-good rollback without waiting for operator traffic. A rollback decision
+does not consume pending state; only successful runtime application plus a
+durable current-pointer update clears it.
+
+At startup Fluxheim converts the persisted Unix expiry to a monotonic deadline.
+Later wall-clock corrections cannot extend or prematurely end the live
+validation window. Admin requests also enforce the deadline as a secondary
+guard.
 
 Public proxy traffic does not confirm or roll back pending snapshots. This keeps
 unauthenticated data-plane clients from influencing admin reload state. Only

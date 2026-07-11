@@ -114,7 +114,8 @@ fn rollback_endpoint_rejects_oversized_target_without_reflecting_it() {
     let body = String::from_utf8(response.body).unwrap();
 
     assert_eq!(response.status, StatusCode::BAD_REQUEST);
-    assert!(body.contains("length 129 exceeds 128 bytes"));
+    assert!(body.contains("129 bytes"));
+    assert!(body.contains("expected 1..=128"));
     assert!(!body.contains(&target));
 }
 

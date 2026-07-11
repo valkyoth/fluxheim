@@ -71,6 +71,10 @@ pub enum CliCommand {
         #[arg(long, env = "FLUXHEIM_SNAPSHOT_STORE")]
         store: PathBuf,
 
+        /// HMAC key file used to authenticate snapshot manifests.
+        #[arg(long, env = "FLUXHEIM_SNAPSHOT_INTEGRITY_KEY_FILE")]
+        integrity_key_file: Option<PathBuf>,
+
         /// Optional human note for the snapshot metadata.
         #[arg(long)]
         message: Option<String>,
@@ -82,6 +86,10 @@ pub enum CliCommand {
         #[arg(long, env = "FLUXHEIM_SNAPSHOT_STORE")]
         store: PathBuf,
 
+        /// HMAC key file used to authenticate snapshot manifests.
+        #[arg(long, env = "FLUXHEIM_SNAPSHOT_INTEGRITY_KEY_FILE")]
+        integrity_key_file: Option<PathBuf>,
+
         /// Snapshot id to roll back to. Defaults to the previous snapshot.
         #[arg(long)]
         to: Option<String>,
@@ -92,6 +100,13 @@ pub enum CliCommand {
         /// Snapshot store directory.
         #[arg(long, env = "FLUXHEIM_SNAPSHOT_STORE")]
         store: PathBuf,
+
+        /// HMAC key file used to authenticate snapshot manifests.
+        #[arg(long, env = "FLUXHEIM_SNAPSHOT_INTEGRITY_KEY_FILE")]
+        integrity_key_file: Option<PathBuf>,
+
+        #[command(subcommand)]
+        action: Option<SnapshotCommand>,
     },
 
     /// Print compiled crypto/TLS backend diagnostics.
@@ -482,6 +497,25 @@ pub enum CliCommand {
 
         #[arg(long)]
         expect_serve_stale_while_revalidate: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SnapshotCommand {
+    /// Show snapshot metadata and integrity status.
+    Show { id: String },
+    /// Show changed top-level configuration fields.
+    Diff { old: String, new: String },
+    /// Verify one snapshot's authenticated manifest.
+    Verify { id: String },
+    /// Check store structure, ancestry, integrity, and temporary files.
+    Doctor,
+    /// Safely remove old snapshots while retaining protected rollback ancestry.
+    Prune {
+        #[arg(long)]
+        keep: Option<usize>,
+        #[arg(long, value_name = "DAYS")]
+        older_than_days: Option<u64>,
     },
 }
 

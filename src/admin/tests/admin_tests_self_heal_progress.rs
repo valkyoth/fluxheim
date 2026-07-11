@@ -69,6 +69,8 @@ fn self_healing_confirm_marks_pending_snapshot_known_good() {
             expires_unix_secs: super::super::unix_secs().saturating_add(30),
             successful_checks: 0,
             failed_checks: 0,
+            rollback_attempts: 0,
+            last_rollback_failure: None,
         }),
     );
 
@@ -104,6 +106,8 @@ fn self_healing_report_confirms_after_enough_successes() {
             expires_unix_secs: super::super::unix_secs().saturating_add(30),
             successful_checks: 0,
             failed_checks: 0,
+            rollback_attempts: 0,
+            last_rollback_failure: None,
         }),
     );
 
@@ -204,6 +208,8 @@ fn self_healing_report_rolls_back_when_error_rate_exceeds_threshold() {
             expires_unix_secs: super::super::unix_secs().saturating_add(30),
             successful_checks: 0,
             failed_checks: 0,
+            rollback_attempts: 0,
+            last_rollback_failure: None,
         }),
     );
     app.proxy.reload_from_config(&candidate_config).unwrap();
@@ -289,6 +295,8 @@ fn watchdog_guard_rolls_back_persisted_error_rate() {
             expires_unix_secs: super::super::unix_secs().saturating_add(30),
             successful_checks: 0,
             failed_checks: 1,
+            rollback_attempts: 0,
+            last_rollback_failure: None,
         }),
     );
     app.proxy.reload_from_config(&candidate_config).unwrap();

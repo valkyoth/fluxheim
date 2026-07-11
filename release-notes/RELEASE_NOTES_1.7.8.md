@@ -41,6 +41,16 @@ general-purpose WASI application hosting.
 - Reject zero, oversized, or overflowing weighted-stream totals inside
   `StreamUpstreamSelector`, preserving the config limits at the public runtime
   construction boundary.
+- Make configuration snapshots transactional and recoverable with mutation-wide
+  private locking, explicit parent/generation history, create-new publication,
+  temporary/orphan cleanup, retryable rollback, persisted self-healing state,
+  redacted invalid-ID diagnostics, and typed clock errors.
+- Add optional HMAC-SHA-256 manifests backed by an external bounded key file.
+  Config and metadata are verified before rollback parsing; legacy stores are
+  reported as unverified rather than silently authenticated.
+- Add resilient listing plus snapshot `show`, `diff`, `verify`, `doctor`, and
+  protected `prune` operations. Snapshot TOML remains plaintext and needs
+  encrypted storage or backups when confidentiality is required.
 - Enforce OpenSSL cipher allow-lists across protocol families. A policy with
   only TLS 1.3 suites disables TLS 1.2, and a policy with only TLS 1.2 suites
   disables TLS 1.3, preventing inherited acceptor defaults from negotiating an
@@ -131,6 +141,7 @@ cargo test --locked -p fluxheim-wasm --features wasi
 cargo test --locked -p fluxheim-config --features wasm-wasi wasm_wasi
 cargo test --locked -p fluxheim-server --features wasm-wasi native_wasm_wasi
 cargo test --locked -p fluxheim-stream
+cargo test --locked -p fluxheim-snapshot
 cargo test --locked -p fluxheim-tls --no-default-features --features tls-rustls,acme
 cargo test --locked -p fluxheim-tls --no-default-features --features tls-openssl,acme
 scripts/smoke_wasm_sandbox.sh
@@ -138,6 +149,7 @@ cargo test --locked -p fluxheim-php-fpm
 scripts/smoke_wordpress_php_fpm.sh
 scripts/smoke_fluxheim_php_wolfi.sh
 scripts/smoke_geoip_circl.sh
+scripts/smoke_admin_listener.sh
 ```
 
 ## Operator Notes

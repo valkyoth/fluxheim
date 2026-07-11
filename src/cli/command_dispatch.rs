@@ -3,7 +3,7 @@ use std::error::Error;
 use crate::config::Config;
 
 use super::{
-    CliCommand,
+    CliCommand, SnapshotCommand,
     acme_init_commands::run_acme_init_command,
     acme_renew_commands::run_acme_renew_command,
     cache_key_command::run_cache_key_command,
@@ -18,17 +18,25 @@ pub(super) fn run_command(
     config_path: Option<&std::path::Path>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     match command {
-        CliCommand::Snapshot { store, message } => {
+        CliCommand::Snapshot {
+            store,
+            integrity_key_file,
+            message,
+        } => {
             let config = Config::load(config_path)?;
-            let store = fluxheim_snapshot::SnapshotStore::new(store);
+            let store = snapshot_store(store, integrity_key_file.as_deref())?;
             let snapshot = store.snapshot_config(&config, message.as_deref())?;
             println!("snapshot: {}", snapshot.id);
             println!("config: {}", snapshot.config_path.display());
             println!("current: {}", store.root().join("current").display());
             Ok(())
         }
-        CliCommand::Rollback { store, to } => {
-            let store = fluxheim_snapshot::SnapshotStore::new(store);
+        CliCommand::Rollback {
+            store,
+            integrity_key_file,
+            to,
+        } => {
+            let store = snapshot_store(store, integrity_key_file.as_deref())?;
             let snapshot = store.rollback_target(to.as_deref())?;
             println!("rollback target: {}", snapshot.id);
             println!("config: {}", snapshot.config_path.display());
@@ -37,17 +45,33 @@ pub(super) fn run_command(
             );
             Ok(())
         }
-        CliCommand::Snapshots { store } => {
-            let store = fluxheim_snapshot::SnapshotStore::new(store);
+        CliCommand::Snapshots {
+            store,
+            integrity_key_file,
+            action,
+        } => {
+            let store = snapshot_store(store, integrity_key_file.as_deref())?;
+            if let Some(action) = action {
+                return run_snapshot_action(&store, action);
+            }
             let current = store.current_id()?;
-            for snapshot in store.list()? {
-                let marker = if current.as_deref() == Some(snapshot.id.as_str()) {
+            for entry in store.list_entries()? {
+                let marker = if current.as_deref() == Some(entry.id.as_str()) {
                     "*"
                 } else {
                     " "
                 };
-                let message = snapshot.metadata.message.as_deref().unwrap_or("no message");
-                println!("{marker} {} {}", snapshot.id, message.replace('\n', " "));
+                let message = entry
+                    .snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.metadata.message.as_deref())
+                    .unwrap_or("no message");
+                println!(
+                    "{marker} {} {} {}",
+                    entry.id,
+                    entry.status.as_str(),
+                    message.replace('\n', " ")
+                );
             }
             Ok(())
         }
@@ -250,5 +274,86 @@ pub(super) fn run_command(
             expect_serve_stale_if_error: *expect_serve_stale_if_error,
             expect_serve_stale_while_revalidate: *expect_serve_stale_while_revalidate,
         }),
+    }
+}
+
+fn snapshot_store(
+    root: &std::path::Path,
+    key_file: Option<&std::path::Path>,
+) -> Result<fluxheim_snapshot::SnapshotStore, Box<dyn Error + Send + Sync>> {
+    match key_file {
+        Some(key_file) => Ok(fluxheim_snapshot::SnapshotStore::with_integrity_key_file(
+            root, key_file,
+        )?),
+        None => Ok(fluxheim_snapshot::SnapshotStore::new(root)),
+    }
+}
+
+fn run_snapshot_action(
+    store: &fluxheim_snapshot::SnapshotStore,
+    action: &SnapshotCommand,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    match action {
+        SnapshotCommand::Show { id } => {
+            let snapshot = store.snapshot(id)?;
+            println!("id: {}", snapshot.id);
+            println!("generation: {}", snapshot.metadata.generation);
+            println!(
+                "parent: {}",
+                snapshot.metadata.parent_id.as_deref().unwrap_or("none")
+            );
+            println!("created_unix_secs: {}", snapshot.metadata.created_unix_secs);
+            println!("integrity: {}", snapshot.integrity.as_str());
+            println!("config: {}", snapshot.config_path.display());
+            Ok(())
+        }
+        SnapshotCommand::Diff { old, new } => {
+            let diff = store.diff(old, new)?;
+            println!("old: {}", diff.old);
+            println!("new: {}", diff.new);
+            for field in diff.changed_top_level_fields {
+                println!("changed: {field}");
+            }
+            Ok(())
+        }
+        SnapshotCommand::Verify { id } => {
+            println!("integrity: {}", store.verify(id)?.as_str());
+            Ok(())
+        }
+        SnapshotCommand::Doctor => {
+            let report = store.doctor()?;
+            println!("healthy: {}", report.healthy);
+            println!("checked_snapshots: {}", report.checked_snapshots);
+            println!(
+                "authenticated_snapshots: {}",
+                report.authenticated_snapshots
+            );
+            println!("unverified_snapshots: {}", report.unverified_snapshots);
+            for issue in &report.issues {
+                println!("issue: {issue}");
+            }
+            if report.healthy {
+                Ok(())
+            } else {
+                Err("snapshot doctor found store integrity issues".into())
+            }
+        }
+        SnapshotCommand::Prune {
+            keep,
+            older_than_days,
+        } => {
+            let report = store.prune(&fluxheim_snapshot::SnapshotPruneOptions {
+                keep: *keep,
+                older_than: older_than_days
+                    .map(|days| std::time::Duration::from_secs(days.saturating_mul(86_400))),
+                protected_ids: Vec::new(),
+            })?;
+            println!("deleted: {}", report.deleted.len());
+            println!("retained: {}", report.retained);
+            for id in report.deleted {
+                println!("pruned: {id}");
+            }
+            Ok(())
+        }
     }
 }

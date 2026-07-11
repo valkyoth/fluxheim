@@ -169,9 +169,11 @@ mod tests {
         )
         .unwrap();
 
-        let error = store.list().unwrap_err();
+        let entries = store.list_entries().unwrap();
 
-        assert!(matches!(error, SnapshotError::UnsafeSnapshotPath { .. }));
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].status, crate::SnapshotEntryStatus::Corrupt);
+        assert!(entries[0].snapshot.is_none());
     }
 
     #[cfg(unix)]

@@ -20,6 +20,9 @@ behavior when the change improves security or project direction.
 - Support CIRCL Geo Open's combined Country and ASN MMDB schema and add an
   opt-in checksum-pinned real-database smoke covering static, proxy, and
   load-balanced country/ASN policy.
+- Add authenticated snapshot manifests, explicit rollback ancestry and
+  generations, persisted self-healing state, resilient listing, store doctor,
+  show/diff/verify commands, and protected pruning.
 
 ### Security
 
@@ -35,6 +38,10 @@ behavior when the change improves security or project direction.
   buffer on drop with `sanitization`.
 - Enforce positive per-upstream and checked aggregate stream weights inside the
   public runtime selector boundary, independently of config validation.
+- Serialize snapshot mutations with a private advisory lock, publish history
+  with create-new semantics, clean failed transactions, retain rollback state
+  until completion, authenticate configured stores with HMAC-SHA-256, redact
+  invalid IDs, and return clock failures without terminating the data plane.
 - Make OpenSSL cipher allow-lists deterministic across protocol families:
   omitting all TLS 1.2 or TLS 1.3 suites now disables that protocol version
   instead of retaining Mozilla acceptor defaults. Use the current Mozilla v5

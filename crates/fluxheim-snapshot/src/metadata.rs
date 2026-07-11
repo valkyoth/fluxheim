@@ -11,6 +11,10 @@ pub struct SnapshotMetadata {
     pub id: String,
     pub created_unix_secs: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
 
@@ -43,6 +47,14 @@ pub(crate) fn validate_snapshot_metadata(
         return Err(SnapshotError::InvalidSnapshotId {
             id: metadata.id.clone(),
         });
+    }
+    if let Some(parent_id) = metadata.parent_id.as_deref() {
+        validate_snapshot_id(parent_id)?;
+        if parent_id == expected_id {
+            return Err(SnapshotError::InvalidSnapshotId {
+                id: parent_id.to_owned(),
+            });
+        }
     }
     if let Some(message) = metadata.message.as_deref() {
         valid_snapshot_message(message)?;

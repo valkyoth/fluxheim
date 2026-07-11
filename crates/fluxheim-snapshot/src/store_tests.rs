@@ -42,6 +42,8 @@ mod tests {
                 expires_unix_secs: 130,
                 successful_checks: 0,
                 failed_checks: 0,
+                rollback_attempts: 0,
+                last_rollback_failure: None,
             })
         );
     }
@@ -58,6 +60,8 @@ mod tests {
                 expires_unix_secs: 130,
                 successful_checks: 1,
                 failed_checks: 0,
+                rollback_attempts: 0,
+                last_rollback_failure: None,
             }),
         };
 
@@ -89,6 +93,8 @@ mod tests {
                 expires_unix_secs: 130,
                 successful_checks: 1,
                 failed_checks: 0,
+                rollback_attempts: 0,
+                last_rollback_failure: None,
             }),
         };
 
@@ -101,7 +107,7 @@ mod tests {
                 ..
             })
         ));
-        assert!(state.pending_validation.is_none());
+        assert!(state.pending_validation.is_some());
     }
 
     #[test]
@@ -116,6 +122,8 @@ mod tests {
                 expires_unix_secs: 130,
                 successful_checks: 1,
                 failed_checks: 0,
+                rollback_attempts: 0,
+                last_rollback_failure: None,
             }),
         };
 
@@ -125,7 +133,7 @@ mod tests {
             rollback,
             Some((_, SnapshotRollbackReason::Expired))
         ));
-        assert!(state.pending_validation.is_none());
+        assert!(state.pending_validation.is_some());
     }
 
     #[test]
@@ -177,12 +185,18 @@ mod tests {
             .permissions()
             .mode()
             & 0o777;
+        let lock_mode = std::fs::metadata(store.root().join(".snapshot.lock"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
 
         assert_eq!(root_mode, super::SNAPSHOT_DIR_MODE);
         assert_eq!(configs_mode, super::SNAPSHOT_DIR_MODE);
         assert_eq!(config_mode, super::SNAPSHOT_FILE_MODE);
         assert_eq!(metadata_mode, super::SNAPSHOT_FILE_MODE);
         assert_eq!(current_mode, super::SNAPSHOT_FILE_MODE);
+        assert_eq!(lock_mode, super::SNAPSHOT_FILE_MODE);
     }
 
     #[cfg(unix)]
@@ -255,10 +269,12 @@ mod tests {
             std::fs::write(safe_child_path(&configs, &format!("s{index:04}.toml")), b"").unwrap();
         }
 
-        let error = store.list().unwrap_err();
+        let entries = store.list_entries().unwrap();
 
-        assert!(
-            matches!(error, SnapshotError::Io(error) if error.kind() == std::io::ErrorKind::InvalidData)
+        assert_eq!(entries.len(), super::MAX_SNAPSHOT_STORE_ENTRIES + 1);
+        assert_eq!(
+            entries.last().unwrap().status,
+            crate::SnapshotEntryStatus::Corrupt
         );
     }
 
@@ -375,8 +391,22 @@ mod tests {
         let message = error.to_string();
 
         assert!(matches!(error, SnapshotError::InvalidSnapshotId { .. }));
-        assert!(message.contains("length 129 exceeds 128 bytes"));
+        assert!(message.contains("129 bytes"));
+        assert!(message.contains("expected 1..=128"));
         assert!(!message.contains(&id));
+    }
+
+    #[test]
+    fn invalid_snapshot_id_diagnostic_does_not_reflect_controls() {
+        let dir = TestDir::new("snapshot-control-id");
+        let store = SnapshotStore::new(dir.path());
+        let id = "forged\nsecurity-log";
+
+        let message = store.rollback_target(Some(id)).unwrap_err().to_string();
+
+        assert!(!message.contains(id));
+        assert!(!message.contains('\n'));
+        assert!(message.contains("invalid snapshot id"));
     }
 
     struct TestDir {

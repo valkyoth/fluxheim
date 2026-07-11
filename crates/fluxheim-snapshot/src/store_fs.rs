@@ -44,6 +44,18 @@ pub(crate) const SNAPSHOT_DIR_MODE: u32 = 0o700;
 pub(crate) const SNAPSHOT_FILE_MODE: u32 = 0o600;
 
 pub(crate) fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), SnapshotError> {
+    write_atomically_with_mode(path, contents, false)
+}
+
+pub(crate) fn write_atomically_new(path: &Path, contents: &[u8]) -> Result<(), SnapshotError> {
+    write_atomically_with_mode(path, contents, true)
+}
+
+fn write_atomically_with_mode(
+    path: &Path,
+    contents: &[u8],
+    create_new: bool,
+) -> Result<(), SnapshotError> {
     let parent = path.parent().ok_or_else(|| {
         SnapshotError::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -51,6 +63,12 @@ pub(crate) fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), Snaps
         ))
     })?;
     require_real_directory(parent)?;
+    if create_new && path_exists_without_following_symlinks(path)? {
+        return Err(SnapshotError::Io(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "snapshot destination already exists",
+        )));
+    }
     require_plain_write_destination(path)?;
 
     let temp_path = parent.join(format!(
@@ -62,6 +80,7 @@ pub(crate) fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), Snaps
         unique_sequence()
     ));
 
+    let mut cleanup = TempPathGuard::new(temp_path.clone());
     {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
@@ -78,9 +97,66 @@ pub(crate) fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), Snaps
         file.sync_all().map_err(SnapshotError::Io)?;
     }
 
-    fs::rename(&temp_path, path).map_err(SnapshotError::Io)?;
+    if create_new {
+        fs::hard_link(&temp_path, path).map_err(SnapshotError::Io)?;
+        fs::remove_file(&temp_path).map_err(SnapshotError::Io)?;
+        cleanup.disarm();
+    } else {
+        fs::rename(&temp_path, path).map_err(SnapshotError::Io)?;
+        cleanup.disarm();
+    }
     sync_directory(parent)?;
     Ok(())
+}
+
+pub(crate) fn open_private_lock_file(path: &Path) -> Result<File, SnapshotError> {
+    let parent = path.parent().ok_or_else(|| {
+        SnapshotError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "snapshot lock path has no parent",
+        ))
+    })?;
+    require_real_directory(parent)?;
+    require_plain_write_destination(path)?;
+
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        options.custom_flags(O_NOFOLLOW).mode(SNAPSHOT_FILE_MODE);
+    }
+    let file = options.open(path).map_err(SnapshotError::Io)?;
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(SNAPSHOT_FILE_MODE))
+        .map_err(SnapshotError::Io)?;
+    if !file.metadata().map_err(SnapshotError::Io)?.is_file() {
+        return Err(SnapshotError::UnsafeSnapshotPath {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(file)
+}
+
+struct TempPathGuard {
+    path: Option<PathBuf>,
+}
+
+impl TempPathGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path: Some(path) }
+    }
+
+    fn disarm(&mut self) {
+        self.path = None;
+    }
+}
+
+impl Drop for TempPathGuard {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 pub(crate) fn unique_sequence() -> u64 {
@@ -286,7 +362,7 @@ fn set_private_directory_mode(path: &Path) -> Result<(), SnapshotError> {
     Ok(())
 }
 
-fn sync_directory(path: &Path) -> Result<(), SnapshotError> {
+pub(crate) fn sync_directory(path: &Path) -> Result<(), SnapshotError> {
     let directory = File::open(path).map_err(SnapshotError::Io)?;
     directory.sync_all().map_err(SnapshotError::Io)
 }

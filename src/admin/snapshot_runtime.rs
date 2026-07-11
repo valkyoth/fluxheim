@@ -2,12 +2,12 @@ use super::*;
 
 impl AdminApp {
     pub(super) fn snapshots_response(&self) -> AdminResponse {
-        match self.store.list() {
+        match self.store.list_entries() {
             Ok(snapshots) => {
                 let current = self.store.current_id().ok().flatten();
                 let snapshots = snapshots
                     .iter()
-                    .map(|snapshot| snapshot_json(snapshot, current.as_deref()))
+                    .map(|entry| snapshot_entry_json(entry, current.as_deref()))
                     .collect::<Vec<_>>();
                 json_response_value(
                     StatusCode::OK,
@@ -145,7 +145,10 @@ impl AdminApp {
         self.current_config.store(Arc::new(new_config));
 
         let impact = impact.kind().to_owned();
-        self.record_applied_snapshot(snapshot.id.clone(), impact.clone(), mode);
+        if mode != SnapshotApplyMode::SelfHealRollback {
+            self.record_applied_snapshot(snapshot.id.clone(), impact.clone(), mode)
+                .map_err(|error| internal_error_response(&error))?;
+        }
 
         Ok(impact)
     }
@@ -173,6 +176,11 @@ impl AdminApp {
         let Some(snapshot) = state.confirm_pending_validation() else {
             return error_response(StatusCode::BAD_REQUEST, "no pending validation");
         };
+        drop(state);
+        self.set_validation_deadline(None);
+        if let Err(error) = self.persist_runtime_state() {
+            return internal_error_response(&error);
+        }
 
         json_response_value(
             StatusCode::OK,
@@ -189,7 +197,7 @@ impl AdminApp {
             return error_response(StatusCode::BAD_REQUEST, "self-healing is disabled");
         }
 
-        let pending = match self.take_pending_validation() {
+        let pending = match self.pending_validation() {
             Some(pending) => pending,
             None => return error_response(StatusCode::BAD_REQUEST, "no pending validation"),
         };
@@ -209,11 +217,19 @@ impl AdminApp {
             );
         };
 
-        let outcome = self.lock_runtime_state().record_health_signal(
-            healthy,
-            self.min_successful_checks,
-            self.max_error_rate_per_mille,
-        );
+        let outcome = {
+            self.lock_runtime_state().record_health_signal(
+                healthy,
+                self.min_successful_checks,
+                self.max_error_rate_per_mille,
+            )
+        };
+        if matches!(outcome, SnapshotHealthSignalOutcome::Confirm { .. }) {
+            self.set_validation_deadline(None);
+        }
+        if let Err(error) = self.persist_runtime_state() {
+            return internal_error_response(&error);
+        }
         match outcome {
             SnapshotHealthSignalOutcome::NoPendingValidation => {
                 error_response(StatusCode::BAD_REQUEST, "no pending validation")
@@ -251,9 +267,10 @@ impl AdminApp {
             return None;
         }
 
+        let expired = self.validation_expired();
         let rollback = self
             .lock_runtime_state()
-            .expired_or_unhealthy_pending(unix_secs(), self.max_error_rate_per_mille)?;
+            .rollback_required(expired, self.max_error_rate_per_mille)?;
 
         Some(self.rollback_pending_validation(&rollback.0, rollback.1.as_str()))
     }
@@ -268,22 +285,39 @@ impl AdminApp {
         reason: &str,
     ) -> AdminResponse {
         let Some(target) = pending.previous_snapshot.as_deref() else {
+            self.record_failed_rollback(pending);
             return error_response(StatusCode::BAD_REQUEST, "no previous known-good snapshot");
         };
         let snapshot = match self.store.rollback_candidate(Some(target)) {
             Ok(snapshot) => snapshot,
-            Err(error) => return error_response(StatusCode::BAD_REQUEST, &error.to_string()),
+            Err(error) => {
+                self.record_failed_rollback(pending);
+                return error_response(StatusCode::BAD_REQUEST, &error.to_string());
+            }
         };
         let new_config = match Config::load(Some(&snapshot.config_path)) {
             Ok(config) => config,
-            Err(error) => return error_response(StatusCode::BAD_REQUEST, &error.to_string()),
+            Err(error) => {
+                self.record_failed_rollback(pending);
+                return error_response(StatusCode::BAD_REQUEST, &error.to_string());
+            }
         };
         let impact =
             match self.apply_snapshot(&snapshot, new_config, SnapshotApplyMode::SelfHealRollback) {
                 Ok(impact) => impact,
-                Err(response) => return response,
+                Err(response) => {
+                    self.record_failed_rollback(pending);
+                    return response;
+                }
             };
         if let Err(error) = self.store.set_current_snapshot(&snapshot.id) {
+            self.record_failed_rollback(pending);
+            return internal_error_response(&error);
+        }
+        self.lock_runtime_state()
+            .complete_rollback(snapshot.id.clone());
+        self.set_validation_deadline(None);
+        if let Err(error) = self.persist_runtime_state() {
             return internal_error_response(&error);
         }
 
@@ -305,7 +339,7 @@ impl AdminApp {
         snapshot: String,
         impact: String,
         mode: SnapshotApplyMode,
-    ) {
+    ) -> Result<(), SnapshotError> {
         self.lock_runtime_state().record_applied_snapshot(
             snapshot,
             impact,
@@ -314,14 +348,64 @@ impl AdminApp {
             self.validation_window_secs,
             unix_secs(),
         );
+        let pending = self.lock_runtime_state().pending_validation.is_some();
+        self.set_validation_deadline(
+            pending.then(|| {
+                std::time::Instant::now() + Duration::from_secs(self.validation_window_secs)
+            }),
+        );
+        self.persist_runtime_state()
     }
 
     pub(super) fn runtime_state(&self) -> SnapshotRuntimeState {
         self.lock_runtime_state().clone()
     }
 
-    pub(super) fn take_pending_validation(&self) -> Option<PendingValidation> {
-        self.lock_runtime_state().pending_validation.take()
+    pub(super) fn pending_validation(&self) -> Option<PendingValidation> {
+        self.lock_runtime_state().pending_validation.clone()
+    }
+
+    pub(super) fn persist_runtime_state(&self) -> Result<(), SnapshotError> {
+        self.store.save_runtime_state(&self.runtime_state())
+    }
+
+    fn record_failed_rollback(&self, pending: &PendingValidation) {
+        self.lock_runtime_state().rollback_failed(pending.clone());
+        if let Err(error) = self.persist_runtime_state() {
+            log::error!(
+                target: "fluxheim::security",
+                "failed to persist retryable snapshot rollback state: {error}"
+            );
+        }
+    }
+
+    fn validation_expired(&self) -> bool {
+        let deadline = self.lock_validation_deadline();
+        match *deadline {
+            Some(deadline) => std::time::Instant::now() >= deadline,
+            None => self
+                .lock_runtime_state()
+                .pending_validation
+                .as_ref()
+                .is_some_and(|pending| pending.expires_unix_secs <= unix_secs()),
+        }
+    }
+
+    fn set_validation_deadline(&self, deadline: Option<std::time::Instant>) {
+        *self.lock_validation_deadline() = deadline;
+    }
+
+    fn lock_validation_deadline(&self) -> std::sync::MutexGuard<'_, Option<std::time::Instant>> {
+        match self.validation_deadline.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "admin validation deadline lock poisoned; aborting to avoid inconsistent self-healing state"
+                );
+                std::process::abort();
+            }
+        }
     }
 
     pub(super) fn lock_runtime_state(&self) -> std::sync::MutexGuard<'_, SnapshotRuntimeState> {

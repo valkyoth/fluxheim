@@ -400,6 +400,7 @@ require_loopback = true
 token_env = "FLUXHEIM_ADMIN_TOKEN"
 token_file = "/run/secrets/fluxheim-admin-token"
 snapshot_store = "/var/lib/fluxheim/snapshots"
+snapshot_integrity_key_file = "/etc/fluxheim/snapshot-integrity.key"
 
 [admin.transport]
 mode = "local_only"
@@ -438,8 +439,12 @@ max_error_rate_per_mille = 100
 ```
 
 If `admin.enabled = true`, configure `token_env` or `token_file`. Snapshot and
-rollback endpoints also require `snapshot_store`. `token_file` and
-`snapshot_store` must not contain parent traversal, must not sit below a
+rollback endpoints also require `snapshot_store`.
+`snapshot_integrity_key_file` is optional; when set, snapshot creation writes
+HMAC-SHA-256 manifests and rollback requires a valid manifest. Keep the key
+outside the store in a private regular file containing 32..=4096 bytes.
+`token_file`, `snapshot_store`, and the integrity key path must not contain
+parent traversal, must not sit below a
 symlinked parent directory, and on Unix must not use a group- or world-writable
 existing parent such as `/tmp`. The snapshot store runtime applies the same rule when it
 is used directly by CLI/admin paths.

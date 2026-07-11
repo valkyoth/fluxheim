@@ -52,6 +52,7 @@ pub(super) fn app_with_config_and_self_healing(
         min_successful_checks: AdminSelfHealingConfig::default().min_successful_checks,
         max_error_rate_per_mille: AdminSelfHealingConfig::default().max_error_rate_per_mille,
         state: Arc::new(std::sync::Mutex::new(SnapshotRuntimeState::default())),
+        validation_deadline: Arc::new(std::sync::Mutex::new(None)),
         auth_throttle,
     }
 }

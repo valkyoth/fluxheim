@@ -2,7 +2,7 @@ use std::error::Error;
 use std::io;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -85,6 +85,7 @@ pub struct AdminApp {
     min_successful_checks: usize,
     max_error_rate_per_mille: u16,
     state: Arc<Mutex<SnapshotRuntimeState>>,
+    validation_deadline: Arc<Mutex<Option<Instant>>>,
     auth_throttle: AdminAuthThrottle,
 }
 
@@ -172,15 +173,27 @@ impl AdminApp {
             .as_ref()
             .ok_or("admin.snapshot_store is required when admin.enabled = true")?;
 
-        let runtime_snapshot = SnapshotStore::new(snapshot_store)
-            .current_id()
-            .ok()
-            .flatten();
+        let store = match config.admin.snapshot_integrity_key_file.as_deref() {
+            Some(key_file) => SnapshotStore::with_integrity_key_file(snapshot_store, key_file)?,
+            None => SnapshotStore::new(snapshot_store),
+        };
+        let runtime_snapshot = store.current_id().ok().flatten();
+        let runtime_state = store
+            .load_runtime_state()?
+            .unwrap_or_else(|| SnapshotRuntimeState {
+                runtime_snapshot: runtime_snapshot.clone(),
+                known_good_snapshot: runtime_snapshot,
+                pending_validation: None,
+            });
+        let validation_deadline = runtime_state.pending_validation.as_ref().map(|pending| {
+            Instant::now()
+                + Duration::from_secs(pending.expires_unix_secs.saturating_sub(unix_secs()))
+        });
 
         let app = Self {
             token,
             client_certificate: AdminClientCertificatePolicy::from_config(&config.admin),
-            store: SnapshotStore::new(snapshot_store),
+            store,
             current_config: Arc::new(ArcSwap::from_pointee(config.clone())),
             proxy,
             health_path: config.admin.self_healing.health_path.clone(),
@@ -190,11 +203,8 @@ impl AdminApp {
             validation_window_secs: config.admin.self_healing.validation_window_secs,
             min_successful_checks: config.admin.self_healing.min_successful_checks,
             max_error_rate_per_mille: config.admin.self_healing.max_error_rate_per_mille,
-            state: Arc::new(Mutex::new(SnapshotRuntimeState {
-                runtime_snapshot: runtime_snapshot.clone(),
-                known_good_snapshot: runtime_snapshot,
-                pending_validation: None,
-            })),
+            state: Arc::new(Mutex::new(runtime_state)),
+            validation_deadline: Arc::new(Mutex::new(validation_deadline)),
             auth_throttle: AdminAuthThrottle::new(config.admin.auth_throttle),
         };
 

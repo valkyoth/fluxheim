@@ -49,6 +49,8 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$TMP_DIR/public" "$TMP_DIR/run" "$TMP_DIR/admin-snapshots"
 printf '%s\n' "fluxheim-admin-smoke-token" > "$TMP_DIR/admin-token"
+printf '%s' "0123456789abcdef0123456789abcdef" > "$TMP_DIR/snapshot-integrity.key"
+chmod 0600 "$TMP_DIR/snapshot-integrity.key"
 printf '%s\n' '<!doctype html><title>admin smoke</title><h1>admin smoke ok</h1>' \
     > "$TMP_DIR/public/index.html"
 
@@ -80,6 +82,7 @@ listen = "127.0.0.1:$ADMIN_PORT"
 require_loopback = true
 token_file = "$TMP_DIR/admin-token"
 snapshot_store = "$TMP_DIR/admin-snapshots"
+snapshot_integrity_key_file = "$TMP_DIR/snapshot-integrity.key"
 
 [admin.ops_socket]
 enabled = true
@@ -157,6 +160,46 @@ fi
 if ! grep -q '"status":"ok"' "$TMP_DIR/admin-status.json"; then
     echo "admin listener smoke failed: status endpoint did not report ok" >&2
     cat "$TMP_DIR/admin-status.json" >&2
+    exit 1
+fi
+
+snapshot_code=$(curl -fsS -o "$TMP_DIR/admin-snapshot.json" -w '%{http_code}' \
+    -X POST \
+    -H "Authorization: Bearer fluxheim-admin-smoke-token" \
+    -H "X-Fluxheim-Message: authenticated admin smoke" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/snapshot")
+if [ "$snapshot_code" != "201" ]; then
+    echo "admin listener smoke failed: expected snapshot HTTP 201, got $snapshot_code" >&2
+    cat "$TMP_DIR/admin-snapshot.json" >&2
+    exit 1
+fi
+
+if ! grep -q '"status":"ok"' "$TMP_DIR/admin-snapshot.json"; then
+    echo "admin listener smoke failed: snapshot endpoint did not report ok" >&2
+    cat "$TMP_DIR/admin-snapshot.json" >&2
+    exit 1
+fi
+
+integrity_files=$(find "$TMP_DIR/admin-snapshots/configs" -maxdepth 1 \
+    -type f -name '*.integrity.toml' | wc -l)
+if [ "$integrity_files" -ne 1 ]; then
+    echo "admin listener smoke failed: expected one authenticated manifest" >&2
+    find "$TMP_DIR/admin-snapshots" -maxdepth 2 -print >&2
+    exit 1
+fi
+
+if ! "$ROOT_DIR/target/debug/fluxheim" snapshots \
+    --store "$TMP_DIR/admin-snapshots" \
+    --integrity-key-file "$TMP_DIR/snapshot-integrity.key" doctor \
+    >"$TMP_DIR/snapshot-doctor.txt" 2>&1; then
+    echo "admin listener smoke failed: authenticated snapshot doctor failed" >&2
+    cat "$TMP_DIR/snapshot-doctor.txt" >&2
+    exit 1
+fi
+
+if ! grep -q 'healthy: true' "$TMP_DIR/snapshot-doctor.txt"; then
+    echo "admin listener smoke failed: snapshot doctor did not report healthy" >&2
+    cat "$TMP_DIR/snapshot-doctor.txt" >&2
     exit 1
 fi
 

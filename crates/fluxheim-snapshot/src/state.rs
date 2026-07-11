@@ -1,4 +1,7 @@
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SnapshotRuntimeState {
     pub runtime_snapshot: Option<String>,
     pub known_good_snapshot: Option<String>,
@@ -27,6 +30,8 @@ impl SnapshotRuntimeState {
                     expires_unix_secs: now_unix_secs.saturating_add(validation_window_secs),
                     successful_checks: 0,
                     failed_checks: 0,
+                    rollback_attempts: 0,
+                    last_rollback_failure: None,
                 });
             }
             SnapshotApplyMode::Reload => {
@@ -47,17 +52,13 @@ impl SnapshotRuntimeState {
         Some(pending.target_snapshot)
     }
 
-    pub fn take_pending_validation(&mut self) -> Option<PendingValidation> {
-        self.pending_validation.take()
-    }
-
     pub fn record_health_signal(
         &mut self,
         healthy: bool,
         min_successful_checks: usize,
         max_error_rate_per_mille: u16,
     ) -> SnapshotHealthSignalOutcome {
-        let Some(mut pending) = self.pending_validation.take() else {
+        let Some(pending) = self.pending_validation.as_mut() else {
             return SnapshotHealthSignalOutcome::NoPendingValidation;
         };
 
@@ -72,20 +73,18 @@ impl SnapshotRuntimeState {
         if metrics.failed_checks > 0
             && metrics.error_rate_per_mille() > u64::from(max_error_rate_per_mille)
         {
-            return SnapshotHealthSignalOutcome::Rollback(pending);
+            return SnapshotHealthSignalOutcome::Rollback(pending.clone());
         }
 
         if metrics.successful_checks >= min_successful_checks {
-            self.known_good_snapshot = Some(pending.target_snapshot.clone());
-            self.runtime_snapshot = Some(pending.target_snapshot.clone());
-            return SnapshotHealthSignalOutcome::Confirm {
-                snapshot: pending.target_snapshot,
-                metrics,
-            };
+            let snapshot = pending.target_snapshot.clone();
+            self.known_good_snapshot = Some(snapshot.clone());
+            self.runtime_snapshot = Some(snapshot.clone());
+            self.pending_validation = None;
+            return SnapshotHealthSignalOutcome::Confirm { snapshot, metrics };
         }
 
         let snapshot = pending.target_snapshot.clone();
-        self.pending_validation = Some(pending);
         SnapshotHealthSignalOutcome::Recorded { snapshot, metrics }
     }
 
@@ -94,19 +93,42 @@ impl SnapshotRuntimeState {
         now_unix_secs: u64,
         max_error_rate_per_mille: u16,
     ) -> Option<(PendingValidation, SnapshotRollbackReason)> {
+        let expired = self
+            .pending_validation
+            .as_ref()
+            .is_some_and(|pending| pending.expires_unix_secs <= now_unix_secs);
+        self.rollback_required(expired, max_error_rate_per_mille)
+    }
+
+    pub fn rollback_required(
+        &self,
+        expired: bool,
+        max_error_rate_per_mille: u16,
+    ) -> Option<(PendingValidation, SnapshotRollbackReason)> {
         let pending = self.pending_validation.as_ref()?;
         let metrics = pending.metrics();
         let reason = if metrics.failed_checks > 0
             && metrics.error_rate_per_mille() > u64::from(max_error_rate_per_mille)
         {
             SnapshotRollbackReason::ErrorRate
-        } else if pending.expires_unix_secs <= now_unix_secs {
+        } else if expired {
             SnapshotRollbackReason::Expired
         } else {
             return None;
         };
-        let pending = self.pending_validation.take()?;
-        Some((pending, reason))
+        Some((pending.clone(), reason))
+    }
+
+    pub fn complete_rollback(&mut self, restored_snapshot: String) {
+        self.runtime_snapshot = Some(restored_snapshot.clone());
+        self.known_good_snapshot = Some(restored_snapshot);
+        self.pending_validation = None;
+    }
+
+    pub fn rollback_failed(&mut self, mut pending: PendingValidation) {
+        pending.rollback_attempts = pending.rollback_attempts.saturating_add(1);
+        pending.last_rollback_failure = Some("rollback application did not complete".to_owned());
+        self.pending_validation = Some(pending);
     }
 }
 
@@ -117,7 +139,8 @@ pub enum SnapshotApplyMode {
     SelfHealRollback,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PendingValidation {
     pub target_snapshot: String,
     pub previous_snapshot: Option<String>,
@@ -125,6 +148,10 @@ pub struct PendingValidation {
     pub expires_unix_secs: u64,
     pub successful_checks: usize,
     pub failed_checks: usize,
+    #[serde(default)]
+    pub rollback_attempts: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_rollback_failure: Option<String>,
 }
 
 impl PendingValidation {

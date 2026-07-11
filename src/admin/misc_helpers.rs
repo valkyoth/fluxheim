@@ -9,7 +9,7 @@ use crate::config::Config;
 
 use fluxheim_config::reload::ReloadReason;
 
-use fluxheim_snapshot::{ConfigSnapshot, PendingValidation};
+use fluxheim_snapshot::{PendingValidation, SnapshotListEntry};
 
 use super::{AdminAuthThrottleScope, header_value};
 
@@ -67,13 +67,25 @@ pub(super) fn load_balancer_display_member(alias: Option<&str>, _member: &str) -
     alias.unwrap_or("redacted").to_owned()
 }
 
-pub(super) fn snapshot_json(snapshot: &ConfigSnapshot, current: Option<&str>) -> Value {
-    json!({
-        "id": snapshot.id,
-        "current": current == Some(snapshot.id.as_str()),
-        "created_unix_secs": snapshot.metadata.created_unix_secs,
-        "message": snapshot.metadata.message.as_deref(),
-    })
+pub(super) fn snapshot_entry_json(entry: &SnapshotListEntry, current: Option<&str>) -> Value {
+    match entry.snapshot.as_ref() {
+        Some(snapshot) => json!({
+            "id": snapshot.id,
+            "current": current == Some(snapshot.id.as_str()),
+            "created_unix_secs": snapshot.metadata.created_unix_secs,
+            "parent_id": snapshot.metadata.parent_id.as_deref(),
+            "generation": snapshot.metadata.generation,
+            "message": snapshot.metadata.message.as_deref(),
+            "status": entry.status.as_str(),
+            "integrity": snapshot.integrity.as_str(),
+        }),
+        None => json!({
+            "id": entry.id,
+            "current": current == Some(entry.id.as_str()),
+            "status": "corrupt",
+            "error": entry.error.as_deref(),
+        }),
+    }
 }
 
 pub(super) fn pending_validation_json(pending: Option<&PendingValidation>) -> Value {
@@ -90,6 +102,8 @@ pub(super) fn pending_validation_json(pending: Option<&PendingValidation>) -> Va
         "expires_unix_secs": pending.expires_unix_secs,
         "successful_checks": pending.successful_checks,
         "failed_checks": pending.failed_checks,
+        "rollback_attempts": pending.rollback_attempts,
+        "last_rollback_failure": pending.last_rollback_failure.as_deref(),
         "error_rate_per_mille": metrics.error_rate_per_mille(),
     })
 }
