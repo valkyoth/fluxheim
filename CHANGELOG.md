@@ -34,6 +34,8 @@ behavior when the change improves security or project direction.
   `sanitization::SecretVec`, and fix the managed child `PATH`.
 - Bind managed PHP-FPM spawn to a trusted executable descriptor and terminate
   its complete dedicated process group during shutdown and watchdog recovery.
+- Bound GeoIP database reads to an exact admitted-length allocation with a
+  separate growth probe, and validate every publicly constructed `GeoContext`.
 
 ## 1.7.7 - 2026-07-10
 

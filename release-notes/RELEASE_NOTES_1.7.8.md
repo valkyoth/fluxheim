@@ -54,6 +54,12 @@ general-purpose WASI application hosting.
 - Hold PHP memory bodies and bounded spool-read buffers in
   `sanitization::SecretVec`, clear consumed spool buffers immediately, and
   clear full buffer capacity on cancellation, error, or drop.
+- Read each verified GeoIP database into an exact admitted-length buffer and
+  probe growth with a separate stack byte, preventing a one-byte in-place
+  append from triggering large `Vec` capacity growth before rejection.
+- Validate public `GeoContext` construction, canonicalize accepted two-letter
+  ASCII countries to uppercase, and reject ASN zero before policy consumers can
+  observe malformed security state.
 - Replace inherited managed PHP-FPM `PATH` handling with a fixed allowlisted
   search path after clearing the child environment.
 

@@ -98,11 +98,45 @@ fn rejects_writable_database_and_parent() {
 fn rejects_database_modified_during_read() {
     let path = trusted_test_file("geoip-read-change", b"first-database");
     let verified = open_verified_mmdb(&path, 64).unwrap();
-    let error = read_verified_mmdb_with_post_read(verified, || {
+    let error = read_verified_mmdb_with_post_read(verified, |_| {
         std::fs::write(&path, b"other-database").unwrap();
     })
     .unwrap_err();
 
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     assert!(error.to_string().contains("changed while reading"));
+}
+
+#[test]
+fn rejects_database_growth_without_growing_admitted_buffer() {
+    use std::io::Write as _;
+
+    let path = trusted_test_file("geoip-read-growth", b"database");
+    let verified = open_verified_mmdb(&path, 64).unwrap();
+    let admitted_len = usize::try_from(verified.byte_len).unwrap();
+    let observed_capacity = std::cell::Cell::new(usize::MAX);
+    let error = read_verified_mmdb_with_post_read(verified, |capacity| {
+        observed_capacity.set(capacity);
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(b"x").unwrap();
+    })
+    .unwrap_err();
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(error.to_string().contains("grew while reading"));
+    assert_eq!(observed_capacity.get(), admitted_len);
+}
+
+#[test]
+fn rejects_database_that_becomes_shorter_before_exact_read() {
+    let path = trusted_test_file("geoip-read-shorter", b"database");
+    let verified = open_verified_mmdb(&path, 64).unwrap();
+    std::fs::write(&path, b"short").unwrap();
+    let error = read_verified_mmdb_with_post_read(verified, |_| {}).unwrap_err();
+
+    assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
+    assert!(error.to_string().contains("became shorter while reading"));
 }

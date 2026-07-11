@@ -3165,13 +3165,16 @@ later databases when possible.
 Fluxheim does not download GeoIP databases in-process. Each MMDB file is capped
 at 512 MiB, each loaded GeoIP runtime is capped at 1 GiB total, and at most
 eight databases are accepted. Aggregate capacity is checked from the verified
-open descriptor before its contents are allocated, read, or parsed. Paths must
-be absolute and symlink-free; the file and every parent directory must be owned
-by root, the effective service user, or the platform root-equivalent owner and
-must not be group- or world-writable. Fluxheim rejects descriptor identity or
-metadata changes during loading. GeoIP update jobs should prepare and verify a
-replacement under a trusted directory, apply safe ownership and modes, then
-atomically rename it into place before reloading Fluxheim.
+open descriptor before its contents are allocated, read, or parsed. The loader
+allocates exactly the admitted length, reads it completely, then probes for one
+extra byte separately so concurrent file growth cannot amplify the heap
+allocation. Paths must be absolute and symlink-free; the file and every parent
+directory must be owned by root, the effective service user, or the platform
+root-equivalent owner and must not be group- or world-writable. Fluxheim rejects
+shortened, grown, descriptor-identity-changed, or metadata-changed databases
+during loading. GeoIP update jobs should prepare and verify a replacement under
+a trusted directory, apply safe ownership and modes, then atomically rename it
+into place before reloading Fluxheim.
 
 Vhost and route access policies can then use:
 
@@ -3184,8 +3187,10 @@ deny_asns = [64512]
 ```
 
 Country values must be uppercase ISO alpha-2 codes. ASN values are numeric and
-must be greater than zero. Geo allow lists fail closed when no Geo-Context is
-available; Geo deny lists deny only on a resolved match. See
+must be greater than zero. The Geo-Context API also validates these invariants
+and canonicalizes valid country values before they can reach policy. Geo allow
+lists fail closed when no Geo-Context is available; Geo deny lists deny only on
+a resolved match. See
 [`docs/geoip.md`](geoip.md) for the feature boundary and operational update
 pattern.
 

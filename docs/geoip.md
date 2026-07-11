@@ -43,15 +43,20 @@ rejected.
 
 Each MMDB file is capped at 512 MiB at both metadata and read time. Fluxheim
 opens and inspects each descriptor, checks its size against the remaining 1 GiB
-aggregate allowance, and only then allocates, reads, and parses it. At most
-eight databases are accepted by both config validation and the runtime crate.
-During hot reload, the old and new runtimes can briefly coexist while in-flight
+aggregate allowance, and only then allocates an exact-length input buffer,
+reads that admitted length, and probes one extra byte without growing the heap
+buffer. Shortened, grown, or metadata-changed files fail loading. At most eight
+databases are accepted by both config validation and the runtime crate. During
+hot reload, the old and new runtimes can briefly coexist while in-flight
 requests finish, so size host/container memory for up to two admitted runtimes
 plus parser overhead.
 
 Country fields are decoded as borrowed MMDB strings. Raw values longer than
 eight bytes are rejected before normalization or owned allocation; accepted
-values must normalize to exactly two ASCII letters.
+values must normalize to exactly two ASCII letters. Public `GeoContext`
+construction enforces the same invariant, canonicalizes accepted countries to
+uppercase, and rejects ASN zero so future policy consumers cannot introduce an
+invalid context through the crate API.
 
 ```toml
 [geoip]

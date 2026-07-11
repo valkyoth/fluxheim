@@ -10,9 +10,40 @@ pub struct GeoContext {
     asn: Option<u32>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GeoContextError {
+    InvalidCountry,
+    InvalidAsn,
+}
+
+impl std::fmt::Display for GeoContextError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidCountry => {
+                formatter.write_str("country must contain exactly two ASCII letters")
+            }
+            Self::InvalidAsn => formatter.write_str("ASN must be greater than zero"),
+        }
+    }
+}
+
+impl std::error::Error for GeoContextError {}
+
 impl GeoContext {
-    pub fn new(country_iso: Option<String>, asn: Option<u32>) -> Self {
-        Self { country_iso, asn }
+    pub fn try_new(country_iso: Option<String>, asn: Option<u32>) -> Result<Self, GeoContextError> {
+        let country_iso = match country_iso {
+            Some(value)
+                if value.len() == 2 && value.bytes().all(|byte| byte.is_ascii_alphabetic()) =>
+            {
+                Some(value.to_ascii_uppercase())
+            }
+            Some(_) => return Err(GeoContextError::InvalidCountry),
+            None => None,
+        };
+        if asn == Some(0) {
+            return Err(GeoContextError::InvalidAsn);
+        }
+        Ok(Self { country_iso, asn })
     }
 
     pub fn country_iso(&self) -> Option<&str> {
@@ -149,7 +180,7 @@ mod geoip_runtime {
                 }
             }
 
-            let context = GeoContext::new(country, asn);
+            let context = GeoContext::try_new(country, asn).ok()?;
             (!context.is_empty()).then_some(context)
         }
     }
@@ -438,38 +469,44 @@ mod geoip_runtime {
     }
 
     fn read_verified_mmdb(verified: VerifiedMmdbFile) -> io::Result<Vec<u8>> {
-        read_verified_mmdb_with_post_read(verified, || {})
+        read_verified_mmdb_with_post_read(verified, |_| {})
     }
 
     fn read_verified_mmdb_with_post_read(
         mut verified: VerifiedMmdbFile,
-        post_read: impl FnOnce(),
+        post_read: impl FnOnce(usize),
     ) -> io::Result<Vec<u8>> {
-        let capacity = usize::try_from(verified.byte_len).map_err(|_| {
+        let expected = usize::try_from(verified.byte_len).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "GeoIP database size cannot be represented on this platform",
             )
         })?;
         let mut contents = Vec::new();
-        contents.try_reserve_exact(capacity).map_err(|error| {
+        contents.try_reserve_exact(expected).map_err(|error| {
             io::Error::other(format!("failed to reserve GeoIP database buffer: {error}"))
         })?;
-        let mut limited = verified
-            .file
-            .by_ref()
-            .take(verified.byte_len.saturating_add(1));
-        limited.read_to_end(&mut contents)?;
-        if contents.len() as u64 != verified.byte_len {
+        contents.resize(expected, 0);
+        verified.file.read_exact(&mut contents).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "GeoIP database became shorter while reading {}: {error}",
+                    verified.path.display()
+                ),
+            )
+        })?;
+        post_read(contents.capacity());
+        let mut extra = [0_u8; 1];
+        if verified.file.read(&mut extra)? != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "GeoIP database size changed while reading: {}",
+                    "GeoIP database grew while reading: {}",
                     verified.path.display()
                 ),
             ));
         }
-        post_read();
         let final_state = MmdbFileState::from_metadata(&verified.file.metadata()?);
         if final_state != verified.state {
             return Err(io::Error::new(
@@ -486,3 +523,32 @@ mod geoip_runtime {
 
 #[cfg(feature = "runtime")]
 pub use geoip_runtime::{GeoIpPolicyUsage, GeoIpRuntime};
+
+#[cfg(test)]
+mod geo_context_tests {
+    use super::{GeoContext, GeoContextError};
+
+    #[test]
+    fn public_constructor_normalizes_valid_security_context() {
+        let context = GeoContext::try_new(Some("se".to_owned()), Some(64_512)).unwrap();
+
+        assert_eq!(context.country_iso(), Some("SE"));
+        assert_eq!(context.asn(), Some(64_512));
+        assert!(!context.is_empty());
+        assert!(GeoContext::try_new(None, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn public_constructor_rejects_invalid_security_context() {
+        for country in ["", "S", "USA", "S1", "SÉ", " SE"] {
+            assert_eq!(
+                GeoContext::try_new(Some(country.to_owned()), None),
+                Err(GeoContextError::InvalidCountry)
+            );
+        }
+        assert_eq!(
+            GeoContext::try_new(Some("SE".to_owned()), Some(0)),
+            Err(GeoContextError::InvalidAsn)
+        );
+    }
+}
