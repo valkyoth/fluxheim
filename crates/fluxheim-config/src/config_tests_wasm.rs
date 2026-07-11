@@ -730,6 +730,36 @@ fn wasm_registry_rejects_invalid_total_admission_budget() {
 
 #[cfg(feature = "wasm")]
 #[test]
+fn wasm_registry_rejects_invalid_preview_admission_budget() {
+    for invalid in [0, 33] {
+        let source = format!(
+            r#"
+            [server]
+            listen = ["127.0.0.1:8080"]
+            default_vhost = "app"
+
+            [wasm]
+            max_total_preview_concurrent_executions = {invalid}
+
+            [[vhosts]]
+            name = "app"
+            hosts = ["app.test"]
+            "#
+        );
+        let config: Config = toml::from_str(&source).unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::InvalidWasmPolicy {
+                field: "max_total_preview_concurrent_executions",
+                ..
+            })
+        ));
+    }
+}
+
+#[cfg(feature = "wasm")]
+#[test]
 fn wasm_registry_rejects_execution_budgets_above_runtime_ceiling() {
     let config: Config = toml::from_str(
         r#"

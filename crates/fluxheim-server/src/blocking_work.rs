@@ -8,6 +8,8 @@ const MAX_NON_CRITICAL_BLOCKING_WORK: usize = 224;
 const MAX_AUTH_BLOCKING_WORK: usize = 96;
 #[cfg(any(test, feature = "wasm"))]
 const MAX_WASM_BLOCKING_WORK: usize = 96;
+#[cfg(any(test, feature = "wasm"))]
+const MAX_WASM_PREVIEW_BLOCKING_WORK: usize = 32;
 const MAX_DISK_CACHE_BLOCKING_WORK: usize = 32;
 #[cfg(any(test, all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
 const MAX_MIRROR_BLOCKING_WORK: usize = 8;
@@ -21,6 +23,8 @@ pub(crate) enum NativeBlockingWorkClass {
     Auth,
     #[cfg(any(test, feature = "wasm"))]
     Wasm,
+    #[cfg(any(test, feature = "wasm"))]
+    WasmPreview,
     DiskCache,
     #[cfg(any(test, all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
     Mirror,
@@ -41,6 +45,8 @@ struct NativeRequestBlockingWorkBudgets {
     auth: Arc<Semaphore>,
     #[cfg(any(test, feature = "wasm"))]
     wasm: Arc<Semaphore>,
+    #[cfg(any(test, feature = "wasm"))]
+    wasm_preview: Arc<Semaphore>,
     disk_cache: Arc<Semaphore>,
     #[cfg(any(test, all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
     mirror: Arc<Semaphore>,
@@ -56,6 +62,8 @@ impl NativeRequestBlockingWorkBudgets {
             auth: Arc::new(Semaphore::new(MAX_AUTH_BLOCKING_WORK)),
             #[cfg(any(test, feature = "wasm"))]
             wasm: Arc::new(Semaphore::new(MAX_WASM_BLOCKING_WORK)),
+            #[cfg(any(test, feature = "wasm"))]
+            wasm_preview: Arc::new(Semaphore::new(MAX_WASM_PREVIEW_BLOCKING_WORK)),
             disk_cache: Arc::new(Semaphore::new(MAX_DISK_CACHE_BLOCKING_WORK)),
             #[cfg(any(test, all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
             mirror: Arc::new(Semaphore::new(MAX_MIRROR_BLOCKING_WORK)),
@@ -69,6 +77,8 @@ impl NativeRequestBlockingWorkBudgets {
             NativeBlockingWorkClass::Auth => &self.auth,
             #[cfg(any(test, feature = "wasm"))]
             NativeBlockingWorkClass::Wasm => &self.wasm,
+            #[cfg(any(test, feature = "wasm"))]
+            NativeBlockingWorkClass::WasmPreview => &self.wasm_preview,
             NativeBlockingWorkClass::DiskCache => &self.disk_cache,
             #[cfg(any(test, all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
             NativeBlockingWorkClass::Mirror => &self.mirror,
@@ -144,6 +154,11 @@ mod tests {
         assert!(budgets.try_acquire(NativeBlockingWorkClass::Wasm).is_ok());
         assert!(
             budgets
+                .try_acquire(NativeBlockingWorkClass::WasmPreview)
+                .is_ok()
+        );
+        assert!(
+            budgets
                 .try_acquire(NativeBlockingWorkClass::DiskCache)
                 .is_ok()
         );
@@ -192,5 +207,25 @@ mod tests {
                 .try_acquire(NativeBlockingWorkClass::Critical)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn preview_wasm_cannot_exhaust_native_wasm_blocking_work() {
+        let budgets = NativeRequestBlockingWorkBudgets::production();
+        let preview = (0..MAX_WASM_PREVIEW_BLOCKING_WORK)
+            .map(|_| {
+                budgets
+                    .try_acquire(NativeBlockingWorkClass::WasmPreview)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            budgets
+                .try_acquire(NativeBlockingWorkClass::WasmPreview)
+                .is_err()
+        );
+        assert!(budgets.try_acquire(NativeBlockingWorkClass::Wasm).is_ok());
+        drop(preview);
     }
 }

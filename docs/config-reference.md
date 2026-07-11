@@ -595,7 +595,8 @@ Successful and rejected weight operations are counted as `member_weight`,
 When compiled with `wasm`, `GET /_fluxheim/status` includes a read-only `wasm`
 object for the validation-stage plugin registry. It reports whether `[wasm]` is
 enabled, whether preview ABIs are allowed, plugin root/plugin/attachment counts,
-the process-wide `max_total_concurrent_executions` ceiling, the cache-specific
+the process-wide `max_total_concurrent_executions` ceiling, the preview-specific
+`max_total_preview_concurrent_executions` ceiling, the cache-specific
 `max_total_cache_concurrent_executions` ceiling, plugin names, plugin paths,
 configured expected SHA-256 digests, declared ABI and host-call namespace,
 phases, fail mode, attachment priority, and whether each plugin or attachment
@@ -678,6 +679,7 @@ the plugin fail mode.
 [wasm]
 enabled = true
 allow_preview_abi = true
+max_total_preview_concurrent_executions = 16
 
 [[wasm.plugins]]
 name = "proxy_preview"
@@ -722,6 +724,12 @@ preview and fail closed. WASI plugins currently support only
 normal Wasm digest pin, fuel, memory, table, timeout, admission, and fail-mode
 controls. Each `random_get` call is capped at 4096 bytes; a larger request
 traps and follows the plugin fail mode.
+
+Preview-namespace access decisions use a separate process-wide admission pool
+configured by `wasm.max_total_preview_concurrent_executions` (default and hard
+maximum `32`) and a separate 32-slot blocking-work class. `wasi-preview` and
+`proxy-wasm-preview` therefore cannot consume the native
+`fluxheim-policy-v1` admission or blocking-work capacity.
 
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:

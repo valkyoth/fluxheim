@@ -226,6 +226,7 @@ fn status_endpoint_reports_wasm_registry_summary() {
         enabled = true
         plugin_roots = ["/srv/fluxheim/plugins"]
         max_total_concurrent_executions = 32
+        max_total_preview_concurrent_executions = 16
         max_total_cache_concurrent_executions = 48
 
         [[wasm.plugins]]
@@ -255,6 +256,7 @@ fn status_endpoint_reports_wasm_registry_summary() {
 
     assert_eq!(body["wasm"]["enabled"], true);
     assert_eq!(body["wasm"]["max_total_concurrent_executions"], 32);
+    assert_eq!(body["wasm"]["max_total_preview_concurrent_executions"], 16);
     assert_eq!(body["wasm"]["max_total_cache_concurrent_executions"], 48);
     assert_eq!(body["wasm"]["plugin_count"], 1);
     assert_eq!(body["wasm"]["attachment_count"], 1);

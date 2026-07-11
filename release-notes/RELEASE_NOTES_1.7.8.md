@@ -11,6 +11,8 @@ general-purpose WASI application hosting.
 - Add the `wasi-preview` ABI and host-call namespace pair.
 - Add `[wasm.plugins.wasi]` with independent `clocks` and `randomness` grants,
   both disabled by default.
+- Add `wasm.max_total_preview_concurrent_executions`, defaulting to and capped
+  at `32`, for both WASI and proxy-ABI preview access hooks.
 - Add real WASI modules proving explicit randomness and clock grants work under
   the normal Fluxheim sandbox.
 - Add live native HTTP/1 coverage proving a granted WASI policy continues into
@@ -35,6 +37,9 @@ general-purpose WASI application hosting.
   fail-closed composition.
 - Include WASI grants in compiled-module identity equality so differently
   authorized modules cannot share an identity.
+- Isolate preview hooks from native policy hooks with separate process-wide
+  admission and 32-slot blocking-work pools, preventing preview saturation
+  from consuming native `fluxheim-policy-v1` capacity.
 
 ## Validation
 
@@ -55,3 +60,5 @@ scripts/smoke_wasm_sandbox.sh
   or execution errors and security-decision hooks fail closed.
 - This release does not grant request bodies, environment, filesystem, network,
   stdio, arguments, or process-control access.
+- The clock grant exposes the full-resolution host clock. Avoid granting it to
+  untrusted multi-tenant plugins colocated with secret-dependent computation.

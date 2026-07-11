@@ -102,6 +102,13 @@ Environment, filesystem, network, polling, stdio, and process-exit imports are
 therefore rejected even though the underlying Wasmtime WASI implementation can
 provide broader interfaces to less constrained embedders.
 
+The clock grant exposes Wasmtime's full-resolution host wall and monotonic
+clocks. Do not grant it to untrusted multi-tenant plugins running alongside
+secret-dependent computation in the same process. Fluxheim currently exposes
+no native policy host functions to the WASI namespace, which limits the
+present side-channel surface, but the grant remains an explicit operator
+tradeoff.
+
 Capability grants are included in compiled-module identity equality so a
 module prepared for an empty capability set cannot be reused as one prepared
 for clocks or randomness. Normal module digest pinning, fuel, memory, table,
@@ -391,6 +398,12 @@ This keeps a hot cacheable route with `cache-lookup` or `cache-store` hooks
 from starving access-decision, route-decision, and header hooks on unrelated
 vhosts.
 
+Preview access-decision hooks are isolated through
+`wasm.max_total_preview_concurrent_executions`, defaulting to and capped at
+`32`, plus a separate 32-slot blocking-work class. Both `wasi-preview` and
+`proxy-wasm-preview` use this pool, so preview plugins cannot consume the
+native `fluxheim-policy-v1` admission or blocking capacity.
+
 ## Security Requirements
 
 - Disabled by default at compile time and runtime.
@@ -423,6 +436,7 @@ vhosts.
 enabled = true
 plugin_roots = ["/etc/fluxheim/plugins"]
 max_total_concurrent_executions = 256
+max_total_preview_concurrent_executions = 32
 max_total_cache_concurrent_executions = 256
 
 [[wasm.plugins]]

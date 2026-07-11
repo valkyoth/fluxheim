@@ -5,6 +5,7 @@
 enabled = true
 allow_preview_abi = true
 plugin_roots = ["/etc/fluxheim/plugins"]
+max_total_preview_concurrent_executions = 16
 
 [[wasm.plugins]]
 name = "wasi_random_policy"

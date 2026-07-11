@@ -87,6 +87,7 @@ const CACHE_STORE_DENY: i32 = 2;
 pub(crate) struct NativeWasmHookRegistry {
     attachments: Vec<NativeWasmAttachment>,
     admission: FluxWasmAdmissionController,
+    preview_admission: FluxWasmAdmissionController,
     cache_admission: FluxWasmAdmissionController,
     cache_vhost_admissions: HashMap<String, FluxWasmAdmissionController>,
 }
@@ -181,6 +182,7 @@ pub(crate) enum NativeWasmHookError {
 pub(crate) enum NativeWasmAdmissionScope {
     BlockingWork,
     Global,
+    PreviewGlobal,
     CacheGlobal,
     CacheVhost,
     Plugin,
@@ -215,6 +217,11 @@ impl NativeWasmHookRegistry {
         }
         let admission = FluxWasmAdmissionController::new(
             usize::try_from(config.wasm.max_total_concurrent_executions)
+                .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?,
+        )
+        .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?;
+        let preview_admission = FluxWasmAdmissionController::new(
+            usize::try_from(config.wasm.max_total_preview_concurrent_executions)
                 .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?,
         )
         .map_err(|_| NativeWasmRegistryError::AdmissionLimit)?;
@@ -312,6 +319,7 @@ impl NativeWasmHookRegistry {
         Ok(Some(Self {
             attachments,
             admission,
+            preview_admission,
             cache_admission,
             cache_vhost_admissions,
         }))
@@ -323,13 +331,17 @@ impl NativeWasmHookRegistry {
             .iter()
             .filter(|attachment| attachment.matches(vhost, route))
             .filter(|attachment| attachment.phases.contains(&WasmPluginPhase::AccessDecision))
-            .map(|attachment| NativeWasmHook {
-                plugin: attachment.plugin.clone(),
-                phase: WasmPluginPhase::AccessDecision,
-                global_admission: self.admission.clone(),
-                global_admission_scope: NativeWasmAdmissionScope::Global,
-                vhost_admission: None,
-                attachment_admission: attachment.admission.clone(),
+            .map(|attachment| {
+                let (global_admission, global_admission_scope) =
+                    self.access_admission(attachment.plugin.host_call_namespace);
+                NativeWasmHook {
+                    plugin: attachment.plugin.clone(),
+                    phase: WasmPluginPhase::AccessDecision,
+                    global_admission,
+                    global_admission_scope,
+                    vhost_admission: None,
+                    attachment_admission: attachment.admission.clone(),
+                }
             })
             .collect();
         let request_headers = self
@@ -413,6 +425,21 @@ impl NativeWasmHookRegistry {
             route_decision,
             cache_lookup,
             cache_store,
+        }
+    }
+
+    fn access_admission(
+        &self,
+        namespace: WasmHostCallNamespace,
+    ) -> (FluxWasmAdmissionController, NativeWasmAdmissionScope) {
+        match namespace {
+            WasmHostCallNamespace::FluxheimPolicyV1 => {
+                (self.admission.clone(), NativeWasmAdmissionScope::Global)
+            }
+            WasmHostCallNamespace::ProxyWasmPreview | WasmHostCallNamespace::WasiPreview => (
+                self.preview_admission.clone(),
+                NativeWasmAdmissionScope::PreviewGlobal,
+            ),
         }
     }
 }
@@ -814,6 +841,14 @@ impl NativeWasmHook {
         let attachment_admission = self.attachment_admission.clone();
         let started = Instant::now();
         let plugin_name = plugin.name.clone();
+        let blocking_work_class = match plugin.host_call_namespace {
+            WasmHostCallNamespace::FluxheimPolicyV1 => {
+                crate::blocking_work::NativeBlockingWorkClass::Wasm
+            }
+            WasmHostCallNamespace::ProxyWasmPreview | WasmHostCallNamespace::WasiPreview => {
+                crate::blocking_work::NativeBlockingWorkClass::WasmPreview
+            }
+        };
         // Acquire the narrowest budgets first so a saturated plugin or attachment cannot
         // reserve process-wide capacity while it waits for its own policy limit.
         let permits = async {
@@ -834,10 +869,11 @@ impl NativeWasmHook {
                 .acquire()
                 .await
                 .map_err(|_| NativeWasmHookError::Admission(global_admission_scope))?;
-            let blocking = crate::blocking_work::try_acquire_request_blocking_work(
-                crate::blocking_work::NativeBlockingWorkClass::Wasm,
-            )
-            .map_err(|_| NativeWasmHookError::Admission(NativeWasmAdmissionScope::BlockingWork))?;
+            let blocking =
+                crate::blocking_work::try_acquire_request_blocking_work(blocking_work_class)
+                    .map_err(|_| {
+                        NativeWasmHookError::Admission(NativeWasmAdmissionScope::BlockingWork)
+                    })?;
             Ok::<_, NativeWasmHookError>((attachment, plugin_permit, vhost, global, blocking))
         }
         .await;
@@ -1844,6 +1880,7 @@ impl NativeWasmAdmissionScope {
         match self {
             Self::BlockingWork => "blocking-work",
             Self::Global => "global",
+            Self::PreviewGlobal => "preview-global",
             Self::CacheGlobal => "cache-global",
             Self::CacheVhost => "cache-vhost",
             Self::Plugin => "plugin",
@@ -1893,6 +1930,27 @@ mod tests {
         );
 
         assert_eq!(scoped.len(), 1);
+    }
+
+    #[test]
+    fn preview_admission_isolated_from_native_policy_admission() {
+        let registry = NativeWasmHookRegistry {
+            attachments: Vec::new(),
+            admission: FluxWasmAdmissionController::new(1).unwrap(),
+            preview_admission: FluxWasmAdmissionController::new(1).unwrap(),
+            cache_admission: FluxWasmAdmissionController::new(1).unwrap(),
+            cache_vhost_admissions: HashMap::new(),
+        };
+        let (preview, preview_scope) =
+            registry.access_admission(WasmHostCallNamespace::WasiPreview);
+        let (native, native_scope) =
+            registry.access_admission(WasmHostCallNamespace::FluxheimPolicyV1);
+        let _preview_permit = preview.try_acquire().unwrap();
+
+        assert_eq!(preview_scope, NativeWasmAdmissionScope::PreviewGlobal);
+        assert_eq!(native_scope, NativeWasmAdmissionScope::Global);
+        assert!(preview.try_acquire().is_err());
+        assert!(native.try_acquire().is_ok());
     }
 
     #[test]

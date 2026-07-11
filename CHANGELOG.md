@@ -24,6 +24,10 @@ behavior when the change improves security or project direction.
 - Include WASI capability grants in compiled-module identity equality and
   preserve the existing digest, fuel, memory, table, timeout, admission, and
   fail-closed controls.
+- Isolate WASI/proxy preview hooks from native policy hooks with a dedicated
+  configurable admission pool and a fixed 32-slot blocking-work class.
+- Document that the opt-in clock capability exposes full host clock resolution
+  and is unsuitable for untrusted plugins colocated with secret-dependent work.
 
 ## 1.7.7 - 2026-07-10
 
