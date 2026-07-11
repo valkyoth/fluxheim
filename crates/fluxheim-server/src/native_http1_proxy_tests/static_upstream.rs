@@ -8,12 +8,12 @@ use crate::{NativeHttp1Proxy, NativeHttp1Upstream};
 
 use super::{
     counting_upstream, downstream_get, failover_proxy_listener, proxy_listener_for,
-    unused_local_address, upstream,
+    rejecting_upstream, upstream,
 };
 
 #[tokio::test]
 async fn native_proxy_fails_over_get_to_second_static_upstream() {
-    let first = unused_local_address().await;
+    let first = rejecting_upstream().await;
     let second = upstream(|request, mut stream| async move {
         let request = String::from_utf8(request).unwrap();
         assert!(request.starts_with("GET /failover HTTP/1.1\r\n"));
@@ -95,7 +95,7 @@ async fn native_proxy_weighted_round_robins_static_upstreams() {
 
 #[tokio::test]
 async fn native_proxy_weighted_failover_skips_duplicate_slots() {
-    let first = unused_local_address().await;
+    let first = rejecting_upstream().await;
     let (second, second_count) = counting_upstream("second", 1).await;
     let proxy = NativeHttp1Proxy::from_weighted_upstreams(
         vec![
@@ -121,7 +121,7 @@ async fn native_proxy_weighted_failover_skips_duplicate_slots() {
 
 #[tokio::test]
 async fn native_proxy_does_not_fail_over_unsafe_method() {
-    let first = unused_local_address().await;
+    let first = rejecting_upstream().await;
     let second = upstream(|_, mut stream| async move {
         stream
             .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 6\r\n\r\nsecond")

@@ -11,6 +11,34 @@ use super::{NativeDiskCache, NativeDiskCacheLocation};
 static NATIVE_DISK_CACHE_PURGE_REGISTRY: OnceLock<Mutex<Vec<NativeDiskCachePurgeHandle>>> =
     OnceLock::new();
 
+#[cfg(test)]
+std::thread_local! {
+    static PURGE_REGISTRY_LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+struct PurgeRegistryLockObservation;
+
+#[cfg(test)]
+impl PurgeRegistryLockObservation {
+    fn enter() -> Self {
+        PURGE_REGISTRY_LOCK_HELD.with(|held| {
+            assert!(
+                !held.replace(true),
+                "nested purge registry lock observation"
+            );
+        });
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for PurgeRegistryLockObservation {
+    fn drop(&mut self) {
+        PURGE_REGISTRY_LOCK_HELD.with(|held| held.set(false));
+    }
+}
+
 #[derive(Clone, Debug)]
 struct NativeDiskCachePurgeHandle {
     vhost: Arc<str>,
@@ -214,10 +242,7 @@ pub(crate) fn register_native_disk_cache_purge_handle(
 
 #[cfg(test)]
 pub(super) fn native_disk_cache_purge_registry_is_unlocked_for_test() -> bool {
-    NATIVE_DISK_CACHE_PURGE_REGISTRY
-        .get()
-        .and_then(|registry| registry.try_lock().ok())
-        .is_some()
+    PURGE_REGISTRY_LOCK_HELD.with(|held| !held.get())
 }
 
 pub fn purge_native_disk_cache_primary(
@@ -419,6 +444,8 @@ fn native_disk_cache_purge_targets() -> Vec<NativeDiskCachePurgeTarget> {
             std::process::abort();
         }
     };
+    #[cfg(test)]
+    let _lock_observation = PurgeRegistryLockObservation::enter();
     registry.retain(|handle| handle.cache.upgrade().is_some());
     registry
         .iter()

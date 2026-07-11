@@ -14,9 +14,7 @@ use crate::{DownstreamHttp1Policy, NativeHttp1Proxy};
 
 #[cfg(feature = "compression-gzip")]
 use super::upstream;
-use super::{
-    downstream_get, proxy_config_with_error_page, proxy_listener_for, unused_local_address,
-};
+use super::{downstream_get, proxy_config_with_error_page, proxy_listener_for, rejecting_upstream};
 
 #[cfg(feature = "compression-gzip")]
 async fn downstream_request_bytes(proxy: std::net::SocketAddr, request: &str) -> Vec<u8> {
@@ -81,7 +79,7 @@ async fn native_proxy_serves_configured_error_page_on_bad_gateway() {
     let errors = tempfile::tempdir().unwrap();
     std::fs::write(errors.path().join("502.html"), "native custom 502\n").unwrap();
     let mut config = proxy_config_with_error_page(errors.path().to_path_buf());
-    config.upstream = Some(unused_local_address().await.to_string());
+    config.upstream = Some(rejecting_upstream().await.to_string());
     let proxy = NativeHttp1Proxy::from_proxy_config(&config, DownstreamHttp1Policy::default())
         .unwrap()
         .unwrap();
@@ -104,7 +102,7 @@ async fn native_proxy_falls_back_when_configured_error_page_is_too_large() {
     let oversized = std::fs::File::create(errors.path().join("502.html")).unwrap();
     oversized.set_len(64 * 1024 * 1024 + 1).unwrap();
     let mut config = proxy_config_with_error_page(errors.path().to_path_buf());
-    config.upstream = Some(unused_local_address().await.to_string());
+    config.upstream = Some(rejecting_upstream().await.to_string());
     let proxy = NativeHttp1Proxy::from_proxy_config(&config, DownstreamHttp1Policy::default())
         .unwrap()
         .unwrap();

@@ -116,7 +116,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 | Capability | Status | Notes |
 | --- | --- | --- |
-| Admin API | ✅ | Bearer-token auth, loopback defaults, brute-force throttling, authenticated health by default, snapshots, rollback, cache operations. |
+| Admin API | ✅ | Bearer-token auth, loopback defaults, brute-force throttling, authenticated health by default, authenticated transactional snapshots, rollback, doctor/prune operations, and cache operations. |
 | Read-only ops socket | ✅ | `1.4.1`; Unix-domain local status/cache/health endpoint with owner/group-only permissions; snapshot listing requires bearer auth. |
 | Prometheus metrics | ✅ | Native metrics profile and bounded labels for edge/cache/LB/PHP events. |
 | OpenTelemetry | ✅ | OTLP metrics and tracing export profiles. |

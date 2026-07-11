@@ -32,3 +32,14 @@ line adds broader Wasm phases.
 | `crates/fluxheim-server/src/native_http1_route_wasm.rs` | 2043 | The native hook bridge now owns registry lookup, pre-submission security/cache admission, access decisions, bounded header host calls, bounded route/cache ABIs, and cache metadata aggregation. | Split header host-call state/mutation helpers, route-decision helpers, and cache-policy helpers into focused `native_http1_route_wasm_headers`, `native_http1_route_wasm_route_decision`, and `native_http1_route_wasm_cache_policy` modules. |
 | `crates/fluxheim-wasm/src/runtime.rs` | 1061 | Runtime construction now includes host bindings, compile-slot coordination, bounded async admission, shared epoch interruption, and execution policy checks. | Split admission, engine/ticker, compile-slot, execution, and host-call helpers into separate runtime submodules. |
 | `src/metrics.rs` | 505 | Root metrics compatibility wrappers remain just over the target after native/Wasm additions. | Move remaining Wasm metric wiring into the observability crate or a focused root adapter. |
+
+The following files crossed the target during the broader `1.7.8` security and
+WASI integration pass. They remain temporary release exceptions with explicit
+split destinations; new functionality must not use them as precedent.
+
+| File | Baseline lines | Reason | Split target |
+| --- | ---: | --- | --- |
+| `crates/fluxheim-geoip/src/lib.rs` | 567 | Runtime policy integration and CIRCL combined-schema support currently share the public model module. | Move runtime loading and provider-specific decoding into focused modules while preserving the public GeoIP types. |
+| `crates/fluxheim-server/src/native_http1_host_router.rs` | 545 | Trusted-client GeoIP context and Wasm policy construction expanded the central host-router assembly boundary. | Move GeoIP/Wasm policy assembly into a dedicated router policy builder. |
+| `crates/fluxheim-server/src/native_http1_host_router_tests.rs` | 516 | Host-router tests now cover trusted-proxy GeoIP and Wasm policy wiring alongside base routing. | Split GeoIP and Wasm construction regressions into focused test modules. |
+| `src/cli.rs` | 531 | Snapshot command dispatch and validated runtime loading remain together in the root CLI adapter. | Move snapshot subcommand execution into a dedicated CLI snapshot module. |

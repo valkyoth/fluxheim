@@ -11,8 +11,8 @@ use crate::{
 };
 
 use super::{
-    downstream_get, native_proxy_test_request_for, proxy_listener_for,
-    static_load_balance_without_health_check, unused_local_address,
+    downstream_get, native_proxy_test_request_for, proxy_listener_for, rejecting_upstream,
+    static_load_balance_without_health_check,
 };
 
 #[path = "h2_support.rs"]
@@ -278,7 +278,7 @@ async fn native_proxy_weighted_round_robins_successful_http2_static_upstreams() 
 
 #[tokio::test]
 async fn native_proxy_http2_safe_method_fails_over_to_second_static_upstream() {
-    let first = unused_local_address().await;
+    let first = rejecting_upstream().await;
     let (second, second_connections) = h2_upstream_with_body("h2 failover\n", 1).await;
     let proxy_config = fluxheim_config::ProxyConfig {
         upstreams: vec![first.to_string(), second.to_string()],
@@ -309,7 +309,7 @@ async fn native_proxy_http2_safe_method_fails_over_to_second_static_upstream() {
 
 #[tokio::test]
 async fn native_proxy_http2_does_not_fail_over_unsafe_method() {
-    let first = unused_local_address().await;
+    let first = rejecting_upstream().await;
     let (second, second_connections) = h2_upstream_with_body("h2 unsafe replay\n", 1).await;
     let proxy_config = fluxheim_config::ProxyConfig {
         upstreams: vec![first.to_string(), second.to_string()],

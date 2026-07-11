@@ -159,6 +159,11 @@ fi
 - Require separate clock and randomness grants and reject all other WASI
   imports before module instantiation.
 - Add real WASI smoke and native listener coverage.
+- Add authenticated transactional snapshots with generation witnesses,
+  provider-backed integrity, resilient doctor/prune operations, and safe legacy
+  manifest bootstrap and migration.
+- Harden stream forwarding, PHP-FPM lifecycle and body handling, TLS input
+  parsing, GeoIP database loading, and static-path invariants.
 
 * Fri Jul 10 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.7-1
 - Add opt-in wasm-proxy-abi compatibility preview namespace validation.

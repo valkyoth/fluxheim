@@ -48,6 +48,20 @@ general-purpose WASI application hosting.
 - Add optional HMAC-SHA-256 manifests backed by an external bounded key file.
   Config and metadata are verified before rollback parsing; legacy stores are
   reported as unverified rather than silently authenticated.
+- Persist an authenticated generation high-water mark and per-manifest
+  generation witnesses so pruning cannot reuse audit generations and freshness
+  scans remain bounded without rereading complete snapshot configurations.
+- Preserve authenticated manifests created before generation witnesses. A
+  fully verified all-legacy store with no generation counter bootstraps from
+  its highest generation, persists authenticated state first, migrates its
+  manifests, and publishes the next snapshot at `max + 1`. Missing state still
+  fails closed for V2 and mixed stores.
+- Route snapshot SHA-256 and HMAC-SHA-256 through the selected Ring,
+  OpenSSL-FIPS, or AWS-LC-FIPS provider, returning provider failures to the
+  administrative caller instead of aborting the data plane.
+- Require owner-only snapshot state and integrity-key files, keep integrity
+  keys outside the snapshot store, and authenticate intentional pruning
+  boundaries.
 - Add resilient listing plus snapshot `show`, `diff`, `verify`, `doctor`, and
   protected `prune` operations. Snapshot TOML remains plaintext and needs
   encrypted storage or backups when confidentiality is required.
@@ -167,6 +181,10 @@ scripts/smoke_admin_listener.sh
 - Document the rootless Podman ownership mapping required for trusted read-only
   config mounts, including explicit `podman unshare chown`, an opt-in `:U`
   alternative, and an in-container verification command.
+- Existing authenticated snapshot stores created before generation witnesses
+  upgrade automatically on their next locked snapshot creation only when every
+  retained legacy manifest verifies. See `docs/config-snapshots.md` for the
+  fail-closed mixed-store and external anti-rollback requirements.
 - CIRCL Geo Open users should follow `docs/geoip.md` for dataset attribution,
   trusted installation, pinned checksums, schema details, and the opt-in live
   database proof. The large network download remains outside normal CI gates.

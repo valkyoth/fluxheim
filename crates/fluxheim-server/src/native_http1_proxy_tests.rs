@@ -241,10 +241,14 @@ fn response_header(response: &str, name: &str) -> Option<String> {
     })
 }
 
-async fn unused_local_address() -> std::net::SocketAddr {
+async fn rejecting_upstream() -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    drop(listener);
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            drop(stream);
+        }
+    });
     address
 }
 
