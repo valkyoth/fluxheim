@@ -55,6 +55,9 @@ behavior when the change improves security or project direction.
 - Return snapshot crypto-provider failures to the administrative caller instead
   of aborting the process, and reject missing or replayed generation state when
   retained snapshot metadata proves a higher generation.
+- Verify generation freshness through bounded per-snapshot HMAC witnesses rather
+  than rereading and hashing every retained config under the store lock, and
+  remove the snapshot crate's unused direct logging dependency.
 - Make OpenSSL cipher allow-lists deterministic across protocol families:
   omitting all TLS 1.2 or TLS 1.3 suites now disables that protocol version
   instead of retaining Mozilla acceptor defaults. Use the current Mozilla v5

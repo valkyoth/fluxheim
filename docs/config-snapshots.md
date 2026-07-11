@@ -46,6 +46,10 @@ publication prevent collisions from replacing existing history.
 cannot make a later snapshot reuse its audit generation. `prune-boundaries.toml`
 records intentional ancestry cuts when retention removes an old parent while
 keeping its child. Both files are authenticated when an integrity key is set.
+Each authenticated integrity manifest includes a small generation witness, so
+freshness checks scan at most 4 KiB per retained manifest and do not reread or
+hash complete snapshot configurations while holding the store mutation lock.
+Unverified stores scan metadata with a 16 KiB per-file bound.
 Fluxheim rejects a missing or lower valid counter when retained snapshot
 metadata proves a higher generation. An HMAC file cannot detect coordinated
 rollback of the complete store after every newer snapshot has been pruned,

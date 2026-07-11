@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
 use fluxheim_config::Config;
@@ -42,6 +43,48 @@ impl SnapshotCryptoProvider for TestCryptoProvider {
 #[derive(Debug)]
 struct FailingCryptoProvider {
     fail_label: &'static [u8],
+}
+
+#[derive(Debug, Default)]
+struct CryptoCallCounts {
+    sha256: AtomicUsize,
+    snapshot_hmac: AtomicUsize,
+    generation_witness_hmac: AtomicUsize,
+}
+
+#[derive(Debug)]
+struct CountingCryptoProvider {
+    counts: Arc<CryptoCallCounts>,
+}
+
+impl SnapshotCryptoProvider for CountingCryptoProvider {
+    fn label(&self) -> &'static str {
+        "counting-test-provider"
+    }
+
+    fn compliance_capable(&self) -> bool {
+        false
+    }
+
+    fn sha256(&self, chunks: &[&[u8]]) -> Result<[u8; 32], String> {
+        self.counts.sha256.fetch_add(1, Ordering::Relaxed);
+        TestCryptoProvider.sha256(chunks)
+    }
+
+    fn hmac_sha256(&self, key: &[u8], chunks: &[&[u8]]) -> Result<[u8; 32], String> {
+        match chunks.first().copied() {
+            Some(b"fluxheim-snapshot-v1\0") => {
+                self.counts.snapshot_hmac.fetch_add(1, Ordering::Relaxed);
+            }
+            Some(b"fluxheim-snapshot-generation-witness-v1\0") => {
+                self.counts
+                    .generation_witness_hmac
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+        TestCryptoProvider.hmac_sha256(key, chunks)
+    }
 }
 
 impl SnapshotCryptoProvider for FailingCryptoProvider {
@@ -168,6 +211,23 @@ fn snapshot_manifest_provider_failure_is_returned_without_abort() {
 }
 
 #[test]
+fn generation_witness_provider_failure_is_returned_without_abort() {
+    let dir = TestDir::new("snapshot-provider-witness-failure");
+    let store = store_with_provider(
+        &dir,
+        Arc::new(FailingCryptoProvider {
+            fail_label: b"fluxheim-snapshot-generation-witness-v1\0",
+        }),
+    );
+
+    assert!(matches!(
+        store.snapshot_config(&Config::default(), None),
+        Err(SnapshotError::CryptoProvider(_))
+    ));
+    assert!(store.list().unwrap().is_empty());
+}
+
+#[test]
 fn recovery_provider_failure_is_returned_without_abort() {
     let dir = TestDir::new("snapshot-provider-recovery-failure");
     let store = store_with_provider(
@@ -232,6 +292,81 @@ fn generation_state_replay_and_removal_fail_before_publication() {
         Err(SnapshotError::GenerationStateInvalid)
     ));
     assert_eq!(store.list().unwrap().len(), 2);
+}
+
+#[test]
+fn generation_verification_scans_only_small_authenticated_witnesses() {
+    let dir = TestDir::new("snapshot-generation-witness-scan");
+    let counts = Arc::new(CryptoCallCounts::default());
+    let store = store_with_provider(
+        &dir,
+        Arc::new(CountingCryptoProvider {
+            counts: Arc::clone(&counts),
+        }),
+    );
+    store.snapshot_config(&Config::default(), None).unwrap();
+    store.snapshot_config(&Config::default(), None).unwrap();
+    let sha_before = counts.sha256.load(Ordering::Relaxed);
+    let snapshot_hmac_before = counts.snapshot_hmac.load(Ordering::Relaxed);
+    let witness_before = counts.generation_witness_hmac.load(Ordering::Relaxed);
+
+    store.verify_generation_state().unwrap();
+
+    assert_eq!(counts.sha256.load(Ordering::Relaxed), sha_before);
+    assert_eq!(
+        counts.snapshot_hmac.load(Ordering::Relaxed),
+        snapshot_hmac_before
+    );
+    assert_eq!(
+        counts.generation_witness_hmac.load(Ordering::Relaxed) - witness_before,
+        2
+    );
+}
+
+#[test]
+fn tampered_generation_witness_blocks_snapshot_before_publication() {
+    let dir = TestDir::new("snapshot-generation-witness-tamper");
+    let (store, _key) = authenticated_store(&dir);
+    let first = store.snapshot_config(&Config::default(), None).unwrap();
+    store.snapshot_config(&Config::default(), None).unwrap();
+    let integrity_path = store
+        .root()
+        .join("configs")
+        .join(format!("{}.integrity.toml", first.id));
+    let raw = std::fs::read_to_string(&integrity_path).unwrap();
+    std::fs::write(
+        &integrity_path,
+        raw.replace("generation = 1", "generation = 9"),
+    )
+    .unwrap();
+
+    assert!(matches!(
+        store.snapshot_config(&Config::default(), None),
+        Err(SnapshotError::GenerationStateInvalid)
+    ));
+    let configs = std::fs::read_dir(store.root().join("configs"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .path()
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|stem| !stem.ends_with(".meta") && !stem.ends_with(".integrity"))
+        })
+        .count();
+    assert_eq!(configs, 2);
+}
+
+#[test]
+fn unverified_generation_scan_rejects_oversized_metadata() {
+    let dir = TestDir::new("snapshot-generation-metadata-limit");
+    let store = SnapshotStore::new(dir.child("store"));
+    let snapshot = store.snapshot_config(&Config::default(), None).unwrap();
+    std::fs::write(&snapshot.metadata_path, vec![b'a'; 16 * 1024 + 1]).unwrap();
+
+    assert!(store.snapshot_config(&Config::default(), None).is_err());
+    assert_eq!(store.list_entries().unwrap().len(), 1);
 }
 
 fn authenticated_store(dir: &TestDir) -> (SnapshotStore, std::path::PathBuf) {

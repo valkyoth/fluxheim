@@ -1,8 +1,18 @@
+use std::fs;
+
 use serde::{Deserialize, Serialize};
 
-use crate::integrity::GENERATION_MAC_LABEL;
+use crate::integrity::{
+    GENERATION_MAC_LABEL, MAX_INTEGRITY_MANIFEST_BYTES, SnapshotIntegrityManifest,
+};
+use crate::metadata::{
+    MAX_SNAPSHOT_METADATA_BYTES, SnapshotMetadata, validate_snapshot_id, validate_snapshot_metadata,
+};
 use crate::store::{SnapshotError, SnapshotStore};
-use crate::store_fs::{read_optional_regular_file_to_string_with_limit, write_atomically};
+use crate::store_fs::{
+    read_optional_regular_file_to_string_with_limit, read_regular_file_to_string_with_limit,
+    regular_snapshot_file_exists, write_atomically,
+};
 
 const MAX_GENERATION_STATE_BYTES: usize = 4096;
 
@@ -112,11 +122,67 @@ impl SnapshotStore {
     }
 
     fn observed_max_generation(&self) -> Result<u64, SnapshotError> {
-        Ok(self
-            .list()?
-            .into_iter()
-            .map(|snapshot| snapshot.metadata.generation)
-            .max()
-            .unwrap_or(0))
+        if !self.safe_existing_configs_dir()? {
+            return Ok(0);
+        }
+        if let Some(key) = self.integrity.as_deref() {
+            return self.observed_authenticated_generation(key);
+        }
+        self.observed_unverified_generation()
+    }
+
+    fn observed_authenticated_generation(
+        &self,
+        key: &crate::integrity::SnapshotIntegrityKey,
+    ) -> Result<u64, SnapshotError> {
+        let mut maximum = 0;
+        for entry in fs::read_dir(self.configs_dir()).map_err(SnapshotError::Io)? {
+            let path = entry.map_err(SnapshotError::Io)?.path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("toml") {
+                continue;
+            }
+            let Some(id) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                return Err(SnapshotError::GenerationStateInvalid);
+            };
+            if id.ends_with(".meta") || id.ends_with(".integrity") {
+                continue;
+            }
+            validate_snapshot_id(id).map_err(|_| SnapshotError::GenerationStateInvalid)?;
+            if !regular_snapshot_file_exists(&path)? {
+                return Err(SnapshotError::GenerationStateInvalid);
+            }
+            let raw = read_regular_file_to_string_with_limit(
+                &self.integrity_path(id),
+                MAX_INTEGRITY_MANIFEST_BYTES,
+            )?;
+            let manifest: SnapshotIntegrityManifest =
+                toml::from_str(&raw).map_err(|_| SnapshotError::GenerationStateInvalid)?;
+            let generation = key
+                .verify_generation_witness(id, &manifest)
+                .map_err(|_| SnapshotError::GenerationStateInvalid)?;
+            maximum = maximum.max(generation);
+        }
+        Ok(maximum)
+    }
+
+    fn observed_unverified_generation(&self) -> Result<u64, SnapshotError> {
+        let mut maximum = 0;
+        for entry in fs::read_dir(self.configs_dir()).map_err(SnapshotError::Io)? {
+            let path = entry.map_err(SnapshotError::Io)?.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                return Err(SnapshotError::GenerationStateInvalid);
+            };
+            let Some(id) = name.strip_suffix(".meta.toml") else {
+                continue;
+            };
+            validate_snapshot_id(id).map_err(|_| SnapshotError::GenerationStateInvalid)?;
+            let raw = read_regular_file_to_string_with_limit(&path, MAX_SNAPSHOT_METADATA_BYTES)?;
+            let metadata: SnapshotMetadata =
+                toml::from_str(&raw).map_err(|_| SnapshotError::GenerationStateInvalid)?;
+            validate_snapshot_metadata(&metadata, id)
+                .map_err(|_| SnapshotError::GenerationStateInvalid)?;
+            maximum = maximum.max(metadata.generation);
+        }
+        Ok(maximum)
     }
 }

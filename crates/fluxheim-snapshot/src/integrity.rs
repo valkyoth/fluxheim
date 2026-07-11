@@ -12,9 +12,11 @@ use crate::store_fs::require_private_regular_file;
 pub(crate) const MAX_INTEGRITY_KEY_BYTES: u64 = 4096;
 const MIN_INTEGRITY_KEY_BYTES: usize = 32;
 const SNAPSHOT_MAC_LABEL: &[u8] = b"fluxheim-snapshot-v1\0";
+const GENERATION_WITNESS_MAC_LABEL: &[u8] = b"fluxheim-snapshot-generation-witness-v1\0";
 const RECOVERY_MAC_LABEL: &[u8] = b"fluxheim-snapshot-recovery-v1\0";
 pub(crate) const GENERATION_MAC_LABEL: &[u8] = b"fluxheim-snapshot-generation-v1\0";
 pub(crate) const PRUNE_BOUNDARY_MAC_LABEL: &[u8] = b"fluxheim-snapshot-prune-boundary-v1\0";
+pub(crate) const MAX_INTEGRITY_MANIFEST_BYTES: u64 = 4096;
 
 pub trait SnapshotCryptoProvider: std::fmt::Debug + Send + Sync {
     fn label(&self) -> &'static str;
@@ -38,6 +40,8 @@ pub(crate) struct SnapshotIntegrityManifest {
     pub key_id: String,
     pub config_sha256: String,
     pub metadata_hmac_sha256: String,
+    pub generation: u64,
+    pub generation_hmac_sha256: String,
 }
 
 impl SnapshotIntegrityKey {
@@ -89,17 +93,21 @@ impl SnapshotIntegrityKey {
         id: &str,
         config: &[u8],
         metadata: &[u8],
+        generation: u64,
     ) -> Result<SnapshotIntegrityManifest, SnapshotError> {
         let config_digest = self
             .provider
             .sha256(&[config])
             .map_err(SnapshotError::CryptoProvider)?;
         let signature = self.sign_result(id, config, metadata)?;
+        let generation_signature = self.sign_generation_witness(id, generation)?;
         Ok(SnapshotIntegrityManifest {
             algorithm: "hmac-sha256".to_owned(),
             key_id: self.key_id.clone(),
             config_sha256: hex(&config_digest),
             metadata_hmac_sha256: hex(&signature),
+            generation,
+            generation_hmac_sha256: hex(&generation_signature),
         })
     }
 
@@ -153,6 +161,7 @@ impl SnapshotIntegrityKey {
         id: &str,
         config: &[u8],
         metadata: &[u8],
+        generation: u64,
         manifest: &SnapshotIntegrityManifest,
     ) -> Result<(), SnapshotError> {
         if manifest.algorithm != "hmac-sha256" || manifest.key_id != self.key_id {
@@ -166,6 +175,10 @@ impl SnapshotIntegrityKey {
         if config_digest != manifest.config_sha256 {
             return Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() });
         }
+        if manifest.generation != generation {
+            return Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() });
+        }
+        self.verify_generation_witness(id, manifest)?;
         let expected = decode_hex_32(&manifest.metadata_hmac_sha256)
             .ok_or_else(|| SnapshotError::IntegrityVerificationFailed { id: id.to_owned() })?;
         if self
@@ -177,6 +190,49 @@ impl SnapshotIntegrityKey {
         } else {
             Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() })
         }
+    }
+
+    pub(crate) fn verify_generation_witness(
+        &self,
+        id: &str,
+        manifest: &SnapshotIntegrityManifest,
+    ) -> Result<u64, SnapshotError> {
+        crate::metadata::validate_snapshot_id(id)?;
+        if manifest.algorithm != "hmac-sha256" || manifest.key_id != self.key_id {
+            return Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() });
+        }
+        let expected = decode_hex_32(&manifest.generation_hmac_sha256)
+            .ok_or_else(|| SnapshotError::IntegrityVerificationFailed { id: id.to_owned() })?;
+        if self
+            .sign_generation_witness(id, manifest.generation)?
+            .ct_eq(&expected)
+            .declassify("snapshot generation witness result is public")
+        {
+            Ok(manifest.generation)
+        } else {
+            Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() })
+        }
+    }
+
+    fn sign_generation_witness(
+        &self,
+        id: &str,
+        generation: u64,
+    ) -> Result<[u8; 32], SnapshotError> {
+        let id_length = encoded_length(id.len())?;
+        self.secret
+            .with_secret(|secret| {
+                self.provider.hmac_sha256(
+                    secret,
+                    &[
+                        GENERATION_WITNESS_MAC_LABEL,
+                        &id_length,
+                        id.as_bytes(),
+                        &generation.to_be_bytes(),
+                    ],
+                )
+            })
+            .map_err(SnapshotError::CryptoProvider)
     }
 
     fn sign_result(

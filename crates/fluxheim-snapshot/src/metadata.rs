@@ -4,6 +4,7 @@ use crate::store::SnapshotError;
 
 pub const MAX_SNAPSHOT_ID_BYTES: usize = 128;
 pub const MAX_SNAPSHOT_MESSAGE_BYTES: usize = 4096;
+pub(crate) const MAX_SNAPSHOT_METADATA_BYTES: u64 = 16 * 1024;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

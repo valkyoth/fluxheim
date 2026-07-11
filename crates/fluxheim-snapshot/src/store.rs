@@ -17,7 +17,7 @@ pub(crate) use crate::model::{
 };
 use crate::store_fs::{
     MAX_CURRENT_SNAPSHOT_POINTER_BYTES, path_exists_without_following_symlinks,
-    read_optional_regular_file_to_string, read_regular_file_to_string_with_limit,
+    read_optional_regular_file_to_string_with_limit, read_regular_file_to_string_with_limit,
     regular_snapshot_file_exists, write_atomically, write_atomically_new,
 };
 use crate::store_layout::validate_integrity_key_outside_store;
@@ -99,7 +99,12 @@ impl SnapshotStore {
             publish_transaction_file(&mut transaction, &config_path, raw_config.as_bytes())?;
             publish_transaction_file(&mut transaction, &metadata_path, raw_metadata.as_bytes())?;
             let integrity = if let Some(key) = self.integrity.as_deref() {
-                let manifest = key.manifest(&id, raw_config.as_bytes(), raw_metadata.as_bytes())?;
+                let manifest = key.manifest(
+                    &id,
+                    raw_config.as_bytes(),
+                    raw_metadata.as_bytes(),
+                    metadata.generation,
+                )?;
                 let raw_manifest =
                     toml::to_string_pretty(&manifest).map_err(SnapshotError::Encode)?;
                 publish_transaction_file(
@@ -295,7 +300,10 @@ impl SnapshotStore {
         }
 
         let metadata_path = self.metadata_path(id);
-        let raw_metadata = read_optional_regular_file_to_string(&metadata_path)?;
+        let raw_metadata = read_optional_regular_file_to_string_with_limit(
+            &metadata_path,
+            crate::metadata::MAX_SNAPSHOT_METADATA_BYTES,
+        )?;
         let integrity = self.verify_integrity(id, raw_metadata.as_deref())?;
         self.snapshot_from_metadata(id, config_path, metadata_path, raw_metadata, integrity)
     }
@@ -315,7 +323,10 @@ impl SnapshotStore {
         )?
         .into_bytes();
         let metadata_path = self.metadata_path(id);
-        let raw_metadata = read_optional_regular_file_to_string(&metadata_path)?;
+        let raw_metadata = read_optional_regular_file_to_string_with_limit(
+            &metadata_path,
+            crate::metadata::MAX_SNAPSHOT_METADATA_BYTES,
+        )?;
         let integrity = self.verify_integrity_bytes(id, &raw_config, raw_metadata.as_deref())?;
         let snapshot =
             self.snapshot_from_metadata(id, config_path, metadata_path, raw_metadata, integrity)?;
@@ -401,11 +412,23 @@ impl SnapshotStore {
         };
         let raw_metadata = raw_metadata
             .ok_or_else(|| SnapshotError::IntegrityManifestMissing { id: id.to_owned() })?;
-        let raw_manifest = read_optional_regular_file_to_string(&self.integrity_path(id))?
-            .ok_or_else(|| SnapshotError::IntegrityManifestMissing { id: id.to_owned() })?;
+        let raw_manifest = read_optional_regular_file_to_string_with_limit(
+            &self.integrity_path(id),
+            crate::integrity::MAX_INTEGRITY_MANIFEST_BYTES,
+        )?
+        .ok_or_else(|| SnapshotError::IntegrityManifestMissing { id: id.to_owned() })?;
         let manifest: SnapshotIntegrityManifest =
             toml::from_str(&raw_manifest).map_err(SnapshotError::Decode)?;
-        key.verify(id, raw_config, raw_metadata.as_bytes(), &manifest)?;
+        let metadata: SnapshotMetadata =
+            toml::from_str(raw_metadata).map_err(SnapshotError::Decode)?;
+        validate_snapshot_metadata(&metadata, id)?;
+        key.verify(
+            id,
+            raw_config,
+            raw_metadata.as_bytes(),
+            metadata.generation,
+            &manifest,
+        )?;
         Ok(SnapshotIntegrityStatus::Authenticated)
     }
 }

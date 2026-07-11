@@ -1300,7 +1300,6 @@ version = "1.7.8"
 dependencies = [
  "fluxheim-common",
  "fluxheim-config",
- "log",
  "ring",
  "rustix",
  "sanitization",
