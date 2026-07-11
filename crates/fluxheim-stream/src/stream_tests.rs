@@ -285,6 +285,62 @@ async fn stream_copy_preserves_both_directions_under_partial_write_backpressure(
     assert_eq!(server_result.unwrap(), downstream_payload);
 }
 
+#[tokio::test(start_paused = true)]
+async fn stream_copy_one_way_activity_keeps_shared_idle_deadline_alive() {
+    const IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+    const ACTIVITY_INTERVAL: Duration = Duration::from_secs(8);
+
+    let (mut downstream_proxy, downstream_client) = tokio::io::duplex(16);
+    let (mut upstream_proxy, upstream_server) = tokio::io::duplex(16);
+    let copy = copy_bidirectional_with_limits(
+        &mut downstream_proxy,
+        &mut upstream_proxy,
+        IDLE_TIMEOUT,
+        None,
+    );
+    let traffic = async move {
+        let (mut downstream_reader, mut downstream_writer) = tokio::io::split(downstream_client);
+        let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream_server);
+        upstream_writer.shutdown().await?;
+
+        for byte in b"alive" {
+            downstream_writer.write_all(&[*byte]).await?;
+            tokio::task::yield_now().await;
+            tokio::time::advance(ACTIVITY_INTERVAL).await;
+        }
+        downstream_writer.shutdown().await?;
+
+        let mut forwarded = Vec::new();
+        upstream_reader.read_to_end(&mut forwarded).await?;
+        let mut reverse = Vec::new();
+        downstream_reader.read_to_end(&mut reverse).await?;
+        Ok::<_, io::Error>((forwarded, reverse))
+    };
+
+    let (copy_result, traffic_result) = tokio::join!(copy, traffic);
+    assert_eq!(copy_result.unwrap(), (5, 0));
+    assert_eq!(traffic_result.unwrap(), (b"alive".to_vec(), Vec::new()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn stream_copy_true_idle_returns_timeout() {
+    let (mut downstream_proxy, _downstream_client) = tokio::io::duplex(16);
+    let (mut upstream_proxy, _upstream_server) = tokio::io::duplex(16);
+    let idle_timeout = Duration::from_secs(10);
+    let copy = copy_bidirectional_with_limits(
+        &mut downstream_proxy,
+        &mut upstream_proxy,
+        idle_timeout,
+        None,
+    );
+    let advance_past_deadline = async {
+        tokio::time::advance(idle_timeout + Duration::from_secs(1)).await;
+    };
+
+    let (copy_result, ()) = tokio::join!(copy, advance_past_deadline);
+    assert!(matches!(copy_result, Err(FluxError::Timeout { .. })));
+}
+
 async fn exchange_duplex_payload(
     stream: tokio::io::DuplexStream,
     payload: Vec<u8>,

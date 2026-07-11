@@ -13,3 +13,6 @@ fluxheim-config = { path = "../fluxheim-config", features = ["stream-proxy"] }
 fluxheim-protocol = { path = "../fluxheim-protocol" }
 sanitization = { version = "1.2.4" }
 tokio = { version = "1.52.3", features = ["io-util", "macros", "rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1.52.3", features = ["test-util"] }
