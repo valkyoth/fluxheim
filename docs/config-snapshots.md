@@ -53,13 +53,19 @@ Unverified stores scan metadata with a 16 KiB per-file bound.
 Authenticated manifests created before generation witnesses remain readable.
 Fluxheim fully verifies their original config digest and metadata HMAC for
 current, rollback, and doctor operations. The next snapshot creation performs
-that same verification under the store lock and atomically replaces each legacy
-manifest with the witnessed format before publishing the new snapshot. A store
-with many legacy snapshots therefore pays one bounded upgrade scan that may read
-their configs; subsequent mutations use only the small witnesses.
-Fluxheim rejects a missing or lower valid counter when retained snapshot
-metadata proves a higher generation. An HMAC file cannot detect coordinated
-rollback of the complete store after every newer snapshot has been pruned,
+that same verification under the store lock. If every retained authenticated
+manifest predates generation witnesses and `generation.toml` does not exist,
+Fluxheim bootstraps the authenticated counter from the highest fully verified
+legacy generation. It persists that counter first, then atomically replaces each
+legacy manifest with the witnessed format, and finally publishes the new
+snapshot at generation `max + 1`. This ordering makes an interrupted migration
+resumable without accepting a mixed store that has no authenticated counter. A
+store with many legacy snapshots therefore pays one bounded upgrade scan that
+may read their configs; subsequent mutations use only the small witnesses.
+Fluxheim rejects a missing counter for a V2 or mixed manifest store, and rejects
+a valid counter lower than any retained authenticated witness. An HMAC file
+cannot detect coordinated rollback of the complete store after every newer
+snapshot has been pruned,
 because the counter and its evidence then share one rollback domain. Operators
 requiring that stronger anti-rollback property must retain snapshots in
 append-only storage or anchor generations in an external TPM, monotonic

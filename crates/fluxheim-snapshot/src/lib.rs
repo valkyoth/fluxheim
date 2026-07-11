@@ -21,6 +21,8 @@ mod store_support;
 mod operations_tests;
 #[cfg(test)]
 mod snapshot_hardening_tests;
+#[cfg(test)]
+mod snapshot_upgrade_tests;
 
 pub use integrity::SnapshotCryptoProvider;
 pub use metadata::{MAX_SNAPSHOT_MESSAGE_BYTES, SnapshotMetadata};

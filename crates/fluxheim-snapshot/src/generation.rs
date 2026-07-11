@@ -25,18 +25,25 @@ struct GenerationState {
     hmac_sha256: Option<String>,
 }
 
+struct GenerationObservation {
+    maximum: u64,
+    legacy_ids: Vec<String>,
+    allow_missing_state: bool,
+}
+
 impl SnapshotStore {
     pub(crate) fn allocate_generation_unlocked(&self) -> Result<u64, SnapshotError> {
-        let observed_max = self.observed_max_generation(true)?;
+        let observation = self.observe_generations()?;
         let current = match read_optional_regular_file_to_string_with_limit(
             &self.generation_path(),
             MAX_GENERATION_STATE_BYTES as u64,
         )? {
             Some(raw) => self.decode_generation_state(&raw)?,
-            None if observed_max == 0 => 0,
+            None if observation.maximum == 0 => 0,
+            None if observation.allow_missing_state => observation.maximum,
             None => return Err(SnapshotError::GenerationStateInvalid),
         };
-        if current < observed_max {
+        if current < observation.maximum {
             return Err(SnapshotError::GenerationStateInvalid);
         }
         let next = current
@@ -47,24 +54,29 @@ impl SnapshotStore {
             return Err(SnapshotError::GenerationStateInvalid);
         }
         write_atomically(&self.generation_path(), raw.as_bytes())?;
+        if let Some(key) = self.integrity.as_deref() {
+            for id in observation.legacy_ids {
+                self.migrate_legacy_manifest(&id, key)?;
+            }
+        }
         Ok(next)
     }
 
     pub(crate) fn verify_generation_state(&self) -> Result<(), SnapshotError> {
-        let observed_max = self.observed_max_generation(false)?;
+        let observation = self.observe_generations()?;
         let Some(raw) = read_optional_regular_file_to_string_with_limit(
             &self.generation_path(),
             MAX_GENERATION_STATE_BYTES as u64,
         )?
         else {
-            return if observed_max == 0 {
+            return if observation.maximum == 0 || observation.allow_missing_state {
                 Ok(())
             } else {
                 Err(SnapshotError::GenerationStateInvalid)
             };
         };
         let persisted = self.decode_generation_state(&raw)?;
-        if persisted < observed_max {
+        if persisted < observation.maximum {
             return Err(SnapshotError::GenerationStateInvalid);
         }
         Ok(())
@@ -122,22 +134,31 @@ impl SnapshotStore {
         self.root().join("generation.toml")
     }
 
-    fn observed_max_generation(&self, migrate_legacy: bool) -> Result<u64, SnapshotError> {
+    fn observe_generations(&self) -> Result<GenerationObservation, SnapshotError> {
         if !self.safe_existing_configs_dir()? {
-            return Ok(0);
+            return Ok(GenerationObservation {
+                maximum: 0,
+                legacy_ids: Vec::new(),
+                allow_missing_state: false,
+            });
         }
         if let Some(key) = self.integrity.as_deref() {
-            return self.observed_authenticated_generation(key, migrate_legacy);
+            return self.observe_authenticated_generations(key);
         }
-        self.observed_unverified_generation()
+        Ok(GenerationObservation {
+            maximum: self.observed_unverified_generation()?,
+            legacy_ids: Vec::new(),
+            allow_missing_state: false,
+        })
     }
 
-    fn observed_authenticated_generation(
+    fn observe_authenticated_generations(
         &self,
         key: &SnapshotIntegrityKey,
-        migrate_legacy: bool,
-    ) -> Result<u64, SnapshotError> {
+    ) -> Result<GenerationObservation, SnapshotError> {
         let mut maximum = 0;
+        let mut legacy_ids = Vec::new();
+        let mut snapshot_count = 0_usize;
         for entry in fs::read_dir(self.configs_dir()).map_err(SnapshotError::Io)? {
             let path = entry.map_err(SnapshotError::Io)?.path();
             if path.extension().and_then(|extension| extension.to_str()) != Some("toml") {
@@ -149,6 +170,7 @@ impl SnapshotStore {
             if id.ends_with(".meta") || id.ends_with(".integrity") {
                 continue;
             }
+            snapshot_count = snapshot_count.saturating_add(1);
             validate_snapshot_id(id).map_err(|_| SnapshotError::GenerationStateInvalid)?;
             if !regular_snapshot_file_exists(&path)? {
                 return Err(SnapshotError::GenerationStateInvalid);
@@ -164,13 +186,20 @@ impl SnapshotStore {
                     key.verify_generation_witness(id, witness)
                 }
                 SnapshotIntegrityManifest::V1(_) => {
-                    self.verify_legacy_generation(id, key, &manifest, migrate_legacy)
+                    let generation = self.verify_legacy_generation(id, key, &manifest)?;
+                    legacy_ids.push(id.to_owned());
+                    Ok(generation)
                 }
             }
             .map_err(generation_scan_error)?;
             maximum = maximum.max(generation);
         }
-        Ok(maximum)
+        let allow_missing_state = snapshot_count != 0 && legacy_ids.len() == snapshot_count;
+        Ok(GenerationObservation {
+            maximum,
+            legacy_ids,
+            allow_missing_state,
+        })
     }
 
     fn verify_legacy_generation(
@@ -178,7 +207,6 @@ impl SnapshotStore {
         id: &str,
         key: &SnapshotIntegrityKey,
         manifest: &SnapshotIntegrityManifest,
-        migrate: bool,
     ) -> Result<u64, SnapshotError> {
         let config = read_regular_file_to_string_with_limit(
             &self.config_path(id),
@@ -198,20 +226,52 @@ impl SnapshotStore {
             metadata.generation,
             manifest,
         )?;
-        if migrate {
-            let witness = key.manifest(
-                id,
-                config.as_bytes(),
-                metadata_raw.as_bytes(),
-                metadata.generation,
-            )?;
-            let raw = toml::to_string_pretty(&witness).map_err(SnapshotError::Encode)?;
-            if raw.len() as u64 > MAX_INTEGRITY_MANIFEST_BYTES {
-                return Err(SnapshotError::GenerationStateInvalid);
-            }
-            write_atomically(&self.integrity_path(id), raw.as_bytes())?;
-        }
         Ok(metadata.generation)
+    }
+
+    fn migrate_legacy_manifest(
+        &self,
+        id: &str,
+        key: &SnapshotIntegrityKey,
+    ) -> Result<(), SnapshotError> {
+        let raw = read_regular_file_to_string_with_limit(
+            &self.integrity_path(id),
+            MAX_INTEGRITY_MANIFEST_BYTES,
+        )?;
+        let manifest: SnapshotIntegrityManifest =
+            toml::from_str(&raw).map_err(SnapshotError::Decode)?;
+        if matches!(manifest, SnapshotIntegrityManifest::V2(_)) {
+            return Ok(());
+        }
+        let config = read_regular_file_to_string_with_limit(
+            &self.config_path(id),
+            crate::store_fs::MAX_SNAPSHOT_FILE_BYTES,
+        )?;
+        let metadata_raw = read_regular_file_to_string_with_limit(
+            &self.metadata_path(id),
+            MAX_SNAPSHOT_METADATA_BYTES,
+        )?;
+        let metadata: SnapshotMetadata =
+            toml::from_str(&metadata_raw).map_err(SnapshotError::Decode)?;
+        validate_snapshot_metadata(&metadata, id)?;
+        key.verify(
+            id,
+            config.as_bytes(),
+            metadata_raw.as_bytes(),
+            metadata.generation,
+            &manifest,
+        )?;
+        let witness = key.manifest(
+            id,
+            config.as_bytes(),
+            metadata_raw.as_bytes(),
+            metadata.generation,
+        )?;
+        let raw = toml::to_string_pretty(&witness).map_err(SnapshotError::Encode)?;
+        if raw.len() as u64 > MAX_INTEGRITY_MANIFEST_BYTES {
+            return Err(SnapshotError::GenerationStateInvalid);
+        }
+        write_atomically(&self.integrity_path(id), raw.as_bytes())
     }
 
     fn observed_unverified_generation(&self) -> Result<u64, SnapshotError> {

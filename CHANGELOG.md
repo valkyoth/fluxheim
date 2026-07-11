@@ -62,6 +62,10 @@ behavior when the change improves security or project direction.
   legacy manifests remain fully verifiable for current, rollback, and doctor
   operations and are atomically migrated after verification during the next
   locked snapshot creation.
+- Bootstrap authenticated generation state for a fully verified store whose
+  retained manifests all predate generation witnesses. Fluxheim persists the
+  authenticated high-water mark before migrating those manifests and publishing
+  generation `max + 1`; missing state still fails closed for V2 or mixed stores.
 - Make OpenSSL cipher allow-lists deterministic across protocol families:
   omitting all TLS 1.2 or TLS 1.3 suites now disables that protocol version
   instead of retaining Mozilla acceptor defaults. Use the current Mozilla v5
