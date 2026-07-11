@@ -89,17 +89,18 @@ impl SnapshotIntegrityKey {
         id: &str,
         config: &[u8],
         metadata: &[u8],
-    ) -> SnapshotIntegrityManifest {
-        SnapshotIntegrityManifest {
+    ) -> Result<SnapshotIntegrityManifest, SnapshotError> {
+        let config_digest = self
+            .provider
+            .sha256(&[config])
+            .map_err(SnapshotError::CryptoProvider)?;
+        let signature = self.sign_result(id, config, metadata)?;
+        Ok(SnapshotIntegrityManifest {
             algorithm: "hmac-sha256".to_owned(),
             key_id: self.key_id.clone(),
-            config_sha256: self
-                .provider
-                .sha256(&[config])
-                .map(|digest| hex(&digest))
-                .unwrap_or_else(|error| crypto_provider_abort(self.provider.label(), &error)),
-            metadata_hmac_sha256: hex(&self.sign(id, config, metadata)),
-        }
+            config_sha256: hex(&config_digest),
+            metadata_hmac_sha256: hex(&signature),
+        })
     }
 
     pub(crate) fn key_id(&self) -> &str {
@@ -110,7 +111,7 @@ impl SnapshotIntegrityKey {
         &self.source_path
     }
 
-    pub(crate) fn sign_recovery(&self, state: &[u8]) -> String {
+    pub(crate) fn sign_recovery(&self, state: &[u8]) -> Result<String, SnapshotError> {
         self.sign_state(RECOVERY_MAC_LABEL, state)
     }
 
@@ -121,14 +122,17 @@ impl SnapshotIntegrityKey {
         self.verify_state(RECOVERY_MAC_LABEL, state, &signature)
     }
 
-    pub(crate) fn sign_state(&self, label: &[u8], state: &[u8]) -> String {
-        let length = (state.len() as u64).to_be_bytes();
-        self.secret.with_secret(|secret| {
-            self.provider
-                .hmac_sha256(secret, &[label, &length, state])
-                .map(|digest| hex(&digest))
-                .unwrap_or_else(|error| crypto_provider_abort(self.provider.label(), &error))
-        })
+    pub(crate) fn sign_state(&self, label: &[u8], state: &[u8]) -> Result<String, SnapshotError> {
+        let length = u64::try_from(state.len())
+            .map_err(|_| SnapshotError::CryptoProvider("state length overflow".to_owned()))?
+            .to_be_bytes();
+        self.secret
+            .with_secret(|secret| {
+                self.provider
+                    .hmac_sha256(secret, &[label, &length, state])
+                    .map(|digest| hex(&digest))
+            })
+            .map_err(SnapshotError::CryptoProvider)
     }
 
     pub(crate) fn verify_state(&self, label: &[u8], state: &[u8], signature: &[u8; 32]) -> bool {
@@ -175,22 +179,15 @@ impl SnapshotIntegrityKey {
         }
     }
 
-    fn sign(&self, id: &str, config: &[u8], metadata: &[u8]) -> [u8; 32] {
-        self.sign_result(id, config, metadata)
-            .unwrap_or_else(|error| {
-                crypto_provider_abort(self.provider.label(), &error.to_string())
-            })
-    }
-
     fn sign_result(
         &self,
         id: &str,
         config: &[u8],
         metadata: &[u8],
     ) -> Result<[u8; 32], SnapshotError> {
-        let id_length = (id.len() as u64).to_be_bytes();
-        let config_length = (config.len() as u64).to_be_bytes();
-        let metadata_length = (metadata.len() as u64).to_be_bytes();
+        let id_length = encoded_length(id.len())?;
+        let config_length = encoded_length(config.len())?;
+        let metadata_length = encoded_length(metadata.len())?;
         self.secret
             .with_secret(|secret| {
                 self.provider.hmac_sha256(
@@ -210,9 +207,10 @@ impl SnapshotIntegrityKey {
     }
 }
 
-fn crypto_provider_abort(provider: &str, error: &str) -> ! {
-    log::error!("fatal: snapshot cryptography failed through {provider}: {error}");
-    std::process::abort()
+fn encoded_length(length: usize) -> Result<[u8; 8], SnapshotError> {
+    u64::try_from(length)
+        .map(u64::to_be_bytes)
+        .map_err(|_| SnapshotError::CryptoProvider("field length overflow".to_owned()))
 }
 
 fn hex(bytes: &[u8]) -> String {

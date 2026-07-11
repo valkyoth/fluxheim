@@ -99,7 +99,7 @@ impl SnapshotStore {
             publish_transaction_file(&mut transaction, &config_path, raw_config.as_bytes())?;
             publish_transaction_file(&mut transaction, &metadata_path, raw_metadata.as_bytes())?;
             let integrity = if let Some(key) = self.integrity.as_deref() {
-                let manifest = key.manifest(&id, raw_config.as_bytes(), raw_metadata.as_bytes());
+                let manifest = key.manifest(&id, raw_config.as_bytes(), raw_metadata.as_bytes())?;
                 let raw_manifest =
                     toml::to_string_pretty(&manifest).map_err(SnapshotError::Encode)?;
                 publish_transaction_file(

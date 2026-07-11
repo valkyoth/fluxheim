@@ -82,12 +82,13 @@ impl SnapshotStore {
             records: records.iter().cloned().collect(),
         })
         .map_err(SnapshotError::Encode)?;
-        let (key_id, hmac_sha256) = self.integrity.as_deref().map_or((None, None), |key| {
-            (
+        let (key_id, hmac_sha256) = match self.integrity.as_deref() {
+            Some(key) => (
                 Some(key.key_id().to_owned()),
-                Some(key.sign_state(PRUNE_BOUNDARY_MAC_LABEL, records_toml.as_bytes())),
-            )
-        });
+                Some(key.sign_state(PRUNE_BOUNDARY_MAC_LABEL, records_toml.as_bytes())?),
+            ),
+            None => (None, None),
+        };
         let raw = toml::to_string(&PersistedPruneBoundaries {
             records_toml,
             key_id,

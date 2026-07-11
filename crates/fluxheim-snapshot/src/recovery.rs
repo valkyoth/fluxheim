@@ -43,7 +43,7 @@ impl SnapshotStore {
         let state_toml = toml::to_string_pretty(state).map_err(SnapshotError::Encode)?;
         let persisted = match self.integrity.as_deref() {
             Some(key) => PersistedRuntimeState {
-                hmac_sha256: Some(key.sign_recovery(state_toml.as_bytes())),
+                hmac_sha256: Some(key.sign_recovery(state_toml.as_bytes())?),
                 key_id: Some(key.key_id().to_owned()),
                 state_toml,
             },

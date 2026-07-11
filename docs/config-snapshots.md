@@ -46,6 +46,13 @@ publication prevent collisions from replacing existing history.
 cannot make a later snapshot reuse its audit generation. `prune-boundaries.toml`
 records intentional ancestry cuts when retention removes an old parent while
 keeping its child. Both files are authenticated when an integrity key is set.
+Fluxheim rejects a missing or lower valid counter when retained snapshot
+metadata proves a higher generation. An HMAC file cannot detect coordinated
+rollback of the complete store after every newer snapshot has been pruned,
+because the counter and its evidence then share one rollback domain. Operators
+requiring that stronger anti-rollback property must retain snapshots in
+append-only storage or anchor generations in an external TPM, monotonic
+counter, or equivalently protected audit system.
 
 Every mutation holds the private `.snapshot.lock` advisory lock across capacity
 validation and publication. For NFS, CSI, or another shared filesystem, verify
@@ -97,7 +104,9 @@ and parse the same owned bytes; they do not reopen a verified pathname.
 Fluxheim streams fields into the selected internal crypto provider without a
 second concatenated config allocation. Normal builds use Ring, while
 OpenSSL-FIPS and AWS-LC-FIPS profiles route snapshot cryptography through their
-selected validated provider.
+selected validated provider. Provider initialization or signing failures fail
+only the snapshot administrative operation with an error; they do not terminate
+the proxy data plane.
 Existing stores remain readable as `Unverified`; configuring a key makes
 missing or invalid manifests and recovery-state authentication fail closed.
 

@@ -52,6 +52,9 @@ behavior when the change improves security or project direction.
 - Route snapshot SHA-256 and HMAC-SHA-256 through Fluxheim's selected Ring,
   OpenSSL-FIPS, or AWS-LC-FIPS provider without duplicating snapshot plaintext
   into a concatenation buffer.
+- Return snapshot crypto-provider failures to the administrative caller instead
+  of aborting the process, and reject missing or replayed generation state when
+  retained snapshot metadata proves a higher generation.
 - Make OpenSSL cipher allow-lists deterministic across protocol families:
   omitting all TLS 1.2 or TLS 1.3 suites now disables that protocol version
   instead of retaining Mozilla acceptor defaults. Use the current Mozilla v5

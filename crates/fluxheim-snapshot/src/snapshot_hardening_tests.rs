@@ -39,6 +39,35 @@ impl SnapshotCryptoProvider for TestCryptoProvider {
     }
 }
 
+#[derive(Debug)]
+struct FailingCryptoProvider {
+    fail_label: &'static [u8],
+}
+
+impl SnapshotCryptoProvider for FailingCryptoProvider {
+    fn label(&self) -> &'static str {
+        "failing-test-provider"
+    }
+
+    fn compliance_capable(&self) -> bool {
+        false
+    }
+
+    fn sha256(&self, chunks: &[&[u8]]) -> Result<[u8; 32], String> {
+        TestCryptoProvider.sha256(chunks)
+    }
+
+    fn hmac_sha256(&self, key: &[u8], chunks: &[&[u8]]) -> Result<[u8; 32], String> {
+        if chunks
+            .first()
+            .is_some_and(|label| *label == self.fail_label)
+        {
+            return Err("injected cryptographic provider failure".to_owned());
+        }
+        TestCryptoProvider.hmac_sha256(key, chunks)
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn doctor_rechecks_integrity_key_permissions() {
@@ -103,17 +132,118 @@ fn authenticated_prune_boundary_rejects_tampering() {
     assert!(!store.doctor().unwrap().healthy);
 }
 
+#[test]
+fn snapshot_generation_provider_failure_is_returned_without_abort() {
+    let dir = TestDir::new("snapshot-provider-generation-failure");
+    let store = store_with_provider(
+        &dir,
+        Arc::new(FailingCryptoProvider {
+            fail_label: b"fluxheim-snapshot-generation-v1\0",
+        }),
+    );
+
+    assert!(matches!(
+        store.snapshot_config(&Config::default(), None),
+        Err(SnapshotError::CryptoProvider(_))
+    ));
+    assert!(store.list().unwrap().is_empty());
+}
+
+#[test]
+fn snapshot_manifest_provider_failure_is_returned_without_abort() {
+    let dir = TestDir::new("snapshot-provider-manifest-failure");
+    let store = store_with_provider(
+        &dir,
+        Arc::new(FailingCryptoProvider {
+            fail_label: b"fluxheim-snapshot-v1\0",
+        }),
+    );
+
+    assert!(matches!(
+        store.snapshot_config(&Config::default(), None),
+        Err(SnapshotError::CryptoProvider(_))
+    ));
+    assert!(store.list().unwrap().is_empty());
+    assert!(store.current_id().unwrap().is_none());
+}
+
+#[test]
+fn recovery_provider_failure_is_returned_without_abort() {
+    let dir = TestDir::new("snapshot-provider-recovery-failure");
+    let store = store_with_provider(
+        &dir,
+        Arc::new(FailingCryptoProvider {
+            fail_label: b"fluxheim-snapshot-recovery-v1\0",
+        }),
+    );
+    store.snapshot_config(&Config::default(), None).unwrap();
+
+    assert!(matches!(
+        store.save_runtime_state(&crate::SnapshotRuntimeState::default()),
+        Err(SnapshotError::CryptoProvider(_))
+    ));
+    assert!(!store.root().join("self-healing.toml").exists());
+}
+
+#[test]
+fn prune_provider_failure_preserves_snapshots_without_abort() {
+    let dir = TestDir::new("snapshot-provider-prune-failure");
+    let store = store_with_provider(
+        &dir,
+        Arc::new(FailingCryptoProvider {
+            fail_label: b"fluxheim-snapshot-prune-boundary-v1\0",
+        }),
+    );
+    store.snapshot_config(&Config::default(), None).unwrap();
+    store.snapshot_config(&Config::default(), None).unwrap();
+    store.snapshot_config(&Config::default(), None).unwrap();
+
+    assert!(matches!(
+        store.prune(&SnapshotPruneOptions {
+            keep: Some(0),
+            older_than: None,
+            protected_ids: Vec::new(),
+        }),
+        Err(SnapshotError::CryptoProvider(_))
+    ));
+    assert_eq!(store.list().unwrap().len(), 3);
+}
+
+#[test]
+fn generation_state_replay_and_removal_fail_before_publication() {
+    let dir = TestDir::new("snapshot-generation-replay");
+    let (store, _key) = authenticated_store(&dir);
+    store.snapshot_config(&Config::default(), None).unwrap();
+    let generation_path = safe_child_path(store.root(), "generation.toml");
+    let generation_one = std::fs::read(&generation_path).unwrap();
+    store.snapshot_config(&Config::default(), None).unwrap();
+
+    std::fs::write(&generation_path, &generation_one).unwrap();
+    assert!(matches!(
+        store.snapshot_config(&Config::default(), None),
+        Err(SnapshotError::GenerationStateInvalid)
+    ));
+    assert_eq!(store.list().unwrap().len(), 2);
+    assert!(!store.doctor().unwrap().healthy);
+
+    std::fs::remove_file(&generation_path).unwrap();
+    assert!(matches!(
+        store.snapshot_config(&Config::default(), None),
+        Err(SnapshotError::GenerationStateInvalid)
+    ));
+    assert_eq!(store.list().unwrap().len(), 2);
+}
+
 fn authenticated_store(dir: &TestDir) -> (SnapshotStore, std::path::PathBuf) {
+    let store = store_with_provider(dir, Arc::new(TestCryptoProvider));
+    (store, dir.child("snapshot.key"))
+}
+
+fn store_with_provider(dir: &TestDir, provider: Arc<dyn SnapshotCryptoProvider>) -> SnapshotStore {
     let key = dir.child("snapshot.key");
     std::fs::write(&key, [11u8; 32]).unwrap();
     set_private_file(&key);
-    let store = SnapshotStore::with_integrity_key_file(
-        dir.child("store"),
-        &key,
-        Arc::new(TestCryptoProvider),
-    )
-    .unwrap();
-    (store, key)
+    SnapshotStore::with_integrity_key_file(dir.child("store"), &key, provider).unwrap()
 }
 
 fn set_private_file(path: &std::path::Path) {

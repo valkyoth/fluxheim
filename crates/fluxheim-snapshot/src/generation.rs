@@ -16,18 +16,18 @@ struct GenerationState {
 
 impl SnapshotStore {
     pub(crate) fn allocate_generation_unlocked(&self) -> Result<u64, SnapshotError> {
+        let observed_max = self.observed_max_generation()?;
         let current = match read_optional_regular_file_to_string_with_limit(
             &self.generation_path(),
             MAX_GENERATION_STATE_BYTES as u64,
         )? {
             Some(raw) => self.decode_generation_state(&raw)?,
-            None => self
-                .list()?
-                .into_iter()
-                .map(|snapshot| snapshot.metadata.generation)
-                .max()
-                .unwrap_or(0),
+            None if observed_max == 0 => 0,
+            None => return Err(SnapshotError::GenerationStateInvalid),
         };
+        if current < observed_max {
+            return Err(SnapshotError::GenerationStateInvalid);
+        }
         let next = current
             .checked_add(1)
             .ok_or(SnapshotError::GenerationExhausted)?;
@@ -40,24 +40,34 @@ impl SnapshotStore {
     }
 
     pub(crate) fn verify_generation_state(&self) -> Result<(), SnapshotError> {
+        let observed_max = self.observed_max_generation()?;
         let Some(raw) = read_optional_regular_file_to_string_with_limit(
             &self.generation_path(),
             MAX_GENERATION_STATE_BYTES as u64,
         )?
         else {
-            return Ok(());
+            return if observed_max == 0 {
+                Ok(())
+            } else {
+                Err(SnapshotError::GenerationStateInvalid)
+            };
         };
-        self.decode_generation_state(&raw).map(|_| ())
+        let persisted = self.decode_generation_state(&raw)?;
+        if persisted < observed_max {
+            return Err(SnapshotError::GenerationStateInvalid);
+        }
+        Ok(())
     }
 
     fn encode_generation_state(&self, generation: u64) -> Result<String, SnapshotError> {
         let payload = generation.to_be_bytes();
-        let (key_id, hmac_sha256) = self.integrity.as_deref().map_or((None, None), |key| {
-            (
+        let (key_id, hmac_sha256) = match self.integrity.as_deref() {
+            Some(key) => (
                 Some(key.key_id().to_owned()),
-                Some(key.sign_state(GENERATION_MAC_LABEL, &payload)),
-            )
-        });
+                Some(key.sign_state(GENERATION_MAC_LABEL, &payload)?),
+            ),
+            None => (None, None),
+        };
         toml::to_string(&GenerationState {
             generation,
             key_id,
@@ -99,5 +109,14 @@ impl SnapshotStore {
 
     pub(crate) fn generation_path(&self) -> std::path::PathBuf {
         self.root().join("generation.toml")
+    }
+
+    fn observed_max_generation(&self) -> Result<u64, SnapshotError> {
+        Ok(self
+            .list()?
+            .into_iter()
+            .map(|snapshot| snapshot.metadata.generation)
+            .max()
+            .unwrap_or(0))
     }
 }
