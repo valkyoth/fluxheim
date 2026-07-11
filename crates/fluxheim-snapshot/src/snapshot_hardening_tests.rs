@@ -369,6 +369,65 @@ fn unverified_generation_scan_rejects_oversized_metadata() {
     assert_eq!(store.list_entries().unwrap().len(), 1);
 }
 
+#[test]
+fn prior_manifest_format_loads_and_migrates_on_locked_creation() {
+    let dir = TestDir::new("snapshot-manifest-v1-upgrade");
+    let (store, _key) = authenticated_store(&dir);
+    let first = store
+        .snapshot_config(&Config::default(), Some("first"))
+        .unwrap();
+    let second = store
+        .snapshot_config(&Config::default(), Some("second"))
+        .unwrap();
+    for id in [&first.id, &second.id] {
+        rewrite_manifest_as_v1(&store, id);
+    }
+
+    assert_eq!(store.current_snapshot().unwrap().unwrap().id, second.id);
+    assert_eq!(
+        store.rollback_candidate(None).unwrap().snapshot.id,
+        first.id
+    );
+    assert!(store.doctor().unwrap().healthy);
+    assert!(!manifest_raw(&store, &first.id).contains("generation_hmac_sha256"));
+
+    let third = store
+        .snapshot_config(&Config::default(), Some("third"))
+        .unwrap();
+
+    assert_eq!(third.metadata.generation, 3);
+    for id in [&first.id, &second.id, &third.id] {
+        let raw = manifest_raw(&store, id);
+        assert!(raw.contains("generation_hmac_sha256"));
+        assert_eq!(
+            store.verify(id).unwrap(),
+            crate::SnapshotIntegrityStatus::Authenticated
+        );
+    }
+}
+
+fn rewrite_manifest_as_v1(store: &SnapshotStore, id: &str) {
+    let path = store
+        .root()
+        .join("configs")
+        .join(format!("{id}.integrity.toml"));
+    let mut manifest: toml::Table =
+        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    manifest.remove("generation");
+    manifest.remove("generation_hmac_sha256");
+    std::fs::write(path, toml::to_string_pretty(&manifest).unwrap()).unwrap();
+}
+
+fn manifest_raw(store: &SnapshotStore, id: &str) -> String {
+    std::fs::read_to_string(
+        store
+            .root()
+            .join("configs")
+            .join(format!("{id}.integrity.toml")),
+    )
+    .unwrap()
+}
+
 fn authenticated_store(dir: &TestDir) -> (SnapshotStore, std::path::PathBuf) {
     let store = store_with_provider(dir, Arc::new(TestCryptoProvider));
     (store, dir.child("snapshot.key"))

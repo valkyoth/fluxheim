@@ -34,8 +34,24 @@ pub(crate) struct SnapshotIntegrityKey {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub(crate) enum SnapshotIntegrityManifest {
+    V2(SnapshotIntegrityManifestV2),
+    V1(SnapshotIntegrityManifestV1),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct SnapshotIntegrityManifest {
+pub(crate) struct SnapshotIntegrityManifestV1 {
+    pub algorithm: String,
+    pub key_id: String,
+    pub config_sha256: String,
+    pub metadata_hmac_sha256: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SnapshotIntegrityManifestV2 {
     pub algorithm: String,
     pub key_id: String,
     pub config_sha256: String,
@@ -101,14 +117,14 @@ impl SnapshotIntegrityKey {
             .map_err(SnapshotError::CryptoProvider)?;
         let signature = self.sign_result(id, config, metadata)?;
         let generation_signature = self.sign_generation_witness(id, generation)?;
-        Ok(SnapshotIntegrityManifest {
+        Ok(SnapshotIntegrityManifest::V2(SnapshotIntegrityManifestV2 {
             algorithm: "hmac-sha256".to_owned(),
             key_id: self.key_id.clone(),
             config_sha256: hex(&config_digest),
             metadata_hmac_sha256: hex(&signature),
             generation,
             generation_hmac_sha256: hex(&generation_signature),
-        })
+        }))
     }
 
     pub(crate) fn key_id(&self) -> &str {
@@ -164,7 +180,8 @@ impl SnapshotIntegrityKey {
         generation: u64,
         manifest: &SnapshotIntegrityManifest,
     ) -> Result<(), SnapshotError> {
-        if manifest.algorithm != "hmac-sha256" || manifest.key_id != self.key_id {
+        let common = manifest.common();
+        if common.algorithm != "hmac-sha256" || common.key_id != self.key_id {
             return Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() });
         }
         let config_digest = self
@@ -172,14 +189,16 @@ impl SnapshotIntegrityKey {
             .sha256(&[config])
             .map_err(SnapshotError::CryptoProvider)
             .map(|digest| hex(&digest))?;
-        if config_digest != manifest.config_sha256 {
+        if config_digest != common.config_sha256 {
             return Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() });
         }
-        if manifest.generation != generation {
-            return Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() });
+        if let SnapshotIntegrityManifest::V2(witness) = manifest {
+            if witness.generation != generation {
+                return Err(SnapshotError::IntegrityVerificationFailed { id: id.to_owned() });
+            }
+            self.verify_generation_witness(id, witness)?;
         }
-        self.verify_generation_witness(id, manifest)?;
-        let expected = decode_hex_32(&manifest.metadata_hmac_sha256)
+        let expected = decode_hex_32(common.metadata_hmac_sha256)
             .ok_or_else(|| SnapshotError::IntegrityVerificationFailed { id: id.to_owned() })?;
         if self
             .sign_result(id, config, metadata)?
@@ -195,7 +214,7 @@ impl SnapshotIntegrityKey {
     pub(crate) fn verify_generation_witness(
         &self,
         id: &str,
-        manifest: &SnapshotIntegrityManifest,
+        manifest: &SnapshotIntegrityManifestV2,
     ) -> Result<u64, SnapshotError> {
         crate::metadata::validate_snapshot_id(id)?;
         if manifest.algorithm != "hmac-sha256" || manifest.key_id != self.key_id {
@@ -261,6 +280,32 @@ impl SnapshotIntegrityKey {
             })
             .map_err(SnapshotError::CryptoProvider)
     }
+}
+
+impl SnapshotIntegrityManifest {
+    fn common(&self) -> SnapshotIntegrityManifestCommon<'_> {
+        match self {
+            Self::V2(manifest) => SnapshotIntegrityManifestCommon {
+                algorithm: &manifest.algorithm,
+                key_id: &manifest.key_id,
+                config_sha256: &manifest.config_sha256,
+                metadata_hmac_sha256: &manifest.metadata_hmac_sha256,
+            },
+            Self::V1(manifest) => SnapshotIntegrityManifestCommon {
+                algorithm: &manifest.algorithm,
+                key_id: &manifest.key_id,
+                config_sha256: &manifest.config_sha256,
+                metadata_hmac_sha256: &manifest.metadata_hmac_sha256,
+            },
+        }
+    }
+}
+
+struct SnapshotIntegrityManifestCommon<'a> {
+    algorithm: &'a str,
+    key_id: &'a str,
+    config_sha256: &'a str,
+    metadata_hmac_sha256: &'a str,
 }
 
 fn encoded_length(length: usize) -> Result<[u8; 8], SnapshotError> {

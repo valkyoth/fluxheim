@@ -50,6 +50,13 @@ Each authenticated integrity manifest includes a small generation witness, so
 freshness checks scan at most 4 KiB per retained manifest and do not reread or
 hash complete snapshot configurations while holding the store mutation lock.
 Unverified stores scan metadata with a 16 KiB per-file bound.
+Authenticated manifests created before generation witnesses remain readable.
+Fluxheim fully verifies their original config digest and metadata HMAC for
+current, rollback, and doctor operations. The next snapshot creation performs
+that same verification under the store lock and atomically replaces each legacy
+manifest with the witnessed format before publishing the new snapshot. A store
+with many legacy snapshots therefore pays one bounded upgrade scan that may read
+their configs; subsequent mutations use only the small witnesses.
 Fluxheim rejects a missing or lower valid counter when retained snapshot
 metadata proves a higher generation. An HMAC file cannot detect coordinated
 rollback of the complete store after every newer snapshot has been pruned,

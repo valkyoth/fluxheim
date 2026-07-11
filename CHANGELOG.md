@@ -58,6 +58,10 @@ behavior when the change improves security or project direction.
 - Verify generation freshness through bounded per-snapshot HMAC witnesses rather
   than rereading and hashing every retained config under the store lock, and
   remove the snapshot crate's unused direct logging dependency.
+- Preserve authenticated snapshot manifests created before generation witnesses:
+  legacy manifests remain fully verifiable for current, rollback, and doctor
+  operations and are atomically migrated after verification during the next
+  locked snapshot creation.
 - Make OpenSSL cipher allow-lists deterministic across protocol families:
   omitting all TLS 1.2 or TLS 1.3 suites now disables that protocol version
   instead of retaining Mozilla acceptor defaults. Use the current Mozilla v5
