@@ -1312,6 +1312,7 @@ dependencies = [
  "fluxheim-common",
  "fluxheim-config",
  "fluxheim-protocol",
+ "sanitization",
  "tokio",
 ]
 

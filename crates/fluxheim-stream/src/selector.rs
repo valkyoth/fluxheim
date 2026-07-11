@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use fluxheim_common::{FluxError, FluxResult};
-use fluxheim_config::config_stream::StreamRouteConfig;
+use fluxheim_config::config_stream::{
+    MAX_STREAM_UPSTREAM_TOTAL_WEIGHT, MAX_STREAM_UPSTREAM_WEIGHT, StreamRouteConfig,
+};
 
 #[derive(Debug)]
 pub struct StreamUpstreamSelector {
@@ -39,11 +41,23 @@ impl StreamUpstreamSelector {
             .enumerate()
             .filter_map(|(index, upstream)| (upstream.backup && !upstream.drained).then_some(index))
             .collect::<Vec<_>>();
-        let primary_weight_total = primary_indices
-            .iter()
-            .map(|index| upstreams[*index].weight)
-            .sum::<usize>()
-            .max(1);
+        let primary_weight_total = primary_indices.iter().try_fold(0usize, |total, index| {
+            let weight = upstreams[*index].weight;
+            if weight == 0 || weight > MAX_STREAM_UPSTREAM_WEIGHT {
+                return Err(FluxError::InvalidInput(
+                    "stream upstream weights must be between 1 and 1000",
+                ));
+            }
+            let total = total.checked_add(weight).ok_or(FluxError::InvalidInput(
+                "stream upstream weight total exceeds platform capacity",
+            ))?;
+            if total > MAX_STREAM_UPSTREAM_TOTAL_WEIGHT {
+                return Err(FluxError::InvalidInput(
+                    "stream upstream weight total exceeds configured maximum",
+                ));
+            }
+            Ok(total)
+        })?;
 
         Ok(Self {
             upstreams: upstreams.into(),

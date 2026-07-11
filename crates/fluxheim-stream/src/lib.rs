@@ -19,8 +19,10 @@ use fluxheim_protocol::{
 };
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
+mod copy;
 mod selector;
 
+pub use copy::{checked_stream_byte_count, copy_bidirectional_with_limits};
 pub use selector::{StreamSelectedUpstream, StreamUpstreamSelector};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -140,6 +142,9 @@ fn stream_dns_resolved_ipv4_address_allowed(address: Ipv4Addr) -> bool {
 }
 
 fn stream_dns_resolved_ipv6_address_allowed(address: Ipv6Addr) -> bool {
+    if let Some(address) = address.to_ipv4() {
+        return stream_dns_resolved_ipv4_address_allowed(address);
+    }
     let segments = address.segments();
     !(address.is_unspecified()
         || address.is_loopback()
@@ -170,115 +175,6 @@ pub fn stream_error_outcome(error: &FluxError) -> &'static str {
         | io::ErrorKind::NotConnected => "connect_error",
         _ => "error",
     }
-}
-
-pub fn checked_stream_byte_count(
-    current: u64,
-    additional: u64,
-    max_connection_bytes: Option<u64>,
-) -> FluxResult<u64> {
-    let next = current.checked_add(additional).ok_or_else(|| {
-        FluxError::io(
-            "count stream bytes",
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "stream copied byte counter overflowed",
-            ),
-        )
-    })?;
-    if max_connection_bytes.is_some_and(|limit| next > limit) {
-        return Err(FluxError::io(
-            "enforce stream byte limit",
-            io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "stream max connection bytes exceeded",
-            ),
-        ));
-    }
-    Ok(next)
-}
-
-enum StreamCopyEvent {
-    DownstreamTotal(u64),
-    UpstreamTotal(u64),
-    DownstreamEof,
-    UpstreamEof,
-}
-
-pub async fn copy_bidirectional_with_limits(
-    downstream: &mut (impl AsyncRead + AsyncWrite + Unpin),
-    upstream: &mut (impl AsyncRead + AsyncWrite + Unpin),
-    idle_timeout: Duration,
-    max_connection_bytes: Option<u64>,
-) -> FluxResult<(u64, u64)> {
-    let (mut downstream_reader, mut downstream_writer) = tokio::io::split(downstream);
-    let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream);
-    let mut downstream_buffer = [0u8; 16 * 1024];
-    let mut upstream_buffer = [0u8; 16 * 1024];
-    let mut downstream_to_upstream = 0u64;
-    let mut upstream_to_downstream = 0u64;
-    let mut downstream_eof = false;
-    let mut upstream_eof = false;
-
-    while !downstream_eof || !upstream_eof {
-        let event = tokio::select! {
-            result = async {
-                let bytes = read_with_idle_timeout(
-                    &mut downstream_reader,
-                    &mut downstream_buffer,
-                    idle_timeout,
-                ).await?;
-                if bytes == 0 {
-                    shutdown_with_idle_timeout(&mut upstream_writer, idle_timeout).await?;
-                    Ok::<_, FluxError>(StreamCopyEvent::DownstreamEof)
-                } else {
-                    let next = checked_stream_byte_count(
-                        downstream_to_upstream,
-                        bytes as u64,
-                        max_connection_bytes,
-                    )?;
-                    write_with_idle_timeout(
-                        &mut upstream_writer,
-                        &downstream_buffer[..bytes],
-                        idle_timeout,
-                    ).await?;
-                    Ok::<_, FluxError>(StreamCopyEvent::DownstreamTotal(next))
-                }
-            }, if !downstream_eof => result,
-            result = async {
-                let bytes = read_with_idle_timeout(
-                    &mut upstream_reader,
-                    &mut upstream_buffer,
-                    idle_timeout,
-                ).await?;
-                if bytes == 0 {
-                    shutdown_with_idle_timeout(&mut downstream_writer, idle_timeout).await?;
-                    Ok::<_, FluxError>(StreamCopyEvent::UpstreamEof)
-                } else {
-                    let next = checked_stream_byte_count(
-                        upstream_to_downstream,
-                        bytes as u64,
-                        max_connection_bytes,
-                    )?;
-                    write_with_idle_timeout(
-                        &mut downstream_writer,
-                        &upstream_buffer[..bytes],
-                        idle_timeout,
-                    ).await?;
-                    Ok::<_, FluxError>(StreamCopyEvent::UpstreamTotal(next))
-                }
-            }, if !upstream_eof => result,
-        }?;
-
-        match event {
-            StreamCopyEvent::DownstreamTotal(total) => downstream_to_upstream = total,
-            StreamCopyEvent::UpstreamTotal(total) => upstream_to_downstream = total,
-            StreamCopyEvent::DownstreamEof => downstream_eof = true,
-            StreamCopyEvent::UpstreamEof => upstream_eof = true,
-        }
-    }
-
-    Ok((downstream_to_upstream, upstream_to_downstream))
 }
 
 pub async fn write_upstream_proxy_protocol(
@@ -410,19 +306,6 @@ where
         Err(_) => Err(FluxError::timeout(
             "stream write timeout",
             "stream write timeout elapsed",
-        )),
-    }
-}
-
-async fn shutdown_with_idle_timeout<W>(writer: &mut W, idle_timeout: Duration) -> FluxResult<()>
-where
-    W: AsyncWrite + Unpin,
-{
-    match tokio::time::timeout(idle_timeout, writer.shutdown()).await {
-        Ok(result) => result.map_err(|error| FluxError::io("shutdown stream", error)),
-        Err(_) => Err(FluxError::timeout(
-            "stream shutdown timeout",
-            "stream shutdown timeout elapsed",
         )),
     }
 }

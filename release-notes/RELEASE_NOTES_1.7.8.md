@@ -29,6 +29,18 @@ general-purpose WASI application hosting.
 
 ## Security
 
+- Normalize IPv4-mapped and IPv4-compatible IPv6 DNS results before stream
+  rebinding checks, closing access to embedded loopback, private, link-local,
+  metadata, carrier-grade NAT, benchmark, and other reserved IPv4 addresses.
+- Keep both stream copy directions in persistent pinned futures and drive one
+  shared idle deadline from their latest successful transfer. Partial writes
+  can no longer be cancelled and silently discarded when reverse traffic wins
+  the dispatcher race.
+- Clear each successfully forwarded plaintext prefix and clear complete stream
+  copy buffers on drop through `sanitization`.
+- Reject zero, oversized, or overflowing weighted-stream totals inside
+  `StreamUpstreamSelector`, preserving the config limits at the public runtime
+  construction boundary.
 - Enforce OpenSSL cipher allow-lists across protocol families. A policy with
   only TLS 1.3 suites disables TLS 1.2, and a policy with only TLS 1.2 suites
   disables TLS 1.3, preventing inherited acceptor defaults from negotiating an
@@ -51,6 +63,8 @@ general-purpose WASI application hosting.
 - Disable default provider features for rustls and tokio-rustls. Normal Ring
   builds no longer include AWS-LC; AWS-LC remains explicitly selected by the
   rustls FIPS profile.
+- Keep `base64-ng` out of default and OpenSSL-only `fluxheim-tls` dependency
+  graphs; it is now activated only by the Rustls key-parsing boundary.
 - Validate each declared `wasi_snapshot_preview1` import before instantiation.
   Clock imports require `clocks = true`; `random_get` requires
   `randomness = true`.
@@ -116,6 +130,7 @@ general-purpose WASI application hosting.
 cargo test --locked -p fluxheim-wasm --features wasi
 cargo test --locked -p fluxheim-config --features wasm-wasi wasm_wasi
 cargo test --locked -p fluxheim-server --features wasm-wasi native_wasm_wasi
+cargo test --locked -p fluxheim-stream
 cargo test --locked -p fluxheim-tls --no-default-features --features tls-rustls,acme
 cargo test --locked -p fluxheim-tls --no-default-features --features tls-openssl,acme
 scripts/smoke_wasm_sandbox.sh

@@ -19,8 +19,8 @@ pub const MAX_STREAM_LISTENERS: usize = 64;
 pub const MAX_STREAM_UPSTREAMS: usize = 64;
 pub const MAX_STREAM_SOURCE_MATCHERS: usize = 256;
 pub const MAX_STREAM_MAX_CONNECTIONS: usize = 1_000_000;
-const MAX_STREAM_UPSTREAM_WEIGHT: usize = 1000;
-const MAX_STREAM_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
+pub const MAX_STREAM_UPSTREAM_WEIGHT: usize = 1000;
+pub const MAX_STREAM_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

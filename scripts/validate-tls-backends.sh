@@ -16,6 +16,13 @@ case "$mode" in
         ;;
 esac
 
+default_tls_tree="$(cargo tree --locked -p fluxheim-tls -e normal --no-default-features)"
+if printf '%s\n' "$default_tls_tree" | grep -Eq '(^|[[:space:]])base64-ng v'; then
+    echo "tls backend: default fluxheim-tls graph unexpectedly resolves base64-ng" >&2
+    exit 1
+fi
+echo "tls backend: default fluxheim-tls graph excludes base64-ng"
+
 run_tls_backend() {
     backend="$1"
     features="proxy,$backend"
@@ -27,6 +34,13 @@ run_tls_backend() {
             exit 1
         fi
         echo "tls backend: normal rustls/Ring profile excludes AWS-LC"
+    else
+        tls_crate_tree="$(cargo tree --locked -p fluxheim-tls -e normal --no-default-features --features "$backend")"
+        if printf '%s\n' "$tls_crate_tree" | grep -Eq '(^|[[:space:]])base64-ng v'; then
+            echo "tls backend: OpenSSL-only fluxheim-tls graph unexpectedly resolves base64-ng" >&2
+            exit 1
+        fi
+        echo "tls backend: OpenSSL-only fluxheim-tls graph excludes base64-ng"
     fi
     echo "tls backend: $cargo_action --no-default-features --features $features"
     cargo $cargo_action --no-default-features --features "$features"

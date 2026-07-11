@@ -229,15 +229,21 @@ upstream_dns_allow_private_addresses = false
 - Configure either `upstream = "host:port"` or `upstreams = ["host:port", ...]`.
   Multiple upstreams use stream-local round-robin selection by default.
 - `upstream_weights` optionally enables weighted stream selection and must have
-  one positive value for each `upstreams` entry. `upstream_aliases` optionally
-  assigns safe low-cardinality names for stream logs and future metrics.
+  one value from 1 through 1000 for each `upstreams` entry; the aggregate must
+  not exceed 65535. Config validation and the runtime selector both enforce
+  these limits with checked accumulation. `upstream_aliases` optionally assigns
+  safe low-cardinality names for stream logs and future metrics.
 - `backup_upstreams` and `drain_upstreams` are optional subsets of
   `upstreams`. Drained stream upstreams do not receive new connections. Backup
   stream upstreams are not selected while a primary is available, but are tried
   as connect-fallback candidates before the downstream stream starts copying.
 - `connect_timeout_secs` bounds DNS/connect setup and defaults to `5`.
 - `idle_timeout_secs` is a true stream idle timer and defaults to `300`. The
-  timer resets whenever either direction transfers bytes.
+  timer resets whenever either direction transfers bytes. Both copy directions
+  retain their read/write state across dispatcher polls, so simultaneous
+  backpressured traffic cannot cancel a partial write. Forwarded plaintext is
+  cleared from the 16 KiB direction buffer immediately, and the complete buffer
+  is cleared when the direction exits.
 - `max_connection_secs` is optional and bounds total accepted stream lifetime
   when set. Leave it unset for no wall-clock lifetime cap.
 - `max_connection_bytes` is optional and caps copied bytes per direction for a
@@ -266,7 +272,8 @@ upstream_dns_allow_private_addresses = false
   Hostname upstreams are resolved on connection setup. By default, Fluxheim
   rejects hostname DNS answers that resolve only to private, loopback,
   link-local, multicast, broadcast, documentation, or unspecified addresses to
-  reduce DNS-rebinding pivots. Set
+  reduce DNS-rebinding pivots. IPv4-mapped and legacy IPv4-compatible IPv6
+  answers are normalized and evaluated by the IPv4 policy before selection. Set
   `upstream_dns_allow_private_addresses = true` only for routes whose hostname
   upstreams are intentionally resolved by trusted internal DNS. IP-literal
   upstreams remain explicit and are not blocked by this DNS guard.

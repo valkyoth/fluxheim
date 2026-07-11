@@ -23,6 +23,18 @@ behavior when the change improves security or project direction.
 
 ### Security
 
+- Normalize IPv4-mapped and legacy IPv4-compatible IPv6 stream DNS answers
+  before rebinding policy checks, preventing loopback, private, link-local,
+  carrier-grade NAT, benchmark, and other reserved IPv4 targets from bypassing
+  the stream SSRF guard.
+- Replace cancellation-unsafe inline bidirectional stream copies with two
+  persistent pinned direction futures and a shared last-activity idle timer,
+  preventing partial writes from losing or duplicating plaintext under
+  simultaneous traffic and backpressure.
+- Clear forwarded stream plaintext immediately and clear each full 16 KiB copy
+  buffer on drop with `sanitization`.
+- Enforce positive per-upstream and checked aggregate stream weights inside the
+  public runtime selector boundary, independently of config validation.
 - Make OpenSSL cipher allow-lists deterministic across protocol families:
   omitting all TLS 1.2 or TLS 1.3 suites now disables that protocol version
   instead of retaining Mozilla acceptor defaults. Use the current Mozilla v5
@@ -39,6 +51,8 @@ behavior when the change improves security or project direction.
 - Disable rustls and tokio-rustls default provider features so normal Ring
   builds no longer compile AWS-LC; FIPS profiles continue to select AWS-LC
   explicitly.
+- Make `base64-ng` optional in `fluxheim-tls` and activate it only for Rustls
+  key parsing, keeping it out of the crate's default and OpenSSL-only graphs.
 - Validate every `wasi_snapshot_preview1` import against the plugin's explicit
   capability grants before instantiation. Environment, arguments, inherited
   stdio, filesystem, sockets/network, polling, and process state remain denied.

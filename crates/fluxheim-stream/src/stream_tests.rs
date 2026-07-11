@@ -83,6 +83,24 @@ fn stream_selector_respects_weights_and_drained_upstreams() {
 }
 
 #[test]
+fn stream_selector_rejects_weights_outside_runtime_bounds() {
+    let route = StreamRouteConfig {
+        name: "tcp".to_owned(),
+        upstreams: vec!["127.0.0.1:5432".to_owned(), "127.0.0.1:6432".to_owned()],
+        upstream_weights: vec![usize::MAX, 1],
+        ..StreamRouteConfig::default()
+    };
+
+    assert!(StreamUpstreamSelector::from_route(&route).is_err());
+
+    let route = StreamRouteConfig {
+        upstream_weights: vec![0, 1],
+        ..route
+    };
+    assert!(StreamUpstreamSelector::from_route(&route).is_err());
+}
+
+#[test]
 fn stream_trusted_sources_match_exact_and_cidr() {
     let exact = StreamSourceMatcher::parse("127.0.0.1", "trusted proxy").unwrap();
     assert!(exact.matches("127.0.0.1".parse().unwrap()));
@@ -152,8 +170,23 @@ fn stream_dns_rebind_guard_rejects_private_resolved_addresses() {
     assert!(!stream_dns_resolved_address_allowed(
         "2001:db8::1".parse().unwrap()
     ));
+    assert!(!stream_dns_resolved_address_allowed(
+        "::ffff:127.0.0.1".parse().unwrap()
+    ));
+    assert!(!stream_dns_resolved_address_allowed(
+        "::ffff:10.0.0.1".parse().unwrap()
+    ));
+    assert!(!stream_dns_resolved_address_allowed(
+        "::ffff:169.254.169.254".parse().unwrap()
+    ));
+    assert!(!stream_dns_resolved_address_allowed(
+        "::127.0.0.1".parse().unwrap()
+    ));
     assert!(stream_dns_resolved_address_allowed(
         "1.1.1.1".parse().unwrap()
+    ));
+    assert!(stream_dns_resolved_address_allowed(
+        "::ffff:1.1.1.1".parse().unwrap()
     ));
     assert!(stream_dns_resolved_address_allowed(
         "2606:4700:4700::1111".parse().unwrap()
@@ -226,4 +259,47 @@ fn stream_byte_counter_rejects_overflow_and_limit() {
             .kind(),
         io::ErrorKind::InvalidData
     );
+}
+
+#[tokio::test]
+async fn stream_copy_preserves_both_directions_under_partial_write_backpressure() {
+    let (mut downstream_proxy, downstream_client) = tokio::io::duplex(1);
+    let (mut upstream_proxy, upstream_server) = tokio::io::duplex(1);
+    let downstream_payload = (0..4096).map(|index| index as u8).collect::<Vec<_>>();
+    let upstream_payload = (0..4096)
+        .map(|index| 255u8.wrapping_sub(index as u8))
+        .collect::<Vec<_>>();
+
+    let copy = copy_bidirectional_with_limits(
+        &mut downstream_proxy,
+        &mut upstream_proxy,
+        Duration::from_secs(5),
+        None,
+    );
+    let client = exchange_duplex_payload(downstream_client, downstream_payload.clone());
+    let server = exchange_duplex_payload(upstream_server, upstream_payload.clone());
+    let (copy_result, client_result, server_result) = tokio::join!(copy, client, server);
+
+    assert_eq!(copy_result.unwrap(), (4096, 4096));
+    assert_eq!(client_result.unwrap(), upstream_payload);
+    assert_eq!(server_result.unwrap(), downstream_payload);
+}
+
+async fn exchange_duplex_payload(
+    stream: tokio::io::DuplexStream,
+    payload: Vec<u8>,
+) -> io::Result<Vec<u8>> {
+    let (mut reader, mut writer) = tokio::io::split(stream);
+    let send = async {
+        writer.write_all(&payload).await?;
+        writer.shutdown().await
+    };
+    let receive = async {
+        let mut received = Vec::new();
+        reader.read_to_end(&mut received).await?;
+        Ok::<_, io::Error>(received)
+    };
+    let (send_result, receive_result) = tokio::join!(send, receive);
+    send_result?;
+    receive_result
 }
