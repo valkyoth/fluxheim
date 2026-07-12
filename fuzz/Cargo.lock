@@ -98,7 +98,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "fluxheim-cache"
-version = "1.7.8"
+version = "1.7.9"
 dependencies = [
  "async-trait",
  "bytes",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-config"
-version = "1.7.8"
+version = "1.7.9"
 dependencies = [
  "fluxheim-protocol",
  "log",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim-php-fpm"
-version = "1.7.8"
+version = "1.7.9"
 dependencies = [
  "fastcgi-client",
  "fluxheim-config",
@@ -141,13 +141,13 @@ dependencies = [
  "log",
  "percent-encoding",
  "rustix",
+ "sanitization",
  "tokio",
- "zeroize",
 ]
 
 [[package]]
 name = "fluxheim-protocol"
-version = "1.7.8"
+version = "1.7.9"
 
 [[package]]
 name = "futures-core"
@@ -368,6 +368,12 @@ dependencies = [
  "linux-raw-sys",
  "windows-sys",
 ]
+
+[[package]]
+name = "sanitization"
+version = "1.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "530e428069232d6d07b439cde737f1263aa1b86d534c1348d2190ada082c2335"
 
 [[package]]
 name = "serde"
@@ -591,9 +597,3 @@ name = "winnow"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0592e1c9d151f854e6fd382574c3a0855250e1d9b2f99d9281c6e6391af352f1"
-
-[[package]]
-name = "zeroize"
-version = "1.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"

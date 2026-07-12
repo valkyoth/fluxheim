@@ -75,9 +75,9 @@ products.
   cleanup, metadata checks, and directory synchronization. This prevents
   parent replacement from redirecting an in-progress atomic write.
 
-## In Progress
+## Compatibility Boundary
 
-- Add checked-in plugins, configuration fixtures, operator documentation, and
-  live HTTP tests for all four migration families.
-- Keep every example bounded by configured symbolic IDs and deny arbitrary
-  filesystem, network, secret, request-body, or cache-object access.
+- The migration examples use Fluxheim's typed, bounded policy ABI; they do not
+  execute iRules, Lua, SPOE, or VCL source directly.
+- Every example remains bounded by configured symbolic IDs and denies arbitrary
+  filesystem, network, secret, request-body, and cache-object access.
