@@ -23,7 +23,8 @@ for file in \
     examples/wasm/cache-policy.toml \
     scripts/build_wasm_policy_examples.sh \
     scripts/smoke_wasm_all.sh \
-    scripts/smoke_wasm_policy_examples.sh
+    scripts/smoke_wasm_policy_examples.sh \
+    scripts/smoke_wasm_policy_examples_binary.sh
 do
     if [ ! -f "$file" ]; then
         echo "wasm example plan: missing $file" >&2

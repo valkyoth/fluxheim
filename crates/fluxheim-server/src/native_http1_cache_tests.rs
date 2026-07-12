@@ -77,6 +77,20 @@ fn disk_cache_store_key(key: &str) -> NativeDiskCacheStoreKey {
 }
 
 #[test]
+fn disabled_disk_cache_does_not_require_a_path() {
+    let config = CacheConfig {
+        enabled: true,
+        memory: fluxheim_config::CacheMemoryConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert!(NativeDiskCache::from_config(&config).is_none());
+}
+
+#[test]
 fn native_peer_fill_cache_ttl_subtracts_upstream_age() {
     let cache = CacheConfig::default();
     let headers = headers(&[("cache-control", "max-age=60"), ("age", "50")]);

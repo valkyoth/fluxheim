@@ -206,3 +206,9 @@ source-to-module builds and digest output, while `scripts/smoke_wasm_all.sh`
 is the single orchestration entry used by both `scripts/test_starter.py` and
 the opt-in stable/deep release gate. This avoids treating multiple script paths
 as arguments to one launcher command and keeps human and CI coverage aligned.
+
+The standalone `scripts/smoke_wasm_policy_examples_binary.sh` proof also loads
+the generated files through a private plugin root and exact SHA-256 pins,
+starts the real Fluxheim binary from a file-based config, and sends HTTP
+traffic through all four vhosts. The in-process listener tests remain the
+faster detailed regressions; both layers are required by the complete smoke.

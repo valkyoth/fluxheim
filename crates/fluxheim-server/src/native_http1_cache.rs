@@ -112,7 +112,7 @@ pub(crate) struct NativeDiskCacheStats {
 
 impl NativeDiskCache {
     pub(crate) fn from_config(config: &CacheConfig) -> Option<Self> {
-        if !native_disk_cache_supported(config) {
+        if !config.disk.enabled || !native_disk_cache_supported(config) {
             return None;
         }
         let (root, backend) = match NativeDiskCacheBackend::from_config(config) {

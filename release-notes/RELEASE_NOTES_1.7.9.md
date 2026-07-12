@@ -32,6 +32,14 @@ products.
 - Add one complete Wasm smoke shared by `scripts/test_starter.py` and the
   opt-in stable/deep release gate, fixing the launcher's previous multi-script
   command wiring.
+- Add a standalone binary smoke using generated modules, exact digest pins, a
+  private plugin root, file-based configuration, two local origins, and real
+  HTTP traffic through every migration family.
+
+## Fixed
+
+- Stop attempting to initialize the native disk-cache backend for memory-only
+  cache policies, avoiding an incorrect missing-path error at startup.
 
 ## Security
 

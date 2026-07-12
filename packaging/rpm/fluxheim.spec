@@ -161,6 +161,8 @@ fi
 - Add the HAProxy Lua/SPOE-style bounded route and load-balancer example.
 - Complete the VCL-like cache-policy example and live operational smoke.
 - Add deterministic Wasm example builds and one shared complete Wasm gate.
+- Add standalone file-config and binary coverage for all Wasm policy examples.
+- Avoid disabled disk-cache initialization for memory-only cache policies.
 - Harden snapshot opens against pathname races and isolate corruption fixtures
   behind safe store primitives.
 

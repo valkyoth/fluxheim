@@ -28,6 +28,14 @@ behavior when the change improves security or project direction.
   by the human launcher and release gate.
 - Fix the human test starter's Wasm entry so sandbox and policy scripts are no
   longer passed as unused arguments to the registry validator.
+- Add a standalone binary smoke that loads generated modules from a private
+  plugin root with exact digests and exercises all four migration families
+  through a file-based configuration and real HTTP traffic.
+
+### Fixed
+
+- Do not initialize or log errors for the native disk-cache backend when a
+  cache policy enables only the memory tier.
 
 ### Security
 

@@ -100,10 +100,8 @@ impl HttpEndpoint {
     fn parse(endpoint: &str) -> Option<Self> {
         let (rest, default_port) = if let Some(rest) = endpoint.strip_prefix("http://") {
             (rest, 80)
-        } else if let Some(rest) = endpoint.strip_prefix("https://") {
-            (rest, 443)
         } else {
-            return None;
+            (endpoint.strip_prefix("https://")?, 443)
         };
         let (authority, path) = rest.split_once('/')?;
         if authority.is_empty() || path.is_empty() {

@@ -19,6 +19,17 @@ digest, and keep the deployed file owner-only or otherwise protected by the
 documented plugin-root trust policy. The builder has no output-path argument;
 it cannot be redirected into a configured production root accidentally.
 
+Run the full standalone deployment proof with:
+
+```sh
+scripts/smoke_wasm_policy_examples_binary.sh
+```
+
+It copies the generated modules into a private temporary plugin root, writes a
+file-based config with exact digests, launches the actual `fluxheim` binary and
+two local origins, and sends real HTTP traffic through all four policy
+families. This is separate from the faster in-process listener regressions.
+
 `irules-access-policy.wat` and `irules-access-policy.toml` demonstrate the
 F5 iRules-style access-policy mapping. Fluxheim first classifies the request
 through configured vhosts, routes, methods, trusted-client ACLs, and TLS
