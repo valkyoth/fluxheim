@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use fluxheim_common::test_support::{safe_child_path, unique_temp_path};
 use fluxheim_config::Config;
 
+use crate::store_fs::write_atomically;
 use crate::{SnapshotCryptoProvider, SnapshotError, SnapshotPruneOptions, SnapshotStore};
 
 #[derive(Debug)]
@@ -138,7 +139,11 @@ fn authenticated_generation_state_rejects_tampering() {
     store.snapshot_config(&Config::default(), None).unwrap();
     let path = safe_child_path(store.root(), "generation.toml");
     let raw = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, raw.replace("generation = 1", "generation = 9")).unwrap();
+    write_atomically(
+        &path,
+        raw.replace("generation = 1", "generation = 9").as_bytes(),
+    )
+    .unwrap();
 
     assert!(matches!(
         store.snapshot_config(&Config::default(), None),
@@ -170,7 +175,7 @@ fn authenticated_prune_boundary_rejects_tampering() {
         .unwrap()
         + marker.len();
     raw[offset] = if raw[offset] == b'0' { b'1' } else { b'0' };
-    std::fs::write(&path, raw).unwrap();
+    write_atomically(&path, &raw).unwrap();
 
     assert!(!store.doctor().unwrap().healthy);
 }
@@ -278,7 +283,7 @@ fn generation_state_replay_and_removal_fail_before_publication() {
     let generation_one = std::fs::read(&generation_path).unwrap();
     store.snapshot_config(&Config::default(), None).unwrap();
 
-    std::fs::write(&generation_path, &generation_one).unwrap();
+    write_atomically(&generation_path, &generation_one).unwrap();
     assert!(matches!(
         store.snapshot_config(&Config::default(), None),
         Err(SnapshotError::GenerationStateInvalid)
@@ -334,9 +339,9 @@ fn tampered_generation_witness_blocks_snapshot_before_publication() {
         .join("configs")
         .join(format!("{}.integrity.toml", first.id));
     let raw = std::fs::read_to_string(&integrity_path).unwrap();
-    std::fs::write(
+    write_atomically(
         &integrity_path,
-        raw.replace("generation = 1", "generation = 9"),
+        raw.replace("generation = 1", "generation = 9").as_bytes(),
     )
     .unwrap();
 
@@ -363,7 +368,7 @@ fn unverified_generation_scan_rejects_oversized_metadata() {
     let dir = TestDir::new("snapshot-generation-metadata-limit");
     let store = SnapshotStore::new(dir.child("store"));
     let snapshot = store.snapshot_config(&Config::default(), None).unwrap();
-    std::fs::write(&snapshot.metadata_path, vec![b'a'; 16 * 1024 + 1]).unwrap();
+    write_atomically(&snapshot.metadata_path, &vec![b'a'; 16 * 1024 + 1]).unwrap();
 
     assert!(store.snapshot_config(&Config::default(), None).is_err());
     assert_eq!(store.list_entries().unwrap().len(), 1);
@@ -415,7 +420,7 @@ fn rewrite_manifest_as_v1(store: &SnapshotStore, id: &str) {
         toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     manifest.remove("generation");
     manifest.remove("generation_hmac_sha256");
-    std::fs::write(path, toml::to_string_pretty(&manifest).unwrap()).unwrap();
+    write_atomically(&path, toml::to_string_pretty(&manifest).unwrap().as_bytes()).unwrap();
 }
 
 fn manifest_raw(store: &SnapshotStore, id: &str) -> String {

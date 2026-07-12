@@ -138,7 +138,15 @@ pub(crate) fn open_private_lock_file(path: &Path) -> Result<File, SnapshotError>
     {
         options.custom_flags(O_NOFOLLOW).mode(SNAPSHOT_FILE_MODE);
     }
-    let file = options.open(path).map_err(SnapshotError::Io)?;
+    let file = options.open(path).map_err(|error| {
+        #[cfg(unix)]
+        if error.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error()) {
+            return SnapshotError::UnsafeSnapshotPath {
+                path: path.to_path_buf(),
+            };
+        }
+        SnapshotError::Io(error)
+    })?;
     let metadata = file.metadata().map_err(SnapshotError::Io)?;
     if !metadata.is_file() {
         return Err(SnapshotError::UnsafeSnapshotPath {
@@ -256,7 +264,7 @@ pub(crate) fn read_regular_file_to_string_with_limit(
 pub(crate) fn optional_symlink_metadata(
     path: &Path,
 ) -> Result<Option<fs::Metadata>, SnapshotError> {
-    match fs::symlink_metadata(path) {
+    match path.symlink_metadata() {
         Ok(metadata) => Ok(Some(metadata)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(SnapshotError::Io(error)),
@@ -352,20 +360,37 @@ fn read_regular_file_to_string(path: &Path) -> Result<String, SnapshotError> {
 }
 
 fn open_regular_file(path: &Path) -> Result<File, SnapshotError> {
-    let metadata = fs::symlink_metadata(path).map_err(SnapshotError::Io)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(SnapshotError::UnsafeSnapshotPath {
-            path: path.to_path_buf(),
-        });
+    #[cfg(not(unix))]
+    {
+        let metadata = path.symlink_metadata().map_err(SnapshotError::Io)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(SnapshotError::UnsafeSnapshotPath {
+                path: path.to_path_buf(),
+            });
+        }
+        require_private_metadata(path, &metadata)?;
     }
-    require_private_metadata(path, &metadata)?;
 
-    let mut options = OpenOptions::new();
-    options.read(true);
     #[cfg(unix)]
-    options.custom_flags(O_NOFOLLOW);
-
-    let file = options.open(path).map_err(SnapshotError::Io)?;
+    let file: File = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|error| {
+        if error == rustix::io::Errno::LOOP {
+            return SnapshotError::UnsafeSnapshotPath {
+                path: path.to_path_buf(),
+            };
+        }
+        SnapshotError::Io(io::Error::from_raw_os_error(error.raw_os_error()))
+    })?
+    .into();
+    #[cfg(not(unix))]
+    let file = OpenOptions::new()
+        .read(true)
+        .open(path)
+        .map_err(SnapshotError::Io)?;
     let metadata = file.metadata().map_err(SnapshotError::Io)?;
     if !metadata.is_file() {
         return Err(SnapshotError::UnsafeSnapshotPath {
@@ -374,6 +399,16 @@ fn open_regular_file(path: &Path) -> Result<File, SnapshotError> {
     }
     require_private_metadata(path, &metadata)?;
     Ok(file)
+}
+
+#[cfg(all(test, unix))]
+pub(crate) fn set_open_private_file_mode_for_test(
+    path: &Path,
+    mode: u32,
+) -> Result<(), SnapshotError> {
+    let file = open_regular_file(path)?;
+    file.set_permissions(fs::Permissions::from_mode(mode))
+        .map_err(SnapshotError::Io)
 }
 
 fn require_private_metadata(path: &Path, metadata: &fs::Metadata) -> Result<(), SnapshotError> {

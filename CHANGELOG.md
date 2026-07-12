@@ -7,6 +7,17 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.7.9 - Unreleased
+
+### Security
+
+- Open snapshot files with no-follow semantics before validating the opened
+  descriptor, closing the check-then-open race while preserving typed unsafe
+  path rejection.
+- Route snapshot corruption fixtures through the atomic store writer and
+  descriptor-based permission changes so security tests do not normalize raw
+  path mutation patterns.
+
 ## 1.7.8 - 2026-07-11
 
 ### Added

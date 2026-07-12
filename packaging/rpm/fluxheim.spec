@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.7.8
+Version:        1.7.9
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sun Jul 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.9-1
+- Start documented and runnable Wasm migration-example parity work.
+- Harden snapshot opens against pathname races and isolate corruption fixtures
+  behind safe store primitives.
+
 * Sat Jul 11 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.8-1
 - Add an opt-in WASI Preview 1 access-decision capability boundary.
 - Require separate clock and randomness grants and reject all other WASI

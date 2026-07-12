@@ -3,7 +3,9 @@ use fluxheim_config::{Config, ProxyConfig};
 use std::sync::{Arc, Barrier};
 
 use crate::store::MAX_SNAPSHOT_STORE_ENTRIES;
-use crate::store_fs::write_atomically_new;
+#[cfg(unix)]
+use crate::store_fs::set_open_private_file_mode_for_test;
+use crate::store_fs::{write_atomically, write_atomically_new};
 use crate::{
     PendingValidation, SnapshotApplyMode, SnapshotEntryStatus, SnapshotError,
     SnapshotIntegrityStatus, SnapshotPruneOptions, SnapshotRuntimeState, SnapshotStore,
@@ -134,18 +136,20 @@ fn authenticated_snapshot_rejects_modified_config() {
     assert_eq!(store.load_runtime_state().unwrap(), Some(state));
     let recovery_path = store.root().join("self-healing.toml");
     let recovery = std::fs::read_to_string(&recovery_path).unwrap();
-    std::fs::write(
+    write_atomically(
         &recovery_path,
-        recovery.replace(&snapshot.id, "tampered-snapshot"),
+        recovery
+            .replace(&snapshot.id, "tampered-snapshot")
+            .as_bytes(),
     )
     .unwrap();
     assert!(matches!(
         store.load_runtime_state(),
         Err(SnapshotError::RuntimeStateIntegrityFailed)
     ));
-    std::fs::write(
+    write_atomically(
         &snapshot.config_path,
-        "[server]\nlisten = [\"127.0.0.1:1\"]\n",
+        b"[server]\nlisten = [\"127.0.0.1:1\"]\n",
     )
     .unwrap();
     assert!(matches!(
@@ -190,16 +194,10 @@ fn rejects_world_readable_integrity_key_and_key_inside_store() {
 #[cfg(unix)]
 #[test]
 fn doctor_rejects_world_readable_snapshot_state() {
-    use std::os::unix::fs::PermissionsExt as _;
-
     let dir = TestDir::new("snapshot-doctor-private");
     let store = SnapshotStore::new(dir.path());
     let snapshot = store.snapshot_config(&Config::default(), None).unwrap();
-    std::fs::set_permissions(
-        &snapshot.config_path,
-        std::fs::Permissions::from_mode(0o644),
-    )
-    .unwrap();
+    set_open_private_file_mode_for_test(&snapshot.config_path, 0o644).unwrap();
 
     let entries = store.list_entries().unwrap();
     assert_eq!(entries[0].status, SnapshotEntryStatus::Corrupt);
@@ -214,9 +212,9 @@ fn verified_rollback_config_is_not_reopened_after_verification() {
     store.snapshot_config(&Config::default(), None).unwrap();
 
     let verified = store.rollback_candidate(None).unwrap();
-    std::fs::write(
+    write_atomically(
         &first.config_path,
-        "[server]\nlisten = [\"127.0.0.1:65535\"]\n",
+        b"[server]\nlisten = [\"127.0.0.1:65535\"]\n",
     )
     .unwrap();
 
@@ -293,7 +291,7 @@ fn resilient_listing_and_doctor_report_corrupt_entries() {
     let dir = TestDir::new("snapshot-doctor-corrupt");
     let store = SnapshotStore::new(dir.path());
     let snapshot = store.snapshot_config(&Config::default(), None).unwrap();
-    std::fs::write(&snapshot.metadata_path, "not valid metadata").unwrap();
+    write_atomically(&snapshot.metadata_path, b"not valid metadata").unwrap();
 
     let entries = store.list_entries().unwrap();
     assert_eq!(entries.len(), 1);
