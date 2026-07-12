@@ -18,9 +18,9 @@ struct AriCacheEntry {
     refresh_after: SystemTime,
 }
 
-static CACHE: std::sync::OnceLock<
-    std::sync::Mutex<std::collections::HashMap<AriCacheKey, AriCacheEntry>>,
-> = std::sync::OnceLock::new();
+type AriCache = std::collections::HashMap<AriCacheKey, AriCacheEntry>;
+
+static CACHE: std::sync::OnceLock<std::sync::Mutex<AriCache>> = std::sync::OnceLock::new();
 
 pub(super) async fn execute_due_queue(
     config: &Config,
@@ -180,11 +180,7 @@ fn safe_ari_schedule(
 }
 
 fn cached_decision(key: &AriCacheKey, now: SystemTime, fallback: bool) -> Option<bool> {
-    let cache = CACHE.get_or_init(Default::default);
-    let mut cache = cache.lock().unwrap_or_else(|_| {
-        log::error!(target: "fluxheim::security", "ACME ARI cache lock poisoned");
-        std::process::abort();
-    });
+    let mut cache = lock_cache();
     cache.retain(|_, entry| entry.refresh_after > now);
     cache.get(key).map(|entry| {
         entry
@@ -194,11 +190,8 @@ fn cached_decision(key: &AriCacheKey, now: SystemTime, fallback: bool) -> Option
 }
 
 fn store_cache(key: &AriCacheKey, scheduled: Option<u64>, now: SystemTime, retry_after: Duration) {
-    let cache = CACHE.get_or_init(Default::default);
-    let mut cache = cache.lock().unwrap_or_else(|_| {
-        log::error!(target: "fluxheim::security", "ACME ARI cache lock poisoned");
-        std::process::abort();
-    });
+    let refresh_after = cache_refresh_after(now, retry_after);
+    let mut cache = lock_cache();
     cache.retain(|_, entry| entry.refresh_after > now);
     if cache.len() >= MAX_CACHE_ENTRIES && !cache.contains_key(key) {
         cache.clear();
@@ -207,10 +200,31 @@ fn store_cache(key: &AriCacheKey, scheduled: Option<u64>, now: SystemTime, retry
         key.clone(),
         AriCacheEntry {
             scheduled_unix_secs: scheduled,
-            refresh_after: now
-                + retry_after.clamp(Duration::from_secs(60), Duration::from_secs(86_400)),
+            refresh_after,
         },
     );
+}
+
+fn cache_refresh_after(now: SystemTime, retry_after: Duration) -> SystemTime {
+    now.checked_add(retry_after.clamp(Duration::from_secs(60), Duration::from_secs(86_400)))
+        .unwrap_or(now)
+}
+
+fn lock_cache() -> std::sync::MutexGuard<'static, AriCache> {
+    let cache = CACHE.get_or_init(Default::default);
+    match cache.lock() {
+        Ok(cache) => cache,
+        Err(poisoned) => {
+            log::error!(
+                target: "fluxheim::security",
+                "ACME ARI advisory cache lock poisoned; discarding cached decisions"
+            );
+            let mut recovered = poisoned.into_inner();
+            recovered.clear();
+            cache.clear_poison();
+            recovered
+        }
+    }
 }
 
 fn unix_secs(time: SystemTime) -> u64 {
@@ -281,6 +295,39 @@ mod tests {
 
         assert_eq!(cached_decision(&first, now, true), Some(false));
         assert_eq!(cached_decision(&second, now, false), Some(true));
+    }
+
+    #[test]
+    fn cache_refresh_deadline_overflow_expires_immediately() {
+        let near_limit = UNIX_EPOCH
+            .checked_add(Duration::from_secs(i64::MAX as u64))
+            .unwrap();
+        assert_eq!(
+            cache_refresh_after(near_limit, Duration::from_secs(86_400)),
+            near_limit
+        );
+    }
+
+    #[test]
+    fn poisoned_advisory_cache_is_cleared_and_recovers() {
+        let _test_lock = CACHE_TEST_LOCK.lock().unwrap();
+        let cache = CACHE.get_or_init(Default::default);
+        let poisoned = std::panic::catch_unwind(|| {
+            let _cache = cache.lock().unwrap();
+            panic!("poison ARI cache for recovery test");
+        });
+        assert!(poisoned.is_err());
+        assert!(cache.is_poisoned());
+
+        let now = UNIX_EPOCH + Duration::from_secs(25_000);
+        let key = AriCacheKey {
+            issuer_directory: "https://issuer.example/directory".to_owned(),
+            certificate_identifier: "recovered-identifier".to_owned(),
+        };
+        store_cache(&key, Some(25_100), now, Duration::from_secs(300));
+
+        assert!(!cache.is_poisoned());
+        assert_eq!(cached_decision(&key, now, true), Some(false));
     }
 
     #[test]

@@ -92,6 +92,59 @@ fn dropped_revocation_quarantine_restores_the_complete_pair() {
     );
 }
 
+#[cfg(feature = "acme-client")]
+#[test]
+fn revocation_reads_quarantined_identity_while_renewal_waits() {
+    let storage = fluxheim_common::test_support::unique_temp_path("acme-revoke-renew-race");
+    let (certificate_a, key_a) = issued_material_for(&["example.test"]);
+    let paths = install_managed_certificate(
+        &storage,
+        "example",
+        certificate_a.as_bytes(),
+        key_a.as_bytes(),
+        &["example.test".to_owned()],
+    )
+    .unwrap();
+    let quarantine = crate::begin_managed_certificate_quarantine(&paths).unwrap();
+
+    assert_eq!(
+        quarantine.read_quarantined_certificate().unwrap(),
+        certificate_a.as_bytes()
+    );
+
+    let (certificate_b, key_b) = issued_material_for(&["example.test"]);
+    let (attempting_tx, attempting_rx) = std::sync::mpsc::channel();
+    let (completed_tx, completed_rx) = std::sync::mpsc::channel();
+    let renewal_storage = storage.clone();
+    let renewal = std::thread::spawn(move || {
+        attempting_tx.send(()).unwrap();
+        completed_tx
+            .send(install_managed_certificate(
+                &renewal_storage,
+                "example",
+                certificate_b.as_bytes(),
+                key_b.as_bytes(),
+                &["example.test".to_owned()],
+            ))
+            .unwrap();
+    });
+
+    attempting_rx
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    assert!(
+        completed_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err()
+    );
+    quarantine.rollback().unwrap();
+    completed_rx
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap()
+        .unwrap();
+    renewal.join().unwrap();
+}
+
 fn installed_revocation_test_pair(label: &str) -> (std::path::PathBuf, AcmeCertificatePaths) {
     let storage = fluxheim_common::test_support::unique_temp_path(label);
     let paths = install_managed_certificate(

@@ -281,7 +281,9 @@ operators can see this capability limit before an incident.
 
 Revocation remains available for managed targets even when automatic renewal is
 disabled. Fluxheim first quarantines the certificate and key atomically under
-the same mutation lock used by TLS readers. A durable fixed-name journal records
+the same mutation lock used by TLS readers, then reads and submits the exact
+quarantined certificate while retaining that lock so concurrent renewal cannot
+substitute another identity. A durable fixed-name journal records
 prepared, pair-quarantined, remote-pending, and remote-confirmed phases with
 validated transaction-derived filenames. A crash before remote contact restores
 the complete pair; an ambiguous remote-pending outcome remains quarantined for
@@ -682,6 +684,9 @@ ARI planning uses four concurrent lookups, a 10-second deadline per target, and
 a 30-second planning budget, executes due renewals progressively, and caches
 successful or unsupported responses until a bounded `Retry-After` deadline.
 Cache entries are namespaced by issuer directory plus certificate identifier.
+Refresh deadlines use checked arithmetic, and a poisoned advisory-cache lock
+causes cached decisions to be discarded and rebuilt instead of terminating the
+process.
 ARI can never postpone renewal inside the final seven days of certificate
 validity, and windows extending beyond `notAfter` are rejected. The cache is
 process-local: external timer invocations retain the concurrency and time

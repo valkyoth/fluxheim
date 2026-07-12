@@ -30,6 +30,9 @@ behavior when the change improves security or project direction.
 - Journal revocation quarantine phases durably so pre-remote crashes restore the
   complete pair, ambiguous remote outcomes stay fail-closed, and confirmed
   quarantine survives crashes while permitting replacement issuance.
+- Bind revocation to the exact certificate moved into quarantine while holding
+  the certificate mutation lock, and make the advisory ARI cache recover from
+  poisoned locks and timestamp overflow without aborting the process.
 - Validate online ACME directories structurally and require exact advertised ToS
   agreement, with an explicit private-directory override only for omitted terms.
 - Parse every advertised ACME endpoint as a bounded HTTPS URI with a real

@@ -141,14 +141,20 @@ pub async fn revoke_instant_acme_certificate(
                 format!("unknown ACME vhost target {vhost_name:?}"),
             )
         })?;
-    let certificate_pem = read_bounded_certificate_file(&target.certificate.cert_path)
-        .map_err(|error| {
+    let account = load_or_create_instant_acme_account(config, &target.issuer).await?;
+    let mut quarantine =
+        begin_managed_certificate_quarantine(&target.certificate).map_err(|error| {
             account_error(
                 &target.issuer,
-                format!("failed to read managed certificate: {error}"),
+                format!("failed to quarantine certificate before revocation: {error}"),
             )
-        })?
-        .ok_or_else(|| account_error(&target.issuer, "managed certificate is missing"))?;
+        })?;
+    let certificate_pem = quarantine.read_quarantined_certificate().map_err(|error| {
+        account_error(
+            &target.issuer,
+            format!("failed to read quarantined certificate: {error}"),
+        )
+    })?;
     use rustls::pki_types::pem::PemObject as _;
     let leaf = rustls::pki_types::CertificateDer::pem_slice_iter(&certificate_pem)
         .next()
@@ -156,21 +162,13 @@ pub async fn revoke_instant_acme_certificate(
         .map_err(|error| {
             account_error(
                 &target.issuer,
-                format!("failed to parse managed certificate: {error}"),
+                format!("failed to parse quarantined certificate: {error}"),
             )
         })?
         .ok_or_else(|| {
             account_error(
                 &target.issuer,
-                "managed certificate has no leaf certificate",
-            )
-        })?;
-    let account = load_or_create_instant_acme_account(config, &target.issuer).await?;
-    let mut quarantine =
-        begin_managed_certificate_quarantine(&target.certificate).map_err(|error| {
-            account_error(
-                &target.issuer,
-                format!("failed to quarantine certificate before revocation: {error}"),
+                "quarantined certificate has no leaf certificate",
             )
         })?;
     quarantine.mark_remote_pending().map_err(|error| {

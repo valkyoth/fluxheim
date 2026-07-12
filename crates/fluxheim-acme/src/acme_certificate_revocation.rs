@@ -4,6 +4,8 @@ use super::fs_ops::{CertificateDirectoryFd, rename_certificate_file, sync_direct
 use super::fs_ops::{
     ManagedCertificateOwner, certificate_directory, open_safe_certificate_directory, write_new_file,
 };
+#[cfg(feature = "acme-client")]
+use super::revocation_fs::read_bounded_regular_file;
 use super::revocation_fs::{
     certificate_file_exists_regular, ensure_certificate_slot_absent, ensure_existing_regular_file,
     revocation_file_names_valid,
@@ -105,6 +107,17 @@ pub(crate) fn begin_managed_certificate_quarantine(
 
 #[cfg(feature = "acme-client")]
 impl ManagedCertificateQuarantine {
+    pub(crate) fn read_quarantined_certificate(
+        &self,
+    ) -> Result<Vec<u8>, AcmeCertificateInstallError> {
+        read_bounded_regular_file(
+            &self.directory,
+            &self.directory.join(&self.journal.certificate_name),
+            self.directory_fd(),
+            MAX_CERTIFICATE_CHAIN_BYTES,
+        )
+    }
+
     pub(crate) fn mark_remote_pending(&mut self) -> Result<(), AcmeCertificateInstallError> {
         self.update_phase(RevocationPhase::RemotePending)
     }
