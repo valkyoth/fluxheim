@@ -18,6 +18,9 @@ for file in \
     examples/wasm/openresty-header-policy.toml \
     examples/wasm/haproxy-spoe-routing-policy.wat \
     examples/wasm/haproxy-spoe-routing-policy.toml \
+    examples/wasm/cache-lookup-policy.wat \
+    examples/wasm/cache-store-policy.wat \
+    examples/wasm/cache-policy.toml \
     scripts/smoke_wasm_policy_examples.sh
 do
     if [ ! -f "$file" ]; then

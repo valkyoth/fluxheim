@@ -1310,6 +1310,7 @@ async fn native_wasm_cache_policy_example_matches_documented_behavior() {
         ("/static/example.png", "mobile-body"),
         ("/static/example.png", "desktop-body"),
         ("/static/example.png", "mobile-refill"),
+        ("/static/example.png", "mobile-after-tag-purge"),
     ])
     .await;
     let mut config = fixture.config_with_attachments(
@@ -1317,13 +1318,13 @@ async fn native_wasm_cache_policy_example_matches_documented_behavior() {
         vec![
             wasm_attachment_phase(
                 "cache_lookup",
-                "route",
+                "vcl-static",
                 100,
                 fluxheim_config::WasmPluginPhase::CacheLookup,
             ),
             wasm_attachment_phase(
                 "cache_store",
-                "route",
+                "vcl-static",
                 100,
                 fluxheim_config::WasmPluginPhase::CacheStore,
             ),
@@ -1331,6 +1332,13 @@ async fn native_wasm_cache_policy_example_matches_documented_behavior() {
     );
     config.vhosts[0].routes[0].path_exact = None;
     config.vhosts[0].routes[0].path_prefix = Some("/".to_owned());
+    config.vhosts[0].name = "vcl.test".to_owned();
+    config.vhosts[0].hosts = vec!["vcl.test".to_owned()];
+    config.vhosts[0].routes[0].name = "vcl-static".to_owned();
+    config.server.default_vhost = Some("vcl.test".to_owned());
+    for attachment in &mut config.wasm.attachments {
+        attachment.vhost = "vcl.test".to_owned();
+    }
     config.vhosts[0].routes[0].redirect = None;
     config.vhosts[0].routes[0].proxy = Some(fluxheim_config::ProxyConfig {
         upstreams: vec![upstream.to_string()],
@@ -1343,23 +1351,23 @@ async fn native_wasm_cache_policy_example_matches_documented_behavior() {
 
     let mobile = downstream_request(
         proxy,
-        "GET /static/example.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
+        "GET /static/example.png HTTP/1.1\r\nHost: vcl.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
     )
     .await;
     let desktop = downstream_request(
         proxy,
-        "GET /static/example.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: desktop\r\nConnection: close\r\n\r\n",
+        "GET /static/example.png HTTP/1.1\r\nHost: vcl.test\r\nX-Device-Class: desktop\r\nConnection: close\r\n\r\n",
     )
     .await;
     let mobile_hit = downstream_request(
         proxy,
-        "GET /static/example.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
+        "GET /static/example.png HTTP/1.1\r\nHost: vcl.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
     )
     .await;
     tokio::time::sleep(Duration::from_millis(1200)).await;
     let mobile_expired = downstream_request(
         proxy,
-        "GET /static/example.png HTTP/1.1\r\nHost: route.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
+        "GET /static/example.png HTTP/1.1\r\nHost: vcl.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
     )
     .await;
 
@@ -1405,6 +1413,27 @@ async fn native_wasm_cache_policy_example_matches_documented_behavior() {
     assert!(mobile_expired.ends_with("mobile-refill"));
     assert_eq!(
         response_header(&mobile_expired, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+
+    let purged = crate::purge_native_memory_cache_tag(
+        "vcl.test",
+        Some("vcl-static"),
+        "vcl.test:route:vcl-static",
+        "wasm-policy",
+        16,
+        false,
+    );
+    assert_eq!(purged.matched, 2);
+    assert_eq!(purged.purged, 2);
+    let after_purge = downstream_request(
+        proxy,
+        "GET /static/example.png HTTP/1.1\r\nHost: vcl.test\r\nX-Device-Class: mobile\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    assert!(after_purge.ends_with("mobile-after-tag-purge"));
+    assert_eq!(
+        response_header(&after_purge, "x-cache-status").as_deref(),
         Some("MISS")
     );
 }

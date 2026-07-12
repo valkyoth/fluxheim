@@ -59,6 +59,13 @@ uses fixed Fluxheim host-call IDs. Plugins cannot emit arbitrary cache-key
 bytes, TTLs, tags, response headers, upstream targets, or filesystem paths
 through this ABI.
 
+Together, these files are the VCL-like cache-policy migration example. The
+live example smoke proves cache pass versus MISS/HIT behavior, bounded
+mobile/desktop key variants, image-only TTL/tag/header mutation, expiry,
+non-image isolation, tag-based purge through normal Fluxheim tooling, and
+fail-closed rejection of unknown or duplicate mutation IDs. Fluxheim does not
+embed VCL and the guest never receives raw cache objects.
+
 `wasi-random-policy.wat` and `wasi-random-policy.toml` demonstrate the opt-in
 `1.7.8` WASI Preview 1 boundary. The module imports only `random_get`, and the
 config grants only randomness. Clocks require their own explicit grant.

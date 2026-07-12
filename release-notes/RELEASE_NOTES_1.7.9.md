@@ -23,6 +23,10 @@ products.
   fixture. Live coverage proves symbolic canary/mirror selection, unavailable
   branch rejection, selected-route policy enforcement, native load balancing,
   and managed-cookie persistence without exposing backend addresses.
+- Promote the existing cache lookup/store WAT pair to the validated VCL-like
+  parity example. The live smoke now proves pass, MISS/HIT, bounded variants,
+  image-only TTL/tag/header metadata, expiry, tag purge, non-image isolation,
+  and fail-closed invalid mutations.
 
 ## Security
 

@@ -12,5 +12,6 @@ cargo test --locked -p fluxheim-server --features wasm \
 cargo test --locked -p fluxheim-server \
     --features "wasm,load-balancer,traffic-mirror" \
     native_wasm_route_decision
+cargo test --locked -p fluxheim-server --features wasm native_wasm_cache_
 
 echo "wasm policy examples smoke: ok"

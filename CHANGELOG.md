@@ -21,6 +21,8 @@ behavior when the change improves security or project direction.
 - Add the checked-in HAProxy Lua/SPOE-style symbolic route policy and config
   example, with live canary, load-balancer, persistence, mirror, and selected
   route-policy coverage.
+- Complete the VCL-like cache-policy example gate with schema validation and
+  live pass, variant, TTL, metadata, tag-purge, and negative mutation coverage.
 
 ### Security
 

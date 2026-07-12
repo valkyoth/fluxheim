@@ -179,6 +179,13 @@ checked-in `examples/wasm/cache-lookup-policy.wat` and
 native HTTP/1 test suite compiles the example sources directly. Richer
 store-admission mutation remains follow-up `1.7.x` cache-policy work.
 
+For `v1.7.9`, the example TOML is schema-validated and the shared live policy
+smoke proves pass versus MISS/HIT behavior, bounded device-class variants,
+image-only TTL/tag/stored-header mutation, TTL expiry, non-image isolation,
+tag-based purge through Fluxheim's cache tooling, and fail-closed unknown or
+duplicate mutation IDs. This is typed VCL-like capability parity; it does not
+embed VCL or expose raw cache objects.
+
 ## Stabilization Requirements
 
 Before `1.7` is complete:
