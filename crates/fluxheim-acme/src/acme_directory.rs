@@ -321,14 +321,20 @@ mod tests {
         let _mount = BindMount(mount_point.clone());
 
         let boundary_directory = open_directory_no_symlinks(&boundary).unwrap();
-        assert!(
-            reconcile_private_directory_subtree(
-                &boundary,
-                &boundary_directory,
-                &mount_point.join("child"),
-                (65_534, 65_534),
-            )
-            .is_err()
+        let error = reconcile_private_directory_subtree(
+            &boundary,
+            &boundary_directory,
+            &mount_point.join("child"),
+            (
+                rustix::process::geteuid().as_raw(),
+                rustix::process::getegid().as_raw(),
+            ),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.raw_os_error(),
+            Some(rustix::io::Errno::XDEV.raw_os_error()),
+            "bind-mount traversal must be rejected by RESOLVE_NO_XDEV"
         );
 
         let after = std::fs::symlink_metadata(&outside).unwrap();

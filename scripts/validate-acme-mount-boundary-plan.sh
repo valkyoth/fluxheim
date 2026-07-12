@@ -19,6 +19,8 @@ require_text() {
 }
 
 require_text "$test_source" '#[ignore = "requires an isolated privileged mount namespace"]'
+require_text "$test_source" 'Some(rustix::io::Errno::XDEV.raw_os_error())'
+require_text "$test_source" 'bind-mount traversal must be rejected by RESOLVE_NO_XDEV'
 require_text "$smoke" 'unshare --user --map-root-user --mount --propagation private --fork'
 require_text "$smoke" '--cap-drop ALL'
 require_text "$smoke" '--cap-add SYS_ADMIN'

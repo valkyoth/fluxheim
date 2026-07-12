@@ -55,7 +55,10 @@ products.
   dedicated smoke using root-mapped user and private mount namespaces, without
   a privileged container. Hosts that disable user namespaces use a
   digest-pinned, network-isolated, read-only container with every capability
-  dropped except the mount operation's required `SYS_ADMIN` capability.
+  dropped except the mount operation's required `SYS_ADMIN` capability. The
+  regression requires the precise `EXDEV` result from Linux `RESOLVE_NO_XDEV`
+  using the namespace's mapped identity, so a later ownership error cannot
+  produce a false pass.
 - Managed ACME account generation now creates P-256 material in zeroizing
   RustCrypto secret/document types before importing it into Ring and retaining
   the durable copy in `sanitization::SecretVec`, removing the transient
