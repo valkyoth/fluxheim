@@ -536,7 +536,8 @@ async fn native_wasm_forbidden_header_mutation_fails_closed() {
 
 #[tokio::test]
 async fn native_wasm_route_decision_selects_configured_canary_route() {
-    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let fixture =
+        WasmRouteFixture::new(&[("router", WasmPluginBody::HaProxySpoeRoutingPolicyExample)]);
     let stable = upstream_expect_body("/lb/item", "stable").await;
     let canary = upstream_expect_body("/lb/item", "canary").await;
     let mut config = fixture.config_with_attachments(
@@ -567,7 +568,8 @@ async fn native_wasm_route_decision_selects_configured_canary_route() {
 
 #[tokio::test]
 async fn native_wasm_route_decision_fails_closed_for_unconfigured_branch() {
-    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let fixture =
+        WasmRouteFixture::new(&[("router", WasmPluginBody::HaProxySpoeRoutingPolicyExample)]);
     let stable = upstream_expect_body("/lb/item", "stable").await;
     let mut config = fixture.config_with_attachments(
         stable,
@@ -594,7 +596,8 @@ async fn native_wasm_route_decision_fails_closed_for_unconfigured_branch() {
 
 #[tokio::test]
 async fn native_wasm_route_decision_does_not_run_before_route_acl() {
-    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let fixture =
+        WasmRouteFixture::new(&[("router", WasmPluginBody::HaProxySpoeRoutingPolicyExample)]);
     let upstream = super::upstream_expect_path("/never", "unexpected").await;
     let mut config = fixture.config_with_attachments(
         upstream,
@@ -624,7 +627,8 @@ async fn native_wasm_route_decision_does_not_run_before_route_acl() {
 
 #[tokio::test]
 async fn native_wasm_route_decision_enforces_selected_route_rate_limit() {
-    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let fixture =
+        WasmRouteFixture::new(&[("router", WasmPluginBody::HaProxySpoeRoutingPolicyExample)]);
     let stable = upstream_expect_body("/limit/item", "stable").await;
     let canary = upstream_expect_body("/limit/item", "canary").await;
     let mut config = fixture.config_with_attachments(
@@ -671,7 +675,8 @@ async fn native_wasm_route_decision_enforces_selected_route_rate_limit() {
 #[cfg(feature = "load-balancer")]
 #[tokio::test]
 async fn native_wasm_route_decision_selects_configured_load_balanced_route() {
-    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let fixture =
+        WasmRouteFixture::new(&[("router", WasmPluginBody::HaProxySpoeRoutingPolicyExample)]);
     let stable = upstream_expect_body("/lb/item", "stable").await;
     let canary_a = upstream_expect_body("/lb/item", "canary-a").await;
     let canary_b = upstream_expect_body("/lb/item", "canary-b").await;
@@ -707,7 +712,8 @@ async fn native_wasm_route_decision_selects_configured_load_balanced_route() {
 #[cfg(feature = "load-balancer")]
 #[tokio::test]
 async fn native_wasm_route_decision_selects_configured_persistent_route() {
-    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let fixture =
+        WasmRouteFixture::new(&[("router", WasmPluginBody::HaProxySpoeRoutingPolicyExample)]);
     let stable = upstream_expect_body("/sticky/item", "stable").await;
     let sticky_a = upstream_body_loop("sticky-a", 2).await;
     let sticky_b = upstream_body_loop("sticky-b", 2).await;
@@ -757,7 +763,8 @@ async fn native_wasm_route_decision_selects_configured_persistent_route() {
 #[cfg(all(feature = "traffic-mirror", not(feature = "privacy-mode")))]
 #[tokio::test]
 async fn native_wasm_route_decision_selects_configured_mirror_route() {
-    let fixture = WasmRouteFixture::new(&[("router", WasmPluginBody::RouteDecision)]);
+    let fixture =
+        WasmRouteFixture::new(&[("router", WasmPluginBody::HaProxySpoeRoutingPolicyExample)]);
     let origin = upstream_expect_body("/shadow/item", "origin").await;
     let (mirror, mirror_rx) = mirror_endpoint().await;
     let mut config = fixture.config_with_attachments(
@@ -1169,7 +1176,7 @@ async fn native_wasm_cross_family_chain_runs_in_order_with_cache_hit_metadata() 
     let fixture = WasmRouteFixture::new(&[
         ("access", WasmPluginBody::Decision(1)),
         ("headers", WasmPluginBody::OpenRestyHeaderPolicyExample),
-        ("router", WasmPluginBody::RouteDecision),
+        ("router", WasmPluginBody::HaProxySpoeRoutingPolicyExample),
         ("cache_key", WasmPluginBody::CacheLookupDeviceKey),
         ("cache_store", WasmPluginBody::CacheStoreHeader),
     ]);
@@ -1904,7 +1911,7 @@ enum WasmPluginBody {
     IrulesAccessPolicyExample,
     OpenRestyHeaderPolicyExample,
     ForbiddenHeader,
-    RouteDecision,
+    HaProxySpoeRoutingPolicyExample,
     CacheLookup,
     CacheLookupDeviceKey,
     CacheLookupForbiddenKey,
@@ -1960,32 +1967,9 @@ impl WasmPluginBody {
                 "#
                 .to_owned()
             }
-            Self::RouteDecision => {
-                r#"
-                (module
-                  (import "fluxheim_policy_v1" "context" (func $context (param i32 i32) (result i32)))
-                  (func (export "fluxheim_route_decision") (result i32)
-                    i32.const 3
-                    i32.const 0
-                    call $context
-                    i32.const 1
-                    i32.eq
-                    if (result i32)
-                      i32.const 3
-                    else
-                      i32.const 2
-                      i32.const 0
-                      call $context
-                      i32.const 1
-                      i32.eq
-                      if (result i32)
-                        i32.const 1
-                      else
-                        i32.const 0
-                      end
-                    end))
-                "#
-                .to_owned()
+            Self::HaProxySpoeRoutingPolicyExample => {
+                include_str!("../../../../examples/wasm/haproxy-spoe-routing-policy.wat")
+                    .to_owned()
             }
             Self::CacheLookup => {
                 r#"
@@ -2332,7 +2316,9 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
         WasmPluginBody::ForbiddenHeader => {
             vec![fluxheim_config::WasmPluginPhase::RequestHeaders]
         }
-        WasmPluginBody::RouteDecision => vec![fluxheim_config::WasmPluginPhase::RouteDecision],
+        WasmPluginBody::HaProxySpoeRoutingPolicyExample => {
+            vec![fluxheim_config::WasmPluginPhase::RouteDecision]
+        }
         WasmPluginBody::CacheLookup
         | WasmPluginBody::CacheLookupDeviceKey
         | WasmPluginBody::CacheLookupForbiddenKey

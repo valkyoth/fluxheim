@@ -31,6 +31,18 @@ cannot create arbitrary names or values. Unknown IDs, duplicate/oversized
 mutations, traps, timeouts, and admission failures follow the configured fail
 mode; security-sensitive examples use `fail-closed`.
 
+`haproxy-spoe-routing-policy.wat` and
+`haproxy-spoe-routing-policy.toml` demonstrate the HAProxy Lua/SPOE-style
+routing mapping. The guest receives only bounded `x-canary: 1` and
+`x-mirror: 1` signals. It may continue normal selection or choose an existing
+matching route named `canary` or `mirror`; it cannot name an arbitrary pool,
+backend, URL, persistence key, or TLS policy.
+
+The selected route still passes its own ACL, rate-limit, concurrency,
+load-balancer, health, persistence, retry, and traffic-mirror controls. If the
+symbolic branch is not configured and still valid for the request, selection
+fails closed instead of falling back to an attacker-chosen destination.
+
 `cache-lookup-policy.wat` and `cache-store-policy.wat` demonstrate the bounded
 1.7.5 cache-policy ABI:
 

@@ -18,6 +18,9 @@ behavior when the change improves security or project direction.
   opt-in Wasm release gate.
 - Add the checked-in nginx Lua/OpenResty-style bounded request/response header
   policy and config example, compiled directly by its real listener tests.
+- Add the checked-in HAProxy Lua/SPOE-style symbolic route policy and config
+  example, with live canary, load-balancer, persistence, mirror, and selected
+  route-policy coverage.
 
 ### Security
 

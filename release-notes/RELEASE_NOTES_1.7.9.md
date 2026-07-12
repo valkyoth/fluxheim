@@ -19,6 +19,10 @@ products.
   fixture. Live coverage proves the allow-listed origin request mutation,
   client response mutation, upstream-header removal, and fail-closed rejection
   of unknown mutation IDs.
+- Add a checked-in HAProxy Lua/SPOE-style route policy and complete config
+  fixture. Live coverage proves symbolic canary/mirror selection, unavailable
+  branch rejection, selected-route policy enforcement, native load balancing,
+  and managed-cookie persistence without exposing backend addresses.
 
 ## Security
 

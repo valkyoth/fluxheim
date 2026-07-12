@@ -56,6 +56,17 @@ fn openresty_header_policy_example_config_validates() {
 }
 
 #[cfg(feature = "wasm")]
+#[test]
+fn haproxy_spoe_routing_policy_example_config_validates() {
+    let config: Config = toml::from_str(include_str!(
+        "../../../examples/wasm/haproxy-spoe-routing-policy.toml"
+    ))
+    .unwrap();
+
+    assert_eq!(config.validate(), Ok(()));
+}
+
+#[cfg(feature = "wasm")]
 fn proxy_preview_wasm_config(plugin_fields: &str) -> Config {
     toml::from_str(&format!(
         r#"

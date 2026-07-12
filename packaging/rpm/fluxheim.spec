@@ -158,6 +158,7 @@ fi
 - Start documented and runnable Wasm migration-example parity work.
 - Add the F5 iRules-style route access example and real listener smoke.
 - Add the nginx Lua/OpenResty-style bounded header-policy example.
+- Add the HAProxy Lua/SPOE-style bounded route and load-balancer example.
 - Harden snapshot opens against pathname races and isolate corruption fixtures
   behind safe store primitives.
 

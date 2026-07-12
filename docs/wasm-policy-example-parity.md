@@ -132,6 +132,14 @@ The hook can continue, deny, or select a configured matching branch; arbitrary
 pool names, persistence keys, and mirror/shadow target decisions remain staged
 for later `1.7.x` slices.
 
+The `v1.7.9` runnable mapping is checked in as
+`examples/wasm/haproxy-spoe-routing-policy.wat` with a complete config fixture.
+The shared live smoke compiles that source and proves configured canary route
+selection, unavailable-branch fail-closed behavior, selected-route policy
+enforcement, native load-balancer selection, managed-cookie persistence, and
+safe configured mirror routing. Backend addresses, arbitrary persistence keys,
+and mirror URLs remain outside the guest ABI.
+
 ### VCL-Like Cache Policy
 
 Capability target:
