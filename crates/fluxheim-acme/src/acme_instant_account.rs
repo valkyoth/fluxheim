@@ -38,17 +38,32 @@ pub async fn load_or_create_instant_acme_account(
             issuer: issuer_name.to_owned(),
         })?;
 
-    if let Some(credentials) = load_account_credentials(storage, issuer_name)
-        .map_err(AcmeInstantClientError::AccountStore)?
-    {
-        return bounded_acme_account_builder(issuer)?
-            .from_credentials(credentials)
-            .await
-            .map_err(|error| AcmeInstantClientError::Account {
-                issuer: issuer_name.to_owned(),
-                message: error.to_string(),
-            });
-    }
+    let bootstrap_storage = storage.to_path_buf();
+    let bootstrap_issuer = issuer_name.to_owned();
+    let bootstrap_directory = issuer.directory_url.clone();
+    let bootstrap = tokio::task::spawn_blocking(move || {
+        begin_account_bootstrap(&bootstrap_storage, &bootstrap_issuer, &bootstrap_directory)
+    })
+    .await
+    .map_err(|error| {
+        account_error(
+            issuer_name,
+            format!("account bootstrap task failed: {error}"),
+        )
+    })?
+    .map_err(AcmeInstantClientError::AccountStore)?;
+    let bootstrap = match bootstrap {
+        AccountBootstrap::Existing(credentials) => {
+            return bounded_acme_account_builder(issuer)?
+                .from_credentials(credentials)
+                .await
+                .map_err(|error| AcmeInstantClientError::Account {
+                    issuer: issuer_name.to_owned(),
+                    message: error.to_string(),
+                });
+        }
+        AccountBootstrap::Pending(bootstrap) => bootstrap,
+    };
 
     let contact_storage;
     let contacts: &[&str] = if let Some(email) = config.tls.acme.contact_email.as_deref() {
@@ -74,20 +89,54 @@ pub async fn load_or_create_instant_acme_account(
         Some(secrets) => Some(external_account_key_from_secrets(issuer_name, secrets)?),
         None => None,
     };
-    let (account, credentials) = bounded_acme_account_builder(issuer)?
-        .create(
-            &account_request,
-            issuer.directory_url.clone(),
-            eab_key.as_ref(),
-        )
-        .await
-        .map_err(|error| AcmeInstantClientError::Account {
-            issuer: issuer_name.to_owned(),
-            message: error.to_string(),
-        })?;
-    store_account_credentials(storage, issuer_name, &credentials)
+    let mut bootstrap = bootstrap;
+    let restored = if bootstrap.recovered() {
+        let key = bootstrap
+            .existing_key_pair()
+            .map_err(AcmeInstantClientError::AccountStore)?;
+        match bounded_acme_account_builder(issuer)?
+            .from_key(key, issuer.directory_url.clone())
+            .await
+        {
+            Ok(account) => Some(account),
+            Err(error) if acme_account_does_not_exist(&error) => None,
+            Err(error) => {
+                return Err(account_error(issuer_name, error.to_string()));
+            }
+        }
+    } else {
+        None
+    };
+    let (account, credentials) = match restored {
+        Some(account) => account,
+        None => {
+            let key = bootstrap
+                .key_pair()
+                .map_err(AcmeInstantClientError::AccountStore)?;
+            bounded_acme_account_builder(issuer)?
+                .create_with_key(
+                    &account_request,
+                    key,
+                    issuer.directory_url.clone(),
+                    eab_key.as_ref(),
+                )
+                .await
+                .map_err(|error| account_error(issuer_name, error.to_string()))?
+        }
+    };
+    bootstrap
+        .promote(&credentials)
         .map_err(AcmeInstantClientError::AccountStore)?;
     Ok(account)
+}
+
+fn acme_account_does_not_exist(error: &instant_acme::Error) -> bool {
+    matches!(
+        error,
+        instant_acme::Error::Api(problem)
+            if problem.r#type.as_deref()
+                == Some("urn:ietf:params:acme:error:accountDoesNotExist")
+    )
 }
 
 pub async fn rollover_instant_acme_account_key(

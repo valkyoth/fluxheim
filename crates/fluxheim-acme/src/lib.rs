@@ -257,8 +257,10 @@ mod acme_targets;
 mod acme_tls_alpn;
 #[path = "acme_transaction.rs"]
 mod acme_transaction;
+#[cfg(all(feature = "acme-client", test))]
+use acme_account_store::PendingAccountBootstrap;
 #[cfg(feature = "acme-client")]
-use acme_account_store::begin_account_deactivation;
+use acme_account_store::{AccountBootstrap, begin_account_bootstrap, begin_account_deactivation};
 pub use acme_account_store::{
     account_credentials_path, load_account_credentials, remove_account_credentials,
     store_account_credentials,

@@ -33,6 +33,10 @@ behavior when the change improves security or project direction.
 - Bind revocation to the exact certificate moved into quarantine while holding
   the certificate mutation lock, and make the advisory ARI cache recover from
   poisoned locks and timestamp overflow without aborting the process.
+- Persist a directory-bound ACME account key before remote account activation,
+  serialize bootstrap per issuer, and recover ambiguous creation with the same
+  key before atomically promoting credentials. A pinned `instant-acme 0.8.5`
+  API patch preserves configured contacts and EAB with caller-provided keys.
 - Validate online ACME directories structurally and require exact advertised ToS
   agreement, with an explicit private-directory override only for omitted terms.
 - Parse every advertised ACME endpoint as a bounded HTTPS URI with a real

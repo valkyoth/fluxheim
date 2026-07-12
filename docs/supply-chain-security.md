@@ -52,6 +52,9 @@ Required review for dependency changes:
 - Do not build untrusted forks, unreviewed dependency branches, or experimental
   dependency updates in an environment that has release keys, production tokens,
   registry credentials, SSH agents, or cloud credentials.
+- Treat the pinned `vendor/instant-acme` source as reviewed third-party code.
+  Its `PATCH.md` records the crates.io checksum, upstream commit, sole API
+  addition, focused regression requirement, and removal condition.
 - Treat `.cargo/config.toml`, Cargo aliases, wrapper scripts, CI workflow
   changes, and release scripts as executable supply-chain changes.
 

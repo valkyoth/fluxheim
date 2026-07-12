@@ -5,6 +5,14 @@ use std::path::{Path, PathBuf};
 
 use sanitization::SecretVec;
 
+#[cfg(feature = "acme-client")]
+#[path = "acme_account_bootstrap.rs"]
+mod bootstrap;
+#[cfg(all(feature = "acme-client", test))]
+pub(crate) use bootstrap::PendingAccountBootstrap;
+#[cfg(feature = "acme-client")]
+pub(crate) use bootstrap::{AccountBootstrap, begin_account_bootstrap};
+
 #[cfg(target_os = "linux")]
 use super::UNIX_O_NOFOLLOW;
 use super::{
@@ -57,6 +65,14 @@ pub fn load_account_credentials(
     }
     let _lock = AcmeMutationLock::acquire(directory)
         .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?;
+    load_account_credentials_locked(&path, directory, false)
+}
+
+fn load_account_credentials_locked(
+    path: &Path,
+    directory: &Path,
+    allow_bootstrap_recovery: bool,
+) -> Result<Option<instant_acme::AccountCredentials>, AcmeAccountStoreError> {
     let pending = directory.join(ACME_ACCOUNT_DEACTIVATION_FILE);
     if pending
         .try_exists()
@@ -68,44 +84,57 @@ pub fn load_account_credentials(
                 .to_owned(),
         });
     }
-    let metadata = match fs::symlink_metadata(&path) {
+    let bootstrap_pending = directory.join(".credentials.bootstrap.pending");
+    if !allow_bootstrap_recovery
+        && bootstrap_pending
+            .try_exists()
+            .map_err(|error| account_store_io_error(&bootstrap_pending, error))?
+    {
+        return Err(AcmeAccountStoreError::UnsafePath {
+            path: bootstrap_pending,
+            message:
+                "account bootstrap is pending; recovery must complete before credentials are used"
+                    .to_owned(),
+        });
+    }
+    let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(account_store_io_error(&path, error)),
+        Err(error) => return Err(account_store_io_error(path, error)),
     };
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(AcmeAccountStoreError::UnsafePath {
-            path,
+            path: path.to_path_buf(),
             message: "credentials path is not a real file".to_owned(),
         });
     }
     if metadata.len() > MAX_ACCOUNT_CREDENTIALS_BYTES {
         return Err(AcmeAccountStoreError::Oversized {
-            path,
+            path: path.to_path_buf(),
             max_bytes: MAX_ACCOUNT_CREDENTIALS_BYTES,
         });
     }
 
-    let mut file = open_regular_account_credentials_file(&path)
-        .map_err(|error| account_store_io_error(&path, error))?;
+    let mut file = open_regular_account_credentials_file(path)
+        .map_err(|error| account_store_io_error(path, error))?;
     let admitted =
         usize::try_from(metadata.len()).map_err(|_| AcmeAccountStoreError::Oversized {
-            path: path.clone(),
+            path: path.to_path_buf(),
             max_bytes: MAX_ACCOUNT_CREDENTIALS_BYTES,
         })?;
     let mut contents = SecretVec::from_fn(admitted, |_| 0);
     contents
         .with_secret_mut(|contents| file.read_exact(contents))
-        .map_err(|error| account_store_io_error(&path, error))?;
+        .map_err(|error| account_store_io_error(path, error))?;
     let mut growth_probe = [0_u8; 1];
     let grew = file
         .read(&mut growth_probe)
-        .map_err(|error| account_store_io_error(&path, error))?
+        .map_err(|error| account_store_io_error(path, error))?
         != 0;
     sanitization::SecureSanitize::secure_sanitize(&mut growth_probe);
     if grew {
         return Err(AcmeAccountStoreError::Oversized {
-            path,
+            path: path.to_path_buf(),
             max_bytes: MAX_ACCOUNT_CREDENTIALS_BYTES,
         });
     }
@@ -114,7 +143,7 @@ pub fn load_account_credentials(
         .with_secret(|contents| serde_json::from_slice(contents))
         .map(Some)
         .map_err(|error| AcmeAccountStoreError::Deserialize {
-            path,
+            path: path.to_path_buf(),
             message: error.to_string(),
         })
 }
@@ -191,6 +220,25 @@ pub fn store_account_credentials(
     ensure_safe_account_directory(directory)?;
     let _mutation_lock = AcmeMutationLock::acquire(directory)
         .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?;
+    let bootstrap_pending = directory.join(".credentials.bootstrap.pending");
+    if bootstrap_pending
+        .try_exists()
+        .map_err(|error| account_store_io_error(&bootstrap_pending, error))?
+    {
+        return Err(AcmeAccountStoreError::UnsafePath {
+            path: bootstrap_pending,
+            message: "account bootstrap is pending; credentials must be promoted by the bootstrap transaction"
+                .to_owned(),
+        });
+    }
+    store_account_credentials_locked(&credentials_path, directory, credentials)
+}
+
+fn store_account_credentials_locked(
+    credentials_path: &AcmeAccountCredentialsPath,
+    directory: &Path,
+    credentials: &instant_acme::AccountCredentials,
+) -> Result<AcmeAccountCredentialsPath, AcmeAccountStoreError> {
     ensure_safe_account_destination(&credentials_path.path)?;
 
     let contents = SecretVec::from_vec(serde_json::to_vec(credentials).map_err(|error| {
@@ -221,7 +269,7 @@ pub fn store_account_credentials(
     }
 
     result?;
-    Ok(credentials_path)
+    Ok(credentials_path.clone())
 }
 
 pub fn remove_account_credentials(

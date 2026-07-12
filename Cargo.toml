@@ -308,3 +308,8 @@ zstd = { version = "0.13.3", default-features = false }
 [profile.release]
 panic = "abort"
 overflow-checks = true
+
+[patch.crates-io]
+# Narrow downstream API patch: lets Fluxheim persist an ACME account key before
+# remote activation while retaining configured contacts and EAB parameters.
+instant-acme = { path = "vendor/instant-acme" }

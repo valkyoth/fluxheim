@@ -6,6 +6,13 @@ use fluxheim_config::{
     ProxyConfig, TlsConfig, VhostAcmeConfig, VhostConfig, VhostTlsConfig, WebConfig,
 };
 
+#[cfg(feature = "acme-client")]
+use super::{
+    AccountBootstrap, AcmeCertificatePaths, AcmeInstantClientError, AcmeTlsAlpn01ChallengeStore,
+    PendingAccountBootstrap, begin_account_bootstrap, decode_eab_hmac_key,
+    recover_managed_certificate_transaction, renew_selected_instant_acme_targets,
+    tls_alpn_01_certificate,
+};
 use super::{
     AcmeAccountStoreError, AcmeCertificateInstallError, AcmeHttp01Challenge,
     AcmeHttp01ChallengeStore, AcmeIssuedCertificate, AcmePreparedHttp01Order, AcmeRenewalError,
@@ -17,14 +24,14 @@ use super::{
     remove_account_credentials, renewal_targets, store_account_credentials,
     toml_offset_datetime_to_system_time,
 };
-#[cfg(feature = "acme-client")]
-use super::{
-    AcmeCertificatePaths, AcmeInstantClientError, AcmeTlsAlpn01ChallengeStore, decode_eab_hmac_key,
-    recover_managed_certificate_transaction, renew_selected_instant_acme_targets,
-    tls_alpn_01_certificate,
-};
 use proptest::prelude::*;
 
+#[cfg(feature = "acme-client")]
+#[path = "acme_tests_account_api.rs"]
+mod account_api;
+#[cfg(feature = "acme-client")]
+#[path = "acme_tests_account_bootstrap.rs"]
+mod account_bootstrap;
 #[cfg(feature = "acme-client")]
 #[path = "acme_tests_lifecycle.rs"]
 mod lifecycle;
