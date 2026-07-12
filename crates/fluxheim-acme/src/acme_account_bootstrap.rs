@@ -24,23 +24,67 @@ pub(crate) struct PendingAccountBootstrap {
     _lock: AcmeMutationLock,
 }
 
+#[cfg(test)]
 pub(crate) fn begin_account_bootstrap(
     storage: &Path,
     issuer_name: &str,
     issuer_directory: &str,
 ) -> Result<AccountBootstrap, AcmeAccountStoreError> {
     let credentials_path = account_credentials_path(storage, issuer_name);
-    let directory =
-        credentials_path
-            .path
-            .parent()
-            .ok_or_else(|| AcmeAccountStoreError::UnsafePath {
-                path: credentials_path.path.clone(),
-                message: "credentials path has no parent directory".to_owned(),
-            })?;
-    ensure_safe_account_directory(directory)?;
-    let mutation_lock = AcmeMutationLock::acquire(directory)
+    let directory = credentials_path
+        .path
+        .parent()
+        .ok_or_else(|| AcmeAccountStoreError::UnsafePath {
+            path: credentials_path.path.clone(),
+            message: "credentials path has no parent directory".to_owned(),
+        })?
+        .to_path_buf();
+    ensure_safe_account_directory(&directory)?;
+    let mutation_lock = AcmeMutationLock::acquire(&directory)
         .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?;
+    begin_account_bootstrap_locked(
+        credentials_path,
+        &directory,
+        issuer_directory,
+        mutation_lock,
+    )
+}
+
+pub(crate) fn try_begin_account_bootstrap(
+    storage: &Path,
+    issuer_name: &str,
+    issuer_directory: &str,
+) -> Result<AccountStoreAttempt<AccountBootstrap>, AcmeAccountStoreError> {
+    let credentials_path = account_credentials_path(storage, issuer_name);
+    let directory = credentials_path
+        .path
+        .parent()
+        .ok_or_else(|| AcmeAccountStoreError::UnsafePath {
+            path: credentials_path.path.clone(),
+            message: "credentials path has no parent directory".to_owned(),
+        })?
+        .to_path_buf();
+    ensure_safe_account_directory(&directory)?;
+    let Some(mutation_lock) = AcmeMutationLock::try_acquire(&directory)
+        .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?
+    else {
+        return Ok(AccountStoreAttempt::Contended);
+    };
+    begin_account_bootstrap_locked(
+        credentials_path,
+        &directory,
+        issuer_directory,
+        mutation_lock,
+    )
+    .map(AccountStoreAttempt::Acquired)
+}
+
+fn begin_account_bootstrap_locked(
+    credentials_path: AcmeAccountCredentialsPath,
+    directory: &Path,
+    issuer_directory: &str,
+    mutation_lock: AcmeMutationLock,
+) -> Result<AccountBootstrap, AcmeAccountStoreError> {
     let pending_path = directory.join(ACCOUNT_BOOTSTRAP_PENDING_FILE);
     let credentials = load_account_credentials_locked(&credentials_path.path, directory, true)?;
     let pending = read_pending_key(&pending_path, issuer_directory)?;

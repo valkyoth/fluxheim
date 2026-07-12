@@ -19,6 +19,9 @@ perl scripts/check-doc-links.pl
 echo "stable release gate: modularity policy"
 scripts/validate-modularity-policy.sh check
 
+echo "stable release gate: instant-acme patch provenance"
+scripts/validate-instant-acme-patch.sh
+
 if [ "$mode" = "release" ]; then
     echo "stable release gate: runtime baseline"
     scripts/capture-runtime-baseline.sh release

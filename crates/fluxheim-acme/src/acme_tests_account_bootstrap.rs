@@ -70,6 +70,78 @@ fn account_bootstrap_lock_serializes_concurrent_creation() {
     worker.join().unwrap();
 }
 
+#[test]
+fn current_thread_runtime_stays_responsive_during_bootstrap_lock_contention() {
+    let storage = fluxheim_common::test_support::unique_temp_path("acme-account-async-lock");
+    let pending =
+        match begin_account_bootstrap(&storage, "issuer", "https://acme.example.test/directory")
+            .unwrap()
+        {
+            AccountBootstrap::Pending(pending) => pending,
+            AccountBootstrap::Existing(_) => panic!("expected a pending account bootstrap"),
+        };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async move {
+        let heartbeat = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let heartbeat_task = {
+            let heartbeat = heartbeat.clone();
+            async move {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                heartbeat.store(true, std::sync::atomic::Ordering::Release);
+            }
+        };
+        let simulated_network_pause = async move {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert!(heartbeat.load(std::sync::atomic::Ordering::Acquire));
+            drop(pending);
+        };
+        let credential_load =
+            crate::acme_account_async::load_account_credentials_async(&storage, "issuer");
+
+        let (load_result, (), ()) =
+            futures::future::join3(credential_load, simulated_network_pause, heartbeat_task).await;
+        let error = match load_result {
+            Ok(_) => panic!("expected pending bootstrap to block credential load"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("bootstrap is pending"));
+    });
+}
+
+#[test]
+fn async_account_lock_contention_has_a_bounded_deadline() {
+    let storage = fluxheim_common::test_support::unique_temp_path("acme-account-async-timeout");
+    let pending =
+        match begin_account_bootstrap(&storage, "issuer", "https://acme.example.test/directory")
+            .unwrap()
+        {
+            AccountBootstrap::Pending(pending) => pending,
+            AccountBootstrap::Existing(_) => panic!("expected a pending account bootstrap"),
+        };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let started = std::time::Instant::now();
+    let error = match runtime.block_on(
+        crate::acme_account_async::load_account_credentials_with_test_timeout(
+            &storage,
+            "issuer",
+            std::time::Duration::from_millis(50),
+        ),
+    ) {
+        Ok(_) => panic!("expected account lock contention timeout"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("timed out"));
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    drop(pending);
+}
+
 #[cfg(feature = "acme-client")]
 #[test]
 fn account_bootstrap_promotion_is_durable_and_cleans_pending_key() {

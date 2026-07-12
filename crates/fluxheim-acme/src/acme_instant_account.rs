@@ -38,20 +38,12 @@ pub async fn load_or_create_instant_acme_account(
             issuer: issuer_name.to_owned(),
         })?;
 
-    let bootstrap_storage = storage.to_path_buf();
-    let bootstrap_issuer = issuer_name.to_owned();
-    let bootstrap_directory = issuer.directory_url.clone();
-    let bootstrap = tokio::task::spawn_blocking(move || {
-        begin_account_bootstrap(&bootstrap_storage, &bootstrap_issuer, &bootstrap_directory)
-    })
-    .await
-    .map_err(|error| {
-        account_error(
-            issuer_name,
-            format!("account bootstrap task failed: {error}"),
-        )
-    })?
-    .map_err(AcmeInstantClientError::AccountStore)?;
+    let bootstrap = acme_account_async::begin_account_bootstrap_async(
+        storage,
+        issuer_name,
+        &issuer.directory_url,
+    )
+    .await?;
     let bootstrap = match bootstrap {
         AccountBootstrap::Existing(credentials) => {
             return bounded_acme_account_builder(issuer)?
@@ -124,9 +116,8 @@ pub async fn load_or_create_instant_acme_account(
                 .map_err(|error| account_error(issuer_name, error.to_string()))?
         }
     };
-    bootstrap
-        .promote(&credentials)
-        .map_err(AcmeInstantClientError::AccountStore)?;
+    acme_account_async::promote_account_bootstrap_async(bootstrap, credentials, issuer_name)
+        .await?;
     Ok(account)
 }
 
@@ -153,27 +144,31 @@ pub async fn deactivate_instant_acme_account(
     config: &Config,
     issuer_name: &str,
 ) -> Result<(), AcmeInstantClientError> {
-    let storage = existing_account_storage(config, issuer_name)?;
+    let storage = existing_account_storage(config, issuer_name).await?;
     let account = load_or_create_instant_acme_account(config, issuer_name).await?;
-    let transaction = begin_account_deactivation(storage, issuer_name)
-        .map_err(AcmeInstantClientError::AccountStore)?;
+    let transaction =
+        acme_account_async::begin_account_deactivation_async(storage, issuer_name).await?;
     let result = tokio::time::timeout(ACME_ACCOUNT_OPERATION_TIMEOUT, account.deactivate())
         .await
         .map_err(|_| account_error(issuer_name, "ACME account deactivation timed out"))?
         .map_err(|error| account_error(issuer_name, error.to_string()));
     match result {
-        Ok(()) => transaction
-            .complete()
-            .map_err(AcmeInstantClientError::AccountStore),
-        Err(primary) => match transaction.rollback() {
-            Ok(()) => Err(primary),
-            Err(rollback) => Err(account_error(
-                issuer_name,
-                format!(
-                    "remote deactivation failed ({primary}); local credential rollback also failed ({rollback})"
-                ),
-            )),
-        },
+        Ok(()) => {
+            acme_account_async::complete_account_deactivation_async(transaction, issuer_name).await
+        }
+        Err(primary) => {
+            match acme_account_async::rollback_account_deactivation_async(transaction, issuer_name)
+                .await
+            {
+                Ok(()) => Err(primary),
+                Err(rollback) => Err(account_error(
+                    issuer_name,
+                    format!(
+                        "remote deactivation failed ({primary}); local credential rollback also failed ({rollback})"
+                    ),
+                )),
+            }
+        }
     }
 }
 
@@ -264,7 +259,7 @@ pub async fn revoke_instant_acme_certificate(
     })
 }
 
-fn existing_account_storage<'a>(
+async fn existing_account_storage<'a>(
     config: &'a Config,
     issuer_name: &str,
 ) -> Result<&'a Path, AcmeInstantClientError> {
@@ -274,8 +269,8 @@ fn existing_account_storage<'a>(
         .storage
         .as_deref()
         .ok_or(AcmeInstantClientError::MissingStorage)?;
-    if load_account_credentials(storage, issuer_name)
-        .map_err(AcmeInstantClientError::AccountStore)?
+    if acme_account_async::load_account_credentials_async(storage, issuer_name)
+        .await?
         .is_none()
     {
         return Err(account_error(issuer_name, "no stored ACME account exists"));

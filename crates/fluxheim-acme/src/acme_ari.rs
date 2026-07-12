@@ -70,7 +70,9 @@ async fn allows_renewal_now(config: &Config, item: &AcmeRenewalItem, now: System
     let Some(storage) = config.tls.acme.storage.as_deref() else {
         return fallback;
     };
-    let Ok(Some(credentials)) = load_account_credentials(storage, &item.target.issuer) else {
+    let Ok(Some(credentials)) =
+        acme_account_async::load_account_credentials_async(storage, &item.target.issuer).await
+    else {
         return fallback;
     };
     let Some(issuer) = config

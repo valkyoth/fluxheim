@@ -113,6 +113,50 @@ impl AcmeMutationLock {
             Ok(Self { file })
         }
     }
+
+    #[cfg(any(feature = "acme-client", test))]
+    pub(crate) fn try_acquire(directory: &Path) -> io::Result<Option<Self>> {
+        #[cfg(unix)]
+        {
+            let directory = rustix::fs::openat(
+                rustix::fs::CWD,
+                directory,
+                rustix::fs::OFlags::RDONLY
+                    | rustix::fs::OFlags::DIRECTORY
+                    | rustix::fs::OFlags::NOFOLLOW
+                    | rustix::fs::OFlags::CLOEXEC,
+                rustix::fs::Mode::empty(),
+            )?;
+            let lock = rustix::fs::openat(
+                &directory,
+                ACME_MUTATION_LOCK_FILE,
+                rustix::fs::OFlags::RDWR
+                    | rustix::fs::OFlags::CREATE
+                    | rustix::fs::OFlags::NOFOLLOW
+                    | rustix::fs::OFlags::CLOEXEC,
+                rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+            )?;
+            match rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+                Ok(()) => Ok(Some(Self { file: lock.into() })),
+                Err(error) if error == rustix::io::Errno::AGAIN => Ok(None),
+                Err(error) => Err(error.into()),
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(directory.join(ACME_MUTATION_LOCK_FILE))?;
+            match file.try_lock() {
+                Ok(()) => Ok(Some(Self { file })),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
+                Err(error) => Err(error),
+            }
+        }
+    }
 }
 
 impl Drop for AcmeMutationLock {
@@ -162,5 +206,16 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(2))
             .unwrap();
         writer.join().unwrap();
+    }
+
+    #[test]
+    fn nonblocking_mutation_lock_reports_contention() {
+        let directory = fluxheim_common::test_support::unique_temp_path("acme-try-lock");
+        std::fs::create_dir_all(&directory).unwrap();
+        let lock = AcmeMutationLock::acquire(&directory).unwrap();
+
+        assert!(AcmeMutationLock::try_acquire(&directory).unwrap().is_none());
+        drop(lock);
+        assert!(AcmeMutationLock::try_acquire(&directory).unwrap().is_some());
     }
 }

@@ -174,6 +174,14 @@ key, the configured contacts, and EAB only when the issuer explicitly reports
 removed. Active credentials and a leftover matching pending record therefore
 recover automatically; mismatched state fails closed.
 
+Async account operations never perform a blocking lifecycle-lock wait on a
+Tokio worker. Fluxheim attempts the filesystem lock nonblockingly on a blocking
+worker, sleeps asynchronously between contended attempts, logs the first wait,
+and returns a visible error after 10 seconds. Credential reads, bootstrap,
+deactivation start, credential promotion, rollback, and completion follow this
+boundary. This keeps a slow issuer from combining a held bootstrap lock with a
+blocked single-thread runtime or an exhausted Tokio worker pool.
+
 Pending account-key buffers use `sanitization::SecretVec`. The pending file is
 overwritten, synced, truncated, and unlinked after durable
 credential promotion; storage devices and copy-on-write filesystems may retain

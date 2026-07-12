@@ -82,6 +82,9 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: Validate instant-acme patch provenance
+        run: scripts/validate-instant-acme-patch.sh
+
       - name: Validate panic policy on feature profiles
         run: |
           cargo clippy --no-default-features --features proxy,tls-rustls,acme --all-targets -- -D warnings

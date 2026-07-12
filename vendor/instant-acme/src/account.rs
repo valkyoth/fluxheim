@@ -445,6 +445,7 @@ impl AccountBuilder {
         .await
     }
 
+    // FLUXHEIM PATCH BEGIN: durable caller-key account bootstrap
     /// Create a new account with caller-provided account parameters and private key
     ///
     /// This is equivalent to [`AccountBuilder::create()`], except that callers can
@@ -464,6 +465,7 @@ impl AccountBuilder {
         )
         .await
     }
+    // FLUXHEIM PATCH END: durable caller-key account bootstrap
 
     /// Load an existing account for the given private key
     ///

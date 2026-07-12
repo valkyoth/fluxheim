@@ -9,9 +9,11 @@ use sanitization::SecretVec;
 #[path = "acme_account_bootstrap.rs"]
 mod bootstrap;
 #[cfg(all(feature = "acme-client", test))]
-pub(crate) use bootstrap::PendingAccountBootstrap;
+pub(crate) use bootstrap::begin_account_bootstrap;
 #[cfg(feature = "acme-client")]
-pub(crate) use bootstrap::{AccountBootstrap, begin_account_bootstrap};
+pub(crate) use bootstrap::{
+    AccountBootstrap, PendingAccountBootstrap, try_begin_account_bootstrap,
+};
 
 #[cfg(target_os = "linux")]
 use super::UNIX_O_NOFOLLOW;
@@ -23,6 +25,12 @@ use super::{
 const ACME_ACCOUNT_DIR: &str = "accounts";
 const ACME_ACCOUNT_CREDENTIALS_FILE: &str = "credentials.json";
 const ACME_ACCOUNT_DEACTIVATION_FILE: &str = ".credentials.deactivation.pending";
+
+#[cfg(feature = "acme-client")]
+pub(crate) enum AccountStoreAttempt<T> {
+    Acquired(T),
+    Contended,
+}
 
 #[cfg(feature = "acme-client")]
 pub(crate) struct AccountDeactivationTransaction {
@@ -66,6 +74,39 @@ pub fn load_account_credentials(
     let _lock = AcmeMutationLock::acquire(directory)
         .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?;
     load_account_credentials_locked(&path, directory, false)
+}
+
+#[cfg(feature = "acme-client")]
+pub(crate) fn try_load_account_credentials(
+    storage: &Path,
+    issuer_name: &str,
+) -> Result<AccountStoreAttempt<Option<instant_acme::AccountCredentials>>, AcmeAccountStoreError> {
+    let path = account_credentials_path(storage, issuer_name).path;
+    let directory = path
+        .parent()
+        .ok_or_else(|| AcmeAccountStoreError::UnsafePath {
+            path: path.clone(),
+            message: "credentials path has no parent directory".to_owned(),
+        })?;
+    match fs::symlink_metadata(directory) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(AcmeAccountStoreError::UnsafePath {
+                path: directory.to_path_buf(),
+                message: "account directory is not a real directory".to_owned(),
+            });
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(AccountStoreAttempt::Acquired(None));
+        }
+        Err(error) => return Err(account_store_io_error(directory, error)),
+    }
+    let Some(_lock) = AcmeMutationLock::try_acquire(directory)
+        .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?
+    else {
+        return Ok(AccountStoreAttempt::Contended);
+    };
+    load_account_credentials_locked(&path, directory, false).map(AccountStoreAttempt::Acquired)
 }
 
 fn load_account_credentials_locked(
@@ -148,7 +189,7 @@ fn load_account_credentials_locked(
         })
 }
 
-#[cfg(feature = "acme-client")]
+#[cfg(all(feature = "acme-client", test))]
 pub(crate) fn begin_account_deactivation(
     storage: &Path,
     issuer_name: &str,
@@ -159,10 +200,42 @@ pub(crate) fn begin_account_deactivation(
         .ok_or_else(|| AcmeAccountStoreError::UnsafePath {
             path: active.clone(),
             message: "credentials path has no parent directory".to_owned(),
-        })?;
-    ensure_safe_account_directory(directory)?;
-    let lock = AcmeMutationLock::acquire(directory)
+        })?
+        .to_path_buf();
+    ensure_safe_account_directory(&directory)?;
+    let lock = AcmeMutationLock::acquire(&directory)
         .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?;
+    begin_account_deactivation_locked(active, &directory, lock)
+}
+
+#[cfg(feature = "acme-client")]
+pub(crate) fn try_begin_account_deactivation(
+    storage: &Path,
+    issuer_name: &str,
+) -> Result<AccountStoreAttempt<AccountDeactivationTransaction>, AcmeAccountStoreError> {
+    let active = account_credentials_path(storage, issuer_name).path;
+    let directory = active
+        .parent()
+        .ok_or_else(|| AcmeAccountStoreError::UnsafePath {
+            path: active.clone(),
+            message: "credentials path has no parent directory".to_owned(),
+        })?
+        .to_path_buf();
+    ensure_safe_account_directory(&directory)?;
+    let Some(lock) = AcmeMutationLock::try_acquire(&directory)
+        .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?
+    else {
+        return Ok(AccountStoreAttempt::Contended);
+    };
+    begin_account_deactivation_locked(active, &directory, lock).map(AccountStoreAttempt::Acquired)
+}
+
+#[cfg(feature = "acme-client")]
+fn begin_account_deactivation_locked(
+    active: PathBuf,
+    directory: &Path,
+    lock: AcmeMutationLock,
+) -> Result<AccountDeactivationTransaction, AcmeAccountStoreError> {
     ensure_safe_account_destination(&active)?;
     let pending = directory.join(ACME_ACCOUNT_DEACTIVATION_FILE);
     match fs::symlink_metadata(&pending) {

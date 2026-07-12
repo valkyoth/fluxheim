@@ -37,6 +37,11 @@ behavior when the change improves security or project direction.
   serialize bootstrap per issuer, and recover ambiguous creation with the same
   key before atomically promoting credentials. A pinned `instant-acme 0.8.5`
   API patch preserves configured contacts and EAB with caller-provided keys.
+- Keep blocking account files and locks off Tokio workers. Async ACME paths use
+  nonblocking lifecycle-lock attempts on blocking workers, bounded asynchronous
+  retry, contention diagnostics, and a 10-second lock-wait deadline.
+- Verify the vendored `instant-acme` source against published `0.8.5` hashes in
+  CI and release gates after removing the single marked downstream API patch.
 - Validate online ACME directories structurally and require exact advertised ToS
   agreement, with an explicit private-directory override only for omitted terms.
 - Parse every advertised ACME endpoint as a bounded HTTPS URI with a real
