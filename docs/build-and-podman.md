@@ -562,6 +562,7 @@ entry point for service-manager or container-scheduled renewal workflows:
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml targets
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml status
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml doctor --online
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml reload
 ```
 
@@ -799,6 +800,8 @@ challenge = "http-01"
 [[tls.acme.issuers]]
 name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
+terms_of_service_agreed = true
+terms_of_service_url = "https://replace-with-the-current-issuer-terms.example/"
 
 [tls.acme.issuers.eab]
 key_id_credential = "actalis-eab-kid"

@@ -5,7 +5,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 #[cfg(feature = "acme-client")]
-use zeroize::Zeroizing;
+use sanitization::{SecretString, SecretVec};
 
 #[cfg(feature = "acme-client")]
 use super::acme_init_toml::build_acme_init_toml;
@@ -16,6 +16,18 @@ pub(super) fn run_acme_init_command(
     options: AcmeInitOptions,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let issuer_name = options.issuer.name();
+    if !options.accept_terms_of_service {
+        return Err("acme-init requires --accept-terms-of-service".into());
+    }
+    let terms_of_service_url = options
+        .terms_of_service_url
+        .as_deref()
+        .ok_or("acme-init requires --terms-of-service-url")?;
+    if !terms_of_service_url.starts_with("https://")
+        || terms_of_service_url.chars().any(char::is_whitespace)
+    {
+        return Err("--terms-of-service-url must be an HTTPS URL".into());
+    }
     validate_acme_init_output_path("output", &options.output)?;
     validate_acme_init_directory_path("storage", &options.storage)?;
     if options.issuer.requires_eab() {
@@ -51,8 +63,9 @@ pub(super) fn run_acme_init_command(
 
         let kid_path = options.secrets_dir.join("actalis-eab-kid");
         let hmac_key_path = options.secrets_dir.join("actalis-eab-hmac-key");
-        write_secret_file(&kid_path, kid.trim(), options.force)?;
-        write_secret_file(&hmac_key_path, hmac_key.trim(), options.force)?;
+        kid.try_with_secret(|secret| write_secret_file(&kid_path, secret, options.force))??;
+        hmac_key
+            .try_with_secret(|secret| write_secret_file(&hmac_key_path, secret, options.force))??;
         created.push(kid_path);
         created.push(hmac_key_path);
 
@@ -75,6 +88,7 @@ pub(super) fn run_acme_init_command(
         &options.storage,
         &options.secrets_dir,
         !options.no_systemd,
+        terms_of_service_url,
     )?;
     write_file_checked(&options.output, &config_toml, options.force, 0o644)?;
     created.push(options.output);
@@ -98,6 +112,8 @@ pub(super) fn run_acme_init_command(
         email,
         kid_file,
         hmac_key_file,
+        terms_of_service_url,
+        accept_terms_of_service,
         non_interactive,
         force,
         no_systemd,
@@ -111,6 +127,8 @@ pub(super) fn run_acme_init_command(
         email,
         kid_file,
         hmac_key_file,
+        terms_of_service_url,
+        accept_terms_of_service,
         non_interactive,
         force,
         no_systemd,
@@ -136,22 +154,35 @@ fn read_or_prompt_secret(
     path: Option<&Path>,
     prompt: &str,
     non_interactive: bool,
-) -> Result<Zeroizing<String>, Box<dyn Error + Send + Sync>> {
+) -> Result<SecretString, Box<dyn Error + Send + Sync>> {
     if let Some(path) = path {
         validate_acme_init_output_path("secret input", path)?;
-        let mut secret = Zeroizing::new(String::new());
         let file = std::fs::File::open(path)?;
-        file.take(4097).read_to_string(&mut secret)?;
-        if secret.len() > 4096 {
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.len() > 4096 {
             return Err("ACME secret input file cannot exceed 4096 bytes".into());
         }
-        return Ok(Zeroizing::new(secret.trim().to_owned()));
+        let mut secret = SecretVec::from_fn(metadata.len() as usize, |_| 0);
+        let mut limited = file.take(4097);
+        secret.with_secret_mut(|bytes| limited.read_exact(bytes))?;
+        let mut probe = [0_u8; 1];
+        let grew = limited.read(&mut probe)? != 0;
+        sanitization::SecureSanitize::secure_sanitize(&mut probe);
+        if grew {
+            return Err("ACME secret input file cannot exceed 4096 bytes".into());
+        }
+        return secret
+            .with_secret(|bytes| {
+                std::str::from_utf8(bytes)
+                    .map(|secret| SecretString::from_secret_str(secret.trim()))
+            })
+            .map_err(Into::into);
     }
     if non_interactive {
         return Err("EAB secret files are required with --non-interactive".into());
     }
-    let secret = Zeroizing::new(rpassword::prompt_password(prompt)?);
-    Ok(Zeroizing::new(secret.trim().to_owned()))
+    let secret = SecretString::from_string(rpassword::prompt_password(prompt)?);
+    Ok(secret.try_with_secret(|secret| SecretString::from_secret_str(secret.trim()))?)
 }
 
 #[cfg(feature = "acme-client")]

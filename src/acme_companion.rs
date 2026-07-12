@@ -11,6 +11,8 @@ mod config_loader;
 mod reload;
 
 use commands::{print_status, print_targets, run_renew};
+#[cfg(feature = "acme-client")]
+use commands::{run_account_operation, run_doctor, run_revoke};
 use reload::request_certificate_reload_for_config;
 #[cfg(all(feature = "acme-client", unix, test))]
 use reload::{MAX_CERTIFICATE_RELOAD_RESPONSE_BYTES, request_certificate_reload};
@@ -58,6 +60,43 @@ pub enum AcmeCompanionCommand {
 
     /// Request certificate-handle reload from the running gateway.
     Reload,
+
+    /// Rotate the private key for an existing ACME account.
+    AccountRollover {
+        /// Configured issuer name.
+        #[arg(long)]
+        issuer: String,
+        /// Confirm this remote account mutation.
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Deactivate an ACME account and remove its local credentials.
+    AccountDeactivate {
+        /// Configured issuer name.
+        #[arg(long)]
+        issuer: String,
+        /// Confirm this destructive remote account mutation.
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Revoke the currently installed certificate for an ACME vhost.
+    Revoke {
+        /// Configured ACME vhost name.
+        #[arg(long)]
+        vhost: String,
+        /// Confirm this destructive certificate mutation.
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Validate ACME configuration, storage, account state, and optional issuer connectivity.
+    Doctor {
+        /// Contact each configured issuer through the bounded ACME HTTP client.
+        #[arg(long)]
+        online: bool,
+    },
 }
 
 pub fn run_from_env() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -91,6 +130,51 @@ where
         AcmeCompanionCommand::Reload => {
             request_certificate_reload_for_config(cli.config.as_deref())
         }
+        AcmeCompanionCommand::AccountRollover { issuer, confirm } => {
+            if !confirm {
+                return Err("account rollover requires --confirm".into());
+            }
+            #[cfg(feature = "acme-client")]
+            return run_account_operation(cli.config.as_deref(), &issuer, "rollover");
+            #[cfg(not(feature = "acme-client"))]
+            {
+                let _ = issuer;
+                Err("account rollover requires the acme-client feature".into())
+            }
+        }
+        AcmeCompanionCommand::AccountDeactivate { issuer, confirm } => {
+            if !confirm {
+                return Err("account deactivation requires --confirm".into());
+            }
+            #[cfg(feature = "acme-client")]
+            return run_account_operation(cli.config.as_deref(), &issuer, "deactivate");
+            #[cfg(not(feature = "acme-client"))]
+            {
+                let _ = issuer;
+                Err("account deactivation requires the acme-client feature".into())
+            }
+        }
+        AcmeCompanionCommand::Revoke { vhost, confirm } => {
+            if !confirm {
+                return Err("certificate revocation requires --confirm".into());
+            }
+            #[cfg(feature = "acme-client")]
+            return run_revoke(cli.config.as_deref(), &vhost);
+            #[cfg(not(feature = "acme-client"))]
+            {
+                let _ = vhost;
+                Err("certificate revocation requires the acme-client feature".into())
+            }
+        }
+        AcmeCompanionCommand::Doctor { online } => {
+            #[cfg(feature = "acme-client")]
+            return run_doctor(cli.config.as_deref(), online);
+            #[cfg(not(feature = "acme-client"))]
+            {
+                let _ = online;
+                Err("ACME doctor requires the acme-client feature".into())
+            }
+        }
     }
 }
 
@@ -112,6 +196,42 @@ mod tests {
                 || error.to_string().contains("not found")
                 || error.to_string().contains("does not exist")
         );
+    }
+
+    #[cfg(feature = "acme-client")]
+    #[test]
+    fn destructive_acme_commands_require_explicit_confirmation() {
+        let rollover = run_from_args([
+            "fluxheim-acme",
+            "account-rollover",
+            "--issuer",
+            "letsencrypt",
+        ])
+        .unwrap_err();
+        assert!(rollover.to_string().contains("requires --confirm"));
+
+        let deactivate = run_from_args([
+            "fluxheim-acme",
+            "account-deactivate",
+            "--issuer",
+            "letsencrypt",
+        ])
+        .unwrap_err();
+        assert!(deactivate.to_string().contains("requires --confirm"));
+
+        let revoke = run_from_args(["fluxheim-acme", "revoke", "--vhost", "example"]).unwrap_err();
+        assert!(revoke.to_string().contains("requires --confirm"));
+    }
+
+    #[cfg(feature = "acme-client")]
+    #[test]
+    fn doctor_tcp_probe_accepts_a_reachable_listener() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || listener.accept().unwrap());
+
+        super::commands::doctor_tcp_reachability("127.0.0.1", port, "test").unwrap();
+        server.join().unwrap();
     }
 
     #[cfg(all(feature = "acme-client", unix))]

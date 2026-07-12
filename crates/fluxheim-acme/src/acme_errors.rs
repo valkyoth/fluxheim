@@ -92,6 +92,7 @@ impl std::error::Error for AcmeSecretLoadError {}
 pub enum AcmeCertificateInstallError {
     InvalidCertificatePem(&'static str),
     InvalidPrivateKeyPem(&'static str),
+    Transaction(String),
     UnsafePath { path: PathBuf, message: String },
     Io { path: PathBuf, error: io::Error },
 }
@@ -104,6 +105,9 @@ impl fmt::Display for AcmeCertificateInstallError {
             }
             Self::InvalidPrivateKeyPem(message) => {
                 write!(formatter, "invalid ACME private key PEM: {message}")
+            }
+            Self::Transaction(message) => {
+                write!(formatter, "ACME certificate transaction failed: {message}")
             }
             Self::UnsafePath { path, message } => {
                 write!(
@@ -176,6 +180,7 @@ impl std::error::Error for AcmeAccountStoreError {}
 pub enum AcmeInstantClientError {
     MissingStorage,
     UnknownIssuer { issuer: String },
+    TermsOfServiceNotAccepted { issuer: String },
     AccountStore(AcmeAccountStoreError),
     ExternalAccountBinding(AcmeSecretLoadError),
     InvalidExternalAccountBindingHmacKey { issuer: String, message: String },
@@ -188,6 +193,10 @@ impl fmt::Display for AcmeInstantClientError {
         match self {
             Self::MissingStorage => write!(formatter, "tls.acme.storage is required"),
             Self::UnknownIssuer { issuer } => write!(formatter, "unknown ACME issuer {issuer:?}"),
+            Self::TermsOfServiceNotAccepted { issuer } => write!(
+                formatter,
+                "ACME issuer {issuer:?} account creation requires terms_of_service_agreed = true and an explicit terms_of_service_url"
+            ),
             Self::AccountStore(error) => write!(formatter, "{error}"),
             Self::ExternalAccountBinding(error) => write!(formatter, "{error}"),
             Self::InvalidExternalAccountBindingHmacKey { issuer, message } => write!(
@@ -237,7 +246,8 @@ impl fmt::Display for AcmeRenewalError {
             Self::Challenge { token, error } => {
                 write!(
                     formatter,
-                    "ACME HTTP-01 challenge {token:?} failed: {error}"
+                    "ACME HTTP-01 challenge <redacted:{}b> failed: {error}",
+                    token.len()
                 )
             }
             Self::TlsAlpnCertificate { domain, message } => write!(
@@ -260,6 +270,10 @@ pub(super) fn instant_client_error_to_renewal_error(
         AcmeInstantClientError::UnknownIssuer { issuer } => {
             AcmeRenewalError::UnknownIssuer { issuer }
         }
+        AcmeInstantClientError::TermsOfServiceNotAccepted { issuer } => AcmeRenewalError::Client {
+            issuer,
+            message: "ACME terms of service have not been explicitly accepted".to_owned(),
+        },
         AcmeInstantClientError::ExternalAccountBinding(error) => {
             AcmeRenewalError::ExternalAccountBinding(error)
         }

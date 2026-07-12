@@ -8,8 +8,10 @@ fn tls_alpn_01_challenge_store_writes_and_removes_safe_files() {
     let digest = [42_u8; 32];
     let (cert_pem, key_pem) = super::tls_alpn_01_certificate("Example.TEST", &digest).unwrap();
 
-    let paths = store
-        .install_challenge_certificate("Example.TEST", &cert_pem, &key_pem)
+    let paths = key_pem
+        .with_secret(|private_key| {
+            store.install_challenge_certificate("Example.TEST", &cert_pem, private_key)
+        })
         .unwrap();
 
     assert!(paths.cert_path.starts_with(&storage));
@@ -54,6 +56,20 @@ fn account_credentials_store_round_trips_secure_file() {
             0o600
         );
     }
+}
+
+#[test]
+fn account_credentials_removal_is_idempotent() {
+    let storage = fluxheim_common::test_support::unique_temp_path("acme-account-remove");
+    store_account_credentials(&storage, "letsencrypt", &test_account_credentials()).unwrap();
+
+    assert!(remove_account_credentials(&storage, "letsencrypt").unwrap());
+    assert!(!remove_account_credentials(&storage, "letsencrypt").unwrap());
+    assert!(
+        load_account_credentials(&storage, "letsencrypt")
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -110,6 +126,7 @@ fn install_managed_certificate_writes_safe_files() {
         "Example Site",
         test_certificate_pem(),
         test_private_key_pem(),
+        &["example.test".to_owned()],
     )
     .unwrap();
 
@@ -145,12 +162,18 @@ fn install_managed_certificate_rejects_invalid_pem_without_touching_previous_fil
         "example",
         test_certificate_pem(),
         test_private_key_pem(),
+        &["example.test".to_owned()],
     )
     .unwrap();
 
-    let error =
-        super::install_managed_certificate(&storage, "example", b"not a cert", b"not a key")
-            .unwrap_err();
+    let error = super::install_managed_certificate(
+        &storage,
+        "example",
+        b"not a cert",
+        b"not a key",
+        &["example.test".to_owned()],
+    )
+    .unwrap_err();
 
     assert!(matches!(
         error,
@@ -164,6 +187,74 @@ fn install_managed_certificate_rejects_invalid_pem_without_touching_previous_fil
         std::fs::read(&paths.key_path).unwrap(),
         test_private_key_pem()
     );
+}
+
+#[test]
+fn install_managed_certificate_rejects_key_and_identifier_mismatches() {
+    let storage = fluxheim_common::test_support::unique_temp_path("acme-install-identity");
+    let (certificate, key) = issued_material_for(&["example.test"]);
+    let (_, other_key) = issued_material_for(&["other.test"]);
+
+    let key_error = super::install_managed_certificate(
+        &storage,
+        "example",
+        certificate.as_bytes(),
+        other_key.as_bytes(),
+        &["example.test".to_owned()],
+    )
+    .unwrap_err();
+    assert!(matches!(
+        key_error,
+        super::AcmeCertificateInstallError::InvalidPrivateKeyPem(_)
+    ));
+
+    let name_error = super::install_managed_certificate(
+        &storage,
+        "example",
+        certificate.as_bytes(),
+        key.as_bytes(),
+        &["other.test".to_owned()],
+    )
+    .unwrap_err();
+    assert!(matches!(
+        name_error,
+        super::AcmeCertificateInstallError::InvalidCertificatePem(_)
+    ));
+}
+
+#[test]
+fn concurrent_certificate_installs_publish_one_complete_pair() {
+    let storage = fluxheim_common::test_support::unique_temp_path("acme-install-concurrent");
+    let first = issued_material_for(&["example.test"]);
+    let second = issued_material_for(&["example.test"]);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+
+    let jobs = [first, second].map(|(certificate, key)| {
+        let storage = storage.clone();
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            barrier.wait();
+            super::install_managed_certificate(
+                &storage,
+                "example",
+                certificate.as_bytes(),
+                key.as_bytes(),
+                &["example.test".to_owned()],
+            )
+        })
+    });
+    barrier.wait();
+    for job in jobs {
+        job.join().unwrap().unwrap();
+    }
+
+    let paths = managed_certificate_paths(&storage, "example");
+    crate::validate_issued_material(
+        &std::fs::read(paths.cert_path).unwrap(),
+        &std::fs::read(paths.key_path).unwrap(),
+        &["example.test".to_owned()],
+    )
+    .unwrap();
 }
 
 #[cfg(unix)]
@@ -181,6 +272,7 @@ fn install_managed_certificate_rejects_symlinked_destination() {
         "example",
         test_certificate_pem(),
         test_private_key_pem(),
+        &["example.test".to_owned()],
     )
     .unwrap_err();
 
@@ -199,6 +291,7 @@ fn install_managed_certificate_stale_backup_does_not_replace_previous_files() {
         "example",
         test_certificate_pem(),
         test_private_key_pem(),
+        &["example.test".to_owned()],
     )
     .unwrap();
     std::fs::write(
@@ -214,8 +307,9 @@ fn install_managed_certificate_stale_backup_does_not_replace_previous_files() {
     let error = super::install_managed_certificate(
         &storage,
         "example",
-        b"-----BEGIN CERTIFICATE-----\nnew\n-----END CERTIFICATE-----\n",
-        b"-----BEGIN PRIVATE KEY-----\nnew\n-----END PRIVATE KEY-----\n",
+        test_certificate_pem(),
+        test_private_key_pem(),
+        &["example.test".to_owned()],
     )
     .unwrap_err();
 

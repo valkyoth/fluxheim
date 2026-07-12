@@ -357,6 +357,37 @@ fn load_openssl_downstream_certificates(
             certificates.push(None);
             continue;
         }
+        #[cfg(feature = "acme")]
+        let _read_lock = if selector.certificate_is_managed_acme(index) {
+            Some(
+                fluxheim_acme::lock_managed_certificate_pair(
+                    &certificate.cert_path,
+                    &certificate.key_path,
+                )
+                .map_err(|source| {
+                    OpenSslDownstreamCertificateStoreError::InspectManagedCertificate {
+                        cert_path: certificate.cert_path.clone(),
+                        key_path: certificate.key_path.clone(),
+                        source,
+                    }
+                })?,
+            )
+        } else {
+            None
+        };
+        if selector.certificate_is_managed_acme(index) && certificate_paths_are_absent(certificate)?
+        {
+            log::warn!(
+                "managed ACME certificate is pending issuance; cert={} key={}",
+                certificate.cert_path.display(),
+                certificate.key_path.display()
+            );
+            if let Some(recorder) = pending_managed_certificate_recorder {
+                recorder();
+            }
+            certificates.push(None);
+            continue;
+        }
         certificates.push(Some(OpenSslDownstreamCertificate::load(certificate)?));
     }
     Ok(certificates)

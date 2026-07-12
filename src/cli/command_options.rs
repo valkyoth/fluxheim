@@ -99,6 +99,8 @@ pub(super) struct AcmeInitOptions {
     pub(super) email: Option<String>,
     pub(super) kid_file: Option<PathBuf>,
     pub(super) hmac_key_file: Option<PathBuf>,
+    pub(super) terms_of_service_url: Option<String>,
+    pub(super) accept_terms_of_service: bool,
     pub(super) non_interactive: bool,
     pub(super) force: bool,
     pub(super) no_systemd: bool,

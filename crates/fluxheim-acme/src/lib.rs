@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::fmt;
 use std::fs;
 use std::io;
@@ -6,7 +8,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use zeroize::Zeroizing;
+use sanitization::{SecretString, SecretVec};
 
 use fluxheim_config::{AcmeChallenge, Config};
 
@@ -106,10 +108,20 @@ impl fmt::Debug for AcmeIssueRequest<'_> {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct AcmeHttp01Challenge {
     pub token: String,
     pub key_authorization: String,
+}
+
+impl fmt::Debug for AcmeHttp01Challenge {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AcmeHttp01Challenge")
+            .field("token", &format_args!("<redacted:{}b>", self.token.len()))
+            .field("key_authorization", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -126,10 +138,9 @@ impl fmt::Debug for AcmePreparedHttp01Order {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
 pub struct AcmeIssuedCertificate {
     pub fullchain_pem: Vec<u8>,
-    pub private_key_pem: Zeroizing<Vec<u8>>,
+    pub private_key_pem: SecretVec,
 }
 
 impl fmt::Debug for AcmeIssuedCertificate {
@@ -185,8 +196,8 @@ pub fn acme_tls_alpn_protocol() -> &'static [u8] {
 }
 
 pub struct AcmeExternalAccountBindingSecrets {
-    pub key_id: Zeroizing<String>,
-    pub hmac_key: Zeroizing<String>,
+    pub key_id: SecretString,
+    pub hmac_key: SecretString,
 }
 
 impl fmt::Debug for AcmeExternalAccountBindingSecrets {
@@ -207,6 +218,8 @@ mod acme_certificate_install;
 mod acme_certificate_paths;
 #[path = "acme_challenges.rs"]
 mod acme_challenges;
+#[path = "acme_cleanup.rs"]
+mod acme_cleanup;
 #[path = "acme_eab.rs"]
 mod acme_eab;
 #[path = "acme_errors.rs"]
@@ -214,6 +227,12 @@ mod acme_errors;
 #[cfg(feature = "acme-client")]
 #[path = "acme_instant.rs"]
 mod acme_instant;
+#[cfg(feature = "acme-client")]
+#[path = "acme_instant_account.rs"]
+mod acme_instant_account;
+#[cfg(feature = "acme-client")]
+#[path = "acme_instant_http.rs"]
+mod acme_instant_http;
 #[path = "acme_names.rs"]
 mod acme_names;
 #[path = "acme_pem.rs"]
@@ -223,13 +242,20 @@ mod acme_queue;
 #[cfg(feature = "acme-client")]
 #[path = "acme_tls_alpn.rs"]
 mod acme_tls_alpn;
+#[path = "acme_transaction.rs"]
+mod acme_transaction;
 pub use acme_account_store::{
-    account_credentials_path, load_account_credentials, store_account_credentials,
+    account_credentials_path, load_account_credentials, remove_account_credentials,
+    store_account_credentials,
 };
-pub use acme_certificate_install::install_managed_certificate;
 use acme_certificate_install::{
     install_certificate_files, managed_certificate_owner, reject_existing_symlink_in_path,
 };
+pub use acme_certificate_install::{
+    install_managed_certificate, recover_managed_certificate_transaction,
+};
+#[cfg(feature = "acme-client")]
+use acme_certificate_paths::read_bounded_certificate_file;
 use acme_certificate_paths::{MANAGED_FULLCHAIN_FILE, MANAGED_PRIVATE_KEY_FILE};
 pub use acme_certificate_paths::{
     load_certificate_not_after, managed_certificate_paths, observe_target_certificate,
@@ -238,6 +264,7 @@ pub use acme_challenges::{
     AcmeHttp01ChallengeStore, AcmeTlsAlpn01ChallengeStore, http_01_token_from_path,
 };
 use acme_challenges::{acme_client_error_message_with_http_01_context, cleanup_http_01_challenges};
+use acme_cleanup::finish_renewal_cleanup;
 #[cfg(all(feature = "acme-client", test))]
 pub(crate) use acme_eab::decode_eab_hmac_key;
 #[cfg(feature = "acme-client")]
@@ -252,18 +279,28 @@ pub use acme_errors::{
 };
 #[cfg(feature = "acme-client")]
 pub use acme_instant::{
-    execute_instant_acme_renewal, load_or_create_instant_acme_account,
-    renew_all_instant_acme_targets, renew_due_instant_acme_targets,
+    execute_instant_acme_renewal, renew_all_instant_acme_targets, renew_due_instant_acme_targets,
     renew_selected_instant_acme_targets,
 };
+#[cfg(feature = "acme-client")]
+use acme_instant_account::ACME_ACCOUNT_OPERATION_TIMEOUT;
+#[cfg(feature = "acme-client")]
+pub use acme_instant_account::{
+    deactivate_instant_acme_account, load_or_create_instant_acme_account,
+    probe_instant_acme_issuer, revoke_instant_acme_certificate, rollover_instant_acme_account_key,
+};
+#[cfg(feature = "acme-client")]
+use acme_instant_http::bounded_acme_account_builder;
 use acme_names::{
     managed_certificate_segment, normalized_domain, short_sha256_hex,
     valid_http_01_key_authorization, valid_http_01_token,
 };
-use acme_pem::{validate_certificate_pem, validate_private_key_pem};
+use acme_pem::validate_issued_material;
 pub use acme_queue::{next_retry_at, plan_renewal_queue, toml_offset_datetime_to_system_time};
 #[cfg(feature = "acme-client")]
 use acme_tls_alpn::{cleanup_tls_alpn_01_challenges, tls_alpn_01_certificate};
+pub use acme_transaction::{AcmeCertificateReadLock, lock_managed_certificate_pair};
+use acme_transaction::{AcmeMutationLock, unique_transaction_id};
 
 pub fn renewal_targets(config: &Config) -> Vec<AcmeRenewalTarget> {
     if !config.tls.enabled || !config.tls.acme.enabled || !config.tls.acme.renewal.enabled {
@@ -378,13 +415,18 @@ pub fn execute_renewal<Client: AcmeIssuerClient>(
                     &published,
                 ),
             })?;
-        let certificate = install_managed_certificate(
-            storage,
-            &item.target.vhost_name,
-            &issued.fullchain_pem,
-            &issued.private_key_pem,
-        )
-        .map_err(AcmeRenewalError::CertificateInstall)?;
+        let certificate = issued
+            .private_key_pem
+            .with_secret(|private_key| {
+                install_managed_certificate(
+                    storage,
+                    &item.target.vhost_name,
+                    &issued.fullchain_pem,
+                    private_key,
+                    &item.target.domains,
+                )
+            })
+            .map_err(AcmeRenewalError::CertificateInstall)?;
 
         Ok(AcmeRenewalOutcome {
             vhost_name: item.target.vhost_name.clone(),
@@ -395,11 +437,7 @@ pub fn execute_renewal<Client: AcmeIssuerClient>(
     })();
 
     let cleanup = cleanup_http_01_challenges(&challenge_store, &published);
-    match (result, cleanup) {
-        (Ok(outcome), Ok(())) => Ok(outcome),
-        (Err(error), Ok(())) => Err(error),
-        (Ok(_), Err(cleanup_error)) | (Err(_), Err(cleanup_error)) => Err(cleanup_error),
-    }
+    finish_renewal_cleanup(result, cleanup)
 }
 
 pub fn load_external_account_binding(

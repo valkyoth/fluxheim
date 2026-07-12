@@ -11,11 +11,22 @@ pub struct AcmeIssuerConfig {
     pub name: String,
     pub directory_url: String,
     #[serde(default)]
+    pub terms_of_service_agreed: bool,
+    #[serde(default)]
+    pub terms_of_service_url: Option<String>,
+    #[serde(default)]
+    pub ca_bundle_file: Option<PathBuf>,
+    #[serde(default)]
     pub eab: Option<AcmeExternalAccountBindingConfig>,
 }
 
 impl AcmeIssuerConfig {
     pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.ca_bundle_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
         if let Some(eab) = &mut self.eab {
             eab.resolve_relative_paths(base_dir);
         }
@@ -33,6 +44,26 @@ impl AcmeIssuerConfig {
                 url: self.directory_url.clone(),
             });
         }
+        if self.terms_of_service_agreed
+            && self
+                .terms_of_service_url
+                .as_deref()
+                .is_none_or(|url| !valid_https_url(url))
+        {
+            return Err(ConfigError::InvalidAcmeTermsOfServiceAcceptance {
+                issuer: self.name.clone(),
+            });
+        }
+        if let Some(url) = self.terms_of_service_url.as_deref()
+            && !valid_https_url(url)
+        {
+            return Err(ConfigError::InvalidAcmeTermsOfServiceAcceptance {
+                issuer: self.name.clone(),
+            });
+        }
+        let ca_field = format!("tls.acme.issuers.{}.ca_bundle_file", self.name);
+        validate_path(ca_field.clone(), self.ca_bundle_file.as_deref())?;
+        validate_non_world_writable_parent(ca_field, self.ca_bundle_file.as_deref())?;
         if let Some(eab) = &self.eab {
             eab.validate(&self.name)?;
         }
@@ -95,16 +126,25 @@ pub(crate) fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
         AcmeIssuerConfig {
             name: "letsencrypt".to_owned(),
             directory_url: "https://acme-v02.api.letsencrypt.org/directory".to_owned(),
+            terms_of_service_agreed: false,
+            terms_of_service_url: None,
+            ca_bundle_file: None,
             eab: None,
         },
         AcmeIssuerConfig {
             name: "letsencrypt-staging".to_owned(),
             directory_url: "https://acme-staging-v02.api.letsencrypt.org/directory".to_owned(),
+            terms_of_service_agreed: false,
+            terms_of_service_url: None,
+            ca_bundle_file: None,
             eab: None,
         },
         AcmeIssuerConfig {
             name: "actalis".to_owned(),
             directory_url: "https://acme-api.actalis.com/acme/directory".to_owned(),
+            terms_of_service_agreed: false,
+            terms_of_service_url: None,
+            ca_bundle_file: None,
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: Some("FLUXHEIM_ACTALIS_EAB_KID".to_owned()),
                 key_id_file: None,
@@ -117,6 +157,9 @@ pub(crate) fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
         AcmeIssuerConfig {
             name: "google-trust-services".to_owned(),
             directory_url: "https://dv.acme-v02.api.pki.goog/directory".to_owned(),
+            terms_of_service_agreed: false,
+            terms_of_service_url: None,
+            ca_bundle_file: None,
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: Some("FLUXHEIM_GTS_EAB_KID".to_owned()),
                 key_id_file: None,
@@ -129,6 +172,9 @@ pub(crate) fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
         AcmeIssuerConfig {
             name: "google-trust-services-staging".to_owned(),
             directory_url: "https://dv.acme-v02.test-api.pki.goog/directory".to_owned(),
+            terms_of_service_agreed: false,
+            terms_of_service_url: None,
+            ca_bundle_file: None,
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: Some("FLUXHEIM_GTS_STAGING_EAB_KID".to_owned()),
                 key_id_file: None,

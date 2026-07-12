@@ -102,7 +102,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | mTLS/client certificates | ✅ | Listener client-auth, fingerprint ACLs, and safe upstream identity forwarding templates. |
 | TLS backends | ✅ | rustls default/recommended, plus OpenSSL for operators who need OpenSSL integration or OpenSSL FIPS provider deployments. |
 | FIPS/ISO-capable builds | ✅ | OpenSSL FIPS provider path and rustls/AWS-LC FIPS-capable candidate path. |
-| ACME | ✅ | Managed HTTP-01 and rustls TLS-ALPN-01 issuance/renewal, plus external HTTP-01 forwarding helper. |
+| ACME | ✅ | Managed HTTP-01 and rustls TLS-ALPN-01 issuance/renewal, bounded and recoverable certificate publication, ARI scheduling, lifecycle/preflight commands, plus external HTTP-01 forwarding. |
 | PROXY protocol | ✅ | v1/v2 receive and upstream send. |
 | HTTP/2 origins | ✅ | Upstream HTTP version controls and bounded HTTP/2 settings. |
 | gRPC pass-through | ✅ | Route-scoped HTTP/2 gRPC policy; no transcoding. |

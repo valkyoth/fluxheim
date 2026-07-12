@@ -283,6 +283,35 @@ fn load_rustls_certified_keys(
             certificates.push(None);
             continue;
         }
+        #[cfg(feature = "acme")]
+        let _read_lock = if selector.certificate_is_managed_acme(index) {
+            Some(
+                fluxheim_acme::lock_managed_certificate_pair(
+                    &certificate.cert_path,
+                    &certificate.key_path,
+                )
+                .map_err(|source| {
+                    RustlsDownstreamCertificateError::InspectManagedCertificate {
+                        cert_path: certificate.cert_path.clone(),
+                        key_path: certificate.key_path.clone(),
+                        source,
+                    }
+                })?,
+            )
+        } else {
+            None
+        };
+        if selector.certificate_is_managed_acme(index) && certificate_paths_are_absent(certificate)?
+        {
+            log::warn!(
+                "managed ACME certificate is pending issuance; cert={} key={}",
+                certificate.cert_path.display(),
+                certificate.key_path.display()
+            );
+            record_pending_managed_certificate();
+            certificates.push(None);
+            continue;
+        }
         certificates.push(Some(Arc::new(load_rustls_certified_key_from_paths(
             &certificate.cert_path,
             &certificate.key_path,

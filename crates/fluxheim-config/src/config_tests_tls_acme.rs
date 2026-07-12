@@ -365,3 +365,17 @@ fn rejects_duplicate_vhost_acme_domains() {
         })
     );
 }
+
+#[test]
+fn rejects_terms_acceptance_without_the_reviewed_url() {
+    let mut config = Config::default();
+    config.tls.acme.issuers[0].terms_of_service_agreed = true;
+    config.tls.acme.issuers[0].terms_of_service_url = None;
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidAcmeTermsOfServiceAcceptance {
+            issuer: "letsencrypt".to_owned(),
+        })
+    );
+}

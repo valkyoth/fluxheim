@@ -8,8 +8,8 @@ use sanitization::SecretVec;
 #[cfg(target_os = "linux")]
 use super::UNIX_O_NOFOLLOW;
 use super::{
-    AcmeAccountCredentialsPath, AcmeAccountStoreError, MAX_ACCOUNT_CREDENTIALS_BYTES,
-    managed_certificate_segment,
+    AcmeAccountCredentialsPath, AcmeAccountStoreError, AcmeMutationLock,
+    MAX_ACCOUNT_CREDENTIALS_BYTES, managed_certificate_segment, unique_transaction_id,
 };
 
 const ACME_ACCOUNT_DIR: &str = "accounts";
@@ -47,20 +47,32 @@ pub fn load_account_credentials(
         });
     }
 
-    let file = open_regular_account_credentials_file(&path)
+    let mut file = open_regular_account_credentials_file(&path)
         .map_err(|error| account_store_io_error(&path, error))?;
-    let mut contents = Vec::new();
-    file.take(MAX_ACCOUNT_CREDENTIALS_BYTES.saturating_add(1))
-        .read_to_end(&mut contents)
+    let admitted =
+        usize::try_from(metadata.len()).map_err(|_| AcmeAccountStoreError::Oversized {
+            path: path.clone(),
+            max_bytes: MAX_ACCOUNT_CREDENTIALS_BYTES,
+        })?;
+    let mut contents = SecretVec::from_fn(admitted, |_| 0);
+    contents
+        .with_secret_mut(|contents| file.read_exact(contents))
         .map_err(|error| account_store_io_error(&path, error))?;
-    if contents.len() as u64 > MAX_ACCOUNT_CREDENTIALS_BYTES {
+    let mut growth_probe = [0_u8; 1];
+    let grew = file
+        .read(&mut growth_probe)
+        .map_err(|error| account_store_io_error(&path, error))?
+        != 0;
+    sanitization::SecureSanitize::secure_sanitize(&mut growth_probe);
+    if grew {
         return Err(AcmeAccountStoreError::Oversized {
             path,
             max_bytes: MAX_ACCOUNT_CREDENTIALS_BYTES,
         });
     }
 
-    serde_json::from_slice(&contents)
+    contents
+        .with_secret(|contents| serde_json::from_slice(contents))
         .map(Some)
         .map_err(|error| AcmeAccountStoreError::Deserialize {
             path,
@@ -83,6 +95,8 @@ pub fn store_account_credentials(
                 message: "credentials path has no parent directory".to_owned(),
             })?;
     ensure_safe_account_directory(directory)?;
+    let _mutation_lock = AcmeMutationLock::acquire(directory)
+        .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?;
     ensure_safe_account_destination(&credentials_path.path)?;
 
     let contents = SecretVec::from_vec(serde_json::to_vec(credentials).map_err(|error| {
@@ -97,7 +111,9 @@ pub fn store_account_credentials(
         });
     }
 
-    let tmp_path = directory.join(".credentials.json.tmp");
+    let transaction =
+        unique_transaction_id().map_err(|error| account_store_io_error(directory, error))?;
+    let tmp_path = directory.join(format!(".credentials.{transaction}.tmp"));
     let result = (|| {
         contents.with_secret(|contents| write_account_credentials_file(&tmp_path, contents))?;
         fs::rename(&tmp_path, &credentials_path.path)
@@ -112,6 +128,33 @@ pub fn store_account_credentials(
 
     result?;
     Ok(credentials_path)
+}
+
+pub fn remove_account_credentials(
+    storage: &Path,
+    issuer_name: &str,
+) -> Result<bool, AcmeAccountStoreError> {
+    let credentials_path = account_credentials_path(storage, issuer_name);
+    let directory =
+        credentials_path
+            .path
+            .parent()
+            .ok_or_else(|| AcmeAccountStoreError::UnsafePath {
+                path: credentials_path.path.clone(),
+                message: "credentials path has no parent directory".to_owned(),
+            })?;
+    ensure_safe_account_directory(directory)?;
+    let _mutation_lock = AcmeMutationLock::acquire(directory)
+        .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?;
+    ensure_safe_account_destination(&credentials_path.path)?;
+    match fs::remove_file(&credentials_path.path) {
+        Ok(()) => {
+            sync_account_directory(directory)?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(account_store_io_error(&credentials_path.path, error)),
+    }
 }
 
 fn ensure_safe_account_directory(directory: &Path) -> Result<(), AcmeAccountStoreError> {

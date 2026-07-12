@@ -1,6 +1,42 @@
 use super::*;
 
 #[test]
+fn http_01_challenge_diagnostics_redact_token_material() {
+    let challenge = AcmeHttp01Challenge {
+        token: "sensitive-token".to_owned(),
+        key_authorization: "sensitive-token.thumbprint".to_owned(),
+    };
+    let debug = format!("{challenge:?}");
+    assert!(debug.contains("<redacted:15b>"));
+    assert!(!debug.contains("sensitive-token"));
+    assert!(!debug.contains("thumbprint"));
+
+    let error = AcmeRenewalError::Challenge {
+        token: challenge.token,
+        error: std::io::Error::other("challenge write failed"),
+    };
+    let display = error.to_string();
+    assert!(display.contains("<redacted:15b>"));
+    assert!(!display.contains("sensitive-token"));
+}
+
+#[test]
+fn renewal_cleanup_preserves_the_primary_failure() {
+    let primary = super::AcmeRenewalError::Client {
+        issuer: "primary".to_owned(),
+        message: "issuance failed".to_owned(),
+    };
+    let cleanup = super::AcmeRenewalError::Client {
+        issuer: "cleanup".to_owned(),
+        message: "cleanup failed".to_owned(),
+    };
+
+    let error = crate::finish_renewal_cleanup::<()>(Err(primary), Err(cleanup)).unwrap_err();
+    assert!(error.to_string().contains("issuance failed"));
+    assert!(!error.to_string().contains("cleanup failed"));
+}
+
+#[test]
 fn execute_renewal_publishes_finalizes_installs_and_cleans_http_01() {
     let storage = fluxheim_common::test_support::unique_temp_path("acme-execute-renewal");
     let mut config = acme_config_with_vhosts(vec![managed_vhost("example")]);
@@ -85,8 +121,14 @@ fn eab_file_secrets_are_trimmed_bounded_and_redacted() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(&*secrets.key_id, "kid-value");
-    assert_eq!(&*secrets.hmac_key, "hmac-value");
+    assert_eq!(
+        secrets.key_id.try_with_secret(str::to_owned).unwrap(),
+        "kid-value"
+    );
+    assert_eq!(
+        secrets.hmac_key.try_with_secret(str::to_owned).unwrap(),
+        "hmac-value"
+    );
     let debug = format!("{secrets:?}");
     assert!(debug.contains("<redacted>"));
     assert!(!debug.contains("kid-value"));
@@ -166,7 +208,7 @@ fn eab_file_secret_rejects_symlinked_file() {
 #[test]
 fn eab_hmac_key_decoder_accepts_base64url_and_rejects_invalid_values() {
     let decoded = super::decode_eab_hmac_key("actalis", "aG1hYy1zZWNyZXQ").unwrap();
-    assert_eq!(&*decoded, b"hmac-secret");
+    assert!(decoded.with_secret(|value| value == b"hmac-secret"));
 
     let error = match super::decode_eab_hmac_key("actalis", "not valid base64!?") {
         Ok(_) => panic!("expected invalid EAB hmac key to be rejected"),

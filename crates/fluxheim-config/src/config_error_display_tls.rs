@@ -66,6 +66,10 @@ pub(super) fn format_tls_error(
             formatter,
             "ACME issuer {issuer:?} must use an https directory URL, got {url:?}"
         ),
+        ConfigError::InvalidAcmeTermsOfServiceAcceptance { issuer } => write!(
+            formatter,
+            "ACME issuer {issuer:?} terms_of_service_agreed requires an explicit valid HTTPS terms_of_service_url"
+        ),
         ConfigError::InvalidAcmeEabSecretSource { issuer, field } => write!(
             formatter,
             "ACME issuer {issuer:?} EAB {field} must be read from an env var, file, or credential"

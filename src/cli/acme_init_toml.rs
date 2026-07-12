@@ -63,7 +63,10 @@ struct AcmeInitRenewalToml {
 struct AcmeInitIssuerToml {
     name: String,
     directory_url: String,
-    eab: AcmeInitEabToml,
+    terms_of_service_agreed: bool,
+    terms_of_service_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    eab: Option<AcmeInitEabToml>,
 }
 
 #[derive(serde::Serialize)]
@@ -84,9 +87,10 @@ pub(super) fn build_acme_init_toml(
     storage: &Path,
     secrets_dir: &Path,
     use_systemd_credentials: bool,
+    terms_of_service_url: &str,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
-    let issuers = if issuer.requires_eab() {
-        let eab = if use_systemd_credentials {
+    let eab = if issuer.requires_eab() {
+        Some(if use_systemd_credentials {
             AcmeInitEabToml {
                 key_id_file: None,
                 key_id_credential: Some("actalis-eab-kid".to_owned()),
@@ -105,15 +109,17 @@ pub(super) fn build_acme_init_toml(
                 ),
                 hmac_key_credential: None,
             }
-        };
-        vec![AcmeInitIssuerToml {
-            name: issuer.name().to_owned(),
-            directory_url: issuer.directory_url().to_owned(),
-            eab,
-        }]
+        })
     } else {
-        Vec::new()
+        None
     };
+    let issuers = vec![AcmeInitIssuerToml {
+        name: issuer.name().to_owned(),
+        directory_url: issuer.directory_url().to_owned(),
+        terms_of_service_agreed: true,
+        terms_of_service_url: terms_of_service_url.to_owned(),
+        eab,
+    }];
 
     let toml = AcmeInitToml {
         tls: AcmeInitTlsToml {

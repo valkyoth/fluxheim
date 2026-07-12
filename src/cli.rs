@@ -139,6 +139,14 @@ pub enum CliCommand {
         #[arg(long, value_name = "PATH", requires = "kid_file")]
         hmac_key_file: Option<PathBuf>,
 
+        /// Exact issuer terms-of-service URL reviewed by the operator.
+        #[arg(long, value_name = "HTTPS_URL", requires = "accept_terms_of_service")]
+        terms_of_service_url: Option<String>,
+
+        /// Record explicit acceptance of the configured terms-of-service URL.
+        #[arg(long, requires = "terms_of_service_url")]
+        accept_terms_of_service: bool,
+
         /// Refuse interactive prompts when required values are missing.
         #[arg(long)]
         non_interactive: bool,

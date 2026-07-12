@@ -52,10 +52,12 @@ impl AcmeHttp01ChallengeStore {
         }
 
         self.ensure_root_directory()?;
+        let _mutation_lock = AcmeMutationLock::acquire(&self.root)?;
         let token_path = self.token_path(token)?;
         let tmp_path = self.root.join(format!(
-            ".challenge-{}.tmp",
-            short_sha256_hex(token.as_bytes())
+            ".challenge-{}-{}.tmp",
+            short_sha256_hex(token.as_bytes()),
+            unique_transaction_id()?
         ));
         let value = value.trim_end_matches(['\r', '\n']);
 
@@ -123,6 +125,8 @@ impl AcmeHttp01ChallengeStore {
         if !valid_http_01_token(token) {
             return Ok(false);
         }
+        self.ensure_root_directory()?;
+        let _mutation_lock = AcmeMutationLock::acquire(&self.root)?;
         let mut path = self.root.clone();
         let mut components = Path::new(token).components();
         match (components.next(), components.next()) {
@@ -144,9 +148,8 @@ impl AcmeHttp01ChallengeStore {
         let tombstone = self.root.join(format!(
             ".removed-challenge-{}-{}.tmp",
             short_sha256_hex(token.as_bytes()),
-            std::process::id()
+            unique_transaction_id()?
         ));
-        let _ = std::fs::remove_file(&tombstone);
         fs::rename(&path, &tombstone)?;
         std::fs::remove_file(&tombstone)?;
         sync_directory_io(&self.root)?;
@@ -234,8 +237,15 @@ impl AcmeTlsAlpn01ChallengeStore {
                 message: "invalid ACME TLS-ALPN-01 domain".to_owned(),
             }
         })?;
-        validate_certificate_pem(fullchain_pem)?;
-        validate_private_key_pem(private_key_pem)?;
+        validate_issued_material(
+            fullchain_pem,
+            private_key_pem,
+            std::slice::from_ref(&normalize_host(domain).ok_or({
+                AcmeCertificateInstallError::InvalidCertificatePem(
+                    "TLS-ALPN certificate domain is invalid",
+                )
+            })?),
+        )?;
         let owner = managed_certificate_owner(&self.root)?;
         install_certificate_files(&paths, fullchain_pem, private_key_pem, owner)?;
         Ok(paths)

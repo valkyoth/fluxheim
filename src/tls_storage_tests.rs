@@ -224,6 +224,9 @@ fn validates_acme_eab_secret_files() {
     config.tls.acme.issuers = vec![AcmeIssuerConfig {
         name: "actalis".to_owned(),
         directory_url: "https://acme-api.actalis.com/acme/directory".to_owned(),
+        terms_of_service_agreed: false,
+        terms_of_service_url: None,
+        ca_bundle_file: None,
         eab: Some(AcmeExternalAccountBindingConfig {
             key_id_env: None,
             key_id_file: Some(key_id.clone()),
@@ -266,6 +269,9 @@ fn rejects_acme_eab_secret_below_world_writable_parent() {
     config.tls.acme.issuers = vec![AcmeIssuerConfig {
         name: "actalis".to_owned(),
         directory_url: "https://acme-api.actalis.com/acme/directory".to_owned(),
+        terms_of_service_agreed: false,
+        terms_of_service_url: None,
+        ca_bundle_file: None,
         eab: Some(AcmeExternalAccountBindingConfig {
             key_id_env: None,
             key_id_file: Some(key_id.clone()),

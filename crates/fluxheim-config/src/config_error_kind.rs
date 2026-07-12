@@ -244,6 +244,9 @@ pub enum ConfigError {
         issuer: String,
         url: String,
     },
+    InvalidAcmeTermsOfServiceAcceptance {
+        issuer: String,
+    },
     InvalidAcmeEabSecretSource {
         issuer: String,
         field: &'static str,

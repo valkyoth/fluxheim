@@ -2988,6 +2988,13 @@ with file-backed External Account Binding secrets.
 Built-in issuer names include `letsencrypt`, `letsencrypt-staging`,
 `actalis`, `google-trust-services`, and `google-trust-services-staging`.
 The custom `[[tls.acme.issuers]]` list is capped at 128 entries.
+Every issuer used to create a new account must set
+`terms_of_service_agreed = true` together with the exact HTTPS
+`terms_of_service_url` reviewed by the operator. Existing account credentials
+can still be loaded without silently accepting changed terms. Optional
+`ca_bundle_file` replaces platform roots for that issuer with a bounded,
+no-follow PEM trust bundle; use it for private ACME CAs or deliberate CA
+pinning.
 Actalis and Google Trust Services require External Account Binding. Their EAB
 secret sources are configured through environment variables, files, or
 credential names. Credential names are preferred for production because the same
@@ -3001,6 +3008,8 @@ Example with systemd credentials:
 [[tls.acme.issuers]]
 name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
+terms_of_service_agreed = true
+terms_of_service_url = "https://replace-with-the-current-issuer-terms.example/"
 
 [tls.acme.issuers.eab]
 key_id_credential = "actalis-eab-kid"
@@ -3013,6 +3022,8 @@ Example with container secrets:
 [[tls.acme.issuers]]
 name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
+terms_of_service_agreed = true
+terms_of_service_url = "https://replace-with-the-current-issuer-terms.example/"
 
 [tls.acme.issuers.eab]
 key_id_credential = "actalis-eab-kid"

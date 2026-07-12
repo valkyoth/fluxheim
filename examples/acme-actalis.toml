@@ -26,6 +26,9 @@ zero_downtime_reload = true
 [[tls.acme.issuers]]
 name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
+terms_of_service_agreed = true
+# Replace this with the exact current Actalis terms URL you reviewed.
+terms_of_service_url = "https://replace-with-the-current-issuer-terms.example/"
 
 [tls.acme.issuers.eab]
 key_id_credential = "actalis-eab-kid"

@@ -121,6 +121,7 @@ acme-client = [
     "acme",
     "fluxheim-acme/acme-client",
     "dep:rpassword",
+    "dep:sanitization",
     "dep:tokio",
 ]
 metrics = [

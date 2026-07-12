@@ -2,7 +2,7 @@ use std::io;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use zeroize::Zeroizing;
+use sanitization::{SecretString, SecretVec};
 
 use fluxheim_config::AcmeExternalAccountBindingConfig;
 
@@ -40,18 +40,29 @@ pub(super) fn external_account_key_from_secrets(
     issuer: &str,
     secrets: &AcmeExternalAccountBindingSecrets,
 ) -> Result<instant_acme::ExternalAccountKey, AcmeInstantClientError> {
-    let key_bytes = decode_eab_hmac_key(issuer, &secrets.hmac_key)?;
-    Ok(instant_acme::ExternalAccountKey::new(
-        secrets.key_id.to_string(),
-        &key_bytes,
-    ))
+    let key_bytes = secrets
+        .hmac_key
+        .try_with_secret(|value| decode_eab_hmac_key(issuer, value))
+        .map_err(
+            |_| AcmeInstantClientError::InvalidExternalAccountBindingHmacKey {
+                issuer: issuer.to_owned(),
+                message: "EAB HMAC key is not valid UTF-8".to_owned(),
+            },
+        )??;
+    let key_id = secrets.key_id.try_with_secret(str::to_owned).map_err(|_| {
+        AcmeInstantClientError::InvalidExternalAccountBindingHmacKey {
+            issuer: issuer.to_owned(),
+            message: "EAB key ID is not valid UTF-8".to_owned(),
+        }
+    })?;
+    Ok(key_bytes.with_secret(|key| instant_acme::ExternalAccountKey::new(key_id, key)))
 }
 
 #[cfg(feature = "acme-client")]
 pub(crate) fn decode_eab_hmac_key(
     issuer: &str,
     value: &str,
-) -> Result<Zeroizing<Vec<u8>>, AcmeInstantClientError> {
+) -> Result<SecretVec, AcmeInstantClientError> {
     if let Some(decoded) =
         decoded_eab_hmac_key(base64_ng::URL_SAFE_NO_PAD.decode_vec(value.as_bytes()))
     {
@@ -78,12 +89,10 @@ pub(crate) fn decode_eab_hmac_key(
 }
 
 #[cfg(feature = "acme-client")]
-fn decoded_eab_hmac_key(
-    decoded: Result<Vec<u8>, base64_ng::DecodeError>,
-) -> Option<Zeroizing<Vec<u8>>> {
+fn decoded_eab_hmac_key(decoded: Result<Vec<u8>, base64_ng::DecodeError>) -> Option<SecretVec> {
     match decoded {
         Ok(decoded) if !decoded.is_empty() && decoded.len() as u64 <= MAX_EAB_SECRET_BYTES => {
-            Some(Zeroizing::new(decoded))
+            Some(SecretVec::from_vec(decoded))
         }
         _ => None,
     }
@@ -95,10 +104,10 @@ fn load_eab_secret(
     env_name: Option<&str>,
     file_path: Option<&Path>,
     credential_name: Option<&str>,
-) -> Result<Zeroizing<String>, AcmeSecretLoadError> {
+) -> Result<SecretString, AcmeSecretLoadError> {
     let value = match (env_name, file_path, credential_name) {
         (Some(env_name), None, None) => {
-            Zeroizing::new(std::env::var(env_name).map_err(|error| {
+            SecretString::from_string(std::env::var(env_name).map_err(|error| {
                 AcmeSecretLoadError::EnvRead {
                     issuer: issuer.to_owned(),
                     field,
@@ -134,7 +143,7 @@ fn read_eab_secret_file(
     issuer: &str,
     field: &'static str,
     path: &Path,
-) -> Result<Zeroizing<String>, AcmeSecretLoadError> {
+) -> Result<SecretString, AcmeSecretLoadError> {
     let file = open_regular_eab_secret_file(issuer, field, path)?;
     let metadata = file
         .metadata()
@@ -155,12 +164,24 @@ fn read_eab_secret_file(
         });
     }
 
-    let mut secret = Zeroizing::new(String::new());
+    let admitted =
+        usize::try_from(metadata.len()).map_err(|_| AcmeSecretLoadError::OversizedSecret {
+            issuer: issuer.to_owned(),
+            field,
+            max_bytes: MAX_EAB_SECRET_BYTES,
+        })?;
+    let mut secret = SecretVec::from_fn(admitted, |_| 0);
     let mut limited = file.take(MAX_EAB_SECRET_BYTES.saturating_add(1));
-    limited
-        .read_to_string(&mut secret)
+    secret
+        .with_secret_mut(|bytes| limited.read_exact(bytes))
         .map_err(|error| eab_file_error(issuer, field, path, error))?;
-    if secret.len() as u64 > MAX_EAB_SECRET_BYTES {
+    let mut probe = [0_u8; 1];
+    let grew = limited
+        .read(&mut probe)
+        .map_err(|error| eab_file_error(issuer, field, path, error))?
+        != 0;
+    sanitization::SecureSanitize::secure_sanitize(&mut probe);
+    if grew {
         return Err(AcmeSecretLoadError::OversizedSecret {
             issuer: issuer.to_owned(),
             field,
@@ -168,7 +189,14 @@ fn read_eab_secret_file(
         });
     }
 
-    Ok(secret)
+    secret
+        .with_secret(|bytes| std::str::from_utf8(bytes).map(SecretString::from_secret_str))
+        .map_err(|error| AcmeSecretLoadError::FileRead {
+            issuer: issuer.to_owned(),
+            field,
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })
 }
 
 #[cfg(target_os = "linux")]
@@ -223,9 +251,14 @@ fn eab_file_error(
 fn normalize_eab_secret(
     issuer: &str,
     field: &'static str,
-    value: Zeroizing<String>,
-) -> Result<Zeroizing<String>, AcmeSecretLoadError> {
-    let value = Zeroizing::new(value.trim().to_owned());
+    value: SecretString,
+) -> Result<SecretString, AcmeSecretLoadError> {
+    let value = value
+        .try_with_secret(|value| SecretString::from_secret_str(value.trim()))
+        .map_err(|_| AcmeSecretLoadError::EmptySecret {
+            issuer: issuer.to_owned(),
+            field,
+        })?;
     if value.is_empty() {
         return Err(AcmeSecretLoadError::EmptySecret {
             issuer: issuer.to_owned(),

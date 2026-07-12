@@ -11,6 +11,10 @@ behavior when the change improves security or project direction.
 
 ### Added
 
+- Add bounded ACME HTTP transport, RFC 9773 ARI scheduling, explicit
+  terms-of-service records, per-issuer CA bundles, `fluxheim-acme doctor`, and
+  confirmation-gated account rollover/deactivation and certificate revocation.
+
 - Add the checked-in F5 iRules-style route access policy and configuration
   example, with real listener coverage for normal origin traffic, pre-origin
   denial, and fail-closed plugin traps.
@@ -38,6 +42,12 @@ behavior when the change improves security or project direction.
   cache policy enables only the memory tier.
 
 ### Security
+
+- Validate issued certificate chains, key matches, validity, server-auth usage,
+  and exact DNS SANs before publication; serialize writers and TLS readers with
+  advisory leases; recover interrupted pair publication through a durable
+  journal; preserve primary renewal errors; redact challenge secrets; and keep
+  ACME account, EAB, and private-key material in `sanitization` containers.
 
 - Open snapshot files with no-follow semantics before validating the opened
   descriptor, closing the check-then-open race while preserving typed unsafe

@@ -1,4 +1,4 @@
-use zeroize::Zeroizing;
+use sanitization::SecretVec;
 
 use fluxheim_config::normalize_host;
 
@@ -24,7 +24,7 @@ pub(super) fn cleanup_tls_alpn_01_challenges(
 pub(super) fn tls_alpn_01_certificate(
     domain: &str,
     key_authorization_digest: &[u8],
-) -> Result<(Vec<u8>, Zeroizing<Vec<u8>>), AcmeRenewalError> {
+) -> Result<(Vec<u8>, SecretVec), AcmeRenewalError> {
     if key_authorization_digest.len() != 32 {
         return Err(AcmeRenewalError::TlsAlpnCertificate {
             domain: domain.to_owned(),
@@ -65,6 +65,6 @@ pub(super) fn tls_alpn_01_certificate(
 
     Ok((
         certificate.pem().into_bytes(),
-        Zeroizing::new(signing_key.serialize_pem().into_bytes()),
+        SecretVec::from_vec(signing_key.serialize_pem().into_bytes()),
     ))
 }

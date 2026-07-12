@@ -311,6 +311,7 @@ impl Display for ConfigError {
             | Self::DuplicateAcmeIssuerName { .. }
             | Self::UnknownAcmeIssuer { .. }
             | Self::InvalidAcmeDirectoryUrl { .. }
+            | Self::InvalidAcmeTermsOfServiceAcceptance { .. }
             | Self::InvalidAcmeEabSecretSource { .. }
             | Self::InvalidAcmeEabCredentialName { .. }
             | Self::ConflictingAcmeEabSecretSource { .. }

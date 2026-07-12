@@ -217,6 +217,9 @@ fn acme_init_actalis_writes_config_and_credential_files() {
         kid_input.to_str().unwrap(),
         "--hmac-key-file",
         hmac_input.to_str().unwrap(),
+        "--terms-of-service-url",
+        "https://issuer.example.test/terms/v1",
+        "--accept-terms-of-service",
         "--output",
         output.to_str().unwrap(),
         "--secrets-dir",
@@ -243,6 +246,24 @@ fn acme_init_actalis_writes_config_and_credential_files() {
     assert!(config.contains("automation = \"external\""));
     assert!(config.contains("key_id_credential = \"actalis-eab-kid\""));
     assert!(config.contains("hmac_key_credential = \"actalis-eab-hmac-key\""));
+    assert!(config.contains("terms_of_service_agreed = true"));
+    assert!(config.contains("terms_of_service_url = \"https://issuer.example.test/terms/v1\""));
+}
+
+#[cfg(feature = "acme-client")]
+#[test]
+fn acme_init_requires_explicit_terms_acceptance() {
+    let error = run_from_args([
+        "fluxheim",
+        "acme-init",
+        "letsencrypt",
+        "--email",
+        "admin@example.test",
+        "--non-interactive",
+    ])
+    .unwrap_err();
+
+    assert!(error.to_string().contains("terms-of-service"));
 }
 
 #[test]

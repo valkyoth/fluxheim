@@ -37,34 +37,9 @@ pub fn observe_target_certificate(
 }
 
 pub fn load_certificate_not_after(path: &Path) -> io::Result<Option<SystemTime>> {
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
+    let Some(contents) = read_bounded_certificate_file(path)? else {
+        return Ok(None);
     };
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "certificate path is not a real file",
-        ));
-    }
-    if metadata.len() > MAX_CERTIFICATE_CHAIN_BYTES as u64 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "certificate file is too large",
-        ));
-    }
-
-    let file = open_regular_certificate_file(path)?;
-    let mut contents = Vec::new();
-    file.take((MAX_CERTIFICATE_CHAIN_BYTES as u64).saturating_add(1))
-        .read_to_end(&mut contents)?;
-    if contents.len() > MAX_CERTIFICATE_CHAIN_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "certificate file is too large",
-        ));
-    }
 
     let (_, pem) = x509_parser::pem::parse_x509_pem(&contents).map_err(|_| {
         io::Error::new(
@@ -87,6 +62,37 @@ pub fn load_certificate_not_after(path: &Path) -> io::Result<Option<SystemTime>>
     }
 
     Ok(Some(UNIX_EPOCH + Duration::from_secs(timestamp as u64)))
+}
+
+pub(super) fn read_bounded_certificate_file(path: &Path) -> io::Result<Option<Vec<u8>>> {
+    let file = match open_regular_certificate_file(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "certificate path is not a real file",
+        ));
+    }
+    if metadata.len() > MAX_CERTIFICATE_CHAIN_BYTES as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "certificate file is too large",
+        ));
+    }
+    let mut contents = Vec::with_capacity(metadata.len() as usize);
+    file.take((MAX_CERTIFICATE_CHAIN_BYTES as u64).saturating_add(1))
+        .read_to_end(&mut contents)?;
+    if contents.len() > MAX_CERTIFICATE_CHAIN_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "certificate file is too large",
+        ));
+    }
+    Ok(Some(contents))
 }
 
 #[cfg(target_os = "linux")]

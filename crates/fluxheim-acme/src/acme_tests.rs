@@ -14,7 +14,8 @@ use super::{
     execute_renewal, http_01_token_from_path, install_managed_certificate,
     load_account_credentials, load_certificate_not_after, load_external_account_binding,
     managed_certificate_paths, next_retry_at, observe_configured_certificates, plan_renewal_queue,
-    renewal_targets, store_account_credentials, toml_offset_datetime_to_system_time,
+    remove_account_credentials, renewal_targets, store_account_credentials,
+    toml_offset_datetime_to_system_time,
 };
 #[cfg(feature = "acme-client")]
 use super::{
@@ -79,6 +80,9 @@ fn eab_file_issuer(key_id: &std::path::Path, hmac_key: &std::path::Path) -> Acme
     AcmeIssuerConfig {
         name: "actalis".to_owned(),
         directory_url: "https://acme-api.actalis.com/acme/directory".to_owned(),
+        terms_of_service_agreed: false,
+        terms_of_service_url: None,
+        ca_bundle_file: None,
         eab: Some(AcmeExternalAccountBindingConfig {
             key_id_env: None,
             key_id_file: Some(key_id.to_path_buf()),
@@ -91,7 +95,7 @@ fn eab_file_issuer(key_id: &std::path::Path, hmac_key: &std::path::Path) -> Acme
 }
 
 fn test_certificate_pem() -> &'static [u8] {
-    b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+    test_issued_material().0.as_bytes()
 }
 
 fn valid_leaf_certificate_pem() -> &'static [u8] {
@@ -99,7 +103,26 @@ fn valid_leaf_certificate_pem() -> &'static [u8] {
 }
 
 fn test_private_key_pem() -> &'static [u8] {
-    b"-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n"
+    test_issued_material().1.as_bytes()
+}
+
+fn test_issued_material() -> &'static (String, String) {
+    static MATERIAL: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
+    MATERIAL.get_or_init(|| {
+        let certified = rcgen::generate_simple_self_signed(["example.test".to_owned()]).unwrap();
+        (certified.cert.pem(), certified.signing_key.serialize_pem())
+    })
+}
+
+fn issued_material_for(domains: &[&str]) -> (String, String) {
+    let certified = rcgen::generate_simple_self_signed(
+        domains
+            .iter()
+            .map(|domain| (*domain).to_owned())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    (certified.cert.pem(), certified.signing_key.serialize_pem())
 }
 
 fn test_account_credentials() -> instant_acme::AccountCredentials {
@@ -166,7 +189,7 @@ impl super::AcmeIssuerClient for FakeAcmeIssuerClient {
 
         Ok(AcmeIssuedCertificate {
             fullchain_pem: test_certificate_pem().to_vec(),
-            private_key_pem: zeroize::Zeroizing::new(test_private_key_pem().to_vec()),
+            private_key_pem: sanitization::SecretVec::from_slice(test_private_key_pem()),
         })
     }
 }

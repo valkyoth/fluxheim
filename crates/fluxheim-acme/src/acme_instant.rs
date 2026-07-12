@@ -1,83 +1,29 @@
 use super::*;
 
 #[cfg(feature = "acme-client")]
-pub async fn load_or_create_instant_acme_account(
-    config: &Config,
-    issuer_name: &str,
-) -> Result<instant_acme::Account, AcmeInstantClientError> {
-    let storage = config
-        .tls
-        .acme
-        .storage
-        .as_deref()
-        .ok_or(AcmeInstantClientError::MissingStorage)?;
-    let issuer = config
-        .tls
-        .acme
-        .issuers
-        .iter()
-        .find(|issuer| issuer.name == issuer_name)
-        .ok_or_else(|| AcmeInstantClientError::UnknownIssuer {
-            issuer: issuer_name.to_owned(),
-        })?;
-
-    if let Some(credentials) = load_account_credentials(storage, issuer_name)
-        .map_err(AcmeInstantClientError::AccountStore)?
-    {
-        return instant_acme::Account::builder()
-            .map_err(|error| AcmeInstantClientError::Account {
-                issuer: issuer_name.to_owned(),
-                message: error.to_string(),
-            })?
-            .from_credentials(credentials)
-            .await
-            .map_err(|error| AcmeInstantClientError::Account {
-                issuer: issuer_name.to_owned(),
-                message: error.to_string(),
-            });
-    }
-
-    let contact_storage;
-    let contacts: &[&str] = if let Some(email) = config.tls.acme.contact_email.as_deref() {
-        contact_storage = [format!("mailto:{email}")];
-        &[&contact_storage[0]]
-    } else {
-        &[]
-    };
-    let account_request = instant_acme::NewAccount {
-        contact: contacts,
-        terms_of_service_agreed: true,
-        only_return_existing: false,
-    };
-    let eab = load_external_account_binding(config, issuer_name)
-        .map_err(AcmeInstantClientError::ExternalAccountBinding)?;
-    let eab_key = match eab.as_ref() {
-        Some(secrets) => Some(external_account_key_from_secrets(issuer_name, secrets)?),
-        None => None,
-    };
-    let (account, credentials) = instant_acme::Account::builder()
-        .map_err(|error| AcmeInstantClientError::Account {
-            issuer: issuer_name.to_owned(),
-            message: error.to_string(),
-        })?
-        .create(
-            &account_request,
-            issuer.directory_url.clone(),
-            eab_key.as_ref(),
-        )
-        .await
-        .map_err(|error| AcmeInstantClientError::Account {
-            issuer: issuer_name.to_owned(),
-            message: error.to_string(),
-        })?;
-    store_account_credentials(storage, issuer_name, &credentials)
-        .map_err(AcmeInstantClientError::AccountStore)?;
-
-    Ok(account)
-}
+const ACME_RENEWAL_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[cfg(feature = "acme-client")]
 pub async fn execute_instant_acme_renewal(
+    config: &Config,
+    item: &AcmeRenewalItem,
+) -> Result<AcmeRenewalOutcome, AcmeRenewalError> {
+    tokio::time::timeout(
+        ACME_RENEWAL_TIMEOUT,
+        execute_instant_acme_renewal_inner(config, item),
+    )
+    .await
+    .map_err(|_| AcmeRenewalError::Client {
+        issuer: item.target.issuer.clone(),
+        message: format!(
+            "ACME renewal exceeded its {} second deadline",
+            ACME_RENEWAL_TIMEOUT.as_secs()
+        ),
+    })?
+}
+
+#[cfg(feature = "acme-client")]
+async fn execute_instant_acme_renewal_inner(
     config: &Config,
     item: &AcmeRenewalItem,
 ) -> Result<AcmeRenewalOutcome, AcmeRenewalError> {
@@ -177,7 +123,7 @@ async fn execute_instant_http_01_renewal(
                     &published,
                 ),
             })?;
-        let private_key_pem = Zeroizing::new(
+        let private_key_pem = SecretVec::from_vec(
             order
                 .finalize()
                 .await
@@ -203,13 +149,17 @@ async fn execute_instant_http_01_renewal(
                 ),
             })?
             .into_bytes();
-        let certificate = install_managed_certificate(
-            storage,
-            &item.target.vhost_name,
-            &fullchain_pem,
-            &private_key_pem,
-        )
-        .map_err(AcmeRenewalError::CertificateInstall)?;
+        let certificate = private_key_pem
+            .with_secret(|private_key| {
+                install_managed_certificate(
+                    storage,
+                    &item.target.vhost_name,
+                    &fullchain_pem,
+                    private_key,
+                    &item.target.domains,
+                )
+            })
+            .map_err(AcmeRenewalError::CertificateInstall)?;
 
         Ok(AcmeRenewalOutcome {
             vhost_name: item.target.vhost_name.clone(),
@@ -221,11 +171,7 @@ async fn execute_instant_http_01_renewal(
     .await;
 
     let cleanup = cleanup_http_01_challenges(&challenge_store, &published);
-    match (result, cleanup) {
-        (Ok(outcome), Ok(())) => Ok(outcome),
-        (Err(error), Ok(())) => Err(error),
-        (Ok(_), Err(cleanup_error)) | (Err(_), Err(cleanup_error)) => Err(cleanup_error),
-    }
+    finish_renewal_cleanup(result, cleanup)
 }
 
 #[cfg(feature = "acme-client")]
@@ -284,8 +230,14 @@ async fn execute_instant_tls_alpn_01_renewal(
                     })?;
                 let digest = challenge.key_authorization().digest();
                 let (cert_pem, key_pem) = tls_alpn_01_certificate(&identifier, digest.as_ref())?;
-                challenge_store
-                    .install_challenge_certificate(&identifier, &cert_pem, &key_pem)
+                key_pem
+                    .with_secret(|private_key| {
+                        challenge_store.install_challenge_certificate(
+                            &identifier,
+                            &cert_pem,
+                            private_key,
+                        )
+                    })
                     .map_err(AcmeRenewalError::CertificateInstall)?;
                 published.push(identifier.clone());
                 challenge
@@ -306,7 +258,7 @@ async fn execute_instant_tls_alpn_01_renewal(
                 issuer: item.target.issuer.clone(),
                 message: error.to_string(),
             })?;
-        let private_key_pem = Zeroizing::new(
+        let private_key_pem = SecretVec::from_vec(
             order
                 .finalize()
                 .await
@@ -324,13 +276,17 @@ async fn execute_instant_tls_alpn_01_renewal(
                 message: error.to_string(),
             })?
             .into_bytes();
-        let certificate = install_managed_certificate(
-            storage,
-            &item.target.vhost_name,
-            &fullchain_pem,
-            &private_key_pem,
-        )
-        .map_err(AcmeRenewalError::CertificateInstall)?;
+        let certificate = private_key_pem
+            .with_secret(|private_key| {
+                install_managed_certificate(
+                    storage,
+                    &item.target.vhost_name,
+                    &fullchain_pem,
+                    private_key,
+                    &item.target.domains,
+                )
+            })
+            .map_err(AcmeRenewalError::CertificateInstall)?;
 
         Ok(AcmeRenewalOutcome {
             vhost_name: item.target.vhost_name.clone(),
@@ -342,11 +298,7 @@ async fn execute_instant_tls_alpn_01_renewal(
     .await;
 
     let cleanup = cleanup_tls_alpn_01_challenges(&challenge_store, &published);
-    match (result, cleanup) {
-        (Ok(outcome), Ok(())) => Ok(outcome),
-        (Err(error), Ok(())) => Err(error),
-        (Ok(_), Err(cleanup_error)) | (Err(_), Err(cleanup_error)) => Err(cleanup_error),
-    }
+    finish_renewal_cleanup(result, cleanup)
 }
 
 #[cfg(feature = "acme-client")]
@@ -365,8 +317,119 @@ pub async fn renew_due_instant_acme_targets(
 ) -> Result<AcmeRenewalRun, AcmeRenewalError> {
     let observations = observe_configured_certificates(config);
     let queue = plan_renewal_queue(config, &observations, now);
-    let due_queue: Vec<AcmeRenewalItem> = queue.into_iter().filter(|item| item.due_now).collect();
+    let mut due_queue = Vec::new();
+    for item in queue {
+        if ari_allows_renewal_now(config, &item, now).await {
+            due_queue.push(item);
+        }
+    }
     execute_instant_acme_queue(config, &due_queue).await
+}
+
+#[cfg(feature = "acme-client")]
+async fn ari_allows_renewal_now(config: &Config, item: &AcmeRenewalItem, now: SystemTime) -> bool {
+    let fallback = item.due_now;
+    let Some(storage) = config.tls.acme.storage.as_deref() else {
+        return fallback;
+    };
+    let Ok(Some(credentials)) = load_account_credentials(storage, &item.target.issuer) else {
+        return fallback;
+    };
+    let Some(issuer) = config
+        .tls
+        .acme
+        .issuers
+        .iter()
+        .find(|issuer| issuer.name == item.target.issuer)
+    else {
+        return fallback;
+    };
+    let Ok(Some(certificate_pem)) =
+        read_bounded_certificate_file(&item.target.certificate.cert_path)
+    else {
+        return fallback;
+    };
+    let Some(Ok(leaf)) = rustls_pemfile::certs(&mut certificate_pem.as_slice()).next() else {
+        return fallback;
+    };
+    let Ok(identifier) = instant_acme::CertificateIdentifier::try_from(&leaf) else {
+        return fallback;
+    };
+    let Ok(builder) = bounded_acme_account_builder(issuer) else {
+        return fallback;
+    };
+    let Ok(Ok(account)) = tokio::time::timeout(
+        ACME_ACCOUNT_OPERATION_TIMEOUT,
+        builder.from_credentials(credentials),
+    )
+    .await
+    else {
+        return fallback;
+    };
+    let renewal_info = tokio::time::timeout(
+        ACME_ACCOUNT_OPERATION_TIMEOUT,
+        account.renewal_info(&identifier),
+    )
+    .await;
+    let info = match renewal_info {
+        Ok(Ok((info, _retry_after))) => info,
+        Ok(Err(instant_acme::Error::Unsupported(_))) => return fallback,
+        Ok(Err(error)) => {
+            log::warn!(
+                target: "fluxheim::acme",
+                "ACME ARI lookup failed for vhost {}: {error}; using configured renewal window",
+                item.target.vhost_name
+            );
+            return fallback;
+        }
+        Err(_) => {
+            log::warn!(
+                target: "fluxheim::acme",
+                "ACME ARI lookup timed out for vhost {}; using configured renewal window",
+                item.target.vhost_name
+            );
+            return fallback;
+        }
+    };
+    let start = info.suggested_window.start.unix_timestamp();
+    let end = info.suggested_window.end.unix_timestamp();
+    if end <= start {
+        return fallback;
+    }
+    let scheduled = deterministic_ari_renewal_time(leaf.as_ref(), start, end);
+    let now = now
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    now >= scheduled.max(0) as u64
+}
+
+#[cfg(feature = "acme-client")]
+fn deterministic_ari_renewal_time(certificate_der: &[u8], start: i64, end: i64) -> i64 {
+    if end <= start {
+        return start;
+    }
+    use sha2::Digest as _;
+    let digest = sha2::Sha256::digest(certificate_der);
+    let mut seed = [0_u8; 8];
+    seed.copy_from_slice(&digest[..8]);
+    let offset = u64::from_be_bytes(seed) % (end - start) as u64;
+    start.saturating_add(offset as i64)
+}
+
+#[cfg(all(feature = "acme-client", test))]
+mod ari_tests {
+    #[test]
+    fn ari_schedule_is_stable_and_inside_the_suggested_window() {
+        let first = super::deterministic_ari_renewal_time(b"certificate", 100, 200);
+        let second = super::deterministic_ari_renewal_time(b"certificate", 100, 200);
+        assert_eq!(first, second);
+        assert!((100..200).contains(&first));
+        assert_eq!(
+            super::deterministic_ari_renewal_time(b"certificate", 50, 50),
+            50
+        );
+    }
 }
 
 #[cfg(feature = "acme-client")]
@@ -382,11 +445,15 @@ pub async fn renew_selected_instant_acme_targets(
         let observations = observe_configured_certificates(config);
         plan_renewal_queue(config, &observations, now)
     };
-    let selected_queue: Vec<AcmeRenewalItem> = queue
+    let mut selected_queue = Vec::new();
+    for item in queue
         .into_iter()
         .filter(|item| item.target.vhost_name == vhost_name)
-        .filter(|item| force_renew || item.due_now)
-        .collect();
+    {
+        if force_renew || ari_allows_renewal_now(config, &item, now).await {
+            selected_queue.push(item);
+        }
+    }
     execute_instant_acme_queue(config, &selected_queue).await
 }
 
