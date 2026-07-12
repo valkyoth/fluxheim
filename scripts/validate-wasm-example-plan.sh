@@ -11,6 +11,17 @@ for file in "$plan" "$examples"; do
     fi
 done
 
+for file in \
+    examples/wasm/irules-access-policy.wat \
+    examples/wasm/irules-access-policy.toml \
+    scripts/smoke_wasm_policy_examples.sh
+do
+    if [ ! -f "$file" ]; then
+        echo "wasm example plan: missing $file" >&2
+        exit 1
+    fi
+done
+
 for term in \
     "F5 iRules" \
     "nginx Lua/OpenResty" \

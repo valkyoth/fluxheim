@@ -48,6 +48,15 @@ Required live test:
 
 Target release: `v1.7.1`.
 
+Status: the checked-in `examples/wasm/irules-access-policy.wat` and
+`examples/wasm/irules-access-policy.toml` pair packages the bounded
+access-decision subset as a runnable `v1.7.9` migration example. Fluxheim owns
+host/path/method/trusted-client/TLS classification; the route-scoped plugin can
+continue, allow, or deny and cannot inspect arbitrary request state. The live
+listener smoke proves an unattached public request reaches origin, the attached
+admin request receives the plugin's 403 before origin dispatch, and a trapping
+plugin fails closed.
+
 ### nginx Lua/OpenResty-Style Header Policy
 
 Capability target:

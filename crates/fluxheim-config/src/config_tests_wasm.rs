@@ -34,6 +34,17 @@ fn base_wasm_config(extra: &str) -> Config {
 }
 
 #[cfg(feature = "wasm")]
+#[test]
+fn irules_access_policy_example_config_validates() {
+    let config: Config = toml::from_str(include_str!(
+        "../../../examples/wasm/irules-access-policy.toml"
+    ))
+    .unwrap();
+
+    assert_eq!(config.validate(), Ok(()));
+}
+
+#[cfg(feature = "wasm")]
 fn proxy_preview_wasm_config(plugin_fields: &str) -> Config {
     toml::from_str(&format!(
         r#"

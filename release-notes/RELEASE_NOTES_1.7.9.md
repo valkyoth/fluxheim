@@ -6,6 +6,16 @@ and VCL-style policy jobs into Fluxheim's typed WebAssembly policy ABI. It
 provides capability mappings, not syntax or runtime compatibility with those
 products.
 
+## Added
+
+- Add a checked-in F5 iRules-style route access policy and complete config
+  fixture using Fluxheim's typed access-decision ABI.
+- Add real listener coverage proving public requests reach origin, attached
+  admin requests are denied before origin dispatch, and plugin traps fail
+  closed.
+- Add `scripts/smoke_wasm_policy_examples.sh` to `scripts/test_starter.py` and
+  the opt-in Wasm release gate.
+
 ## Security
 
 - Open private snapshot files with platform no-follow semantics before

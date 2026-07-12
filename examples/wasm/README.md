@@ -5,6 +5,20 @@ These examples are source-level policy examples. Build the `.wat` files to
 `wasm.plugin_roots`, and pin the module SHA-256 in config before enabling it in
 production.
 
+`irules-access-policy.wat` and `irules-access-policy.toml` demonstrate the
+F5 iRules-style access-policy mapping. Fluxheim first classifies the request
+through configured vhosts, routes, methods, trusted-client ACLs, and TLS
+policy. The example plugin is attached only to the bounded `admin` route and
+returns the typed deny decision, producing a small fixed 403 response before
+origin dispatch. Requests outside that attachment continue normally. A trap,
+timeout, invalid result, or admission failure follows `fail_mode =
+"fail-closed"` and cannot silently bypass the policy.
+
+This is capability parity, not Tcl syntax compatibility. The access-decision
+module receives no raw headers, body, filesystem, network, admin-token, or TLS
+secret capability. Use native route and access configuration for classification
+instead of attempting arbitrary parsing inside the plugin.
+
 `cache-lookup-policy.wat` and `cache-store-policy.wat` demonstrate the bounded
 1.7.5 cache-policy ABI:
 

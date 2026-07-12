@@ -134,6 +134,7 @@ if [ "${FLUXHEIM_GATE_WASM:-0}" = "1" ]; then
     echo "stable release gate: Wasm config registry and sandbox smoke"
     scripts/validate-wasm-config-registry.sh
     scripts/smoke_wasm_sandbox.sh
+    scripts/smoke_wasm_policy_examples.sh
 else
     echo "stable release gate: skipping Wasm sandbox smoke; set FLUXHEIM_GATE_WASM=1 to enable"
 fi

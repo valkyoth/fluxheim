@@ -34,6 +34,30 @@ async fn native_wasm_access_decision_denies_before_upstream() {
 }
 
 #[tokio::test]
+async fn native_wasm_irules_policy_example_allows_public_and_denies_admin() {
+    let fixture =
+        WasmRouteFixture::new(&[("irules_policy", WasmPluginBody::IrulesAccessPolicyExample)]);
+    let upstream = super::upstream_expect_path("/public", "public origin").await;
+    let mut config = fixture.config_with_attachments(
+        upstream,
+        vec![wasm_attachment("irules_policy", "admin", 100)],
+    );
+    config.vhosts[0].routes[0].name = "admin".to_owned();
+    config.vhosts[0].routes[0].path_exact = Some("/admin".to_owned());
+    let router =
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap();
+    let proxy = router_listener(router).await;
+
+    let allowed = downstream_get(proxy, "/public").await;
+    assert!(allowed.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(allowed.ends_with("public origin"));
+
+    let denied = downstream_get(proxy, "/admin").await;
+    assert!(denied.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    assert!(denied.ends_with("wasm access denied\n"));
+}
+
+#[tokio::test]
 async fn native_wasm_access_decision_uses_first_deny_in_priority_order() {
     let fixture = WasmRouteFixture::new(&[
         ("deny", WasmPluginBody::Decision(2)),
@@ -1875,6 +1899,7 @@ impl WasmRouteFixture {
 #[derive(Clone, Copy)]
 enum WasmPluginBody {
     Decision(i32),
+    IrulesAccessPolicyExample,
     HeaderPolicy,
     ForbiddenHeader,
     RouteDecision,
@@ -1897,8 +1922,11 @@ enum WasmPluginBody {
     Trap,
     #[cfg(feature = "wasm-proxy-abi")]
     ProxyPreviewLogCall,
+    #[cfg(feature = "wasm-wasi")]
     WasiRandomGranted,
+    #[cfg(feature = "wasm-wasi")]
     WasiRandomDenied,
+    #[cfg(feature = "wasm-wasi")]
     WasiForbiddenFdWrite,
     BusyLoop,
 }
@@ -1910,6 +1938,9 @@ impl WasmPluginBody {
                 format!(
                     r#"(module (func (export "fluxheim_access_decision") (result i32) i32.const {decision}))"#
                 )
+            }
+            Self::IrulesAccessPolicyExample => {
+                include_str!("../../../../examples/wasm/irules-access-policy.wat").to_owned()
             }
             Self::HeaderPolicy => {
                 r#"
@@ -2203,6 +2234,7 @@ impl WasmPluginBody {
                 "#
                 .to_owned()
             }
+            #[cfg(feature = "wasm-wasi")]
             Self::WasiRandomGranted | Self::WasiRandomDenied => {
                 r#"
                 (module
@@ -2216,6 +2248,7 @@ impl WasmPluginBody {
                 "#
                 .to_owned()
             }
+            #[cfg(feature = "wasm-wasi")]
             Self::WasiForbiddenFdWrite => {
                 r#"
                 (module
@@ -2264,12 +2297,15 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
     let proxy_preview = matches!(body, WasmPluginBody::ProxyPreviewLogCall);
     #[cfg(not(feature = "wasm-proxy-abi"))]
     let proxy_preview = false;
+    #[cfg(feature = "wasm-wasi")]
     let wasi_preview = matches!(
         body,
         WasmPluginBody::WasiRandomGranted
             | WasmPluginBody::WasiRandomDenied
             | WasmPluginBody::WasiForbiddenFdWrite
     );
+    #[cfg(not(feature = "wasm-wasi"))]
+    let wasi_preview = false;
     fluxheim_config::WasmPluginConfig {
         name: name.to_owned(),
         path,
@@ -2289,11 +2325,29 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
             fluxheim_config::WasmHostCallNamespace::FluxheimPolicyV1
         },
         wasi: fluxheim_config::WasmWasiCapabilitiesConfig {
-            clocks: matches!(body, WasmPluginBody::WasiForbiddenFdWrite),
-            randomness: matches!(
-                body,
-                WasmPluginBody::WasiRandomGranted | WasmPluginBody::WasiForbiddenFdWrite
-            ),
+            clocks: {
+                #[cfg(feature = "wasm-wasi")]
+                {
+                    matches!(body, WasmPluginBody::WasiForbiddenFdWrite)
+                }
+                #[cfg(not(feature = "wasm-wasi"))]
+                {
+                    false
+                }
+            },
+            randomness: {
+                #[cfg(feature = "wasm-wasi")]
+                {
+                    matches!(
+                        body,
+                        WasmPluginBody::WasiRandomGranted | WasmPluginBody::WasiForbiddenFdWrite
+                    )
+                }
+                #[cfg(not(feature = "wasm-wasi"))]
+                {
+                    false
+                }
+            },
         },
         phases: wasm_plugin_phases(body),
         fail_mode: fluxheim_config::WasmPluginFailMode::FailClosed,
@@ -2337,11 +2391,15 @@ fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPh
             vec![fluxheim_config::WasmPluginPhase::CacheStore]
         }
         WasmPluginBody::Decision(_)
+        | WasmPluginBody::IrulesAccessPolicyExample
         | WasmPluginBody::Trap
-        | WasmPluginBody::WasiRandomGranted
-        | WasmPluginBody::WasiRandomDenied
-        | WasmPluginBody::WasiForbiddenFdWrite
         | WasmPluginBody::BusyLoop => vec![fluxheim_config::WasmPluginPhase::AccessDecision],
+        #[cfg(feature = "wasm-wasi")]
+        WasmPluginBody::WasiRandomGranted
+        | WasmPluginBody::WasiRandomDenied
+        | WasmPluginBody::WasiForbiddenFdWrite => {
+            vec![fluxheim_config::WasmPluginPhase::AccessDecision]
+        }
         #[cfg(feature = "wasm-proxy-abi")]
         WasmPluginBody::ProxyPreviewLogCall => {
             vec![fluxheim_config::WasmPluginPhase::AccessDecision]

@@ -175,8 +175,12 @@ TESTS: tuple[TestEntry, ...] = (
         "wasm",
         "Wasm config and sandbox smoke",
         "wasm",
-        ("scripts/validate-wasm-config-registry.sh", "scripts/smoke_wasm_sandbox.sh"),
-        "Validates the Fluxheim Wasm config registry and executes real Wasm modules through the bounded sandbox.",
+        (
+            "scripts/validate-wasm-config-registry.sh",
+            "scripts/smoke_wasm_sandbox.sh",
+            "scripts/smoke_wasm_policy_examples.sh",
+        ),
+        "Validates the Wasm registry, sandbox, and real-listener migration policy examples.",
     ),
     TestEntry(
         "observability",

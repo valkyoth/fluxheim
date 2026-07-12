@@ -9,6 +9,14 @@ behavior when the change improves security or project direction.
 
 ## 1.7.9 - Unreleased
 
+### Added
+
+- Add the checked-in F5 iRules-style route access policy and configuration
+  example, with real listener coverage for normal origin traffic, pre-origin
+  denial, and fail-closed plugin traps.
+- Add a dedicated Wasm policy-example smoke to the human test starter and the
+  opt-in Wasm release gate.
+
 ### Security
 
 - Open snapshot files with no-follow semantics before validating the opened
