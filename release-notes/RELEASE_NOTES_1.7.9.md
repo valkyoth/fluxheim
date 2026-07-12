@@ -47,7 +47,10 @@ products.
   descriptor and reconciles every managed descendant to the selected UID/GID
   through descriptor-relative, no-symlink traversal. Restart repairs
   intermediate `0700 root:root` directories left by an interrupted root-run
-  handoff, while outside-boundary targets fail before mutation.
+  handoff, while outside-boundary targets fail before mutation. Linux also
+  enforces `openat2(RESOLVE_NO_XDEV)` and other Unix platforms reject device-ID
+  changes before ownership mutation, preventing reconciliation through nested
+  mount points.
 - Managed ACME account generation now creates P-256 material in zeroizing
   RustCrypto secret/document types before importing it into Ring and retaining
   the durable copy in `sanitization::SecretVec`, removing the transient

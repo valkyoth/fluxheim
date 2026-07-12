@@ -75,7 +75,12 @@ descriptor for the nearest existing storage boundary. Every managed descendant
 is reopened relative to that descriptor and reconciled to the selected UID/GID
 and mode `0700`, including descendants left `root:root` by an interrupted prior
 handoff. Paths outside the recorded boundary are rejected before filesystem
-mutation, and ancestors above it are never re-owned.
+mutation, and ancestors above it are never re-owned. Linux requires
+`openat2(2)` support for root-run reconciliation and uses `RESOLVE_BENEATH`,
+`RESOLVE_NO_SYMLINKS`, `RESOLVE_NO_MAGICLINKS`, and `RESOLVE_NO_XDEV`; an older
+kernel fails closed rather than falling back. Other Unix platforms compare the
+opened boundary and descendant device identifiers before changing ownership or
+mode.
 
 ```bash
 fluxheim --config path/to/fluxheim.toml --check-tls-storage

@@ -40,18 +40,21 @@ pub(crate) fn reconcile_private_directory_subtree(
         })
         .collect::<io::Result<Vec<_>>>()?;
 
+    let boundary_device = rustix::fs::fstat(boundary_directory)?.st_dev;
     let mut directory = rustix::io::dup(boundary_directory)?;
     for name in components.into_iter().flatten() {
         match rustix::fs::mkdirat(&directory, name, private_directory_mode()) {
             Ok(()) | Err(rustix::io::Errno::EXIST) => {}
             Err(error) => return Err(error.into()),
         }
-        directory = rustix::fs::openat(
-            &directory,
-            name,
-            directory_open_flags(),
-            rustix::fs::Mode::empty(),
-        )?;
+        let next = open_reconciliation_descendant(&directory, name)?;
+        if rustix::fs::fstat(&next)?.st_dev != boundary_device {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "ACME managed directory target crosses a filesystem boundary",
+            ));
+        }
+        directory = next;
         rustix::fs::fchown(
             &directory,
             Some(rustix::fs::Uid::from_raw(owner.0)),
@@ -60,6 +63,38 @@ pub(crate) fn reconcile_private_directory_subtree(
         rustix::fs::fchmod(&directory, private_directory_mode())?;
     }
     Ok(directory)
+}
+
+#[cfg(target_os = "linux")]
+fn open_reconciliation_descendant(
+    directory: &rustix::fd::OwnedFd,
+    name: &std::ffi::OsStr,
+) -> io::Result<rustix::fd::OwnedFd> {
+    rustix::fs::openat2(
+        directory,
+        name,
+        directory_open_flags(),
+        rustix::fs::Mode::empty(),
+        rustix::fs::ResolveFlags::BENEATH
+            | rustix::fs::ResolveFlags::NO_SYMLINKS
+            | rustix::fs::ResolveFlags::NO_MAGICLINKS
+            | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(Into::into)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn open_reconciliation_descendant(
+    directory: &rustix::fd::OwnedFd,
+    name: &std::ffi::OsStr,
+) -> io::Result<rustix::fd::OwnedFd> {
+    rustix::fs::openat(
+        directory,
+        name,
+        directory_open_flags(),
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(Into::into)
 }
 
 #[cfg(unix)]
@@ -253,5 +288,58 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert!(!outside.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owned_directory_reconciliation_rejects_bind_mount() {
+        // Run only inside an isolated privileged mount namespace.
+        const ENABLED: &str = "FLUXHEIM_ACME_MOUNT_BOUNDARY_TEST";
+        if std::env::var_os(ENABLED).as_deref() != Some(std::ffi::OsStr::new("1")) {
+            eprintln!("privileged ACME mount-boundary test skipped");
+            return;
+        }
+        if !rustix::process::geteuid().is_root() {
+            panic!("privileged ACME mount-boundary test requires root");
+        }
+
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+
+        struct BindMount(std::path::PathBuf);
+        impl Drop for BindMount {
+            fn drop(&mut self) {
+                let _ = rustix::mount::unmount(&self.0, rustix::mount::UnmountFlags::DETACH);
+            }
+        }
+
+        let root = fluxheim_common::test_support::unique_temp_path("acme-directory-mount");
+        let boundary = root.join("storage");
+        let mount_point = boundary.join("mounted");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&mount_point).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let original = std::fs::symlink_metadata(&outside).unwrap();
+        rustix::mount::mount_bind(&outside, &mount_point).unwrap();
+        let _mount = BindMount(mount_point.clone());
+
+        let boundary_directory = open_directory_no_symlinks(&boundary).unwrap();
+        assert!(
+            reconcile_private_directory_subtree(
+                &boundary,
+                &boundary_directory,
+                &mount_point.join("child"),
+                (65_534, 65_534),
+            )
+            .is_err()
+        );
+
+        let after = std::fs::symlink_metadata(&outside).unwrap();
+        assert_eq!((after.uid(), after.gid()), (original.uid(), original.gid()));
+        assert_eq!(
+            after.permissions().mode() & 0o777,
+            original.permissions().mode() & 0o777
+        );
+        assert!(!outside.join("child").exists());
     }
 }

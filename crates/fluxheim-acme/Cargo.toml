@@ -51,3 +51,6 @@ x509-parser = { version = "0.18.1", default-features = false }
 fluxheim-common = { path = "../fluxheim-common", features = ["test-support"] }
 proptest = "1.9.0"
 tokio = { version = "1.52.3", default-features = false, features = ["rt", "time"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+rustix = { version = "1.1.4", features = ["mount"] }
