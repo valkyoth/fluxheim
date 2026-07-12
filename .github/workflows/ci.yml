@@ -109,6 +109,9 @@ jobs:
       - name: Run default tests
         run: cargo test
 
+      - name: Run privileged ACME mount-boundary regression
+        run: FLUXHEIM_ACME_MOUNT_TEST_RUNTIME=docker scripts/smoke_acme_mount_boundary.sh
+
       - name: Validate OWASP Top 10 2025 baseline
         run: scripts/validate-owasp-top10-2025.sh check
 

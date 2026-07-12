@@ -102,6 +102,13 @@ TESTS: tuple[TestEntry, ...] = (
         "Runs the OpenBao-backed cache encryption smoke using FLUXHEIM_OPENBAO_IMAGE.",
     ),
     TestEntry(
+        "acme-mount-boundary",
+        "ACME mount-boundary security smoke",
+        "security",
+        ("scripts/smoke_acme_mount_boundary.sh",),
+        "Runs the ignored ACME bind-mount regression in an isolated privileged container.",
+    ),
+    TestEntry(
         "peer-fill",
         "Peer-fill cache smoke",
         "cache",

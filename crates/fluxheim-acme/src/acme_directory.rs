@@ -292,16 +292,13 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    #[ignore = "requires an isolated privileged mount namespace"]
     fn owned_directory_reconciliation_rejects_bind_mount() {
         // Run only inside an isolated privileged mount namespace.
-        const ENABLED: &str = "FLUXHEIM_ACME_MOUNT_BOUNDARY_TEST";
-        if std::env::var_os(ENABLED).as_deref() != Some(std::ffi::OsStr::new("1")) {
-            eprintln!("privileged ACME mount-boundary test skipped");
-            return;
-        }
-        if !rustix::process::geteuid().is_root() {
-            panic!("privileged ACME mount-boundary test requires root");
-        }
+        assert!(
+            rustix::process::geteuid().is_root(),
+            "mount-boundary test requires root"
+        );
 
         use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 

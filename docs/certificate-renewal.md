@@ -82,6 +82,16 @@ kernel fails closed rather than falling back. Other Unix platforms compare the
 opened boundary and descendant device identifiers before changing ownership or
 mode.
 
+The Linux bind-mount regression is deliberately marked ignored in ordinary
+Rust test runs because it requires mount capability and an isolated mount
+namespace. CI, the deep release gate, and `scripts/test_starter.py` execute
+`scripts/smoke_acme_mount_boundary.sh`, which runs that exact ignored test in a
+privileged disposable container. Its default Debian helper image is pinned by
+multi-architecture manifest digest because the container receives elevated
+mount capability; overrides are part of the operator's trusted test
+environment. A normal test inventory therefore reports the Rust test as
+ignored rather than as a false pass.
+
 ```bash
 fluxheim --config path/to/fluxheim.toml --check-tls-storage
 ```

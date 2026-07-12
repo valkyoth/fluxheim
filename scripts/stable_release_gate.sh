@@ -234,6 +234,13 @@ else
     echo "stable release gate: skipping fuzz target compile check; set FLUXHEIM_GATE_FUZZ_CHECK=1 to enable"
 fi
 
+if [ "${FLUXHEIM_GATE_ACME_MOUNT_BOUNDARY:-0}" = "1" ]; then
+    echo "stable release gate: privileged ACME mount-boundary smoke"
+    scripts/smoke_acme_mount_boundary.sh
+else
+    echo "stable release gate: skipping privileged ACME mount-boundary smoke; set FLUXHEIM_GATE_ACME_MOUNT_BOUNDARY=1 to enable"
+fi
+
 if [ "$mode" = "release" ] && [ "${FLUXHEIM_SKIP_IMAGE_GATE:-0}" != "1" ]; then
     echo "stable release gate: required Podman image smoke"
     scripts/podman_smoke.sh
