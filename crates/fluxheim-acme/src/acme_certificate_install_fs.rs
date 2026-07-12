@@ -44,12 +44,37 @@ pub(crate) type ManagedCertificateOwner = Option<UnixFileOwner>;
 #[cfg(not(unix))]
 pub(crate) type ManagedCertificateOwner = ();
 
+#[derive(Debug)]
+pub(crate) struct ManagedCertificateOwnership {
+    #[cfg(unix)]
+    owner: ManagedCertificateOwner,
+    #[cfg(unix)]
+    boundary: Option<PathBuf>,
+    #[cfg(unix)]
+    boundary_directory: Option<rustix::fd::OwnedFd>,
+}
+
+impl ManagedCertificateOwnership {
+    pub(crate) fn file_owner(&self) -> ManagedCertificateOwner {
+        #[cfg(unix)]
+        {
+            self.owner
+        }
+        #[cfg(not(unix))]
+        {}
+    }
+}
+
 #[cfg(unix)]
-pub(crate) fn managed_certificate_owner(
+pub(crate) fn managed_certificate_ownership(
     storage: &Path,
-) -> Result<ManagedCertificateOwner, AcmeCertificateInstallError> {
+) -> Result<ManagedCertificateOwnership, AcmeCertificateInstallError> {
     if !rustix::process::geteuid().is_root() {
-        return Ok(None);
+        return Ok(ManagedCertificateOwnership {
+            owner: None,
+            boundary: None,
+            boundary_directory: None,
+        });
     }
 
     let mut current = storage;
@@ -61,16 +86,34 @@ pub(crate) fn managed_certificate_owner(
                     message: "path contains a symlink".to_owned(),
                 });
             }
-            Ok(metadata) => {
-                use std::os::unix::fs::MetadataExt;
-                return Ok(Some(UnixFileOwner {
-                    uid: metadata.uid(),
-                    gid: metadata.gid(),
-                }));
+            Ok(_) => {
+                let boundary_directory = crate::acme_directory::open_directory_no_symlinks(current)
+                    .map_err(|error| AcmeCertificateInstallError::Io {
+                        path: current.to_path_buf(),
+                        error,
+                    })?;
+                let metadata = rustix::fs::fstat(&boundary_directory).map_err(|error| {
+                    AcmeCertificateInstallError::Io {
+                        path: current.to_path_buf(),
+                        error: error.into(),
+                    }
+                })?;
+                return Ok(ManagedCertificateOwnership {
+                    owner: Some(UnixFileOwner {
+                        uid: metadata.st_uid,
+                        gid: metadata.st_gid,
+                    }),
+                    boundary: Some(current.to_path_buf()),
+                    boundary_directory: Some(boundary_directory),
+                });
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 let Some(parent) = current.parent() else {
-                    return Ok(None);
+                    return Ok(ManagedCertificateOwnership {
+                        owner: None,
+                        boundary: None,
+                        boundary_directory: None,
+                    });
                 };
                 current = parent;
             }
@@ -85,28 +128,58 @@ pub(crate) fn managed_certificate_owner(
 }
 
 #[cfg(not(unix))]
-pub(crate) fn managed_certificate_owner(
+pub(crate) fn managed_certificate_ownership(
     _storage: &Path,
+) -> Result<ManagedCertificateOwnership, AcmeCertificateInstallError> {
+    Ok(ManagedCertificateOwnership {})
+}
+
+#[cfg(feature = "acme-client")]
+pub(crate) fn managed_certificate_owner(
+    storage: &Path,
 ) -> Result<ManagedCertificateOwner, AcmeCertificateInstallError> {
-    Ok(())
+    managed_certificate_ownership(storage).map(|ownership| ownership.file_owner())
 }
 
 pub(super) fn ensure_safe_directory(
     directory: &Path,
-    owner: ManagedCertificateOwner,
+    ownership: &ManagedCertificateOwnership,
 ) -> Result<(), AcmeCertificateInstallError> {
     #[cfg(unix)]
     {
-        let directory_fd = crate::acme_directory::create_private_directory_all_with_owner(
-            directory,
-            owner.map(|owner| (owner.uid, owner.gid)),
-        )
+        let directory_fd = match (
+            ownership.owner,
+            ownership.boundary.as_deref(),
+            ownership.boundary_directory.as_ref(),
+        ) {
+            (Some(owner), Some(boundary), Some(boundary_directory)) => {
+                crate::acme_directory::reconcile_private_directory_subtree(
+                    boundary,
+                    boundary_directory,
+                    directory,
+                    (owner.uid, owner.gid),
+                )
+            }
+            (None, None, None) => crate::acme_directory::create_private_directory_all(directory),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "ACME managed directory ownership plan is incomplete",
+            )),
+        }
         .map_err(|error| AcmeCertificateInstallError::Io {
             path: directory.to_path_buf(),
             error,
         })?;
+        rustix::fs::fchmod(
+            &directory_fd,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR | rustix::fs::Mode::XUSR,
+        )
+        .map_err(|error| AcmeCertificateInstallError::Io {
+            path: directory.to_path_buf(),
+            error: error.into(),
+        })?;
         let directory_file = fs::File::from(directory_fd);
-        apply_owner_to_file(&directory_file, directory, owner)?;
+        apply_owner_to_file(&directory_file, directory, ownership.file_owner())?;
         Ok(())
     }
 
@@ -117,7 +190,7 @@ pub(super) fn ensure_safe_directory(
             path: directory.to_path_buf(),
             error,
         })?;
-        apply_owner_to_path(directory, owner)?;
+        apply_owner_to_path(directory, ownership.file_owner())?;
         reject_existing_symlink_in_path(directory)?;
         let metadata =
             fs::symlink_metadata(directory).map_err(|error| AcmeCertificateInstallError::Io {

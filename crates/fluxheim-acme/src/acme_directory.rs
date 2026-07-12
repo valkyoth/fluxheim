@@ -5,28 +5,65 @@ use std::path::{Component, Path};
 
 #[cfg(unix)]
 pub(crate) fn create_private_directory_all(path: &Path) -> io::Result<rustix::fd::OwnedFd> {
-    create_private_directory_all_with_owner(path, None)
-}
-
-#[cfg(unix)]
-pub(crate) fn create_private_directory_all_with_owner(
-    path: &Path,
-    owner: Option<(u32, u32)>,
-) -> io::Result<rustix::fd::OwnedFd> {
-    walk_directory(path, true, owner)
+    walk_directory(path, true)
 }
 
 #[cfg(unix)]
 pub(crate) fn open_directory_no_symlinks(path: &Path) -> io::Result<rustix::fd::OwnedFd> {
-    walk_directory(path, false, None)
+    walk_directory(path, false)
 }
 
 #[cfg(unix)]
-fn walk_directory(
-    path: &Path,
-    create: bool,
-    owner: Option<(u32, u32)>,
+pub(crate) fn reconcile_private_directory_subtree(
+    boundary: &Path,
+    boundary_directory: &rustix::fd::OwnedFd,
+    target: &Path,
+    owner: (u32, u32),
 ) -> io::Result<rustix::fd::OwnedFd> {
+    let relative = target.strip_prefix(boundary).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "ACME managed directory target escapes its ownership boundary",
+        )
+    })?;
+    let components = relative
+        .components()
+        .map(|component| match component {
+            Component::CurDir => Ok(None),
+            Component::Normal(name) => Ok(Some(name)),
+            Component::RootDir | Component::ParentDir | Component::Prefix(_) => {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "ACME managed directory target contains a non-normal component",
+                ))
+            }
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+
+    let mut directory = rustix::io::dup(boundary_directory)?;
+    for name in components.into_iter().flatten() {
+        match rustix::fs::mkdirat(&directory, name, private_directory_mode()) {
+            Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+            Err(error) => return Err(error.into()),
+        }
+        directory = rustix::fs::openat(
+            &directory,
+            name,
+            directory_open_flags(),
+            rustix::fs::Mode::empty(),
+        )?;
+        rustix::fs::fchown(
+            &directory,
+            Some(rustix::fs::Uid::from_raw(owner.0)),
+            Some(rustix::fs::Gid::from_raw(owner.1)),
+        )?;
+        rustix::fs::fchmod(&directory, private_directory_mode())?;
+    }
+    Ok(directory)
+}
+
+#[cfg(unix)]
+fn walk_directory(path: &Path, create: bool) -> io::Result<rustix::fd::OwnedFd> {
     let mut directory = rustix::fs::openat(
         rustix::fs::CWD,
         if path.is_absolute() {
@@ -49,41 +86,29 @@ fn walk_directory(
                 ));
             }
         };
-        let created = if create {
-            match rustix::fs::mkdirat(
-                &directory,
-                name,
-                rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR | rustix::fs::Mode::XUSR,
-            ) {
-                Ok(()) => true,
-                Err(rustix::io::Errno::EXIST) => false,
+        if create {
+            match rustix::fs::mkdirat(&directory, name, private_directory_mode()) {
+                Ok(()) | Err(rustix::io::Errno::EXIST) => {}
                 Err(error) => return Err(error.into()),
             }
-        } else {
-            false
-        };
+        }
         directory = rustix::fs::openat(
             &directory,
             name,
             directory_open_flags(),
             rustix::fs::Mode::empty(),
         )?;
-        if created && let Some((uid, gid)) = owner {
-            rustix::fs::fchown(
-                &directory,
-                Some(rustix::fs::Uid::from_raw(uid)),
-                Some(rustix::fs::Gid::from_raw(gid)),
-            )?;
-        }
     }
 
     if create {
-        rustix::fs::fchmod(
-            &directory,
-            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR | rustix::fs::Mode::XUSR,
-        )?;
+        rustix::fs::fchmod(&directory, private_directory_mode())?;
     }
     Ok(directory)
+}
+
+#[cfg(unix)]
+fn private_directory_mode() -> rustix::fs::Mode {
+    rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR | rustix::fs::Mode::XUSR
 }
 
 #[cfg(unix)]
@@ -128,13 +153,40 @@ mod tests {
     }
 
     #[test]
-    fn owned_directory_walker_assigns_every_created_component() {
+    fn owned_directory_reconciliation_updates_preexisting_components() {
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+
+        let root = fluxheim_common::test_support::unique_temp_path("acme-directory-reconcile");
+        let boundary = root.join("storage");
+        let stranded = boundary.join("one");
+        std::fs::create_dir_all(&stranded).unwrap();
+        std::fs::set_permissions(&stranded, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let target = stranded.join("two");
+        let owner = (
+            rustix::process::geteuid().as_raw(),
+            rustix::process::getegid().as_raw(),
+        );
+
+        let boundary_directory = open_directory_no_symlinks(&boundary).unwrap();
+        reconcile_private_directory_subtree(&boundary, &boundary_directory, &target, owner)
+            .unwrap();
+
+        for component in [stranded, target] {
+            let metadata = std::fs::symlink_metadata(component).unwrap();
+            assert_eq!((metadata.uid(), metadata.gid()), owner);
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
+        }
+    }
+
+    #[test]
+    fn owned_directory_reconciliation_repairs_interrupted_handoff() {
         const CHILD_PATH: &str = "FLUXHEIM_ACME_OWNER_TEST_PATH";
         if let Some(path) = std::env::var_os(CHILD_PATH) {
             open_directory_no_symlinks(Path::new(&path)).unwrap();
             return;
         }
         if !rustix::process::geteuid().is_root() {
+            eprintln!("root-only ACME ownership recovery test skipped");
             return;
         }
 
@@ -143,11 +195,26 @@ mod tests {
 
         let root = fluxheim_common::test_support::unique_temp_path("acme-directory-owner");
         std::fs::create_dir_all(&root).unwrap();
-        let target = root.join("one/two/three");
+        let boundary = root.join("storage");
+        std::fs::create_dir(&boundary).unwrap();
         let owner = (65_534, 65_534);
-        create_private_directory_all_with_owner(&target, Some(owner)).unwrap();
+        rustix::fs::chown(
+            &boundary,
+            Some(rustix::fs::Uid::from_raw(owner.0)),
+            Some(rustix::fs::Gid::from_raw(owner.1)),
+        )
+        .unwrap();
+        std::fs::set_permissions(&boundary, std::fs::Permissions::from_mode(0o700)).unwrap();
 
-        for component in [root.join("one"), root.join("one/two"), target.clone()] {
+        let stranded = boundary.join("one");
+        std::fs::create_dir(&stranded).unwrap();
+        std::fs::set_permissions(&stranded, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let target = stranded.join("two/three");
+        let boundary_directory = open_directory_no_symlinks(&boundary).unwrap();
+        reconcile_private_directory_subtree(&boundary, &boundary_directory, &target, owner)
+            .unwrap();
+
+        for component in [stranded, boundary.join("one/two"), target.clone()] {
             let metadata = std::fs::symlink_metadata(component).unwrap();
             assert_eq!((metadata.uid(), metadata.gid()), owner);
             assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
@@ -156,7 +223,7 @@ mod tests {
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "acme_directory::tests::owned_directory_walker_assigns_every_created_component",
+                "acme_directory::tests::owned_directory_reconciliation_repairs_interrupted_handoff",
             ])
             .env(CHILD_PATH, &target)
             .uid(owner.0)
@@ -164,5 +231,27 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success());
+    }
+
+    #[test]
+    fn owned_directory_reconciliation_rejects_target_outside_boundary() {
+        let root = fluxheim_common::test_support::unique_temp_path("acme-directory-boundary");
+        let boundary = root.join("storage");
+        let outside = root.join("outside/child");
+        std::fs::create_dir_all(&boundary).unwrap();
+
+        let boundary_directory = open_directory_no_symlinks(&boundary).unwrap();
+        let error = reconcile_private_directory_subtree(
+            &boundary,
+            &boundary_directory,
+            &outside,
+            (
+                rustix::process::geteuid().as_raw(),
+                rustix::process::getegid().as_raw(),
+            ),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(!outside.exists());
     }
 }

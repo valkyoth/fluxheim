@@ -2,7 +2,8 @@ use super::backup::cleanup_backup;
 use super::fs_ops::{CertificateDirectoryFd, rename_certificate_file, sync_directory};
 #[cfg(feature = "acme-client")]
 use super::fs_ops::{
-    ManagedCertificateOwner, certificate_directory, open_safe_certificate_directory, write_new_file,
+    ManagedCertificateOwner, certificate_directory, managed_certificate_owner,
+    open_safe_certificate_directory, write_new_file,
 };
 #[cfg(feature = "acme-client")]
 use super::revocation_fs::read_bounded_regular_file;
@@ -12,7 +13,6 @@ use super::revocation_fs::{
 };
 use super::*;
 use serde::{Deserialize, Serialize};
-
 const REVOCATION_JOURNAL_FILE: &str = ".revocation.transaction";
 const MAX_REVOCATION_JOURNAL_BYTES: u64 = 4096;
 

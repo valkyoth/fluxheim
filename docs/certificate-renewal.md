@@ -69,6 +69,14 @@ and group/world-accessible ACME storage directories. Config parsing stays
 separate from filesystem checks so configuration can still be validated before
 files are provisioned.
 
+When a root-run renewal or maintenance process installs managed certificates
+below storage owned by the Fluxheim service user, it retains an open no-follow
+descriptor for the nearest existing storage boundary. Every managed descendant
+is reopened relative to that descriptor and reconciled to the selected UID/GID
+and mode `0700`, including descendants left `root:root` by an interrupted prior
+handoff. Paths outside the recorded boundary are rejected before filesystem
+mutation, and ancestors above it are never re-owned.
+
 ```bash
 fluxheim --config path/to/fluxheim.toml --check-tls-storage
 ```

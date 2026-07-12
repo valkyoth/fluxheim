@@ -255,8 +255,9 @@ impl AcmeTlsAlpn01ChallengeStore {
                 )
             })?),
         )?;
-        let owner = managed_certificate_owner(&self.root)?;
-        install_certificate_files(&paths, fullchain_pem, private_key_pem, owner)?;
+        let ownership =
+            crate::acme_certificate_install::fs_ops::managed_certificate_ownership(&self.root)?;
+        install_certificate_files(&paths, fullchain_pem, private_key_pem, ownership)?;
         Ok(paths)
     }
 

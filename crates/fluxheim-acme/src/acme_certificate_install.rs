@@ -16,10 +16,10 @@ use backup::{backup_existing_file, cleanup_backup};
 use fs_ops::CertificateDirectoryFd;
 #[cfg(not(unix))]
 pub(crate) use fs_ops::reject_existing_symlink_in_path;
-pub(crate) use fs_ops::{ManagedCertificateOwner, managed_certificate_owner};
 use fs_ops::{
-    certificate_directory, ensure_safe_destination, ensure_safe_directory,
-    open_safe_certificate_directory, rename_certificate_file, write_new_file,
+    ManagedCertificateOwnership, certificate_directory, ensure_safe_destination,
+    ensure_safe_directory, managed_certificate_ownership, open_safe_certificate_directory,
+    rename_certificate_file, write_new_file,
 };
 use recovery::{
     CertificateInstallPhase, begin_certificate_install, complete_certificate_install,
@@ -43,8 +43,8 @@ pub fn install_managed_certificate(
     validate_issued_material(fullchain_pem, private_key_pem, expected_domains)?;
 
     let paths = managed_certificate_paths(storage, vhost_name);
-    let owner = managed_certificate_owner(storage)?;
-    install_certificate_files(&paths, fullchain_pem, private_key_pem, owner)?;
+    let ownership = managed_certificate_ownership(storage)?;
+    install_certificate_files(&paths, fullchain_pem, private_key_pem, ownership)?;
     Ok(paths)
 }
 
@@ -53,9 +53,9 @@ pub fn recover_managed_certificate_transaction(
     vhost_name: &str,
 ) -> Result<(), AcmeCertificateInstallError> {
     let paths = managed_certificate_paths(storage, vhost_name);
-    let owner = managed_certificate_owner(storage)?;
+    let ownership = managed_certificate_ownership(storage)?;
     let directory = certificate_directory(&paths)?;
-    ensure_safe_directory(&directory, owner)?;
+    ensure_safe_directory(&directory, &ownership)?;
     let _mutation_lock =
         AcmeMutationLock::acquire(&directory).map_err(|error| AcmeCertificateInstallError::Io {
             path: directory.join(".fluxheim-acme.lock"),
@@ -75,10 +75,11 @@ pub(super) fn install_certificate_files(
     paths: &AcmeCertificatePaths,
     fullchain_pem: &[u8],
     private_key_pem: &[u8],
-    owner: ManagedCertificateOwner,
+    ownership: ManagedCertificateOwnership,
 ) -> Result<(), AcmeCertificateInstallError> {
     let directory = certificate_directory(paths)?;
-    ensure_safe_directory(&directory, owner)?;
+    ensure_safe_directory(&directory, &ownership)?;
+    let owner = ownership.file_owner();
     let _mutation_lock =
         AcmeMutationLock::acquire(&directory).map_err(|error| AcmeCertificateInstallError::Io {
             path: directory.join(".fluxheim-acme.lock"),

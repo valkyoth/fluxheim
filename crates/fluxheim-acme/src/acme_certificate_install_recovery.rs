@@ -264,7 +264,7 @@ fn validate_transaction_id(
 mod tests {
     use super::super::backup::backup_existing_file;
     use super::super::fs_ops::{
-        ensure_safe_directory, managed_certificate_owner, open_safe_certificate_directory,
+        ensure_safe_directory, managed_certificate_ownership, open_safe_certificate_directory,
     };
     use super::*;
 
@@ -273,8 +273,9 @@ mod tests {
         let storage = fluxheim_common::test_support::unique_temp_path("acme-install-recovery");
         let paths = managed_certificate_paths(&storage, "example");
         let directory = paths.cert_path.parent().unwrap().to_path_buf();
-        let owner = managed_certificate_owner(&storage).unwrap();
-        ensure_safe_directory(&directory, owner).unwrap();
+        let ownership = managed_certificate_ownership(&storage).unwrap();
+        let owner = ownership.file_owner();
+        ensure_safe_directory(&directory, &ownership).unwrap();
         fs::write(&paths.cert_path, b"old certificate").unwrap();
         fs::write(&paths.key_path, b"old key").unwrap();
         #[cfg(unix)]
