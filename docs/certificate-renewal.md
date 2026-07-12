@@ -187,7 +187,9 @@ Crate consumers running inside Tokio should use
 `remove_account_credentials_async`. Their synchronous counterparts are
 intended for synchronous startup and maintenance code and may wait indefinitely
 on the advisory lifecycle lock; each is marked with a Rustdoc `# Blocking`
-contract.
+contract. Both API families reject ordinary credential stores and removals while
+a bootstrap or ambiguous deactivation journal exists, so recovery state cannot
+be hidden by publishing a second active credential file.
 
 Pending account-key buffers use `sanitization::SecretVec`. The pending file is
 overwritten, synced, truncated, and unlinked after durable

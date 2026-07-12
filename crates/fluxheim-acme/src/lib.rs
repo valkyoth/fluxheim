@@ -221,6 +221,8 @@ impl fmt::Debug for AcmeExternalAccountBindingSecrets {
 #[cfg(feature = "acme-client")]
 #[path = "acme_account_async.rs"]
 mod acme_account_async;
+#[path = "acme_account_state.rs"]
+mod acme_account_state;
 #[path = "acme_account_store.rs"]
 mod acme_account_store;
 #[cfg(feature = "acme-client")]
@@ -264,6 +266,10 @@ mod acme_transaction;
 pub use acme_account_async::{
     load_account_credentials_async, remove_account_credentials_async,
     store_account_credentials_async,
+};
+use acme_account_state::{
+    reject_pending_account_bootstrap, reject_pending_account_deactivation,
+    reject_pending_account_mutation,
 };
 #[cfg(feature = "acme-client")]
 use acme_account_store::{

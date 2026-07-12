@@ -88,17 +88,7 @@ fn try_store_account_credentials(
     else {
         return Ok(AccountStoreAttempt::Contended);
     };
-    let pending = directory.join(".credentials.bootstrap.pending");
-    if pending
-        .try_exists()
-        .map_err(|error| account_async_store_io_error(&pending, error))?
-    {
-        return Err(AcmeAccountStoreError::UnsafePath {
-            path: pending,
-            message: "account bootstrap is pending; credentials must be promoted by the bootstrap transaction"
-                .to_owned(),
-        });
-    }
+    reject_pending_account_mutation(directory)?;
     store_account_credentials_locked(&credentials_path, directory, credentials)
         .map(AccountStoreAttempt::Acquired)
 }
@@ -116,6 +106,7 @@ fn try_remove_account_credentials(
     else {
         return Ok(AccountStoreAttempt::Contended);
     };
+    reject_pending_account_mutation(directory)?;
     ensure_safe_account_destination(&credentials_path.path)?;
     let removed = match fs::remove_file(&credentials_path.path) {
         Ok(()) => {

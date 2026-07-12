@@ -80,12 +80,20 @@ fn account_deactivation_quarantine_is_fail_closed_and_recoverable() {
 
     let transaction = crate::begin_account_deactivation(&storage, "letsencrypt").unwrap();
     transaction.abandon();
+    let active = account_credentials_path(&storage, "letsencrypt").path;
+    assert!(!active.exists());
+    let store_error =
+        store_account_credentials(&storage, "letsencrypt", &test_account_credentials())
+            .unwrap_err();
+    assert!(store_error.to_string().contains("ambiguous pending state"));
+    let remove_error = remove_account_credentials(&storage, "letsencrypt").unwrap_err();
+    assert!(remove_error.to_string().contains("ambiguous pending state"));
+    assert!(!active.exists());
     let pending = match load_account_credentials(&storage, "letsencrypt") {
         Ok(_) => panic!("expected pending deactivation to fail closed"),
         Err(error) => error,
     };
     assert!(pending.to_string().contains("ambiguous pending state"));
-    let active = account_credentials_path(&storage, "letsencrypt").path;
     std::fs::rename(
         active
             .parent()

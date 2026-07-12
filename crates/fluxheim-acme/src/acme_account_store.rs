@@ -19,12 +19,12 @@ pub(crate) use bootstrap::{
 use super::UNIX_O_NOFOLLOW;
 use super::{
     AcmeAccountCredentialsPath, AcmeAccountStoreError, AcmeMutationLock,
-    MAX_ACCOUNT_CREDENTIALS_BYTES, managed_certificate_segment, unique_transaction_id,
+    MAX_ACCOUNT_CREDENTIALS_BYTES, managed_certificate_segment, reject_pending_account_bootstrap,
+    reject_pending_account_deactivation, reject_pending_account_mutation, unique_transaction_id,
 };
 
 const ACME_ACCOUNT_DIR: &str = "accounts";
 const ACME_ACCOUNT_CREDENTIALS_FILE: &str = "credentials.json";
-const ACME_ACCOUNT_DEACTIVATION_FILE: &str = ".credentials.deactivation.pending";
 
 #[cfg(feature = "acme-client")]
 pub(crate) enum AccountStoreAttempt<T> {
@@ -120,29 +120,9 @@ fn load_account_credentials_locked(
     directory: &Path,
     allow_bootstrap_recovery: bool,
 ) -> Result<Option<instant_acme::AccountCredentials>, AcmeAccountStoreError> {
-    let pending = directory.join(ACME_ACCOUNT_DEACTIVATION_FILE);
-    if pending
-        .try_exists()
-        .map_err(|error| account_store_io_error(&pending, error))?
-    {
-        return Err(AcmeAccountStoreError::UnsafePath {
-            path: pending,
-            message: "account deactivation is in an ambiguous pending state; operator recovery is required"
-                .to_owned(),
-        });
-    }
-    let bootstrap_pending = directory.join(".credentials.bootstrap.pending");
-    if !allow_bootstrap_recovery
-        && bootstrap_pending
-            .try_exists()
-            .map_err(|error| account_store_io_error(&bootstrap_pending, error))?
-    {
-        return Err(AcmeAccountStoreError::UnsafePath {
-            path: bootstrap_pending,
-            message:
-                "account bootstrap is pending; recovery must complete before credentials are used"
-                    .to_owned(),
-        });
+    reject_pending_account_deactivation(directory)?;
+    if !allow_bootstrap_recovery {
+        reject_pending_account_bootstrap(directory)?;
     }
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -243,7 +223,7 @@ fn begin_account_deactivation_locked(
     lock: AcmeMutationLock,
 ) -> Result<AccountDeactivationTransaction, AcmeAccountStoreError> {
     ensure_safe_account_destination(&active)?;
-    let pending = directory.join(ACME_ACCOUNT_DEACTIVATION_FILE);
+    let pending = directory.join(super::acme_account_state::ACCOUNT_DEACTIVATION_PENDING_FILE);
     match fs::symlink_metadata(&pending) {
         Ok(_) => {
             return Err(AcmeAccountStoreError::UnsafePath {
@@ -305,17 +285,7 @@ pub fn store_account_credentials(
     ensure_safe_account_directory(directory)?;
     let _mutation_lock = AcmeMutationLock::acquire(directory)
         .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?;
-    let bootstrap_pending = directory.join(".credentials.bootstrap.pending");
-    if bootstrap_pending
-        .try_exists()
-        .map_err(|error| account_store_io_error(&bootstrap_pending, error))?
-    {
-        return Err(AcmeAccountStoreError::UnsafePath {
-            path: bootstrap_pending,
-            message: "account bootstrap is pending; credentials must be promoted by the bootstrap transaction"
-                .to_owned(),
-        });
-    }
+    reject_pending_account_mutation(directory)?;
     store_account_credentials_locked(&credentials_path, directory, credentials)
 }
 
@@ -379,6 +349,7 @@ pub fn remove_account_credentials(
     ensure_safe_account_directory(directory)?;
     let _mutation_lock = AcmeMutationLock::acquire(directory)
         .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?;
+    reject_pending_account_mutation(directory)?;
     ensure_safe_account_destination(&credentials_path.path)?;
     match fs::remove_file(&credentials_path.path) {
         Ok(()) => {

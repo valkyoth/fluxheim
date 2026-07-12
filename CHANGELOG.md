@@ -27,6 +27,8 @@ behavior when the change improves security or project direction.
   account state fails closed, while revocation quarantines the active pair before
   the remote operation, preserves ambiguous outcomes for operator resolution,
   and requests live reload after success even when scheduled renewal is disabled.
+  Ordinary synchronous and async credential store/removal APIs now reject both
+  bootstrap and ambiguous deactivation journals while holding the lifecycle lock.
 - Journal revocation quarantine phases durably so pre-remote crashes restore the
   complete pair, ambiguous remote outcomes stay fail-closed, and confirmed
   quarantine survives crashes while permitting replacement issuance.
