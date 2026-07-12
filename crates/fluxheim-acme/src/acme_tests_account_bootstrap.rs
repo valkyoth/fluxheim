@@ -6,9 +6,7 @@ fn bootstrap_credentials(
     directory: &str,
 ) -> instant_acme::AccountCredentials {
     let (_, key_der) = bootstrap.key_pair().unwrap();
-    let encoded = base64_ng::URL_SAFE_NO_PAD
-        .encode_string(key_der.secret_pkcs8_der())
-        .unwrap();
+    let encoded = key_der.with_secret(|key| base64_ng::URL_SAFE_NO_PAD.encode_string(key).unwrap());
     serde_json::from_value(serde_json::json!({
         "id": "https://acme.example.test/account/1",
         "key_pkcs8": encoded,

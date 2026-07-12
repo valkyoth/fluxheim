@@ -95,46 +95,43 @@ pub(super) fn ensure_safe_directory(
     directory: &Path,
     owner: ManagedCertificateOwner,
 ) -> Result<(), AcmeCertificateInstallError> {
-    reject_existing_symlink_in_path(directory)?;
-    fs::create_dir_all(directory).map_err(|error| AcmeCertificateInstallError::Io {
-        path: directory.to_path_buf(),
-        error,
-    })?;
-    apply_owner_to_path(directory, owner)?;
-    reject_existing_symlink_in_path(directory)?;
-    let metadata =
-        fs::symlink_metadata(directory).map_err(|error| AcmeCertificateInstallError::Io {
+    #[cfg(unix)]
+    {
+        let directory_fd =
+            crate::acme_directory::create_private_directory_all(directory).map_err(|error| {
+                AcmeCertificateInstallError::Io {
+                    path: directory.to_path_buf(),
+                    error,
+                }
+            })?;
+        let directory_file = fs::File::from(directory_fd);
+        apply_owner_to_file(&directory_file, directory, owner)?;
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    {
+        reject_existing_symlink_in_path(directory)?;
+        fs::create_dir_all(directory).map_err(|error| AcmeCertificateInstallError::Io {
             path: directory.to_path_buf(),
             error,
         })?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(AcmeCertificateInstallError::UnsafePath {
-            path: directory.to_path_buf(),
-            message: "path is not a real directory".to_owned(),
-        });
+        apply_owner_to_path(directory, owner)?;
+        reject_existing_symlink_in_path(directory)?;
+        let metadata =
+            fs::symlink_metadata(directory).map_err(|error| AcmeCertificateInstallError::Io {
+                path: directory.to_path_buf(),
+                error,
+            })?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(AcmeCertificateInstallError::UnsafePath {
+                path: directory.to_path_buf(),
+                message: "path is not a real directory".to_owned(),
+            });
+        }
+
+        Ok(())
     }
-
-    Ok(())
-}
-
-#[cfg(unix)]
-fn apply_owner_to_path(
-    path: &Path,
-    owner: ManagedCertificateOwner,
-) -> Result<(), AcmeCertificateInstallError> {
-    let Some(owner) = owner else {
-        return Ok(());
-    };
-
-    rustix::fs::chown(
-        path,
-        Some(rustix::fs::Uid::from_raw(owner.uid)),
-        Some(rustix::fs::Gid::from_raw(owner.gid)),
-    )
-    .map_err(|error| AcmeCertificateInstallError::Io {
-        path: path.to_path_buf(),
-        error: error.into(),
-    })
 }
 
 #[cfg(not(unix))]
@@ -192,6 +189,7 @@ pub(super) fn ensure_safe_destination(path: &Path) -> Result<(), AcmeCertificate
     }
 }
 
+#[cfg(not(unix))]
 pub(crate) fn reject_existing_symlink_in_path(
     path: &Path,
 ) -> Result<(), AcmeCertificateInstallError> {
@@ -311,40 +309,11 @@ fn certificate_file_raw_mode(
 pub(super) fn open_safe_certificate_directory(
     directory: &Path,
 ) -> Result<rustix::fd::OwnedFd, AcmeCertificateInstallError> {
-    #[cfg(target_os = "linux")]
-    {
-        match rustix::fs::openat2(
-            rustix::fs::CWD,
-            directory,
-            rustix::fs::OFlags::RDONLY
-                | rustix::fs::OFlags::DIRECTORY
-                | rustix::fs::OFlags::CLOEXEC,
-            rustix::fs::Mode::empty(),
-            rustix::fs::ResolveFlags::NO_SYMLINKS | rustix::fs::ResolveFlags::NO_MAGICLINKS,
-        ) {
-            Ok(fd) => return Ok(fd),
-            Err(rustix::io::Errno::NOSYS | rustix::io::Errno::INVAL) => {}
-            Err(error) => {
-                return Err(AcmeCertificateInstallError::Io {
-                    path: directory.to_path_buf(),
-                    error: error.into(),
-                });
-            }
+    crate::acme_directory::open_directory_no_symlinks(directory).map_err(|error| {
+        AcmeCertificateInstallError::Io {
+            path: directory.to_path_buf(),
+            error,
         }
-    }
-
-    rustix::fs::openat(
-        rustix::fs::CWD,
-        directory,
-        rustix::fs::OFlags::RDONLY
-            | rustix::fs::OFlags::DIRECTORY
-            | rustix::fs::OFlags::NOFOLLOW
-            | rustix::fs::OFlags::CLOEXEC,
-        rustix::fs::Mode::empty(),
-    )
-    .map_err(|error| AcmeCertificateInstallError::Io {
-        path: directory.to_path_buf(),
-        error: error.into(),
     })
 }
 

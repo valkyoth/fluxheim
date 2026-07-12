@@ -6,7 +6,8 @@ use std::time::Instant;
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use bytes::Bytes;
-use rustls_pki_types::{CertificateDer, Der, PrivatePkcs8KeyDer};
+use rustls_pki_types::{CertificateDer, Der};
+use sanitization::SecretVec;
 use serde::de::{self, DeserializeOwned};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
@@ -90,7 +91,7 @@ pub struct AccountCredentials {
     pub(crate) id: String,
     /// Stored in DER, serialized as base64
     #[serde(with = "pkcs8_serde")]
-    pub(crate) key_pkcs8: PrivatePkcs8KeyDer<'static>,
+    pub(crate) key_pkcs8: SecretVec,
     pub(crate) directory: Option<String>,
     /// We never serialize `urls` by default, but we support deserializing them
     /// in order to support serialized data from older versions of the library.
@@ -100,43 +101,49 @@ pub struct AccountCredentials {
 
 impl AccountCredentials {
     /// The account's private key
-    pub fn private_key(&self) -> &PrivatePkcs8KeyDer<'_> {
-        &self.key_pkcs8
+    pub fn with_private_key<R>(&self, inspect: impl FnOnce(&[u8]) -> R) -> R {
+        self.key_pkcs8.with_secret(inspect)
     }
 }
 
 mod pkcs8_serde {
     use std::fmt;
 
-    use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
-    use rustls_pki_types::PrivatePkcs8KeyDer;
+    use sanitization::SecretVec;
     use serde::{Deserializer, Serializer, de};
 
     pub(crate) fn serialize<S: Serializer>(
-        key_pkcs8: &PrivatePkcs8KeyDer<'_>,
+        key_pkcs8: &SecretVec,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        let encoded = BASE64_URL_SAFE_NO_PAD.encode(key_pkcs8.secret_pkcs8_der());
-        serializer.serialize_str(&encoded)
+        key_pkcs8.with_secret(|key| {
+            let encoded = base64_ng::URL_SAFE_NO_PAD
+                .encode_secret(key)
+                .map_err(serde::ser::Error::custom)?;
+            let encoded = encoded
+                .expose_secret_utf8()
+                .map_err(serde::ser::Error::custom)?;
+            serializer.serialize_str(encoded)
+        })
     }
 
     pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
-    ) -> Result<PrivatePkcs8KeyDer<'static>, D::Error> {
+    ) -> Result<SecretVec, D::Error> {
         struct Visitor;
 
         impl de::Visitor<'_> for Visitor {
-            type Value = PrivatePkcs8KeyDer<'static>;
+            type Value = SecretVec;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a base64-encoded PKCS#8 private key")
             }
 
             fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
-                match BASE64_URL_SAFE_NO_PAD.decode(v) {
-                    Ok(bytes) => Ok(PrivatePkcs8KeyDer::from(bytes)),
-                    Err(err) => Err(de::Error::custom(err)),
-                }
+                let decoded = base64_ng::ct::URL_SAFE_NO_PAD
+                    .decode_secret_staged::<4096>(v.as_bytes())
+                    .map_err(de::Error::custom)?;
+                Ok(SecretVec::from_slice(decoded.expose_secret()))
             }
         }
 

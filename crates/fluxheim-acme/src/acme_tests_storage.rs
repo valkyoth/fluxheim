@@ -38,10 +38,9 @@ fn account_credentials_store_round_trips_secure_file() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(
-        loaded.private_key().secret_pkcs8_der(),
-        credentials.private_key().secret_pkcs8_der()
-    );
+    loaded.with_private_key(|loaded| {
+        credentials.with_private_key(|expected| assert_eq!(loaded, expected));
+    });
     assert_eq!(
         serde_json::to_value(&loaded).unwrap(),
         serde_json::to_value(&credentials).unwrap()

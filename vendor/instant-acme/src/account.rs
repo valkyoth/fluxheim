@@ -17,6 +17,7 @@ use rustls_pki_types::CertificateDer;
 #[cfg(feature = "hyper-rustls")]
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+use sanitization::SecretVec;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -230,7 +231,7 @@ impl Account {
             old_key: Jwk,
         }
 
-        let (new_key, new_key_pkcs8) = Key::generate_pkcs8()?;
+        let (new_key, new_key_pkcs8) = Key::generate_secret_pkcs8()?;
         let mut header = new_key.header(Some("nonce"), new_key_url);
         header.nonce = None;
         let payload = NewKey {
@@ -354,10 +355,19 @@ impl AccountInner {
         credentials: AccountCredentials,
         http: Box<dyn HttpClient>,
     ) -> Result<Self, Error> {
+        let AccountCredentials {
+            id,
+            key_pkcs8,
+            directory,
+            urls,
+        } = credentials;
+        let key = key_pkcs8.with_secret(|key| {
+            Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key))
+        })?;
         Ok(Self {
-            id: credentials.id,
-            key: Key::from_pkcs8_der(credentials.key_pkcs8)?,
-            client: Arc::new(match (credentials.directory, credentials.urls) {
+            id,
+            key,
+            client: Arc::new(match (directory, urls) {
                 (Some(directory_url), _) => Client::new(directory_url, http).await?,
                 (None, Some(directory)) => Client {
                     http,
@@ -435,7 +445,7 @@ impl AccountBuilder {
         directory_url: String,
         external_account: Option<&ExternalAccountKey>,
     ) -> Result<(Account, AccountCredentials), Error> {
-        let (key, key_pkcs8) = Key::generate_pkcs8()?;
+        let (key, key_pkcs8) = Key::generate_secret_pkcs8()?;
         Self::create_inner(
             account,
             (key, key_pkcs8),
@@ -453,7 +463,7 @@ impl AccountBuilder {
     pub async fn create_with_key(
         self,
         account: &NewAccount<'_>,
-        key: (Key, PrivatePkcs8KeyDer<'static>),
+        key: (Key, SecretVec),
         directory_url: String,
         external_account: Option<&ExternalAccountKey>,
     ) -> Result<(Account, AccountCredentials), Error> {
@@ -466,6 +476,27 @@ impl AccountBuilder {
         .await
     }
     // FLUXHEIM PATCH END: durable caller-key account bootstrap
+
+    // FLUXHEIM PATCH BEGIN: protected caller-key account recovery
+    /// Load an existing account using protected PKCS#8 key material.
+    pub async fn from_secret_key(
+        self,
+        key: (Key, SecretVec),
+        directory_url: String,
+    ) -> Result<(Account, AccountCredentials), Error> {
+        Self::create_inner(
+            &NewAccount {
+                contact: &[],
+                terms_of_service_agreed: true,
+                only_return_existing: true,
+            },
+            key,
+            None,
+            Client::new(directory_url, self.http).await?,
+        )
+        .await
+    }
+    // FLUXHEIM PATCH END: protected caller-key account recovery
 
     /// Load an existing account for the given private key
     ///
@@ -511,7 +542,9 @@ impl AccountBuilder {
                 only_return_existing,
             },
             match key {
-                (key, PrivateKeyDer::Pkcs8(pkcs8)) => (key, pkcs8),
+                (key, PrivateKeyDer::Pkcs8(pkcs8)) => {
+                    (key, SecretVec::from_slice(pkcs8.secret_pkcs8_der()))
+                }
                 _ => return Err("unsupported key format, expected PKCS#8".into()),
             },
             None,
@@ -542,7 +575,7 @@ impl AccountBuilder {
 
     async fn create_inner(
         account: &NewAccount<'_>,
-        (key, key_pkcs8): (Key, PrivatePkcs8KeyDer<'static>),
+        (key, key_pkcs8): (Key, SecretVec),
         external_account: Option<&ExternalAccountKey>,
         client: Client,
     ) -> Result<(Account, AccountCredentials), Error> {
@@ -606,6 +639,17 @@ pub struct Key {
 }
 
 impl Key {
+    // FLUXHEIM PATCH BEGIN: protected generated account key
+    /// Generate a key pair whose serialized PKCS#8 bytes clear on drop.
+    pub fn generate_secret_pkcs8() -> Result<(Self, SecretVec), Error> {
+        let rng = crypto::SystemRandom::new();
+        let pkcs8 =
+            crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
+                .map_err(|_| Error::Crypto)?;
+        Ok((Self::new(pkcs8.as_ref(), rng)?, SecretVec::from_slice(pkcs8.as_ref())))
+    }
+    // FLUXHEIM PATCH END: protected generated account key
+
     /// Generate a new ECDSA P-256 key pair
     #[deprecated(since = "0.8.3", note = "use `generate_pkcs8()` instead")]
     pub fn generate() -> Result<(Self, PrivateKeyDer<'static>), Error> {

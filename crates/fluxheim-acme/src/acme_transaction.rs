@@ -35,15 +35,7 @@ impl AcmeCertificateReadLock {
     fn acquire(directory: &Path) -> io::Result<Self> {
         #[cfg(unix)]
         {
-            let directory = rustix::fs::openat(
-                rustix::fs::CWD,
-                directory,
-                rustix::fs::OFlags::RDONLY
-                    | rustix::fs::OFlags::DIRECTORY
-                    | rustix::fs::OFlags::NOFOLLOW
-                    | rustix::fs::OFlags::CLOEXEC,
-                rustix::fs::Mode::empty(),
-            )?;
+            let directory = crate::acme_directory::open_directory_no_symlinks(directory)?;
             let lock = rustix::fs::openat(
                 &directory,
                 ACME_MUTATION_LOCK_FILE,
@@ -80,15 +72,7 @@ impl AcmeMutationLock {
     pub(crate) fn acquire(directory: &Path) -> io::Result<Self> {
         #[cfg(unix)]
         {
-            let directory = rustix::fs::openat(
-                rustix::fs::CWD,
-                directory,
-                rustix::fs::OFlags::RDONLY
-                    | rustix::fs::OFlags::DIRECTORY
-                    | rustix::fs::OFlags::NOFOLLOW
-                    | rustix::fs::OFlags::CLOEXEC,
-                rustix::fs::Mode::empty(),
-            )?;
+            let directory = crate::acme_directory::open_directory_no_symlinks(directory)?;
             let lock = rustix::fs::openat(
                 &directory,
                 ACME_MUTATION_LOCK_FILE,
@@ -118,15 +102,7 @@ impl AcmeMutationLock {
     pub(crate) fn try_acquire(directory: &Path) -> io::Result<Option<Self>> {
         #[cfg(unix)]
         {
-            let directory = rustix::fs::openat(
-                rustix::fs::CWD,
-                directory,
-                rustix::fs::OFlags::RDONLY
-                    | rustix::fs::OFlags::DIRECTORY
-                    | rustix::fs::OFlags::NOFOLLOW
-                    | rustix::fs::OFlags::CLOEXEC,
-                rustix::fs::Mode::empty(),
-            )?;
+            let directory = crate::acme_directory::open_directory_no_symlinks(directory)?;
             let lock = rustix::fs::openat(
                 &directory,
                 ACME_MUTATION_LOCK_FILE,

@@ -87,7 +87,7 @@ pub async fn load_or_create_instant_acme_account(
             .existing_key_pair()
             .map_err(AcmeInstantClientError::AccountStore)?;
         match bounded_acme_account_builder(issuer)?
-            .from_key(key, issuer.directory_url.clone())
+            .from_secret_key(key, issuer.directory_url.clone())
             .await
         {
             Ok(account) => Some(account),

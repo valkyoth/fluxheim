@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use http_body_util::BodyExt as _;
+use sha2::Digest as _;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -60,8 +61,8 @@ fn patched_account_creation_preserves_key_contacts_and_eab() {
     runtime.block_on(async {
         let client = AccountCreationHttp::default();
         let captured = client.request_body.clone();
-        let (key, key_der) = instant_acme::Key::generate_pkcs8().unwrap();
-        let expected_key = key_der.secret_pkcs8_der().to_vec();
+        let (key, key_der) = instant_acme::Key::generate_secret_pkcs8().unwrap();
+        let expected_key: [u8; 32] = key_der.with_secret(|key| sha2::Sha256::digest(key).into());
         let contacts = ["mailto:security@example.test"];
         let request = instant_acme::NewAccount {
             contact: &contacts,
@@ -79,7 +80,9 @@ fn patched_account_creation_preserves_key_contacts_and_eab() {
             .await
             .unwrap();
 
-        assert_eq!(credentials.private_key().secret_pkcs8_der(), expected_key);
+        credentials.with_private_key(|key| {
+            assert_eq!(<[u8; 32]>::from(sha2::Sha256::digest(key)), expected_key);
+        });
         let request = captured.lock().unwrap().take().unwrap();
         let envelope: serde_json::Value = serde_json::from_slice(&request).unwrap();
         let payload = base64_ng::URL_SAFE_NO_PAD

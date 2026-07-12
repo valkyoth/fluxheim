@@ -44,10 +44,10 @@ behavior when the change improves security or project direction.
   retry, contention diagnostics, and a 10-second lock-wait deadline. Public
   bounded async credential load, store, and removal APIs prevent downstream
   Tokio callers from falling back to indefinitely blocking lifecycle methods.
-- Verify the vendored `instant-acme` source against published `0.8.5` hashes in
-  CI and release gates after removing the single marked downstream API patch;
-  separately pin the exact permitted patch body and use a private unpredictable
-  validation workspace to prevent local symlink clobbering.
+- Verify unchanged vendored `instant-acme 0.8.5` files against published hashes
+  and intentionally modified files against reviewed patched hashes plus an
+  aggregate digest in CI and release gates, without creating
+  attacker-addressable temporary paths.
 - Validate online ACME directories structurally and require exact advertised ToS
   agreement, with an explicit private-directory override only for omitted terms.
 - Parse every advertised ACME endpoint as a bounded HTTPS URI with a real
@@ -88,6 +88,12 @@ behavior when the change improves security or project direction.
   advisory leases; recover interrupted pair publication through a durable
   journal; preserve primary renewal errors; redact challenge secrets; and keep
   ACME account, EAB, and private-key material in `sanitization` containers.
+- Keep ACME account PKCS#8 bytes in `sanitization::SecretVec` across the patched
+  client credential boundary, including drop-cleared Base64 serialization and
+  deserialization buffers, bootstrap creation, and account recovery.
+- Create ACME account, certificate, and challenge directories component by
+  component with descriptor-relative no-follow operations on Unix, and reuse
+  the same traversal for account mutation and certificate read locks.
 
 - Open snapshot files with no-follow semantics before validating the opened
   descriptor, closing the check-then-open race while preserving typed unsafe
@@ -99,6 +105,9 @@ behavior when the change improves security or project direction.
   descriptor and use descriptor-relative create, link, rename, cleanup,
   metadata, and durability operations, preventing pathname re-resolution and
   parent replacement during atomic writes.
+- Open the private snapshot mutation lock relative to the same no-symlink parent
+  descriptor, with component-wise fallback traversal on platforms without
+  Linux `openat2`.
 
 ## 1.7.8 - 2026-07-11
 

@@ -1,4 +1,6 @@
-use std::fs::{self, File, OpenOptions};
+#[cfg(not(unix))]
+use std::fs::OpenOptions;
+use std::fs::{self, File};
 #[cfg(not(unix))]
 use std::io::Write as _;
 use std::io::{self, Read};
@@ -12,40 +14,13 @@ pub(crate) use crate::store_fs_metadata::{
     require_real_directory,
 };
 #[cfg(unix)]
-use crate::store_fs_unix::{sync_directory as sync_directory_unix, write_atomically_in_directory};
+use crate::store_fs_unix::{
+    open_private_lock_file_in_directory, sync_directory as sync_directory_unix,
+    write_atomically_in_directory,
+};
 
 #[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-const O_NOFOLLOW: i32 = 0o400000;
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-const O_NOFOLLOW: i32 = 0x0100;
-
-#[cfg(all(
-    unix,
-    not(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    ))
-))]
-compile_error!(
-    "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe file opening before building Fluxheim"
-);
+use std::os::unix::fs::PermissionsExt;
 
 pub(crate) const MAX_CURRENT_SNAPSHOT_POINTER_BYTES: u64 = 4096;
 pub(crate) const MAX_SNAPSHOT_FILE_BYTES: u64 = 16 * 1024 * 1024;
@@ -101,11 +76,6 @@ fn write_atomically_with_mode(
         {
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                options.custom_flags(O_NOFOLLOW).mode(SNAPSHOT_FILE_MODE);
-            }
-
             let mut file = options.open(&temp_path).map_err(SnapshotError::Io)?;
             #[cfg(unix)]
             fs::set_permissions(&temp_path, fs::Permissions::from_mode(SNAPSHOT_FILE_MODE))
@@ -145,26 +115,21 @@ pub(crate) fn open_private_lock_file(path: &Path) -> Result<File, SnapshotError>
         ))
     })?;
     require_real_directory(parent)?;
-    require_plain_write_destination(path)?;
-    if path_exists_without_following_symlinks(path)? {
-        require_private_regular_file(path)?;
-    }
 
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true);
     #[cfg(unix)]
-    {
-        options.custom_flags(O_NOFOLLOW).mode(SNAPSHOT_FILE_MODE);
-    }
-    let file = options.open(path).map_err(|error| {
-        #[cfg(unix)]
-        if error.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error()) {
-            return SnapshotError::UnsafeSnapshotPath {
-                path: path.to_path_buf(),
-            };
+    let file = open_private_lock_file_in_directory(parent, path)?;
+
+    #[cfg(not(unix))]
+    let file = {
+        require_plain_write_destination(path)?;
+        if path_exists_without_following_symlinks(path)? {
+            require_private_regular_file(path)?;
         }
-        SnapshotError::Io(error)
-    })?;
+
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true);
+        options.open(path).map_err(SnapshotError::Io)?
+    };
     let metadata = file.metadata().map_err(SnapshotError::Io)?;
     if !metadata.is_file() {
         return Err(SnapshotError::UnsafeSnapshotPath {
@@ -404,6 +369,7 @@ fn require_private_metadata(path: &Path, metadata: &fs::Metadata) -> Result<(), 
     Ok(())
 }
 
+#[cfg(not(unix))]
 fn require_plain_write_destination(path: &Path) -> Result<(), SnapshotError> {
     let Some(metadata) = optional_symlink_metadata(path)? else {
         return Ok(());

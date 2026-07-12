@@ -2,7 +2,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt as _;
-use std::path::Path;
+use std::path::{Component, Path};
 
 use crate::store::SnapshotError;
 use crate::store_fs::{SNAPSHOT_FILE_MODE, unique_sequence};
@@ -87,6 +87,26 @@ pub(crate) fn write_atomically_in_directory(
     })
 }
 
+pub(crate) fn open_private_lock_file_in_directory(
+    parent: &Path,
+    path: &Path,
+) -> Result<File, SnapshotError> {
+    let name = snapshot_file_name_in_directory(parent, path)?;
+    let directory = open_snapshot_directory(parent)?;
+    require_plain_write_directory_entry(&directory, name, path)?;
+    let fd = rustix::fs::openat(
+        &directory,
+        name,
+        rustix::fs::OFlags::RDWR
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+    )
+    .map_err(rustix_snapshot_error)?;
+    Ok(File::from(fd))
+}
+
 pub(crate) fn optional_symlink_metadata(
     path: &Path,
 ) -> Result<Option<SnapshotPathMetadata>, SnapshotError> {
@@ -136,9 +156,17 @@ fn open_snapshot_directory(path: &Path) -> Result<File, SnapshotError> {
         }
     }
 
-    rustix::fs::openat(
+    open_snapshot_directory_componentwise(path)
+}
+
+fn open_snapshot_directory_componentwise(path: &Path) -> Result<File, SnapshotError> {
+    let mut directory = rustix::fs::openat(
         rustix::fs::CWD,
-        path,
+        if path.is_absolute() {
+            Path::new("/")
+        } else {
+            Path::new(".")
+        },
         rustix::fs::OFlags::RDONLY
             | rustix::fs::OFlags::DIRECTORY
             | rustix::fs::OFlags::NOFOLLOW
@@ -146,7 +174,31 @@ fn open_snapshot_directory(path: &Path) -> Result<File, SnapshotError> {
         rustix::fs::Mode::empty(),
     )
     .map(File::from)
-    .map_err(rustix_snapshot_error)
+    .map_err(rustix_snapshot_error)?;
+
+    for component in path.components() {
+        let name = match component {
+            Component::RootDir | Component::CurDir => continue,
+            Component::Normal(name) => name,
+            Component::ParentDir | Component::Prefix(_) => {
+                return Err(SnapshotError::UnsafeSnapshotPath {
+                    path: path.to_path_buf(),
+                });
+            }
+        };
+        directory = rustix::fs::openat(
+            &directory,
+            name,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )
+        .map(File::from)
+        .map_err(rustix_snapshot_error)?;
+    }
+    Ok(directory)
 }
 
 fn directory_entry_exists(directory: &File, name: &OsStr) -> Result<bool, SnapshotError> {

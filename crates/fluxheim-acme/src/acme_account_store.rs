@@ -1,7 +1,9 @@
 use std::fs;
 use std::io;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(any(feature = "acme-client", not(unix)))]
+use std::path::PathBuf;
 
 use sanitization::SecretVec;
 
@@ -362,19 +364,29 @@ pub fn remove_account_credentials(
 }
 
 pub(crate) fn ensure_safe_account_directory(directory: &Path) -> Result<(), AcmeAccountStoreError> {
-    reject_existing_symlink_in_account_path(directory)?;
-    fs::create_dir_all(directory).map_err(|error| account_store_io_error(directory, error))?;
-    reject_existing_symlink_in_account_path(directory)?;
-    let metadata = fs::symlink_metadata(directory)
-        .map_err(|error| account_store_io_error(directory, error))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(AcmeAccountStoreError::UnsafePath {
-            path: directory.to_path_buf(),
-            message: "path is not a real directory".to_owned(),
-        });
+    #[cfg(unix)]
+    {
+        crate::acme_directory::create_private_directory_all(directory)
+            .map_err(|error| account_store_io_error(directory, error))?;
+        Ok(())
     }
 
-    Ok(())
+    #[cfg(not(unix))]
+    {
+        reject_existing_symlink_in_account_path(directory)?;
+        fs::create_dir_all(directory).map_err(|error| account_store_io_error(directory, error))?;
+        reject_existing_symlink_in_account_path(directory)?;
+        let metadata = fs::symlink_metadata(directory)
+            .map_err(|error| account_store_io_error(directory, error))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(AcmeAccountStoreError::UnsafePath {
+                path: directory.to_path_buf(),
+                message: "path is not a real directory".to_owned(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 pub(crate) fn ensure_safe_account_destination(path: &Path) -> Result<(), AcmeAccountStoreError> {
@@ -391,6 +403,7 @@ pub(crate) fn ensure_safe_account_destination(path: &Path) -> Result<(), AcmeAcc
     }
 }
 
+#[cfg(not(unix))]
 fn reject_existing_symlink_in_account_path(path: &Path) -> Result<(), AcmeAccountStoreError> {
     let mut current = PathBuf::new();
     for component in path.components() {

@@ -1,6 +1,6 @@
 use super::*;
 use crate::acme_account_state::ACCOUNT_BOOTSTRAP_PENDING_FILE;
-use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls::pki_types::PrivatePkcs8KeyDer;
 use sanitization::SecretVec;
 use sanitization::ct::ConstantTimeEq as _;
 use sha2::{Digest as _, Sha256};
@@ -92,9 +92,11 @@ fn begin_account_bootstrap_locked(
     if let Some(credentials) = credentials {
         if let Some(pending) = pending {
             let matches = pending.with_secret(|pending| {
-                pending
-                    .ct_eq(credentials.private_key().secret_pkcs8_der())
-                    .declassify("ACME bootstrap key recovery result is public")
+                credentials.with_private_key(|key| {
+                    pending
+                        .ct_eq(key)
+                        .declassify("ACME bootstrap key recovery result is public")
+                })
             });
             if !matches {
                 return Err(AcmeAccountStoreError::UnsafePath {
@@ -111,13 +113,13 @@ fn begin_account_bootstrap_locked(
     let (key_der, initial_key, recovered) = match pending {
         Some(key_der) => (key_der, None, true),
         None => {
-            let (key, generated) = instant_acme::Key::generate_pkcs8().map_err(|error| {
+            let (key, generated) = instant_acme::Key::generate_secret_pkcs8().map_err(|error| {
                 AcmeAccountStoreError::UnsafePath {
                     path: pending_path.clone(),
                     message: format!("failed to generate pending account key: {error}"),
                 }
             })?;
-            let key_der = SecretVec::from_slice(generated.secret_pkcs8_der());
+            let key_der = generated;
             write_pending_key(directory, &pending_path, issuer_directory, &key_der)?;
             (key_der, Some(key), false)
         }
@@ -141,27 +143,27 @@ impl PendingAccountBootstrap {
 
     pub(crate) fn key_pair(
         &mut self,
-    ) -> Result<(instant_acme::Key, PrivatePkcs8KeyDer<'static>), AcmeAccountStoreError> {
+    ) -> Result<(instant_acme::Key, SecretVec), AcmeAccountStoreError> {
         self.key_der.with_secret(|key_der| {
             let key = if let Some(key) = self.initial_key.take() {
                 key
             } else {
-                instant_acme::Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der.to_vec()))
-                    .map_err(|_| AcmeAccountStoreError::UnsafePath {
+                instant_acme::Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(key_der)).map_err(
+                    |_| AcmeAccountStoreError::UnsafePath {
                         path: self.pending_path.clone(),
                         message: "pending account key is not valid PKCS#8 P-256 material"
                             .to_owned(),
-                    })?
+                    },
+                )?
             };
-            Ok((key, PrivatePkcs8KeyDer::from(key_der.to_vec())))
+            Ok((key, SecretVec::from_slice(key_der)))
         })
     }
 
     pub(crate) fn existing_key_pair(
         &mut self,
-    ) -> Result<(instant_acme::Key, PrivateKeyDer<'static>), AcmeAccountStoreError> {
-        let (key, key_der) = self.key_pair()?;
-        Ok((key, PrivateKeyDer::Pkcs8(key_der)))
+    ) -> Result<(instant_acme::Key, SecretVec), AcmeAccountStoreError> {
+        self.key_pair()
     }
 
     pub(crate) fn promote(
@@ -169,9 +171,11 @@ impl PendingAccountBootstrap {
         credentials: &instant_acme::AccountCredentials,
     ) -> Result<(), AcmeAccountStoreError> {
         let matches = self.key_der.with_secret(|pending| {
-            pending
-                .ct_eq(credentials.private_key().secret_pkcs8_der())
-                .declassify("ACME bootstrap credential key match result is public")
+            credentials.with_private_key(|key| {
+                pending
+                    .ct_eq(key)
+                    .declassify("ACME bootstrap credential key match result is public")
+            })
         });
         if !matches {
             return Err(AcmeAccountStoreError::UnsafePath {

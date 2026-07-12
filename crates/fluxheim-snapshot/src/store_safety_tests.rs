@@ -1,8 +1,10 @@
 use super::{SnapshotError, SnapshotStore};
-use crate::store_fs::{MAX_CURRENT_SNAPSHOT_POINTER_BYTES, write_atomically};
+use crate::store_fs::{
+    MAX_CURRENT_SNAPSHOT_POINTER_BYTES, open_private_lock_file, write_atomically,
+};
 
 mod tests {
-    use super::{SnapshotError, SnapshotStore, write_atomically};
+    use super::{SnapshotError, SnapshotStore, open_private_lock_file, write_atomically};
     use fluxheim_common::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
     #[cfg(unix)]
     use fluxheim_common::test_support::{unique_group_writable_child, unique_world_writable_child};
@@ -47,6 +49,23 @@ mod tests {
 
         assert!(matches!(error, SnapshotError::UnsafeStoreRoot { .. }));
         assert!(!real_parent.join("snapshots").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_lock_open_rejects_symlinked_parent_component() {
+        let dir = TestDir::new("snapshot-lock-parent-symlink");
+        let real_parent = dir.child("real-parent");
+        let linked_parent = dir.child("linked-parent");
+        std::fs::create_dir(&real_parent).unwrap();
+        std::os::unix::fs::symlink(&real_parent, &linked_parent).unwrap();
+
+        let error = open_private_lock_file(&linked_parent.join(".snapshot.lock")).unwrap_err();
+        assert!(matches!(
+            error,
+            SnapshotError::UnsafeSnapshotPath { .. } | SnapshotError::Io(_)
+        ));
+        assert!(!real_parent.join(".snapshot.lock").exists());
     }
 
     #[cfg(unix)]

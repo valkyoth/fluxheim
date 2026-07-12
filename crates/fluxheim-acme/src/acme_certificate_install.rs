@@ -14,9 +14,9 @@ mod revocation_fs;
 use backup::{backup_existing_file, cleanup_backup};
 #[cfg(not(unix))]
 use fs_ops::CertificateDirectoryFd;
-pub(crate) use fs_ops::{
-    ManagedCertificateOwner, managed_certificate_owner, reject_existing_symlink_in_path,
-};
+#[cfg(not(unix))]
+pub(crate) use fs_ops::reject_existing_symlink_in_path;
+pub(crate) use fs_ops::{ManagedCertificateOwner, managed_certificate_owner};
 use fs_ops::{
     certificate_directory, ensure_safe_destination, ensure_safe_directory,
     open_safe_certificate_directory, rename_certificate_file, write_new_file,

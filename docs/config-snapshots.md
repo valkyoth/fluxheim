@@ -76,6 +76,13 @@ validation and publication. For NFS, CSI, or another shared filesystem, verify
 that cross-node file locking is reliable; otherwise enforce one writer at the
 orchestration layer.
 
+On Unix the lock file is opened relative to a no-symlink parent-directory
+descriptor, using the same boundary as atomic snapshot publication. Linux uses
+`openat2` with no-symlink and no-magic-link resolution when available; the
+portable Unix fallback walks every component with descriptor-relative
+`openat(..., DIRECTORY|NOFOLLOW)`. An intermediate path swap therefore cannot
+redirect the lock to a different directory.
+
 The store is deliberately conservative about filesystem indirection. Snapshot
 ids may only contain ASCII letters, digits, `_`, and `-`, and are limited to
 128 bytes; the store root cannot contain `..` or sit below a symlinked parent

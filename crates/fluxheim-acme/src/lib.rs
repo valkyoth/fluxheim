@@ -236,6 +236,8 @@ mod acme_certificate_paths;
 mod acme_challenges;
 #[path = "acme_cleanup.rs"]
 mod acme_cleanup;
+#[path = "acme_directory.rs"]
+mod acme_directory;
 #[path = "acme_eab.rs"]
 mod acme_eab;
 #[path = "acme_errors.rs"]
@@ -286,9 +288,9 @@ pub use acme_account_store::{
 use acme_account_store::{begin_account_bootstrap, begin_account_deactivation};
 #[cfg(feature = "acme-client")]
 use acme_certificate_install::begin_managed_certificate_quarantine;
-use acme_certificate_install::{
-    install_certificate_files, managed_certificate_owner, reject_existing_symlink_in_path,
-};
+#[cfg(not(unix))]
+use acme_certificate_install::reject_existing_symlink_in_path;
+use acme_certificate_install::{install_certificate_files, managed_certificate_owner};
 pub use acme_certificate_install::{
     install_managed_certificate, recover_managed_certificate_transaction,
 };

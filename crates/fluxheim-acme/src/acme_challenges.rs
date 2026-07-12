@@ -157,19 +157,28 @@ impl AcmeHttp01ChallengeStore {
     }
 
     fn ensure_root_directory(&self) -> io::Result<()> {
-        reject_existing_symlink_in_path(&self.root)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
-        fs::create_dir_all(&self.root)?;
-        reject_existing_symlink_in_path(&self.root)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
-        let metadata = fs::symlink_metadata(&self.root)?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "ACME HTTP-01 challenge root is not a real directory",
-            ));
+        #[cfg(unix)]
+        {
+            crate::acme_directory::create_private_directory_all(&self.root)?;
+            Ok(())
         }
-        Ok(())
+
+        #[cfg(not(unix))]
+        {
+            reject_existing_symlink_in_path(&self.root)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+            fs::create_dir_all(&self.root)?;
+            reject_existing_symlink_in_path(&self.root)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+            let metadata = fs::symlink_metadata(&self.root)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "ACME HTTP-01 challenge root is not a real directory",
+                ));
+            }
+            Ok(())
+        }
     }
 
     fn token_path(&self, token: &str) -> io::Result<PathBuf> {
