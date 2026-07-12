@@ -265,9 +265,16 @@ fn validate_acme_directory_response(
 }
 
 fn valid_acme_endpoint(endpoint: &str) -> bool {
-    endpoint.starts_with("https://")
-        && endpoint.len() > "https://".len()
-        && !endpoint.chars().any(char::is_whitespace)
+    let Ok(uri) = endpoint.parse::<http::Uri>() else {
+        return false;
+    };
+    uri.scheme_str() == Some("https")
+        && uri.authority().is_some_and(|authority| {
+            !authority.host().is_empty()
+                && authority.as_str().len() <= 255
+                && !authority.as_str().contains('@')
+        })
+        && uri.path().starts_with('/')
 }
 
 fn issuer_probe_error(
@@ -317,7 +324,7 @@ fn open_ca_bundle_no_follow(path: &std::path::Path) -> std::io::Result<std::fs::
 #[cfg(test)]
 mod tests {
     use super::{
-        BoundedAcmeHttpClient, MAX_ACME_RESPONSE_BYTES, collect_capped_body,
+        BoundedAcmeHttpClient, MAX_ACME_RESPONSE_BYTES, collect_capped_body, valid_acme_endpoint,
         validate_acme_directory_response,
     };
     use bytes::Bytes;
@@ -422,5 +429,21 @@ mod tests {
             validate_acme_directory_response(&private_issuer, http::StatusCode::OK, &wrong_terms,)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn acme_endpoint_requires_parsed_https_authority() {
+        assert!(valid_acme_endpoint("https://acme.example.test/new-order"));
+        assert!(valid_acme_endpoint("https://[::1]:8443/new-order"));
+        for invalid in [
+            "http://acme.example.test/new-order",
+            "https://?query",
+            "https://#fragment",
+            "https:///missing-authority",
+            "https://user@acme.example.test/new-order",
+            "not-a-uri",
+        ] {
+            assert!(!valid_acme_endpoint(invalid), "accepted {invalid:?}");
+        }
     }
 }

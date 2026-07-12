@@ -173,6 +173,14 @@ permits a mismatch and is valid only with explicit terms acceptance and an
 HTTPS terms URL. Existing stored accounts remain loadable so an operator can
 review a changed agreement deliberately.
 
+The current ACME client fetches the directory again while creating an account
+and does not expose a validation callback for that second response. Therefore,
+an issuer changing its advertised terms between Fluxheim's validated probe and
+the client's account request remains a narrow upstream API limitation. Fluxheim
+does not weaken the explicit configured acceptance, and closing this residual
+fully requires the client to create from the already validated directory
+snapshot or expose its second response for comparison.
+
 Private ACME services can set `ca_bundle_file` on an issuer. Fluxheim then
 trusts only that no-follow, 1 MiB/128-certificate-limited PEM bundle instead of
 platform roots:
@@ -268,12 +276,18 @@ create an account-orphaning crash window. Deactivation first moves local
 credentials into a locked pending state, restores them if the remote operation
 fails, and deletes them only after issuer confirmation. An interrupted pending
 state blocks account loading rather than ambiguously using stale credentials.
+`fluxheim-acme doctor` reports `account-rollover=unavailable` explicitly so
+operators can see this capability limit before an incident.
 
 Revocation remains available for managed targets even when automatic renewal is
 disabled. Fluxheim first quarantines the certificate and key atomically under
-the same mutation lock used by TLS readers, restores the pair if remote
-revocation fails, and retains the quarantined pair after success for incident
-review. The companion then requests a live certificate reload and reports
+the same mutation lock used by TLS readers. A durable fixed-name journal records
+prepared, pair-quarantined, remote-pending, and remote-confirmed phases with
+validated transaction-derived filenames. A crash before remote contact restores
+the complete pair; an ambiguous remote-pending outcome remains quarantined for
+operator resolution; a confirmed outcome retains the quarantined pair for
+incident review while allowing replacement issuance. The companion then
+requests a live certificate reload and reports
 `replacement_required=true`. If reload fails, stop or isolate the listener
 until a replacement certificate is installed; do not continue serving the
 revoked in-memory identity.
@@ -667,6 +681,13 @@ failed, or timed-out ARI requests fall back to the configured renewal window.
 ARI planning uses four concurrent lookups, a 10-second deadline per target, and
 a 30-second planning budget, executes due renewals progressively, and caches
 successful or unsupported responses until a bounded `Retry-After` deadline.
+Cache entries are namespaced by issuer directory plus certificate identifier.
+ARI can never postpone renewal inside the final seven days of certificate
+validity, and windows extending beyond `notAfter` are rejected. The cache is
+process-local: external timer invocations retain the concurrency and time
+budgets but do not retain `Retry-After` state between processes. Persisting ARI
+state would require authenticated, crash-safe storage and is intentionally not
+implemented as an unauthenticated cache file.
 
 ## No-Downtime Reload
 

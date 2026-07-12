@@ -166,13 +166,19 @@ pub async fn revoke_instant_acme_certificate(
             )
         })?;
     let account = load_or_create_instant_acme_account(config, &target.issuer).await?;
-    let quarantine =
+    let mut quarantine =
         begin_managed_certificate_quarantine(&target.certificate).map_err(|error| {
             account_error(
                 &target.issuer,
                 format!("failed to quarantine certificate before revocation: {error}"),
             )
         })?;
+    quarantine.mark_remote_pending().map_err(|error| {
+        account_error(
+            &target.issuer,
+            format!("failed to persist pending revocation state: {error}"),
+        )
+    })?;
     let revocation = tokio::time::timeout(
         ACME_ACCOUNT_OPERATION_TIMEOUT,
         account.revoke(&instant_acme::RevocationRequest {
@@ -184,17 +190,25 @@ pub async fn revoke_instant_acme_certificate(
     .map_err(|_| account_error(&target.issuer, "ACME certificate revocation timed out"))
     .and_then(|result| result.map_err(|error| account_error(&target.issuer, error.to_string())));
     if let Err(primary) = revocation {
-        return match quarantine.rollback() {
-            Ok(()) => Err(primary),
-            Err(rollback) => Err(account_error(
-                &target.issuer,
-                format!(
-                    "remote revocation failed ({primary}); local certificate restoration also failed ({rollback})"
-                ),
-            )),
-        };
+        let (certificate, private_key) = quarantine.quarantine_paths();
+        return Err(account_error(
+            &target.issuer,
+            format!(
+                "remote revocation outcome is ambiguous ({primary}); certificate remains quarantined at {} and {}; operator resolution is required",
+                certificate.display(),
+                private_key.display()
+            ),
+        ));
     }
-    let (quarantined_certificate, quarantined_private_key) = quarantine.complete();
+    quarantine.mark_remote_confirmed().map_err(|error| {
+        account_error(
+            &target.issuer,
+            format!("certificate was revoked but confirmation journaling failed: {error}"),
+        )
+    })?;
+    let (quarantined_certificate, quarantined_private_key) = quarantine
+        .complete()
+        .map_err(|error| account_error(&target.issuer, error.to_string()))?;
     Ok(AcmeRevocationOutcome {
         certificate: target.certificate,
         quarantined_certificate,

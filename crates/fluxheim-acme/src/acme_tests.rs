@@ -19,8 +19,9 @@ use super::{
 };
 #[cfg(feature = "acme-client")]
 use super::{
-    AcmeInstantClientError, AcmeTlsAlpn01ChallengeStore, decode_eab_hmac_key,
-    renew_selected_instant_acme_targets, tls_alpn_01_certificate,
+    AcmeCertificatePaths, AcmeInstantClientError, AcmeTlsAlpn01ChallengeStore, decode_eab_hmac_key,
+    recover_managed_certificate_transaction, renew_selected_instant_acme_targets,
+    tls_alpn_01_certificate,
 };
 use proptest::prelude::*;
 

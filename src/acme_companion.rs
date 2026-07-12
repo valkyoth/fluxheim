@@ -234,6 +234,15 @@ mod tests {
         server.join().unwrap();
     }
 
+    #[cfg(feature = "acme-client")]
+    #[test]
+    fn doctor_reports_account_rollover_as_unavailable() {
+        assert_eq!(
+            super::commands::account_rollover_capability_status(),
+            "acme capability: account-rollover=unavailable reason=client-cannot-prejournal-replacement-key"
+        );
+    }
+
     #[cfg(all(feature = "acme-client", unix))]
     #[test]
     fn certificate_reload_request_sends_control_command() {

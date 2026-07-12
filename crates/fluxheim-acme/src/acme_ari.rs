@@ -4,6 +4,13 @@ const LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
 const PLANNING_BUDGET: Duration = Duration::from_secs(30);
 const LOOKUP_CONCURRENCY: usize = 4;
 const MAX_CACHE_ENTRIES: usize = 4096;
+const EMERGENCY_RENEWAL_WINDOW: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct AriCacheKey {
+    issuer_directory: String,
+    certificate_identifier: String,
+}
 
 #[derive(Clone, Copy)]
 struct AriCacheEntry {
@@ -12,7 +19,7 @@ struct AriCacheEntry {
 }
 
 static CACHE: std::sync::OnceLock<
-    std::sync::Mutex<std::collections::HashMap<String, AriCacheEntry>>,
+    std::sync::Mutex<std::collections::HashMap<AriCacheKey, AriCacheEntry>>,
 > = std::sync::OnceLock::new();
 
 pub(super) async fn execute_due_queue(
@@ -88,7 +95,13 @@ async fn allows_renewal_now(config: &Config, item: &AcmeRenewalItem, now: System
     let Ok(identifier) = instant_acme::CertificateIdentifier::try_from(&leaf) else {
         return fallback;
     };
-    let cache_key = identifier.to_string();
+    if emergency_renewal_required(item.not_after, now) {
+        return true;
+    }
+    let cache_key = AriCacheKey {
+        issuer_directory: issuer.directory_url.clone(),
+        certificate_identifier: identifier.to_string(),
+    };
     if let Some(decision) = cached_decision(&cache_key, now, fallback) {
         return decision;
     }
@@ -133,15 +146,40 @@ async fn allows_renewal_now(config: &Config, item: &AcmeRenewalItem, now: System
     };
     let start = info.suggested_window.start.unix_timestamp();
     let end = info.suggested_window.end.unix_timestamp();
-    if end <= start {
+    let Some(scheduled) = safe_ari_schedule(item.not_after, leaf.as_ref(), start, end) else {
+        log::warn!(
+            target: "fluxheim::security",
+            "issuer {} returned an ACME ARI window outside certificate validity for vhost {}",
+            item.target.issuer,
+            item.target.vhost_name
+        );
         return fallback;
-    }
-    let scheduled = deterministic_renewal_time(leaf.as_ref(), start, end).max(0) as u64;
+    };
     store_cache(&cache_key, Some(scheduled), now, retry_after);
     unix_secs(now) >= scheduled
 }
 
-fn cached_decision(key: &str, now: SystemTime, fallback: bool) -> Option<bool> {
+fn emergency_renewal_required(not_after: Option<SystemTime>, now: SystemTime) -> bool {
+    let Some(emergency_deadline) = now.checked_add(EMERGENCY_RENEWAL_WINDOW) else {
+        return true;
+    };
+    not_after.is_none_or(|not_after| not_after <= emergency_deadline)
+}
+
+fn safe_ari_schedule(
+    not_after: Option<SystemTime>,
+    certificate_der: &[u8],
+    start: i64,
+    end: i64,
+) -> Option<u64> {
+    let not_after = not_after?.duration_since(UNIX_EPOCH).ok()?.as_secs();
+    if start < 0 || end <= start || end as u64 > not_after {
+        return None;
+    }
+    Some(deterministic_renewal_time(certificate_der, start, end) as u64)
+}
+
+fn cached_decision(key: &AriCacheKey, now: SystemTime, fallback: bool) -> Option<bool> {
     let cache = CACHE.get_or_init(Default::default);
     let mut cache = cache.lock().unwrap_or_else(|_| {
         log::error!(target: "fluxheim::security", "ACME ARI cache lock poisoned");
@@ -155,7 +193,7 @@ fn cached_decision(key: &str, now: SystemTime, fallback: bool) -> Option<bool> {
     })
 }
 
-fn store_cache(key: &str, scheduled: Option<u64>, now: SystemTime, retry_after: Duration) {
+fn store_cache(key: &AriCacheKey, scheduled: Option<u64>, now: SystemTime, retry_after: Duration) {
     let cache = CACHE.get_or_init(Default::default);
     let mut cache = cache.lock().unwrap_or_else(|_| {
         log::error!(target: "fluxheim::security", "ACME ARI cache lock poisoned");
@@ -166,7 +204,7 @@ fn store_cache(key: &str, scheduled: Option<u64>, now: SystemTime, retry_after: 
         cache.clear();
     }
     cache.insert(
-        key.to_owned(),
+        key.clone(),
         AriCacheEntry {
             scheduled_unix_secs: scheduled,
             refresh_after: now
@@ -196,6 +234,8 @@ fn deterministic_renewal_time(certificate_der: &[u8], start: i64, end: i64) -> i
 mod tests {
     use super::*;
 
+    static CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn schedule_is_stable_and_inside_suggested_window() {
         let first = deterministic_renewal_time(b"certificate", 100, 200);
@@ -206,22 +246,68 @@ mod tests {
 
     #[test]
     fn cache_honors_retry_after_and_schedule() {
+        let _test_lock = CACHE_TEST_LOCK.lock().unwrap();
         let now = UNIX_EPOCH + Duration::from_secs(10_000);
-        store_cache(
-            "test-cache-key",
-            Some(10_100),
-            now,
-            Duration::from_secs(300),
-        );
-        assert_eq!(cached_decision("test-cache-key", now, true), Some(false));
+        let key = AriCacheKey {
+            issuer_directory: "https://issuer.example/directory".to_owned(),
+            certificate_identifier: "identifier".to_owned(),
+        };
+        store_cache(&key, Some(10_100), now, Duration::from_secs(300));
+        assert_eq!(cached_decision(&key, now, true), Some(false));
         assert_eq!(
-            cached_decision("test-cache-key", now + Duration::from_secs(100), false),
+            cached_decision(&key, now + Duration::from_secs(100), false),
             Some(true)
         );
         assert_eq!(
-            cached_decision("test-cache-key", now + Duration::from_secs(301), false),
+            cached_decision(&key, now + Duration::from_secs(301), false),
             None
         );
+    }
+
+    #[test]
+    fn cache_is_namespaced_by_issuer_directory() {
+        let _test_lock = CACHE_TEST_LOCK.lock().unwrap();
+        let now = UNIX_EPOCH + Duration::from_secs(20_000);
+        let first = AriCacheKey {
+            issuer_directory: "https://first.example/directory".to_owned(),
+            certificate_identifier: "same-aki-and-serial".to_owned(),
+        };
+        let second = AriCacheKey {
+            issuer_directory: "https://second.example/directory".to_owned(),
+            certificate_identifier: "same-aki-and-serial".to_owned(),
+        };
+        store_cache(&first, Some(20_100), now, Duration::from_secs(300));
+        store_cache(&second, Some(19_900), now, Duration::from_secs(300));
+
+        assert_eq!(cached_decision(&first, now, true), Some(false));
+        assert_eq!(cached_decision(&second, now, false), Some(true));
+    }
+
+    #[test]
+    fn ari_window_must_end_within_certificate_validity() {
+        let not_after = UNIX_EPOCH + Duration::from_secs(30_000);
+        assert_eq!(
+            safe_ari_schedule(Some(not_after), b"certificate", 29_000, 30_001),
+            None
+        );
+        assert!(safe_ari_schedule(Some(not_after), b"certificate", 29_000, 30_000).is_some());
+    }
+
+    #[test]
+    fn expired_and_emergency_window_certificates_renew_immediately() {
+        let now = UNIX_EPOCH + Duration::from_secs(40_000);
+        assert!(emergency_renewal_required(
+            Some(now - Duration::from_secs(1)),
+            now
+        ));
+        assert!(emergency_renewal_required(
+            Some(now + EMERGENCY_RENEWAL_WINDOW),
+            now
+        ));
+        assert!(!emergency_renewal_required(
+            Some(now + EMERGENCY_RENEWAL_WINDOW + Duration::from_secs(1)),
+            now
+        ));
     }
 
     #[test]

@@ -91,3 +91,127 @@ fn dropped_revocation_quarantine_restores_the_complete_pair() {
         test_private_key_pem()
     );
 }
+
+fn installed_revocation_test_pair(label: &str) -> (std::path::PathBuf, AcmeCertificatePaths) {
+    let storage = fluxheim_common::test_support::unique_temp_path(label);
+    let paths = install_managed_certificate(
+        &storage,
+        "example",
+        test_certificate_pem(),
+        test_private_key_pem(),
+        &["example.test".to_owned()],
+    )
+    .unwrap();
+    (storage, paths)
+}
+
+#[test]
+fn revocation_journal_rejects_unbound_or_unsafe_file_names() {
+    let transaction = "0123456789abcdef0123456789abcdef";
+    assert!(
+        crate::acme_certificate_install::revocation_file_names_valid(
+            transaction,
+            ".revoked-0123456789abcdef0123456789abcdef-fullchain.pem",
+            ".revoked-0123456789abcdef0123456789abcdef-privkey.pem",
+        )
+    );
+    assert!(
+        !crate::acme_certificate_install::revocation_file_names_valid(
+            transaction,
+            "../../outside.pem",
+            ".revoked-0123456789abcdef0123456789abcdef-privkey.pem",
+        )
+    );
+    assert!(
+        !crate::acme_certificate_install::revocation_file_names_valid(
+            "not-a-transaction",
+            ".revoked-not-a-transaction-fullchain.pem",
+            ".revoked-not-a-transaction-privkey.pem",
+        )
+    );
+}
+
+#[test]
+fn prepared_revocation_crash_restores_partial_pair() {
+    let (storage, paths) = installed_revocation_test_pair("acme-revoke-prepared-crash");
+    let quarantine =
+        crate::acme_certificate_install::simulate_prepared_revocation_crash(&paths).unwrap();
+    assert!(!paths.cert_path.exists());
+    assert!(paths.key_path.exists());
+
+    recover_managed_certificate_transaction(&storage, "example").unwrap();
+
+    assert!(paths.cert_path.exists());
+    assert!(paths.key_path.exists());
+    assert!(!quarantine.exists());
+}
+
+#[test]
+fn pair_quarantined_crash_restores_pair_before_remote_contact() {
+    let (storage, paths) = installed_revocation_test_pair("acme-revoke-pair-crash");
+    let quarantine = crate::begin_managed_certificate_quarantine(&paths).unwrap();
+    let (certificate, private_key) = quarantine.abandon();
+
+    recover_managed_certificate_transaction(&storage, "example").unwrap();
+
+    assert!(paths.cert_path.exists());
+    assert!(paths.key_path.exists());
+    assert!(!certificate.exists());
+    assert!(!private_key.exists());
+}
+
+#[test]
+fn remote_pending_crash_remains_fail_closed() {
+    let (storage, paths) = installed_revocation_test_pair("acme-revoke-pending-crash");
+    let mut quarantine = crate::begin_managed_certificate_quarantine(&paths).unwrap();
+    quarantine.mark_remote_pending().unwrap();
+    let (certificate, private_key) = quarantine.abandon();
+
+    let error = recover_managed_certificate_transaction(&storage, "example").unwrap_err();
+
+    assert!(error.to_string().contains("outcome is ambiguous"));
+    assert!(!paths.cert_path.exists());
+    assert!(!paths.key_path.exists());
+    assert!(certificate.exists());
+    assert!(private_key.exists());
+
+    assert!(
+        install_managed_certificate(
+            &storage,
+            "example",
+            test_certificate_pem(),
+            test_private_key_pem(),
+            &["example.test".to_owned()],
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn remote_confirmed_crash_keeps_quarantine_and_allows_replacement() {
+    let (storage, paths) = installed_revocation_test_pair("acme-revoke-confirmed-crash");
+    let mut quarantine = crate::begin_managed_certificate_quarantine(&paths).unwrap();
+    quarantine.mark_remote_pending().unwrap();
+    quarantine.mark_remote_confirmed().unwrap();
+    let (certificate, private_key) = quarantine.abandon();
+
+    recover_managed_certificate_transaction(&storage, "example").unwrap();
+
+    assert!(!paths.cert_path.exists());
+    assert!(!paths.key_path.exists());
+    assert!(certificate.exists());
+    assert!(private_key.exists());
+
+    install_managed_certificate(
+        &storage,
+        "example",
+        test_certificate_pem(),
+        test_private_key_pem(),
+        &["example.test".to_owned()],
+    )
+    .unwrap();
+    assert!(paths.cert_path.exists());
+    assert!(paths.key_path.exists());
+    assert!(certificate.exists());
+    assert!(private_key.exists());
+}

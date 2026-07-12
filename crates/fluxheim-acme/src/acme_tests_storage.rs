@@ -307,8 +307,10 @@ fn revoked_certificate_quarantine_removes_the_active_pair() {
     )
     .unwrap();
 
-    let quarantine = crate::begin_managed_certificate_quarantine(&paths).unwrap();
-    let (certificate, private_key) = quarantine.complete();
+    let mut quarantine = crate::begin_managed_certificate_quarantine(&paths).unwrap();
+    quarantine.mark_remote_pending().unwrap();
+    quarantine.mark_remote_confirmed().unwrap();
+    let (certificate, private_key) = quarantine.complete().unwrap();
 
     assert!(!paths.cert_path.exists());
     assert!(!paths.key_path.exists());

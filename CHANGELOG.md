@@ -20,12 +20,20 @@ behavior when the change improves security or project direction.
   with race coverage proving cleanup cannot leave a partial certificate pair.
 - Bound ARI planning by lookup concurrency, per-target timeout, and total budget;
   execute due work progressively and cache issuer guidance through Retry-After.
+- Namespace ARI cache entries by issuer and certificate identity, force renewal
+  inside the seven-day emergency window, and reject issuer windows extending
+  beyond certificate validity.
 - Make account deactivation and certificate revocation transactional. Pending
   account state fails closed, while revocation quarantines the active pair before
-  the remote operation, restores it on failure, and requests live reload after
-  success even when scheduled renewal is disabled.
+  the remote operation, preserves ambiguous outcomes for operator resolution,
+  and requests live reload after success even when scheduled renewal is disabled.
+- Journal revocation quarantine phases durably so pre-remote crashes restore the
+  complete pair, ambiguous remote outcomes stay fail-closed, and confirmed
+  quarantine survives crashes while permitting replacement issuance.
 - Validate online ACME directories structurally and require exact advertised ToS
   agreement, with an explicit private-directory override only for omitted terms.
+- Parse every advertised ACME endpoint as a bounded HTTPS URI with a real
+  authority, and expose unavailable safe account rollover in doctor output.
 - Remove the unmaintained direct `rustls-pemfile` dependency in favor of the
   maintained `rustls-pki-types` PEM parser already provided through rustls.
 

@@ -3000,7 +3000,9 @@ requires explicit acceptance plus an HTTPS terms URL. Existing account
 credentials can still be loaded without silently accepting changed terms.
 Optional `ca_bundle_file` replaces platform roots for that issuer with a bounded,
 no-follow PEM trust bundle; use it for private ACME CAs or deliberate CA
-pinning.
+pinning. Directory endpoint validation parses each URL as an HTTP URI and
+requires an HTTPS scheme, a bounded non-userinfo authority, and an absolute
+path; a superficial `https://` prefix is not sufficient.
 Actalis and Google Trust Services require External Account Binding. Their EAB
 secret sources are configured through environment variables, files, or
 credential names. Credential names are preferred for production because the same
