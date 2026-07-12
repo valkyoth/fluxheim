@@ -22,6 +22,9 @@ scripts/validate-modularity-policy.sh check
 echo "stable release gate: instant-acme patch provenance"
 scripts/validate-instant-acme-patch.sh
 
+echo "stable release gate: ACME mount-boundary test plan"
+scripts/validate-acme-mount-boundary-plan.sh
+
 if [ "$mode" = "release" ]; then
     echo "stable release gate: runtime baseline"
     scripts/capture-runtime-baseline.sh release

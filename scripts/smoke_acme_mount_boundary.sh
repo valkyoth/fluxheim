@@ -9,24 +9,10 @@ if [ "$(uname -s)" != "Linux" ]; then
     exit 1
 fi
 
-runtime=${FLUXHEIM_ACME_MOUNT_TEST_RUNTIME:-}
-if [ -z "$runtime" ]; then
-    if command -v podman >/dev/null 2>&1; then
-        runtime=podman
-    elif command -v docker >/dev/null 2>&1; then
-        runtime=docker
-    else
-        echo "ACME mount-boundary smoke requires Podman or Docker" >&2
-        exit 1
-    fi
+if ! command -v unshare >/dev/null 2>&1; then
+    echo "ACME mount-boundary smoke requires util-linux unshare" >&2
+    exit 1
 fi
-case "$runtime" in
-    podman | docker) ;;
-    *)
-        echo "unsupported ACME mount-boundary container runtime: $runtime" >&2
-        exit 1
-        ;;
-esac
 
 test_name=acme_directory::tests::owned_directory_reconciliation_rejects_bind_mount
 build_output=$(cargo test --locked -p fluxheim-acme --features acme-client \
@@ -39,11 +25,8 @@ if [ -z "$test_binary" ] || [ ! -x "$test_binary" ]; then
     exit 1
 fi
 
-image=${FLUXHEIM_ACME_MOUNT_TEST_IMAGE:-docker.io/library/debian:13.3-slim@sha256:1d3c811171a08a5adaa4a163fbafd96b61b87aa871bbc7aa15431ac275d3d430}
-"$runtime" run --rm --privileged --user 0:0 \
-    --entrypoint /fluxheim-acme-test \
-    -v "$test_binary:/fluxheim-acme-test:ro,Z" \
-    "$image" \
+unshare --user --map-root-user --mount --propagation private --fork \
+    "$test_binary" \
     --exact "$test_name" --ignored --nocapture
 
 echo "ACME mount-boundary smoke passed"

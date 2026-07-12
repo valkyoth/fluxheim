@@ -106,7 +106,7 @@ TESTS: tuple[TestEntry, ...] = (
         "ACME mount-boundary security smoke",
         "security",
         ("scripts/smoke_acme_mount_boundary.sh",),
-        "Runs the ignored ACME bind-mount regression in an isolated privileged container.",
+        "Runs the ignored ACME bind-mount regression in isolated user and mount namespaces.",
     ),
     TestEntry(
         "peer-fill",
