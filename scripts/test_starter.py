@@ -173,14 +173,10 @@ TESTS: tuple[TestEntry, ...] = (
     ),
     TestEntry(
         "wasm",
-        "Wasm config and sandbox smoke",
+        "Wasm complete smoke",
         "wasm",
-        (
-            "scripts/validate-wasm-config-registry.sh",
-            "scripts/smoke_wasm_sandbox.sh",
-            "scripts/smoke_wasm_policy_examples.sh",
-        ),
-        "Validates the Wasm registry, sandbox, and real-listener migration policy examples.",
+        ("scripts/smoke_wasm_all.sh",),
+        "Builds policy examples and validates the registry, sandbox, and real-listener migration examples.",
     ),
     TestEntry(
         "observability",

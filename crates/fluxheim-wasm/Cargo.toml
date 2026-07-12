@@ -17,6 +17,9 @@ wasi = ["runtime", "dep:wasmtime-wasi"]
 name = "wasm_sandbox_smoke"
 required-features = ["runtime"]
 
+[[example]]
+name = "build_policy_examples"
+
 [dependencies]
 sha2 = "0.11.0"
 thiserror = "2.0.18"

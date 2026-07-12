@@ -200,3 +200,9 @@ Before `1.7` is complete:
 - every example must have a matching negative test that proves the sandbox does
   not expose filesystem, network, env, admin APIs, secrets, request bodies, or
   raw cache objects without explicit future capabilities.
+
+`v1.7.9` provides `scripts/build_wasm_policy_examples.sh` for deterministic
+source-to-module builds and digest output, while `scripts/smoke_wasm_all.sh`
+is the single orchestration entry used by both `scripts/test_starter.py` and
+the opt-in stable/deep release gate. This avoids treating multiple script paths
+as arguments to one launcher command and keeps human and CI coverage aligned.

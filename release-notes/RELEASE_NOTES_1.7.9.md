@@ -27,6 +27,11 @@ products.
   parity example. The live smoke now proves pass, MISS/HIT, bounded variants,
   image-only TTL/tag/header metadata, expiry, tag purge, non-image isolation,
   and fail-closed invalid mutations.
+- Add a deterministic policy builder that emits deployable `.wasm` files and
+  `SHA256SUMS` under `target/wasm-policy-examples/`.
+- Add one complete Wasm smoke shared by `scripts/test_starter.py` and the
+  opt-in stable/deep release gate, fixing the launcher's previous multi-script
+  command wiring.
 
 ## Security
 

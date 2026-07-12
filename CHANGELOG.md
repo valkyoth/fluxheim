@@ -23,6 +23,11 @@ behavior when the change improves security or project direction.
   route-policy coverage.
 - Complete the VCL-like cache-policy example gate with schema validation and
   live pass, variant, TTL, metadata, tag-purge, and negative mutation coverage.
+- Add a deterministic builder for all migration policies that emits real Wasm
+  modules and SHA-256 sums under `target/`, plus one complete Wasm smoke shared
+  by the human launcher and release gate.
+- Fix the human test starter's Wasm entry so sandbox and policy scripts are no
+  longer passed as unused arguments to the registry validator.
 
 ### Security
 

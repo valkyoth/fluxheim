@@ -5,6 +5,20 @@ These examples are source-level policy examples. Build the `.wat` files to
 `wasm.plugin_roots`, and pin the module SHA-256 in config before enabling it in
 production.
 
+Build every checked-in migration policy and generate exact SHA-256 digests
+with:
+
+```sh
+scripts/build_wasm_policy_examples.sh
+```
+
+The command writes real modules and `SHA256SUMS` under
+`target/wasm-policy-examples/`. Copy the required modules into a configured
+plugin root, replace each example config's digest placeholder with the emitted
+digest, and keep the deployed file owner-only or otherwise protected by the
+documented plugin-root trust policy. The builder has no output-path argument;
+it cannot be redirected into a configured production root accidentally.
+
 `irules-access-policy.wat` and `irules-access-policy.toml` demonstrate the
 F5 iRules-style access-policy mapping. Fluxheim first classifies the request
 through configured vhosts, routes, methods, trusted-client ACLs, and TLS

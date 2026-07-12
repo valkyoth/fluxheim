@@ -21,6 +21,8 @@ for file in \
     examples/wasm/cache-lookup-policy.wat \
     examples/wasm/cache-store-policy.wat \
     examples/wasm/cache-policy.toml \
+    scripts/build_wasm_policy_examples.sh \
+    scripts/smoke_wasm_all.sh \
     scripts/smoke_wasm_policy_examples.sh
 do
     if [ ! -f "$file" ]; then
@@ -50,6 +52,18 @@ done
 
 if ! grep -q "scripts/test_starter.py" "$examples"; then
     echo "wasm example plan: examples doc must require test_starter coverage" >&2
+    exit 1
+fi
+
+if ! python3 scripts/test_starter.py --run wasm --dry-run \
+    | grep -q "scripts/smoke_wasm_all.sh"
+then
+    echo "wasm example plan: test starter does not run the complete Wasm smoke" >&2
+    exit 1
+fi
+
+if ! grep -q "scripts/smoke_wasm_all.sh" scripts/stable_release_gate.sh; then
+    echo "wasm example plan: stable release gate does not run the complete Wasm smoke" >&2
     exit 1
 fi
 

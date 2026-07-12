@@ -160,6 +160,7 @@ fi
 - Add the nginx Lua/OpenResty-style bounded header-policy example.
 - Add the HAProxy Lua/SPOE-style bounded route and load-balancer example.
 - Complete the VCL-like cache-policy example and live operational smoke.
+- Add deterministic Wasm example builds and one shared complete Wasm gate.
 - Harden snapshot opens against pathname races and isolate corruption fixtures
   behind safe store primitives.
 
