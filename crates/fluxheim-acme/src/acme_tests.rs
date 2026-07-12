@@ -41,6 +41,9 @@ mod plan;
 mod renewal;
 #[path = "acme_tests_storage.rs"]
 mod storage;
+#[cfg(feature = "acme-client")]
+#[path = "acme_tests_storage_async.rs"]
+mod storage_async;
 
 fn acme_config_with_vhosts(vhosts: Vec<VhostConfig>) -> Config {
     Config {

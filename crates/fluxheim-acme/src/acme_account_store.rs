@@ -49,6 +49,12 @@ pub fn account_credentials_path(storage: &Path, issuer_name: &str) -> AcmeAccoun
     }
 }
 
+/// Loads persisted ACME account credentials.
+///
+/// # Blocking
+///
+/// Waits indefinitely for the issuer lifecycle lock. Async code should use
+/// `load_account_credentials_async` instead.
 pub fn load_account_credentials(
     storage: &Path,
     issuer_name: &str,
@@ -276,6 +282,12 @@ impl AccountDeactivationTransaction {
     }
 }
 
+/// Persists ACME account credentials atomically.
+///
+/// # Blocking
+///
+/// Waits indefinitely for the issuer lifecycle lock. Async code should use
+/// `store_account_credentials_async` instead.
 pub fn store_account_credentials(
     storage: &Path,
     issuer_name: &str,
@@ -307,7 +319,7 @@ pub fn store_account_credentials(
     store_account_credentials_locked(&credentials_path, directory, credentials)
 }
 
-fn store_account_credentials_locked(
+pub(crate) fn store_account_credentials_locked(
     credentials_path: &AcmeAccountCredentialsPath,
     directory: &Path,
     credentials: &instant_acme::AccountCredentials,
@@ -345,6 +357,12 @@ fn store_account_credentials_locked(
     Ok(credentials_path.clone())
 }
 
+/// Removes persisted ACME account credentials.
+///
+/// # Blocking
+///
+/// Waits indefinitely for the issuer lifecycle lock. Async code should use
+/// `remove_account_credentials_async` instead.
 pub fn remove_account_credentials(
     storage: &Path,
     issuer_name: &str,
@@ -372,7 +390,7 @@ pub fn remove_account_credentials(
     }
 }
 
-fn ensure_safe_account_directory(directory: &Path) -> Result<(), AcmeAccountStoreError> {
+pub(crate) fn ensure_safe_account_directory(directory: &Path) -> Result<(), AcmeAccountStoreError> {
     reject_existing_symlink_in_account_path(directory)?;
     fs::create_dir_all(directory).map_err(|error| account_store_io_error(directory, error))?;
     reject_existing_symlink_in_account_path(directory)?;
@@ -388,7 +406,7 @@ fn ensure_safe_account_directory(directory: &Path) -> Result<(), AcmeAccountStor
     Ok(())
 }
 
-fn ensure_safe_account_destination(path: &Path) -> Result<(), AcmeAccountStoreError> {
+pub(crate) fn ensure_safe_account_destination(path: &Path) -> Result<(), AcmeAccountStoreError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             Err(AcmeAccountStoreError::UnsafePath {

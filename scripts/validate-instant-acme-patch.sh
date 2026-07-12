@@ -4,11 +4,18 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 vendor="$root/vendor/instant-acme"
 checksums="$vendor/UPSTREAM-SHA256SUMS"
-temporary="${TMPDIR:-/tmp}/fluxheim-instant-acme-upstream-$$.rs"
-trap 'rm -f "$temporary"' EXIT HUP INT TERM
+patch_checksum="$vendor/FLUXHEIM-PATCH-SHA256"
+temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-instant-acme.XXXXXX")
+upstream_source="$temporary_dir/upstream-account.rs"
+patch_source="$temporary_dir/fluxheim-patch.rs"
+trap 'rm -rf -- "$temporary_dir"' EXIT HUP INT TERM
 
 if [ ! -f "$checksums" ]; then
     echo "instant-acme patch policy: missing upstream checksums" >&2
+    exit 1
+fi
+if [ ! -f "$patch_checksum" ]; then
+    echo "instant-acme patch policy: missing downstream patch checksum" >&2
     exit 1
 fi
 
@@ -29,11 +36,24 @@ awk '
     skip { next }
     trim_blank && /^$/ { trim_blank = 0; next }
     { trim_blank = 0; print }
-' "$vendor/src/account.rs" >"$temporary"
+' "$vendor/src/account.rs" >"$upstream_source"
+
+awk '
+    /FLUXHEIM PATCH BEGIN: durable caller-key account bootstrap/ { capture = 1; next }
+    /FLUXHEIM PATCH END: durable caller-key account bootstrap/ { capture = 0; next }
+    capture { print }
+' "$vendor/src/account.rs" >"$patch_source"
+
+expected_patch=$(cat "$patch_checksum")
+actual_patch=$(sha256sum "$patch_source" | awk '{ print $1 }')
+if [ "$actual_patch" != "$expected_patch" ]; then
+    echo "instant-acme patch policy: permitted downstream patch body drifted" >&2
+    exit 1
+fi
 
 while read -r expected path; do
     if [ "$path" = "src/account.rs" ]; then
-        actual=$(sha256sum "$temporary" | awk '{ print $1 }')
+        actual=$(sha256sum "$upstream_source" | awk '{ print $1 }')
     else
         actual=$(sha256sum "$vendor/$path" | awk '{ print $1 }')
     fi

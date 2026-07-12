@@ -16,4 +16,6 @@ updating it, compare every vendored file with the corresponding crates.io source
 and retain a focused test proving key identity, contacts, and EAB behavior.
 `scripts/validate-instant-acme-patch.sh` enforces that comparison in CI and
 release gates by stripping the marked method and checking the published source
-hashes in `UPSTREAM-SHA256SUMS`.
+hashes in `UPSTREAM-SHA256SUMS`. It separately verifies the exact permitted
+downstream method body against `FLUXHEIM-PATCH-SHA256`, so neither upstream nor
+patched code can drift without an explicit policy update.

@@ -142,6 +142,53 @@ fn async_account_lock_contention_has_a_bounded_deadline() {
     drop(pending);
 }
 
+#[test]
+fn async_account_mutations_remain_responsive_and_time_out_under_contention() {
+    let storage = fluxheim_common::test_support::unique_temp_path("acme-account-async-mutations");
+    let pending =
+        match begin_account_bootstrap(&storage, "issuer", "https://acme.example.test/directory")
+            .unwrap()
+        {
+            AccountBootstrap::Pending(pending) => pending,
+            AccountBootstrap::Existing(_) => panic!("expected a pending account bootstrap"),
+        };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let heartbeat = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let started = std::time::Instant::now();
+
+    runtime.block_on(async {
+        let store = crate::acme_account_async::store_account_credentials_with_test_timeout(
+            &storage,
+            "issuer",
+            test_account_credentials(),
+            std::time::Duration::from_millis(50),
+        );
+        let remove = crate::acme_account_async::remove_account_credentials_with_test_timeout(
+            &storage,
+            "issuer",
+            std::time::Duration::from_millis(50),
+        );
+        let heartbeat_task = {
+            let heartbeat = heartbeat.clone();
+            async move {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                heartbeat.store(true, std::sync::atomic::Ordering::Release);
+            }
+        };
+        let (store_result, remove_result, ()) =
+            futures::future::join3(store, remove, heartbeat_task).await;
+        assert!(store_result.unwrap_err().to_string().contains("timed out"));
+        assert!(remove_result.unwrap_err().to_string().contains("timed out"));
+    });
+
+    assert!(heartbeat.load(std::sync::atomic::Ordering::Acquire));
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    drop(pending);
+}
+
 #[cfg(feature = "acme-client")]
 #[test]
 fn account_bootstrap_promotion_is_durable_and_cleans_pending_key() {

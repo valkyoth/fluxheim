@@ -182,6 +182,13 @@ deactivation start, credential promotion, rollback, and completion follow this
 boundary. This keeps a slow issuer from combining a held bootstrap lock with a
 blocked single-thread runtime or an exhausted Tokio worker pool.
 
+Crate consumers running inside Tokio should use
+`load_account_credentials_async`, `store_account_credentials_async`, and
+`remove_account_credentials_async`. Their synchronous counterparts are
+intended for synchronous startup and maintenance code and may wait indefinitely
+on the advisory lifecycle lock; each is marked with a Rustdoc `# Blocking`
+contract.
+
 Pending account-key buffers use `sanitization::SecretVec`. The pending file is
 overwritten, synced, truncated, and unlinked after durable
 credential promotion; storage devices and copy-on-write filesystems may retain
@@ -190,7 +197,9 @@ at-rest confidentiality. The checked-in
 `instant-acme 0.8.5` patch exposes only the existing internal account-creation
 path with a caller-provided key; it does not change ACME signing or protocol
 behavior. Patch provenance and removal criteria are recorded in
-`vendor/instant-acme/PATCH.md`.
+`vendor/instant-acme/PATCH.md`. Release validation uses a private unpredictable
+temporary directory and independently pins both the published upstream files
+and the exact permitted downstream patch body.
 
 New account creation is refused until the selected issuer records both
 `terms_of_service_agreed = true` and the exact HTTPS

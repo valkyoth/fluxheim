@@ -261,9 +261,16 @@ mod acme_tls_alpn;
 #[path = "acme_transaction.rs"]
 mod acme_transaction;
 #[cfg(feature = "acme-client")]
+pub use acme_account_async::{
+    load_account_credentials_async, remove_account_credentials_async,
+    store_account_credentials_async,
+};
+#[cfg(feature = "acme-client")]
 use acme_account_store::{
     AccountBootstrap, AccountDeactivationTransaction, AccountStoreAttempt, PendingAccountBootstrap,
-    try_begin_account_bootstrap, try_begin_account_deactivation, try_load_account_credentials,
+    ensure_safe_account_destination, ensure_safe_account_directory,
+    store_account_credentials_locked, try_begin_account_bootstrap, try_begin_account_deactivation,
+    try_load_account_credentials,
 };
 pub use acme_account_store::{
     account_credentials_path, load_account_credentials, remove_account_credentials,

@@ -1,14 +1,154 @@
 use super::*;
+use std::sync::Arc;
 
 const ACCOUNT_LOCK_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 const ACCOUNT_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(25);
 
-pub(crate) async fn load_account_credentials_async(
+/// Loads ACME credentials without blocking a Tokio worker.
+///
+/// Returns an error when the issuer lifecycle lock cannot be acquired within
+/// Fluxheim's bounded account-lock deadline.
+pub async fn load_account_credentials_async(
     storage: &Path,
     issuer_name: &str,
 ) -> Result<Option<instant_acme::AccountCredentials>, AcmeInstantClientError> {
     load_account_credentials_async_with_timeout(storage, issuer_name, ACCOUNT_LOCK_WAIT_TIMEOUT)
         .await
+}
+
+/// Persists ACME credentials without blocking a Tokio worker.
+///
+/// Returns an error when the issuer lifecycle lock cannot be acquired within
+/// Fluxheim's bounded account-lock deadline.
+pub async fn store_account_credentials_async(
+    storage: &Path,
+    issuer_name: &str,
+    credentials: instant_acme::AccountCredentials,
+) -> Result<AcmeAccountCredentialsPath, AcmeInstantClientError> {
+    store_account_credentials_async_with_timeout(
+        storage,
+        issuer_name,
+        credentials,
+        ACCOUNT_LOCK_WAIT_TIMEOUT,
+    )
+    .await
+}
+
+async fn store_account_credentials_async_with_timeout(
+    storage: &Path,
+    issuer_name: &str,
+    credentials: instant_acme::AccountCredentials,
+    wait_timeout: Duration,
+) -> Result<AcmeAccountCredentialsPath, AcmeInstantClientError> {
+    let storage = storage.to_path_buf();
+    let issuer = issuer_name.to_owned();
+    let credentials = Arc::new(credentials);
+    run_account_store_attempt(issuer_name, "credential store", wait_timeout, move || {
+        try_store_account_credentials(&storage, &issuer, credentials.as_ref())
+    })
+    .await
+}
+
+/// Removes ACME credentials without blocking a Tokio worker.
+///
+/// Returns an error when the issuer lifecycle lock cannot be acquired within
+/// Fluxheim's bounded account-lock deadline.
+pub async fn remove_account_credentials_async(
+    storage: &Path,
+    issuer_name: &str,
+) -> Result<bool, AcmeInstantClientError> {
+    remove_account_credentials_async_with_timeout(storage, issuer_name, ACCOUNT_LOCK_WAIT_TIMEOUT)
+        .await
+}
+
+async fn remove_account_credentials_async_with_timeout(
+    storage: &Path,
+    issuer_name: &str,
+    wait_timeout: Duration,
+) -> Result<bool, AcmeInstantClientError> {
+    let storage = storage.to_path_buf();
+    let issuer = issuer_name.to_owned();
+    run_account_store_attempt(issuer_name, "credential removal", wait_timeout, move || {
+        try_remove_account_credentials(&storage, &issuer)
+    })
+    .await
+}
+
+fn try_store_account_credentials(
+    storage: &Path,
+    issuer_name: &str,
+    credentials: &instant_acme::AccountCredentials,
+) -> Result<AccountStoreAttempt<AcmeAccountCredentialsPath>, AcmeAccountStoreError> {
+    let credentials_path = account_credentials_path(storage, issuer_name);
+    let directory = account_directory(&credentials_path)?;
+    ensure_safe_account_directory(directory)?;
+    let Some(_lock) = AcmeMutationLock::try_acquire(directory).map_err(|error| {
+        account_async_store_io_error(&directory.join(".fluxheim-acme.lock"), error)
+    })?
+    else {
+        return Ok(AccountStoreAttempt::Contended);
+    };
+    let pending = directory.join(".credentials.bootstrap.pending");
+    if pending
+        .try_exists()
+        .map_err(|error| account_async_store_io_error(&pending, error))?
+    {
+        return Err(AcmeAccountStoreError::UnsafePath {
+            path: pending,
+            message: "account bootstrap is pending; credentials must be promoted by the bootstrap transaction"
+                .to_owned(),
+        });
+    }
+    store_account_credentials_locked(&credentials_path, directory, credentials)
+        .map(AccountStoreAttempt::Acquired)
+}
+
+fn try_remove_account_credentials(
+    storage: &Path,
+    issuer_name: &str,
+) -> Result<AccountStoreAttempt<bool>, AcmeAccountStoreError> {
+    let credentials_path = account_credentials_path(storage, issuer_name);
+    let directory = account_directory(&credentials_path)?;
+    ensure_safe_account_directory(directory)?;
+    let Some(_lock) = AcmeMutationLock::try_acquire(directory).map_err(|error| {
+        account_async_store_io_error(&directory.join(".fluxheim-acme.lock"), error)
+    })?
+    else {
+        return Ok(AccountStoreAttempt::Contended);
+    };
+    ensure_safe_account_destination(&credentials_path.path)?;
+    let removed = match fs::remove_file(&credentials_path.path) {
+        Ok(()) => {
+            let directory_file = fs::File::open(directory)
+                .map_err(|error| account_async_store_io_error(directory, error))?;
+            directory_file
+                .sync_all()
+                .map_err(|error| account_async_store_io_error(directory, error))?;
+            true
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => return Err(account_async_store_io_error(&credentials_path.path, error)),
+    };
+    Ok(AccountStoreAttempt::Acquired(removed))
+}
+
+fn account_directory(
+    credentials_path: &AcmeAccountCredentialsPath,
+) -> Result<&Path, AcmeAccountStoreError> {
+    credentials_path
+        .path
+        .parent()
+        .ok_or_else(|| AcmeAccountStoreError::UnsafePath {
+            path: credentials_path.path.clone(),
+            message: "credentials path has no parent directory".to_owned(),
+        })
+}
+
+fn account_async_store_io_error(path: &Path, error: io::Error) -> AcmeAccountStoreError {
+    AcmeAccountStoreError::Io {
+        path: path.to_path_buf(),
+        error,
+    }
 }
 
 async fn load_account_credentials_async_with_timeout(
@@ -168,4 +308,24 @@ pub(crate) async fn load_account_credentials_with_test_timeout(
     wait_timeout: Duration,
 ) -> Result<Option<instant_acme::AccountCredentials>, AcmeInstantClientError> {
     load_account_credentials_async_with_timeout(storage, issuer_name, wait_timeout).await
+}
+
+#[cfg(test)]
+pub(crate) async fn store_account_credentials_with_test_timeout(
+    storage: &Path,
+    issuer_name: &str,
+    credentials: instant_acme::AccountCredentials,
+    wait_timeout: Duration,
+) -> Result<AcmeAccountCredentialsPath, AcmeInstantClientError> {
+    store_account_credentials_async_with_timeout(storage, issuer_name, credentials, wait_timeout)
+        .await
+}
+
+#[cfg(test)]
+pub(crate) async fn remove_account_credentials_with_test_timeout(
+    storage: &Path,
+    issuer_name: &str,
+    wait_timeout: Duration,
+) -> Result<bool, AcmeInstantClientError> {
+    remove_account_credentials_async_with_timeout(storage, issuer_name, wait_timeout).await
 }
