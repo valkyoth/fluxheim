@@ -86,11 +86,15 @@ The Linux bind-mount regression is deliberately marked ignored in ordinary
 Rust test runs because it requires mount capability and an isolated mount
 namespace. CI, the deep release gate, and `scripts/test_starter.py` execute
 `scripts/smoke_acme_mount_boundary.sh`, which runs that exact ignored test in a
-root-mapped user namespace and a private mount namespace. The test receives no
-host-root or privileged-container capability. Hosts that prohibit unprivileged
-user namespaces fail the dedicated smoke explicitly instead of silently
-skipping it or falling back to broader privilege. A normal test inventory
-therefore reports the Rust test as ignored rather than as a false pass.
+root-mapped user namespace and a private mount namespace. When a host prohibits
+unprivileged user namespaces, including GitHub-hosted runners, the script uses
+a digest-pinned disposable container with networking disabled, a read-only root
+filesystem, all capabilities dropped except `SYS_ADMIN`, and
+`no-new-privileges`. Docker's AppArmor profile is disabled for this one-shot
+container because that profile denies `mount(2)` independently of capabilities;
+Docker's seccomp profile and the other restrictions remain active. The script
+never uses unrestricted `--privileged` access. A normal test inventory therefore
+reports the Rust test as ignored rather than as a false pass.
 
 ```bash
 fluxheim --config path/to/fluxheim.toml --check-tls-storage

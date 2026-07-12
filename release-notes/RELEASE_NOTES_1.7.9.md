@@ -53,7 +53,9 @@ products.
   mount points. The bind-mount regression is explicitly ignored in
   ordinary Rust runs and executed by CI and the deep release gate through a
   dedicated smoke using root-mapped user and private mount namespaces, without
-  a privileged container.
+  a privileged container. Hosts that disable user namespaces use a
+  digest-pinned, network-isolated, read-only container with every capability
+  dropped except the mount operation's required `SYS_ADMIN` capability.
 - Managed ACME account generation now creates P-256 material in zeroizing
   RustCrypto secret/document types before importing it into Ring and retaining
   the durable copy in `sanitization::SecretVec`, removing the transient
