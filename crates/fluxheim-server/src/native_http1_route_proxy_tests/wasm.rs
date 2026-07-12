@@ -477,8 +477,9 @@ async fn native_wasm_cache_admission_budget_is_fair_across_vhosts() {
 }
 
 #[tokio::test]
-async fn native_wasm_request_and_response_headers_use_bounded_host_calls() {
-    let fixture = WasmRouteFixture::new(&[("headers", WasmPluginBody::HeaderPolicy)]);
+async fn native_wasm_openresty_header_policy_example_uses_bounded_host_calls() {
+    let fixture =
+        WasmRouteFixture::new(&[("headers", WasmPluginBody::OpenRestyHeaderPolicyExample)]);
     let upstream = upstream_expect_policy_header("/item").await;
     let mut config = fixture
         .config_with_attachments(upstream, vec![wasm_attachment_all("headers", "route", 100)]);
@@ -1167,7 +1168,7 @@ async fn native_wasm_cache_store_can_set_bounded_stored_response_header() {
 async fn native_wasm_cross_family_chain_runs_in_order_with_cache_hit_metadata() {
     let fixture = WasmRouteFixture::new(&[
         ("access", WasmPluginBody::Decision(1)),
-        ("headers", WasmPluginBody::HeaderPolicy),
+        ("headers", WasmPluginBody::OpenRestyHeaderPolicyExample),
         ("router", WasmPluginBody::RouteDecision),
         ("cache_key", WasmPluginBody::CacheLookupDeviceKey),
         ("cache_store", WasmPluginBody::CacheStoreHeader),
@@ -1746,7 +1747,8 @@ async fn native_wasm_cache_store_deny_wins_over_earlier_skip() {
 #[cfg(feature = "php-fpm")]
 #[tokio::test]
 async fn native_wasm_response_headers_apply_to_php_fpm_fallback() {
-    let fixture = WasmRouteFixture::new(&[("headers", WasmPluginBody::HeaderPolicy)]);
+    let fixture =
+        WasmRouteFixture::new(&[("headers", WasmPluginBody::OpenRestyHeaderPolicyExample)]);
     let fpm = fastcgi_responder(
         b"Status: 200 OK\r\nContent-Type: text/plain\r\nX-Powered-By: php\r\n\r\nphp-policy",
     )
@@ -1900,7 +1902,7 @@ impl WasmRouteFixture {
 enum WasmPluginBody {
     Decision(i32),
     IrulesAccessPolicyExample,
-    HeaderPolicy,
+    OpenRestyHeaderPolicyExample,
     ForbiddenHeader,
     RouteDecision,
     CacheLookup,
@@ -1942,43 +1944,8 @@ impl WasmPluginBody {
             Self::IrulesAccessPolicyExample => {
                 include_str!("../../../../examples/wasm/irules-access-policy.wat").to_owned()
             }
-            Self::HeaderPolicy => {
-                r#"
-                (module
-                  (import "fluxheim_policy_v1" "context" (func $context (param i32 i32) (result i32)))
-                  (import "fluxheim_policy_v1" "set_request_header" (func $set_request_header (param i32 i32) (result i32)))
-                  (import "fluxheim_policy_v1" "set_response_header" (func $set_response_header (param i32 i32) (result i32)))
-                  (import "fluxheim_policy_v1" "remove_response_header" (func $remove_response_header (param i32 i32) (result i32)))
-                  (func (export "fluxheim_request_headers") (result i32)
-                    i32.const 1
-                    i32.const 0
-                    call $context
-                    i32.const 3
-                    i32.eq
-                    if
-                      i32.const 1
-                      i32.const 4
-                      call $set_request_header
-                      drop
-                    else
-                      i32.const 1
-                      i32.const 1
-                      call $set_request_header
-                      drop
-                    end
-                    i32.const 0)
-                  (func (export "fluxheim_response_headers") (result i32)
-                    i32.const 2
-                    i32.const 4
-                    call $set_response_header
-                    drop
-                    i32.const 3
-                    i32.const 0
-                    call $remove_response_header
-                    drop
-                    i32.const 0))
-                "#
-                .to_owned()
+            Self::OpenRestyHeaderPolicyExample => {
+                include_str!("../../../../examples/wasm/openresty-header-policy.wat").to_owned()
             }
             Self::ForbiddenHeader => {
                 r#"
@@ -2358,7 +2325,7 @@ fn wasm_plugin(root: &Path, name: &str, body: WasmPluginBody) -> fluxheim_config
 
 fn wasm_plugin_phases(body: WasmPluginBody) -> Vec<fluxheim_config::WasmPluginPhase> {
     match body {
-        WasmPluginBody::HeaderPolicy => vec![
+        WasmPluginBody::OpenRestyHeaderPolicyExample => vec![
             fluxheim_config::WasmPluginPhase::RequestHeaders,
             fluxheim_config::WasmPluginPhase::ResponseHeaders,
         ],

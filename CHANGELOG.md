@@ -16,6 +16,8 @@ behavior when the change improves security or project direction.
   denial, and fail-closed plugin traps.
 - Add a dedicated Wasm policy-example smoke to the human test starter and the
   opt-in Wasm release gate.
+- Add the checked-in nginx Lua/OpenResty-style bounded request/response header
+  policy and config example, compiled directly by its real listener tests.
 
 ### Security
 

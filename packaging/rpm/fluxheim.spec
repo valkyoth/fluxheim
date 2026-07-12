@@ -157,6 +157,7 @@ fi
 * Sun Jul 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.9-1
 - Start documented and runnable Wasm migration-example parity work.
 - Add the F5 iRules-style route access example and real listener smoke.
+- Add the nginx Lua/OpenResty-style bounded header-policy example.
 - Harden snapshot opens against pathname races and isolate corruption fixtures
   behind safe store primitives.
 

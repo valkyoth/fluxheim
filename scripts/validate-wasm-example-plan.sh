@@ -14,6 +14,8 @@ done
 for file in \
     examples/wasm/irules-access-policy.wat \
     examples/wasm/irules-access-policy.toml \
+    examples/wasm/openresty-header-policy.wat \
+    examples/wasm/openresty-header-policy.toml \
     scripts/smoke_wasm_policy_examples.sh
 do
     if [ ! -f "$file" ]; then

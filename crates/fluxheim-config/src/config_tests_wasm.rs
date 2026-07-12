@@ -45,6 +45,17 @@ fn irules_access_policy_example_config_validates() {
 }
 
 #[cfg(feature = "wasm")]
+#[test]
+fn openresty_header_policy_example_config_validates() {
+    let config: Config = toml::from_str(include_str!(
+        "../../../examples/wasm/openresty-header-policy.toml"
+    ))
+    .unwrap();
+
+    assert_eq!(config.validate(), Ok(()));
+}
+
+#[cfg(feature = "wasm")]
 fn proxy_preview_wasm_config(plugin_fields: &str) -> Config {
     toml::from_str(&format!(
         r#"

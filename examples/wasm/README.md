@@ -19,6 +19,18 @@ module receives no raw headers, body, filesystem, network, admin-token, or TLS
 secret capability. Use native route and access configuration for classification
 instead of attempting arbitrary parsing inside the plugin.
 
+`openresty-header-policy.wat` and `openresty-header-policy.toml` demonstrate
+the nginx Lua/OpenResty-style header-policy mapping. On the configured `/gold/`
+route, the module reads only Fluxheim's bounded path-class ID, adds the
+allow-listed `x-policy-tier: gold` request header, removes the allow-listed
+upstream `x-powered-by` response header, and adds
+`x-fluxheim-policy-branch: gold` to the client response.
+
+The guest cannot read raw `Authorization`, `Cookie`, or `Set-Cookie` values and
+cannot create arbitrary names or values. Unknown IDs, duplicate/oversized
+mutations, traps, timeouts, and admission failures follow the configured fail
+mode; security-sensitive examples use `fail-closed`.
+
 `cache-lookup-policy.wat` and `cache-store-policy.wat` demonstrate the bounded
 1.7.5 cache-policy ABI:
 

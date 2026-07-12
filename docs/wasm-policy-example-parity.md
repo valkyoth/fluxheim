@@ -92,6 +92,13 @@ coverage is in
 mutation IDs. The ABI remains symbolic and does not expose raw sensitive
 headers or bodies.
 
+The `v1.7.9` operator example is checked in as
+`examples/wasm/openresty-header-policy.wat` with a complete config fixture. The
+shared policy-example smoke compiles that exact source and proves the origin
+receives `x-policy-tier: gold`, the client receives
+`x-fluxheim-policy-branch: gold`, upstream `x-powered-by` is removed, and an
+unknown header mutation ID fails closed before origin dispatch.
+
 ### HAProxy Lua/SPOE-Style Routing And Load-Balancer Policy
 
 Capability target:

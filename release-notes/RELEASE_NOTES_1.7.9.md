@@ -15,6 +15,10 @@ products.
   closed.
 - Add `scripts/smoke_wasm_policy_examples.sh` to `scripts/test_starter.py` and
   the opt-in Wasm release gate.
+- Add a checked-in nginx Lua/OpenResty-style header policy and complete config
+  fixture. Live coverage proves the allow-listed origin request mutation,
+  client response mutation, upstream-header removal, and fail-closed rejection
+  of unknown mutation IDs.
 
 ## Security
 
