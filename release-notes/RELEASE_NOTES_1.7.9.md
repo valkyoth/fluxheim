@@ -49,6 +49,10 @@ products.
 - Use the snapshot store's atomic writer and descriptor-based permission
   changes for corruption fixtures, keeping negative security tests realistic
   without normalizing raw path mutation patterns.
+- Use one no-follow parent-directory descriptor for Unix snapshot publication,
+  with descriptor-relative temporary creation, create-new linking, replacement,
+  cleanup, metadata checks, and directory synchronization. This prevents
+  parent replacement from redirecting an in-progress atomic write.
 
 ## In Progress
 

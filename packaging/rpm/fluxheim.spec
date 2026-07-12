@@ -165,6 +165,7 @@ fi
 - Avoid disabled disk-cache initialization for memory-only cache policies.
 - Harden snapshot opens against pathname races and isolate corruption fixtures
   behind safe store primitives.
+- Make Unix snapshot publication and metadata checks descriptor-relative.
 
 * Sat Jul 11 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.8-1
 - Add an opt-in WASI Preview 1 access-decision capability boundary.

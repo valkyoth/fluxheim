@@ -45,6 +45,10 @@ behavior when the change improves security or project direction.
 - Route snapshot corruption fixtures through the atomic store writer and
   descriptor-based permission changes so security tests do not normalize raw
   path mutation patterns.
+- Anchor Unix snapshot publication to one no-follow parent-directory
+  descriptor and use descriptor-relative create, link, rename, cleanup,
+  metadata, and durability operations, preventing pathname re-resolution and
+  parent replacement during atomic writes.
 
 ## 1.7.8 - 2026-07-11
 

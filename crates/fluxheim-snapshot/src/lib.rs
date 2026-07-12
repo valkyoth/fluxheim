@@ -14,6 +14,9 @@ mod recovery;
 mod state;
 mod store;
 mod store_fs;
+mod store_fs_metadata;
+#[cfg(unix)]
+mod store_fs_unix;
 mod store_layout;
 mod store_support;
 

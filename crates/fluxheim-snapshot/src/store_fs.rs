@@ -1,9 +1,18 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+#[cfg(not(unix))]
+use std::io::Write as _;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::store::SnapshotError;
+use crate::store_fs_metadata::require_private_path_metadata;
+pub(crate) use crate::store_fs_metadata::{
+    is_symlink, optional_symlink_metadata, path_exists_without_following_symlinks,
+    require_real_directory,
+};
+#[cfg(unix)]
+use crate::store_fs_unix::{sync_directory as sync_directory_unix, write_atomically_in_directory};
 
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -63,60 +72,69 @@ fn write_atomically_with_mode(
         ))
     })?;
     require_real_directory(parent)?;
-    if create_new && path_exists_without_following_symlinks(path)? {
-        return Err(SnapshotError::Io(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "snapshot destination already exists",
-        )));
-    }
-    require_plain_write_destination(path)?;
 
-    let temp_path = parent.join(format!(
-        ".{}.tmp-{}-{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("snapshot"),
-        std::process::id(),
-        unique_sequence()
-    ));
-
-    let mut cleanup = TempPathGuard::new(temp_path.clone());
+    #[cfg(unix)]
     {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
+        write_atomically_in_directory(parent, path, contents, create_new)
+    }
+
+    #[cfg(not(unix))]
+    {
+        if create_new && path_exists_without_following_symlinks(path)? {
+            return Err(SnapshotError::Io(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "snapshot destination already exists",
+            )));
+        }
+        require_plain_write_destination(path)?;
+
+        let temp_path = parent.join(format!(
+            ".{}.tmp-{}-{}",
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("snapshot"),
+            std::process::id(),
+            unique_sequence()
+        ));
+
+        let mut cleanup = TempPathGuard::new(temp_path.clone());
         {
-            options.custom_flags(O_NOFOLLOW).mode(SNAPSHOT_FILE_MODE);
-        }
-
-        let mut file = options.open(&temp_path).map_err(SnapshotError::Io)?;
-        #[cfg(unix)]
-        fs::set_permissions(&temp_path, fs::Permissions::from_mode(SNAPSHOT_FILE_MODE))
-            .map_err(SnapshotError::Io)?;
-        file.write_all(contents).map_err(SnapshotError::Io)?;
-        file.sync_all().map_err(SnapshotError::Io)?;
-    }
-
-    if create_new {
-        fs::hard_link(&temp_path, path).map_err(SnapshotError::Io)?;
-        fs::remove_file(&temp_path).map_err(|_| SnapshotError::PublishedButNotDurable {
-            path: path.to_path_buf(),
-        })?;
-        cleanup.disarm();
-    } else {
-        fs::rename(&temp_path, path).map_err(SnapshotError::Io)?;
-        cleanup.disarm();
-    }
-    sync_directory(parent).map_err(|error| {
-        if create_new {
-            SnapshotError::PublishedButNotDurable {
-                path: path.to_path_buf(),
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                options.custom_flags(O_NOFOLLOW).mode(SNAPSHOT_FILE_MODE);
             }
-        } else {
-            error
+
+            let mut file = options.open(&temp_path).map_err(SnapshotError::Io)?;
+            #[cfg(unix)]
+            fs::set_permissions(&temp_path, fs::Permissions::from_mode(SNAPSHOT_FILE_MODE))
+                .map_err(SnapshotError::Io)?;
+            file.write_all(contents).map_err(SnapshotError::Io)?;
+            file.sync_all().map_err(SnapshotError::Io)?;
         }
-    })?;
-    Ok(())
+
+        if create_new {
+            fs::hard_link(&temp_path, path).map_err(SnapshotError::Io)?;
+            fs::remove_file(&temp_path).map_err(|_| SnapshotError::PublishedButNotDurable {
+                path: path.to_path_buf(),
+            })?;
+            cleanup.disarm();
+        } else {
+            fs::rename(&temp_path, path).map_err(SnapshotError::Io)?;
+            cleanup.disarm();
+        }
+        sync_directory(parent).map_err(|error| {
+            if create_new {
+                SnapshotError::PublishedButNotDurable {
+                    path: path.to_path_buf(),
+                }
+            } else {
+                error
+            }
+        })?;
+        Ok(())
+    }
 }
 
 pub(crate) fn open_private_lock_file(path: &Path) -> Result<File, SnapshotError> {
@@ -157,10 +175,12 @@ pub(crate) fn open_private_lock_file(path: &Path) -> Result<File, SnapshotError>
     Ok(file)
 }
 
+#[cfg(not(unix))]
 struct TempPathGuard {
     path: Option<PathBuf>,
 }
 
+#[cfg(not(unix))]
 impl TempPathGuard {
     fn new(path: PathBuf) -> Self {
         Self { path: Some(path) }
@@ -171,6 +191,7 @@ impl TempPathGuard {
     }
 }
 
+#[cfg(not(unix))]
 impl Drop for TempPathGuard {
     fn drop(&mut self) {
         if let Some(path) = self.path.take() {
@@ -193,18 +214,12 @@ pub(crate) fn regular_snapshot_file_exists(path: &Path) -> Result<bool, Snapshot
             path: path.to_path_buf(),
         });
     }
-    require_private_metadata(path, &metadata)?;
+    require_private_path_metadata(path, &metadata)?;
     Ok(true)
 }
 
 pub(crate) fn require_private_regular_file(path: &Path) -> Result<(), SnapshotError> {
-    let metadata = fs::symlink_metadata(path).map_err(SnapshotError::Io)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(SnapshotError::UnsafeSnapshotPath {
-            path: path.to_path_buf(),
-        });
-    }
-    require_private_metadata(path, &metadata)
+    open_regular_file(path).map(drop)
 }
 
 pub(crate) fn read_optional_regular_file_to_string(
@@ -259,42 +274,6 @@ pub(crate) fn read_regular_file_to_string_with_limit(
         )));
     }
     Ok(contents)
-}
-
-pub(crate) fn optional_symlink_metadata(
-    path: &Path,
-) -> Result<Option<fs::Metadata>, SnapshotError> {
-    match path.symlink_metadata() {
-        Ok(metadata) => Ok(Some(metadata)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(SnapshotError::Io(error)),
-    }
-}
-
-pub(crate) fn path_exists_without_following_symlinks(path: &Path) -> Result<bool, SnapshotError> {
-    optional_symlink_metadata(path).map(|metadata| metadata.is_some())
-}
-
-pub(crate) fn require_real_directory(path: &Path) -> Result<(), SnapshotError> {
-    let Some(metadata) = optional_symlink_metadata(path)? else {
-        return Err(SnapshotError::UnsafeSnapshotPath {
-            path: path.to_path_buf(),
-        });
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(SnapshotError::UnsafeSnapshotPath {
-            path: path.to_path_buf(),
-        });
-    }
-    Ok(())
-}
-
-pub(crate) fn is_symlink(path: &Path) -> Result<bool, SnapshotError> {
-    optional_symlink_metadata(path).map(|metadata| {
-        metadata
-            .map(|metadata| metadata.file_type().is_symlink())
-            .unwrap_or(false)
-    })
 }
 
 pub(crate) fn ensure_real_directory(path: &Path) -> Result<(), SnapshotError> {
@@ -447,6 +426,14 @@ fn set_private_directory_mode(path: &Path) -> Result<(), SnapshotError> {
 }
 
 pub(crate) fn sync_directory(path: &Path) -> Result<(), SnapshotError> {
-    let directory = File::open(path).map_err(SnapshotError::Io)?;
-    directory.sync_all().map_err(SnapshotError::Io)
+    #[cfg(unix)]
+    {
+        sync_directory_unix(path)
+    }
+
+    #[cfg(not(unix))]
+    {
+        let directory = File::open(path).map_err(SnapshotError::Io)?;
+        directory.sync_all().map_err(SnapshotError::Io)
+    }
 }
