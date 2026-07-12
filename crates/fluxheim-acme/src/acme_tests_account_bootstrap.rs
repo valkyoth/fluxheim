@@ -1,4 +1,5 @@
 use super::*;
+use crate::acme_account_state::ACCOUNT_BOOTSTRAP_PENDING_FILE;
 
 fn bootstrap_credentials(
     bootstrap: &mut PendingAccountBootstrap,
@@ -209,7 +210,7 @@ fn account_bootstrap_promotion_is_durable_and_cleans_pending_key() {
         .path
         .parent()
         .unwrap()
-        .join(".credentials.bootstrap.pending");
+        .join(ACCOUNT_BOOTSTRAP_PENDING_FILE);
     assert!(!pending_path.exists());
 }
 
@@ -228,7 +229,7 @@ fn account_bootstrap_sanitizes_pending_key_before_unlink() {
         .path
         .parent()
         .unwrap()
-        .join(".credentials.bootstrap.pending");
+        .join(ACCOUNT_BOOTSTRAP_PENDING_FILE);
     let retained_link = storage.join("pending-key-sanitization-witness");
     std::fs::hard_link(&pending_path, &retained_link).unwrap();
 
@@ -260,7 +261,7 @@ fn account_bootstrap_recovers_after_credentials_publish_before_cleanup() {
         .path
         .parent()
         .unwrap()
-        .join(".credentials.bootstrap.pending");
+        .join(ACCOUNT_BOOTSTRAP_PENDING_FILE);
     assert!(!pending_path.exists());
 }
 
@@ -326,7 +327,7 @@ fn pending_account_bootstrap_key_is_owner_only() {
         .path
         .parent()
         .unwrap()
-        .join(".credentials.bootstrap.pending");
+        .join(ACCOUNT_BOOTSTRAP_PENDING_FILE);
     assert_eq!(
         std::fs::metadata(pending_path)
             .unwrap()
@@ -354,7 +355,7 @@ fn account_bootstrap_rejects_symlinked_pending_key() {
         .path
         .parent()
         .unwrap()
-        .join(".credentials.bootstrap.pending");
+        .join(ACCOUNT_BOOTSTRAP_PENDING_FILE);
     std::fs::remove_file(&pending_path).unwrap();
     let outside = storage.with_extension("outside-key");
     std::fs::write(&outside, b"outside").unwrap();
