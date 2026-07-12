@@ -24,6 +24,9 @@ use super::{
 };
 use proptest::prelude::*;
 
+#[cfg(feature = "acme-client")]
+#[path = "acme_tests_lifecycle.rs"]
+mod lifecycle;
 #[path = "acme_tests_plan.rs"]
 mod plan;
 #[path = "acme_tests_renewal.rs"]
@@ -82,6 +85,7 @@ fn eab_file_issuer(key_id: &std::path::Path, hmac_key: &std::path::Path) -> Acme
         directory_url: "https://acme-api.actalis.com/acme/directory".to_owned(),
         terms_of_service_agreed: false,
         terms_of_service_url: None,
+        allow_unadvertised_terms_of_service: false,
         ca_bundle_file: None,
         eab: Some(AcmeExternalAccountBindingConfig {
             key_id_env: None,

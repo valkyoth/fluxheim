@@ -15,6 +15,8 @@ pub struct AcmeIssuerConfig {
     #[serde(default)]
     pub terms_of_service_url: Option<String>,
     #[serde(default)]
+    pub allow_unadvertised_terms_of_service: bool,
+    #[serde(default)]
     pub ca_bundle_file: Option<PathBuf>,
     #[serde(default)]
     pub eab: Option<AcmeExternalAccountBindingConfig>,
@@ -56,6 +58,13 @@ impl AcmeIssuerConfig {
         }
         if let Some(url) = self.terms_of_service_url.as_deref()
             && !valid_https_url(url)
+        {
+            return Err(ConfigError::InvalidAcmeTermsOfServiceAcceptance {
+                issuer: self.name.clone(),
+            });
+        }
+        if self.allow_unadvertised_terms_of_service
+            && (!self.terms_of_service_agreed || self.terms_of_service_url.is_none())
         {
             return Err(ConfigError::InvalidAcmeTermsOfServiceAcceptance {
                 issuer: self.name.clone(),
@@ -128,6 +137,7 @@ pub(crate) fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
             directory_url: "https://acme-v02.api.letsencrypt.org/directory".to_owned(),
             terms_of_service_agreed: false,
             terms_of_service_url: None,
+            allow_unadvertised_terms_of_service: false,
             ca_bundle_file: None,
             eab: None,
         },
@@ -136,6 +146,7 @@ pub(crate) fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
             directory_url: "https://acme-staging-v02.api.letsencrypt.org/directory".to_owned(),
             terms_of_service_agreed: false,
             terms_of_service_url: None,
+            allow_unadvertised_terms_of_service: false,
             ca_bundle_file: None,
             eab: None,
         },
@@ -144,6 +155,7 @@ pub(crate) fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
             directory_url: "https://acme-api.actalis.com/acme/directory".to_owned(),
             terms_of_service_agreed: false,
             terms_of_service_url: None,
+            allow_unadvertised_terms_of_service: false,
             ca_bundle_file: None,
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: Some("FLUXHEIM_ACTALIS_EAB_KID".to_owned()),
@@ -159,6 +171,7 @@ pub(crate) fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
             directory_url: "https://dv.acme-v02.api.pki.goog/directory".to_owned(),
             terms_of_service_agreed: false,
             terms_of_service_url: None,
+            allow_unadvertised_terms_of_service: false,
             ca_bundle_file: None,
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: Some("FLUXHEIM_GTS_EAB_KID".to_owned()),
@@ -174,6 +187,7 @@ pub(crate) fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
             directory_url: "https://dv.acme-v02.test-api.pki.goog/directory".to_owned(),
             terms_of_service_agreed: false,
             terms_of_service_url: None,
+            allow_unadvertised_terms_of_service: false,
             ca_bundle_file: None,
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: Some("FLUXHEIM_GTS_STAGING_EAB_KID".to_owned()),

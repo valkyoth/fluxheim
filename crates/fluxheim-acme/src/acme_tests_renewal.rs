@@ -36,6 +36,22 @@ fn renewal_cleanup_preserves_the_primary_failure() {
     assert!(!error.to_string().contains("cleanup failed"));
 }
 
+#[cfg(feature = "acme-client")]
+#[test]
+fn account_rollover_fails_before_remote_mutation_is_possible() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let error = runtime
+        .block_on(crate::rollover_instant_acme_account_key(
+            &Config::default(),
+            "letsencrypt",
+        ))
+        .unwrap_err();
+
+    assert!(error.to_string().contains("caller-generated key"));
+}
+
 #[test]
 fn execute_renewal_publishes_finalizes_installs_and_cleans_http_01() {
     let storage = fluxheim_common::test_support::unique_temp_path("acme-execute-renewal");

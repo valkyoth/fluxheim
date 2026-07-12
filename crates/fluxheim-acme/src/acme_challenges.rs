@@ -255,6 +255,24 @@ impl AcmeTlsAlpn01ChallengeStore {
         let Some(paths) = self.certificate_paths_for_domain(domain) else {
             return Ok(false);
         };
+        let directory = paths.cert_path.parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "ACME TLS-ALPN-01 challenge path has no parent directory",
+            )
+        })?;
+        match fs::symlink_metadata(directory) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "ACME TLS-ALPN-01 challenge directory is not a real directory",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+        let _mutation_lock = AcmeMutationLock::acquire(directory)?;
 
         let mut removed = false;
         for path in [&paths.cert_path, &paths.key_path] {
@@ -273,10 +291,7 @@ impl AcmeTlsAlpn01ChallengeStore {
             removed = true;
         }
 
-        if let Some(directory) = paths.cert_path.parent() {
-            let _ = fs::remove_dir(directory);
-        }
-        let _ = fs::remove_dir(&self.root);
+        sync_directory_io(directory)?;
 
         Ok(removed)
     }

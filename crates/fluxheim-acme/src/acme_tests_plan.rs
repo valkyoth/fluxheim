@@ -8,6 +8,17 @@ fn skips_targets_when_global_acme_is_disabled() {
 }
 
 #[test]
+fn incident_targets_remain_available_when_renewal_is_disabled() {
+    let mut config = acme_config_with_vhosts(vec![managed_vhost("example")]);
+    config.tls.acme.renewal.enabled = false;
+
+    assert!(renewal_targets(&config).is_empty());
+    let targets = crate::managed_acme_targets(&config);
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].vhost_name, "example");
+}
+
+#[test]
 fn builds_targets_from_enabled_vhosts() {
     let config = acme_config_with_vhosts(vec![VhostConfig {
         name: "example".to_owned(),

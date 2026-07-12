@@ -53,10 +53,16 @@ pub(super) fn run_revoke(
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(fluxheim_acme::revoke_instant_acme_certificate(
+    let outcome = runtime.block_on(fluxheim_acme::revoke_instant_acme_certificate(
         &config, vhost,
     ))?;
-    println!("acme certificate revoke: vhost={vhost} status=ok");
+    request_certificate_reload(&config)?;
+    println!(
+        "acme certificate revoke: vhost={vhost} status=quarantined replacement_required={} cert={} key={}",
+        outcome.replacement_required,
+        outcome.quarantined_certificate.display(),
+        outcome.quarantined_private_key.display()
+    );
     Ok(())
 }
 

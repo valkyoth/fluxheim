@@ -72,6 +72,43 @@ fn account_credentials_removal_is_idempotent() {
     );
 }
 
+#[cfg(feature = "acme-client")]
+#[test]
+fn account_deactivation_quarantine_is_fail_closed_and_recoverable() {
+    let storage = fluxheim_common::test_support::unique_temp_path("acme-account-deactivation");
+    store_account_credentials(&storage, "letsencrypt", &test_account_credentials()).unwrap();
+
+    let transaction = crate::begin_account_deactivation(&storage, "letsencrypt").unwrap();
+    transaction.abandon();
+    let pending = match load_account_credentials(&storage, "letsencrypt") {
+        Ok(_) => panic!("expected pending deactivation to fail closed"),
+        Err(error) => error,
+    };
+    assert!(pending.to_string().contains("ambiguous pending state"));
+    let active = account_credentials_path(&storage, "letsencrypt").path;
+    std::fs::rename(
+        active
+            .parent()
+            .unwrap()
+            .join(".credentials.deactivation.pending"),
+        &active,
+    )
+    .unwrap();
+    assert!(
+        load_account_credentials(&storage, "letsencrypt")
+            .unwrap()
+            .is_some()
+    );
+
+    let transaction = crate::begin_account_deactivation(&storage, "letsencrypt").unwrap();
+    transaction.complete().unwrap();
+    assert!(
+        load_account_credentials(&storage, "letsencrypt")
+            .unwrap()
+            .is_none()
+    );
+}
+
 #[test]
 fn account_credentials_store_rejects_invalid_json_and_oversized_files() {
     let storage = fluxheim_common::test_support::unique_temp_path("acme-account-invalid");
@@ -255,6 +292,28 @@ fn concurrent_certificate_installs_publish_one_complete_pair() {
         &["example.test".to_owned()],
     )
     .unwrap();
+}
+
+#[cfg(feature = "acme-client")]
+#[test]
+fn revoked_certificate_quarantine_removes_the_active_pair() {
+    let storage = fluxheim_common::test_support::unique_temp_path("acme-revoke-quarantine");
+    let paths = install_managed_certificate(
+        &storage,
+        "example",
+        test_certificate_pem(),
+        test_private_key_pem(),
+        &["example.test".to_owned()],
+    )
+    .unwrap();
+
+    let quarantine = crate::begin_managed_certificate_quarantine(&paths).unwrap();
+    let (certificate, private_key) = quarantine.complete();
+
+    assert!(!paths.cert_path.exists());
+    assert!(!paths.key_path.exists());
+    assert_eq!(std::fs::read(certificate).unwrap(), test_certificate_pem());
+    assert_eq!(std::fs::read(private_key).unwrap(), test_private_key_pem());
 }
 
 #[cfg(unix)]

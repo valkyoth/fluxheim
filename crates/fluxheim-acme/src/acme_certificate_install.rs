@@ -8,7 +8,7 @@ pub(crate) mod fs_ops;
 mod recovery;
 
 use backup::{backup_existing_file, cleanup_backup};
-#[cfg(not(unix))]
+#[cfg(any(not(unix), feature = "acme-client"))]
 use fs_ops::CertificateDirectoryFd;
 pub(crate) use fs_ops::{
     ManagedCertificateOwner, managed_certificate_owner, reject_existing_symlink_in_path,
@@ -17,6 +17,8 @@ use fs_ops::{
     certificate_directory, ensure_safe_destination, ensure_safe_directory,
     open_safe_certificate_directory, rename_certificate_file, write_new_file,
 };
+#[cfg(feature = "acme-client")]
+use fs_ops::{ensure_certificate_slot_absent, ensure_existing_regular_file, sync_directory};
 use recovery::{
     CertificateInstallPhase, begin_certificate_install, complete_certificate_install,
     recover_interrupted_install, update_certificate_install_phase,
@@ -57,6 +59,150 @@ pub fn recover_managed_certificate_transaction(
     #[cfg(not(unix))]
     let directory_fd: Option<&CertificateDirectoryFd> = None;
     recover_interrupted_install(&directory, &paths, directory_fd)
+}
+
+#[cfg(feature = "acme-client")]
+pub(crate) struct ManagedCertificateQuarantine {
+    paths: AcmeCertificatePaths,
+    directory: PathBuf,
+    quarantined_certificate: PathBuf,
+    quarantined_private_key: PathBuf,
+    _mutation_lock: AcmeMutationLock,
+    #[cfg(unix)]
+    directory_fd: CertificateDirectoryFd,
+    active: bool,
+}
+
+#[cfg(feature = "acme-client")]
+pub(crate) fn begin_managed_certificate_quarantine(
+    paths: &AcmeCertificatePaths,
+) -> Result<ManagedCertificateQuarantine, AcmeCertificateInstallError> {
+    let directory = certificate_directory(paths)?;
+    let mutation_lock =
+        AcmeMutationLock::acquire(&directory).map_err(|error| AcmeCertificateInstallError::Io {
+            path: directory.join(".fluxheim-acme.lock"),
+            error,
+        })?;
+    #[cfg(unix)]
+    let directory_fd = open_safe_certificate_directory(&directory)?;
+    #[cfg(unix)]
+    let directory_fd_ref = Some(&directory_fd);
+    #[cfg(not(unix))]
+    let directory_fd_ref: Option<&CertificateDirectoryFd> = None;
+    ensure_existing_regular_file(&directory, &paths.cert_path, directory_fd_ref)?;
+    ensure_existing_regular_file(&directory, &paths.key_path, directory_fd_ref)?;
+    let transaction = unique_transaction_id().map_err(|error| AcmeCertificateInstallError::Io {
+        path: directory.clone(),
+        error,
+    })?;
+    let quarantined_certificate = directory.join(format!(".revoked-{transaction}-fullchain.pem"));
+    let quarantined_private_key = directory.join(format!(".revoked-{transaction}-privkey.pem"));
+    rename_certificate_file(
+        &directory,
+        &paths.cert_path,
+        &quarantined_certificate,
+        directory_fd_ref,
+    )?;
+    if let Err(error) = rename_certificate_file(
+        &directory,
+        &paths.key_path,
+        &quarantined_private_key,
+        directory_fd_ref,
+    ) {
+        if let Err(rollback) = rename_certificate_file(
+            &directory,
+            &quarantined_certificate,
+            &paths.cert_path,
+            directory_fd_ref,
+        ) {
+            log::error!(
+                target: "fluxheim::security",
+                "ACME revocation quarantine rollback failed at {}: {rollback}",
+                paths.cert_path.display()
+            );
+        }
+        return Err(error);
+    }
+    sync_directory(&directory, directory_fd_ref)?;
+    Ok(ManagedCertificateQuarantine {
+        paths: paths.clone(),
+        directory,
+        quarantined_certificate,
+        quarantined_private_key,
+        _mutation_lock: mutation_lock,
+        #[cfg(unix)]
+        directory_fd,
+        active: true,
+    })
+}
+
+#[cfg(feature = "acme-client")]
+impl ManagedCertificateQuarantine {
+    pub(crate) fn complete(mut self) -> (PathBuf, PathBuf) {
+        self.active = false;
+        (
+            self.quarantined_certificate.clone(),
+            self.quarantined_private_key.clone(),
+        )
+    }
+
+    pub(crate) fn rollback(mut self) -> Result<(), AcmeCertificateInstallError> {
+        self.restore()?;
+        self.active = false;
+        Ok(())
+    }
+
+    fn restore(&mut self) -> Result<(), AcmeCertificateInstallError> {
+        let directory_fd = self.directory_fd();
+        ensure_certificate_slot_absent(&self.directory, &self.paths.cert_path, directory_fd)?;
+        ensure_certificate_slot_absent(&self.directory, &self.paths.key_path, directory_fd)?;
+        rename_certificate_file(
+            &self.directory,
+            &self.quarantined_certificate,
+            &self.paths.cert_path,
+            directory_fd,
+        )?;
+        if let Err(error) = rename_certificate_file(
+            &self.directory,
+            &self.quarantined_private_key,
+            &self.paths.key_path,
+            directory_fd,
+        ) {
+            let _ = rename_certificate_file(
+                &self.directory,
+                &self.paths.cert_path,
+                &self.quarantined_certificate,
+                directory_fd,
+            );
+            return Err(error);
+        }
+        sync_directory(&self.directory, directory_fd)
+    }
+
+    #[cfg(unix)]
+    fn directory_fd(&self) -> Option<&CertificateDirectoryFd> {
+        Some(&self.directory_fd)
+    }
+
+    #[cfg(not(unix))]
+    fn directory_fd(&self) -> Option<&CertificateDirectoryFd> {
+        None
+    }
+}
+
+#[cfg(feature = "acme-client")]
+impl Drop for ManagedCertificateQuarantine {
+    fn drop(&mut self) {
+        if self.active
+            && let Err(error) = self.restore()
+        {
+            log::error!(
+                target: "fluxheim::security",
+                "failed to restore ACME certificate quarantine at {}: {error}",
+                self.directory.display()
+            );
+        }
+    }
 }
 
 pub(super) fn install_certificate_files(

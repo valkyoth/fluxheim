@@ -202,16 +202,82 @@ pub(crate) async fn probe_acme_directory(
                 issuer: issuer.name.clone(),
                 message: error.to_string(),
             })?;
-    if !response.parts.status.is_success() {
-        return Err(AcmeInstantClientError::Account {
-            issuer: issuer.name.clone(),
-            message: format!(
-                "ACME directory returned HTTP status {}",
-                response.parts.status
-            ),
-        });
+    let status = response.parts.status;
+    let mut body = response.body;
+    let bytes = body
+        .into_bytes()
+        .await
+        .map_err(|error| issuer_probe_error(issuer, error.to_string()))?;
+    validate_acme_directory_response(issuer, status, &bytes)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryProbe {
+    new_nonce: String,
+    new_account: String,
+    new_order: String,
+    #[serde(default)]
+    meta: DirectoryProbeMeta,
+}
+
+#[derive(Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryProbeMeta {
+    terms_of_service: Option<String>,
+}
+
+fn validate_acme_directory_response(
+    issuer: &fluxheim_config::AcmeIssuerConfig,
+    status: http::StatusCode,
+    bytes: &[u8],
+) -> Result<(), AcmeInstantClientError> {
+    if !status.is_success() {
+        return Err(issuer_probe_error(
+            issuer,
+            format!("ACME directory returned HTTP status {status}"),
+        ));
     }
-    Ok(())
+    let directory: DirectoryProbe = serde_json::from_slice(bytes)
+        .map_err(|_| issuer_probe_error(issuer, "response is not a valid ACME directory"))?;
+    for (name, endpoint) in [
+        ("newNonce", directory.new_nonce.as_str()),
+        ("newAccount", directory.new_account.as_str()),
+        ("newOrder", directory.new_order.as_str()),
+    ] {
+        if !valid_acme_endpoint(endpoint) {
+            return Err(issuer_probe_error(
+                issuer,
+                format!("ACME directory {name} endpoint is not a valid HTTPS URL"),
+            ));
+        }
+    }
+    match (
+        directory.meta.terms_of_service.as_deref(),
+        issuer.terms_of_service_url.as_deref(),
+    ) {
+        (Some(advertised), Some(accepted)) if advertised == accepted => Ok(()),
+        (None, Some(_)) if issuer.allow_unadvertised_terms_of_service => Ok(()),
+        _ => Err(AcmeInstantClientError::TermsOfServiceNotAccepted {
+            issuer: issuer.name.clone(),
+        }),
+    }
+}
+
+fn valid_acme_endpoint(endpoint: &str) -> bool {
+    endpoint.starts_with("https://")
+        && endpoint.len() > "https://".len()
+        && !endpoint.chars().any(char::is_whitespace)
+}
+
+fn issuer_probe_error(
+    issuer: &fluxheim_config::AcmeIssuerConfig,
+    message: impl Into<String>,
+) -> AcmeInstantClientError {
+    AcmeInstantClientError::Account {
+        issuer: issuer.name.clone(),
+        message: message.into(),
+    }
 }
 
 fn load_ca_bundle(path: &std::path::Path) -> Result<rustls::RootCertStore, BoundedAcmeHttpError> {
@@ -223,8 +289,9 @@ fn load_ca_bundle(path: &std::path::Path) -> Result<rustls::RootCertStore, Bound
     let mut limited = BufReader::new(file.take(MAX_ACME_CA_BUNDLE_BYTES.saturating_add(1)));
     let mut roots = rustls::RootCertStore::empty();
     let mut count = 0_usize;
-    for certificate in rustls_pemfile::certs(&mut limited) {
-        let certificate = certificate.map_err(BoundedAcmeHttpError::TrustStore)?;
+    use rustls::pki_types::pem::PemObject as _;
+    for certificate in rustls::pki_types::CertificateDer::pem_reader_iter(&mut limited) {
+        let certificate = certificate.map_err(|_| BoundedAcmeHttpError::InvalidTrustBundle)?;
         count = count.saturating_add(1);
         if count > MAX_ACME_CA_CERTIFICATES || roots.add(certificate).is_err() {
             return Err(BoundedAcmeHttpError::InvalidTrustBundle);
@@ -249,7 +316,10 @@ fn open_ca_bundle_no_follow(path: &std::path::Path) -> std::io::Result<std::fs::
 
 #[cfg(test)]
 mod tests {
-    use super::{BoundedAcmeHttpClient, MAX_ACME_RESPONSE_BYTES, collect_capped_body};
+    use super::{
+        BoundedAcmeHttpClient, MAX_ACME_RESPONSE_BYTES, collect_capped_body,
+        validate_acme_directory_response,
+    };
     use bytes::Bytes;
     use http_body_util::Full;
 
@@ -294,10 +364,63 @@ mod tests {
             directory_url: "https://acme.example.test/directory".to_owned(),
             terms_of_service_agreed: true,
             terms_of_service_url: Some("https://acme.example.test/terms/v1".to_owned()),
+            allow_unadvertised_terms_of_service: false,
             ca_bundle_file: Some(link),
             eab: None,
         };
 
         assert!(BoundedAcmeHttpClient::try_new(&issuer).is_err());
+    }
+
+    #[test]
+    fn directory_probe_requires_acme_endpoints_and_exact_terms() {
+        let issuer = fluxheim_config::AcmeIssuerConfig {
+            name: "test".to_owned(),
+            directory_url: "https://acme.example.test/directory".to_owned(),
+            terms_of_service_agreed: true,
+            terms_of_service_url: Some("https://acme.example.test/terms/v2".to_owned()),
+            allow_unadvertised_terms_of_service: false,
+            ca_bundle_file: None,
+            eab: None,
+        };
+        let valid = br#"{
+            "newNonce":"https://acme.example.test/new-nonce",
+            "newAccount":"https://acme.example.test/new-account",
+            "newOrder":"https://acme.example.test/new-order",
+            "meta":{"termsOfService":"https://acme.example.test/terms/v2"}
+        }"#;
+        validate_acme_directory_response(&issuer, http::StatusCode::OK, valid).unwrap();
+
+        let non_acme = br#"{"status":"ok"}"#;
+        assert!(validate_acme_directory_response(&issuer, http::StatusCode::OK, non_acme).is_err());
+        let wrong_terms = valid
+            .windows("terms/v2".len())
+            .position(|window| window == b"terms/v2")
+            .map(|position| {
+                let mut changed = valid.to_vec();
+                changed[position + "terms/".len()] = b'3';
+                changed
+            })
+            .unwrap();
+        assert!(
+            validate_acme_directory_response(&issuer, http::StatusCode::OK, &wrong_terms).is_err()
+        );
+
+        let missing_terms = br#"{
+            "newNonce":"https://acme.example.test/new-nonce",
+            "newAccount":"https://acme.example.test/new-account",
+            "newOrder":"https://acme.example.test/new-order"
+        }"#;
+        assert!(
+            validate_acme_directory_response(&issuer, http::StatusCode::OK, missing_terms).is_err()
+        );
+        let mut private_issuer = issuer;
+        private_issuer.allow_unadvertised_terms_of_service = true;
+        validate_acme_directory_response(&private_issuer, http::StatusCode::OK, missing_terms)
+            .unwrap();
+        assert!(
+            validate_acme_directory_response(&private_issuer, http::StatusCode::OK, &wrong_terms,)
+                .is_err()
+        );
     }
 }

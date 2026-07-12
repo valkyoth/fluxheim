@@ -73,6 +73,14 @@ pub struct AcmeAccountCredentialsPath {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AcmeRevocationOutcome {
+    pub certificate: AcmeCertificatePaths,
+    pub quarantined_certificate: PathBuf,
+    pub quarantined_private_key: PathBuf,
+    pub replacement_required: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CertificateObservation {
     pub vhost_name: String,
     pub not_after: SystemTime,
@@ -212,6 +220,9 @@ impl fmt::Debug for AcmeExternalAccountBindingSecrets {
 
 #[path = "acme_account_store.rs"]
 mod acme_account_store;
+#[cfg(feature = "acme-client")]
+#[path = "acme_ari.rs"]
+mod acme_ari;
 #[path = "acme_certificate_install.rs"]
 mod acme_certificate_install;
 #[path = "acme_certificate_paths.rs"]
@@ -239,15 +250,21 @@ mod acme_names;
 mod acme_pem;
 #[path = "acme_queue.rs"]
 mod acme_queue;
+#[path = "acme_targets.rs"]
+mod acme_targets;
 #[cfg(feature = "acme-client")]
 #[path = "acme_tls_alpn.rs"]
 mod acme_tls_alpn;
 #[path = "acme_transaction.rs"]
 mod acme_transaction;
+#[cfg(feature = "acme-client")]
+use acme_account_store::begin_account_deactivation;
 pub use acme_account_store::{
     account_credentials_path, load_account_credentials, remove_account_credentials,
     store_account_credentials,
 };
+#[cfg(feature = "acme-client")]
+use acme_certificate_install::begin_managed_certificate_quarantine;
 use acme_certificate_install::{
     install_certificate_files, managed_certificate_owner, reject_existing_symlink_in_path,
 };
@@ -297,58 +314,11 @@ use acme_names::{
 };
 use acme_pem::validate_issued_material;
 pub use acme_queue::{next_retry_at, plan_renewal_queue, toml_offset_datetime_to_system_time};
+pub use acme_targets::{managed_acme_targets, renewal_targets};
 #[cfg(feature = "acme-client")]
 use acme_tls_alpn::{cleanup_tls_alpn_01_challenges, tls_alpn_01_certificate};
 pub use acme_transaction::{AcmeCertificateReadLock, lock_managed_certificate_pair};
 use acme_transaction::{AcmeMutationLock, unique_transaction_id};
-
-pub fn renewal_targets(config: &Config) -> Vec<AcmeRenewalTarget> {
-    if !config.tls.enabled || !config.tls.acme.enabled || !config.tls.acme.renewal.enabled {
-        return Vec::new();
-    }
-
-    let Some(storage) = &config.tls.acme.storage else {
-        return Vec::new();
-    };
-
-    config
-        .vhosts
-        .iter()
-        .filter(|vhost| vhost.tls.enabled && vhost.tls.acme.enabled)
-        .map(|vhost| {
-            let issuer = vhost
-                .tls
-                .acme
-                .issuer
-                .clone()
-                .unwrap_or_else(|| config.tls.acme.default_issuer.clone());
-            let domains = if vhost.tls.acme.domains.is_empty() {
-                vhost
-                    .hosts
-                    .iter()
-                    .filter(|host| !host.starts_with("*."))
-                    .map(|host| normalized_domain(host))
-                    .collect()
-            } else {
-                vhost
-                    .tls
-                    .acme
-                    .domains
-                    .iter()
-                    .map(|domain| normalized_domain(domain))
-                    .collect()
-            };
-
-            AcmeRenewalTarget {
-                vhost_name: vhost.name.clone(),
-                issuer,
-                domains,
-                challenge: config.tls.acme.challenge,
-                certificate: managed_certificate_paths(storage, &vhost.name),
-            }
-        })
-        .collect()
-}
 
 pub fn execute_renewal<Client: AcmeIssuerClient>(
     config: &Config,

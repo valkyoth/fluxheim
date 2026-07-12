@@ -13,7 +13,21 @@ behavior when the change improves security or project direction.
 
 - Add bounded ACME HTTP transport, RFC 9773 ARI scheduling, explicit
   terms-of-service records, per-issuer CA bundles, `fluxheim-acme doctor`, and
-  confirmation-gated account rollover/deactivation and certificate revocation.
+  confirmation-gated account deactivation and certificate revocation. Account
+  rollover now fails before remote mutation until the client supports a
+  caller-generated, pre-journaled replacement key.
+- Serialize TLS-ALPN challenge install and cleanup under the ACME mutation lock,
+  with race coverage proving cleanup cannot leave a partial certificate pair.
+- Bound ARI planning by lookup concurrency, per-target timeout, and total budget;
+  execute due work progressively and cache issuer guidance through Retry-After.
+- Make account deactivation and certificate revocation transactional. Pending
+  account state fails closed, while revocation quarantines the active pair before
+  the remote operation, restores it on failure, and requests live reload after
+  success even when scheduled renewal is disabled.
+- Validate online ACME directories structurally and require exact advertised ToS
+  agreement, with an explicit private-directory override only for omitted terms.
+- Remove the unmaintained direct `rustls-pemfile` dependency in favor of the
+  maintained `rustls-pki-types` PEM parser already provided through rustls.
 
 - Add the checked-in F5 iRules-style route access policy and configuration
   example, with real listener coverage for normal origin traffic, pre-origin

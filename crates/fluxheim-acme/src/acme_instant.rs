@@ -317,119 +317,15 @@ pub async fn renew_due_instant_acme_targets(
 ) -> Result<AcmeRenewalRun, AcmeRenewalError> {
     let observations = observe_configured_certificates(config);
     let queue = plan_renewal_queue(config, &observations, now);
-    let mut due_queue = Vec::new();
-    for item in queue {
-        if ari_allows_renewal_now(config, &item, now).await {
-            due_queue.push(item);
-        }
-    }
-    execute_instant_acme_queue(config, &due_queue).await
+    execute_due_instant_acme_queue(config, &queue, now).await
 }
 
-#[cfg(feature = "acme-client")]
-async fn ari_allows_renewal_now(config: &Config, item: &AcmeRenewalItem, now: SystemTime) -> bool {
-    let fallback = item.due_now;
-    let Some(storage) = config.tls.acme.storage.as_deref() else {
-        return fallback;
-    };
-    let Ok(Some(credentials)) = load_account_credentials(storage, &item.target.issuer) else {
-        return fallback;
-    };
-    let Some(issuer) = config
-        .tls
-        .acme
-        .issuers
-        .iter()
-        .find(|issuer| issuer.name == item.target.issuer)
-    else {
-        return fallback;
-    };
-    let Ok(Some(certificate_pem)) =
-        read_bounded_certificate_file(&item.target.certificate.cert_path)
-    else {
-        return fallback;
-    };
-    let Some(Ok(leaf)) = rustls_pemfile::certs(&mut certificate_pem.as_slice()).next() else {
-        return fallback;
-    };
-    let Ok(identifier) = instant_acme::CertificateIdentifier::try_from(&leaf) else {
-        return fallback;
-    };
-    let Ok(builder) = bounded_acme_account_builder(issuer) else {
-        return fallback;
-    };
-    let Ok(Ok(account)) = tokio::time::timeout(
-        ACME_ACCOUNT_OPERATION_TIMEOUT,
-        builder.from_credentials(credentials),
-    )
-    .await
-    else {
-        return fallback;
-    };
-    let renewal_info = tokio::time::timeout(
-        ACME_ACCOUNT_OPERATION_TIMEOUT,
-        account.renewal_info(&identifier),
-    )
-    .await;
-    let info = match renewal_info {
-        Ok(Ok((info, _retry_after))) => info,
-        Ok(Err(instant_acme::Error::Unsupported(_))) => return fallback,
-        Ok(Err(error)) => {
-            log::warn!(
-                target: "fluxheim::acme",
-                "ACME ARI lookup failed for vhost {}: {error}; using configured renewal window",
-                item.target.vhost_name
-            );
-            return fallback;
-        }
-        Err(_) => {
-            log::warn!(
-                target: "fluxheim::acme",
-                "ACME ARI lookup timed out for vhost {}; using configured renewal window",
-                item.target.vhost_name
-            );
-            return fallback;
-        }
-    };
-    let start = info.suggested_window.start.unix_timestamp();
-    let end = info.suggested_window.end.unix_timestamp();
-    if end <= start {
-        return fallback;
-    }
-    let scheduled = deterministic_ari_renewal_time(leaf.as_ref(), start, end);
-    let now = now
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    now >= scheduled.max(0) as u64
-}
-
-#[cfg(feature = "acme-client")]
-fn deterministic_ari_renewal_time(certificate_der: &[u8], start: i64, end: i64) -> i64 {
-    if end <= start {
-        return start;
-    }
-    use sha2::Digest as _;
-    let digest = sha2::Sha256::digest(certificate_der);
-    let mut seed = [0_u8; 8];
-    seed.copy_from_slice(&digest[..8]);
-    let offset = u64::from_be_bytes(seed) % (end - start) as u64;
-    start.saturating_add(offset as i64)
-}
-
-#[cfg(all(feature = "acme-client", test))]
-mod ari_tests {
-    #[test]
-    fn ari_schedule_is_stable_and_inside_the_suggested_window() {
-        let first = super::deterministic_ari_renewal_time(b"certificate", 100, 200);
-        let second = super::deterministic_ari_renewal_time(b"certificate", 100, 200);
-        assert_eq!(first, second);
-        assert!((100..200).contains(&first));
-        assert_eq!(
-            super::deterministic_ari_renewal_time(b"certificate", 50, 50),
-            50
-        );
-    }
+async fn execute_due_instant_acme_queue(
+    config: &Config,
+    queue: &[AcmeRenewalItem],
+    now: SystemTime,
+) -> Result<AcmeRenewalRun, AcmeRenewalError> {
+    acme_ari::execute_due_queue(config, queue, now).await
 }
 
 #[cfg(feature = "acme-client")]
@@ -450,7 +346,7 @@ pub async fn renew_selected_instant_acme_targets(
         .into_iter()
         .filter(|item| item.target.vhost_name == vhost_name)
     {
-        if force_renew || ari_allows_renewal_now(config, &item, now).await {
+        if force_renew || acme_ari::allows_renewal_now_bounded(config, &item, now).await {
             selected_queue.push(item);
         }
     }
@@ -462,24 +358,30 @@ async fn execute_instant_acme_queue(
     config: &Config,
     queue: &[AcmeRenewalItem],
 ) -> Result<AcmeRenewalRun, AcmeRenewalError> {
-    let mut renewed = Vec::with_capacity(queue.len());
-    let mut failed = Vec::new();
-
+    let mut run = AcmeRenewalRun {
+        attempted: 0,
+        renewed: Vec::with_capacity(queue.len()),
+        failed: Vec::new(),
+    };
     for item in queue {
-        match execute_instant_acme_renewal(config, item).await {
-            Ok(outcome) => renewed.push(outcome),
-            Err(error) => failed.push(AcmeRenewalFailure {
-                vhost_name: item.target.vhost_name.clone(),
-                issuer: item.target.issuer.clone(),
-                domains: item.target.domains.clone(),
-                error: error.to_string(),
-            }),
-        }
+        execute_instant_acme_item(config, item, &mut run).await;
     }
+    Ok(run)
+}
 
-    Ok(AcmeRenewalRun {
-        attempted: queue.len(),
-        renewed,
-        failed,
-    })
+pub(super) async fn execute_instant_acme_item(
+    config: &Config,
+    item: &AcmeRenewalItem,
+    run: &mut AcmeRenewalRun,
+) {
+    run.attempted = run.attempted.saturating_add(1);
+    match execute_instant_acme_renewal(config, item).await {
+        Ok(outcome) => run.renewed.push(outcome),
+        Err(error) => run.failed.push(AcmeRenewalFailure {
+            vhost_name: item.target.vhost_name.clone(),
+            issuer: item.target.issuer.clone(),
+            domains: item.target.domains.clone(),
+            error: error.to_string(),
+        }),
+    }
 }

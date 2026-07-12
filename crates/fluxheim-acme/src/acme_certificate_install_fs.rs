@@ -192,6 +192,76 @@ pub(super) fn ensure_safe_destination(path: &Path) -> Result<(), AcmeCertificate
     }
 }
 
+#[cfg(feature = "acme-client")]
+pub(super) fn ensure_existing_regular_file(
+    directory: &Path,
+    path: &Path,
+    directory_fd: Option<&CertificateDirectoryFd>,
+) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(unix)]
+    if let Some(directory_fd) = directory_fd {
+        let name = certificate_file_name_in_directory(directory, path)?;
+        return match rustix::fs::statat(directory_fd, name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(stat) if rustix::fs::FileType::from_raw_mode(stat.st_mode).is_file() => Ok(()),
+            Ok(_) => Err(AcmeCertificateInstallError::UnsafePath {
+                path: path.to_path_buf(),
+                message: "managed certificate is not a regular file".to_owned(),
+            }),
+            Err(error) => Err(AcmeCertificateInstallError::Io {
+                path: path.to_path_buf(),
+                error: error.into(),
+            }),
+        };
+    }
+
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(()),
+        Ok(_) => Err(AcmeCertificateInstallError::UnsafePath {
+            path: path.to_path_buf(),
+            message: "managed certificate is not a regular file".to_owned(),
+        }),
+        Err(error) => Err(AcmeCertificateInstallError::Io {
+            path: path.to_path_buf(),
+            error,
+        }),
+    }
+}
+
+#[cfg(feature = "acme-client")]
+pub(super) fn ensure_certificate_slot_absent(
+    directory: &Path,
+    path: &Path,
+    directory_fd: Option<&CertificateDirectoryFd>,
+) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(unix)]
+    if let Some(directory_fd) = directory_fd {
+        let name = certificate_file_name_in_directory(directory, path)?;
+        return match rustix::fs::statat(directory_fd, name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW) {
+            Err(error) if error == rustix::io::Errno::NOENT => Ok(()),
+            Ok(_) => Err(AcmeCertificateInstallError::UnsafePath {
+                path: path.to_path_buf(),
+                message: "managed certificate destination unexpectedly exists".to_owned(),
+            }),
+            Err(error) => Err(AcmeCertificateInstallError::Io {
+                path: path.to_path_buf(),
+                error: error.into(),
+            }),
+        };
+    }
+
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => Err(AcmeCertificateInstallError::UnsafePath {
+            path: path.to_path_buf(),
+            message: "managed certificate destination unexpectedly exists".to_owned(),
+        }),
+        Err(error) => Err(AcmeCertificateInstallError::Io {
+            path: path.to_path_buf(),
+            error,
+        }),
+    }
+}
+
 pub(crate) fn reject_existing_symlink_in_path(
     path: &Path,
 ) -> Result<(), AcmeCertificateInstallError> {

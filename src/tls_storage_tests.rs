@@ -226,6 +226,7 @@ fn validates_acme_eab_secret_files() {
         directory_url: "https://acme-api.actalis.com/acme/directory".to_owned(),
         terms_of_service_agreed: false,
         terms_of_service_url: None,
+        allow_unadvertised_terms_of_service: false,
         ca_bundle_file: None,
         eab: Some(AcmeExternalAccountBindingConfig {
             key_id_env: None,
@@ -271,6 +272,7 @@ fn rejects_acme_eab_secret_below_world_writable_parent() {
         directory_url: "https://acme-api.actalis.com/acme/directory".to_owned(),
         terms_of_service_agreed: false,
         terms_of_service_url: None,
+        allow_unadvertised_terms_of_service: false,
         ca_bundle_file: None,
         eab: Some(AcmeExternalAccountBindingConfig {
             key_id_env: None,

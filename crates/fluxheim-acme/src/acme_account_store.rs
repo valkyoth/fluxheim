@@ -14,6 +14,15 @@ use super::{
 
 const ACME_ACCOUNT_DIR: &str = "accounts";
 const ACME_ACCOUNT_CREDENTIALS_FILE: &str = "credentials.json";
+const ACME_ACCOUNT_DEACTIVATION_FILE: &str = ".credentials.deactivation.pending";
+
+#[cfg(feature = "acme-client")]
+pub(crate) struct AccountDeactivationTransaction {
+    directory: PathBuf,
+    active: PathBuf,
+    pending: PathBuf,
+    _lock: AcmeMutationLock,
+}
 
 pub fn account_credentials_path(storage: &Path, issuer_name: &str) -> AcmeAccountCredentialsPath {
     AcmeAccountCredentialsPath {
@@ -29,6 +38,36 @@ pub fn load_account_credentials(
     issuer_name: &str,
 ) -> Result<Option<instant_acme::AccountCredentials>, AcmeAccountStoreError> {
     let path = account_credentials_path(storage, issuer_name).path;
+    let directory = path
+        .parent()
+        .ok_or_else(|| AcmeAccountStoreError::UnsafePath {
+            path: path.clone(),
+            message: "credentials path has no parent directory".to_owned(),
+        })?;
+    match fs::symlink_metadata(directory) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(AcmeAccountStoreError::UnsafePath {
+                path: directory.to_path_buf(),
+                message: "account directory is not a real directory".to_owned(),
+            });
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(account_store_io_error(directory, error)),
+    }
+    let _lock = AcmeMutationLock::acquire(directory)
+        .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?;
+    let pending = directory.join(ACME_ACCOUNT_DEACTIVATION_FILE);
+    if pending
+        .try_exists()
+        .map_err(|error| account_store_io_error(&pending, error))?
+    {
+        return Err(AcmeAccountStoreError::UnsafePath {
+            path: pending,
+            message: "account deactivation is in an ambiguous pending state; operator recovery is required"
+                .to_owned(),
+        });
+    }
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -78,6 +117,61 @@ pub fn load_account_credentials(
             path,
             message: error.to_string(),
         })
+}
+
+#[cfg(feature = "acme-client")]
+pub(crate) fn begin_account_deactivation(
+    storage: &Path,
+    issuer_name: &str,
+) -> Result<AccountDeactivationTransaction, AcmeAccountStoreError> {
+    let active = account_credentials_path(storage, issuer_name).path;
+    let directory = active
+        .parent()
+        .ok_or_else(|| AcmeAccountStoreError::UnsafePath {
+            path: active.clone(),
+            message: "credentials path has no parent directory".to_owned(),
+        })?;
+    ensure_safe_account_directory(directory)?;
+    let lock = AcmeMutationLock::acquire(directory)
+        .map_err(|error| account_store_io_error(&directory.join(".fluxheim-acme.lock"), error))?;
+    ensure_safe_account_destination(&active)?;
+    let pending = directory.join(ACME_ACCOUNT_DEACTIVATION_FILE);
+    match fs::symlink_metadata(&pending) {
+        Ok(_) => {
+            return Err(AcmeAccountStoreError::UnsafePath {
+                path: pending,
+                message: "account deactivation transaction already exists".to_owned(),
+            });
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(account_store_io_error(&pending, error)),
+    }
+    fs::rename(&active, &pending).map_err(|error| account_store_io_error(&active, error))?;
+    sync_account_directory(directory)?;
+    Ok(AccountDeactivationTransaction {
+        directory: directory.to_path_buf(),
+        active,
+        pending,
+        _lock: lock,
+    })
+}
+
+#[cfg(feature = "acme-client")]
+impl AccountDeactivationTransaction {
+    #[cfg(test)]
+    pub(crate) fn abandon(self) {}
+
+    pub(crate) fn rollback(self) -> Result<(), AcmeAccountStoreError> {
+        fs::rename(&self.pending, &self.active)
+            .map_err(|error| account_store_io_error(&self.active, error))?;
+        sync_account_directory(&self.directory)
+    }
+
+    pub(crate) fn complete(self) -> Result<(), AcmeAccountStoreError> {
+        fs::remove_file(&self.pending)
+            .map_err(|error| account_store_io_error(&self.pending, error))?;
+        sync_account_directory(&self.directory)
+    }
 }
 
 pub fn store_account_credentials(

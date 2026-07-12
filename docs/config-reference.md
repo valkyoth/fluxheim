@@ -2990,9 +2990,15 @@ Built-in issuer names include `letsencrypt`, `letsencrypt-staging`,
 The custom `[[tls.acme.issuers]]` list is capped at 128 entries.
 Every issuer used to create a new account must set
 `terms_of_service_agreed = true` together with the exact HTTPS
-`terms_of_service_url` reviewed by the operator. Existing account credentials
-can still be loaded without silently accepting changed terms. Optional
-`ca_bundle_file` replaces platform roots for that issuer with a bounded,
+`terms_of_service_url` reviewed by the operator. The bounded online directory
+probe requires HTTPS `newNonce`, `newAccount`, and `newOrder` endpoints and an
+exact match with the directory's advertised `meta.termsOfService`. Private
+directories that omit this metadata may set
+`allow_unadvertised_terms_of_service = true`; the default is `false`, a
+directory-advertised mismatch is always rejected, and the override itself
+requires explicit acceptance plus an HTTPS terms URL. Existing account
+credentials can still be loaded without silently accepting changed terms.
+Optional `ca_bundle_file` replaces platform roots for that issuer with a bounded,
 no-follow PEM trust bundle; use it for private ACME CAs or deliberate CA
 pinning.
 Actalis and Google Trust Services require External Account Binding. Their EAB
@@ -3010,6 +3016,8 @@ name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
 terms_of_service_agreed = true
 terms_of_service_url = "https://replace-with-the-current-issuer-terms.example/"
+# Only for a private directory that omits meta.termsOfService:
+# allow_unadvertised_terms_of_service = true
 
 [tls.acme.issuers.eab]
 key_id_credential = "actalis-eab-kid"

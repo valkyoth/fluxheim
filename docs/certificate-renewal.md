@@ -163,8 +163,15 @@ locations.
 New account creation is refused until the selected issuer records both
 `terms_of_service_agreed = true` and the exact HTTPS
 `terms_of_service_url` reviewed by the operator. Fluxheim never silently
-accepts an issuer's current or future terms. Existing stored accounts remain
-loadable so an operator can review a changed agreement deliberately.
+accepts an issuer's current or future terms. Before creating an account or
+reporting an online probe as healthy, Fluxheim parses the bounded ACME
+directory, requires HTTPS `newNonce`, `newAccount`, and `newOrder` endpoints,
+and requires the advertised `meta.termsOfService` value to match the configured
+URL exactly. If a private ACME directory deliberately omits that metadata, the
+operator may set `allow_unadvertised_terms_of_service = true`; this never
+permits a mismatch and is valid only with explicit terms acceptance and an
+HTTPS terms URL. Existing stored accounts remain loadable so an operator can
+review a changed agreement deliberately.
 
 Private ACME services can set `ca_bundle_file` on an issuer. Fluxheim then
 trusts only that no-follow, 1 MiB/128-certificate-limited PEM bundle instead of
@@ -253,6 +260,23 @@ fluxheim-acme --config /etc/fluxheim/fluxheim.toml account-rollover --issuer let
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml revoke --vhost example.com --confirm
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml account-deactivate --issuer letsencrypt --confirm
 ```
+
+Account key rollover currently fails before making a remote change. The ACME
+client generates the replacement key internally, so Fluxheim cannot durably
+journal that exact key before activation at the issuer; enabling rollover would
+create an account-orphaning crash window. Deactivation first moves local
+credentials into a locked pending state, restores them if the remote operation
+fails, and deletes them only after issuer confirmation. An interrupted pending
+state blocks account loading rather than ambiguously using stale credentials.
+
+Revocation remains available for managed targets even when automatic renewal is
+disabled. Fluxheim first quarantines the certificate and key atomically under
+the same mutation lock used by TLS readers, restores the pair if remote
+revocation fails, and retains the quarantined pair after success for incident
+review. The companion then requests a live certificate reload and reports
+`replacement_required=true`. If reload fails, stop or isolate the listener
+until a replacement certificate is installed; do not continue serving the
+revoked in-memory identity.
 
 Official RPM and container release assets include `acme-client` by default. If
 you compile from source with a custom feature list, include it explicitly:
@@ -640,6 +664,9 @@ The renewal worker uses ACME Renewal Information (ARI) when the issuer supports
 RFC 9773. Fluxheim selects a stable certificate-derived point inside the
 suggested window to avoid synchronized renewals. Unsupported, malformed,
 failed, or timed-out ARI requests fall back to the configured renewal window.
+ARI planning uses four concurrent lookups, a 10-second deadline per target, and
+a 30-second planning budget, executes due renewals progressively, and caches
+successful or unsupported responses until a bounded `Retry-After` deadline.
 
 ## No-Downtime Reload
 

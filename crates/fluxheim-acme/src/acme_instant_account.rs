@@ -62,6 +62,7 @@ pub async fn load_or_create_instant_acme_account(
             issuer: issuer_name.to_owned(),
         });
     }
+    acme_instant_http::probe_acme_directory(issuer).await?;
     let account_request = instant_acme::NewAccount {
         contact: contacts,
         terms_of_service_agreed: issuer.terms_of_service_agreed,
@@ -90,18 +91,13 @@ pub async fn load_or_create_instant_acme_account(
 }
 
 pub async fn rollover_instant_acme_account_key(
-    config: &Config,
+    _config: &Config,
     issuer_name: &str,
 ) -> Result<(), AcmeInstantClientError> {
-    let storage = existing_account_storage(config, issuer_name)?;
-    let mut account = load_or_create_instant_acme_account(config, issuer_name).await?;
-    let credentials = tokio::time::timeout(ACME_ACCOUNT_OPERATION_TIMEOUT, account.update_key())
-        .await
-        .map_err(|_| account_error(issuer_name, "ACME account key rollover timed out"))?
-        .map_err(|error| account_error(issuer_name, error.to_string()))?;
-    store_account_credentials(storage, issuer_name, &credentials)
-        .map_err(AcmeInstantClientError::AccountStore)?;
-    Ok(())
+    Err(account_error(
+        issuer_name,
+        "safe ACME account rollover is unavailable because the client cannot persist a caller-generated key before remote activation",
+    ))
 }
 
 pub async fn deactivate_instant_acme_account(
@@ -110,20 +106,33 @@ pub async fn deactivate_instant_acme_account(
 ) -> Result<(), AcmeInstantClientError> {
     let storage = existing_account_storage(config, issuer_name)?;
     let account = load_or_create_instant_acme_account(config, issuer_name).await?;
-    tokio::time::timeout(ACME_ACCOUNT_OPERATION_TIMEOUT, account.deactivate())
+    let transaction = begin_account_deactivation(storage, issuer_name)
+        .map_err(AcmeInstantClientError::AccountStore)?;
+    let result = tokio::time::timeout(ACME_ACCOUNT_OPERATION_TIMEOUT, account.deactivate())
         .await
         .map_err(|_| account_error(issuer_name, "ACME account deactivation timed out"))?
-        .map_err(|error| account_error(issuer_name, error.to_string()))?;
-    remove_account_credentials(storage, issuer_name)
-        .map_err(AcmeInstantClientError::AccountStore)?;
-    Ok(())
+        .map_err(|error| account_error(issuer_name, error.to_string()));
+    match result {
+        Ok(()) => transaction
+            .complete()
+            .map_err(AcmeInstantClientError::AccountStore),
+        Err(primary) => match transaction.rollback() {
+            Ok(()) => Err(primary),
+            Err(rollback) => Err(account_error(
+                issuer_name,
+                format!(
+                    "remote deactivation failed ({primary}); local credential rollback also failed ({rollback})"
+                ),
+            )),
+        },
+    }
 }
 
 pub async fn revoke_instant_acme_certificate(
     config: &Config,
     vhost_name: &str,
-) -> Result<(), AcmeInstantClientError> {
-    let target = renewal_targets(config)
+) -> Result<AcmeRevocationOutcome, AcmeInstantClientError> {
+    let target = managed_acme_targets(config)
         .into_iter()
         .find(|target| target.vhost_name == vhost_name)
         .ok_or_else(|| {
@@ -140,7 +149,8 @@ pub async fn revoke_instant_acme_certificate(
             )
         })?
         .ok_or_else(|| account_error(&target.issuer, "managed certificate is missing"))?;
-    let leaf = rustls_pemfile::certs(&mut certificate_pem.as_slice())
+    use rustls::pki_types::pem::PemObject as _;
+    let leaf = rustls::pki_types::CertificateDer::pem_slice_iter(&certificate_pem)
         .next()
         .transpose()
         .map_err(|error| {
@@ -156,7 +166,14 @@ pub async fn revoke_instant_acme_certificate(
             )
         })?;
     let account = load_or_create_instant_acme_account(config, &target.issuer).await?;
-    tokio::time::timeout(
+    let quarantine =
+        begin_managed_certificate_quarantine(&target.certificate).map_err(|error| {
+            account_error(
+                &target.issuer,
+                format!("failed to quarantine certificate before revocation: {error}"),
+            )
+        })?;
+    let revocation = tokio::time::timeout(
         ACME_ACCOUNT_OPERATION_TIMEOUT,
         account.revoke(&instant_acme::RevocationRequest {
             certificate: &leaf,
@@ -164,8 +181,26 @@ pub async fn revoke_instant_acme_certificate(
         }),
     )
     .await
-    .map_err(|_| account_error(&target.issuer, "ACME certificate revocation timed out"))?
-    .map_err(|error| account_error(&target.issuer, error.to_string()))
+    .map_err(|_| account_error(&target.issuer, "ACME certificate revocation timed out"))
+    .and_then(|result| result.map_err(|error| account_error(&target.issuer, error.to_string())));
+    if let Err(primary) = revocation {
+        return match quarantine.rollback() {
+            Ok(()) => Err(primary),
+            Err(rollback) => Err(account_error(
+                &target.issuer,
+                format!(
+                    "remote revocation failed ({primary}); local certificate restoration also failed ({rollback})"
+                ),
+            )),
+        };
+    }
+    let (quarantined_certificate, quarantined_private_key) = quarantine.complete();
+    Ok(AcmeRevocationOutcome {
+        certificate: target.certificate,
+        quarantined_certificate,
+        quarantined_private_key,
+        replacement_required: true,
+    })
 }
 
 fn existing_account_storage<'a>(

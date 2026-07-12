@@ -379,3 +379,16 @@ fn rejects_terms_acceptance_without_the_reviewed_url() {
         })
     );
 }
+
+#[test]
+fn rejects_unadvertised_terms_override_without_explicit_acceptance() {
+    let mut config = Config::default();
+    config.tls.acme.issuers[0].allow_unadvertised_terms_of_service = true;
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidAcmeTermsOfServiceAcceptance {
+            issuer: "letsencrypt".to_owned(),
+        })
+    );
+}
