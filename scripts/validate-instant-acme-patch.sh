@@ -63,7 +63,11 @@ while read -r expected path; do
 done <"$patched_checksums"
 
 grep -q 'version = "0.8.5"' "$vendor/Cargo.toml"
+grep -q 'rust-version = "1.85"' "$vendor/Cargo.toml"
 grep -q '\[dependencies.sanitization\]' "$vendor/Cargo.toml"
+grep -q '\[dependencies.p256\]' "$vendor/Cargo.toml"
+grep -q 'p256::SecretKey::try_generate()' "$vendor/src/account.rs"
+grep -q 'secret_key.to_pkcs8_der()' "$vendor/src/account.rs"
 grep -q 'key_pkcs8: SecretVec' "$vendor/src/types.rs"
 grep -q 'decode_secret_staged::<4096>' "$vendor/src/types.rs"
 grep -q 'c8c16a211d01bee3586c2639da00dcd96e70dcd2' "$vendor/PATCH.md"

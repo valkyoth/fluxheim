@@ -8,9 +8,14 @@ crate checksum is
 Fluxheim adds caller-key account bootstrap and recovery methods around the
 existing private `create_inner` implementation. Account credential PKCS#8 bytes
 are owned by `sanitization::SecretVec`, and key JSON encoding/decoding uses
-drop-cleared Base64 buffers. No ACME wire-format, signing, EAB, HTTP, or response
-behavior is changed. These APIs let Fluxheim durably journal the account key
-before the issuer can activate it while preserving configured contacts and EAB.
+drop-cleared Base64 buffers. New P-256 account material is generated through a
+zeroizing RustCrypto `SecretKey` and serialized through a zeroizing
+`SecretDocument` before the selected Ring/AWS-LC-compatible provider imports it
+as the active signing key. This downstream patch therefore raises the vendored
+client's effective MSRV from 1.70 to 1.85. No ACME wire-format, signing, EAB,
+HTTP, or response behavior is changed. These APIs let Fluxheim durably journal
+the account key before the issuer can activate it while preserving configured
+contacts and EAB.
 
 Remove this patch when an upstream release exposes an equivalent API. Before
 updating it, compare every vendored file with the corresponding crates.io source

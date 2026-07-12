@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use base64::prelude::{BASE64_URL_SAFE_NO_PAD, Engine};
 use http::header::LOCATION;
+use p256::elliptic_curve::{Generate as _, pkcs8::EncodePrivateKey as _};
 #[cfg(feature = "time")]
 use http::header::USER_AGENT;
 #[cfg(feature = "time")]
@@ -642,11 +643,11 @@ impl Key {
     // FLUXHEIM PATCH BEGIN: protected generated account key
     /// Generate a key pair whose serialized PKCS#8 bytes clear on drop.
     pub fn generate_secret_pkcs8() -> Result<(Self, SecretVec), Error> {
+        let secret_key = p256::SecretKey::try_generate().map_err(|_| Error::Crypto)?;
+        let pkcs8 = secret_key.to_pkcs8_der().map_err(|_| Error::Crypto)?;
+        let protected = SecretVec::from_slice(pkcs8.as_bytes());
         let rng = crypto::SystemRandom::new();
-        let pkcs8 =
-            crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
-                .map_err(|_| Error::Crypto)?;
-        Ok((Self::new(pkcs8.as_ref(), rng)?, SecretVec::from_slice(pkcs8.as_ref())))
+        Ok((Self::new(pkcs8.as_bytes(), rng)?, protected))
     }
     // FLUXHEIM PATCH END: protected generated account key
 
@@ -659,14 +660,9 @@ impl Key {
 
     /// Generate a new ECDSA P-256 key pair
     pub fn generate_pkcs8() -> Result<(Self, PrivatePkcs8KeyDer<'static>), Error> {
-        let rng = crypto::SystemRandom::new();
-        let pkcs8 =
-            crypto::EcdsaKeyPair::generate_pkcs8(&crypto::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
-                .map_err(|_| Error::Crypto)?;
-        Ok((
-            Self::new(pkcs8.as_ref(), rng)?,
-            PrivatePkcs8KeyDer::from(pkcs8.as_ref().to_vec()),
-        ))
+        let (key, pkcs8) = Self::generate_secret_pkcs8()?;
+        let private_key = pkcs8.with_secret(|bytes| PrivatePkcs8KeyDer::from(bytes.to_vec()));
+        Ok((key, private_key))
     }
 
     /// Create a new key from the given PKCS#8 DER-encoded private key
@@ -705,6 +701,23 @@ impl Signer for Key {
         self.inner
             .sign(&self.rng, payload)
             .map_err(|_| Error::Crypto)
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+
+    #[test]
+    fn protected_generation_returns_the_active_key_material() {
+        let (generated, pkcs8) = Key::generate_secret_pkcs8().unwrap();
+        let restored = pkcs8
+            .with_secret(|bytes| Key::from_pkcs8_der(PrivatePkcs8KeyDer::from(bytes)))
+            .unwrap();
+
+        assert_eq!(generated.thumb, restored.thumb);
+        assert!(generated.sign(b"fluxheim-acme-key-proof").is_ok());
+        assert!(restored.sign(b"fluxheim-acme-key-proof").is_ok());
     }
 }
 

@@ -207,9 +207,11 @@ patch set without creating a predictable temporary path.
 The pinned client also owns serialized account PKCS#8 bytes in
 `sanitization::SecretVec` rather than a bare heap vector. Account creation,
 recovery, credential JSON Base64 encoding, and Base64 decoding keep transient
-key material behind drop-cleared containers. The active cryptographic signing
-key remains inside the selected cryptographic provider for the lifetime of the
-account, as required to sign ACME requests.
+key material behind drop-cleared containers. New P-256 keys are generated in a
+zeroizing RustCrypto secret-key type and serialized into a zeroizing PKCS#8
+document before Ring imports the active signing key. The active cryptographic
+signing key remains inside Ring for the lifetime of the account, as required to
+sign ACME requests.
 
 New account creation is refused until the selected issuer records both
 `terms_of_service_agreed = true` and the exact HTTPS

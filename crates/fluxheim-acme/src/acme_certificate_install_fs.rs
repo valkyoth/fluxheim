@@ -97,13 +97,14 @@ pub(super) fn ensure_safe_directory(
 ) -> Result<(), AcmeCertificateInstallError> {
     #[cfg(unix)]
     {
-        let directory_fd =
-            crate::acme_directory::create_private_directory_all(directory).map_err(|error| {
-                AcmeCertificateInstallError::Io {
-                    path: directory.to_path_buf(),
-                    error,
-                }
-            })?;
+        let directory_fd = crate::acme_directory::create_private_directory_all_with_owner(
+            directory,
+            owner.map(|owner| (owner.uid, owner.gid)),
+        )
+        .map_err(|error| AcmeCertificateInstallError::Io {
+            path: directory.to_path_buf(),
+            error,
+        })?;
         let directory_file = fs::File::from(directory_fd);
         apply_owner_to_file(&directory_file, directory, owner)?;
         Ok(())

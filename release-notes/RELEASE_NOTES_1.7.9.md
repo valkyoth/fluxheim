@@ -43,6 +43,15 @@ products.
 
 ## Security
 
+- ACME certificate installation now assigns the selected managed UID/GID to
+  every directory component it creates through descriptor-relative,
+  no-symlink traversal. Root-run maintenance can no longer leave intermediate
+  `0700 root:root` directories that block the configured service owner.
+- Managed ACME account generation now creates P-256 material in zeroizing
+  RustCrypto secret/document types before importing it into Ring and retaining
+  the durable copy in `sanitization::SecretVec`, removing the transient
+  non-zeroizing Ring PKCS#8 document.
+
 - Open private snapshot files with platform no-follow semantics before
   validating type and permissions from the opened descriptor. This removes a
   check-then-open race while retaining fail-closed symlink handling.
