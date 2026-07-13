@@ -266,6 +266,7 @@ impl NativeHttp1RouteProxyRoute {
     }
 
     pub(crate) async fn handle(&self, request: NativeHttp1Request) -> NativeHttp1Response {
+        let cors_origin = self.response_headers.cors_response_origin(&request);
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -279,7 +280,8 @@ impl NativeHttp1RouteProxyRoute {
             .await;
         #[cfg(not(feature = "wasm"))]
         let mut response = self.action.handle(request).await;
-        self.response_headers.apply(&mut response);
+        self.response_headers
+            .apply_with_cors_origin(cors_origin.as_deref(), &mut response);
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",

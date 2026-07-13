@@ -18,6 +18,13 @@ behavior when the change improves security or project direction.
   IDs and every current Wasm outcome decoder.
 - Run decoder totality property coverage from the complete Wasm smoke and
   document the finite, non-blocking in-process host-callback boundary.
+- Add opt-in `baseline` and `cross-origin-isolated` response-hardening profiles,
+  typed Permissions-Policy, COOP, CORP, COEP, legacy cross-domain policy, CSP
+  report-only, and validated Reporting-Endpoints controls.
+- Add request-aware CORS with validated exact/wildcard origins, local preflight
+  handling, credential safety, upstream-header ownership, and automatic `Vary`.
+- Add `Retry-After: 1` to generated rate, concurrency, PHP-FPM capacity, and
+  ACME blocking-work saturation responses.
 
 ### Changed
 
@@ -29,6 +36,8 @@ behavior when the change improves security or project direction.
 
 - Strip `Client-IP` and `Proxy-Connection`, reject malformed quoted forwarding
   hops, and validate typed `Forwarded` host/protocol inputs before emission.
+- Strip additional deployment identity headers including Envoy, Azure, Fly,
+  original-forwarding, proxy-user, and forwarded-client-certificate fields.
 - Correct quoted exact-origin `Refresh` rewriting and avoid treating a cookie
   named `Domain` or `Path` as a `Set-Cookie` attribute.
 - Add fuzz coverage for the header parsers and rewrite boundaries changed by

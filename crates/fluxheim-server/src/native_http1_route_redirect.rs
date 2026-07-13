@@ -47,7 +47,7 @@ pub(crate) fn https_redirect_response(
         NativeHttp1Response::new(config.status, redirect_reason(config.status), Vec::new())
             .with_header("location", location)
             .with_header("content-length", "0");
-    response_headers.apply(&mut response);
+    response_headers.apply_for_request(request, &mut response);
     Some(response)
 }
 

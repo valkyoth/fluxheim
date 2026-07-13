@@ -17,6 +17,11 @@ keeping the typed policy ABI constrained.
 - Make the in-process native host-callback contract explicit: finite symbolic
   operations only, with blocking I/O and third-party callback code requiring a
   future killable subprocess boundary.
+- Add opt-in response-hardening profiles and typed modern browser policy fields
+  without changing the default response behavior.
+- Add validated request-aware CORS, local preflight handling, correct dynamic
+  `Vary`, and live listener evidence that preflights do not reach the origin.
+- Add bounded `Retry-After` guidance to generated capacity-limit responses.
 
 ## Compatibility Boundary
 
@@ -30,6 +35,8 @@ keeping the typed policy ABI constrained.
 
 - Strip the historical `Proxy-Connection` hop-by-hop header on native HTTP/1
   and HTTP/2 upstream paths through one shared header policy.
+- Strip Envoy, original-forwarding, Azure, Fly, proxy-user, and forwarded client
+  certificate identity headers before trusted replacements are generated.
 - Treat the first `Set-Cookie` segment only as the cookie name/value pair, so
   cookies named `Domain` or `Path` are not mistaken for attributes.
 - Preserve closing quotes and trailing syntax while rewriting quoted exact-

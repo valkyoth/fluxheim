@@ -22,6 +22,7 @@ pub(crate) async fn native_acme_http_01_response(
         crate::blocking_work::NativeBlockingWorkClass::Critical,
     ) else {
         return NativeHttp1Response::new(503, "Service Unavailable", b"service unavailable\n")
+            .with_retry_after_secs(1)
             .close_connection();
     };
 

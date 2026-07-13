@@ -199,7 +199,7 @@ impl NativeHttp1Proxy {
 
     pub fn with_header_policy(mut self, headers: &fluxheim_config::HeaderPolicyConfig) -> Self {
         self.request_headers = NativeRouteRequestHeaderPolicy::from_policy(&headers.request);
-        self.response_headers = NativeRouteResponseHeaderPolicy::from_policy(&headers.response);
+        self.response_headers = NativeRouteResponseHeaderPolicy::from_header_policy(headers);
         self
     }
 

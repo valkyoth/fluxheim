@@ -36,7 +36,8 @@ impl NativeHttp1Proxy {
         if let Some((cache, status, reason, age_secs)) = cache_status {
             response = with_native_cache_status(response, cache, status, reason, age_secs);
         }
-        self.response_headers.apply(&mut response);
+        self.response_headers
+            .apply_for_request(request, &mut response);
         response = response.with_write_policy(self.response_write_policy);
         #[cfg(any(
             feature = "compression-brotli",

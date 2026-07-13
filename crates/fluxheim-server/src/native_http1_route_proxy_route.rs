@@ -239,7 +239,7 @@ impl NativeHttp1RouteProxyRoute {
             ))]
             compression: None,
             request_headers: NativeRouteRequestHeaderPolicy::from_policy(&base_headers.request),
-            response_headers: NativeRouteResponseHeaderPolicy::from_policy(&base_headers.response),
+            response_headers: NativeRouteResponseHeaderPolicy::from_header_policy(base_headers),
             access: NativeIpAccessPolicy::default(),
             rate_limit: NativeRateLimit::default(),
             concurrency: NativeConcurrencyLimit::default(),
@@ -355,7 +355,7 @@ impl NativeHttp1RouteProxyRoute {
                 .clone()
                 .or_else(|| inherited_compression.cloned()),
             request_headers: NativeRouteRequestHeaderPolicy::from_policy(&headers.request),
-            response_headers: NativeRouteResponseHeaderPolicy::from_policy(&headers.response),
+            response_headers: NativeRouteResponseHeaderPolicy::from_header_policy(&headers),
             access: NativeIpAccessPolicy::from_config(&route.access)?,
             rate_limit: NativeRateLimit::from_config(&route.rate_limit),
             concurrency: NativeConcurrencyLimit::from_config(&route.concurrency),

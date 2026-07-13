@@ -2,7 +2,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-use crate::native_http1_route_action::write_takeover_rejection;
+use crate::native_http1_cors::cors_preflight_requested_method;
+use crate::native_http1_route_action::{write_takeover_limit_rejection, write_takeover_rejection};
 #[cfg(any(
     feature = "compression-brotli",
     feature = "compression-gzip",
@@ -38,8 +39,15 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
                     .close_connection();
             };
-            let selected_route = self.select_route(&request.method, &path);
-            let decoded_policy_route = self.select_decoded_policy_route(&request.method, &path);
+            let preflight_method = cors_preflight_requested_method(&request);
+            let selected_route = preflight_method
+                .and_then(|method| self.select_route(method, &path))
+                .filter(|route| route.response_headers.cors_enabled())
+                .or_else(|| self.select_route(&request.method, &path));
+            let decoded_policy_route = preflight_method
+                .and_then(|method| self.select_decoded_policy_route(method, &path))
+                .filter(|route| route.response_headers.cors_enabled())
+                .or_else(|| self.select_decoded_policy_route(&request.method, &path));
             if selected_route.is_none()
                 && self.fallback_web.is_none()
                 && self.fallback.is_none()
@@ -80,6 +88,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                         "Too Many Requests",
                         b"too many requests\n",
                     )
+                    .with_retry_after_secs(1)
                     .close_connection();
                 }
             };
@@ -94,6 +103,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                         "Too Many Requests",
                         b"rate limited\n",
                     )
+                    .with_retry_after_secs(1)
                     .close_connection();
                 }
             }
@@ -125,6 +135,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                         "Too Many Requests",
                         b"too many requests\n",
                     )
+                    .with_retry_after_secs(1)
                     .close_connection();
                 }
             };
@@ -139,6 +150,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                         "Too Many Requests",
                         b"rate limited\n",
                     )
+                    .with_retry_after_secs(1)
                     .close_connection();
                 }
             }
@@ -155,6 +167,15 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     &self.https_redirect,
                     &self.fallback_response_headers,
                 )
+            {
+                return response;
+            }
+            if let Some(response) = selected_route
+                .and_then(|route| route.response_headers.cors_preflight_response(&request))
+                .or_else(|| {
+                    self.fallback_response_headers
+                        .cors_preflight_response(&request)
+                })
             {
                 return response;
             }
@@ -226,6 +247,9 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             if let Some(php) = &self.fallback_php
                 && let Some(resolved) = php.resolve_for_fallback(&path)
             {
+                let cors_origin = self
+                    .fallback_response_headers
+                    .cors_response_origin(&request);
                 #[cfg(feature = "wasm")]
                 let wasm_response_context = NativeWasmHeaderContext::from_path(&path);
                 #[cfg(feature = "wasm")]
@@ -239,7 +263,8 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     return response;
                 }
                 let mut response = php.handle_resolved(request, path, resolved).await;
-                self.fallback_response_headers.apply(&mut response);
+                self.fallback_response_headers
+                    .apply_with_cors_origin(cors_origin.as_deref(), &mut response);
                 #[cfg(feature = "wasm")]
                 if let Some(failure) = wasm_response_header_failure(
                     &self.wasm_hooks,
@@ -257,6 +282,9 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
             }
             #[cfg(feature = "php-fpm")]
             if let Some(php) = &self.fallback_php {
+                let cors_origin = self
+                    .fallback_response_headers
+                    .cors_response_origin(&request);
                 #[cfg(feature = "wasm")]
                 let wasm_response_context = NativeWasmHeaderContext::from_path(&path);
                 #[cfg(feature = "wasm")]
@@ -270,7 +298,8 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     return response;
                 }
                 let mut response = php.handle(request).await;
-                self.fallback_response_headers.apply(&mut response);
+                self.fallback_response_headers
+                    .apply_with_cors_origin(cors_origin.as_deref(), &mut response);
                 #[cfg(feature = "wasm")]
                 if let Some(failure) = wasm_response_header_failure(
                     &self.wasm_hooks,
@@ -462,7 +491,7 @@ impl NativeHttp1RouteProxy {
         let concurrency_permits = match self.acquire_concurrency_permits(concurrency_route).await {
             Ok(permits) => permits,
             Err(status) => {
-                return write_takeover_rejection(
+                return write_takeover_limit_rejection(
                     &mut stream,
                     status,
                     "Too Many Requests",
@@ -475,7 +504,7 @@ impl NativeHttp1RouteProxy {
             NativeRateLimitDecision::Allow => {}
             NativeRateLimitDecision::Delay(delay) => tokio::time::sleep(delay).await,
             NativeRateLimitDecision::Reject(status) => {
-                return write_takeover_rejection(
+                return write_takeover_limit_rejection(
                     &mut stream,
                     status,
                     "Too Many Requests",
@@ -553,7 +582,8 @@ impl NativeHttp1RouteProxy {
     ) -> Option<NativeHttp1Response> {
         let web = self.fallback_web.as_ref()?;
         let mut response = web.handle_optional(request, path)?;
-        self.fallback_response_headers.apply(&mut response);
+        self.fallback_response_headers
+            .apply_for_request(request, &mut response);
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",

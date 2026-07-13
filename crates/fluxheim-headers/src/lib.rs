@@ -30,6 +30,12 @@ pub const SPOOFABLE_CLIENT_IP_HEADERS: &[&str] = &[
     "client-ip",
     "x-cluster-client-ip",
     "fastly-client-ip",
+    "x-envoy-external-address",
+    "x-original-forwarded-for",
+    "x-azure-clientip",
+    "fly-client-ip",
+    "x-proxyuser-ip",
+    "x-forwarded-client-cert",
 ];
 
 pub const DEFAULT_SERVER_HEADER: &str = "fluxheim";
@@ -406,11 +412,22 @@ mod tests {
 
     #[test]
     fn spoofable_identity_headers_include_client_ip() {
-        assert!(
-            SPOOFABLE_CLIENT_IP_HEADERS
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case("client-ip"))
-        );
+        for expected in [
+            "client-ip",
+            "x-envoy-external-address",
+            "x-original-forwarded-for",
+            "x-azure-clientip",
+            "fly-client-ip",
+            "x-proxyuser-ip",
+            "x-forwarded-client-cert",
+        ] {
+            assert!(
+                SPOOFABLE_CLIENT_IP_HEADERS
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(expected)),
+                "missing spoofable identity header {expected}"
+            );
+        }
     }
 
     #[test]

@@ -52,6 +52,7 @@ async fn native_route_proxy_vhost_concurrency_rejects_second_request() {
     let first = first.await.unwrap();
 
     assert!(rejected.starts_with("HTTP/1.1 429 Too Many Requests\r\n"));
+    assert!(rejected.contains("retry-after: 1\r\n"));
     assert!(rejected.ends_with("too many requests\n"));
     assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(first.ends_with("released"));
@@ -103,6 +104,7 @@ async fn native_route_proxy_route_concurrency_rejects_second_request() {
     let first = first.await.unwrap();
 
     assert!(rejected.starts_with("HTTP/1.1 429 Too Many Requests\r\n"));
+    assert!(rejected.contains("retry-after: 1\r\n"));
     assert!(rejected.ends_with("too many requests\n"));
     assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(first.ends_with("released"));
@@ -154,6 +156,7 @@ async fn native_route_proxy_vhost_rate_limit_rejects_second_request() {
     assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(first.ends_with("first"));
     assert!(second.starts_with("HTTP/1.1 429 Too Many Requests\r\n"));
+    assert!(second.contains("retry-after: 1\r\n"));
     assert!(second.ends_with("rate limited\n"));
 }
 
@@ -203,6 +206,7 @@ async fn native_route_proxy_route_rate_limit_rejects_second_request() {
     assert!(first.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(first.ends_with("first"));
     assert!(second.starts_with("HTTP/1.1 429 Too Many Requests\r\n"));
+    assert!(second.contains("retry-after: 1\r\n"));
     assert!(second.ends_with("rate limited\n"));
 }
 
@@ -263,6 +267,7 @@ async fn native_route_proxy_rate_limit_delay_consumes_concurrency() {
     let delayed = delayed.await.unwrap();
 
     assert!(rejected_by_concurrency.starts_with("HTTP/1.1 503 Too Many Requests\r\n"));
+    assert!(rejected_by_concurrency.contains("retry-after: 1\r\n"));
     assert!(rejected_by_concurrency.ends_with("too many requests\n"));
     assert!(delayed.starts_with("HTTP/1.1 308 Permanent Redirect\r\n"));
 }

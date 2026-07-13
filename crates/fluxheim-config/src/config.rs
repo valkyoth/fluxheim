@@ -46,10 +46,13 @@ pub use crate::config_compression::DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES;
 pub use crate::config_error::ConfigError;
 pub use crate::config_geoip::{GeoIpConfig, GeoIpDatabaseConfig, GeoIpProvider};
 pub use crate::config_header::{
-    ForwardedClientIpHeaderMode, HeaderOperationsConfig, HeaderPolicyConfig, HeaderValues,
-    RequestHeaderPolicyConfig, RequestHeaderPolicyOverlayConfig, ResponseHeaderPolicyConfig,
-    ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
-    ResponseHeaderRewriteRuleConfig, ResponseHstsConfig, VhostHeaderPolicyConfig,
+    CorsPolicyConfig, CorsPolicyOverlayConfig, CrossOriginEmbedderPolicy, CrossOriginOpenerPolicy,
+    CrossOriginResourcePolicy, ForwardedClientIpHeaderMode, HeaderOperationsConfig,
+    HeaderPolicyConfig, HeaderValues, PermittedCrossDomainPolicies, RequestHeaderPolicyConfig,
+    RequestHeaderPolicyOverlayConfig, ResponseHardeningConfig, ResponseHardeningProfile,
+    ResponseHeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
+    ResponseHeaderRewriteRuleConfig, ResponseHstsConfig, ResponsePermissionsPolicyConfig,
+    ResponsePermissionsPolicyProfile, VhostHeaderPolicyConfig,
 };
 #[cfg(test)]
 pub use crate::config_header::{MAX_HEADER_APPEND_VALUES, MAX_HEADER_MUTATION_NAMES};

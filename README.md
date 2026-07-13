@@ -63,7 +63,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Regex path rewrite templates | ✅ | `1.4.1`; `rewrite_template` maps regex routes to safe upstream paths without nginx-style rewrite loops or `if`. |
 | Method-based routing | ✅ | `1.4.1`; optional route `methods = ["GET", "HEAD"]` filters. |
 | HTTPS redirects | ✅ | Optional global HTTP-to-HTTPS redirects with safe Host validation. |
-| Secure headers | ✅ | Request/response header policy, `Server: fluxheim` by default, removable by config. |
+| Secure headers | ✅ | Request/response policy, opt-in hardening and cross-origin-isolation profiles, typed CSP reporting and modern browser controls, validated request-aware CORS, automatic `Vary`, and bounded `Retry-After`; origin `Server` headers are preserved by default and removed by the hardening profiles. |
 | PHP-FPM applications | ✅ | External php-fpm for existing pools. |
 | Managed PHP-FPM | ✅ | Fluxheim-supervised php-fpm pools for zero-admin WordPress-style deployments. |
 

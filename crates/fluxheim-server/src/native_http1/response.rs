@@ -49,6 +49,10 @@ impl NativeHttp1Response {
         self
     }
 
+    pub fn with_retry_after_secs(self, retry_after_secs: u64) -> Self {
+        self.with_header("retry-after", retry_after_secs.to_string())
+    }
+
     pub const fn close_connection(mut self) -> Self {
         self.close = true;
         self

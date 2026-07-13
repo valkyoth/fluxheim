@@ -172,3 +172,30 @@ where
     stream.flush().await?;
     Ok(())
 }
+
+pub(crate) async fn write_takeover_limit_rejection<S>(
+    stream: &mut S,
+    status: u16,
+    reason: &str,
+    body: &[u8],
+) -> Result<(), NativeHttp1Error>
+where
+    S: tokio::io::AsyncWrite + Unpin,
+{
+    stream
+        .write_all(
+            format!(
+                "HTTP/1.1 {status} {reason}\r\n\
+                 Connection: close\r\n\
+                 Content-Length: {}\r\n\
+                 Content-Type: text/plain\r\n\
+                 Retry-After: 1\r\n\r\n",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .await?;
+    stream.write_all(body).await?;
+    stream.flush().await?;
+    Ok(())
+}

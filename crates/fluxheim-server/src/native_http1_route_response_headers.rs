@@ -1,10 +1,13 @@
+use fluxheim_config::config_header_hardening::reporting_endpoints_header_value;
 use fluxheim_config::{
-    HeaderValues, ResponseHeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig,
-    ResponseHeaderRewriteConfig,
+    HeaderPolicyConfig, HeaderValues, ResponseHardeningProfile, ResponseHeaderPolicyConfig,
+    ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
 };
 use fluxheim_headers::{rewrite_header_prefix, rewrite_refresh_url, rewrite_set_cookie_value};
 
+use crate::NativeHttp1Request;
 use crate::NativeHttp1Response;
+use crate::native_http1_cors::NativeCorsPolicy;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct NativeRouteResponseHeaderPolicy {
@@ -13,31 +16,72 @@ pub(crate) struct NativeRouteResponseHeaderPolicy {
     set: Vec<(String, String)>,
     append: Vec<(String, String)>,
     rewrite: ResponseHeaderRewriteConfig,
+    cors: NativeCorsPolicy,
 }
 
 impl NativeRouteResponseHeaderPolicy {
-    pub(crate) fn from_policy(policy: &ResponseHeaderPolicyConfig) -> Self {
+    pub(crate) fn from_header_policy(headers: &HeaderPolicyConfig) -> Self {
+        Self::from_policy_and_cors(&headers.response, &headers.cors)
+    }
+
+    fn from_policy_and_cors(
+        policy: &ResponseHeaderPolicyConfig,
+        cors: &fluxheim_config::CorsPolicyConfig,
+    ) -> Self {
         let mut native = Self {
             enabled: policy.enabled,
-            unset: policy.effective_unset(),
-            set: policy.effective_set().into_iter().collect(),
-            append: flatten_append_headers(&policy.append),
+            unset: Vec::new(),
+            set: Vec::new(),
+            append: Vec::new(),
             rewrite: policy.rewrite.clone(),
+            cors: NativeCorsPolicy::from_config(cors),
         };
+        native.apply_hardening_profile(policy.hardening.profile);
         native.apply_standard_headers_from_policy(policy);
+        native.apply_explicit_mutations(
+            policy.effective_unset(),
+            policy.effective_set(),
+            &policy.append,
+        );
         native
     }
 
     pub(crate) fn from_overlay(overlay: &ResponseHeaderPolicyOverlayConfig) -> Self {
         let mut policy = Self {
             enabled: overlay.enabled.unwrap_or(true),
-            unset: overlay.effective_unset(),
-            set: overlay.effective_set().into_iter().collect(),
-            append: flatten_append_headers(&overlay.append),
+            unset: Vec::new(),
+            set: Vec::new(),
+            append: Vec::new(),
             rewrite: overlay.rewrite.clone(),
+            cors: NativeCorsPolicy::default(),
         };
+        if let Some(hardening) = &overlay.hardening {
+            policy.apply_hardening_profile(hardening.profile);
+        }
         policy.apply_standard_headers(overlay);
+        policy.apply_explicit_mutations(
+            overlay.effective_unset(),
+            overlay.effective_set(),
+            &overlay.append,
+        );
         policy
+    }
+
+    fn apply_hardening_profile(&mut self, profile: ResponseHardeningProfile) {
+        if profile == ResponseHardeningProfile::Off {
+            return;
+        }
+        self.unset_header("server");
+        self.set_header(
+            "permissions-policy",
+            "camera=(), geolocation=(), microphone=(), payment=(), usb=()".to_owned(),
+        );
+        self.set_header("x-permitted-cross-domain-policies", "none".to_owned());
+        if profile == ResponseHardeningProfile::CrossOriginIsolated {
+            self.set_header("cross-origin-opener-policy", "same-origin".to_owned());
+            self.set_header("cross-origin-resource-policy", "same-origin".to_owned());
+            self.set_header("cross-origin-embedder-policy", "require-corp".to_owned());
+        }
     }
 
     fn apply_standard_headers_from_policy(&mut self, policy: &ResponseHeaderPolicyConfig) {
@@ -50,6 +94,42 @@ impl NativeRouteResponseHeaderPolicy {
         }
         if let Some(value) = &policy.content_security_policy {
             self.set_optional_header("content-security-policy", Some(value.clone()));
+        }
+        if let Some(value) = &policy.content_security_policy_report_only {
+            self.set_optional_header("content-security-policy-report-only", Some(value.clone()));
+        }
+        if let Some(value) = &policy.permissions_policy {
+            self.set_optional_header(
+                "permissions-policy",
+                value.header_value().map(str::to_owned),
+            );
+        }
+        if let Some(value) = policy.cross_origin_opener_policy {
+            self.set_optional_header(
+                "cross-origin-opener-policy",
+                Some(value.header_value().to_owned()),
+            );
+        }
+        if let Some(value) = policy.cross_origin_resource_policy {
+            self.set_optional_header(
+                "cross-origin-resource-policy",
+                Some(value.header_value().to_owned()),
+            );
+        }
+        if let Some(value) = policy.cross_origin_embedder_policy {
+            self.set_optional_header(
+                "cross-origin-embedder-policy",
+                Some(value.header_value().to_owned()),
+            );
+        }
+        if let Some(value) = policy.x_permitted_cross_domain_policies {
+            self.set_optional_header(
+                "x-permitted-cross-domain-policies",
+                Some(value.header_value().to_owned()),
+            );
+        }
+        if let Some(value) = reporting_endpoints_header_value(&policy.reporting_endpoints) {
+            self.set_optional_header("reporting-endpoints", Some(value));
         }
         if let Some(value) = &policy.x_content_type_options {
             self.set_optional_header("x-content-type-options", Some(value.clone()));
@@ -75,6 +155,48 @@ impl NativeRouteResponseHeaderPolicy {
         if let Some(value) = &overlay.content_security_policy {
             self.set_optional_header("content-security-policy", value.clone());
         }
+        if let Some(value) = &overlay.content_security_policy_report_only {
+            self.set_optional_header("content-security-policy-report-only", value.clone());
+        }
+        if let Some(value) = &overlay.permissions_policy {
+            self.set_optional_header(
+                "permissions-policy",
+                value
+                    .as_ref()
+                    .and_then(|value| value.header_value())
+                    .map(str::to_owned),
+            );
+        }
+        if let Some(value) = overlay.cross_origin_opener_policy {
+            self.set_optional_header(
+                "cross-origin-opener-policy",
+                value.map(|value| value.header_value().to_owned()),
+            );
+        }
+        if let Some(value) = overlay.cross_origin_resource_policy {
+            self.set_optional_header(
+                "cross-origin-resource-policy",
+                value.map(|value| value.header_value().to_owned()),
+            );
+        }
+        if let Some(value) = overlay.cross_origin_embedder_policy {
+            self.set_optional_header(
+                "cross-origin-embedder-policy",
+                value.map(|value| value.header_value().to_owned()),
+            );
+        }
+        if let Some(value) = overlay.x_permitted_cross_domain_policies {
+            self.set_optional_header(
+                "x-permitted-cross-domain-policies",
+                value.map(|value| value.header_value().to_owned()),
+            );
+        }
+        if let Some(endpoints) = &overlay.reporting_endpoints {
+            self.set_optional_header(
+                "reporting-endpoints",
+                reporting_endpoints_header_value(endpoints),
+            );
+        }
         if let Some(value) = &overlay.x_content_type_options {
             self.set_optional_header("x-content-type-options", value.clone());
         }
@@ -88,10 +210,45 @@ impl NativeRouteResponseHeaderPolicy {
 
     fn set_optional_header(&mut self, name: &str, value: Option<String>) {
         if let Some(value) = value {
-            self.set.push((name.to_owned(), value));
+            self.set_header(name, value);
         } else {
+            self.unset_header(name);
+        }
+    }
+
+    fn set_header(&mut self, name: &str, value: String) {
+        self.unset
+            .retain(|existing| !existing.eq_ignore_ascii_case(name));
+        self.set
+            .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+        self.set.push((name.to_owned(), value));
+    }
+
+    fn unset_header(&mut self, name: &str) {
+        self.set
+            .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+        if !self
+            .unset
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(name))
+        {
             self.unset.push(name.to_owned());
         }
+    }
+
+    fn apply_explicit_mutations(
+        &mut self,
+        unset: Vec<String>,
+        set: std::collections::BTreeMap<String, String>,
+        append: &std::collections::BTreeMap<String, HeaderValues>,
+    ) {
+        for name in unset {
+            self.unset_header(&name);
+        }
+        for (name, value) in set {
+            self.set_header(&name, value);
+        }
+        self.append.extend(flatten_append_headers(append));
     }
 
     pub(crate) fn apply(&self, response: &mut NativeHttp1Response) {
@@ -109,6 +266,47 @@ impl NativeRouteResponseHeaderPolicy {
         for (name, value) in &self.append {
             response.push_header(name.clone(), value.clone());
         }
+    }
+
+    pub(crate) fn apply_for_request(
+        &self,
+        request: &NativeHttp1Request,
+        response: &mut NativeHttp1Response,
+    ) {
+        self.apply(response);
+        self.cors.apply_response(request, response);
+    }
+
+    pub(crate) fn cors_response_origin(&self, request: &NativeHttp1Request) -> Option<String> {
+        self.cors.response_origin(request)
+    }
+
+    pub(crate) const fn cors_enabled(&self) -> bool {
+        self.cors.enabled()
+    }
+
+    pub(crate) fn apply_with_cors_origin(
+        &self,
+        origin: Option<&str>,
+        response: &mut NativeHttp1Response,
+    ) {
+        self.apply(response);
+        self.cors.apply_response_origin(origin, response);
+    }
+
+    pub(crate) fn cors_preflight_response(
+        &self,
+        request: &NativeHttp1Request,
+    ) -> Option<NativeHttp1Response> {
+        let mut response = self.cors.preflight_response(request)?;
+        self.apply(&mut response);
+        if !self.cors.reapply_preflight_headers(request, &mut response) {
+            return Some(
+                NativeHttp1Response::new(403, "Forbidden", b"CORS request denied\n".to_vec())
+                    .close_connection(),
+            );
+        }
+        Some(response)
     }
 }
 

@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::ConfigError;
 use crate::config_header::{HeaderOperationsConfig, HeaderValues};
+use crate::config_header_hardening::{
+    CrossOriginEmbedderPolicy, CrossOriginOpenerPolicy, CrossOriginResourcePolicy,
+    PermittedCrossDomainPolicies, ResponseHardeningConfig, ResponsePermissionsPolicyConfig,
+    validate_reporting_endpoints,
+};
 use crate::config_header_validation::{
     combined_header_set, combined_header_unset, merge_header_mutations,
     validate_cookie_domain_rewrite_rules, validate_cookie_path_rewrite_rules,
@@ -17,11 +22,27 @@ pub struct ResponseHeaderPolicyConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
+    pub hardening: ResponseHardeningConfig,
+    #[serde(default)]
     pub strict_transport_security: Option<String>,
     #[serde(default)]
     pub hsts: Option<ResponseHstsConfig>,
     #[serde(default)]
     pub content_security_policy: Option<String>,
+    #[serde(default)]
+    pub content_security_policy_report_only: Option<String>,
+    #[serde(default)]
+    pub permissions_policy: Option<ResponsePermissionsPolicyConfig>,
+    #[serde(default)]
+    pub cross_origin_opener_policy: Option<CrossOriginOpenerPolicy>,
+    #[serde(default)]
+    pub cross_origin_resource_policy: Option<CrossOriginResourcePolicy>,
+    #[serde(default)]
+    pub cross_origin_embedder_policy: Option<CrossOriginEmbedderPolicy>,
+    #[serde(default)]
+    pub x_permitted_cross_domain_policies: Option<PermittedCrossDomainPolicies>,
+    #[serde(default)]
+    pub reporting_endpoints: BTreeMap<String, String>,
     #[serde(default = "default_x_content_type_options")]
     pub x_content_type_options: Option<String>,
     #[serde(default = "default_x_frame_options")]
@@ -48,9 +69,17 @@ impl Default for ResponseHeaderPolicyConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            hardening: ResponseHardeningConfig::default(),
             strict_transport_security: None,
             hsts: None,
             content_security_policy: None,
+            content_security_policy_report_only: None,
+            permissions_policy: None,
+            cross_origin_opener_policy: None,
+            cross_origin_resource_policy: None,
+            cross_origin_embedder_policy: None,
+            x_permitted_cross_domain_policies: None,
+            reporting_endpoints: BTreeMap::new(),
             x_content_type_options: default_x_content_type_options(),
             x_frame_options: default_x_frame_options(),
             referrer_policy: default_referrer_policy(),
@@ -82,6 +111,14 @@ impl ResponseHeaderPolicyConfig {
         validate_optional_header_value(
             "headers.response.content_security_policy",
             self.content_security_policy.as_deref(),
+        )?;
+        validate_optional_header_value(
+            "headers.response.content_security_policy_report_only",
+            self.content_security_policy_report_only.as_deref(),
+        )?;
+        validate_reporting_endpoints(
+            "headers.response.reporting_endpoints",
+            &self.reporting_endpoints,
         )?;
         validate_optional_header_value(
             "headers.response.x_content_type_options",
@@ -121,6 +158,9 @@ impl ResponseHeaderPolicyConfig {
         if let Some(enabled) = overlay.enabled {
             self.enabled = enabled;
         }
+        if let Some(hardening) = &overlay.hardening {
+            self.hardening = hardening.clone();
+        }
         if let Some(value) = &overlay.strict_transport_security {
             self.strict_transport_security = value.clone();
         }
@@ -129,6 +169,27 @@ impl ResponseHeaderPolicyConfig {
         }
         if let Some(value) = &overlay.content_security_policy {
             self.content_security_policy = value.clone();
+        }
+        if let Some(value) = &overlay.content_security_policy_report_only {
+            self.content_security_policy_report_only = value.clone();
+        }
+        if let Some(value) = &overlay.permissions_policy {
+            self.permissions_policy = value.clone();
+        }
+        if let Some(value) = overlay.cross_origin_opener_policy {
+            self.cross_origin_opener_policy = value;
+        }
+        if let Some(value) = overlay.cross_origin_resource_policy {
+            self.cross_origin_resource_policy = value;
+        }
+        if let Some(value) = overlay.cross_origin_embedder_policy {
+            self.cross_origin_embedder_policy = value;
+        }
+        if let Some(value) = overlay.x_permitted_cross_domain_policies {
+            self.x_permitted_cross_domain_policies = value;
+        }
+        if let Some(value) = &overlay.reporting_endpoints {
+            self.reporting_endpoints = value.clone();
         }
         if let Some(value) = &overlay.x_content_type_options {
             self.x_content_type_options = value.clone();
@@ -241,11 +302,27 @@ pub struct ResponseHeaderPolicyOverlayConfig {
     #[serde(default)]
     pub enabled: Option<bool>,
     #[serde(default)]
+    pub hardening: Option<ResponseHardeningConfig>,
+    #[serde(default)]
     pub strict_transport_security: Option<Option<String>>,
     #[serde(default)]
     pub hsts: Option<Option<ResponseHstsConfig>>,
     #[serde(default)]
     pub content_security_policy: Option<Option<String>>,
+    #[serde(default)]
+    pub content_security_policy_report_only: Option<Option<String>>,
+    #[serde(default)]
+    pub permissions_policy: Option<Option<ResponsePermissionsPolicyConfig>>,
+    #[serde(default)]
+    pub cross_origin_opener_policy: Option<Option<CrossOriginOpenerPolicy>>,
+    #[serde(default)]
+    pub cross_origin_resource_policy: Option<Option<CrossOriginResourcePolicy>>,
+    #[serde(default)]
+    pub cross_origin_embedder_policy: Option<Option<CrossOriginEmbedderPolicy>>,
+    #[serde(default)]
+    pub x_permitted_cross_domain_policies: Option<Option<PermittedCrossDomainPolicies>>,
+    #[serde(default)]
+    pub reporting_endpoints: Option<BTreeMap<String, String>>,
     #[serde(default)]
     pub x_content_type_options: Option<Option<String>>,
     #[serde(default)]
@@ -290,6 +367,18 @@ impl ResponseHeaderPolicyOverlayConfig {
                 .as_ref()
                 .and_then(Option::as_deref),
         )?;
+        validate_optional_header_value(
+            "vhosts.headers.response.content_security_policy_report_only",
+            self.content_security_policy_report_only
+                .as_ref()
+                .and_then(Option::as_deref),
+        )?;
+        if let Some(reporting_endpoints) = &self.reporting_endpoints {
+            validate_reporting_endpoints(
+                "vhosts.headers.response.reporting_endpoints",
+                reporting_endpoints,
+            )?;
+        }
         validate_optional_header_value(
             "vhosts.headers.response.x_content_type_options",
             self.x_content_type_options

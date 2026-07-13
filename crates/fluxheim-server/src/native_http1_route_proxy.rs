@@ -134,7 +134,7 @@ impl NativeHttp1RouteProxy {
             proxy.trace_propagation = NativeTracePropagation::from_config(&config.tracing);
         }
         proxy.fallback_response_headers =
-            NativeRouteResponseHeaderPolicy::from_policy(&config.headers.response);
+            NativeRouteResponseHeaderPolicy::from_header_policy(&config.headers);
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -425,8 +425,8 @@ impl NativeHttp1RouteProxy {
             fallback_web,
             #[cfg(feature = "php-fpm")]
             fallback_php,
-            fallback_response_headers: NativeRouteResponseHeaderPolicy::from_policy(
-                &headers.response,
+            fallback_response_headers: NativeRouteResponseHeaderPolicy::from_header_policy(
+                &headers,
             ),
             #[cfg(any(
                 feature = "compression-brotli",

@@ -3174,7 +3174,10 @@ Stable scope:
   or third-party native callback code, design and prove a killable subprocess
   runner with bounded authenticated IPC, process admission, timeout termination,
   and crash cleanup; do not represent thread timeouts or `catch_unwind` as hard
-  isolation in an abort-on-panic release.
+  isolation in an abort-on-panic release. Add opt-in response-hardening profiles,
+  typed modern browser isolation/reporting controls, request-aware validated
+  CORS with preflight handling and automatic `Vary`, bounded `Retry-After` on
+  generated capacity rejections, and broader spoofable identity stripping.
 - `v1.7.11`: zero-downtime upgrade planning and first implementation slice
   after the Wasm line is stable. Add a documented design for native binary and
   Podman deployments that can swap Fluxheim versions without a listener gap:
@@ -3186,6 +3189,13 @@ Stable scope:
   requests move to the new process while existing keep-alive/proxy requests
   drain on the old process, and documents which Podman setups cannot be
   truly zero-downtime without a stable fronting layer.
+- `v1.7.12`: standards-based response metadata after the zero-downtime slice.
+  Add opt-in RFC 9211 `Cache-Status` from real cache outcomes and low-cardinality
+  RFC 9209 `Proxy-Status` from generated proxy failures without exposing backend
+  addresses, certificate details, DNS names, or arbitrary error strings. Add
+  streaming RFC 9530 `Content-Digest`/`Repr-Digest` only after proving cache,
+  compression, conditional, HEAD, and range-response semantics with live tests;
+  do not emulate these fields with static response-header mutation.
 - `v1.8.0`: cross-platform production baseline planning. Replace the old
   "macOS developer-only" posture with a concrete macOS and Windows production
   parity line now that Fluxheim no longer depends on Pingora for the normal
@@ -4815,7 +4825,10 @@ circular dependencies.
   cache policy mappings.
 - `v1.7.10`: Wasm stabilization release. All four example families must be in
   `scripts/test_starter.py` and the stable/deep release gates before the line
-  is considered complete.
+  is considered complete. Also add opt-in response-hardening profiles, typed
+  modern browser controls, request-aware validated CORS with local preflight
+  handling and automatic `Vary`, generated capacity-response `Retry-After`,
+  and broader spoofable identity stripping without changing default behavior.
 - `v1.7.11`: zero-downtime upgrade release after Wasm stabilization. Add
   inherited listener file-descriptor support, systemd socket activation
   guidance, readiness-gated new-process startup, old-process drain mode,
@@ -4824,6 +4837,11 @@ circular dependencies.
   live upgrade smoke tests that prove no listener gap for the supported native
   path and clearly document Podman configurations that cannot be seamless
   without a fronting layer.
+- `v1.7.12`: standards-based response metadata. Implement opt-in RFC 9211
+  `Cache-Status`, low-cardinality RFC 9209 `Proxy-Status`, and streaming RFC
+  9530 digest fields from real runtime state with live cache, proxy failure,
+  compression, conditional, HEAD, and range tests. Never expose backend
+  topology or synthesize these protocol fields as static decorative headers.
 - `v1.8.0`: cross-platform production baseline planning. Make macOS and
   Windows first-class release targets where practical, with Linux as the
   reference baseline. Define the supported profile matrix, platform-specific

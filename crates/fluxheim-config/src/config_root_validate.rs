@@ -261,6 +261,25 @@ impl Config {
 
         for vhost in &self.vhosts {
             vhost.validate(self.server.regex_enabled)?;
+            let vhost_headers = self.headers.with_vhost_overlay(&vhost.headers);
+            vhost_headers
+                .validate()
+                .map_err(|source| ConfigError::VhostSection {
+                    vhost: vhost.name.clone(),
+                    section: "headers",
+                    source: Box::new(source),
+                })?;
+            for route in &vhost.routes {
+                vhost_headers
+                    .with_vhost_overlay(&route.headers)
+                    .validate()
+                    .map_err(|source| ConfigError::RouteSection {
+                        vhost: vhost.name.clone(),
+                        route: route.name.clone(),
+                        section: "headers",
+                        source: Box::new(source),
+                    })?;
+            }
             vhost
                 .validate_tls(&self.tls, self.vhost_has_shared_managed_acme_source(vhost))
                 .map_err(|source| ConfigError::VhostSection {

@@ -161,6 +161,8 @@ fi
 - Document and gate the finite, non-blocking native host-callback contract.
 - Harden client-identity, hop-by-hop, Forwarded, Refresh, and Set-Cookie header
   handling while preserving operator-selected response policy.
+- Add opt-in response-hardening profiles, typed modern browser controls,
+  validated request-aware CORS, automatic Vary, and bounded Retry-After.
 
 * Sun Jul 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.9-1
 - Start documented and runnable Wasm migration-example parity work.

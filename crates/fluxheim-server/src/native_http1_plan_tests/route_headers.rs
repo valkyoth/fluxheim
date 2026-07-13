@@ -229,6 +229,7 @@ fn server_plan_accepts_native_http1_route_proxy_candidate_with_response_header_o
                 headers: fluxheim_config::VhostHeaderPolicyConfig {
                     request: Default::default(),
                     response: response_headers,
+                    cors: Default::default(),
                 },
             }],
         }],
@@ -294,6 +295,7 @@ fn server_plan_accepts_native_http1_route_proxy_candidate_with_request_header_mu
                 headers: fluxheim_config::VhostHeaderPolicyConfig {
                     request: request_headers,
                     response: Default::default(),
+                    cors: Default::default(),
                 },
             }],
         }],
@@ -359,6 +361,7 @@ fn server_plan_accepts_native_http1_route_proxy_candidate_with_forwarded_append_
                         ..Default::default()
                     },
                     response: Default::default(),
+                    cors: Default::default(),
                 },
             }],
         }],
@@ -428,6 +431,7 @@ fn server_plan_accepts_native_http1_route_proxy_candidate_with_owned_forwarded_p
                         ..Default::default()
                     },
                     response: Default::default(),
+                    cors: Default::default(),
                 },
             }],
         }],

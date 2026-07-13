@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::ResponseHeaderRewriteRuleConfig;
+use crate::{ResponseHardeningProfile, ResponsePermissionsPolicyConfig};
 
 #[test]
 fn parses_response_header_policy() {
@@ -212,6 +213,158 @@ fn rejects_conflicting_hsts_response_header_policy() {
         config.validate(),
         Err(ConfigError::InvalidResponseHeaderValue {
             field: "headers.response.hsts"
+        })
+    );
+}
+
+#[test]
+fn parses_opt_in_response_hardening_and_reporting_policy() {
+    let config: Config = toml::from_str(
+        r#"
+            [headers.response]
+            content_security_policy_report_only = "default-src 'self'; report-to csp"
+            cross_origin_opener_policy = "same-origin-allow-popups"
+            cross_origin_resource_policy = "same-site"
+            cross_origin_embedder_policy = "credentialless"
+            x_permitted_cross_domain_policies = "none"
+
+            [headers.response.hardening]
+            profile = "baseline"
+
+            [headers.response.permissions_policy]
+            profile = "deny-all"
+
+            [headers.response.reporting_endpoints]
+            csp = "https://reports.example.test/csp"
+            "#,
+    )
+    .unwrap();
+
+    let response = &config.headers.response;
+    assert_eq!(
+        response.hardening.profile,
+        ResponseHardeningProfile::Baseline
+    );
+    assert_eq!(
+        response
+            .permissions_policy
+            .as_ref()
+            .and_then(ResponsePermissionsPolicyConfig::header_value),
+        Some(
+            "accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), identity-credentials-get=(), idle-detection=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), otp-credentials=(), payment=(), picture-in-picture=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), storage-access=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=()"
+        )
+    );
+    config.validate().unwrap();
+}
+
+#[test]
+fn response_hardening_is_off_by_default() {
+    assert_eq!(
+        Config::default().headers.response.hardening.profile,
+        ResponseHardeningProfile::Off
+    );
+}
+
+#[test]
+fn validates_cors_credentials_and_origins() {
+    let wildcard_credentials: Config = toml::from_str(
+        r#"
+            [headers.cors]
+            enabled = true
+            allow_origins = ["*"]
+            allow_credentials = true
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        wildcard_credentials.validate(),
+        Err(ConfigError::InvalidResponseHeaderValue {
+            field: "headers.cors"
+        })
+    );
+
+    let invalid_origin: Config = toml::from_str(
+        r#"
+            [headers.cors]
+            enabled = true
+            allow_origins = ["https://example.test/path"]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_origin.validate(),
+        Err(ConfigError::InvalidResponseHeaderValue {
+            field: "headers.cors"
+        })
+    );
+}
+
+#[test]
+fn validates_effective_inherited_cors_policy() {
+    let config: Config = toml::from_str(
+        r#"
+            [headers.cors]
+            enabled = true
+            allow_origins = ["https://app.example.test"]
+            allow_credentials = true
+
+            [[vhosts]]
+            name = "example"
+            hosts = ["example.test"]
+
+            [vhosts.headers.cors]
+            allow_origins = ["*"]
+            "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::VhostSection {
+            section: "headers",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn allows_vhost_to_enable_inherited_cors_origins() {
+    let config: Config = toml::from_str(
+        r#"
+            [headers.cors]
+            allow_origins = ["https://app.example.test"]
+            allow_credentials = true
+
+            [[vhosts]]
+            name = "example"
+            hosts = ["example.test"]
+
+            [vhosts.headers.cors]
+            enabled = true
+            "#,
+    )
+    .unwrap();
+
+    config.validate().unwrap();
+    let effective = config.headers.with_vhost_overlay(&config.vhosts[0].headers);
+    assert!(effective.cors.enabled);
+    assert_eq!(effective.cors.allow_origins, ["https://app.example.test"]);
+}
+
+#[test]
+fn rejects_invalid_reporting_endpoint_url() {
+    let config: Config = toml::from_str(
+        r#"
+            [headers.response.reporting_endpoints]
+            csp = "file:///tmp/report"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidHeaderValue {
+            field: "headers.response.reporting_endpoints",
+            name: "csp".to_owned()
         })
     );
 }

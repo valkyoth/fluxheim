@@ -3,6 +3,12 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::config::ConfigError;
+pub use crate::config_header_cors::{CorsPolicyConfig, CorsPolicyOverlayConfig};
+pub use crate::config_header_hardening::{
+    CrossOriginEmbedderPolicy, CrossOriginOpenerPolicy, CrossOriginResourcePolicy,
+    PermittedCrossDomainPolicies, ResponseHardeningConfig, ResponseHardeningProfile,
+    ResponsePermissionsPolicyConfig, ResponsePermissionsPolicyProfile,
+};
 pub use crate::config_header_response::{
     ResponseHeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
     ResponseHeaderRewriteRuleConfig, ResponseHstsConfig,
@@ -16,18 +22,22 @@ pub struct HeaderPolicyConfig {
     pub request: RequestHeaderPolicyConfig,
     #[serde(default)]
     pub response: ResponseHeaderPolicyConfig,
+    #[serde(default)]
+    pub cors: CorsPolicyConfig,
 }
 
 impl HeaderPolicyConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.request.validate()?;
-        self.response.validate()
+        self.response.validate()?;
+        self.cors.validate("headers.cors")
     }
 
     pub fn with_vhost_overlay(&self, overlay: &VhostHeaderPolicyConfig) -> Self {
         let mut policy = self.clone();
         policy.request.apply_overlay(&overlay.request);
         policy.response.apply_overlay(&overlay.response);
+        policy.cors.apply_overlay(&overlay.cors);
         policy
     }
 }
@@ -39,12 +49,15 @@ pub struct VhostHeaderPolicyConfig {
     pub request: RequestHeaderPolicyOverlayConfig,
     #[serde(default)]
     pub response: ResponseHeaderPolicyOverlayConfig,
+    #[serde(default)]
+    pub cors: CorsPolicyOverlayConfig,
 }
 
 impl VhostHeaderPolicyConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.request.validate()?;
-        self.response.validate()
+        self.response.validate()?;
+        self.cors.validate("vhosts.headers.cors")
     }
 }
 

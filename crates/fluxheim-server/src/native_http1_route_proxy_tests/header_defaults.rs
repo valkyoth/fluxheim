@@ -96,6 +96,12 @@ async fn native_route_proxy_privacy_mode_strips_spoofable_headers_after_mutation
             "x-forwarded-host",
             "x-forwarded-proto",
             "client-ip",
+            "x-envoy-external-address",
+            "x-original-forwarded-for",
+            "x-azure-clientip",
+            "fly-client-ip",
+            "x-proxyuser-ip",
+            "x-forwarded-client-cert",
         ],
     )
     .await;
@@ -115,6 +121,12 @@ async fn native_route_proxy_privacy_mode_strips_spoofable_headers_after_mutation
          X-Forwarded-Host: admin.internal\r\n\
          X-Forwarded-Proto: https\r\n\
          Client-IP: 203.0.113.11\r\n\
+         X-Envoy-External-Address: 203.0.113.12\r\n\
+         X-Original-Forwarded-For: 203.0.113.13\r\n\
+         X-Azure-ClientIP: 203.0.113.14\r\n\
+         Fly-Client-IP: 203.0.113.15\r\n\
+         X-ProxyUser-IP: 203.0.113.16\r\n\
+         X-Forwarded-Client-Cert: By=spiffe://example.test/proxy\r\n\
          Connection: close\r\n\r\n",
     )
     .await;

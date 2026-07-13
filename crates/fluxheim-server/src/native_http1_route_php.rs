@@ -163,6 +163,7 @@ impl NativePhpFpmRoute {
         };
         let Ok(_permit) = Arc::clone(&self.in_flight).try_acquire_owned() else {
             return NativeHttp1Response::new(503, "Service Unavailable", b"php busy\n")
+                .with_retry_after_secs(1)
                 .close_connection();
         };
         let body = match native_php_request_body(&request, &self.config).await {
