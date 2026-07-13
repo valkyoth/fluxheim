@@ -41,6 +41,8 @@ keeping the typed policy ABI constrained.
   cookies named `Domain` or `Path` are not mistaken for attributes.
 - Preserve closing quotes and trailing syntax while rewriting quoted exact-
   origin `Refresh` URLs.
+- Enforce CORS method allowlists on actual responses and serialize bounded
+  Reporting-Endpoints dictionaries with strict keys and HTTPS collectors.
 
 ## Security
 

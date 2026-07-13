@@ -1227,7 +1227,8 @@ profile = "deny-sensitive"
 csp = "https://reports.example.com/csp"
 ```
 
-Reporting endpoints are limited to 16 validated HTTP(S) URLs. Use report-only
+Reporting endpoints are limited to 16 HTTPS URLs, use lowercase RFC 9651
+dictionary keys, and have a bounded aggregate serialized size. Use report-only
 CSP before enforcement, keep the endpoint on trusted infrastructure, and bound
 its retention and ingestion independently. The generic response mutation layer
 remains available for deliberately site-specific policies. For example,
@@ -1271,7 +1272,11 @@ locally with `204`; denied preflights receive `403` and do not reach the origin.
 Fluxheim owns the resulting CORS headers, replaces unsafe upstream values, and
 manages `Vary: Origin`, `Vary: Access-Control-Request-Method`, and
 `Vary: Access-Control-Request-Headers`. Response compression separately manages
-`Vary: Accept-Encoding`.
+`Vary: Accept-Encoding`. Actual responses receive CORS authorization headers
+only when both the request origin and request method are allowed. CORS controls
+whether browser JavaScript may read a response; it is not CSRF protection and
+must never replace route access policy, authentication, authorization, or
+same-site cookie controls.
 
 Generated rate-limit and concurrency-limit responses include
 `Retry-After: 1`. Temporary PHP-FPM and ACME blocking-work saturation responses

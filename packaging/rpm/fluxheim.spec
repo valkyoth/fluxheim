@@ -163,6 +163,7 @@ fi
   handling while preserving operator-selected response policy.
 - Add opt-in response-hardening profiles, typed modern browser controls,
   validated request-aware CORS, automatic Vary, and bounded Retry-After.
+- Enforce actual-response CORS methods and strict Reporting-Endpoints encoding.
 
 * Sun Jul 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.9-1
 - Start documented and runnable Wasm migration-example parity work.

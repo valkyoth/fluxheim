@@ -3,10 +3,12 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::config::ConfigError;
-use crate::config_header_validation::{valid_http_header_name, validate_optional_header_value};
+use crate::config_header_validation::validate_optional_header_value;
 use crate::config_http::valid_http_endpoint_url;
 
 const MAX_REPORTING_ENDPOINTS: usize = 16;
+const MAX_REPORTING_ENDPOINT_NAME_BYTES: usize = 64;
+const MAX_REPORTING_ENDPOINTS_HEADER_BYTES: usize = 16_384;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -148,13 +150,20 @@ pub(crate) fn validate_reporting_endpoints(
         return Err(ConfigError::InvalidResponseHeaderValue { field });
     }
     for (name, endpoint) in endpoints {
-        if !valid_http_header_name(name) || !valid_http_endpoint_url(endpoint) {
+        if !valid_structured_field_key(name)
+            || !endpoint.starts_with("https://")
+            || !valid_http_endpoint_url(endpoint)
+            || serialize_sf_string(endpoint).is_none()
+        {
             return Err(ConfigError::InvalidHeaderValue {
                 field,
                 name: name.clone(),
             });
         }
         validate_optional_header_value(field, Some(endpoint))?;
+    }
+    if reporting_endpoints_header_value(endpoints).is_none() && !endpoints.is_empty() {
+        return Err(ConfigError::InvalidResponseHeaderValue { field });
     }
     Ok(())
 }
@@ -163,13 +172,66 @@ pub fn reporting_endpoints_header_value(endpoints: &BTreeMap<String, String>) ->
     if endpoints.is_empty() {
         return None;
     }
-    Some(
-        endpoints
-            .iter()
-            .map(|(name, endpoint)| format!("{name}=\"{endpoint}\""))
-            .collect::<Vec<_>>()
-            .join(", "),
-    )
+    let mut serialized = String::new();
+    for (name, endpoint) in endpoints {
+        if !valid_structured_field_key(name)
+            || !endpoint.starts_with("https://")
+            || !valid_http_endpoint_url(endpoint)
+        {
+            return None;
+        }
+        let endpoint = serialize_sf_string(endpoint)?;
+        let separator_bytes = usize::from(!serialized.is_empty()) * 2;
+        let additional_bytes = separator_bytes
+            .checked_add(name.len())?
+            .checked_add(1)?
+            .checked_add(endpoint.len())?;
+        if serialized.len().checked_add(additional_bytes)? > MAX_REPORTING_ENDPOINTS_HEADER_BYTES {
+            return None;
+        }
+        if !serialized.is_empty() {
+            serialized.push_str(", ");
+        }
+        serialized.push_str(name);
+        serialized.push('=');
+        serialized.push_str(&endpoint);
+    }
+    Some(serialized)
+}
+
+fn valid_structured_field_key(name: &str) -> bool {
+    if name.len() > MAX_REPORTING_ENDPOINT_NAME_BYTES {
+        return false;
+    }
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(b'a'..=b'z' | b'*'))
+        && bytes.all(|byte| {
+            matches!(
+                byte,
+                b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'*'
+            )
+        })
+}
+
+fn serialize_sf_string(value: &str) -> Option<String> {
+    if !value.is_ascii() || value.bytes().any(|byte| !(0x20..=0x7e).contains(&byte)) {
+        return None;
+    }
+    let escaped_bytes = value
+        .bytes()
+        .filter(|byte| matches!(byte, b'"' | b'\\'))
+        .count();
+    let capacity = value.len().checked_add(escaped_bytes)?.checked_add(2)?;
+    let mut serialized = String::with_capacity(capacity);
+    serialized.push('"');
+    for character in value.chars() {
+        if matches!(character, '"' | '\\') {
+            serialized.push('\\');
+        }
+        serialized.push(character);
+    }
+    serialized.push('"');
+    Some(serialized)
 }
 
 fn default_true() -> bool {

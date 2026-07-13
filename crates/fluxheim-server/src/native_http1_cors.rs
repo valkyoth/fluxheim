@@ -123,9 +123,15 @@ impl NativeCorsPolicy {
     }
 
     pub(crate) fn response_origin(&self, request: &NativeHttp1Request) -> Option<String> {
-        self.enabled
-            .then(|| self.allowed_origin(request).map(str::to_owned))
-            .flatten()
+        if !self.enabled
+            || !self
+                .allow_methods
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(&request.method))
+        {
+            return None;
+        }
+        self.allowed_origin(request).map(str::to_owned)
     }
 
     pub(crate) fn apply_response_origin(

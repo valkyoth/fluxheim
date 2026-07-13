@@ -5,7 +5,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::{DownstreamHttp1Policy, NativeHttp1Proxy, NativeHttp1Upstream};
 
-use super::{proxy_listener_for, upstream};
+use super::{counting_upstream, proxy_listener_for, upstream};
 
 #[tokio::test]
 async fn native_proxy_applies_header_policy() {
@@ -258,6 +258,48 @@ async fn native_route_proxy_handles_validated_cors_preflight_and_actual_request(
     assert!(response.contains("vary: Accept-Encoding, Origin\r\n"));
     assert!(!response.contains("access-control-allow-methods: DELETE\r\n"));
     assert!(!response.contains("access-control-max-age: 86400\r\n"));
+}
+
+#[tokio::test]
+async fn native_route_proxy_enforces_cors_methods_on_actual_responses() {
+    let (upstream, requests) = counting_upstream("ok", 2).await;
+    let mut config = fluxheim_config::Config::default();
+    config.proxy.upstreams = vec![upstream.to_string()];
+    config.headers.cors = fluxheim_config::CorsPolicyConfig {
+        enabled: true,
+        allow_origins: vec!["https://app.example.test".to_owned()],
+        allow_methods: vec!["POST".to_owned()],
+        allow_headers: Vec::new(),
+        expose_headers: Vec::new(),
+        allow_credentials: true,
+        max_age_secs: None,
+    };
+    config.headers.validate().unwrap();
+    let proxy = crate::NativeHttp1RouteProxy::from_root_config(
+        &config,
+        DownstreamHttp1Policy::default(),
+        0,
+    )
+    .unwrap();
+    let proxy = route_proxy_listener(proxy).await;
+
+    let get = downstream_request(
+        proxy,
+        "GET /resource HTTP/1.1\r\nHost: proxy.test\r\nOrigin: https://app.example.test\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let post = downstream_request(
+        proxy,
+        "POST /resource HTTP/1.1\r\nHost: proxy.test\r\nOrigin: https://app.example.test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+
+    assert!(get.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(!get.contains("access-control-allow-origin:"));
+    assert!(!get.contains("access-control-allow-credentials:"));
+    assert!(post.contains("access-control-allow-origin: https://app.example.test\r\n"));
+    assert!(post.contains("access-control-allow-credentials: true\r\n"));
+    assert_eq!(requests.load(std::sync::atomic::Ordering::Acquire), 2);
 }
 
 async fn downstream_request(proxy: std::net::SocketAddr, request: &str) -> String {

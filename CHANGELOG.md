@@ -42,6 +42,9 @@ behavior when the change improves security or project direction.
   named `Domain` or `Path` as a `Set-Cookie` attribute.
 - Add fuzz coverage for the header parsers and rewrite boundaries changed by
   this hardening pass.
+- Enforce configured CORS methods on actual responses, not only preflights.
+- Serialize Reporting-Endpoints as a bounded RFC 9651 dictionary with strict
+  lowercase keys, escaped ASCII strings, and HTTPS-only collectors.
 
 ## 1.7.9 - 2026-07-12
 

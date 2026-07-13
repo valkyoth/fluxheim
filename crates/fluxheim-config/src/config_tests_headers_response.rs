@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::ResponseHeaderRewriteRuleConfig;
+use crate::config_header_hardening::reporting_endpoints_header_value;
 use crate::{ResponseHardeningProfile, ResponsePermissionsPolicyConfig};
 
 #[test]
@@ -367,4 +368,71 @@ fn rejects_invalid_reporting_endpoint_url() {
             name: "csp".to_owned()
         })
     );
+}
+
+#[test]
+fn rejects_invalid_reporting_endpoint_dictionary_members() {
+    for name in ["CSP", "1csp", "csp+production"] {
+        let mut config = Config::default();
+        config.headers.response.reporting_endpoints.insert(
+            name.to_owned(),
+            "https://reports.example.test/csp".to_owned(),
+        );
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderValue {
+                field: "headers.response.reporting_endpoints",
+                ..
+            })
+        ));
+    }
+
+    for endpoint in [
+        "http://reports.example.test/csp",
+        "https://reports.example.test/csp-\u{00e5}",
+    ] {
+        let mut config = Config::default();
+        config
+            .headers
+            .response
+            .reporting_endpoints
+            .insert("csp".to_owned(), endpoint.to_owned());
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderValue {
+                field: "headers.response.reporting_endpoints",
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn serializes_reporting_endpoints_as_bounded_structured_fields() {
+    let endpoints = std::collections::BTreeMap::from([
+        (
+            "csp".to_owned(),
+            "https://reports.example.test/csp\"primary".to_owned(),
+        ),
+        (
+            "network-errors".to_owned(),
+            "https://reports.example.test/network\\errors".to_owned(),
+        ),
+    ]);
+    assert_eq!(
+        reporting_endpoints_header_value(&endpoints).as_deref(),
+        Some(
+            "csp=\"https://reports.example.test/csp\\\"primary\", network-errors=\"https://reports.example.test/network\\\\errors\""
+        )
+    );
+
+    let oversized = (0..9)
+        .map(|index| {
+            (
+                format!("endpoint-{index}"),
+                format!("https://reports.example.test/{}", "a".repeat(2000)),
+            )
+        })
+        .collect();
+    assert_eq!(reporting_endpoints_header_value(&oversized), None);
 }
