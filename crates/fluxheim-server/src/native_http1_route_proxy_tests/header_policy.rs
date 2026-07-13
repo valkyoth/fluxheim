@@ -65,8 +65,10 @@ async fn native_route_proxy_applies_route_response_rewrites() {
     let upstream = upstream_response(
         "HTTP/1.1 302 Found\r\n\
          location: http://backend.internal/login\r\n\
-         refresh: 0;url=http://backend.internal/next\r\n\
+         refresh: 0;url=\"http://backend.internal\"\r\n\
          set-cookie: sid=1; Domain=backend.internal; Path=/internal\r\n\
+         set-cookie: Domain=backend.internal; Secure\r\n\
+         set-cookie: Path=/internal; Secure\r\n\
          content-length: 0\r\n\r\n",
     )
     .await;
@@ -77,8 +79,8 @@ async fn native_route_proxy_applies_route_response_rewrites() {
                 to: "https://edge.example/".to_owned(),
             }],
             refresh: vec![fluxheim_config::ResponseHeaderRewriteRuleConfig {
-                from: "http://backend.internal/".to_owned(),
-                to: "https://edge.example/".to_owned(),
+                from: "http://backend.internal".to_owned(),
+                to: "https://edge.example".to_owned(),
             }],
             cookie_domain: vec![fluxheim_config::ResponseHeaderRewriteRuleConfig {
                 from: "backend.internal".to_owned(),
@@ -104,9 +106,11 @@ async fn native_route_proxy_applies_route_response_rewrites() {
     );
     assert_eq!(
         response_header(&response, "refresh").as_deref(),
-        Some("0;url=https://edge.example/next")
+        Some("0;url=\"https://edge.example\"")
     );
     assert!(response.contains("set-cookie: sid=1; Domain=edge.example; Path=/\r\n"));
+    assert!(response.contains("set-cookie: Domain=backend.internal; Secure\r\n"));
+    assert!(response.contains("set-cookie: Path=/internal; Secure\r\n"));
 }
 
 #[tokio::test]
@@ -171,13 +175,13 @@ async fn native_route_proxy_regenerates_forwarded_traceparent_span_id() {
 async fn native_route_proxy_renders_request_header_templates_before_forwarding() {
     let upstream = upstream_expect_header(
         "/api/item?version=1",
-        "x-forwarded-host",
+        "x-route-host",
         "route.test",
         "x-remove",
     )
     .await;
     let mut set = BTreeMap::new();
-    set.insert("x-forwarded-host".to_owned(), "{host}".to_owned());
+    set.insert("x-route-host".to_owned(), "{host}".to_owned());
     set.insert("x-original-uri".to_owned(), "{uri}".to_owned());
     set.insert("x-client-upgrade".to_owned(), "{http.upgrade}".to_owned());
     let policy = fluxheim_config::RequestHeaderPolicyOverlayConfig {

@@ -36,7 +36,9 @@ pub(crate) async fn upstream_response(body: &'static str) -> std::net::SocketAdd
     addr
 }
 
-async fn upstream_assert_x_real_ip(expected: &'static str) -> std::net::SocketAddr {
+async fn upstream_assert_client_identity(expected: &'static str) -> std::net::SocketAddr {
+    #[cfg(feature = "privacy-mode")]
+    let _ = expected;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -54,11 +56,19 @@ async fn upstream_assert_x_real_ip(expected: &'static str) -> std::net::SocketAd
             }
         }
         let request = String::from_utf8(request).unwrap();
+        #[cfg(not(feature = "privacy-mode"))]
         assert!(
             request
                 .lines()
                 .any(|line| line.eq_ignore_ascii_case(&format!("x-real-ip: {expected}"))),
             "missing x-real-ip header in request:\n{request}"
+        );
+        #[cfg(feature = "privacy-mode")]
+        assert!(
+            !request
+                .lines()
+                .any(|line| line.to_ascii_lowercase().starts_with("x-real-ip:")),
+            "privacy mode forwarded x-real-ip in request:\n{request}"
         );
         stream
             .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 8\r\n\r\nproxy-ok")
@@ -190,7 +200,7 @@ async fn native_http1_proxy_runtime_serves_nginx_consistent_hash_pool() {
 
 #[tokio::test]
 async fn native_http1_proxy_runtime_accepts_trusted_proxy_protocol_v1_listener() {
-    let upstream = upstream_assert_x_real_ip("203.0.113.10").await;
+    let upstream = upstream_assert_client_identity("203.0.113.10").await;
     let mut config = fluxheim_config::Config::default();
     config.server.listen = vec!["127.0.0.1:0".to_owned()];
     config.server.proxy_protocol = fluxheim_config::DownstreamProxyProtocol::V1;
@@ -219,7 +229,7 @@ async fn native_http1_proxy_runtime_accepts_trusted_proxy_protocol_v1_listener()
 
 #[tokio::test]
 async fn native_http1_proxy_runtime_accepts_trusted_proxy_protocol_v2_listener() {
-    let upstream = upstream_assert_x_real_ip("203.0.113.20").await;
+    let upstream = upstream_assert_client_identity("203.0.113.20").await;
     let mut config = fluxheim_config::Config::default();
     config.server.listen = vec!["127.0.0.1:0".to_owned()];
     config.server.proxy_protocol = fluxheim_config::DownstreamProxyProtocol::V2;

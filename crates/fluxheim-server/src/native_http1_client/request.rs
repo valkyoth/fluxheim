@@ -185,17 +185,10 @@ pub(super) fn connection_tokens(request: &NativeHttp1Request) -> Vec<String> {
 }
 
 pub(super) fn upstream_hop_by_hop_header(name: &str, connection_tokens: &[String]) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "connection"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "te"
-            | "trailer"
-            | "transfer-encoding"
-            | "upgrade"
-    ) || connection_tokens
+    fluxheim_headers::HOP_BY_HOP_REQUEST_HEADERS
         .iter()
-        .any(|token| token.eq_ignore_ascii_case(name))
+        .any(|blocked| name.eq_ignore_ascii_case(blocked))
+        || connection_tokens
+            .iter()
+            .any(|token| token.eq_ignore_ascii_case(name))
 }

@@ -25,3 +25,23 @@ keeping the typed policy ABI constrained.
 - New host capabilities that require blocking I/O or third-party native
   callback code remain out of process until a killable, bounded IPC runner is
   designed and proven.
+
+## Fixed
+
+- Strip the historical `Proxy-Connection` hop-by-hop header on native HTTP/1
+  and HTTP/2 upstream paths through one shared header policy.
+- Treat the first `Set-Cookie` segment only as the cookie name/value pair, so
+  cookies named `Domain` or `Path` are not mistaken for attributes.
+- Preserve closing quotes and trailing syntax while rewriting quoted exact-
+  origin `Refresh` URLs.
+
+## Security
+
+- Strip the distinct spoofable `Client-IP` identity header, including in
+  privacy-mode request sanitization.
+- Reject repeated, embedded, and unbalanced quotes plus bracketed IPv4 in
+  trusted `X-Forwarded-For` chains instead of normalizing malformed hops.
+- Make `Forwarded` construction fallible, use a typed HTTP/HTTPS protocol, and
+  reject invalid host values before producing an upstream header.
+- Add a compile-gated fuzz target for trusted forwarding parsing, `Forwarded`
+  construction, hop-by-hop policy, `Refresh`, and `Set-Cookie` rewrites.

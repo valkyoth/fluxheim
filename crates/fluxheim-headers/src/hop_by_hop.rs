@@ -1,6 +1,7 @@
 pub const HOP_BY_HOP_REQUEST_HEADERS: &[&str] = &[
     "connection",
     "keep-alive",
+    "proxy-connection",
     "proxy-authenticate",
     "proxy-authorization",
     "te",
@@ -63,6 +64,15 @@ mod tests {
         assert_eq!(
             policy.connection_listed_headers(),
             &["close".to_string(), "x-hop".to_string()]
+        );
+    }
+
+    #[test]
+    fn known_headers_include_historical_proxy_connection() {
+        assert!(
+            HOP_BY_HOP_REQUEST_HEADERS
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("proxy-connection"))
         );
     }
 

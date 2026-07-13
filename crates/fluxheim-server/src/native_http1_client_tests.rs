@@ -394,6 +394,7 @@ async fn native_upstream_strips_request_hop_by_hop_headers() {
         let request = String::from_utf8(request).unwrap();
         assert!(!request.to_ascii_lowercase().contains("x-hop:"));
         assert!(!request.to_ascii_lowercase().contains("upgrade:"));
+        assert!(!request.to_ascii_lowercase().contains("proxy-connection:"));
         stream
             .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 99\r\n\r\n")
             .await
@@ -411,6 +412,9 @@ async fn native_upstream_strips_request_hop_by_hop_headers() {
     request
         .headers
         .push(("Upgrade".to_owned(), "websocket".to_owned()));
+    request
+        .headers
+        .push(("Proxy-Connection".to_owned(), "keep-alive".to_owned()));
 
     let response = NativeHttp1Upstream::new(addr.to_string())
         .send(&request)

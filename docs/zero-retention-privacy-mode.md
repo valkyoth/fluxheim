@@ -285,7 +285,7 @@ Required tests:
 - Config validation rejects metrics, disk cache, WAF, Cloudflare real-IP
   restoration, PHP/CGI, and legacy HTTP when privacy mode is enabled.
 - Proxy requests strip `X-Forwarded-For`, `Forwarded`, `X-Real-IP`,
-  `CF-Connecting-IP`, and `True-Client-IP`.
+  `CF-Connecting-IP`, `True-Client-IP`, `X-Client-IP`, and `Client-IP`.
 - Proxy requests do not synthesize new real-IP forwarding headers.
 - Access logging hook emits no request event.
 - No request path, IP, user-agent, cookie, or request ID is written by

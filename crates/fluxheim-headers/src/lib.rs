@@ -11,7 +11,9 @@ mod client_ip;
 mod hop_by_hop;
 
 #[cfg(not(feature = "privacy-mode"))]
-pub use client_ip::{build_forwarded_header, effective_client_ip, parse_x_forwarded_for_ip};
+pub use client_ip::{
+    ForwardedProto, build_forwarded_header, effective_client_ip, parse_x_forwarded_for_ip,
+};
 pub use hop_by_hop::{
     HOP_BY_HOP_REQUEST_HEADERS, HopByHopRequestHeaderPolicy, hop_by_hop_request_header_policy,
 };
@@ -25,6 +27,7 @@ pub const SPOOFABLE_CLIENT_IP_HEADERS: &[&str] = &[
     "cf-connecting-ip",
     "true-client-ip",
     "x-client-ip",
+    "client-ip",
     "x-cluster-client-ip",
     "fastly-client-ip",
 ];
@@ -105,15 +108,28 @@ pub fn rewrite_refresh_url(
     rules: &[ResponseHeaderRewriteRuleConfig],
 ) -> Option<String> {
     let url_start = find_refresh_url_start(value)?;
-    let match_start = if matches!(value.as_bytes().get(url_start), Some(b'"' | b'\'')) {
-        url_start + 1
-    } else {
-        url_start
+    let quote = value
+        .as_bytes()
+        .get(url_start)
+        .copied()
+        .filter(|byte| matches!(byte, b'"' | b'\''));
+    let match_start = url_start.checked_add(usize::from(quote.is_some()))?;
+    let match_end = match quote {
+        Some(quote) => {
+            let relative_end = value[match_start..].find(char::from(quote))?;
+            match_start.checked_add(relative_end)?
+        }
+        None => value.len(),
     };
-    let rewritten_url = rewrite_header_prefix(&value[match_start..], rules)?;
-    let mut rewritten = String::with_capacity(match_start + rewritten_url.len());
+    let rewritten_url = rewrite_header_prefix(&value[match_start..match_end], rules)?;
+    let capacity = value
+        .len()
+        .checked_sub(match_end.checked_sub(match_start)?)?
+        .checked_add(rewritten_url.len())?;
+    let mut rewritten = String::with_capacity(capacity);
     rewritten.push_str(&value[..match_start]);
     rewritten.push_str(&rewritten_url);
+    rewritten.push_str(&value[match_end..]);
     Some(rewritten)
 }
 
@@ -155,6 +171,10 @@ pub fn rewrite_set_cookie_value(
     for (index, segment) in value.split(';').enumerate() {
         if index > 0 {
             rewritten.push(';');
+        }
+        if index == 0 {
+            rewritten.push_str(segment);
+            continue;
         }
         if let Some(next) = rewrite_cookie_attribute(
             segment,
@@ -290,8 +310,9 @@ mod tests {
     use fluxheim_config::{ResponseHeaderRewriteConfig, ResponseHeaderRewriteRuleConfig};
 
     use super::{
-        RouteRegexCaptures, join_header_values, join_header_values_with_separator,
-        rewrite_header_prefix, rewrite_refresh_url, rewrite_set_cookie_value,
+        RouteRegexCaptures, SPOOFABLE_CLIENT_IP_HEADERS, join_header_values,
+        join_header_values_with_separator, rewrite_header_prefix, rewrite_refresh_url,
+        rewrite_set_cookie_value,
     };
 
     #[test]
@@ -326,6 +347,23 @@ mod tests {
             rewrite_refresh_url("0; url=\"http://backend.internal/login\"", &rules),
             Some("0; url=\"https://example.test/login\"".to_owned())
         );
+
+        let origin_rules = [ResponseHeaderRewriteRuleConfig {
+            from: "http://backend.internal".to_owned(),
+            to: "https://example.test".to_owned(),
+        }];
+        assert_eq!(
+            rewrite_refresh_url("0; url=\"http://backend.internal\"", &origin_rules),
+            Some("0; url=\"https://example.test\"".to_owned())
+        );
+        assert_eq!(
+            rewrite_refresh_url("0; url='http://backend.internal'; next", &origin_rules),
+            Some("0; url='https://example.test'; next".to_owned())
+        );
+        assert_eq!(
+            rewrite_refresh_url("0; url=\"http://backend.internal", &origin_rules),
+            None
+        );
     }
 
     #[test]
@@ -355,6 +393,23 @@ mod tests {
                 &rewrite
             ),
             Some("quoted=1; Domain=example.test; Path=/admin; HttpOnly".to_owned())
+        );
+        assert_eq!(
+            rewrite_set_cookie_value("Domain=backend.internal; Secure", &rewrite),
+            None
+        );
+        assert_eq!(
+            rewrite_set_cookie_value("Path=/app/session; Secure", &rewrite),
+            None
+        );
+    }
+
+    #[test]
+    fn spoofable_identity_headers_include_client_ip() {
+        assert!(
+            SPOOFABLE_CLIENT_IP_HEADERS
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("client-ip"))
         );
     }
 

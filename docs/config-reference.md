@@ -1098,6 +1098,14 @@ client-IP forwarding remains stripped. IPv4-mapped IPv6 socket addresses such as
 rate-limit, and GeoIP decisions, so IPv4 CIDR rules apply consistently on
 dual-stack listeners.
 
+The inbound identity denylist includes `Client-IP`, `X-Client-IP`,
+`X-Forwarded-For`, `X-Real-IP`, `Forwarded`, common CDN identity fields, and
+the generated forwarded host/protocol fields. Malformed trusted
+`X-Forwarded-For` hops, including repeated or unbalanced quotes, invalidate the
+whole chain and fall back to the directly observed peer. Add deployment-specific
+identity headers to `headers.request.remove` when an upstream or edge product
+uses a name outside Fluxheim's built-in list.
+
 Warning: setting `strip_inbound_client_ip_headers = false` together with
 `x_forwarded_host = false` or `x_forwarded_proto = false` allows
 client-supplied `X-Forwarded-Host` or `X-Forwarded-Proto` values to reach the
@@ -1182,6 +1190,11 @@ You may still set `headers.response.strict_transport_security` directly as a raw
 header value, but do not combine it with `[headers.response.hsts]` in the same
 policy. HSTS and CSP are intentionally not enabled blindly in examples because
 they are site-specific and can break local HTTP testing or asset policies.
+
+Fluxheim intentionally has no implicit all-sites hardening preset today.
+Compatibility-sensitive policies such as HSTS, CSP, Permissions-Policy, COOP,
+CORP, and COEP must remain operator-selected. The existing typed fields and
+`headers.response.add`/`remove` controls can express these policies explicitly.
 
 Fluxheim sets `Server: fluxheim` and strips `X-Powered-By` by default. Operators
 who do not want a server banner can remove it with `remove = ["server"]`, and

@@ -25,6 +25,15 @@ behavior when the change improves security or project direction.
   is exposed by the test starter and that the deep release gate enables the
   complete Wasm smoke.
 
+### Fixed
+
+- Strip `Client-IP` and `Proxy-Connection`, reject malformed quoted forwarding
+  hops, and validate typed `Forwarded` host/protocol inputs before emission.
+- Correct quoted exact-origin `Refresh` rewriting and avoid treating a cookie
+  named `Domain` or `Path` as a `Set-Cookie` attribute.
+- Add fuzz coverage for the header parsers and rewrite boundaries changed by
+  this hardening pass.
+
 ## 1.7.9 - 2026-07-12
 
 ### Added

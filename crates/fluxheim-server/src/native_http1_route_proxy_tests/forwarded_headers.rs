@@ -28,6 +28,7 @@ async fn native_route_proxy_request_header_builder_uses_secure_forwarded_default
         assert!(request.contains("x-forwarded-host: route.test\r\n"));
         assert!(request.contains("x-forwarded-proto: http\r\n"));
         assert!(!request.to_ascii_lowercase().contains("cf-connecting-ip:"));
+        assert!(!request.to_ascii_lowercase().contains("client-ip:"));
         assert!(!request.contains("x-forwarded-for: 192.0.2.9\r\n"));
         stream
             .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 8\r\n\r\nbaseline")
@@ -45,6 +46,7 @@ async fn native_route_proxy_request_header_builder_uses_secure_forwarded_default
          Host: route.test\r\n\
          X-Forwarded-For: 192.0.2.9\r\n\
          CF-Connecting-IP: 192.0.2.10\r\n\
+         Client-IP: 192.0.2.11\r\n\
          Connection: close\r\n\r\n",
     )
     .await;

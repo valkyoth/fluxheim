@@ -3,7 +3,7 @@ use fluxheim_config::ForwardedClientIpHeaderMode;
 use fluxheim_config::{HeaderValues, RequestHeaderPolicyConfig};
 use fluxheim_headers::SPOOFABLE_CLIENT_IP_HEADERS;
 #[cfg(not(feature = "privacy-mode"))]
-use fluxheim_headers::{build_forwarded_header, effective_client_ip};
+use fluxheim_headers::{ForwardedProto, build_forwarded_header, effective_client_ip};
 
 use crate::NativeHttp1Request;
 #[cfg(not(feature = "privacy-mode"))]
@@ -131,10 +131,10 @@ impl NativeRouteRequestHeaderPolicy {
     #[cfg(not(feature = "privacy-mode"))]
     fn apply_forwarded_headers(&self, request: &mut NativeHttp1Request) {
         let original_host = header_value(request, "host").map(str::to_owned);
-        let proto = if request.downstream_tls {
-            "https"
+        let (proto, forwarded_proto) = if request.downstream_tls {
+            ("https", ForwardedProto::Https)
         } else {
-            "http"
+            ("http", ForwardedProto::Http)
         };
 
         if self.strip_inbound_client_ip_headers {
@@ -212,11 +212,13 @@ impl NativeRouteRequestHeaderPolicy {
 
         if self.forwarded {
             if let Some(ip) = client_ip {
-                replace_request_header(
-                    request,
-                    "forwarded",
-                    build_forwarded_header(ip, original_host.as_deref(), proto),
-                );
+                if let Some(value) =
+                    build_forwarded_header(ip, original_host.as_deref(), forwarded_proto)
+                {
+                    replace_request_header(request, "forwarded", value);
+                } else {
+                    remove_request_header(request, "forwarded");
+                }
             } else {
                 remove_request_header(request, "forwarded");
             }

@@ -12,6 +12,7 @@ cargo-fuzz = true
 [dependencies]
 fluxheim-cache = { path = "../crates/fluxheim-cache" }
 fluxheim-config = { path = "../crates/fluxheim-config" }
+fluxheim-headers = { path = "../crates/fluxheim-headers" }
 fluxheim-php-fpm = { path = "../crates/fluxheim-php-fpm" }
 libfuzzer-sys = "0.4"
 
@@ -32,6 +33,13 @@ bench = false
 [[bin]]
 name = "parse_php_response"
 path = "fuzz_targets/parse_php_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "header_policy"
+path = "fuzz_targets/header_policy.rs"
 test = false
 doc = false
 bench = false

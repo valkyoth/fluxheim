@@ -416,6 +416,7 @@ cargo install --locked cargo-fuzz
 scripts/validate-fuzz-targets.sh
 cargo fuzz run host_normalization -- -max_total_time=60
 cargo fuzz run cache_headers -- -max_total_time=60
+cargo fuzz run header_policy -- -max_total_time=60
 ```
 
 Increase the runtime substantially before a stable tag. Keep generated corpora

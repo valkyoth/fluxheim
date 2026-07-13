@@ -73,25 +73,34 @@ async fn native_proxy_reuses_origin_connection_for_separate_downstream_clients()
 #[tokio::test]
 async fn native_proxy_writes_upstream_proxy_protocol_v1_from_listener_context() {
     let expected_destination_port = Arc::new(AtomicUsize::new(0));
+    #[cfg(not(feature = "privacy-mode"))]
     let expected_destination_port_for_upstream = Arc::clone(&expected_destination_port);
     let upstream = upstream(move |request, mut stream| {
+        #[cfg(not(feature = "privacy-mode"))]
         let expected_destination_port = Arc::clone(&expected_destination_port_for_upstream);
         async move {
             let request = String::from_utf8(request).unwrap();
             let proxy_line = request.lines().next().unwrap_or_default();
             let fields: Vec<_> = proxy_line.split_whitespace().collect();
-            assert_eq!(fields.len(), 6);
-            assert_eq!(fields[0], "PROXY");
-            assert_eq!(fields[1], "TCP4");
-            assert_eq!(fields[2], "127.0.0.1");
-            assert_eq!(fields[3], "127.0.0.1");
-            assert_ne!(fields[4], "0");
-            assert_eq!(
-                fields[5],
-                expected_destination_port
-                    .load(Ordering::Acquire)
-                    .to_string()
-            );
+            #[cfg(feature = "privacy-mode")]
+            {
+                assert_eq!(fields, ["PROXY", "UNKNOWN"]);
+            }
+            #[cfg(not(feature = "privacy-mode"))]
+            {
+                assert_eq!(fields.len(), 6);
+                assert_eq!(fields[0], "PROXY");
+                assert_eq!(fields[1], "TCP4");
+                assert_eq!(fields[2], "127.0.0.1");
+                assert_eq!(fields[3], "127.0.0.1");
+                assert_ne!(fields[4], "0");
+                assert_eq!(
+                    fields[5],
+                    expected_destination_port
+                        .load(Ordering::Acquire)
+                        .to_string()
+                );
+            }
             assert!(request.contains("GET /proxy-protocol HTTP/1.1\r\n"));
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")

@@ -126,8 +126,17 @@ version = "0.0.0"
 dependencies = [
  "fluxheim-cache",
  "fluxheim-config",
+ "fluxheim-headers",
  "fluxheim-php-fpm",
  "libfuzzer-sys",
+]
+
+[[package]]
+name = "fluxheim-headers"
+version = "1.7.10"
+dependencies = [
+ "fluxheim-config",
+ "fluxheim-protocol",
 ]
 
 [[package]]

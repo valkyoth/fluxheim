@@ -91,7 +91,12 @@ async fn native_route_proxy_default_constructor_applies_safe_request_headers() {
 async fn native_route_proxy_privacy_mode_strips_spoofable_headers_after_mutation() {
     let upstream = upstream_expect_headers_absent(
         "/privacy",
-        &["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto"],
+        &[
+            "x-forwarded-for",
+            "x-forwarded-host",
+            "x-forwarded-proto",
+            "client-ip",
+        ],
     )
     .await;
     let mut overlay = fluxheim_config::RequestHeaderPolicyOverlayConfig::default();
@@ -109,6 +114,7 @@ async fn native_route_proxy_privacy_mode_strips_spoofable_headers_after_mutation
          X-Forwarded-For: 203.0.113.9\r\n\
          X-Forwarded-Host: admin.internal\r\n\
          X-Forwarded-Proto: https\r\n\
+         Client-IP: 203.0.113.11\r\n\
          Connection: close\r\n\r\n",
     )
     .await;
