@@ -5,7 +5,7 @@ the 1.7 WebAssembly policy line. It turns the documented migration examples
 into explicit operator-selectable and release-gated acceptance evidence while
 keeping the typed policy ABI constrained.
 
-## In Progress
+## Added
 
 - Expose focused `scripts/test_starter.py` entries for F5 iRules-style,
   nginx Lua/OpenResty-style, HAProxy Lua/SPOE-style, and VCL-like Wasm policy
