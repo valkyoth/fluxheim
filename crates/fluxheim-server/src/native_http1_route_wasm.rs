@@ -1897,6 +1897,11 @@ mod tests {
     proptest! {
         #[test]
         fn wasm_guest_id_decoders_are_total(first in any::<i32>(), second in any::<i32>()) {
+            let _ = wasm_default_outcome_label(first);
+            let _ = wasm_header_outcome_label(first);
+            let _ = wasm_route_outcome_label(first);
+            let _ = wasm_cache_lookup_outcome_label(first);
+            let _ = wasm_cache_store_outcome_label(first);
             let _ = wasm_request_header_mutation(first, second);
             let _ = wasm_response_header_mutation(first, second);
             let _ = wasm_response_removable_header(first);

@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-web"
-version = "1.7.9"
+version = "1.7.10"
 edition = "2024"
 rust-version = "1.97.0"
 license = "EUPL-1.2"

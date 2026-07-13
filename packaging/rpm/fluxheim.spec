@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.7.9
+Version:        1.7.10
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Mon Jul 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.10-1
+- Add selectable live smokes for all four Wasm migration-example families.
+- Require family launcher coverage and the complete deep-gate Wasm smoke.
+- Extend arbitrary guest-integer coverage across every Wasm outcome decoder.
+
 * Sun Jul 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.9-1
 - Start documented and runnable Wasm migration-example parity work.
 - Add the F5 iRules-style route access example and real listener smoke.

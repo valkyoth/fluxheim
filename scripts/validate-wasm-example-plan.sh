@@ -63,8 +63,31 @@ then
     exit 1
 fi
 
+for entry in \
+    "wasm-irules irules" \
+    "wasm-openresty openresty" \
+    "wasm-haproxy-spoe haproxy-spoe" \
+    "wasm-vcl vcl"
+do
+    test_id=${entry%% *}
+    family=${entry#* }
+    if ! python3 scripts/test_starter.py --run "$test_id" --dry-run \
+        | grep -q "scripts/smoke_wasm_policy_examples.sh $family"
+    then
+        echo "wasm example plan: test starter does not expose $family coverage" >&2
+        exit 1
+    fi
+done
+
 if ! grep -q "scripts/smoke_wasm_all.sh" scripts/stable_release_gate.sh; then
     echo "wasm example plan: stable release gate does not run the complete Wasm smoke" >&2
+    exit 1
+fi
+
+if ! grep -q 'FLUXHEIM_GATE_WASM="${FLUXHEIM_GATE_WASM:-1}"' \
+    scripts/stable_release_deep_gate.sh
+then
+    echo "wasm example plan: deep release gate does not require the complete Wasm smoke" >&2
     exit 1
 fi
 

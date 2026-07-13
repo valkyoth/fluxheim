@@ -207,6 +207,11 @@ is the single orchestration entry used by both `scripts/test_starter.py` and
 the opt-in stable/deep release gate. This avoids treating multiple script paths
 as arguments to one launcher command and keeps human and CI coverage aligned.
 
+`v1.7.10` also exposes each family independently through `wasm-irules`,
+`wasm-openresty`, `wasm-haproxy-spoe`, and `wasm-vcl` test-starter entries.
+These focused entries invoke the same family checks used by the aggregate
+smoke; they are not reduced documentation-only substitutes.
+
 The standalone `scripts/smoke_wasm_policy_examples_binary.sh` proof also loads
 the generated files through a private plugin root and exact SHA-256 pins,
 starts the real Fluxheim binary from a file-based config, and sends HTTP

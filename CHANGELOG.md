@@ -7,7 +7,23 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.7.9 - Unreleased
+## 1.7.10 - Unreleased
+
+### Added
+
+- Add independently selectable `scripts/test_starter.py` entries for the F5
+  iRules-style, nginx Lua/OpenResty-style, HAProxy Lua/SPOE-style, and VCL-like
+  Wasm policy examples while retaining one aggregate release-gate smoke.
+- Extend arbitrary guest-integer property coverage across symbolic host-call
+  IDs and every current Wasm outcome decoder.
+
+### Changed
+
+- Require the Wasm acceptance validator to prove that every migration family
+  is exposed by the test starter and that the deep release gate enables the
+  complete Wasm smoke.
+
+## 1.7.9 - 2026-07-12
 
 ### Added
 
