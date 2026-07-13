@@ -16,6 +16,8 @@ behavior when the change improves security or project direction.
   Wasm policy examples while retaining one aggregate release-gate smoke.
 - Extend arbitrary guest-integer property coverage across symbolic host-call
   IDs and every current Wasm outcome decoder.
+- Run decoder totality property coverage from the complete Wasm smoke and
+  document the finite, non-blocking in-process host-callback boundary.
 
 ### Changed
 

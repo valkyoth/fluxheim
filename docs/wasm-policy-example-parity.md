@@ -212,6 +212,10 @@ as arguments to one launcher command and keeps human and CI coverage aligned.
 These focused entries invoke the same family checks used by the aggregate
 smoke; they are not reduced documentation-only substitutes.
 
+The aggregate smoke also runs the arbitrary guest-ID decoder property test.
+This keeps symbolic host-call and guest-outcome decoding totality inside the
+same deep-gate evidence as the runnable examples.
+
 The standalone `scripts/smoke_wasm_policy_examples_binary.sh` proof also loads
 the generated files through a private plugin root and exact SHA-256 pins,
 starts the real Fluxheim binary from a file-based config, and sends HTTP

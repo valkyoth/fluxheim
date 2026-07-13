@@ -565,6 +565,24 @@ the whole cache-hook process budget. Direct backend pool/member choice,
 plugin-provided persistence-key choice, dynamic mirror/shadow target choice,
 and richer store policy hooks remain staged for later `1.7.x` releases.
 
+## Native Host Callback Safety
+
+The in-process `fluxheim-policy-v1` host callbacks are intentionally limited to
+finite symbolic-ID decoding, bounded context reads, and mutation of
+per-invocation bounded state. They do not perform filesystem or network I/O,
+IPC, sleeps, async waits, process execution, or third-party callback dispatch.
+The server crate forbids unsafe code and denies production `panic!`, `unwrap`,
+and `expect` use. Guest-controlled integer IDs and outcomes are decoded with
+total matches that reject unknown values, and the complete Wasm smoke runs a
+property test over arbitrary signed 32-bit inputs for every current decoder.
+
+A future host capability that needs blocking I/O, contended external state, or
+third-party native code must not be added to this in-process callback surface.
+It first requires a killable subprocess runner with authenticated bounded IPC,
+process-wide admission, hard timeout termination, and crash cleanup. A thread
+timeout or `catch_unwind` is not a hard-isolation substitute because Fluxheim
+release builds abort on panic.
+
 ## Reload Semantics
 
 WASM configuration must stay explicit in reload-impact classification. Changes

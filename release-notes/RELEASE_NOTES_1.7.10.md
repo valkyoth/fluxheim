@@ -14,6 +14,9 @@ keeping the typed policy ABI constrained.
   and validate that the deep release gate requires the complete Wasm smoke.
 - Audit every guest-controlled symbolic ID decoder for total, panic-free
   behavior over arbitrary integer inputs.
+- Make the in-process native host-callback contract explicit: finite symbolic
+  operations only, with blocking I/O and third-party callback code requiring a
+  future killable subprocess boundary.
 
 ## Compatibility Boundary
 

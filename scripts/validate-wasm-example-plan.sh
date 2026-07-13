@@ -91,6 +91,11 @@ then
     exit 1
 fi
 
+if ! grep -q "wasm_guest_id_decoders_are_total" scripts/smoke_wasm_all.sh; then
+    echo "wasm example plan: complete smoke does not prove guest ID decoder totality" >&2
+    exit 1
+fi
+
 if ! grep -q "capability parity, not syntax" "$examples"; then
     echo "wasm example plan: examples doc must state capability parity, not syntax compatibility" >&2
     exit 1

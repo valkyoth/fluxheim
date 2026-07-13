@@ -158,6 +158,7 @@ fi
 - Add selectable live smokes for all four Wasm migration-example families.
 - Require family launcher coverage and the complete deep-gate Wasm smoke.
 - Extend arbitrary guest-integer coverage across every Wasm outcome decoder.
+- Document and gate the finite, non-blocking native host-callback contract.
 
 * Sun Jul 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.9-1
 - Start documented and runnable Wasm migration-example parity work.
