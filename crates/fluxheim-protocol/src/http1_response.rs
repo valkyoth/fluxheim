@@ -69,7 +69,7 @@ fn parse_status_line(line: &str) -> Result<(Http1Version, u16, &str), Http1Parse
     let status = status
         .parse::<u16>()
         .map_err(|_| Http1ParseError::InvalidStatusCode)?;
-    if !(100..=999).contains(&status) {
+    if !(100..=599).contains(&status) {
         return Err(Http1ParseError::InvalidStatusCode);
     }
     if reason

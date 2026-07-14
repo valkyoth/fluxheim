@@ -7,7 +7,7 @@ use super::{
 };
 
 fn header<'a>(name: &'a str, value: &'a str) -> Http1Header<'a> {
-    Http1Header { name, value }
+    Http1Header::new(name, value).expect("valid test header")
 }
 
 #[test]
@@ -208,12 +208,23 @@ fn rejects_invalid_http1_request_target_forms() {
     );
     assert_eq!(
         http1_request_target("CONNECT", "user@example.test:443"),
-        Err(Http1ParseError::InvalidRequestTarget)
+        Err(Http1ParseError::InvalidAuthority)
     );
     assert_eq!(
         http1_request_target("GET", "http://user@example.test/path"),
-        Err(Http1ParseError::InvalidRequestTarget)
+        Err(Http1ParseError::InvalidAuthority)
     );
+    for target in [
+        "http:%GG",
+        "http:\\internal",
+        "http:#fragment",
+        "ftp://example.test/",
+    ] {
+        assert_eq!(
+            http1_request_target("GET", target),
+            Err(Http1ParseError::InvalidRequestTarget)
+        );
+    }
 }
 
 #[test]
@@ -238,19 +249,22 @@ fn parsed_head_exposes_request_target_decision() {
 #[test]
 fn classifies_content_length_and_chunked_body_framing() {
     assert_eq!(
-        http1_request_body_framing(&[]),
+        http1_request_body_framing(Http1Version::Http11, &[]),
         Ok(Http1BodyFraming::NoBody)
     );
     assert_eq!(
-        http1_request_body_framing(&[header("Content-Length", "0")]),
+        http1_request_body_framing(Http1Version::Http11, &[header("Content-Length", "0")]),
         Ok(Http1BodyFraming::NoBody)
     );
     assert_eq!(
-        http1_request_body_framing(&[header("Content-Length", "42")]),
+        http1_request_body_framing(Http1Version::Http11, &[header("Content-Length", "42")]),
         Ok(Http1BodyFraming::ContentLength(42))
     );
     assert_eq!(
-        http1_request_body_framing(&[header("Transfer-Encoding", "chunked")]),
+        http1_request_body_framing(
+            Http1Version::Http11,
+            &[header("Transfer-Encoding", "chunked")]
+        ),
         Ok(Http1BodyFraming::Chunked)
     );
 }
@@ -258,30 +272,45 @@ fn classifies_content_length_and_chunked_body_framing() {
 #[test]
 fn rejects_ambiguous_or_invalid_body_framing() {
     assert_eq!(
-        http1_request_body_framing(&[
-            header("Transfer-Encoding", "chunked"),
-            header("Content-Length", "1")
-        ]),
+        http1_request_body_framing(
+            Http1Version::Http11,
+            &[
+                header("Transfer-Encoding", "chunked"),
+                header("Content-Length", "1")
+            ]
+        ),
         Err(Http1ParseError::ConflictingBodyFraming)
     );
     assert_eq!(
-        http1_request_body_framing(&[header("Content-Length", "1"), header("Content-Length", "2")]),
+        http1_request_body_framing(
+            Http1Version::Http11,
+            &[header("Content-Length", "1"), header("Content-Length", "2")]
+        ),
         Err(Http1ParseError::DuplicateContentLength)
     );
     assert_eq!(
-        http1_request_body_framing(&[header("Content-Length", "1"), header("Content-Length", "1")]),
+        http1_request_body_framing(
+            Http1Version::Http11,
+            &[header("Content-Length", "1"), header("Content-Length", "1")]
+        ),
         Err(Http1ParseError::DuplicateContentLength)
     );
     assert_eq!(
-        http1_request_body_framing(&[header("Content-Length", "1x")]),
+        http1_request_body_framing(Http1Version::Http11, &[header("Content-Length", "1x")]),
         Err(Http1ParseError::InvalidContentLength)
     );
     assert_eq!(
-        http1_request_body_framing(&[header("Transfer-Encoding", "chunked, gzip")]),
+        http1_request_body_framing(
+            Http1Version::Http11,
+            &[header("Transfer-Encoding", "chunked, gzip")]
+        ),
         Err(Http1ParseError::UnsupportedTransferEncoding)
     );
     assert_eq!(
-        http1_request_body_framing(&[header("Transfer-Encoding", "gzip, chunked")]),
+        http1_request_body_framing(
+            Http1Version::Http11,
+            &[header("Transfer-Encoding", "gzip, chunked")]
+        ),
         Err(Http1ParseError::UnsupportedTransferEncoding)
     );
 }
@@ -451,42 +480,11 @@ fn chunked_decoder_enforces_output_and_body_limits() {
 
 #[test]
 fn chunked_decoder_default_body_limit_is_bounded() {
-    assert_eq!(
-        Http1ChunkLimits::default().max_body_bytes,
-        DEFAULT_HTTP1_MAX_BODY_BYTES
-    );
-    assert!(Http1ChunkLimits::default().max_body_bytes < usize::MAX);
-}
-
-#[test]
-fn chunked_decoder_rejects_invalid_chunk_shapes() {
-    let mut output = [0u8; 16];
-
-    assert_eq!(
-        decode_http1_chunked_body(b"g\r\nbad\r\n", &mut output, Http1ChunkLimits::default()),
-        Err(Http1ParseError::InvalidChunkSize)
-    );
-    assert_eq!(
-        decode_http1_chunked_body(b"4\r\nWikiXX", &mut output, Http1ChunkLimits::default()),
-        Err(Http1ParseError::InvalidChunk)
-    );
-    assert_eq!(
-        decode_http1_chunked_body(
-            b"5\r\nhello\r\n0\r\n\r\n",
-            &mut output,
-            Http1ChunkLimits {
-                max_chunk_size: 4,
-                ..Http1ChunkLimits::default()
-            }
-        ),
-        Err(Http1ParseError::ChunkTooLarge)
-    );
-    assert_eq!(
-        decode_http1_chunked_body(
-            b"ffffffffffffffff\r\n",
-            &mut output,
-            Http1ChunkLimits::default()
-        ),
-        Err(Http1ParseError::ChunkTooLarge)
-    );
+    let limits = Http1ChunkLimits::default();
+    assert_eq!(limits.max_body_bytes, DEFAULT_HTTP1_MAX_BODY_BYTES);
+    assert!(limits.max_body_bytes < usize::MAX);
+    assert!(limits.max_encoded_bytes > limits.max_body_bytes);
+    assert!(limits.max_chunk_line_bytes < limits.max_encoded_bytes);
+    assert!(limits.max_chunk_count < usize::MAX);
+    assert!(limits.max_chunk_extension_bytes < limits.max_encoded_bytes);
 }

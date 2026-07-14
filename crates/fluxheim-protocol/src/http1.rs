@@ -1,5 +1,5 @@
 use crate::http_token_valid;
-use crate::http1_target::{Http1RequestTarget, http1_request_target};
+use crate::http1_target::{Http1RequestTarget, http1_request_target, validate_http1_authority};
 
 pub const DEFAULT_HTTP1_MAX_HEAD_BYTES: usize = 64 * 1024;
 pub const DEFAULT_HTTP1_MAX_HEADER_COUNT: usize = 100;
@@ -33,8 +33,34 @@ pub enum Http1Version {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Http1Header<'a> {
-    pub name: &'a str,
-    pub value: &'a str,
+    name: &'a str,
+    value: &'a str,
+}
+
+impl<'a> Http1Header<'a> {
+    pub fn new(name: &'a str, value: &'a str) -> Result<Self, Http1ParseError> {
+        if !http_token_valid(name) {
+            return Err(Http1ParseError::InvalidHeaderName);
+        }
+        if value
+            .bytes()
+            .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f..=0xff))
+        {
+            return Err(Http1ParseError::InvalidHeaderValue);
+        }
+        Ok(Self {
+            name,
+            value: value.trim(),
+        })
+    }
+
+    pub const fn name(&self) -> &'a str {
+        self.name
+    }
+
+    pub const fn value(&self) -> &'a str {
+        self.value
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -48,7 +74,7 @@ pub struct Http1RequestHead<'a> {
 
 impl<'a> Http1RequestHead<'a> {
     pub fn body_framing(&self) -> Result<Http1BodyFraming, Http1ParseError> {
-        http1_request_body_framing(&self.headers)
+        http1_request_body_framing(self.version, &self.headers)
     }
 
     pub fn host(&self) -> Result<&'a str, Http1ParseError> {
@@ -61,6 +87,46 @@ impl<'a> Http1RequestHead<'a> {
 
     pub fn request_target(&self) -> Result<Http1RequestTarget<'a>, Http1ParseError> {
         http1_request_target(self.method, self.target)
+    }
+
+    pub fn effective_authority(&self) -> Result<&'a str, Http1ParseError> {
+        let target = self.request_target()?;
+        let host = http1_optional_host(&self.headers)?;
+        match target {
+            Http1RequestTarget::AbsoluteUri {
+                authority: Some(authority),
+                ..
+            }
+            | Http1RequestTarget::Authority { raw: authority, .. } => {
+                validate_http1_authority(authority)?;
+                if host.is_some_and(|host| !authority.eq_ignore_ascii_case(host)) {
+                    return Err(Http1ParseError::ConflictingAuthority);
+                }
+                Ok(authority)
+            }
+            Http1RequestTarget::Origin { .. } | Http1RequestTarget::Asterisk => {
+                host.ok_or(Http1ParseError::MissingHost)
+            }
+            Http1RequestTarget::AbsoluteUri {
+                authority: None, ..
+            } => Err(Http1ParseError::InvalidAuthority),
+        }
+    }
+
+    pub fn validate_message(&self) -> Result<Http1RequestValidation<'a>, Http1ParseError> {
+        if self.version == Http1Version::Http11 {
+            http1_required_host(&self.headers)?;
+        }
+        let effective_authority = match self.effective_authority() {
+            Ok(authority) => Some(authority),
+            Err(Http1ParseError::MissingHost) if self.version == Http1Version::Http10 => None,
+            Err(error) => return Err(error),
+        };
+        Ok(Http1RequestValidation {
+            body_framing: self.body_framing()?,
+            connection_directive: self.connection_directive()?,
+            effective_authority,
+        })
     }
 }
 
@@ -114,7 +180,9 @@ impl Http1HeadBuffer {
 pub enum Http1ParseError {
     BodyTooLarge,
     ChunkTooLarge,
+    ChunkMetadataTooLarge,
     ConflictingBodyFraming,
+    ConflictingAuthority,
     DuplicateContentLength,
     DuplicateHost,
     HeaderCountExceeded,
@@ -124,6 +192,7 @@ pub enum Http1ParseError {
     InvalidContentLength,
     InvalidChunk,
     InvalidChunkSize,
+    InvalidAuthority,
     InvalidHost,
     InvalidHeaderName,
     InvalidHeaderValue,
@@ -133,6 +202,7 @@ pub enum Http1ParseError {
     InvalidStatusCode,
     InvalidUtf8,
     MissingHost,
+    EncodedBodyTooLarge,
     ObsoleteLineFolding,
     OutputTooSmall,
     StartLineTooLong,
@@ -151,6 +221,44 @@ pub enum Http1BodyFraming {
 pub enum Http1ConnectionDirective {
     Close,
     Persistent,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Http1ConnectionOptions<'a> {
+    options: Vec<&'a str>,
+}
+
+impl Http1ConnectionOptions<'_> {
+    pub fn contains(&self, name: &str) -> bool {
+        self.options
+            .iter()
+            .any(|option| option.eq_ignore_ascii_case(name))
+    }
+
+    pub fn identifies_hop_by_hop_header(&self, name: &str) -> bool {
+        self.contains(name)
+            || matches_ignore_ascii_case(
+                name,
+                &[
+                    "connection",
+                    "keep-alive",
+                    "proxy-authenticate",
+                    "proxy-authorization",
+                    "proxy-connection",
+                    "te",
+                    "trailer",
+                    "transfer-encoding",
+                    "upgrade",
+                ],
+            )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Http1RequestValidation<'a> {
+    pub body_framing: Http1BodyFraming,
+    pub connection_directive: Http1ConnectionDirective,
+    pub effective_authority: Option<&'a str>,
 }
 
 pub fn parse_http1_request_head(
@@ -195,23 +303,27 @@ pub fn parse_http1_request_head(
 }
 
 pub fn http1_request_body_framing(
+    version: Http1Version,
     headers: &[Http1Header<'_>],
 ) -> Result<Http1BodyFraming, Http1ParseError> {
     let mut content_length = None;
     let mut transfer_encoding = None;
 
     for header in headers {
-        if header.name.eq_ignore_ascii_case("content-length") {
-            let parsed = parse_content_length(header.value)?;
+        if header.name().eq_ignore_ascii_case("content-length") {
+            let parsed = parse_content_length(header.value())?;
             if content_length.is_some() {
                 return Err(Http1ParseError::DuplicateContentLength);
             }
             content_length = Some(parsed);
-        } else if header.name.eq_ignore_ascii_case("transfer-encoding") {
+        } else if header.name().eq_ignore_ascii_case("transfer-encoding") {
+            if version == Http1Version::Http10 {
+                return Err(Http1ParseError::UnsupportedTransferEncoding);
+            }
             if transfer_encoding.is_some() {
                 return Err(Http1ParseError::UnsupportedTransferEncoding);
             }
-            transfer_encoding = Some(parse_transfer_encoding(header.value)?);
+            transfer_encoding = Some(parse_transfer_encoding(header.value())?);
         }
     }
 
@@ -224,46 +336,33 @@ pub fn http1_request_body_framing(
 }
 
 pub fn http1_required_host<'a>(headers: &[Http1Header<'a>]) -> Result<&'a str, Http1ParseError> {
+    http1_optional_host(headers)?.ok_or(Http1ParseError::MissingHost)
+}
+
+fn http1_optional_host<'a>(
+    headers: &[Http1Header<'a>],
+) -> Result<Option<&'a str>, Http1ParseError> {
     let mut host = None;
     for header in headers {
-        if header.name.eq_ignore_ascii_case("host") {
+        if header.name().eq_ignore_ascii_case("host") {
             if host.is_some() {
                 return Err(Http1ParseError::DuplicateHost);
             }
-            let value = header.value.trim();
-            if value.is_empty() || value.bytes().any(|byte| matches!(byte, b' ' | b'\t')) {
-                return Err(Http1ParseError::InvalidHost);
-            }
+            let value = header.value().trim();
+            validate_http1_authority(value).map_err(|_| Http1ParseError::InvalidHost)?;
             host = Some(value);
         }
     }
-    host.ok_or(Http1ParseError::MissingHost)
+    Ok(host)
 }
 
 pub fn http1_connection_directive(
     version: Http1Version,
     headers: &[Http1Header<'_>],
 ) -> Result<Http1ConnectionDirective, Http1ParseError> {
-    let mut close = false;
-    let mut keep_alive = false;
-
-    for header in headers {
-        if !header.name.eq_ignore_ascii_case("connection") {
-            continue;
-        }
-        for token in header.value.split(',') {
-            let token = token.trim();
-            if !http_token_valid(token) {
-                return Err(Http1ParseError::InvalidConnection);
-            }
-            if token.eq_ignore_ascii_case("close") {
-                close = true;
-            } else if token.eq_ignore_ascii_case("keep-alive") {
-                keep_alive = true;
-            }
-        }
-    }
-
+    let options = http1_connection_options(headers)?;
+    let close = options.contains("close");
+    let keep_alive = options.contains("keep-alive");
     if close {
         return Ok(Http1ConnectionDirective::Close);
     }
@@ -272,6 +371,36 @@ pub fn http1_connection_directive(
     } else {
         Ok(Http1ConnectionDirective::Close)
     }
+}
+
+pub fn http1_connection_options<'a>(
+    headers: &[Http1Header<'a>],
+) -> Result<Http1ConnectionOptions<'a>, Http1ParseError> {
+    let mut options = Vec::new();
+    for header in headers {
+        if !header.name().eq_ignore_ascii_case("connection") {
+            continue;
+        }
+        for token in header.value().split(',') {
+            let token = token.trim();
+            if !http_token_valid(token) {
+                return Err(Http1ParseError::InvalidConnection);
+            }
+            if !options
+                .iter()
+                .any(|existing: &&str| existing.eq_ignore_ascii_case(token))
+            {
+                options.push(token);
+            }
+        }
+    }
+    Ok(Http1ConnectionOptions { options })
+}
+
+fn matches_ignore_ascii_case(value: &str, candidates: &[&str]) -> bool {
+    candidates
+        .iter()
+        .any(|candidate| value.eq_ignore_ascii_case(candidate))
 }
 
 pub(super) fn complete_head_len(
@@ -345,17 +474,5 @@ pub(super) fn parse_header_line(line: &str) -> Result<Http1Header<'_>, Http1Pars
     let Some((name, value)) = line.split_once(':') else {
         return Err(Http1ParseError::InvalidHeaderName);
     };
-    if !http_token_valid(name) {
-        return Err(Http1ParseError::InvalidHeaderName);
-    }
-    if value
-        .bytes()
-        .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f..=0xff))
-    {
-        return Err(Http1ParseError::InvalidHeaderValue);
-    }
-    Ok(Http1Header {
-        name,
-        value: value.trim(),
-    })
+    Http1Header::new(name, value)
 }

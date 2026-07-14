@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fluxheim_protocol::{
-    Http1ConnectionDirective, Http1HeadLimits, Http1Header, Http1ParseError, Http1Version,
+    Http1ConnectionDirective, Http1HeadLimits, Http1Header, Http1ParseError,
     parse_http1_request_head,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
@@ -204,30 +204,22 @@ where
                 Some(head) => head,
                 None => return Ok(()),
             };
-            let close_after_response = match head.connection_directive() {
-                Ok(directive) => directive == Http1ConnectionDirective::Close,
-                Err(error) => {
-                    write_bad_request(&mut stream).await?;
-                    return Err(error.into());
-                }
-            };
-            if head.version == Http1Version::Http11
-                && let Err(error) = head.host()
-            {
-                write_bad_request(&mut stream).await?;
-                return Err(error.into());
-            }
-            let body_framing = match head.body_framing() {
-                Ok(framing) => framing,
+            let validation = match head.validate_message() {
+                Ok(validation) => validation,
                 Err(error) => {
                     write_bad_request(&mut stream).await?;
                     return Err(error.into());
                 }
             };
             (
-                close_after_response,
-                body_framing,
-                owned_request_from_head(&head, peer_addr, &request_context),
+                validation.connection_directive == Http1ConnectionDirective::Close,
+                validation.body_framing,
+                owned_request_from_head(
+                    &head,
+                    validation.effective_authority,
+                    peer_addr,
+                    &request_context,
+                ),
             )
         };
         let request_body_timeout = handler
@@ -398,6 +390,7 @@ where
 
 fn owned_request_from_head(
     head: &fluxheim_protocol::Http1RequestHead<'_>,
+    effective_authority: Option<&str>,
     peer_addr: Option<SocketAddr>,
     request_context: &NativeHttp1RequestContext,
 ) -> NativeHttp1Request {
@@ -411,17 +404,25 @@ fn owned_request_from_head(
         geo_context: request_context.geo_context.clone(),
         target: head.target.to_owned(),
         version: head.version,
-        headers: owned_headers(&head.headers),
+        headers: owned_headers(&head.headers, effective_authority),
         body: Zeroizing::new(Vec::new()),
         trailers: Vec::new(),
     }
 }
 
-fn owned_headers(headers: &[Http1Header<'_>]) -> Vec<(String, String)> {
-    headers
+fn owned_headers(
+    headers: &[Http1Header<'_>],
+    effective_authority: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut owned = headers
         .iter()
-        .map(|header| (header.name.to_owned(), header.value.to_owned()))
-        .collect()
+        .filter(|header| !header.name().eq_ignore_ascii_case("host"))
+        .map(|header| (header.name().to_owned(), header.value().to_owned()))
+        .collect::<Vec<_>>();
+    if let Some(authority) = effective_authority {
+        owned.push(("host".to_owned(), authority.to_owned()));
+    }
+    owned
 }
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl-backend"))]

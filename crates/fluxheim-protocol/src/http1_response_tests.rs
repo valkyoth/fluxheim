@@ -3,7 +3,7 @@ use super::{
 };
 
 fn header<'a>(name: &'a str, value: &'a str) -> Http1Header<'a> {
-    Http1Header { name, value }
+    Http1Header::new(name, value).expect("valid test header")
 }
 
 #[test]
@@ -42,6 +42,13 @@ fn rejects_invalid_response_status_line() {
         parse_http1_response_head(b"HTTP/1.1 20 OK\r\n\r\n", Http1HeadLimits::default()),
         Err(Http1ParseError::InvalidStatusCode)
     );
+    for status in ["099", "600", "999"] {
+        let input = format!("HTTP/1.1 {status} invalid\r\n\r\n");
+        assert_eq!(
+            parse_http1_response_head(input.as_bytes(), Http1HeadLimits::default()),
+            Err(Http1ParseError::InvalidStatusCode)
+        );
+    }
     assert_eq!(
         parse_http1_response_head(b"HTTP/1.1 200 bad\x7f\r\n\r\n", Http1HeadLimits::default()),
         Err(Http1ParseError::InvalidResponseLine)

@@ -54,6 +54,21 @@ deployment patterns.
 
 ## Fixed
 
+- Use one validated HTTP/1 authority for routing, authorization, forwarding,
+  and cache partitioning. Conflicting absolute-form authority and `Host`,
+  malformed ports/IPv6/host syntax, non-HTTP absolute targets, and malformed
+  absolute URIs now fail before request dispatch.
+- Reject every HTTP/1.0 `Transfer-Encoding` message before evaluating
+  keep-alive. Chunked decoding now bounds encoded bytes, line length, extension
+  bytes, and chunk count, validates extension grammar, and preserves parser
+  state across fragmented reads.
+- Reject origin response status codes outside `100..=599`, oversized PROXY v1
+  lines, and PROXY v2 payloads that exceed policy or differ from the declared
+  frame length.
+- Prevent construction of unvalidated protocol headers, share one bounded
+  `Connection` option parser with hop-by-hop filtering, and add dedicated fuzz
+  targets for HTTP/1 request/response heads, request targets, chunk bodies, and
+  PROXY v1/v2 frames.
 - Route HTTP/2 requests exclusively by `:authority`; supplied `Host` fields are
   replaced and requests without authority fail closed.
 - Remove all fixed and `Connection`-nominated hop-by-hop origin response

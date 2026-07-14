@@ -214,7 +214,7 @@ async fn rejects_redirect_location_without_safe_host() {
     .await;
 
     assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
-    assert!(response.ends_with("missing or invalid host\n"));
+    assert!(response.ends_with("bad request\n"));
 }
 
 #[tokio::test]

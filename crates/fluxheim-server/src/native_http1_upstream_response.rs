@@ -1,10 +1,9 @@
-use std::collections::HashSet;
 use std::time::Duration;
 
 use fluxheim_protocol::{
-    Http1ChunkLimits, Http1ConnectionDirective, Http1HeadLimits, Http1ParseError,
-    Http1ResponseHead, decode_http1_chunked_body, http_token_valid, http1_connection_directive,
-    parse_http1_response_head,
+    Http1ChunkLimits, Http1ChunkedDecoder, Http1ConnectionDirective, Http1ConnectionOptions,
+    Http1HeadLimits, Http1ParseError, Http1ResponseHead, http_token_valid,
+    http1_connection_directive, http1_connection_options, parse_http1_response_head,
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::time::timeout;
@@ -106,14 +105,14 @@ where
     let status = head.status;
     let reason = head.reason.to_owned();
     let body_framing = response_body_framing(status, request_method, &head.headers)?;
-    let connection_options = response_connection_options(&head.headers)?;
+    let connection_options = http1_connection_options(&head.headers)?;
     let origin_closes =
         http1_connection_directive(head.version, &head.headers)? == Http1ConnectionDirective::Close;
     let headers = head
         .headers
         .iter()
-        .filter(|header| response_header_allowed(header.name, body_framing, &connection_options))
-        .map(|header| (header.name.to_owned(), header.value.to_owned()))
+        .filter(|header| response_header_allowed(header.name(), body_framing, &connection_options))
+        .map(|header| (header.name().to_owned(), header.value().to_owned()))
         .collect::<Vec<_>>();
     let body =
         read_response_body(stream, &mut buffer, head_len, body_framing, max_body_bytes).await?;
@@ -198,9 +197,9 @@ fn response_body_framing(
     let mut content_length = None;
     let mut transfer_coding = None;
     for header in headers {
-        if header.name.eq_ignore_ascii_case("content-length") {
+        if header.name().eq_ignore_ascii_case("content-length") {
             let parsed = header
-                .value
+                .value()
                 .trim()
                 .parse::<u64>()
                 .map_err(|_| Http1ParseError::InvalidContentLength)?;
@@ -208,8 +207,8 @@ fn response_body_framing(
                 return Err(Http1ParseError::DuplicateContentLength);
             }
             content_length = Some(parsed);
-        } else if header.name.eq_ignore_ascii_case("transfer-encoding") {
-            for coding in header.value.split(',').map(str::trim) {
+        } else if header.name().eq_ignore_ascii_case("transfer-encoding") {
+            for coding in header.value().split(',').map(str::trim) {
                 if coding.is_empty()
                     || !http_token_valid(coding)
                     || transfer_coding.replace(coding).is_some()
@@ -318,30 +317,20 @@ async fn read_chunked_body<S>(
 where
     S: AsyncRead + Unpin,
 {
-    let mut raw = buffer[head_len..].to_vec();
+    let limits = Http1ChunkLimits::default().with_max_body_bytes(max_body_bytes);
+    let mut decoder = Http1ChunkedDecoder::new(limits);
+    if decoder.push(&buffer[head_len..])?.is_some() {
+        return Ok(decoder.decoded_body().to_vec());
+    }
     loop {
-        let limits = Http1ChunkLimits {
-            max_body_bytes,
-            ..Http1ChunkLimits::default()
-        };
-        let mut output = vec![0u8; raw.len().min(max_body_bytes)];
-        match decode_http1_chunked_body(&raw, &mut output, limits) {
-            Ok(Some(decoded)) => return Ok(output[..decoded.decoded_len].to_vec()),
-            Ok(None) => {}
-            Err(Http1ParseError::OutputTooSmall) => {
-                return Err(Http1ParseError::BodyTooLarge.into());
-            }
-            Err(error) => return Err(error.into()),
-        }
-        if raw.len() >= max_body_bytes {
-            return Err(Http1ParseError::BodyTooLarge.into());
-        }
         let mut chunk = [0u8; UPSTREAM_READ_CHUNK_BYTES];
         let read = stream.read(&mut chunk).await?;
         if read == 0 {
             return Err(Http1ParseError::InvalidChunk.into());
         }
-        raw.extend_from_slice(&chunk[..read]);
+        if decoder.push(&chunk[..read])?.is_some() {
+            return Ok(decoder.decoded_body().to_vec());
+        }
     }
 }
 
@@ -371,46 +360,12 @@ fn response_body_reusable(
     }
 }
 
-fn downstream_hop_by_hop_header(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "connection"
-            | "keep-alive"
-            | "proxy-connection"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "te"
-            | "trailer"
-            | "transfer-encoding"
-            | "upgrade"
-    )
-}
-
-fn response_connection_options(
-    headers: &[fluxheim_protocol::Http1Header<'_>],
-) -> Result<HashSet<String>, Http1ParseError> {
-    let mut options = HashSet::new();
-    for header in headers
-        .iter()
-        .filter(|header| header.name.eq_ignore_ascii_case("connection"))
-    {
-        for option in header.value.split(',').map(str::trim) {
-            if option.is_empty() || !http_token_valid(option) {
-                return Err(Http1ParseError::InvalidConnection);
-            }
-            options.insert(option.to_ascii_lowercase());
-        }
-    }
-    Ok(options)
-}
-
 fn response_header_allowed(
     name: &str,
     body_framing: ResponseBodyFraming,
-    connection_options: &HashSet<String>,
+    connection_options: &Http1ConnectionOptions<'_>,
 ) -> bool {
-    !(downstream_hop_by_hop_header(name)
-        || connection_options.contains(&name.to_ascii_lowercase())
+    !(connection_options.identifies_hop_by_hop_header(name)
         || matches!(body_framing, ResponseBodyFraming::Chunked)
             && name.eq_ignore_ascii_case("content-length"))
 }

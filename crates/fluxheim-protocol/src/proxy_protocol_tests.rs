@@ -153,6 +153,16 @@ fn proxy_protocol_v1_parser_extracts_source() {
 }
 
 #[test]
+fn proxy_protocol_v1_parser_enforces_maximum_line_length() {
+    let mut line = b"PROXY UNKNOWN ".to_vec();
+    line.resize(super::PROXY_PROTOCOL_V1_MAX_LINE + 1, b'x');
+    assert_eq!(
+        parse_downstream_proxy_protocol_v1(&line),
+        Err(DownstreamProxyProtocolParseError::V1LineTooLong)
+    );
+}
+
+#[test]
 fn proxy_protocol_v2_parser_extracts_source() {
     let mut header = [0u8; PROXY_PROTOCOL_V2_HEADER_LEN];
     header[..PROXY_PROTOCOL_V2_SIGNATURE.len()].copy_from_slice(PROXY_PROTOCOL_V2_SIGNATURE);
@@ -186,5 +196,30 @@ fn proxy_protocol_v2_parser_rejects_invalid_signature() {
     assert_eq!(
         parse_downstream_proxy_protocol_v2(&header, &[]),
         Err(DownstreamProxyProtocolParseError::V2InvalidSignature)
+    );
+}
+
+#[test]
+fn proxy_protocol_v2_parser_requires_exact_bounded_payload_length() {
+    let mut header = [0u8; PROXY_PROTOCOL_V2_HEADER_LEN];
+    header[..PROXY_PROTOCOL_V2_SIGNATURE.len()].copy_from_slice(PROXY_PROTOCOL_V2_SIGNATURE);
+    header[12] = 0x21;
+    header[13] = 0x11;
+    header[14..16].copy_from_slice(&0u16.to_be_bytes());
+    assert_eq!(
+        parse_downstream_proxy_protocol_v2(&header, &[0; 12]),
+        Err(DownstreamProxyProtocolParseError::V2InvalidLength)
+    );
+
+    header[14..16].copy_from_slice(&12u16.to_be_bytes());
+    assert_eq!(
+        parse_downstream_proxy_protocol_v2(&header, &[0; 11]),
+        Err(DownstreamProxyProtocolParseError::V2InvalidLength)
+    );
+
+    header[14..16].copy_from_slice(&u16::MAX.to_be_bytes());
+    assert_eq!(
+        parse_downstream_proxy_protocol_v2(&header, &[]),
+        Err(DownstreamProxyProtocolParseError::V2InvalidLength)
     );
 }

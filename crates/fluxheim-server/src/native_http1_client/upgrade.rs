@@ -81,10 +81,10 @@ pub(super) fn validate_switching_protocols_response(
 fn http1_headers_contain_token(headers: &[Http1Header<'_>], name: &str, token: &str) -> bool {
     headers
         .iter()
-        .filter(|header| header.name.eq_ignore_ascii_case(name))
+        .filter(|header| header.name().eq_ignore_ascii_case(name))
         .any(|header| {
             header
-                .value
+                .value()
                 .split(',')
                 .any(|candidate| candidate.trim().eq_ignore_ascii_case(token))
         })
@@ -99,10 +99,10 @@ pub(super) fn websocket_downstream_upgrade_response_head(
     response.extend_from_slice(b"upgrade: websocket\r\n");
     let mut accept_seen = false;
     for header in &head.headers {
-        let Some(name) = websocket_downstream_response_header_name(header.name) else {
+        let Some(name) = websocket_downstream_response_header_name(header.name()) else {
             continue;
         };
-        if !valid_upstream_header_value(header.value) {
+        if !valid_upstream_header_value(header.value()) {
             return Err(fluxheim_protocol::Http1ParseError::InvalidHeaderValue.into());
         }
         if name.eq_ignore_ascii_case("sec-websocket-accept") {
@@ -110,7 +110,7 @@ pub(super) fn websocket_downstream_upgrade_response_head(
         }
         response.extend_from_slice(name.as_bytes());
         response.extend_from_slice(b": ");
-        response.extend_from_slice(header.value.as_bytes());
+        response.extend_from_slice(header.value().as_bytes());
         response.extend_from_slice(b"\r\n");
     }
     if !accept_seen {

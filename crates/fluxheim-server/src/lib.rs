@@ -240,6 +240,10 @@ mod native_http1_test_utils;
 mod native_http1_tests;
 
 #[cfg(test)]
+#[path = "native_http1_security_tests.rs"]
+mod native_http1_security_tests;
+
+#[cfg(test)]
 #[path = "native_http1_body_policy_tests.rs"]
 mod native_http1_body_policy_tests;
 

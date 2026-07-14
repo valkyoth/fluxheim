@@ -359,7 +359,7 @@ async fn native_host_router_routes_exact_hosts_and_default_fallback() {
 }
 
 #[tokio::test]
-async fn native_host_router_falls_back_for_missing_and_invalid_host() {
+async fn native_host_router_falls_back_for_missing_and_unknown_host() {
     let first = upstream_response("first").await;
     let fallback = upstream_response_count("fallback", 2).await;
     let mut config = fluxheim_config::Config::default();
@@ -406,7 +406,7 @@ async fn native_host_router_strict_mode_rejects_missing_invalid_and_unknown_host
     assert!(invalid.starts_with("HTTP/1.1 400 Bad Request\r\n"));
     assert!(unknown.starts_with("HTTP/1.1 421 Misdirected Request\r\n"));
     assert!(HOST_REJECTION_MISSING.load(Ordering::Acquire) >= 1);
-    assert!(HOST_REJECTION_INVALID.load(Ordering::Acquire) >= 1);
+    assert_eq!(HOST_REJECTION_INVALID.load(Ordering::Acquire), 0);
     assert!(HOST_REJECTION_UNKNOWN.load(Ordering::Acquire) >= 1);
 }
 

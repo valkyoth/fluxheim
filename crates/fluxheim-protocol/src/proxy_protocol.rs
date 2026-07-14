@@ -127,6 +127,7 @@ pub fn proxy_protocol_v2_header(
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum DownstreamProxyProtocolParseError {
+    V1LineTooLong,
     V1NotUtf8,
     V1MissingCrlf,
     V1MissingPrefix,
@@ -143,6 +144,7 @@ pub enum DownstreamProxyProtocolParseError {
     V2InvalidSignature,
     V2InvalidVersion,
     V2InvalidCommand,
+    V2InvalidLength,
     V2TruncatedTcp4,
     V2TruncatedTcp6,
     V2InvalidTcp6Source,
@@ -160,6 +162,7 @@ impl std::error::Error for DownstreamProxyProtocolParseError {}
 impl DownstreamProxyProtocolParseError {
     pub const fn as_static_str(self) -> &'static str {
         match self {
+            Self::V1LineTooLong => "stream downstream PROXY v1 header exceeds 108 bytes",
             Self::V1NotUtf8 => "stream downstream PROXY v1 header is not UTF-8",
             Self::V1MissingCrlf => "stream downstream PROXY v1 header is missing CRLF",
             Self::V1MissingPrefix => "stream downstream PROXY v1 header is missing prefix",
@@ -186,6 +189,9 @@ impl DownstreamProxyProtocolParseError {
             Self::V2InvalidVersion => "stream downstream PROXY v2 header has invalid version",
             Self::V2InvalidSignature => "stream downstream PROXY v2 header has invalid signature",
             Self::V2InvalidCommand => "stream downstream PROXY v2 header has invalid command",
+            Self::V2InvalidLength => {
+                "stream downstream PROXY v2 payload length does not match its header"
+            }
             Self::V2TruncatedTcp4 => "stream downstream PROXY v2 TCP4 address is truncated",
             Self::V2TruncatedTcp6 => "stream downstream PROXY v2 TCP6 address is truncated",
             Self::V2InvalidTcp6Source => "stream downstream PROXY v2 TCP6 source is invalid",
@@ -199,6 +205,9 @@ impl DownstreamProxyProtocolParseError {
 pub fn parse_downstream_proxy_protocol_v1(
     line: &[u8],
 ) -> Result<Option<SocketAddr>, DownstreamProxyProtocolParseError> {
+    if line.len() > PROXY_PROTOCOL_V1_MAX_LINE {
+        return Err(DownstreamProxyProtocolParseError::V1LineTooLong);
+    }
     let line =
         std::str::from_utf8(line).map_err(|_| DownstreamProxyProtocolParseError::V1NotUtf8)?;
     let line = line
@@ -248,6 +257,10 @@ pub fn parse_downstream_proxy_protocol_v2(
     header: &[u8; PROXY_PROTOCOL_V2_HEADER_LEN],
     payload: &[u8],
 ) -> Result<Option<SocketAddr>, DownstreamProxyProtocolParseError> {
+    let declared_length = usize::from(u16::from_be_bytes([header[14], header[15]]));
+    if declared_length > PROXY_PROTOCOL_V2_MAX_PAYLOAD || payload.len() != declared_length {
+        return Err(DownstreamProxyProtocolParseError::V2InvalidLength);
+    }
     if &header[..PROXY_PROTOCOL_V2_SIGNATURE.len()] != PROXY_PROTOCOL_V2_SIGNATURE {
         return Err(DownstreamProxyProtocolParseError::V2InvalidSignature);
     }

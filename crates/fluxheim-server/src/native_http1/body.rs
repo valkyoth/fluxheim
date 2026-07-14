@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use fluxheim_protocol::{Http1BodyFraming, Http1ParseError, decode_http1_chunked_body};
+use fluxheim_protocol::{Http1BodyFraming, Http1ChunkLimits, Http1ChunkedDecoder, Http1ParseError};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::time::timeout;
 
@@ -83,32 +83,24 @@ where
     S: AsyncRead + Unpin,
 {
     buffer.drain(..head_len);
+    let limits = Http1ChunkLimits::default().with_max_body_bytes(max_body_bytes);
+    let mut decoder = Http1ChunkedDecoder::new(limits);
+    if let Some(decoded) = decoder.push(buffer)? {
+        let body = decoder.decoded_body().to_vec();
+        buffer.drain(..decoded.consumed_len);
+        return Ok(body);
+    }
     loop {
-        let limits = fluxheim_protocol::Http1ChunkLimits {
-            max_body_bytes,
-            ..fluxheim_protocol::Http1ChunkLimits::default()
-        };
-        let mut output = vec![0u8; buffer.len().min(max_body_bytes)];
-        match decode_http1_chunked_body(buffer, &mut output, limits) {
-            Ok(Some(decoded)) => {
-                let body = output[..decoded.decoded_len].to_vec();
-                buffer.drain(..decoded.consumed_len);
-                return Ok(body);
-            }
-            Ok(None) => {}
-            Err(Http1ParseError::OutputTooSmall) => {
-                return Err(Http1ParseError::BodyTooLarge.into());
-            }
-            Err(error) => return Err(error.into()),
-        }
-        if buffer.len() >= max_body_bytes {
-            return Err(Http1ParseError::BodyTooLarge.into());
-        }
         let mut chunk = [0u8; READ_CHUNK_BYTES];
         let read = stream.read(&mut chunk).await?;
         if read == 0 {
             return Err(Http1ParseError::InvalidChunk.into());
         }
         buffer.extend_from_slice(&chunk[..read]);
+        if let Some(decoded) = decoder.push(&chunk[..read])? {
+            let body = decoder.decoded_body().to_vec();
+            buffer.drain(..decoded.consumed_len);
+            return Ok(body);
+        }
     }
 }

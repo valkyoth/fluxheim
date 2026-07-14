@@ -53,6 +53,17 @@ behavior when the change improves security or project direction.
 
 ### Fixed
 
+- Canonicalize HTTP/1 authority before routing: absolute-form and CONNECT
+  targets must agree with `Host`, malformed authorities fail closed, and only
+  validated HTTP(S) absolute targets are accepted.
+- Reject HTTP/1.0 transfer coding before persistence is decided, bound chunk
+  lines/count/extensions/encoded bytes, validate extension syntax, and decode
+  fragmented chunk bodies incrementally without rescanning prior input.
+- Restrict parsed upstream status codes to `100..=599` and make PROXY v1/v2
+  parsers enforce their exported line/payload bounds and exact v2 length.
+- Make protocol header fields constructible only through validation, centralize
+  `Connection` option and hop-by-hop identification, and add five protocol fuzz
+  targets covering heads, targets, chunking, and PROXY framing.
 - Make HTTP/2 `:authority` authoritative over any supplied `Host` fields,
   preventing cross-vhost routing confusion.
 - Strip upstream response headers nominated by `Connection`, including before
