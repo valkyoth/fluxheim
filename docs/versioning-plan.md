@@ -3178,11 +3178,12 @@ Stable scope:
   typed modern browser isolation/reporting controls, request-aware validated
   CORS with preflight handling and automatic `Vary`, bounded `Retry-After` on
   generated capacity rejections, and broader spoofable identity stripping.
-- `v1.7.11`: zero-downtime upgrade planning and first implementation slice
-  after the Wasm line is stable. Add a documented design for native binary and
+- `v1.7.11`: zero-downtime upgrade release after the Wasm line is stable. Add
+  a documented and live-tested design for native binary and
   Podman deployments that can swap Fluxheim versions without a listener gap:
   inherited listener file descriptors, systemd socket activation support,
-  readiness-gated new-process startup, old-process drain mode, bounded
+  readiness-gated new-process startup after every configured background
+  service reports ready, old-process drain mode, bounded
   graceful drain timeout, and a container-safe blue/green handoff pattern
   through a stable fronting listener or host-level redirect owner. Add smoke
   coverage that starts an old Fluxheim process, starts a new one, proves new
