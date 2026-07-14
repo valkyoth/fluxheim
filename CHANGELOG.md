@@ -19,6 +19,9 @@ behavior when the change improves security or project direction.
   with exact descriptor-count/address matching and a real inherited-FD smoke.
 - Add systemd `READY=1`, status, and stopping notifications after complete
   native startup, including abstract notification-socket smoke coverage.
+- Add a two-generation real-binary upgrade smoke proving failed replacement
+  rollback, readiness-gated handoff, uninterrupted accepts, and old keep-alive
+  drain on one externally owned listener.
 
 ### Changed
 

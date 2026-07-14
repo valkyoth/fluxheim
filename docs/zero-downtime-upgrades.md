@@ -137,9 +137,10 @@ Read-only configuration, certificate material, and static content may be shared
 when their existing filesystem trust requirements are preserved. Operators
 must not bypass storage leases to make overlapping generations start.
 
-## Acceptance Evidence
+## Native Acceptance Evidence
 
-The completed release must provide a live upgrade smoke that proves:
+`scripts/smoke_zero_downtime_upgrade.sh` provides a live upgrade smoke that
+proves:
 
 - an old process serves a persistent connection;
 - a new process adopts the same externally owned public listener;
@@ -147,11 +148,10 @@ The completed release must provide a live upgrade smoke that proves:
 - new connections reach the new generation without connection refusal;
 - the established old-process connection completes during drain;
 - the old process exits within the configured timeout;
-- failed replacement startup leaves the old generation serving;
-- direct-published Podman limitations are reported clearly rather than called
-  zero downtime.
+- failed replacement startup leaves the old generation serving.
 
-Inherited-listener adoption and bounded drain are implemented. Until readiness
-signaling and the complete two-generation handoff smoke land, `1.7.11` should
-still be described as zero-downtime groundwork rather than complete transparent
-upgrade automation.
+Inherited-listener adoption, readiness signaling, bounded drain, and the native
+two-generation handoff are implemented. Podman still requires a stable fronting
+owner; directly published containers are documented as non-zero-downtime and
+will receive separate deployment smoke coverage rather than being represented
+as equivalent to inherited native sockets.

@@ -25,3 +25,7 @@ socket activation are enabled.
 - Report systemd readiness only after native listener/background-service startup
   completes, fail startup if a configured notification socket is unreachable,
   and report bounded-drain status after a shutdown signal.
+- Exercise an old and new Fluxheim process on one parent-owned listener. The
+  maintained smoke proves a bad replacement leaves old serving, green readiness
+  precedes drain, established old traffic completes, and new requests have no
+  connection-refusal window.

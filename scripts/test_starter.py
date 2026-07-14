@@ -88,6 +88,13 @@ TESTS: tuple[TestEntry, ...] = (
         "Passes a real TCP listener as FD 3 and proves strict fail-closed adoption.",
     ),
     TestEntry(
+        "zero-downtime-upgrade",
+        "Readiness-gated zero-downtime upgrade smoke",
+        "operations",
+        ("scripts/smoke_zero_downtime_upgrade.sh",),
+        "Proves failed replacement rollback, ready-generation handoff, and old connection drain.",
+    ),
+    TestEntry(
         "proxy-cache",
         "Proxy cache smoke",
         "cache",
