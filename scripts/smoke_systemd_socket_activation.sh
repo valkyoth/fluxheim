@@ -212,6 +212,29 @@ if LISTEN_PID=999999 "$ROOT_DIR/target/debug/fluxheim" \
 fi
 grep -q "requires LISTEN_FDS" "$tmp/partial-environment.log"
 
+if python3 - "$ROOT_DIR/target/debug/fluxheim" "$config" <<'PY' \
+    >"$tmp/non-socket.log" 2>&1
+import os
+import sys
+
+binary, config = sys.argv[1:]
+source = os.open(config, os.O_RDONLY)
+if source != 3:
+    os.dup2(source, 3, inheritable=True)
+else:
+    os.set_inheritable(3, True)
+environment = os.environ.copy()
+environment["LISTEN_FDS"] = "1"
+environment["LISTEN_PID"] = str(os.getpid())
+environment["LISTEN_FDNAMES"] = "http"
+os.execve(binary, [binary, "--config", config], environment)
+PY
+then
+    echo "systemd socket activation smoke failed: regular file was accepted as listener" >&2
+    exit 1
+fi
+grep -q "is not a socket" "$tmp/non-socket.log"
+
 if NOTIFY_SOCKET="$missing_notify_socket" "$ROOT_DIR/target/debug/fluxheim" \
     --config "$config" >"$tmp/missing-notify.log" 2>&1; then
     echo "systemd socket activation smoke failed: unreachable readiness socket was ignored" >&2

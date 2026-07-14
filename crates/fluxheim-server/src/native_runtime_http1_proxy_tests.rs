@@ -235,6 +235,27 @@ async fn native_http1_proxy_runtime_rejects_wrong_or_duplicate_inherited_address
     assert!(error.to_string().contains("duplicate listener address"));
 }
 
+#[tokio::test]
+async fn native_http1_proxy_runtime_matches_inherited_listeners_by_address_not_fd_order() {
+    let first = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let second = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let first_addr = first.local_addr().unwrap();
+    let second_addr = second.local_addr().unwrap();
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = vec![first_addr.to_string(), second_addr.to_string()];
+    let plan = ServerPlan::from_config(&config).expect("valid two-listener plan");
+
+    let runtime = NativeHttp1ProxyRuntime::bind_from_config_with_inherited_listeners(
+        &config,
+        &plan,
+        vec![second, first],
+    )
+    .await
+    .expect("adopt reversed inherited listeners");
+
+    assert_eq!(runtime.local_addrs(), [first_addr, second_addr]);
+}
+
 #[cfg(feature = "load-balancer")]
 #[tokio::test]
 async fn native_http1_proxy_runtime_collects_native_load_balancer_service() {
