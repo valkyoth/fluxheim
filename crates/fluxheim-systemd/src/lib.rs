@@ -5,41 +5,65 @@ use std::io;
 use std::net::TcpListener;
 
 #[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(target_os = "linux")]
+static ACTIVATION_CONSUMED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "linux")]
 pub fn receive_tcp_listeners(expected: usize) -> io::Result<Vec<TcpListener>> {
     use std::os::fd::{FromRawFd as _, IntoRawFd as _, OwnedFd};
 
     use libsystemd::activation::{IsType as _, receive_descriptors};
 
+    ACTIVATION_CONSUMED
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "systemd activation descriptors were already consumed",
+            )
+        })?;
+
     // `false` is security-critical: environment mutation is unsound once other
     // process threads can concurrently read libc's environment storage.
     let descriptors =
         receive_descriptors(false).map_err(|error| io::Error::other(error.to_string()))?;
-    if descriptors.len() != expected {
+    // Establish ownership of the complete set before fallible validation. This
+    // makes every error close all declared descriptors and prevents a retry
+    // from adopting a partially consumed or subsequently reused FD number.
+    let owned = descriptors
+        .into_iter()
+        .map(|descriptor| {
+            let is_inet = descriptor.is_inet();
+            let raw = descriptor.into_raw_fd();
+            // SAFETY: the process-wide claim above permits exactly one transfer
+            // of the inherited FD3+ set. Every descriptor is consumed here and
+            // placed under `OwnedFd` before any fallible validation occurs.
+            let owned = unsafe { OwnedFd::from_raw_fd(raw) };
+            (is_inet, owned)
+        })
+        .collect::<Vec<_>>();
+    if owned.len() != expected {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
                 "expected {expected} inherited listener(s), received {}",
-                descriptors.len()
+                owned.len()
             ),
         ));
     }
 
-    descriptors
+    owned
         .into_iter()
         .enumerate()
-        .map(|(index, descriptor)| {
-            if !descriptor.is_inet() {
+        .map(|(index, (is_inet, owned))| {
+            if !is_inet {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!("descriptor index {index} is not a socket in the internet family"),
                 ));
             }
-            let raw = descriptor.into_raw_fd();
-            // SAFETY: `receive_descriptors(false)` validated this systemd-owned
-            // descriptor and returns each FD3+ slot exactly once. This function
-            // consumes every descriptor and transfers that unique ownership to
-            // `OwnedFd` without cloning or closing it elsewhere.
-            let owned = unsafe { OwnedFd::from_raw_fd(raw) };
             validated_tcp_listener(index, owned)
         })
         .collect()

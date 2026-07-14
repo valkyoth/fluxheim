@@ -8,6 +8,11 @@ if ! rg -q 'receive_descriptors\(false\)' "$boundary"; then
     echo "systemd activation policy: descriptor receipt must preserve LISTEN_*" >&2
     exit 1
 fi
+if ! rg -q 'static ACTIVATION_CONSUMED: AtomicBool' "$boundary" \
+    || ! rg -q '\.compare_exchange\(false, true, Ordering::AcqRel, Ordering::Acquire\)' "$boundary"; then
+    echo "systemd activation policy: descriptor ownership must be process-wide and one-shot" >&2
+    exit 1
+fi
 if rg -q 'listenfd' "$ROOT_DIR/Cargo.toml" "$ROOT_DIR/Cargo.lock" \
     "$ROOT_DIR/src" "$ROOT_DIR/crates/fluxheim-systemd"; then
     echo "systemd activation policy: listenfd must not re-enter the runtime graph" >&2

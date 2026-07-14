@@ -68,6 +68,12 @@ threads exist is not memory-safe on Unix. The focused `fluxheim-systemd` crate
 uses non-mutating libsystemd receipt and contains the single audited raw-FD
 ownership transfer required to construct owned Rust listeners.
 
+Descriptor adoption is process-wide and one-shot. Concurrent or repeated
+calls fail before reading FD 3. Fluxheim converts the complete declared set to
+owned descriptors before validating individual listeners, so a malformed item
+closes the entire inherited set and the process cannot retry against descriptor
+numbers that the operating system may later reuse.
+
 When any activation variable is present, validation failure is fatal. Fluxheim
 does not bind missing listeners as a fallback. This prevents a partially
 activated process from serving a different listener set than its supervisor

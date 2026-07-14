@@ -48,3 +48,6 @@ deployment patterns.
 - Remove `listenfd` from socket activation and receive descriptors through a
   focused Fluxheim crate with environment clearing disabled, preserving memory
   safety for multithreaded and embedded runtimes.
+- Claim inherited systemd descriptors exactly once per process and own the
+  complete set before validating any item. Concurrent calls and retries fail
+  before touching FD 3, while validation failures close the complete set.

@@ -47,6 +47,9 @@ behavior when the change improves security or project direction.
   boundary. Systemd descriptors are received without mutating `LISTEN_*` after
   Tokio starts, then validated and transferred through one audited unsafe
   ownership conversion.
+- Enforce process-wide one-shot systemd descriptor adoption and establish
+  ownership of the complete inherited set before validation, preventing double
+  close, partial consumption, and retry against reused descriptor numbers.
 
 ## 1.7.10 - 2026-07-13
 

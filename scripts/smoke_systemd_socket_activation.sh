@@ -80,6 +80,50 @@ index_files = ["index.html"]
 EOF
 
 cargo build --quiet --locked
+cargo build --quiet --locked -p fluxheim-systemd --example activation_ownership_probe
+
+ownership_probe="$ROOT_DIR/target/debug/examples/activation_ownership_probe"
+for mode in concurrent repeat; do
+    python3 - "$ownership_probe" "$mode" <<'PY'
+import os
+import socket
+import sys
+
+binary, mode = sys.argv[1:]
+listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+listener.bind(("127.0.0.1", 0))
+listener.listen(8)
+if listener.fileno() != 3:
+    raise RuntimeError(f"ownership probe expected listener FD 3, got {listener.fileno()}")
+os.set_inheritable(3, True)
+environment = os.environ.copy()
+environment["LISTEN_FDS"] = "1"
+environment["LISTEN_PID"] = str(os.getpid())
+os.execve(binary, [binary, mode], environment)
+PY
+done
+
+python3 - "$ownership_probe" <<'PY'
+import os
+import socket
+import sys
+
+binary = sys.argv[1]
+special = os.open("/dev/null", os.O_RDONLY)
+listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+listener.bind(("127.0.0.1", 0))
+listener.listen(8)
+if (special, listener.fileno()) != (3, 4):
+    raise RuntimeError(
+        f"failed-validation probe expected FDs 3 and 4, got {special} and {listener.fileno()}"
+    )
+os.set_inheritable(3, True)
+os.set_inheritable(4, True)
+environment = os.environ.copy()
+environment["LISTEN_FDS"] = "2"
+environment["LISTEN_PID"] = str(os.getpid())
+os.execve(binary, [binary, "failed-validation-retry"], environment)
+PY
 
 python3 - "$notify_socket" "$notify_bound" "$notify_ready" "$notify_log" <<'PY' &
 import pathlib
