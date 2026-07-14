@@ -26,6 +26,9 @@ behavior when the change improves security or project direction.
   80 config, including RPM payload and deterministic activation instructions.
 - Add an optional real Podman blue/green smoke proving direct host-port conflict,
   failed-green rollback, stable-front switching, and old-container drain.
+- Wait for every configured background service to report its explicit ready
+  point before sending systemd `READY=1`, and fail startup if a service exits
+  before doing so.
 
 ### Changed
 
@@ -33,6 +36,8 @@ behavior when the change improves security or project direction.
   native runtime instead of retaining those values only in the launch plan.
 - Reject partial, wrong-process, unbounded, duplicate, missing, or unexpected
   inherited-listener activation instead of mixing inheritance with fresh binds.
+- Reject inherited TCP descriptors that are sockets but are not in listening
+  state, with a live connected-stream regression in the activation smoke.
 
 ## 1.7.10 - 2026-07-13
 

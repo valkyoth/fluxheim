@@ -50,7 +50,10 @@ impl fmt::Display for SocketActivationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidValue { variable, value } => {
-                write!(formatter, "invalid systemd socket activation {variable}={value:?}")
+                write!(
+                    formatter,
+                    "invalid systemd socket activation {variable}={value:?}"
+                )
             }
             Self::ListenerCount { expected, actual } => write!(
                 formatter,
@@ -85,8 +88,8 @@ impl Error for SocketActivationError {
     }
 }
 
-pub(super) fn take_systemd_tcp_listeners(
-) -> Result<Option<Vec<TcpListener>>, SocketActivationError> {
+pub(super) fn take_systemd_tcp_listeners() -> Result<Option<Vec<TcpListener>>, SocketActivationError>
+{
     let listen_fds = environment_value("LISTEN_FDS")?;
     let listen_pid = environment_value("LISTEN_PID")?;
     let listen_fdnames = environment_value("LISTEN_FDNAMES")?;
@@ -97,7 +100,8 @@ pub(super) fn take_systemd_tcp_listeners(
         listen_fdnames.as_deref(),
         first_fd.as_deref(),
         std::process::id(),
-    )? else {
+    )?
+    else {
         return Ok(None);
     };
 
@@ -144,12 +148,13 @@ fn validate_activation_metadata(
     let listen_pid = listen_pid.ok_or(SocketActivationError::MissingVariable {
         variable: "LISTEN_PID",
     })?;
-    let actual_pid = listen_pid.parse::<u32>().map_err(|_| {
-        SocketActivationError::InvalidValue {
-            variable: "LISTEN_PID",
-            value: listen_pid.to_owned(),
-        }
-    })?;
+    let actual_pid =
+        listen_pid
+            .parse::<u32>()
+            .map_err(|_| SocketActivationError::InvalidValue {
+                variable: "LISTEN_PID",
+                value: listen_pid.to_owned(),
+            })?;
     if actual_pid != current_pid {
         return Err(SocketActivationError::ProcessMismatch {
             expected: current_pid,

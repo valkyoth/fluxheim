@@ -174,6 +174,7 @@ async fn run_native_runtime_async(
         .map(fluxheim_server::NativeHttp1ProxyRuntime::take_load_balancer_services)
         .unwrap_or_default();
     let supervisor = fluxheim_runtime::NativeBackgroundSupervisor::new();
+    let mut background_readiness = runtime_readiness::BackgroundReadiness::new();
     let mut background_handles = Vec::new();
 
     #[cfg(feature = "stream-proxy")]
@@ -182,7 +183,7 @@ async fn run_native_runtime_async(
     {
         for service in crate::stream_proxy::stream_background_services_from_config(&config)? {
             log::info!("{} enabled", stream_service_spec.name());
-            background_handles.push(supervisor.spawn_service(service.into_native()));
+            background_handles.push(background_readiness.spawn(&supervisor, service.into_native()));
         }
     }
 
@@ -190,7 +191,7 @@ async fn run_native_runtime_async(
     if let Some(udp_service_spec) = server_plan.service(fluxheim_server::ServiceKind::UdpProxy) {
         for service in crate::udp_proxy::udp_background_services_from_config(&config)? {
             log::info!("{} enabled", udp_service_spec.name());
-            background_handles.push(supervisor.spawn_service(service.into_native()));
+            background_handles.push(background_readiness.spawn(&supervisor, service.into_native()));
         }
     }
 
@@ -202,7 +203,8 @@ async fn run_native_runtime_async(
             crate::metrics::metrics_background_service_from_config(&config.metrics)?
         {
             log::info!("{} enabled", metrics_service_spec.name());
-            background_handles.push(supervisor.spawn_service(metrics_service.into_native()));
+            background_handles
+                .push(background_readiness.spawn(&supervisor, metrics_service.into_native()));
         }
 
         #[cfg(feature = "cache")]
@@ -211,7 +213,8 @@ async fn run_native_runtime_async(
         {
             record_cache_runtime_metrics();
             background_handles.push(
-                supervisor.spawn_service(
+                background_readiness.spawn(
+                    &supervisor,
                     crate::background::background_service_for_spec(
                         task,
                         CacheRuntimeMetricsBackgroundService,
@@ -229,7 +232,8 @@ async fn run_native_runtime_async(
                 crate::metrics_otlp::MetricsOtlpExporter::from_config(&config.metrics.otlp)?
             {
                 background_handles.push(
-                    supervisor.spawn_service(
+                    background_readiness.spawn(
+                        &supervisor,
                         crate::background::background_service_for_spec(
                             task,
                             MetricsOtlpBackgroundService { exporter },
@@ -256,7 +260,8 @@ async fn run_native_runtime_async(
             config.cache_purger.batches
         );
         background_handles.push(
-            supervisor.spawn_service(
+            background_readiness.spawn(
+                &supervisor,
                 crate::background::background_service_for_spec(
                     task,
                     CacheStalePurgerBackgroundService {
@@ -274,7 +279,8 @@ async fn run_native_runtime_async(
     {
         for service in native_load_balancer_services {
             log::info!("{} enabled", load_balancer_service_spec.name());
-            background_handles.push(supervisor.spawn_service(service.into_native_service()));
+            background_handles
+                .push(background_readiness.spawn(&supervisor, service.into_native_service()));
         }
     }
 
@@ -287,7 +293,7 @@ async fn run_native_runtime_async(
             native_certificate_reloader.clone(),
         )?
     {
-        background_handles.push(supervisor.spawn_service(service.into_native()));
+        background_handles.push(background_readiness.spawn(&supervisor, service.into_native()));
     }
 
     #[cfg(feature = "acme-client")]
@@ -299,7 +305,8 @@ async fn run_native_runtime_async(
             config.tls.acme.renewal.check_interval_secs
         );
         background_handles.push(
-            supervisor.spawn_service(
+            background_readiness.spawn(
+                &supervisor,
                 crate::background::background_service_for_spec(
                     task,
                     AcmeRenewalBackgroundService {
@@ -375,10 +382,12 @@ async fn run_native_runtime_async(
 
         if let Some(watchdog) = admin_services.watchdog {
             log::info!("admin self-healing watchdog enabled");
-            background_handles.push(supervisor.spawn_service(watchdog.into_native()));
+            background_handles
+                .push(background_readiness.spawn(&supervisor, watchdog.into_native()));
         }
     }
 
+    background_readiness.wait(&supervisor).await?;
     let (critical_handles, background_handles): (Vec<_>, Vec<_>) = background_handles
         .into_iter()
         .partition(fluxheim_runtime::NativeBackgroundJoinHandle::is_critical);

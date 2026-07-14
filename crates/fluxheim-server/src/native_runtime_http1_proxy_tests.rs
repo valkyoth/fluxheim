@@ -214,15 +214,16 @@ async fn native_http1_proxy_runtime_rejects_wrong_or_duplicate_inherited_address
     .await
     .err()
     .expect("wrong inherited address must fail closed");
-    assert!(error.to_string().contains("did not supply required proxy listener"));
+    assert!(
+        error
+            .to_string()
+            .contains("did not supply required proxy listener")
+    );
 
     let first = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let duplicate_addr = first.local_addr().unwrap();
     let duplicate = first.try_clone().unwrap();
-    config.server.listen = vec![
-        duplicate_addr.to_string(),
-        "127.0.0.1:18081".to_owned(),
-    ];
+    config.server.listen = vec![duplicate_addr.to_string(), "127.0.0.1:18081".to_owned()];
     let plan = ServerPlan::from_config(&config).expect("valid two-listener plan");
     let error = NativeHttp1ProxyRuntime::bind_from_config_with_inherited_listeners(
         &config,

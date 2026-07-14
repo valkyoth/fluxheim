@@ -138,7 +138,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
 | HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.9` protocol milestone using the Rust `quinn`/`h3` stack after the `1.8` macOS/Windows production parity line. |
 | WASM extensibility | 🧪 | The `1.7.0` through `1.7.10` line added the optional bounded Wasmtime runtime, typed access/header/route/cache policy hooks, isolated module identities, proxy-ABI and WASI previews, and runnable migration examples for F5 iRules-style, nginx Lua/OpenResty-style, HAProxy Lua/SPOE-style, and VCL-like policy. `1.7.10` stabilized the line with independently selectable family smokes, release-gate enforcement, and arbitrary guest-ID decoder property coverage. Direct backend choice, plugin-provided persistence keys, and dynamic mirror/shadow target choice remain constrained follow-up work. |
-| Zero-downtime upgrades | 🧪 | Active `1.7.11` work. The first slice tracks accepted native connection tasks, stops new accepts during drain, and applies bounded process grace/shutdown timing. Inherited listener descriptors, systemd socket activation, readiness signaling, and the live old/new process handoff smoke remain required before transparent upgrades are called stable. |
+| Zero-downtime upgrades | ✅ | `1.7.11`; bounded native drain, strict systemd listener inheritance, readiness notification after all configured background services report ready, live old/new process handoff coverage, and a tested Podman blue/green pattern behind a stable fronting listener. Directly replacing a container that owns published host ports is explicitly not gap-free. |
 
 See [Production Readiness](docs/production-readiness.md) for the precise
 stable-core promise and deployment checks. See
@@ -424,12 +424,13 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Release: 1.7.11 Zero-Downtime Upgrade Groundwork
+## Current Release: 1.7.11 Zero-Downtime Upgrades
 
 Fluxheim does not treat every planned idea as stable. The current release line
-is `1.7.11`, the first zero-downtime process-upgrade slice after the stable
-`1.7.0` through `1.7.10` Wasm milestones. It establishes real bounded drain
-semantics before inherited listener and readiness-gated handoff support.
+is `1.7.11`, the zero-downtime process-upgrade release after the stable
+`1.7.0` through `1.7.10` Wasm milestones. It adds bounded drain, strict
+systemd listener inheritance, readiness-gated native handoff, and a tested
+Podman blue/green pattern behind a stable fronting listener.
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
   proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
@@ -485,10 +486,11 @@ semantics before inherited listener and readiness-gated handoff support.
   proxy-ABI/WASI previews, and runnable examples for F5 iRules-style policy,
   nginx Lua/OpenResty-style header policy, HAProxy Lua/SPOE-style
   routing/load-balancer policy, and VCL-like cache policy.
-- `1.7.11` starts zero-downtime upgrade groundwork. Native listeners stop
-  accepting after the configured grace interval, retain established connection
-  tasks during drain, and enforce a bounded process shutdown timeout. Full
-  systemd socket activation and Podman blue/green handoff remain in progress.
+- `1.7.11` completes the zero-downtime upgrade slice. Native listeners retain
+  established work during bounded drain, systemd can retain and pass public
+  listeners across generations, and `READY=1` follows explicit readiness from
+  every configured background service. A live Podman smoke proves the supported
+  blue/green pattern and the direct-published-port limitation.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

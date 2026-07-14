@@ -4,9 +4,7 @@ use std::net::{SocketAddr, TcpListener as StdTcpListener};
 use tokio::net::TcpListener;
 
 use super::{NativeHttp1ProxyRuntimeError, NativeHttp1ProxyRuntimeListener};
-use crate::{
-    ListenerProtocol, NativeRuntimeLaunchListener, NativeRuntimeLaunchPlan, ServiceKind,
-};
+use crate::{ListenerProtocol, NativeRuntimeLaunchListener, NativeRuntimeLaunchPlan, ServiceKind};
 
 pub(super) async fn native_proxy_runtime_listeners(
     launch_plan: &NativeRuntimeLaunchPlan,
@@ -72,11 +70,11 @@ fn adopt_inherited_listeners(
             .local_addr()
             .map_err(|source| NativeHttp1ProxyRuntimeError::InheritedListenerInspect { source })?;
         #[cfg(target_os = "linux")]
-        if !rustix::net::sockopt::socket_acceptconn(&listener)
-            .map_err(|source| NativeHttp1ProxyRuntimeError::InheritedListenerInspect {
+        if !rustix::net::sockopt::socket_acceptconn(&listener).map_err(|source| {
+            NativeHttp1ProxyRuntimeError::InheritedListenerInspect {
                 source: source.into(),
-            })?
-        {
+            }
+        })? {
             return Err(NativeHttp1ProxyRuntimeError::InheritedListenerNotListening { addr });
         }
         if by_addr.insert(addr, listener).is_some() {

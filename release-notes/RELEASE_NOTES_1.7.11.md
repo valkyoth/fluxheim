@@ -1,11 +1,11 @@
 # Fluxheim 1.7.11 Release Notes
 
-Fluxheim 1.7.11 starts the zero-downtime process-upgrade line after the stable
-1.7 Wasm policy milestones. The first implementation slice establishes real,
-bounded drain semantics before listener file-descriptor handoff and systemd
-socket activation are enabled.
+Fluxheim 1.7.11 delivers the zero-downtime process-upgrade slice after the
+stable 1.7 Wasm policy milestones. It combines bounded native drain, strict
+listener inheritance, readiness-gated handoff, and tested native and Podman
+deployment patterns.
 
-## In Progress
+## Added
 
 - Track accepted native HTTP, HTTPS, HTTP/2, and Unix-listener connections so
   shutdown stops new accepts while established connections drain.
@@ -35,3 +35,8 @@ socket activation are enabled.
 - Add a real rootless-Podman blue/green smoke. It verifies that direct published
   ports cannot be atomically replaced, then proves the supported stable-front
   pattern with failed-green rollback and old keep-alive drain.
+- Wait for every configured background service to reach its explicit ready
+  point before systemd receives `READY=1`; a service that exits first makes the
+  replacement fail closed and leaves the old generation serving.
+- Reject inherited descriptors that are not listening TCP sockets, including a
+  live regression using a connected stream bound to the expected address.

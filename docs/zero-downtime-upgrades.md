@@ -1,8 +1,8 @@
 # Zero-Downtime Upgrades
 
-Fluxheim `1.7.11` starts the zero-downtime process-upgrade line. This document
-defines the safety model before listener inheritance, readiness signaling, and
-deployment automation are promoted as stable behavior.
+Fluxheim `1.7.11` provides the zero-downtime process-upgrade foundation. This
+document defines the supported listener inheritance, readiness, drain, and
+deployment contracts.
 
 Zero downtime requires one component outside the replaceable Fluxheim process
 to keep ownership of the public listening socket. Replacing a process that is
@@ -11,7 +11,7 @@ of how quickly the replacement starts.
 
 ## Current 1.7.11 Drain Contract
 
-The first implementation slice makes native shutdown behavior explicit:
+Native shutdown behavior is explicit:
 
 1. Fluxheim receives `SIGTERM`, `SIGQUIT`, or the platform shutdown signal.
 2. An optional `server.process.grace_period_seconds` delay allows a supervisor
@@ -29,9 +29,9 @@ The service manager or container stop timeout must exceed the grace period plus
 the graceful drain timeout. Otherwise it can send `SIGKILL` before Fluxheim's
 own bound is reached.
 
-This drain contract improves normal restarts. The second implementation slice
-also supports inherited public HTTP/HTTPS TCP listeners so an external socket
-owner can remove connection refusal during replacement.
+This drain contract improves normal restarts. Inherited public HTTP/HTTPS TCP
+listeners let an external socket owner remove connection refusal during
+replacement.
 
 ## Native Binary And systemd Design
 
@@ -57,9 +57,9 @@ Fluxheim accepts only the standard systemd FD-3 protocol. `LISTEN_FDS` must be
 between 1 and 128, `LISTEN_PID` must equal the current process, and an optional
 `LISTEN_FDNAMES` list must contain the declared number of names. The
 non-standard `LISTEN_FDS_FIRST_FD` extension is rejected. Every inherited item
-must be a TCP listener whose bound address exactly matches one planned public
-HTTP/HTTPS address; configured port `0` is therefore not valid for activated
-production listeners.
+must be a TCP socket in listening state whose bound address exactly matches one
+planned public HTTP/HTTPS address; configured port `0` is therefore not valid
+for activated production listeners.
 
 When any activation variable is present, validation failure is fatal. Fluxheim
 does not bind missing listeners as a fallback. This prevents a partially
@@ -82,14 +82,14 @@ ready only after all startup-blocking work succeeds, including:
 - load-balancer pool construction;
 - required Wasm module validation and compilation;
 - binding or adopting every required listener;
-- starting critical background services.
+- receiving the explicit ready signal from every configured background service.
 
 On Linux, Fluxheim sends `READY=1` with status `Fluxheim native runtime ready`
-after those steps. If `NOTIFY_SOCKET` is configured but malformed or
-unreachable, startup fails instead of logging a false-ready state. On shutdown
-it sends `STOPPING=1` and a draining status before applying the optional grace
-period. Linux abstract notification sockets and filesystem sockets are both
-supported.
+after those steps. A background service that exits before its ready signal
+fails startup. If `NOTIFY_SOCKET` is configured but malformed or unreachable,
+startup fails instead of logging a false-ready state. On shutdown it sends
+`STOPPING=1` and a draining status before applying the optional grace period.
+Linux abstract notification sockets and filesystem sockets are both supported.
 
 If readiness fails, the old process must remain active and the replacement must
 exit without asking it to drain. A timeout or failed health probe is a failed
