@@ -257,6 +257,9 @@ mod native_http1_tls_listener_tests;
 #[cfg(test)]
 #[path = "native_http1_client_tests.rs"]
 mod native_http1_client_tests;
+#[cfg(test)]
+#[path = "native_http1_upstream_security_tests.rs"]
+mod native_http1_upstream_security_tests;
 
 #[cfg(test)]
 #[path = "native_http1_client_h2c_tests.rs"]

@@ -51,3 +51,15 @@ deployment patterns.
 - Claim inherited systemd descriptors exactly once per process and own the
   complete set before validating any item. Concurrent calls and retries fail
   before touching FD 3, while validation failures close the complete set.
+
+## Fixed
+
+- Route HTTP/2 requests exclusively by `:authority`; supplied `Host` fields are
+  replaced and requests without authority fail closed.
+- Remove all fixed and `Connection`-nominated hop-by-hop origin response
+  headers before delivery or cache admission, and reject malformed options.
+- Read through at most eight HTTP/1 informational origin responses to the final
+  response, reject generic status 101, and reject transfer-coding chains that
+  Fluxheim cannot decode completely.
+- Prevent oversized embedded HTTP/1 connection limits from reaching Tokio's
+  panicking semaphore constructor.

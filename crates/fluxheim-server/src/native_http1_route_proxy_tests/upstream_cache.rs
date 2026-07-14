@@ -7,6 +7,40 @@ pub(super) async fn upstream_cacheable_once(body: &'static str) -> std::net::Soc
     upstream_cacheable_once_with_max_age(body, 60).await
 }
 
+pub(super) async fn upstream_cacheable_once_with_hop_header(
+    body: &'static str,
+) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-length: {}\r\nconnection: x-internal-session\r\nproxy-connection: keep-alive\r\nx-internal-session: secret\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    addr
+}
+
 pub(super) async fn peer_fill_cacheable_once(body: &'static str) -> std::net::SocketAddr {
     peer_fill_response_once(format!(
         "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-length: {}\r\n\r\n{}",

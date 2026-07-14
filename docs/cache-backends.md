@@ -48,6 +48,9 @@ internal cache implementation.
   upstream response headers before cache admission and downstream delivery.
   This is intended for tightly scoped static-asset routes where operators know
   a header such as `Set-Cookie` is not part of the cache identity.
+- Fluxheim always removes fixed hop-by-hop origin response headers and every
+  field nominated by `Connection` before cache admission. These transport-local
+  fields cannot be stored for later clients.
 - `cache.tag_headers`, `vhosts.cache.tag_headers`, and
   `vhosts.routes.cache.tag_headers` control which origin response headers are
   trusted as cache-tag sources for indexed tag purge. Defaults are

@@ -6,9 +6,34 @@ use crate::NativeHttp1RouteProxy;
 
 use super::{
     downstream_get, downstream_request, native_proxy_memory_cache_config, proxy_for,
-    response_header, response_header_values, route_proxy_listener, upstream_cacheable_sequence,
+    response_header, response_header_values, route_proxy_listener,
+    upstream_cacheable_once_with_hop_header, upstream_cacheable_sequence,
     upstream_delayed_cacheable_once, upstream_response, upstream_vary_sequence,
 };
+
+#[tokio::test]
+async fn native_route_proxy_never_forwards_or_caches_connection_nominated_headers() {
+    let upstream = upstream_cacheable_once_with_hop_header("cache-safe").await;
+    let cache = native_proxy_memory_cache_config();
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let miss = downstream_get(listener, "/asset.png").await;
+    let hit = downstream_get(listener, "/asset.png").await;
+
+    assert_eq!(
+        response_header(&miss, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert_eq!(
+        response_header(&hit, "x-cache-status").as_deref(),
+        Some("HIT")
+    );
+    for response in [&miss, &hit] {
+        assert!(response_header(response, "proxy-connection").is_none());
+        assert!(response_header(response, "x-internal-session").is_none());
+    }
+}
 
 #[tokio::test]
 async fn native_route_proxy_origin_protection_limits_concurrent_cache_fills() {

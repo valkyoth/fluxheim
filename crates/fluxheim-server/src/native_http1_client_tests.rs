@@ -145,7 +145,7 @@ async fn native_upstream_does_not_pool_http10_without_keep_alive() {
 }
 
 #[tokio::test]
-async fn native_upstream_does_not_pool_switching_protocols_response() {
+async fn native_upstream_rejects_switching_protocols_outside_takeover_path() {
     let addr = upstream(|_, mut stream| async move {
         stream
             .write_all(
@@ -157,9 +157,12 @@ async fn native_upstream_does_not_pool_switching_protocols_response() {
     .await;
 
     let upstream = NativeHttp1Upstream::new(addr.to_string()).with_pool_max_idle(1);
-    let response = upstream.send(&request()).await.unwrap();
+    let error = upstream.send(&request()).await.unwrap_err();
 
-    assert_eq!(response.status(), 101);
+    assert!(matches!(
+        error,
+        NativeHttp1Error::Parse(fluxheim_protocol::Http1ParseError::InvalidResponseLine)
+    ));
     assert_eq!(upstream.idle_connection_count().await, 0);
 }
 

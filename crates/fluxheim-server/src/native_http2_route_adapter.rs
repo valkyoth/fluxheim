@@ -74,18 +74,16 @@ fn native_http2_request_to_http1(
         body,
         trailers,
     } = request;
+    let authority = uri.authority()?.as_str().to_owned();
     let mut owned_headers = Vec::with_capacity(headers.len().saturating_add(1));
     for (name, value) in &headers {
+        if name == http::header::HOST {
+            continue;
+        }
         let value = value.to_str().ok()?.to_owned();
         owned_headers.push((name.as_str().to_owned(), value));
     }
-    if !owned_headers
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("host"))
-        && let Some(authority) = uri.authority()
-    {
-        owned_headers.push(("host".to_owned(), authority.as_str().to_owned()));
-    }
+    owned_headers.push(("host".to_owned(), authority));
     let target = uri
         .path_and_query()
         .map(|path| path.as_str().to_owned())
@@ -199,5 +197,53 @@ mod tests {
 
         assert_eq!(cookies, vec!["a=1", "b=2"]);
         assert!(!converted.headers().contains_key("connection"));
+    }
+
+    #[test]
+    fn h2_adapter_replaces_all_host_fields_with_authority() {
+        let mut headers = http::HeaderMap::new();
+        headers.append(
+            http::header::HOST,
+            http::HeaderValue::from_static("internal.test"),
+        );
+        headers.append(
+            http::header::HOST,
+            http::HeaderValue::from_static("other.test"),
+        );
+        let request = NativeHttp2Request {
+            method: http::Method::GET,
+            uri: "https://public.test/resource".parse().unwrap(),
+            headers,
+            body: zeroize::Zeroizing::new(Vec::new()),
+            trailers: None,
+        };
+
+        let converted =
+            native_http2_request_to_http1(request, None, &NativeHttp1RequestContext::default())
+                .unwrap();
+        let hosts = converted
+            .headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("host"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].1, "public.test");
+    }
+
+    #[test]
+    fn h2_adapter_rejects_request_without_authority() {
+        let request = NativeHttp2Request {
+            method: http::Method::GET,
+            uri: "/resource".parse().unwrap(),
+            headers: http::HeaderMap::new(),
+            body: zeroize::Zeroizing::new(Vec::new()),
+            trailers: None,
+        };
+
+        assert!(
+            native_http2_request_to_http1(request, None, &NativeHttp1RequestContext::default(),)
+                .is_none()
+        );
     }
 }

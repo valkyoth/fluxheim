@@ -1,8 +1,9 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
 use fluxheim_protocol::{
     Http1ChunkLimits, Http1ConnectionDirective, Http1HeadLimits, Http1ParseError,
-    Http1ResponseHead, decode_http1_chunked_body, http1_connection_directive,
+    Http1ResponseHead, decode_http1_chunked_body, http_token_valid, http1_connection_directive,
     parse_http1_response_head,
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -11,6 +12,7 @@ use tokio::time::timeout;
 use crate::{NativeHttp1Error, NativeHttp1Response};
 
 const UPSTREAM_READ_CHUNK_BYTES: usize = 8192;
+const MAX_INFORMATIONAL_RESPONSES: usize = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ResponseBodyFraming {
@@ -77,20 +79,40 @@ where
         max_head_bytes,
         ..Http1HeadLimits::default()
     };
-    let mut buffer = read_upstream_response_head(stream, limits).await?;
+    let mut buffer = Vec::with_capacity(UPSTREAM_READ_CHUNK_BYTES);
+    let mut informational_responses = 0usize;
+    loop {
+        fill_upstream_response_head(stream, &mut buffer, limits).await?;
+        let (status, head_len) = {
+            let head = parse_http1_response_head(&buffer, limits)?
+                .ok_or(Http1ParseError::InvalidResponseLine)?;
+            (head.status, head.head_len)
+        };
+        if status == 101 {
+            return Err(Http1ParseError::InvalidResponseLine.into());
+        }
+        if status >= 200 {
+            break;
+        }
+        informational_responses = informational_responses.saturating_add(1);
+        if informational_responses > MAX_INFORMATIONAL_RESPONSES {
+            return Err(Http1ParseError::InvalidResponseLine.into());
+        }
+        buffer.drain(..head_len);
+    }
     let head =
         parse_http1_response_head(&buffer, limits)?.ok_or(Http1ParseError::InvalidResponseLine)?;
     let head_len = head.head_len;
     let status = head.status;
     let reason = head.reason.to_owned();
     let body_framing = response_body_framing(status, request_method, &head.headers)?;
-    let origin_closes = http1_connection_directive(head.version, &head.headers)
-        .map(|directive| directive == Http1ConnectionDirective::Close)
-        .unwrap_or(true);
+    let connection_options = response_connection_options(&head.headers)?;
+    let origin_closes =
+        http1_connection_directive(head.version, &head.headers)? == Http1ConnectionDirective::Close;
     let headers = head
         .headers
         .iter()
-        .filter(|header| response_header_allowed(header.name, body_framing))
+        .filter(|header| response_header_allowed(header.name, body_framing, &connection_options))
         .map(|header| (header.name.to_owned(), header.value.to_owned()))
         .collect::<Vec<_>>();
     let body =
@@ -117,9 +139,21 @@ where
     S: AsyncRead + Unpin,
 {
     let mut buffer = Vec::with_capacity(UPSTREAM_READ_CHUNK_BYTES);
+    fill_upstream_response_head(stream, &mut buffer, limits).await?;
+    Ok(buffer)
+}
+
+async fn fill_upstream_response_head<S>(
+    stream: &mut S,
+    buffer: &mut Vec<u8>,
+    limits: Http1HeadLimits,
+) -> Result<(), NativeHttp1Error>
+where
+    S: AsyncRead + Unpin,
+{
     loop {
-        match parse_http1_response_head(&buffer, limits) {
-            Ok(Some(_)) => return Ok(buffer),
+        match parse_http1_response_head(buffer, limits) {
+            Ok(Some(_)) => return Ok(()),
             Ok(None) => {}
             Err(error) => return Err(error.into()),
         }
@@ -162,7 +196,7 @@ fn response_body_framing(
         return Ok(ResponseBodyFraming::NoBody);
     }
     let mut content_length = None;
-    let mut chunked = false;
+    let mut transfer_coding = None;
     for header in headers {
         if header.name.eq_ignore_ascii_case("content-length") {
             let parsed = header
@@ -175,18 +209,20 @@ fn response_body_framing(
             }
             content_length = Some(parsed);
         } else if header.name.eq_ignore_ascii_case("transfer-encoding") {
-            if !header
-                .value
-                .split(',')
-                .any(|token| token.trim().eq_ignore_ascii_case("chunked"))
-            {
-                return Err(Http1ParseError::UnsupportedTransferEncoding);
+            for coding in header.value.split(',').map(str::trim) {
+                if coding.is_empty()
+                    || !http_token_valid(coding)
+                    || transfer_coding.replace(coding).is_some()
+                {
+                    return Err(Http1ParseError::UnsupportedTransferEncoding);
+                }
             }
-            chunked = true;
         }
     }
-    if chunked {
+    if transfer_coding.is_some_and(|coding| coding.eq_ignore_ascii_case("chunked")) {
         Ok(ResponseBodyFraming::Chunked)
+    } else if transfer_coding.is_some() {
+        Err(Http1ParseError::UnsupportedTransferEncoding)
     } else if let Some(length) = content_length {
         Ok(ResponseBodyFraming::ContentLength(
             usize::try_from(length).map_err(|_| Http1ParseError::BodyTooLarge)?,
@@ -340,6 +376,7 @@ fn downstream_hop_by_hop_header(name: &str) -> bool {
         name.to_ascii_lowercase().as_str(),
         "connection"
             | "keep-alive"
+            | "proxy-connection"
             | "proxy-authenticate"
             | "proxy-authorization"
             | "te"
@@ -349,8 +386,31 @@ fn downstream_hop_by_hop_header(name: &str) -> bool {
     )
 }
 
-fn response_header_allowed(name: &str, body_framing: ResponseBodyFraming) -> bool {
+fn response_connection_options(
+    headers: &[fluxheim_protocol::Http1Header<'_>],
+) -> Result<HashSet<String>, Http1ParseError> {
+    let mut options = HashSet::new();
+    for header in headers
+        .iter()
+        .filter(|header| header.name.eq_ignore_ascii_case("connection"))
+    {
+        for option in header.value.split(',').map(str::trim) {
+            if option.is_empty() || !http_token_valid(option) {
+                return Err(Http1ParseError::InvalidConnection);
+            }
+            options.insert(option.to_ascii_lowercase());
+        }
+    }
+    Ok(options)
+}
+
+fn response_header_allowed(
+    name: &str,
+    body_framing: ResponseBodyFraming,
+    connection_options: &HashSet<String>,
+) -> bool {
     !(downstream_hop_by_hop_header(name)
+        || connection_options.contains(&name.to_ascii_lowercase())
         || matches!(body_framing, ResponseBodyFraming::Chunked)
             && name.eq_ignore_ascii_case("content-length"))
 }

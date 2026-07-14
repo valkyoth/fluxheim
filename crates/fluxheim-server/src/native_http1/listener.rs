@@ -23,7 +23,7 @@ where
     H: NativeHttp1Handler,
     F: Future<Output = ()> + Send,
 {
-    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let semaphore = connection_semaphore(policy)?;
     let mut connections = NativeConnectionTasks::new();
     let local_addr = listener.local_addr().ok();
     tokio::pin!(shutdown);
@@ -69,7 +69,7 @@ where
     H: NativeHttp1Handler,
     F: Future<Output = ()> + Send,
 {
-    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let semaphore = connection_semaphore(policy)?;
     let mut connections = NativeConnectionTasks::new();
     let local_addr = listener.local_addr().ok();
     tokio::pin!(shutdown);
@@ -126,7 +126,7 @@ where
     H: NativeHttp1Handler,
     F: Future<Output = ()> + Send,
 {
-    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let semaphore = connection_semaphore(policy)?;
     let mut connections = NativeConnectionTasks::new();
     tokio::pin!(shutdown);
     loop {
@@ -162,4 +162,18 @@ where
     drop(listener);
     connections.drain().await;
     Ok(())
+}
+
+pub(super) fn connection_semaphore(
+    policy: DownstreamHttp1Policy,
+) -> Result<Arc<Semaphore>, NativeHttp1Error> {
+    let max_connections = policy.max_connections();
+    if max_connections > Semaphore::MAX_PERMITS {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "HTTP/1 max_connections exceeds Tokio semaphore capacity",
+        )
+        .into());
+    }
+    Ok(Arc::new(Semaphore::new(max_connections)))
 }

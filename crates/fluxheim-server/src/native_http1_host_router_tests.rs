@@ -451,6 +451,52 @@ async fn native_host_router_strict_mode_rejects_unknown_http2_authority() {
 }
 
 #[tokio::test]
+async fn native_host_router_uses_http2_authority_instead_of_host() {
+    let public = upstream_response("public").await;
+    let internal = upstream_response("internal").await;
+    let mut config = fluxheim_config::Config::default();
+    config.server.default_vhost = Some("public".to_owned());
+    config.server.host_routing.strict = true;
+    config.vhosts = vec![
+        vhost("public", &["public.test"], public),
+        vhost("internal", &["internal.test"], internal),
+    ];
+    let router = Arc::new(
+        NativeHttp1HostRouter::from_config(&config, DownstreamHttp1Policy::default(), 0).unwrap(),
+    );
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let adapter = Arc::new(NativeHttp2RouteAdapter::new(
+        router,
+        None,
+        NativeHttp1RequestContext::default(),
+    ));
+    let server = tokio::spawn(
+        crate::native_http2_stack::serve_native_http2_connection_until_idle(
+            server_io,
+            DownstreamHttp2Policy::default(),
+            adapter,
+            Duration::from_millis(50),
+        ),
+    );
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let connection = tokio::spawn(async move { connection.await.unwrap() });
+    let request = http::Request::builder()
+        .uri("https://public.test/")
+        .header(http::header::HOST, "internal.test")
+        .body(())
+        .unwrap();
+
+    let (response, _) = client.send_request(request, true).unwrap();
+    let response = response.await.unwrap();
+    let body = response.into_body().data().await.unwrap().unwrap();
+
+    assert_eq!(body.as_ref(), b"public");
+    drop(client);
+    connection.await.unwrap();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn native_host_router_routes_wildcards_by_longest_suffix() {
     let wildcard = upstream_response("wildcard").await;
     let specific = upstream_response("specific").await;

@@ -51,6 +51,19 @@ behavior when the change improves security or project direction.
   ownership of the complete inherited set before validation, preventing double
   close, partial consumption, and retry against reused descriptor numbers.
 
+### Fixed
+
+- Make HTTP/2 `:authority` authoritative over any supplied `Host` fields,
+  preventing cross-vhost routing confusion.
+- Strip upstream response headers nominated by `Connection`, including before
+  cache admission, and reject malformed connection options and unsupported
+  transfer-coding chains.
+- Consume a bounded sequence of HTTP/1 informational upstream responses before
+  returning the final response, while reserving status 101 for explicit
+  validated takeover paths.
+- Bound public HTTP/1 connection-limit builders and validate every listener
+  semaphore construction instead of allowing oversized values to panic.
+
 ## 1.7.10 - 2026-07-13
 
 ### Added

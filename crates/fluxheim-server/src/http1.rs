@@ -62,13 +62,36 @@ impl DownstreamHttp1Policy {
         }
     }
 
+    /// Sets the listener connection cap, clamped to Tokio's semaphore limit.
     pub const fn with_max_connections(mut self, max_connections: usize) -> Self {
-        self.max_connections = if max_connections == 0 {
+        let requested = if max_connections == 0 {
             DEFAULT_HTTP1_MAX_CONNECTIONS
         } else {
             max_connections
         };
+        self.max_connections = if requested > tokio::sync::Semaphore::MAX_PERMITS {
+            tokio::sync::Semaphore::MAX_PERMITS
+        } else {
+            requested
+        };
         self
+    }
+
+    /// Sets the listener connection cap or rejects values Tokio cannot represent.
+    pub const fn try_with_max_connections(
+        mut self,
+        max_connections: usize,
+    ) -> Result<Self, &'static str> {
+        let requested = if max_connections == 0 {
+            DEFAULT_HTTP1_MAX_CONNECTIONS
+        } else {
+            max_connections
+        };
+        if requested > tokio::sync::Semaphore::MAX_PERMITS {
+            return Err("HTTP/1 max_connections exceeds Tokio semaphore capacity");
+        }
+        self.max_connections = requested;
+        Ok(self)
     }
 
     pub const fn with_request_body_timeout(mut self, timeout: Duration) -> Self {

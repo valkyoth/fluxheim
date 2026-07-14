@@ -153,6 +153,21 @@ fn downstream_http1_policy_treats_zero_connection_cap_as_default() {
 }
 
 #[test]
+fn downstream_http1_policy_bounds_connection_cap_without_panicking() {
+    let saturated = DownstreamHttp1Policy::default().with_max_connections(usize::MAX);
+    let rejected = DownstreamHttp1Policy::default().try_with_max_connections(usize::MAX);
+
+    assert_eq!(
+        saturated.max_connections(),
+        tokio::sync::Semaphore::MAX_PERMITS
+    );
+    assert_eq!(
+        rejected,
+        Err("HTTP/1 max_connections exceeds Tokio semaphore capacity")
+    );
+}
+
+#[test]
 fn server_plan_maps_configured_limits_to_downstream_http1_policy() {
     let mut config = Config::default();
     config.server.limits = ServerLimitsConfig {

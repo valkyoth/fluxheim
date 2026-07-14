@@ -2,11 +2,11 @@ use std::future::Future;
 use std::sync::Arc;
 
 use tokio::net::TcpListener;
-use tokio::sync::Semaphore;
 use tokio::time::timeout;
 use tokio_openssl::SslStream;
 
 use super::connection_tasks::NativeConnectionTasks;
+use super::listener::connection_semaphore;
 use super::{
     NativeHttp1Error, NativeHttp1Handler, NativeHttp1RequestContext, NativeHttp1TlsClientIdentity,
     NativeTlsHttp2Dispatch, serve_native_http1_connection_with_context, sha256_hex,
@@ -24,7 +24,7 @@ where
     H: NativeHttp1Handler,
     F: Future<Output = ()> + Send,
 {
-    let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let semaphore = connection_semaphore(policy)?;
     let mut connections = NativeConnectionTasks::new();
     let local_addr = listener.local_addr().ok();
     tokio::pin!(shutdown);
@@ -102,7 +102,7 @@ where
     H: NativeHttp1Handler,
     F: Future<Output = ()> + Send,
 {
-    let semaphore = Arc::new(Semaphore::new(http1_policy.max_connections()));
+    let semaphore = connection_semaphore(http1_policy)?;
     let mut connections = NativeConnectionTasks::new();
     let local_addr = listener.local_addr().ok();
     tokio::pin!(shutdown);

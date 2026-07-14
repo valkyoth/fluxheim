@@ -1582,6 +1582,15 @@ h2c/prior-knowledge upstreams and TLS ALPN-negotiated upstream HTTP/2 for
 `http/1.1`, then sends the upstream request with the protocol selected by ALPN.
 Plaintext `http1-and-http2` remains HTTP/1.1-only unless
 `upstream_h2c_upgrade = true` is explicitly configured.
+For downstream HTTP/2, `:authority` is the sole vhost-routing authority;
+Fluxheim discards any ordinary `Host` fields before adapting the request and
+rejects requests without authority. Native HTTP/1 origins may send a bounded
+sequence of informational responses before the final response. Generic status
+`101` is accepted only by the explicit WebSocket or h2c takeover paths.
+Fluxheim supports only a single `chunked` HTTP/1 response transfer coding and
+rejects coding chains it cannot decode completely. It removes fixed
+hop-by-hop response fields plus every field nominated by `Connection` before
+downstream delivery or cache admission.
 For explicit gRPC routes, set route-scoped `[vhosts.routes.grpc] enabled =
 true`; Fluxheim then requires the route proxy to allow upstream HTTP/2, rejects
 non-`POST` requests, accepts only `application/grpc` or `application/grpc+*`
