@@ -109,6 +109,37 @@ fn native_runtime_target_adapter_selects_native_for_ready_plan() {
 }
 
 #[test]
+fn native_runtime_shutdown_timing_uses_configured_process_values() {
+    let mut config = crate::config::Config::default();
+    config.server.process.grace_period_seconds = Some(3);
+    config.server.process.graceful_shutdown_timeout_seconds = Some(17);
+    let process = fluxheim_server::ServerPlan::from_config(&config)
+        .unwrap()
+        .process()
+        .clone();
+
+    assert_eq!(
+        super::native_runtime_shutdown_grace(&process),
+        Some(std::time::Duration::from_secs(3))
+    );
+    assert_eq!(
+        super::native_runtime_shutdown_timeout(&process),
+        std::time::Duration::from_secs(17)
+    );
+}
+
+#[test]
+fn native_runtime_shutdown_timeout_is_bounded_by_default() {
+    let process = fluxheim_server::ProcessSpec::default();
+
+    assert_eq!(super::native_runtime_shutdown_grace(&process), None);
+    assert_eq!(
+        super::native_runtime_shutdown_timeout(&process),
+        std::time::Duration::from_secs(30)
+    );
+}
+
+#[test]
 fn native_runtime_rejects_unsupported_certificate_background_tasks() {
     let plan = fluxheim_server::ServerPlan::with_process(
         fluxheim_server::ProcessSpec::default(),

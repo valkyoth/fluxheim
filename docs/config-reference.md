@@ -163,6 +163,12 @@ Notes:
   process plan. Changes to these values require a process upgrade, not a live
   snapshot reload. Keep `threads` conservative in containers because worker
   threads and listener tasks are process-level resources.
+- On process shutdown, `grace_period_seconds` delays the drain request when it
+  is configured. Fluxheim then drops native accept sockets while established
+  HTTP, HTTPS, HTTP/2, and local HTTP connections drain.
+  `graceful_shutdown_timeout_seconds` bounds that drain; omitting it uses an
+  effective 30-second timeout. The supervisor stop timeout must exceed the sum
+  of the configured grace and effective drain timeout.
 - `pid_file`, `upgrade_sock`, `certificate_reload_sock`, and optional
   `error_log` must not contain parent traversal, must not be below symlinked
   existing parent directories, and on Unix must not use a group- or

@@ -123,6 +123,14 @@ sudo systemctl restart fluxheim.service
 Fluxheim exits on `SIGTERM`; the unit uses `TimeoutStopSec=30s` so the process
 has time to drain and shut down cleanly before systemd escalates.
 
+Starting with `1.7.11`, native listeners stop accepting after the configured
+grace interval and wait for established connection tasks within the configured
+graceful-shutdown timeout. This makes restarts bounded and connection-aware,
+but the packaged service does not yet claim zero downtime because it remains
+the sole owner of its ports. The systemd socket-activation design and rollout
+requirements are documented in
+[Zero-Downtime Upgrades](zero-downtime-upgrades.md).
+
 ## ACME Timer
 
 RPM packages install a one-shot renewal unit and timer:

@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.7.10
+Version:        1.7.11
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,10 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue Jul 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.11-1
+- Start bounded native listener draining as the first zero-downtime upgrade
+  prerequisite.
+
 * Mon Jul 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.10-1
 - Add selectable live smokes for all four Wasm migration-example families.
 - Require family launcher coverage and the complete deep-gate Wasm smoke.

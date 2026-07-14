@@ -6,6 +6,7 @@ use tokio::sync::Semaphore;
 use tokio::time::timeout;
 use tokio_openssl::SslStream;
 
+use super::connection_tasks::NativeConnectionTasks;
 use super::{
     NativeHttp1Error, NativeHttp1Handler, NativeHttp1RequestContext, NativeHttp1TlsClientIdentity,
     NativeTlsHttp2Dispatch, serve_native_http1_connection_with_context, sha256_hex,
@@ -24,11 +25,14 @@ where
     F: Future<Output = ()> + Send,
 {
     let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let mut connections = NativeConnectionTasks::new();
     let local_addr = listener.local_addr().ok();
     tokio::pin!(shutdown);
     loop {
         tokio::select! {
-            () = &mut shutdown => return Ok(()),
+            biased;
+            () = &mut shutdown => break,
+            () = connections.join_next(), if !connections.is_empty() => {}
             accepted = listener.accept() => {
                 let (stream, peer_addr) = accepted?;
                 let Ok(permit) = semaphore.clone().try_acquire_owned() else {
@@ -40,7 +44,7 @@ where
                 };
                 let acceptor = acceptor.clone();
                 let handler = handler.clone();
-                tokio::spawn(async move {
+                connections.spawn(async move {
                     let stream = match native_openssl_server_stream(&acceptor, stream) {
                         Ok(stream) => stream,
                         Err(error) => {
@@ -81,6 +85,9 @@ where
             }
         }
     }
+    drop(listener);
+    connections.drain().await;
+    Ok(())
 }
 
 pub async fn serve_native_http1_and_http2_openssl_listener<H, F>(
@@ -96,11 +103,14 @@ where
     F: Future<Output = ()> + Send,
 {
     let semaphore = Arc::new(Semaphore::new(http1_policy.max_connections()));
+    let mut connections = NativeConnectionTasks::new();
     let local_addr = listener.local_addr().ok();
     tokio::pin!(shutdown);
     loop {
         tokio::select! {
-            () = &mut shutdown => return Ok(()),
+            biased;
+            () = &mut shutdown => break,
+            () = connections.join_next(), if !connections.is_empty() => {}
             accepted = listener.accept() => {
                 let (stream, peer_addr) = accepted?;
                 let Ok(permit) = semaphore.clone().try_acquire_owned() else {
@@ -112,7 +122,7 @@ where
                 };
                 let acceptor = acceptor.clone();
                 let handler = handler.clone();
-                tokio::spawn(async move {
+                connections.spawn(async move {
                     let stream = match native_openssl_server_stream(&acceptor, stream) {
                         Ok(stream) => stream,
                         Err(error) => {
@@ -182,6 +192,9 @@ where
             }
         }
     }
+    drop(listener);
+    connections.drain().await;
+    Ok(())
 }
 
 fn native_openssl_server_stream(

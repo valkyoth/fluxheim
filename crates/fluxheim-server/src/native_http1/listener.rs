@@ -6,6 +6,7 @@ use tokio::net::TcpListener;
 use tokio::net::UnixListener;
 use tokio::sync::Semaphore;
 
+use super::connection_tasks::NativeConnectionTasks;
 use super::{
     NativeHttp1Error, NativeHttp1Handler, NativeHttp1RequestContext,
     serve_native_http1_connection_with_context, serve_native_http1_proxy_protocol_connection,
@@ -23,11 +24,14 @@ where
     F: Future<Output = ()> + Send,
 {
     let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let mut connections = NativeConnectionTasks::new();
     let local_addr = listener.local_addr().ok();
     tokio::pin!(shutdown);
     loop {
         tokio::select! {
-            () = &mut shutdown => return Ok(()),
+            biased;
+            () = &mut shutdown => break,
+            () = connections.join_next(), if !connections.is_empty() => {}
             accepted = listener.accept() => {
                 let (stream, peer_addr) = accepted?;
                 let Ok(permit) = semaphore.clone().try_acquire_owned() else {
@@ -38,7 +42,7 @@ where
                     continue;
                 };
                 let handler = handler.clone();
-                tokio::spawn(async move {
+                connections.spawn(async move {
                     let request_context = NativeHttp1RequestContext {
                         local_addr,
                         ..NativeHttp1RequestContext::default()
@@ -49,6 +53,9 @@ where
             }
         }
     }
+    drop(listener);
+    connections.drain().await;
+    Ok(())
 }
 
 pub async fn serve_native_http1_listener_with_proxy_protocol<H, F>(
@@ -63,11 +70,14 @@ where
     F: Future<Output = ()> + Send,
 {
     let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let mut connections = NativeConnectionTasks::new();
     let local_addr = listener.local_addr().ok();
     tokio::pin!(shutdown);
     loop {
         tokio::select! {
-            () = &mut shutdown => return Ok(()),
+            biased;
+            () = &mut shutdown => break,
+            () = connections.join_next(), if !connections.is_empty() => {}
             accepted = listener.accept() => {
                 let (stream, peer_addr) = accepted?;
                 let Ok(permit) = semaphore.clone().try_acquire_owned() else {
@@ -79,7 +89,7 @@ where
                 };
                 let handler = handler.clone();
                 let proxy_protocol = proxy_protocol.clone();
-                tokio::spawn(async move {
+                connections.spawn(async move {
                     let result = serve_native_http1_proxy_protocol_connection(
                         stream,
                         peer_addr,
@@ -100,6 +110,9 @@ where
             }
         }
     }
+    drop(listener);
+    connections.drain().await;
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -114,10 +127,13 @@ where
     F: Future<Output = ()> + Send,
 {
     let semaphore = Arc::new(Semaphore::new(policy.max_connections()));
+    let mut connections = NativeConnectionTasks::new();
     tokio::pin!(shutdown);
     loop {
         tokio::select! {
-            () = &mut shutdown => return Ok(()),
+            biased;
+            () = &mut shutdown => break,
+            () = connections.join_next(), if !connections.is_empty() => {}
             accepted = listener.accept() => {
                 let (stream, _) = accepted?;
                 let Ok(permit) = semaphore.clone().try_acquire_owned() else {
@@ -128,7 +144,7 @@ where
                     continue;
                 };
                 let handler = handler.clone();
-                tokio::spawn(async move {
+                connections.spawn(async move {
                     let request_context = NativeHttp1RequestContext::default();
                     let _ = serve_native_http1_connection_with_context(
                         stream,
@@ -143,4 +159,7 @@ where
             }
         }
     }
+    drop(listener);
+    connections.drain().await;
+    Ok(())
 }

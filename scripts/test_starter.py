@@ -74,6 +74,13 @@ TESTS: tuple[TestEntry, ...] = (
         "Exercises the native HTTP/1 proxy path after the Pingora cutover.",
     ),
     TestEntry(
+        "graceful-drain",
+        "Native graceful connection drain smoke",
+        "operations",
+        ("scripts/smoke_graceful_drain.sh",),
+        "Proves SIGTERM stops new accepts while an established keep-alive request drains.",
+    ),
+    TestEntry(
         "proxy-cache",
         "Proxy cache smoke",
         "cache",

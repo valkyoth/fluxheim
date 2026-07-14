@@ -473,15 +473,15 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.7.10-wolfi`, `v1.7.10-alpine`, `v1.7.10-suse-micro`, `v1.7.10-debian`
+- `v1.7.11-wolfi`, `v1.7.11-alpine`, `v1.7.11-suse-micro`, `v1.7.11-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.7.10`
-- `v1.7.10-base`
+- `v1.7.11`
+- `v1.7.11-base`
 - `latest`
 - `latest-base`
 
@@ -490,21 +490,21 @@ automation. They point at the full/default image profile.
 
 The focused image profiles publish tags with a profile segment:
 
-- `v1.7.10-cache-wolfi`, `v1.7.10-cache-alpine`,
-  `v1.7.10-cache-suse-micro`, `v1.7.10-cache-debian`
-- `v1.7.10-proxy-wolfi`, `v1.7.10-proxy-alpine`,
-  `v1.7.10-proxy-suse-micro`, `v1.7.10-proxy-debian`
-- `v1.7.10-load-balancer-wolfi`, `v1.7.10-load-balancer-alpine`,
-  `v1.7.10-load-balancer-suse-micro`, `v1.7.10-load-balancer-debian`
-- `v1.7.10-php-wolfi`, `v1.7.10-php-alpine`,
-  `v1.7.10-php-suse-micro`, `v1.7.10-php-debian`
+- `v1.7.11-cache-wolfi`, `v1.7.11-cache-alpine`,
+  `v1.7.11-cache-suse-micro`, `v1.7.11-cache-debian`
+- `v1.7.11-proxy-wolfi`, `v1.7.11-proxy-alpine`,
+  `v1.7.11-proxy-suse-micro`, `v1.7.11-proxy-debian`
+- `v1.7.11-load-balancer-wolfi`, `v1.7.11-load-balancer-alpine`,
+  `v1.7.11-load-balancer-suse-micro`, `v1.7.11-load-balancer-debian`
+- `v1.7.11-php-wolfi`, `v1.7.11-php-alpine`,
+  `v1.7.11-php-suse-micro`, `v1.7.11-php-debian`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-load-balancer-wolfi`, `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`,
   `latest-load-balancer-wolfi`, `latest-php-wolfi`, etc. when run from the
   default branch
-- Wolfi short aliases: `v1.7.10-cache`, `v1.7.10-proxy`,
-  `v1.7.10-load-balancer`, `v1.7.10-php`, `latest-cache`, `latest-proxy`,
+- Wolfi short aliases: `v1.7.11-cache`, `v1.7.11-proxy`,
+  `v1.7.11-load-balancer`, `v1.7.11-php`, `latest-cache`, `latest-proxy`,
   `latest-load-balancer`, and `latest-php`
 
 Starting with `v1.5.0`, the load-balancer image profile is part of normal tag
@@ -942,7 +942,11 @@ stable feature.
 
 The container config sets `grace_period_seconds = 2` and
 `graceful_shutdown_timeout_seconds = 5`; keep the Podman stop timeout higher
-than the sum of those values so normal shutdown does not fall back to `SIGKILL`.
+than the sum of those values so native accepted connections can drain and
+normal shutdown does not fall back to `SIGKILL`. Replacing a container that
+directly owns its published host ports still has a listener gap; see
+[Zero-Downtime Upgrades](zero-downtime-upgrades.md) for the readiness-gated
+blue/green design.
 
 Published images default to the rootless-friendly
 [packaging/container/fluxheim.toml](../packaging/container/fluxheim.toml) and a

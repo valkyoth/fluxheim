@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim-php-fpm"
-version = "1.7.10"
+version = "1.7.11"
 edition = "2024"
 rust-version = "1.97.0"
 license = "EUPL-1.2"

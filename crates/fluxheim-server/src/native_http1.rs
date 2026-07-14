@@ -19,6 +19,7 @@ use crate::{DownstreamHttp1Policy, ProxyProtocolPolicy};
 const READ_CHUNK_BYTES: usize = 8192;
 
 mod body;
+mod connection_tasks;
 mod listener;
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
 mod openssl_listener;

@@ -7,6 +7,20 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.7.11 - Unreleased
+
+### Added
+
+- Start zero-downtime process-upgrade support by making native listener drain
+  behavior explicit and testable before inherited listener handoff is enabled.
+- Add a real-binary `SIGTERM` smoke proving the old listener closes while an
+  established keep-alive connection completes within the shutdown bound.
+
+### Changed
+
+- Apply configured process grace and graceful-shutdown timeout policy in the
+  native runtime instead of retaining those values only in the launch plan.
+
 ## 1.7.10 - 2026-07-13
 
 ### Added

@@ -137,7 +137,8 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional bounded local MMDB support with trusted-file enforcement for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. The [GeoIP guide](docs/geoip.md) includes a pinned real CIRCL database proof for static, proxy, and load-balancer paths. |
 | Pingora-free runtime | ✅ | `1.6.34`; normal Fluxheim builds no longer compile Pingora crates. Server/listener/TLS, HTTP/1, HTTP/2, WebSocket, cache, load-balancer, admin, metrics, stream, and background-service paths run through Fluxheim-owned Rust crates. |
 | HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.9` protocol milestone using the Rust `quinn`/`h3` stack after the `1.8` macOS/Windows production parity line. |
-| WASM extensibility | 🧪 | Active `1.7.x` line. `1.7.0` added the optional `wasm` feature, strict plugin-file loading, bounded Wasmtime execution, and real-Wasm smoke coverage. `1.7.1` adds config-level plugin registry validation, deterministic attachment ordering, admission limits, metrics, and live native HTTP/1 access-decision hooks. `1.7.2` adds bounded native HTTP/1 request/response header hooks. `1.7.3` starts bounded native HTTP/1 route-decision hooks with configured canary and mirror branch selection, including selected native load-balanced and persistent routes. `1.7.4` starts VCL-like cache-policy hooks with bounded cache-lookup and cache-store decisions for continue/pass/bypass/skip-store/deny around cache lookup and storage. `1.7.5` adds bounded symbolic cache-key component hooks for low-cardinality cache variants plus fixed-ID cache-store TTL/tag/header metadata, symbolic content-type inspection, and a checked-in cache-policy example. `1.7.6` starts mature-runtime hardening with explicit compiled-module identities that isolate module reuse by plugin digest, ABI version, native feature surface, and Fluxheim version. `1.7.7` adds the opt-in `wasm-proxy-abi` compatibility preview boundary. `1.7.8` starts an opt-in WASI Preview 1 boundary with explicit clock/randomness grants and fail-closed import filtering. `1.7.9` adds documentation and runnable examples for F5 iRules-style, nginx Lua/OpenResty-style, HAProxy Lua/SPOE-style, and VCL-like policy migrations. `1.7.10` stabilizes that line with independently selectable family smokes, release-gate enforcement, and arbitrary guest-ID decoder property coverage. Direct backend choice, plugin-provided persistence keys, and dynamic mirror/shadow target choice remain constrained follow-up work. |
+| WASM extensibility | 🧪 | The `1.7.0` through `1.7.10` line added the optional bounded Wasmtime runtime, typed access/header/route/cache policy hooks, isolated module identities, proxy-ABI and WASI previews, and runnable migration examples for F5 iRules-style, nginx Lua/OpenResty-style, HAProxy Lua/SPOE-style, and VCL-like policy. `1.7.10` stabilized the line with independently selectable family smokes, release-gate enforcement, and arbitrary guest-ID decoder property coverage. Direct backend choice, plugin-provided persistence keys, and dynamic mirror/shadow target choice remain constrained follow-up work. |
+| Zero-downtime upgrades | 🧪 | Active `1.7.11` work. The first slice tracks accepted native connection tasks, stops new accepts during drain, and applies bounded process grace/shutdown timing. Inherited listener descriptors, systemd socket activation, readiness signaling, and the live old/new process handoff smoke remain required before transparent upgrades are called stable. |
 
 See [Production Readiness](docs/production-readiness.md) for the precise
 stable-core promise and deployment checks. See
@@ -351,8 +352,8 @@ Release tags use the same profile/OS suffixes on both registries. The first
 `1.7.x` image tags include `v1.7.0-wolfi`, `v1.7.0-cache-wolfi`,
 `v1.7.0-proxy-wolfi`, `v1.7.0-load-balancer-wolfi`, and `v1.7.0-php-wolfi`;
 follow-up `1.7.x` releases use the same suffix pattern, for example
-`v1.7.10-wolfi`, `v1.7.10-cache-wolfi`, `v1.7.10-proxy-wolfi`,
-`v1.7.10-load-balancer-wolfi`, and `v1.7.10-php-wolfi`.
+`v1.7.11-wolfi`, `v1.7.11-cache-wolfi`, `v1.7.11-proxy-wolfi`,
+`v1.7.11-load-balancer-wolfi`, and `v1.7.11-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
@@ -423,12 +424,12 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Release: 1.7 Wasm Extensibility
+## Current Release: 1.7.11 Zero-Downtime Upgrade Groundwork
 
 Fluxheim does not treat every planned idea as stable. The current release line
-is `1.7.x`, the shared Wasm extensibility line. It follows the `1.6.x`
-Pingora-exit line, where normal Fluxheim builds stopped compiling Pingora
-crates and moved request handling onto Fluxheim-owned Rust runtime boundaries.
+is `1.7.11`, the first zero-downtime process-upgrade slice after the stable
+`1.7.0` through `1.7.10` Wasm milestones. It establishes real bounded drain
+semantics before inherited listener and readiness-gated handoff support.
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
   proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
@@ -484,6 +485,10 @@ crates and moved request handling onto Fluxheim-owned Rust runtime boundaries.
   proxy-ABI/WASI previews, and runnable examples for F5 iRules-style policy,
   nginx Lua/OpenResty-style header policy, HAProxy Lua/SPOE-style
   routing/load-balancer policy, and VCL-like cache policy.
+- `1.7.11` starts zero-downtime upgrade groundwork. Native listeners stop
+  accepting after the configured grace interval, retain established connection
+  tasks during drain, and enforce a bounded process shutdown timeout. Full
+  systemd socket activation and Podman blue/green handoff remain in progress.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
@@ -528,6 +533,7 @@ moves to the following Fluxheim-owned `1.9` protocol line based on the Rust
 - [OpenTelemetry Tracing](docs/opentelemetry-tracing.md)
 - [WASM Extensibility](docs/wasm-extensibility.md)
 - [Wasm Policy Example Parity](docs/wasm-policy-example-parity.md)
+- [Zero-Downtime Upgrades](docs/zero-downtime-upgrades.md)
 - [Crypto RPC Edge](docs/crypto-rpc-edge.md)
 - [External Authorization Request](docs/auth-request.md)
 - [Zero-Retention Privacy Mode](docs/zero-retention-privacy-mode.md)

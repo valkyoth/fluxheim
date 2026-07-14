@@ -7,8 +7,8 @@ use tokio::sync::oneshot;
 
 use crate::native_http1_tests::{read_response, spawn_server, spawn_server_with_policy};
 use crate::{
-    DownstreamHttp1Policy, NativeHttp1Error, NativeHttp1Response, serve_native_http1_connection,
-    serve_native_http1_listener,
+    DownstreamHttp1Policy, NativeHttp1Error, NativeHttp1Request, NativeHttp1Response,
+    serve_native_http1_connection, serve_native_http1_listener,
 };
 
 #[tokio::test]
@@ -219,7 +219,7 @@ async fn native_http1_listener_drops_connections_over_budget() {
         .await
         .unwrap();
     });
-    let _held_stream = TcpStream::connect(addr).await.unwrap();
+    let held_stream = TcpStream::connect(addr).await.unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
     let mut stream = TcpStream::connect(addr).await.unwrap();
 
@@ -237,6 +237,7 @@ async fn native_http1_listener_drops_connections_over_budget() {
         Err(error) => panic!("unexpected read error: {error}"),
     }
 
+    drop(held_stream);
     shutdown_tx.send(()).unwrap();
     join.await.unwrap();
 }
@@ -271,4 +272,68 @@ async fn native_http1_listener_serves_until_shutdown() {
 
     shutdown_tx.send(()).unwrap();
     join.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http1_listener_drains_existing_keep_alive_after_shutdown() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let handler = Arc::new(|request: NativeHttp1Request| async move {
+        NativeHttp1Response::new(200, "OK", request.target)
+    });
+    let mut join = tokio::spawn(async move {
+        serve_native_http1_listener(
+            listener,
+            DownstreamHttp1Policy::default(),
+            handler,
+            async move {
+                let _ = shutdown_rx.await;
+            },
+        )
+        .await
+        .unwrap();
+    });
+
+    let mut established = TcpStream::connect(addr).await.unwrap();
+    established
+        .write_all(b"GET /before HTTP/1.1\r\nHost: local.test\r\n\r\n")
+        .await
+        .unwrap();
+    let before = read_response(&mut established).await;
+    assert!(before.ends_with("/before"));
+
+    shutdown_tx.send(()).unwrap();
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    assert!(
+        !join.is_finished(),
+        "listener exited before keep-alive drain"
+    );
+
+    let mut refused = false;
+    for _ in 0..20 {
+        match TcpStream::connect(addr).await {
+            Ok(stream) => {
+                drop(stream);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            Err(_) => {
+                refused = true;
+                break;
+            }
+        }
+    }
+    assert!(refused, "draining listener continued accepting connections");
+
+    established
+        .write_all(b"GET /during-drain HTTP/1.1\r\nHost: local.test\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let during_drain = read_response(&mut established).await;
+    assert!(during_drain.ends_with("/during-drain"));
+
+    tokio::time::timeout(Duration::from_secs(1), &mut join)
+        .await
+        .unwrap()
+        .unwrap();
 }

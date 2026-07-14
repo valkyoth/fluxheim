@@ -37,6 +37,14 @@ mod runtime_logging;
 #[cfg(feature = "proxy")]
 use runtime_logging::init_logging;
 #[cfg(feature = "proxy")]
+#[path = "runtime_shutdown.rs"]
+mod runtime_shutdown;
+#[cfg(feature = "proxy")]
+use runtime_shutdown::{
+    native_runtime_shutdown_grace, native_runtime_shutdown_timeout,
+    wait_native_runtime_shutdown_signal,
+};
+#[cfg(feature = "proxy")]
 pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     init_logging(&config)?;
     #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
@@ -374,22 +382,48 @@ async fn run_native_runtime_async(
     let watchdog = supervisor.spawn_critical_watchdog(critical_handles);
     log::info!("native runtime started");
     wait_native_runtime_shutdown_signal().await;
-    let _ = supervisor.shutdown();
 
-    if let Some(proxy_runtime) = proxy_runtime {
-        for result in proxy_runtime.join().await {
-            result?;
-        }
+    if let Some(grace) = native_runtime_shutdown_grace(launch_plan.process()) {
+        log::info!(
+            "native runtime shutdown signal received; grace period={}s",
+            grace.as_secs()
+        );
+        tokio::time::sleep(grace).await;
     }
-    for handle in listener_handles {
-        match handle.await {
-            Ok(result) => result?,
-            Err(error) if error.is_cancelled() => {}
-            Err(error) => return Err(Box::new(error)),
+
+    let _ = supervisor.shutdown();
+    let drain_timeout = native_runtime_shutdown_timeout(launch_plan.process());
+    log::info!(
+        "native runtime draining established work; timeout={}s",
+        drain_timeout.as_secs()
+    );
+    let drain = async move {
+        if let Some(proxy_runtime) = proxy_runtime {
+            for result in proxy_runtime.join().await {
+                result?;
+            }
         }
-    }
-    for handle in background_handles {
-        handle.join().await?;
+        for handle in listener_handles {
+            match handle.await {
+                Ok(result) => result?,
+                Err(error) if error.is_cancelled() => {}
+                Err(error) => return Err(Box::<dyn Error + Send + Sync>::from(error)),
+            }
+        }
+        for handle in background_handles {
+            handle.join().await?;
+        }
+        Ok::<(), Box<dyn Error + Send + Sync>>(())
+    };
+    match tokio::time::timeout(drain_timeout, drain).await {
+        Ok(result) => result?,
+        Err(_) => {
+            log::warn!(
+                target: "fluxheim::native_runtime",
+                "native runtime graceful drain timed out after {}s; remaining work will be terminated",
+                drain_timeout.as_secs()
+            );
+        }
     }
     watchdog.abort();
     let _ = watchdog.join().await;
@@ -423,38 +457,6 @@ fn reject_unsupported_native_background_tasks(
 #[cfg(feature = "proxy")]
 async fn native_shutdown_wait(mut shutdown: fluxheim_runtime::FluxShutdown) {
     let _ = shutdown.wait_for_shutdown().await;
-}
-
-#[cfg(feature = "proxy")]
-async fn wait_native_runtime_shutdown_signal() {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-
-        let mut terminate = signal(SignalKind::terminate()).ok();
-        let mut quit = signal(SignalKind::quit()).ok();
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = async {
-                if let Some(signal) = &mut terminate {
-                    let _ = signal.recv().await;
-                } else {
-                    std::future::pending::<()>().await;
-                }
-            } => {}
-            _ = async {
-                if let Some(signal) = &mut quit {
-                    let _ = signal.recv().await;
-                } else {
-                    std::future::pending::<()>().await;
-                }
-            } => {}
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
-    }
 }
 
 #[cfg(all(
