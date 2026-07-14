@@ -151,6 +151,45 @@ fn fragmented_chunk_metadata_is_scanned_incrementally() {
 }
 
 #[test]
+fn maximum_chunk_line_is_independent_of_input_fragmentation() {
+    let encoded = b"00000001\r\na\r\n0\r\n\r\n";
+    let limits = Http1ChunkLimits {
+        max_chunk_line_bytes: 8,
+        ..Http1ChunkLimits::default()
+    };
+
+    let decode_fragments = |fragments: &[&[u8]]| {
+        let mut decoder = Http1ChunkedDecoder::new(limits);
+        let mut output = Vec::new();
+        let mut complete = None;
+        for fragment in fragments {
+            complete = decoder
+                .push(fragment, &mut output)
+                .expect("maximum-length chunk line remains valid");
+            if complete.is_some() {
+                break;
+            }
+        }
+        (complete.expect("complete chunked body"), output)
+    };
+
+    let expected = decode_fragments(&[encoded]);
+    assert_eq!(expected.0.consumed_len, encoded.len());
+    assert_eq!(expected.1, b"a");
+
+    for split in 0..=encoded.len() {
+        assert_eq!(
+            decode_fragments(&[&encoded[..split], &encoded[split..]]),
+            expected,
+            "split at byte {split} changed the decode result"
+        );
+    }
+
+    let bytewise = encoded.iter().map(std::slice::from_ref).collect::<Vec<_>>();
+    assert_eq!(decode_fragments(&bytewise), expected);
+}
+
+#[test]
 fn incremental_decoder_does_not_retain_the_full_encoded_body() {
     let mut encoded = Vec::new();
     for _ in 0..20_000 {

@@ -64,7 +64,9 @@ behavior when the change improves security or project direction.
   request-target characters before routing.
 - Bound chunk lines/count/extensions/encoded bytes, scan fragmented metadata
   incrementally, stream decoded bytes into caller-owned output, and compact
-  consumed wire data instead of retaining duplicate complete bodies.
+  consumed wire data instead of retaining duplicate complete bodies. Treat a
+  trailing partial CRLF consistently so maximum-length chunk lines decode the
+  same way across every network fragmentation boundary.
 - Restrict parsed upstream status codes to `100..=599` and make PROXY v1/v2
   parsers enforce their exported line/payload bounds and exact v2 length.
 - Make protocol header fields constructible only through validation, centralize

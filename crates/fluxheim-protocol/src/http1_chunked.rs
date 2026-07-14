@@ -151,9 +151,14 @@ impl Http1ChunkedDecoder {
             match self.state {
                 Http1ChunkedDecodeState::Size => {
                     let Some(line_end) = find_crlf(&self.input, self.line_scan_offset) else {
-                        if self.input.len().saturating_sub(self.input_offset)
-                            > self.limits.max_chunk_line_bytes
-                        {
+                        let pending = self
+                            .input
+                            .get(self.input_offset..)
+                            .ok_or(Http1ParseError::InvalidChunk)?;
+                        let pending_line_len = pending
+                            .len()
+                            .saturating_sub(usize::from(pending.last() == Some(&b'\r')));
+                        if pending_line_len > self.limits.max_chunk_line_bytes {
                             return Err(Http1ParseError::ChunkMetadataTooLarge);
                         }
                         self.line_scan_offset =
