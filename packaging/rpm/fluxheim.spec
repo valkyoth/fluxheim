@@ -25,6 +25,7 @@ Source6:        actalis-eab.conf
 Source7:        fluxheim-acme.service
 Source8:        fluxheim-acme.timer
 Source9:        actalis-eab-acme.conf
+Source10:       fluxheim.socket
 
 ExclusiveArch:  x86_64 aarch64
 
@@ -91,6 +92,7 @@ install -Dm0644 %{SOURCE6} %{buildroot}%{_docdir}/fluxheim/systemd/actalis-eab.c
 install -Dm0644 %{SOURCE7} %{buildroot}%{_unitdir}/fluxheim-acme.service
 install -Dm0644 %{SOURCE8} %{buildroot}%{_unitdir}/fluxheim-acme.timer
 install -Dm0644 %{SOURCE9} %{buildroot}%{_docdir}/fluxheim/systemd/actalis-eab-acme.conf
+install -Dm0644 %{SOURCE10} %{buildroot}%{_unitdir}/fluxheim.socket
 
 install -d -m0755 %{buildroot}%{_sysconfdir}/fluxheim/conf.d
 install -d -m0755 %{buildroot}%{_sysconfdir}/fluxheim/tls
@@ -139,6 +141,7 @@ fi
 %{_tmpfilesdir}/fluxheim.conf
 %{_sysusersdir}/fluxheim.conf
 %{_unitdir}/fluxheim.service
+%{_unitdir}/fluxheim.socket
 %{_unitdir}/fluxheim-acme.service
 %{_unitdir}/fluxheim-acme.timer
 %dir %{_sysconfdir}/fluxheim
@@ -157,6 +160,8 @@ fi
 * Tue Jul 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.11-1
 - Start bounded native listener draining as the first zero-downtime upgrade
   prerequisite.
+- Add strict systemd socket activation, readiness notification, and the optional
+  packaged public-listener socket unit.
 
 * Mon Jul 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.10-1
 - Add selectable live smokes for all four Wasm migration-example families.

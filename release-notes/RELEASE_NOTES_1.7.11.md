@@ -29,3 +29,6 @@ socket activation are enabled.
   maintained smoke proves a bad replacement leaves old serving, green readiness
   precedes drain, established old traffic completes, and new requests have no
   connection-refusal window.
+- Ship an optional RPM/systemd socket unit for the packaged port-80 listener.
+  It remains disabled by default so existing direct-binding deployments do not
+  change behavior during package installation.

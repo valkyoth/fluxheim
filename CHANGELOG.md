@@ -22,6 +22,8 @@ behavior when the change improves security or project direction.
 - Add a two-generation real-binary upgrade smoke proving failed replacement
   rollback, readiness-gated handoff, uninterrupted accepts, and old keep-alive
   drain on one externally owned listener.
+- Ship a disabled-by-default `fluxheim.socket` unit matching the packaged port
+  80 config, including RPM payload and deterministic activation instructions.
 
 ### Changed
 

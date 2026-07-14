@@ -62,10 +62,11 @@ below one of Fluxheim's standard native roots: `/etc/fluxheim`, `/run/fluxheim`,
 `/var/lib/fluxheim`, `/var/cache/fluxheim`, `/var/log/fluxheim`, or
 `/srv/fluxheim`.
 
-Install the systemd unit and optional environment file:
+Install the systemd service, optional socket unit, and environment file:
 
 ```bash
 sudo install -Dm0644 packaging/systemd/fluxheim.service /etc/systemd/system/fluxheim.service
+sudo install -Dm0644 packaging/systemd/fluxheim.socket /etc/systemd/system/fluxheim.socket
 sudo install -Dm0644 packaging/systemd/fluxheim.env /etc/sysconfig/fluxheim
 sudo systemctl daemon-reload
 ```
@@ -130,9 +131,10 @@ through systemd socket activation. This makes restarts bounded and
 connection-aware and lets systemd retain the listening socket between process
 generations.
 
-The addresses in the socket unit must exactly match `server.listen` and
-`server.tls_listen`. For example, for a config listening on
-`0.0.0.0:80` and `0.0.0.0:443`, create `/etc/systemd/system/fluxheim.socket`:
+RPM packages ship a disabled `fluxheim.socket` matching the packaged
+`server.listen = ["0.0.0.0:80"]` default. The addresses in the socket unit must
+exactly match `server.listen` and `server.tls_listen`. For example, for a config
+listening on `0.0.0.0:80` and `0.0.0.0:443`, replace the socket unit with:
 
 ```ini
 [Unit]
@@ -148,13 +150,21 @@ Service=fluxheim.service
 WantedBy=sockets.target
 ```
 
-Then activate the socket owner:
+The first conversion from a directly bound service requires one stop/start and
+therefore is not itself zero-downtime. Disable the direct service owner, then
+activate the persistent socket owner:
 
 ```bash
 sudo systemctl daemon-reload
+sudo systemctl disable --now fluxheim.service
 sudo systemctl enable --now fluxheim.socket
-sudo systemctl restart fluxheim.service
+sudo systemctl start fluxheim.service
 ```
+
+Keep `fluxheim.socket` enabled and do not re-enable `fluxheim.service`; incoming
+traffic can activate the service, and explicit service restarts retain the
+socket in systemd. After this one-time conversion, validate an update and use
+`systemctl restart fluxheim.service` while the socket unit remains active.
 
 Do not add addresses that are absent from the Fluxheim config and do not omit
 configured public addresses. Fluxheim rejects partial activation, wrong-process

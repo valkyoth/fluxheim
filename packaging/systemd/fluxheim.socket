@@ -1,0 +1,11 @@
+[Unit]
+Description=Fluxheim public HTTP listener
+Documentation=https://github.com/valkyoth/fluxheim
+
+[Socket]
+ListenStream=0.0.0.0:80
+NoDelay=true
+Service=fluxheim.service
+
+[Install]
+WantedBy=sockets.target
