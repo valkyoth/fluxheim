@@ -1,7 +1,7 @@
 use super::{
     Http1ChunkLimits, Http1ChunkedDecode, Http1ChunkedDecoder, Http1HeadLimits, Http1Header,
-    Http1ParseError, Http1Version, decode_http1_chunked_body, http1_connection_options,
-    http1_request_body_framing, http1_required_host, parse_http1_request_head,
+    Http1ParseError, decode_http1_chunked_body, http1_connection_options, http1_request_target,
+    http1_required_host, parse_http1_request_head,
 };
 
 fn header<'a>(name: &'a str, value: &'a str) -> Http1Header<'a> {
@@ -10,18 +10,11 @@ fn header<'a>(name: &'a str, value: &'a str) -> Http1Header<'a> {
 
 #[test]
 fn canonical_authority_rejects_conflicting_or_malformed_host() {
-    let parsed = parse_http1_request_head(
-        b"GET http://public.example/secret HTTP/1.1\r\nHost: internal.example\r\n\r\n",
-        Http1HeadLimits::default(),
-    )
-    .unwrap()
-    .expect("complete head");
     assert_eq!(
-        parsed.effective_authority(),
-        Err(Http1ParseError::ConflictingAuthority)
-    );
-    assert_eq!(
-        parsed.validate_message(),
+        parse_http1_request_head(
+            b"GET http://public.example/secret HTTP/1.1\r\nHost: internal.example\r\n\r\n",
+            Http1HeadLimits::default(),
+        ),
         Err(Http1ParseError::ConflictingAuthority)
     );
 
@@ -42,6 +35,17 @@ fn canonical_authority_rejects_conflicting_or_malformed_host() {
 }
 
 #[test]
+fn accepts_rfc3986_path_and_query_characters_or_percent_encoding() {
+    assert!(
+        http1_request_target(
+            "GET",
+            "/a-z_A-Z~!$&'()*+,;=:@/%7Bvalue%7D?q=/path?next&x=%E2%82%AC"
+        )
+        .is_ok()
+    );
+}
+
+#[test]
 fn absolute_form_authority_is_canonical_when_host_matches() {
     let parsed = parse_http1_request_head(
         b"GET https://PUBLIC.example:443/path HTTP/1.1\r\nHost: public.example:443\r\n\r\n",
@@ -49,29 +53,16 @@ fn absolute_form_authority_is_canonical_when_host_matches() {
     )
     .unwrap()
     .expect("complete head");
-    assert_eq!(parsed.effective_authority(), Ok("PUBLIC.example:443"));
-    assert_eq!(
-        parsed
-            .validate_message()
-            .map(|validated| validated.effective_authority),
-        Ok(Some("PUBLIC.example:443"))
-    );
+    assert_eq!(parsed.effective_authority(), Some("PUBLIC.example:443"));
 }
 
 #[test]
 fn http10_transfer_encoding_is_rejected_before_persistence_decision() {
-    let parsed = parse_http1_request_head(
-        b"POST / HTTP/1.0\r\nHost: example.test\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n",
-        Http1HeadLimits::default(),
-    )
-    .unwrap()
-    .expect("complete head");
     assert_eq!(
-        parsed.validate_message(),
-        Err(Http1ParseError::UnsupportedTransferEncoding)
-    );
-    assert_eq!(
-        http1_request_body_framing(Http1Version::Http10, &parsed.headers),
+        parse_http1_request_head(
+            b"POST / HTTP/1.0\r\nHost: example.test\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n",
+            Http1HeadLimits::default(),
+        ),
         Err(Http1ParseError::UnsupportedTransferEncoding)
     );
 }
@@ -103,17 +94,34 @@ fn connection_options_identify_standard_and_nominated_hop_headers() {
 }
 
 #[test]
+fn connection_option_parsing_scales_with_many_unique_tokens() {
+    let value = (0..16_384)
+        .map(|index| format!("x-hop-{index}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let headers = [header("Connection", &value)];
+    let options = http1_connection_options(&headers).expect("valid options");
+
+    assert!(options.contains("x-hop-0"));
+    assert!(options.contains("X-HOP-16383"));
+    assert!(!options.contains("x-hop-16384"));
+}
+
+#[test]
 fn incremental_chunked_decoder_preserves_state_across_single_byte_fragments() {
     let encoded = b"4;name=value\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\nnext";
     let mut decoder = Http1ChunkedDecoder::new(Http1ChunkLimits::default());
+    let mut output = Vec::new();
     let mut complete = None;
     for byte in encoded {
-        complete = decoder.push(std::slice::from_ref(byte)).unwrap();
+        complete = decoder
+            .push(std::slice::from_ref(byte), &mut output)
+            .unwrap();
         if complete.is_some() {
             break;
         }
     }
-    assert_eq!(decoder.decoded_body(), b"Wikipedia");
+    assert_eq!(output, b"Wikipedia");
     assert_eq!(
         complete,
         Some(Http1ChunkedDecode {
@@ -121,6 +129,49 @@ fn incremental_chunked_decoder_preserves_state_across_single_byte_fragments() {
             consumed_len: 35,
         })
     );
+}
+
+#[test]
+fn fragmented_chunk_metadata_is_scanned_incrementally() {
+    let mut encoded = Vec::from("1;".as_bytes());
+    encoded.extend(std::iter::repeat_n(b'a', 8_000));
+    encoded.extend_from_slice(b"\r\na\r\n0\r\n\r\n");
+    let mut decoder = Http1ChunkedDecoder::new(Http1ChunkLimits::default());
+    let mut output = Vec::new();
+    let mut complete = None;
+
+    for byte in &encoded {
+        complete = decoder
+            .push(std::slice::from_ref(byte), &mut output)
+            .expect("valid fragmented body");
+    }
+
+    assert_eq!(output, b"a");
+    assert_eq!(complete.expect("complete body").consumed_len, encoded.len());
+}
+
+#[test]
+fn incremental_decoder_does_not_retain_the_full_encoded_body() {
+    let mut encoded = Vec::new();
+    for _ in 0..20_000 {
+        encoded.extend_from_slice(b"1\r\na\r\n");
+    }
+    encoded.extend_from_slice(b"0\r\n\r\n");
+    let limits = Http1ChunkLimits {
+        max_chunk_count: 20_001,
+        ..Http1ChunkLimits::default()
+    };
+    let mut decoder = Http1ChunkedDecoder::new(limits);
+    let mut output = Vec::new();
+
+    let decoded = decoder
+        .push(&encoded, &mut output)
+        .expect("valid encoded body")
+        .expect("complete body");
+
+    assert_eq!(decoded.decoded_len, 20_000);
+    assert_eq!(output.len(), 20_000);
+    assert!(decoder.buffered_len() <= 8 * 1024);
 }
 
 #[test]

@@ -3189,7 +3189,10 @@ Stable scope:
   coverage that starts an old Fluxheim process, starts a new one, proves new
   requests move to the new process while existing keep-alive/proxy requests
   drain on the old process, and documents which Podman setups cannot be
-  truly zero-downtime without a stable fronting layer.
+  truly zero-downtime without a stable fronting layer. Close the HTTP/1 parser
+  audit with a validated-only public request-head type, strict RFC 3986 target
+  grammar, linear Connection/fragmented-chunk processing, and caller-owned
+  bounded chunk output backed by live framing and pipelining regressions.
 - `v1.7.12`: standards-based response metadata after the zero-downtime slice.
   Add opt-in RFC 9211 `Cache-Status` from real cache outcomes and low-cardinality
   RFC 9209 `Proxy-Status` from generated proxy failures without exposing backend
@@ -4837,7 +4840,9 @@ circular dependencies.
   that uses a stable fronting listener or host-level redirect owner. Include
   live upgrade smoke tests that prove no listener gap for the supported native
   path and clearly document Podman configurations that cannot be seamless
-  without a fronting layer.
+  without a fronting layer. Complete the HTTP/1 parser audit by making semantic
+  validation part of the public parse boundary and proving linear, bounded
+  request-target, Connection, and chunked-body handling.
 - `v1.7.12`: standards-based response metadata. Implement opt-in RFC 9211
   `Cache-Status`, low-cardinality RFC 9209 `Proxy-Status`, and streaming RFC
   9530 digest fields from real runtime state with live cache, proxy failure,

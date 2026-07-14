@@ -109,20 +109,17 @@ fn split_query(value: &str) -> Result<(&str, Option<&str>), Http1ParseError> {
 }
 
 fn validate_path(value: &str) -> Result<(), Http1ParseError> {
-    if value.is_empty() || value.as_bytes().contains(&b'#') || value.as_bytes().contains(&b'\\') {
+    if value.is_empty() {
         return Err(Http1ParseError::InvalidRequestTarget);
     }
-    validate_percent_encoding(value)
+    validate_uri_component(value, false)
 }
 
 fn validate_query(value: &str) -> Result<(), Http1ParseError> {
-    if value.as_bytes().contains(&b'#') || value.as_bytes().contains(&b'\\') {
-        return Err(Http1ParseError::InvalidRequestTarget);
-    }
-    validate_percent_encoding(value)
+    validate_uri_component(value, true)
 }
 
-fn validate_percent_encoding(value: &str) -> Result<(), Http1ParseError> {
+fn validate_uri_component(value: &str, query: bool) -> Result<(), Http1ParseError> {
     let bytes = value.as_bytes();
     let mut index = 0usize;
     while index < bytes.len() {
@@ -137,11 +134,38 @@ fn validate_percent_encoding(value: &str) -> Result<(), Http1ParseError> {
                 return Err(Http1ParseError::InvalidRequestTarget);
             }
             index += 3;
-        } else {
+        } else if uri_component_byte_allowed(bytes[index], query) {
             index += 1;
+        } else {
+            return Err(Http1ParseError::InvalidRequestTarget);
         }
     }
     Ok(())
+}
+
+fn uri_component_byte_allowed(byte: u8, query: bool) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'-' | b'.'
+                | b'_'
+                | b'~'
+                | b'!'
+                | b'$'
+                | b'&'
+                | b'\''
+                | b'('
+                | b')'
+                | b'*'
+                | b'+'
+                | b','
+                | b';'
+                | b'='
+                | b':'
+                | b'@'
+                | b'/'
+        )
+        || query && byte == b'?'
 }
 
 pub(crate) fn validate_http1_authority(value: &str) -> Result<(), Http1ParseError> {
@@ -242,7 +266,7 @@ fn find_path_or_query_start(value: &str) -> Option<usize> {
 }
 
 fn target_has_forbidden_byte(value: &str) -> bool {
-    value.bytes().any(|byte| matches!(byte, 0x00..=0x20 | 0x7f))
+    !value.is_ascii() || value.bytes().any(|byte| matches!(byte, 0x00..=0x20 | 0x7f))
 }
 
 fn target_contains_scheme_slashes(target: &str) -> bool {

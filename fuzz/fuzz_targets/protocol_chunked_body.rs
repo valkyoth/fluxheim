@@ -16,8 +16,9 @@ fuzz_target!(|data: &[u8]| {
     let _ = decode_http1_chunked_body(data, &mut output, limits);
 
     let mut decoder = Http1ChunkedDecoder::new(limits);
+    let mut incremental_output = Vec::new();
     for fragment in data.chunks(7) {
-        if decoder.push(fragment).is_err() {
+        if decoder.push(fragment, &mut incremental_output).is_err() {
             break;
         }
     }

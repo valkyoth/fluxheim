@@ -319,8 +319,9 @@ where
 {
     let limits = Http1ChunkLimits::default().with_max_body_bytes(max_body_bytes);
     let mut decoder = Http1ChunkedDecoder::new(limits);
-    if decoder.push(&buffer[head_len..])?.is_some() {
-        return Ok(decoder.decoded_body().to_vec());
+    let mut body = Vec::new();
+    if decoder.push(&buffer[head_len..], &mut body)?.is_some() {
+        return Ok(body);
     }
     loop {
         let mut chunk = [0u8; UPSTREAM_READ_CHUNK_BYTES];
@@ -328,8 +329,8 @@ where
         if read == 0 {
             return Err(Http1ParseError::InvalidChunk.into());
         }
-        if decoder.push(&chunk[..read])?.is_some() {
-            return Ok(decoder.decoded_body().to_vec());
+        if decoder.push(&chunk[..read], &mut body)?.is_some() {
+            return Ok(body);
         }
     }
 }
@@ -363,7 +364,7 @@ fn response_body_reusable(
 fn response_header_allowed(
     name: &str,
     body_framing: ResponseBodyFraming,
-    connection_options: &Http1ConnectionOptions<'_>,
+    connection_options: &Http1ConnectionOptions,
 ) -> bool {
     !(connection_options.identifies_hop_by_hop_header(name)
         || matches!(body_framing, ResponseBodyFraming::Chunked)

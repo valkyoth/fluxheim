@@ -1,4 +1,5 @@
 use crate::http_token_valid;
+use crate::http1_connection::{Http1ConnectionDirective, http1_connection_directive};
 use crate::http1_target::{Http1RequestTarget, http1_request_target, validate_http1_authority};
 
 pub const DEFAULT_HTTP1_MAX_HEAD_BYTES: usize = 64 * 1024;
@@ -64,32 +65,28 @@ impl<'a> Http1Header<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Http1RequestHead<'a> {
-    pub method: &'a str,
-    pub target: &'a str,
-    pub version: Http1Version,
-    pub headers: Vec<Http1Header<'a>>,
-    pub head_len: usize,
+struct RawHttp1RequestHead<'a> {
+    method: &'a str,
+    target: &'a str,
+    version: Http1Version,
+    headers: Vec<Http1Header<'a>>,
+    head_len: usize,
 }
 
-impl<'a> Http1RequestHead<'a> {
-    pub fn body_framing(&self) -> Result<Http1BodyFraming, Http1ParseError> {
+impl<'a> RawHttp1RequestHead<'a> {
+    fn body_framing(&self) -> Result<Http1BodyFraming, Http1ParseError> {
         http1_request_body_framing(self.version, &self.headers)
     }
 
-    pub fn host(&self) -> Result<&'a str, Http1ParseError> {
-        http1_required_host(&self.headers)
-    }
-
-    pub fn connection_directive(&self) -> Result<Http1ConnectionDirective, Http1ParseError> {
+    fn connection_directive(&self) -> Result<Http1ConnectionDirective, Http1ParseError> {
         http1_connection_directive(self.version, &self.headers)
     }
 
-    pub fn request_target(&self) -> Result<Http1RequestTarget<'a>, Http1ParseError> {
+    fn request_target(&self) -> Result<Http1RequestTarget<'a>, Http1ParseError> {
         http1_request_target(self.method, self.target)
     }
 
-    pub fn effective_authority(&self) -> Result<&'a str, Http1ParseError> {
+    fn effective_authority(&self) -> Result<&'a str, Http1ParseError> {
         let target = self.request_target()?;
         let host = http1_optional_host(&self.headers)?;
         match target {
@@ -113,20 +110,66 @@ impl<'a> Http1RequestHead<'a> {
         }
     }
 
-    pub fn validate_message(&self) -> Result<Http1RequestValidation<'a>, Http1ParseError> {
+    fn validate_message(&self) -> Result<Http1RequestValidation<'a>, Http1ParseError> {
         if self.version == Http1Version::Http11 {
             http1_required_host(&self.headers)?;
         }
+        let request_target = self.request_target()?;
         let effective_authority = match self.effective_authority() {
             Ok(authority) => Some(authority),
             Err(Http1ParseError::MissingHost) if self.version == Http1Version::Http10 => None,
             Err(error) => return Err(error),
         };
         Ok(Http1RequestValidation {
+            request_target,
             body_framing: self.body_framing()?,
             connection_directive: self.connection_directive()?,
             effective_authority,
         })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidatedHttp1RequestHead<'a> {
+    head: RawHttp1RequestHead<'a>,
+    validation: Http1RequestValidation<'a>,
+}
+
+impl<'a> ValidatedHttp1RequestHead<'a> {
+    pub const fn method(&self) -> &'a str {
+        self.head.method
+    }
+
+    pub const fn target(&self) -> &'a str {
+        self.head.target
+    }
+
+    pub const fn version(&self) -> Http1Version {
+        self.head.version
+    }
+
+    pub fn headers(&self) -> &[Http1Header<'a>] {
+        &self.head.headers
+    }
+
+    pub const fn head_len(&self) -> usize {
+        self.head.head_len
+    }
+
+    pub const fn body_framing(&self) -> Http1BodyFraming {
+        self.validation.body_framing
+    }
+
+    pub const fn connection_directive(&self) -> Http1ConnectionDirective {
+        self.validation.connection_directive
+    }
+
+    pub const fn effective_authority(&self) -> Option<&'a str> {
+        self.validation.effective_authority
+    }
+
+    pub fn request_target(&self) -> Http1RequestTarget<'a> {
+        self.validation.request_target
     }
 }
 
@@ -151,7 +194,7 @@ impl Http1HeadBuffer {
     pub fn append(
         &mut self,
         chunk: &[u8],
-    ) -> Result<Option<Http1RequestHead<'_>>, Http1ParseError> {
+    ) -> Result<Option<ValidatedHttp1RequestHead<'_>>, Http1ParseError> {
         if self.bytes.len() > self.limits.max_head_bytes {
             return Err(Http1ParseError::HeadTooLarge);
         }
@@ -218,53 +261,28 @@ pub enum Http1BodyFraming {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Http1ConnectionDirective {
-    Close,
-    Persistent,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Http1ConnectionOptions<'a> {
-    options: Vec<&'a str>,
-}
-
-impl Http1ConnectionOptions<'_> {
-    pub fn contains(&self, name: &str) -> bool {
-        self.options
-            .iter()
-            .any(|option| option.eq_ignore_ascii_case(name))
-    }
-
-    pub fn identifies_hop_by_hop_header(&self, name: &str) -> bool {
-        self.contains(name)
-            || matches_ignore_ascii_case(
-                name,
-                &[
-                    "connection",
-                    "keep-alive",
-                    "proxy-authenticate",
-                    "proxy-authorization",
-                    "proxy-connection",
-                    "te",
-                    "trailer",
-                    "transfer-encoding",
-                    "upgrade",
-                ],
-            )
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Http1RequestValidation<'a> {
-    pub body_framing: Http1BodyFraming,
-    pub connection_directive: Http1ConnectionDirective,
-    pub effective_authority: Option<&'a str>,
+struct Http1RequestValidation<'a> {
+    request_target: Http1RequestTarget<'a>,
+    body_framing: Http1BodyFraming,
+    connection_directive: Http1ConnectionDirective,
+    effective_authority: Option<&'a str>,
 }
 
 pub fn parse_http1_request_head(
     input: &[u8],
     limits: Http1HeadLimits,
-) -> Result<Option<Http1RequestHead<'_>>, Http1ParseError> {
+) -> Result<Option<ValidatedHttp1RequestHead<'_>>, Http1ParseError> {
+    let Some(head) = parse_http1_request_head_raw(input, limits)? else {
+        return Ok(None);
+    };
+    let validation = head.validate_message()?;
+    Ok(Some(ValidatedHttp1RequestHead { head, validation }))
+}
+
+fn parse_http1_request_head_raw(
+    input: &[u8],
+    limits: Http1HeadLimits,
+) -> Result<Option<RawHttp1RequestHead<'_>>, Http1ParseError> {
     let Some(head_len) = complete_head_len(input, limits.max_head_bytes)? else {
         return Ok(None);
     };
@@ -293,7 +311,7 @@ pub fn parse_http1_request_head(
         headers.push(parse_header_line(line)?);
     }
 
-    Ok(Some(Http1RequestHead {
+    Ok(Some(RawHttp1RequestHead {
         method,
         target,
         version,
@@ -354,53 +372,6 @@ fn http1_optional_host<'a>(
         }
     }
     Ok(host)
-}
-
-pub fn http1_connection_directive(
-    version: Http1Version,
-    headers: &[Http1Header<'_>],
-) -> Result<Http1ConnectionDirective, Http1ParseError> {
-    let options = http1_connection_options(headers)?;
-    let close = options.contains("close");
-    let keep_alive = options.contains("keep-alive");
-    if close {
-        return Ok(Http1ConnectionDirective::Close);
-    }
-    if version == Http1Version::Http11 || keep_alive {
-        Ok(Http1ConnectionDirective::Persistent)
-    } else {
-        Ok(Http1ConnectionDirective::Close)
-    }
-}
-
-pub fn http1_connection_options<'a>(
-    headers: &[Http1Header<'a>],
-) -> Result<Http1ConnectionOptions<'a>, Http1ParseError> {
-    let mut options = Vec::new();
-    for header in headers {
-        if !header.name().eq_ignore_ascii_case("connection") {
-            continue;
-        }
-        for token in header.value().split(',') {
-            let token = token.trim();
-            if !http_token_valid(token) {
-                return Err(Http1ParseError::InvalidConnection);
-            }
-            if !options
-                .iter()
-                .any(|existing: &&str| existing.eq_ignore_ascii_case(token))
-            {
-                options.push(token);
-            }
-        }
-    }
-    Ok(Http1ConnectionOptions { options })
-}
-
-fn matches_ignore_ascii_case(value: &str, candidates: &[&str]) -> bool {
-    candidates
-        .iter()
-        .any(|candidate| value.eq_ignore_ascii_case(candidate))
 }
 
 pub(super) fn complete_head_len(

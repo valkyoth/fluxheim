@@ -10,7 +10,5 @@ fuzz_target!(|data: &[u8]| {
         max_header_line_bytes: 8 * 1024,
         max_start_line_bytes: 8 * 1024,
     };
-    if let Ok(Some(head)) = parse_http1_request_head(data, limits) {
-        let _ = head.validate_message();
-    }
+    let _ = parse_http1_request_head(data, limits);
 });

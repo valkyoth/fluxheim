@@ -6,6 +6,8 @@ pub const DEFAULT_HTTP1_MAX_ENCODED_BYTES: usize = 72 * 1024 * 1024;
 pub const DEFAULT_HTTP1_MAX_CHUNK_LINE_BYTES: usize = 8 * 1024;
 pub const DEFAULT_HTTP1_MAX_CHUNK_COUNT: usize = 1024 * 1024;
 pub const DEFAULT_HTTP1_MAX_CHUNK_EXTENSION_BYTES: usize = 64 * 1024;
+const HTTP1_CHUNK_INPUT_FRAGMENT_BYTES: usize = 8 * 1024;
+const HTTP1_CHUNK_COMPACT_THRESHOLD_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Http1ChunkLimits {
@@ -56,8 +58,11 @@ enum Http1ChunkedDecodeState {
 pub struct Http1ChunkedDecoder {
     limits: Http1ChunkLimits,
     input: Vec<u8>,
-    output: Vec<u8>,
     input_offset: usize,
+    line_scan_offset: usize,
+    compacted_len: usize,
+    received_len: usize,
+    decoded_len: usize,
     chunk_count: usize,
     extension_bytes: usize,
     state: Http1ChunkedDecodeState,
@@ -69,8 +74,11 @@ impl Http1ChunkedDecoder {
         Self {
             limits,
             input: Vec::new(),
-            output: Vec::new(),
             input_offset: 0,
+            line_scan_offset: 0,
+            compacted_len: 0,
+            received_len: 0,
+            decoded_len: 0,
             chunk_count: 0,
             extension_bytes: 0,
             state: Http1ChunkedDecodeState::Size,
@@ -78,39 +86,78 @@ impl Http1ChunkedDecoder {
         }
     }
 
-    pub fn push(&mut self, chunk: &[u8]) -> Result<Option<Http1ChunkedDecode>, Http1ParseError> {
+    pub fn push(
+        &mut self,
+        chunk: &[u8],
+        output: &mut Vec<u8>,
+    ) -> Result<Option<Http1ChunkedDecode>, Http1ParseError> {
+        if output.len() != self.decoded_len {
+            return Err(Http1ParseError::InvalidChunk);
+        }
+        self.push_with_sink(chunk, output)
+    }
+
+    pub fn buffered_len(&self) -> usize {
+        self.input.len()
+    }
+
+    fn push_with_sink<S: Http1ChunkSink>(
+        &mut self,
+        chunk: &[u8],
+        output: &mut S,
+    ) -> Result<Option<Http1ChunkedDecode>, Http1ParseError> {
         if let Some(complete) = self.complete {
             return Ok(Some(complete));
         }
-        let encoded_len = self
-            .input
-            .len()
-            .checked_add(chunk.len())
-            .ok_or(Http1ParseError::EncodedBodyTooLarge)?;
-        if encoded_len > self.limits.max_encoded_bytes {
-            return Err(Http1ParseError::EncodedBodyTooLarge);
+        if chunk.is_empty() {
+            return self.process(output);
         }
-        self.input
-            .try_reserve(chunk.len())
-            .map_err(|_| Http1ParseError::EncodedBodyTooLarge)?;
-        self.input.extend_from_slice(chunk);
-        self.process()
+        let mut offset = 0usize;
+        while offset < chunk.len() {
+            let remaining_limit = self
+                .limits
+                .max_encoded_bytes
+                .saturating_sub(self.received_len);
+            if remaining_limit == 0 {
+                return Err(Http1ParseError::EncodedBodyTooLarge);
+            }
+            let fragment_len = (chunk.len() - offset)
+                .min(HTTP1_CHUNK_INPUT_FRAGMENT_BYTES)
+                .min(remaining_limit);
+            let end = offset
+                .checked_add(fragment_len)
+                .ok_or(Http1ParseError::EncodedBodyTooLarge)?;
+            self.input
+                .try_reserve(fragment_len)
+                .map_err(|_| Http1ParseError::EncodedBodyTooLarge)?;
+            self.input.extend_from_slice(&chunk[offset..end]);
+            self.received_len = self
+                .received_len
+                .checked_add(fragment_len)
+                .ok_or(Http1ParseError::EncodedBodyTooLarge)?;
+            if let Some(complete) = self.process(output)? {
+                return Ok(Some(complete));
+            }
+            offset = end;
+        }
+        Ok(None)
     }
 
-    pub fn decoded_body(&self) -> &[u8] {
-        &self.output
-    }
-
-    fn process(&mut self) -> Result<Option<Http1ChunkedDecode>, Http1ParseError> {
+    fn process<S: Http1ChunkSink>(
+        &mut self,
+        output: &mut S,
+    ) -> Result<Option<Http1ChunkedDecode>, Http1ParseError> {
         loop {
             match self.state {
                 Http1ChunkedDecodeState::Size => {
-                    let Some(line_end) = find_crlf(&self.input, self.input_offset) else {
+                    let Some(line_end) = find_crlf(&self.input, self.line_scan_offset) else {
                         if self.input.len().saturating_sub(self.input_offset)
                             > self.limits.max_chunk_line_bytes
                         {
                             return Err(Http1ParseError::ChunkMetadataTooLarge);
                         }
+                        self.line_scan_offset =
+                            self.input.len().saturating_sub(1).max(self.input_offset);
                         return Ok(None);
                     };
                     let line = &self.input[self.input_offset..line_end];
@@ -136,6 +183,7 @@ impl Http1ChunkedDecoder {
                     self.input_offset = line_end
                         .checked_add(2)
                         .ok_or(Http1ParseError::InvalidChunk)?;
+                    self.line_scan_offset = self.input_offset;
                     if size == 0 {
                         self.state = Http1ChunkedDecodeState::End;
                         continue;
@@ -157,20 +205,18 @@ impl Http1ChunkedDecoder {
                         return Err(Http1ParseError::InvalidChunk);
                     }
                     let output_end = self
-                        .output
-                        .len()
+                        .decoded_len
                         .checked_add(size)
                         .ok_or(Http1ParseError::BodyTooLarge)?;
                     if output_end > self.limits.max_body_bytes {
                         return Err(Http1ParseError::BodyTooLarge);
                     }
-                    self.output
-                        .try_reserve(size)
-                        .map_err(|_| Http1ParseError::BodyTooLarge)?;
-                    self.output
-                        .extend_from_slice(&self.input[self.input_offset..data_end]);
+                    output.append(&self.input[self.input_offset..data_end])?;
+                    self.decoded_len = output_end;
                     self.input_offset = chunk_end;
+                    self.line_scan_offset = self.input_offset;
                     self.state = Http1ChunkedDecodeState::Size;
+                    self.compact_consumed()?;
                 }
                 Http1ChunkedDecodeState::End => {
                     let Some(end) = self
@@ -183,11 +229,12 @@ impl Http1ChunkedDecoder {
                         return Err(Http1ParseError::InvalidChunk);
                     }
                     let consumed_len = self
-                        .input_offset
-                        .checked_add(2)
+                        .compacted_len
+                        .checked_add(self.input_offset)
+                        .and_then(|value| value.checked_add(2))
                         .ok_or(Http1ParseError::InvalidChunk)?;
                     let complete = Http1ChunkedDecode {
-                        decoded_len: self.output.len(),
+                        decoded_len: self.decoded_len,
                         consumed_len,
                     };
                     self.complete = Some(complete);
@@ -195,6 +242,62 @@ impl Http1ChunkedDecoder {
                 }
             }
         }
+    }
+
+    fn compact_consumed(&mut self) -> Result<(), Http1ParseError> {
+        if self.input_offset == 0 {
+            return Ok(());
+        }
+        if self.input_offset != self.input.len()
+            && (self.input_offset < HTTP1_CHUNK_COMPACT_THRESHOLD_BYTES
+                || self.input_offset < self.input.len() / 2)
+        {
+            return Ok(());
+        }
+        let consumed = self.input_offset;
+        self.compacted_len = self
+            .compacted_len
+            .checked_add(consumed)
+            .ok_or(Http1ParseError::EncodedBodyTooLarge)?;
+        self.input.copy_within(consumed.., 0);
+        self.input.truncate(self.input.len() - consumed);
+        self.input_offset = 0;
+        self.line_scan_offset = self.line_scan_offset.saturating_sub(consumed);
+        Ok(())
+    }
+}
+
+trait Http1ChunkSink {
+    fn append(&mut self, bytes: &[u8]) -> Result<(), Http1ParseError>;
+}
+
+impl Http1ChunkSink for Vec<u8> {
+    fn append(&mut self, bytes: &[u8]) -> Result<(), Http1ParseError> {
+        self.try_reserve(bytes.len())
+            .map_err(|_| Http1ParseError::BodyTooLarge)?;
+        self.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
+struct Http1SliceChunkSink<'a> {
+    output: &'a mut [u8],
+    len: usize,
+}
+
+impl Http1ChunkSink for Http1SliceChunkSink<'_> {
+    fn append(&mut self, bytes: &[u8]) -> Result<(), Http1ParseError> {
+        let end = self
+            .len
+            .checked_add(bytes.len())
+            .ok_or(Http1ParseError::OutputTooSmall)?;
+        let destination = self
+            .output
+            .get_mut(self.len..end)
+            .ok_or(Http1ParseError::OutputTooSmall)?;
+        destination.copy_from_slice(bytes);
+        self.len = end;
+        Ok(())
     }
 }
 
@@ -204,14 +307,8 @@ pub fn decode_http1_chunked_body(
     limits: Http1ChunkLimits,
 ) -> Result<Option<Http1ChunkedDecode>, Http1ParseError> {
     let mut decoder = Http1ChunkedDecoder::new(limits);
-    let Some(decoded) = decoder.push(input)? else {
-        return Ok(None);
-    };
-    if decoded.decoded_len > output.len() {
-        return Err(Http1ParseError::OutputTooSmall);
-    }
-    output[..decoded.decoded_len].copy_from_slice(decoder.decoded_body());
-    Ok(Some(decoded))
+    let mut sink = Http1SliceChunkSink { output, len: 0 };
+    decoder.push_with_sink(input, &mut sink)
 }
 
 fn find_crlf(input: &[u8], offset: usize) -> Option<usize> {

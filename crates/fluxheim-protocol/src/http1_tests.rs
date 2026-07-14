@@ -17,13 +17,13 @@ fn parses_bounded_http11_request_head() {
         .unwrap()
         .expect("complete head");
 
-    assert_eq!(parsed.method, "GET");
-    assert_eq!(parsed.target, "/index.html");
-    assert_eq!(parsed.version, Http1Version::Http11);
-    assert_eq!(parsed.head_len, input.len() - 4);
+    assert_eq!(parsed.method(), "GET");
+    assert_eq!(parsed.target(), "/index.html");
+    assert_eq!(parsed.version(), Http1Version::Http11);
+    assert_eq!(parsed.head_len(), input.len() - 4);
     assert_eq!(
-        parsed.headers,
-        vec![
+        parsed.headers(),
+        &[
             header("Host", "example.test"),
             header("Connection", "close")
         ]
@@ -53,9 +53,9 @@ fn buffers_fragmented_request_head_until_complete() {
         .unwrap()
         .expect("complete head");
 
-    assert_eq!(parsed.method, "GET");
-    assert_eq!(parsed.target, "/");
-    assert_eq!(parsed.headers, vec![header("Host", "example.test")]);
+    assert_eq!(parsed.method(), "GET");
+    assert_eq!(parsed.target(), "/");
+    assert_eq!(parsed.headers(), &[header("Host", "example.test")]);
 }
 
 #[test]
@@ -219,6 +219,11 @@ fn rejects_invalid_http1_request_target_forms() {
         "http:\\internal",
         "http:#fragment",
         "ftp://example.test/",
+        "/raw{brace}",
+        "/raw|pipe",
+        "/raw[bracket]",
+        "/café",
+        "/ok?raw}brace",
     ] {
         assert_eq!(
             http1_request_target("GET", target),
@@ -238,11 +243,11 @@ fn parsed_head_exposes_request_target_decision() {
 
     assert_eq!(
         parsed.request_target(),
-        Ok(Http1RequestTarget::Origin {
+        Http1RequestTarget::Origin {
             raw: "/items?kind=book",
             path: "/items",
             query: Some("kind=book")
-        })
+        }
     );
 }
 
@@ -324,10 +329,7 @@ fn parsed_head_exposes_body_framing_decision() {
     .unwrap()
     .expect("complete head");
 
-    assert_eq!(
-        parsed.body_framing(),
-        Ok(Http1BodyFraming::ContentLength(5))
-    );
+    assert_eq!(parsed.body_framing(), Http1BodyFraming::ContentLength(5));
 }
 
 #[test]
@@ -352,7 +354,7 @@ fn validates_required_http11_host_boundary() {
 }
 
 #[test]
-fn parsed_head_exposes_required_host_decision() {
+fn parsed_head_exposes_effective_authority() {
     let parsed = parse_http1_request_head(
         b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n",
         Http1HeadLimits::default(),
@@ -360,7 +362,7 @@ fn parsed_head_exposes_required_host_decision() {
     .unwrap()
     .expect("complete head");
 
-    assert_eq!(parsed.host(), Ok("example.test"));
+    assert_eq!(parsed.effective_authority(), Some("example.test"));
 }
 
 #[test]
@@ -413,7 +415,7 @@ fn parsed_head_exposes_connection_directive() {
 
     assert_eq!(
         parsed.connection_directive(),
-        Ok(Http1ConnectionDirective::Close)
+        Http1ConnectionDirective::Close
     );
 }
 

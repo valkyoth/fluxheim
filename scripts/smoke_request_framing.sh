@@ -171,6 +171,26 @@ cases = [
         b"POST / HTTP/1.1\r\nHost: static.test\r\nContent-Length: 17\r\nConnection: close\r\n\r\n",
         {413},
     ),
+    (
+        "conflicting_absolute_authority",
+        b"GET http://public.test/ HTTP/1.1\r\nHost: static.test\r\nConnection: close\r\n\r\n",
+        {400},
+    ),
+    (
+        "http10_transfer_encoding",
+        b"POST / HTTP/1.0\r\nHost: static.test\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n0\r\n\r\n",
+        {400},
+    ),
+    (
+        "raw_character_outside_uri_grammar",
+        b"GET /raw{brace} HTTP/1.1\r\nHost: static.test\r\nConnection: close\r\n\r\n",
+        {400},
+    ),
+    (
+        "overflow_chunk_size",
+        b"POST / HTTP/1.1\r\nHost: static.test\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\nffffffffffffffff\r\n",
+        {400},
+    ),
 ]
 
 many_headers = b"GET / HTTP/1.1\r\nHost: static.test\r\n" + b"".join(

@@ -6,6 +6,7 @@
 
 mod http1;
 mod http1_chunked;
+mod http1_connection;
 mod http1_response;
 mod http1_target;
 mod proxy_protocol;
@@ -20,16 +21,19 @@ mod http1_tests;
 pub use http1::{
     DEFAULT_HTTP1_MAX_HEAD_BYTES, DEFAULT_HTTP1_MAX_HEADER_COUNT,
     DEFAULT_HTTP1_MAX_HEADER_LINE_BYTES, DEFAULT_HTTP1_MAX_START_LINE_BYTES, Http1BodyFraming,
-    Http1ConnectionDirective, Http1ConnectionOptions, Http1HeadBuffer, Http1HeadLimits,
-    Http1Header, Http1ParseError, Http1RequestHead, Http1RequestValidation, Http1Version,
-    http1_connection_directive, http1_connection_options, http1_request_body_framing,
-    http1_required_host, parse_http1_request_head,
+    Http1HeadBuffer, Http1HeadLimits, Http1Header, Http1ParseError, Http1Version,
+    ValidatedHttp1RequestHead, http1_request_body_framing, http1_required_host,
+    parse_http1_request_head,
 };
 pub use http1_chunked::{
     DEFAULT_HTTP1_MAX_BODY_BYTES, DEFAULT_HTTP1_MAX_CHUNK_COUNT,
     DEFAULT_HTTP1_MAX_CHUNK_EXTENSION_BYTES, DEFAULT_HTTP1_MAX_CHUNK_LINE_BYTES,
     DEFAULT_HTTP1_MAX_CHUNK_SIZE, DEFAULT_HTTP1_MAX_ENCODED_BYTES, Http1ChunkLimits,
     Http1ChunkedDecode, Http1ChunkedDecoder, decode_http1_chunked_body,
+};
+pub use http1_connection::{
+    Http1ConnectionDirective, Http1ConnectionOptions, http1_connection_directive,
+    http1_connection_options,
 };
 pub use http1_response::{Http1ResponseHead, parse_http1_response_head};
 pub use http1_target::{Http1RequestTarget, http1_request_target};

@@ -85,22 +85,32 @@ where
     buffer.drain(..head_len);
     let limits = Http1ChunkLimits::default().with_max_body_bytes(max_body_bytes);
     let mut decoder = Http1ChunkedDecoder::new(limits);
-    if let Some(decoded) = decoder.push(buffer)? {
-        let body = decoder.decoded_body().to_vec();
-        buffer.drain(..decoded.consumed_len);
+    let mut body = Vec::new();
+    let initial = std::mem::take(buffer);
+    if let Some(decoded) = decoder.push(&initial, &mut body)? {
+        buffer.extend_from_slice(&initial[decoded.consumed_len..]);
         return Ok(body);
     }
+    let mut fed_len = initial.len();
     loop {
         let mut chunk = [0u8; READ_CHUNK_BYTES];
         let read = stream.read(&mut chunk).await?;
         if read == 0 {
             return Err(Http1ParseError::InvalidChunk.into());
         }
-        buffer.extend_from_slice(&chunk[..read]);
-        if let Some(decoded) = decoder.push(&chunk[..read])? {
-            let body = decoder.decoded_body().to_vec();
-            buffer.drain(..decoded.consumed_len);
+        if let Some(decoded) = decoder.push(&chunk[..read], &mut body)? {
+            let consumed_from_chunk = decoded
+                .consumed_len
+                .checked_sub(fed_len)
+                .ok_or(Http1ParseError::InvalidChunk)?;
+            let remainder = chunk
+                .get(consumed_from_chunk..read)
+                .ok_or(Http1ParseError::InvalidChunk)?;
+            buffer.extend_from_slice(remainder);
             return Ok(body);
         }
+        fed_len = fed_len
+            .checked_add(read)
+            .ok_or(Http1ParseError::EncodedBodyTooLarge)?;
     }
 }

@@ -56,14 +56,21 @@ behavior when the change improves security or project direction.
 - Canonicalize HTTP/1 authority before routing: absolute-form and CONNECT
   targets must agree with `Host`, malformed authorities fail closed, and only
   validated HTTP(S) absolute targets are accepted.
-- Reject HTTP/1.0 transfer coding before persistence is decided, bound chunk
-  lines/count/extensions/encoded bytes, validate extension syntax, and decode
-  fragmented chunk bodies incrementally without rescanning prior input.
+- Make the public HTTP/1 request-head parser return only a validated type:
+  authority/`Host`, request-target, framing, and persistence checks now complete
+  before callers can inspect or route a parsed request.
+- Reject HTTP/1.0 transfer coding before persistence is decided, enforce the
+  RFC 3986 ASCII path/query grammar, and reject malformed raw or percent-encoded
+  request-target characters before routing.
+- Bound chunk lines/count/extensions/encoded bytes, scan fragmented metadata
+  incrementally, stream decoded bytes into caller-owned output, and compact
+  consumed wire data instead of retaining duplicate complete bodies.
 - Restrict parsed upstream status codes to `100..=599` and make PROXY v1/v2
   parsers enforce their exported line/payload bounds and exact v2 length.
 - Make protocol header fields constructible only through validation, centralize
-  `Connection` option and hop-by-hop identification, and add five protocol fuzz
-  targets covering heads, targets, chunking, and PROXY framing.
+  `Connection` option and hop-by-hop identification in a focused module, parse
+  option sets in linear expected time, and add five protocol fuzz targets
+  covering heads, targets, chunking, and PROXY framing.
 - Make HTTP/2 `:authority` authoritative over any supplied `Host` fields,
   preventing cross-vhost routing confusion.
 - Strip upstream response headers nominated by `Connection`, including before

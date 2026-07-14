@@ -59,3 +59,17 @@ async fn native_http1_dispatches_only_the_canonical_absolute_authority() {
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.ends_with("canonical"));
 }
+
+#[tokio::test]
+async fn native_http1_rejects_raw_characters_outside_uri_grammar() {
+    let addr = spawn_server(|_| NativeHttp1Response::new(200, "OK", b"unexpected")).await;
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    stream
+        .write_all(b"GET /raw{brace} HTTP/1.1\r\nHost: local.test\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let response = read_response(&mut stream).await;
+
+    assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    assert!(response.ends_with("bad request\n"));
+}

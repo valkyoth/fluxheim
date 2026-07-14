@@ -1,6 +1,6 @@
 # path	kind	target	reason
 scripts/smoke_1_0_core.sh	script	1.6.8-1.6.11	Core HTTP/static/proxy/TLS behavior parity before native HTTP cutover.
-scripts/smoke_request_framing.sh	script	1.6.8-1.6.11	HTTP request framing and parser safety parity.
+scripts/smoke_request_framing.sh	script	1.6.8-1.7.11	HTTP request framing and parser safety parity, including canonical authority, HTTP/1.0 transfer-encoding rejection, strict URI grammar, bounded bodies/headers, and overflow chunk rejection.
 scripts/smoke_native_http1_proxy.sh	script	1.6.10-1.6.16	Native HTTP/1 listener, upstream client, plain static proxy, upstream TLS, upstream mTLS, and native proxy cutover eligibility parity.
 scripts/smoke_native_http2_preview.sh	script	1.6.11-1.6.15	Native HTTP/2 safety-hook preview gate, server-plan exposure, and upstream client parity tests.
 scripts/smoke_static_local.sh	script	1.6.8-1.6.9	Static serving, headers, and local static-cache parity.

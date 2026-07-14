@@ -204,22 +204,10 @@ where
                 Some(head) => head,
                 None => return Ok(()),
             };
-            let validation = match head.validate_message() {
-                Ok(validation) => validation,
-                Err(error) => {
-                    write_bad_request(&mut stream).await?;
-                    return Err(error.into());
-                }
-            };
             (
-                validation.connection_directive == Http1ConnectionDirective::Close,
-                validation.body_framing,
-                owned_request_from_head(
-                    &head,
-                    validation.effective_authority,
-                    peer_addr,
-                    &request_context,
-                ),
+                head.connection_directive() == Http1ConnectionDirective::Close,
+                head.body_framing(),
+                owned_request_from_head(&head, peer_addr, &request_context),
             )
         };
         let request_body_timeout = handler
@@ -326,18 +314,6 @@ where
     .await
 }
 
-async fn write_bad_request<S>(stream: &mut S) -> Result<(), NativeHttp1Error>
-where
-    S: AsyncWrite + Unpin,
-{
-    write_response(
-        stream,
-        NativeHttp1Response::new(400, "Bad Request", b"bad request\n").close_connection(),
-        true,
-    )
-    .await
-}
-
 async fn write_request_head_error<S>(
     stream: &mut S,
     error: &Http1ParseError,
@@ -372,7 +348,7 @@ where
 {
     loop {
         match parse_http1_request_head(buffer, limits) {
-            Ok(Some(head)) => return Ok(Some(head.head_len)),
+            Ok(Some(head)) => return Ok(Some(head.head_len())),
             Ok(None) => {}
             Err(error) => return Err(error.into()),
         }
@@ -389,22 +365,21 @@ where
 }
 
 fn owned_request_from_head(
-    head: &fluxheim_protocol::Http1RequestHead<'_>,
-    effective_authority: Option<&str>,
+    head: &fluxheim_protocol::ValidatedHttp1RequestHead<'_>,
     peer_addr: Option<SocketAddr>,
     request_context: &NativeHttp1RequestContext,
 ) -> NativeHttp1Request {
     NativeHttp1Request {
-        method: head.method.to_owned(),
+        method: head.method().to_owned(),
         peer_addr,
         local_addr: request_context.local_addr,
         effective_client_addr: request_context.effective_client_addr,
         downstream_tls: request_context.downstream_tls,
         tls_identity: request_context.tls_identity.clone(),
         geo_context: request_context.geo_context.clone(),
-        target: head.target.to_owned(),
-        version: head.version,
-        headers: owned_headers(&head.headers, effective_authority),
+        target: head.target().to_owned(),
+        version: head.version(),
+        headers: owned_headers(head.headers(), head.effective_authority()),
         body: Zeroizing::new(Vec::new()),
         trailers: Vec::new(),
     }

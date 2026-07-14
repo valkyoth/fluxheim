@@ -52,6 +52,37 @@ async fn native_http1_reads_chunked_body() {
 }
 
 #[tokio::test]
+async fn native_http1_preserves_pipelined_request_after_chunked_body() {
+    let addr = spawn_server(|request| {
+        NativeHttp1Response::new(
+            200,
+            "OK",
+            format!(
+                "{}:{}",
+                request.target,
+                String::from_utf8_lossy(&request.body)
+            ),
+        )
+    })
+    .await;
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+
+    stream
+        .write_all(
+            b"POST /one HTTP/1.1\r\nHost: local.test\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\nGET /two HTTP/1.1\r\nHost: local.test\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+
+    assert_eq!(response.matches("HTTP/1.1 200 OK\r\n").count(), 2);
+    assert!(response.contains("/one:hello"));
+    assert!(response.ends_with("/two:"));
+}
+
+#[tokio::test]
 async fn native_http1_rejects_overflow_sized_chunk_header() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
