@@ -27,6 +27,10 @@ impl fmt::Display for NativeHttp1ProxyRuntimeError {
                 formatter,
                 "failed to inspect inherited systemd TCP listener: {source}"
             ),
+            Self::InheritedListenerNotListening { addr } => write!(
+                formatter,
+                "inherited systemd TCP socket {addr} is not in listening state"
+            ),
             Self::InheritedListenerSetup { addr, source } => write!(
                 formatter,
                 "failed to adopt inherited systemd TCP listener {addr}: {source}"
@@ -105,6 +109,7 @@ impl Error for NativeHttp1ProxyRuntimeError {
             Self::TlsPlan(error) => Some(error),
             Self::DuplicateInheritedListener { .. }
             | Self::InheritedListenerCount { .. }
+            | Self::InheritedListenerNotListening { .. }
             | Self::MissingProxyHttpListener
             | Self::MissingInheritedListener { .. }
             | Self::UnsupportedTlsAlpn { .. }

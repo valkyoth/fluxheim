@@ -235,6 +235,37 @@ then
 fi
 grep -q "is not a socket" "$tmp/non-socket.log"
 
+if timeout 5 python3 - "$ROOT_DIR/target/debug/fluxheim" "$config" "$port" <<'PY' \
+    >"$tmp/non-listening.log" 2>&1
+import os
+import socket
+import sys
+
+binary, config, local_port_text = sys.argv[1:]
+remote = socket.socket()
+remote.bind(("127.0.0.1", 0))
+remote.listen(1)
+connected = socket.socket()
+connected.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+connected.bind(("127.0.0.1", int(local_port_text)))
+connected.connect(remote.getsockname())
+peer, _ = remote.accept()
+if connected.fileno() != 3:
+    os.dup2(connected.fileno(), 3, inheritable=True)
+else:
+    os.set_inheritable(3, True)
+environment = os.environ.copy()
+environment["LISTEN_FDS"] = "1"
+environment["LISTEN_PID"] = str(os.getpid())
+environment["LISTEN_FDNAMES"] = "http"
+os.execve(binary, [binary, "--config", config], environment)
+PY
+then
+    echo "systemd socket activation smoke failed: connected stream was accepted as listener" >&2
+    exit 1
+fi
+grep -q "is not in listening state" "$tmp/non-listening.log"
+
 if NOTIFY_SOCKET="$missing_notify_socket" "$ROOT_DIR/target/debug/fluxheim" \
     --config "$config" >"$tmp/missing-notify.log" 2>&1; then
     echo "systemd socket activation smoke failed: unreachable readiness socket was ignored" >&2

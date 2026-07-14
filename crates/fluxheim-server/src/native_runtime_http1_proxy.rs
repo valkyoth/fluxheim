@@ -110,6 +110,9 @@ pub enum NativeHttp1ProxyRuntimeError {
     InheritedListenerInspect {
         source: io::Error,
     },
+    InheritedListenerNotListening {
+        addr: SocketAddr,
+    },
     InheritedListenerSetup {
         addr: SocketAddr,
         source: io::Error,

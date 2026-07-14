@@ -71,6 +71,14 @@ fn adopt_inherited_listeners(
         let addr = listener
             .local_addr()
             .map_err(|source| NativeHttp1ProxyRuntimeError::InheritedListenerInspect { source })?;
+        #[cfg(target_os = "linux")]
+        if !rustix::net::sockopt::socket_acceptconn(&listener)
+            .map_err(|source| NativeHttp1ProxyRuntimeError::InheritedListenerInspect {
+                source: source.into(),
+            })?
+        {
+            return Err(NativeHttp1ProxyRuntimeError::InheritedListenerNotListening { addr });
+        }
         if by_addr.insert(addr, listener).is_some() {
             return Err(NativeHttp1ProxyRuntimeError::DuplicateInheritedListener { addr });
         }
