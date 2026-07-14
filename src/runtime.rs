@@ -40,6 +40,9 @@ use runtime_logging::init_logging;
 #[path = "runtime_shutdown.rs"]
 mod runtime_shutdown;
 #[cfg(feature = "proxy")]
+#[path = "runtime_socket_activation.rs"]
+mod runtime_socket_activation;
+#[cfg(feature = "proxy")]
 use runtime_shutdown::{
     native_runtime_shutdown_grace, native_runtime_shutdown_timeout,
     wait_native_runtime_shutdown_signal,
@@ -134,10 +137,20 @@ async fn run_native_runtime_async(
         .service(fluxheim_server::ServiceKind::ProxyHttp)
         .is_some()
     {
-        Some(
-            fluxheim_server::NativeHttp1ProxyRuntime::bind_from_config(&config, &server_plan)
-                .await?,
-        )
+        Some(match runtime_socket_activation::take_systemd_tcp_listeners()? {
+            Some(listeners) => {
+                fluxheim_server::NativeHttp1ProxyRuntime::bind_from_config_with_inherited_listeners(
+                    &config,
+                    &server_plan,
+                    listeners,
+                )
+                .await?
+            }
+            None => {
+                fluxheim_server::NativeHttp1ProxyRuntime::bind_from_config(&config, &server_plan)
+                    .await?
+            }
+        })
     } else {
         None
     };

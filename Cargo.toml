@@ -49,6 +49,7 @@ proxy = [
     "ingress",
     "dep:async-trait",
     "dep:base64-ng",
+    "dep:listenfd",
     "fluxheim-config/proxy",
     "dep:percent-encoding",
     "dep:ring",
@@ -294,6 +295,9 @@ thiserror = "2.0.18"
 toml = "1.1.2"
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"], optional = true }
 zeroize = { version = "1.9.0", features = ["derive"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
+listenfd = { version = "1.0.2", optional = true }
 
 [dev-dependencies]
 brotli = { version = "8.0.4", default-features = false, features = ["std"] }

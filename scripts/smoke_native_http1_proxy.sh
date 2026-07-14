@@ -6,5 +6,6 @@ cargo test --locked -p fluxheim-server native_proxy_forwards_downstream_request_
 cargo test --locked -p fluxheim-server native_proxy --features tls-rustls
 cargo test --locked -p fluxheim-server native_proxy --no-default-features --features tls-openssl
 scripts/smoke_graceful_drain.sh
+scripts/smoke_systemd_socket_activation.sh
 
 echo "native HTTP/1 listener/proxy smoke passed"

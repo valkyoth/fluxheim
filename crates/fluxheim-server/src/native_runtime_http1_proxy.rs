@@ -28,8 +28,12 @@ use crate::{
 
 #[path = "native_runtime_http1_proxy_error.rs"]
 mod runtime_error;
+#[path = "native_runtime_http1_proxy_listener.rs"]
+mod runtime_listener;
 #[path = "native_runtime_http1_proxy_tls.rs"]
 mod runtime_tls;
+
+use runtime_listener::native_proxy_runtime_listeners;
 
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
 use runtime_tls::native_openssl_acceptor;
@@ -96,7 +100,24 @@ pub enum NativeHttp1ProxyRuntimeError {
         source: io::Error,
     },
     LaunchPlan(NativeRuntimeLaunchPlanError),
+    DuplicateInheritedListener {
+        addr: SocketAddr,
+    },
+    InheritedListenerCount {
+        expected: usize,
+        actual: usize,
+    },
+    InheritedListenerInspect {
+        source: io::Error,
+    },
+    InheritedListenerSetup {
+        addr: SocketAddr,
+        source: io::Error,
+    },
     MissingProxyHttpListener,
+    MissingInheritedListener {
+        addr: SocketAddr,
+    },
     Router(NativeHttp1HostRouterConfigError),
     #[cfg(feature = "tls-rustls-backend")]
     RustlsCertificate(fluxheim_tls::RustlsDownstreamCertificateError),
@@ -118,6 +139,9 @@ pub enum NativeHttp1ProxyRuntimeError {
         protocol: ListenerProtocol,
         addr: SocketAddr,
     },
+    UnexpectedInheritedListener {
+        addr: SocketAddr,
+    },
 }
 
 impl NativeHttp1ProxyRuntime {
@@ -128,12 +152,31 @@ impl NativeHttp1ProxyRuntime {
         let launch_plan = plan
             .native_runtime_launch_plan()
             .map_err(NativeHttp1ProxyRuntimeError::LaunchPlan)?;
-        Self::bind_from_launch_plan(config, &launch_plan).await
+        Self::bind_from_launch_plan_with_listeners(config, &launch_plan, None).await
+    }
+
+    pub async fn bind_from_config_with_inherited_listeners(
+        config: &Config,
+        plan: &ServerPlan,
+        listeners: Vec<std::net::TcpListener>,
+    ) -> Result<Self, NativeHttp1ProxyRuntimeError> {
+        let launch_plan = plan
+            .native_runtime_launch_plan()
+            .map_err(NativeHttp1ProxyRuntimeError::LaunchPlan)?;
+        Self::bind_from_launch_plan_with_listeners(config, &launch_plan, Some(listeners)).await
     }
 
     pub async fn bind_from_launch_plan(
         config: &Config,
         launch_plan: &NativeRuntimeLaunchPlan,
+    ) -> Result<Self, NativeHttp1ProxyRuntimeError> {
+        Self::bind_from_launch_plan_with_listeners(config, launch_plan, None).await
+    }
+
+    async fn bind_from_launch_plan_with_listeners(
+        config: &Config,
+        launch_plan: &NativeRuntimeLaunchPlan,
+        inherited_listeners: Option<Vec<std::net::TcpListener>>,
     ) -> Result<Self, NativeHttp1ProxyRuntimeError> {
         #[cfg(feature = "load-balancer")]
         let (router, load_balancer_services, load_balancer_admin_pools) =
@@ -187,45 +230,7 @@ impl NativeHttp1ProxyRuntime {
                 addr: listener.listener_addr(),
             });
         }
-        let mut listeners = Vec::new();
-        for planned in launch_plan
-            .listeners()
-            .iter()
-            .filter(|listener| listener.service_kind() == ServiceKind::ProxyHttp)
-        {
-            if !matches!(
-                planned.listener_protocol(),
-                ListenerProtocol::Http | ListenerProtocol::Https
-            ) {
-                return Err(NativeHttp1ProxyRuntimeError::UnsupportedListener {
-                    protocol: planned.listener_protocol(),
-                    addr: planned.listener_addr(),
-                });
-            }
-            let listener = TcpListener::bind(planned.listener_addr())
-                .await
-                .map_err(|source| NativeHttp1ProxyRuntimeError::Bind {
-                    addr: planned.listener_addr(),
-                    source,
-                })?;
-            let local_addr =
-                listener
-                    .local_addr()
-                    .map_err(|source| NativeHttp1ProxyRuntimeError::Bind {
-                        addr: planned.listener_addr(),
-                        source,
-                    })?;
-            listeners.push(NativeHttp1ProxyRuntimeListener {
-                protocol: planned.listener_protocol(),
-                proxy_protocol_enabled: planned.proxy_protocol_enabled(),
-                planned_addr: planned.listener_addr(),
-                local_addr,
-                listener,
-            });
-        }
-        if listeners.is_empty() {
-            return Err(NativeHttp1ProxyRuntimeError::MissingProxyHttpListener);
-        }
+        let listeners = native_proxy_runtime_listeners(launch_plan, inherited_listeners).await?;
         Ok(Self {
             policy: launch_plan.downstream_http1(),
             #[cfg(any(

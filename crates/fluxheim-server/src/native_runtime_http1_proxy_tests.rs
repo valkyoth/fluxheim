@@ -147,6 +147,94 @@ async fn native_http1_proxy_runtime_binds_launch_plan_and_serves_proxy_listener(
     }
 }
 
+#[tokio::test]
+async fn native_http1_proxy_runtime_adopts_exact_inherited_listener() {
+    let upstream = upstream_response("inherited-ok").await;
+    let inherited = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let inherited_addr = inherited.local_addr().unwrap();
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = vec![inherited_addr.to_string()];
+    config.proxy.upstream = Some(upstream.to_string());
+
+    let plan = ServerPlan::from_config(&config).expect("valid inherited listener plan");
+    let runtime = NativeHttp1ProxyRuntime::bind_from_config_with_inherited_listeners(
+        &config,
+        &plan,
+        vec![inherited],
+    )
+    .await
+    .expect("adopt inherited listener");
+    assert_eq!(runtime.local_addrs(), [inherited_addr]);
+
+    let supervisor = NativeBackgroundSupervisor::new();
+    let handle = runtime.start(&supervisor);
+    let response = downstream_get(inherited_addr).await;
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with("inherited-ok"));
+
+    assert!(supervisor.shutdown());
+    for result in handle.join().await {
+        result.expect("inherited listener stopped cleanly");
+    }
+}
+
+#[tokio::test]
+async fn native_http1_proxy_runtime_rejects_inherited_listener_count_mismatch() {
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = vec!["127.0.0.1:18080".to_owned()];
+    let plan = ServerPlan::from_config(&config).expect("valid listener plan");
+
+    let error = NativeHttp1ProxyRuntime::bind_from_config_with_inherited_listeners(
+        &config,
+        &plan,
+        Vec::new(),
+    )
+    .await
+    .err()
+    .expect("missing inherited listener must fail closed");
+
+    assert!(error.to_string().contains("supplied 0 TCP listener(s)"));
+}
+
+#[tokio::test]
+async fn native_http1_proxy_runtime_rejects_wrong_or_duplicate_inherited_addresses() {
+    let expected = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let expected_addr = expected.local_addr().unwrap();
+    drop(expected);
+    let wrong = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = vec![expected_addr.to_string()];
+    let plan = ServerPlan::from_config(&config).expect("valid listener plan");
+
+    let error = NativeHttp1ProxyRuntime::bind_from_config_with_inherited_listeners(
+        &config,
+        &plan,
+        vec![wrong],
+    )
+    .await
+    .err()
+    .expect("wrong inherited address must fail closed");
+    assert!(error.to_string().contains("did not supply required proxy listener"));
+
+    let first = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let duplicate_addr = first.local_addr().unwrap();
+    let duplicate = first.try_clone().unwrap();
+    config.server.listen = vec![
+        duplicate_addr.to_string(),
+        "127.0.0.1:18081".to_owned(),
+    ];
+    let plan = ServerPlan::from_config(&config).expect("valid two-listener plan");
+    let error = NativeHttp1ProxyRuntime::bind_from_config_with_inherited_listeners(
+        &config,
+        &plan,
+        vec![first, duplicate],
+    )
+    .await
+    .err()
+    .expect("duplicate inherited addresses must fail closed");
+    assert!(error.to_string().contains("duplicate listener address"));
+}
+
 #[cfg(feature = "load-balancer")]
 #[tokio::test]
 async fn native_http1_proxy_runtime_collects_native_load_balancer_service() {

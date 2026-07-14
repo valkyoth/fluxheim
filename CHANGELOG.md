@@ -15,11 +15,15 @@ behavior when the change improves security or project direction.
   behavior explicit and testable before inherited listener handoff is enabled.
 - Add a real-binary `SIGTERM` smoke proving the old listener closes while an
   established keep-alive connection completes within the shutdown bound.
+- Add strict systemd socket activation for public native HTTP/HTTPS listeners,
+  with exact descriptor-count/address matching and a real inherited-FD smoke.
 
 ### Changed
 
 - Apply configured process grace and graceful-shutdown timeout policy in the
   native runtime instead of retaining those values only in the launch plan.
+- Reject partial, wrong-process, unbounded, duplicate, missing, or unexpected
+  inherited-listener activation instead of mixing inheritance with fresh binds.
 
 ## 1.7.10 - 2026-07-13
 

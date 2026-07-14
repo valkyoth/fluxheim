@@ -15,9 +15,29 @@ impl fmt::Display for NativeHttp1ProxyRuntimeError {
             Self::LaunchPlan(error) => {
                 write!(formatter, "native HTTP/1 proxy launch plan: {error}")
             }
+            Self::DuplicateInheritedListener { addr } => write!(
+                formatter,
+                "systemd socket activation supplied duplicate listener address {addr}"
+            ),
+            Self::InheritedListenerCount { expected, actual } => write!(
+                formatter,
+                "systemd socket activation supplied {actual} TCP listener(s), but the proxy launch plan requires {expected}"
+            ),
+            Self::InheritedListenerInspect { source } => write!(
+                formatter,
+                "failed to inspect inherited systemd TCP listener: {source}"
+            ),
+            Self::InheritedListenerSetup { addr, source } => write!(
+                formatter,
+                "failed to adopt inherited systemd TCP listener {addr}: {source}"
+            ),
             Self::MissingProxyHttpListener => {
                 formatter.write_str("native HTTP/1 proxy runtime requires a proxy HTTP listener")
             }
+            Self::MissingInheritedListener { addr } => write!(
+                formatter,
+                "systemd socket activation did not supply required proxy listener {addr}"
+            ),
             Self::Router(error) => write!(formatter, "native HTTP/1 host router: {error}"),
             #[cfg(feature = "tls-rustls-backend")]
             Self::RustlsCertificate(error) => {
@@ -54,6 +74,10 @@ impl fmt::Display for NativeHttp1ProxyRuntimeError {
                 formatter,
                 "native HTTP/1 proxy listener {addr} uses unsupported protocol {protocol:?}"
             ),
+            Self::UnexpectedInheritedListener { addr } => write!(
+                formatter,
+                "systemd socket activation supplied unexpected proxy listener {addr}"
+            ),
         }
     }
 }
@@ -62,6 +86,8 @@ impl Error for NativeHttp1ProxyRuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Bind { source, .. } => Some(source),
+            Self::InheritedListenerInspect { source }
+            | Self::InheritedListenerSetup { source, .. } => Some(source),
             Self::LaunchPlan(error) => Some(error),
             Self::Router(error) => Some(error),
             #[cfg(feature = "tls-rustls-backend")]
@@ -77,9 +103,13 @@ impl Error for NativeHttp1ProxyRuntimeError {
                 all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend")
             ))]
             Self::TlsPlan(error) => Some(error),
-            Self::MissingProxyHttpListener
+            Self::DuplicateInheritedListener { .. }
+            | Self::InheritedListenerCount { .. }
+            | Self::MissingProxyHttpListener
+            | Self::MissingInheritedListener { .. }
             | Self::UnsupportedTlsAlpn { .. }
-            | Self::UnsupportedListener { .. } => None,
+            | Self::UnsupportedListener { .. }
+            | Self::UnexpectedInheritedListener { .. } => None,
         }
     }
 }

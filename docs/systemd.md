@@ -125,10 +125,43 @@ has time to drain and shut down cleanly before systemd escalates.
 
 Starting with `1.7.11`, native listeners stop accepting after the configured
 grace interval and wait for established connection tasks within the configured
-graceful-shutdown timeout. This makes restarts bounded and connection-aware,
-but the packaged service does not yet claim zero downtime because it remains
-the sole owner of its ports. The systemd socket-activation design and rollout
-requirements are documented in
+graceful-shutdown timeout. Public HTTP/HTTPS listeners can also be inherited
+through systemd socket activation. This makes restarts bounded and
+connection-aware and lets systemd retain the listening socket between process
+generations.
+
+The addresses in the socket unit must exactly match `server.listen` and
+`server.tls_listen`. For example, for a config listening on
+`0.0.0.0:80` and `0.0.0.0:443`, create `/etc/systemd/system/fluxheim.socket`:
+
+```ini
+[Unit]
+Description=Fluxheim public listeners
+
+[Socket]
+ListenStream=0.0.0.0:80
+ListenStream=0.0.0.0:443
+NoDelay=true
+Service=fluxheim.service
+
+[Install]
+WantedBy=sockets.target
+```
+
+Then activate the socket owner:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now fluxheim.socket
+sudo systemctl restart fluxheim.service
+```
+
+Do not add addresses that are absent from the Fluxheim config and do not omit
+configured public addresses. Fluxheim rejects partial activation, wrong-process
+descriptors, non-TCP descriptors, duplicate addresses, and address mismatches;
+it never silently binds a fallback public socket once activation was requested.
+The packaged service remains `Type=simple` until the readiness-signaling slice
+is complete. The complete rollout model and current limitation are documented in
 [Zero-Downtime Upgrades](zero-downtime-upgrades.md).
 
 ## ACME Timer

@@ -16,3 +16,9 @@ socket activation are enabled.
   human test launcher.
 - Document the native binary, systemd socket-activation, and Podman blue/green
   handoff boundaries before exposing upgrade automation.
+- Adopt public HTTP/HTTPS TCP listeners from the standard systemd FD-3
+  protocol, requiring a matching `LISTEN_PID`, bounded descriptor count, and
+  exact one-for-one launch-plan address match.
+- Add unit coverage for malformed activation metadata and real-socket adoption,
+  plus a real-binary smoke that serves through an inherited listener and proves
+  malformed activation fails closed.

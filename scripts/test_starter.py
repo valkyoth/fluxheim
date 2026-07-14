@@ -81,6 +81,13 @@ TESTS: tuple[TestEntry, ...] = (
         "Proves SIGTERM stops new accepts while an established keep-alive request drains.",
     ),
     TestEntry(
+        "systemd-socket-activation",
+        "systemd socket activation smoke",
+        "operations",
+        ("scripts/smoke_systemd_socket_activation.sh",),
+        "Passes a real TCP listener as FD 3 and proves strict fail-closed adoption.",
+    ),
+    TestEntry(
         "proxy-cache",
         "Proxy cache smoke",
         "cache",

@@ -29,8 +29,9 @@ The service manager or container stop timeout must exceed the grace period plus
 the graceful drain timeout. Otherwise it can send `SIGKILL` before Fluxheim's
 own bound is reached.
 
-This drain contract improves normal restarts, but it does not by itself remove
-the listener gap between two independently bound processes.
+This drain contract improves normal restarts. The second implementation slice
+also supports inherited public HTTP/HTTPS TCP listeners so an external socket
+owner can remove connection refusal during replacement.
 
 ## Native Binary And systemd Design
 
@@ -51,6 +52,19 @@ boundary. Fluxheim must fail closed on missing, duplicate, unexpected, or
 wrong-address descriptors. It must not infer HTTP versus HTTPS from a port;
 descriptor assignment remains tied to the explicit `listen` and `tls_listen`
 launch plan.
+
+Fluxheim accepts only the standard systemd FD-3 protocol. `LISTEN_FDS` must be
+between 1 and 128, `LISTEN_PID` must equal the current process, and an optional
+`LISTEN_FDNAMES` list must contain the declared number of names. The
+non-standard `LISTEN_FDS_FIRST_FD` extension is rejected. Every inherited item
+must be a TCP listener whose bound address exactly matches one planned public
+HTTP/HTTPS address; configured port `0` is therefore not valid for activated
+production listeners.
+
+When any activation variable is present, validation failure is fatal. Fluxheim
+does not bind missing listeners as a fallback. This prevents a partially
+activated process from serving a different listener set than its supervisor
+intended.
 
 Socket activation for public HTTP/HTTPS listeners is the first target. Admin,
 metrics, stream, UDP, and local control sockets remain separately owned until
@@ -130,5 +144,7 @@ The completed release must provide a live upgrade smoke that proves:
 - direct-published Podman limitations are reported clearly rather than called
   zero downtime.
 
-Until that smoke and inherited-listener implementation land, `1.7.11` should
-be described as zero-downtime groundwork, not complete transparent upgrades.
+Inherited-listener adoption and bounded drain are implemented. Until readiness
+signaling and the complete two-generation handoff smoke land, `1.7.11` should
+still be described as zero-downtime groundwork rather than complete transparent
+upgrade automation.
