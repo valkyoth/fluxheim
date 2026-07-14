@@ -186,7 +186,7 @@ fn parse_bounded_usize(
         })
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn take_validated_listeners(count: usize) -> Result<Vec<TcpListener>, SocketActivationError> {
     let mut listen_fd = listenfd::ListenFd::from_env();
     if listen_fd.len() != count {
@@ -209,11 +209,11 @@ fn take_validated_listeners(count: usize) -> Result<Vec<TcpListener>, SocketActi
     Ok(listeners)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 fn take_validated_listeners(_count: usize) -> Result<Vec<TcpListener>, SocketActivationError> {
     Err(SocketActivationError::InvalidValue {
         variable: "LISTEN_FDS",
-        value: "socket activation is only supported on Unix".to_owned(),
+        value: "systemd socket activation is only supported on Linux".to_owned(),
     })
 }
 

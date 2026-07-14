@@ -84,7 +84,7 @@ ready only after all startup-blocking work succeeds, including:
 - binding or adopting every required listener;
 - starting critical background services.
 
-On Unix, Fluxheim sends `READY=1` with status `Fluxheim native runtime ready`
+On Linux, Fluxheim sends `READY=1` with status `Fluxheim native runtime ready`
 after those steps. If `NOTIFY_SOCKET` is configured but malformed or
 unreachable, startup fails instead of logging a false-ready state. On shutdown
 it sends `STOPPING=1` and a draining status before applying the optional grace

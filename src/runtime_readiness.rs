@@ -1,6 +1,6 @@
 use std::io;
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub(super) fn notify_ready() -> io::Result<()> {
     notify(&[
         libsystemd::daemon::NotifyState::Ready,
@@ -8,7 +8,7 @@ pub(super) fn notify_ready() -> io::Result<()> {
     ])
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 pub(super) fn notify_ready() -> io::Result<()> {
     Ok(())
 }
@@ -22,7 +22,7 @@ pub(super) fn notify_stopping() {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn notify_stopping_inner() -> io::Result<()> {
     notify(&[
         libsystemd::daemon::NotifyState::Stopping,
@@ -30,12 +30,12 @@ fn notify_stopping_inner() -> io::Result<()> {
     ])
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 fn notify_stopping_inner() -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn notify(states: &[libsystemd::daemon::NotifyState]) -> io::Result<()> {
     let configured = std::env::var_os("NOTIFY_SOCKET");
     if let Some(value) = configured.as_ref()
