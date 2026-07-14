@@ -95,6 +95,13 @@ TESTS: tuple[TestEntry, ...] = (
         "Proves failed replacement rollback, ready-generation handoff, and old connection drain.",
     ),
     TestEntry(
+        "podman-blue-green",
+        "Podman blue/green upgrade smoke",
+        "containers",
+        ("scripts/smoke_podman_blue_green.sh",),
+        "Builds two Fluxheim containers and proves handoff behind one stable front listener.",
+    ),
+    TestEntry(
         "proxy-cache",
         "Proxy cache smoke",
         "cache",

@@ -24,6 +24,8 @@ behavior when the change improves security or project direction.
   drain on one externally owned listener.
 - Ship a disabled-by-default `fluxheim.socket` unit matching the packaged port
   80 config, including RPM payload and deterministic activation instructions.
+- Add an optional real Podman blue/green smoke proving direct host-port conflict,
+  failed-green rollback, stable-front switching, and old-container drain.
 
 ### Changed
 

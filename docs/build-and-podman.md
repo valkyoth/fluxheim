@@ -948,6 +948,18 @@ directly owns its published host ports still has a listener gap; see
 [Zero-Downtime Upgrades](zero-downtime-upgrades.md) for the readiness-gated
 blue/green design.
 
+Run the optional real-container proof with:
+
+```bash
+scripts/smoke_podman_blue_green.sh
+```
+
+It builds the reduced static-site profile unless
+`FLUXHEIM_UPGRADE_CONTAINER_IMAGE` names an existing image. The smoke proves
+that direct host-port replacement conflicts, then exercises failed-green
+rollback, external readiness probing, new-connection switching, and blue
+keep-alive drain behind a stable front listener.
+
 Published images default to the rootless-friendly
 [packaging/container/fluxheim.toml](../packaging/container/fluxheim.toml) and a
 self-contained default page at

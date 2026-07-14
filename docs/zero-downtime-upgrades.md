@@ -126,6 +126,17 @@ Two containers using `SO_REUSEPORT` directly are not the default design. It
 does not provide deterministic readiness-gated routing, and traffic may still
 reach the old generation until its listener closes.
 
+`scripts/smoke_podman_blue_green.sh` builds a reduced Fluxheim image and proves
+this boundary with real rootless containers. It verifies that a second
+direct-published container cannot claim blue's host port, then runs blue and
+green on distinct private ports behind one stable test listener. It keeps
+routing on blue when an invalid replacement exits, probes green before the
+switch, routes new connections to green, and lets an established blue
+keep-alive connection finish after `SIGTERM`. The Python front listener is a
+test harness, not a production proxy; production deployments should use a
+maintained load balancer, orchestrator service, or host socket owner with the
+same readiness and rollback sequence.
+
 ## Shared State
 
 Blue and green processes must not concurrently mutate storage that has a
@@ -153,5 +164,5 @@ proves:
 Inherited-listener adoption, readiness signaling, bounded drain, and the native
 two-generation handoff are implemented. Podman still requires a stable fronting
 owner; directly published containers are documented as non-zero-downtime and
-will receive separate deployment smoke coverage rather than being represented
-as equivalent to inherited native sockets.
+have separate live deployment smoke coverage rather than being represented as
+equivalent to inherited native sockets.

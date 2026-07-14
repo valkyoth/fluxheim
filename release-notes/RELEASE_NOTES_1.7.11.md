@@ -32,3 +32,6 @@ socket activation are enabled.
 - Ship an optional RPM/systemd socket unit for the packaged port-80 listener.
   It remains disabled by default so existing direct-binding deployments do not
   change behavior during package installation.
+- Add a real rootless-Podman blue/green smoke. It verifies that direct published
+  ports cannot be atomically replaced, then proves the supported stable-front
+  pattern with failed-green rollback and old keep-alive drain.
