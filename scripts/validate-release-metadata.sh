@@ -27,9 +27,11 @@ fi
 case "$cargo_rust_version" in
     *.*.*)
         expected_toolchain_version="$cargo_rust_version"
+        expected_rpm_rust_version="$(printf '%s\n' "$cargo_rust_version" | cut -d. -f1,2)"
         ;;
     *.*)
         expected_toolchain_version="$cargo_rust_version.0"
+        expected_rpm_rust_version="$cargo_rust_version"
         ;;
     *)
         echo "release metadata: Cargo.toml rust-version $cargo_rust_version is not a supported version shape" >&2
@@ -89,6 +91,15 @@ fi
 
 if ! grep -q "^Version:[[:space:]]*$cargo_version$" packaging/rpm/fluxheim.spec; then
     echo "release metadata: packaging/rpm/fluxheim.spec Version does not match $cargo_version" >&2
+    exit 1
+fi
+
+rpm_rust_version="$(
+    sed -n 's/^%global rust_min_version[[:space:]]*//p' packaging/rpm/fluxheim.spec \
+        | sed -n '1p'
+)"
+if [ "$rpm_rust_version" != "$expected_rpm_rust_version" ]; then
+    echo "release metadata: RPM Rust minimum $rpm_rust_version does not match Cargo.toml $expected_rpm_rust_version" >&2
     exit 1
 fi
 

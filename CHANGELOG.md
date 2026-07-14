@@ -7,7 +7,7 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.7.11 - Unreleased
+## 1.7.11 - 2026-07-14
 
 ### Added
 
@@ -86,6 +86,16 @@ behavior when the change improves security or project direction.
 - Restrict critical watchdog registration to ownership-checked critical task
   handles, returning noncritical handles intact instead of dropping and
   cancelling their running services.
+- Remove caller-controlled executable and temporary-root arguments from the
+  zero-downtime and Podman blue/green smokes, closing CodeQL command/path
+  injection findings in release-test tooling.
+- Make the proxy-cache smoke tolerate the bounded interval between an SWR
+  memory-cache publish and completion of its awaited disk-tier persistence.
+
+### Packaging
+
+- Update the interactive RPM build menu to Fedora 44 and openSUSE Leap 16.0,
+  and remove the end-of-life Leap 15 target.
 
 ## 1.7.10 - 2026-07-13
 

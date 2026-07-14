@@ -2,15 +2,7 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
-tmp="$SMOKE_TMP_ROOT/fluxheim-podman-upgrade-smoke-$$"
 image="${FLUXHEIM_UPGRADE_CONTAINER_IMAGE:-fluxheim:upgrade-smoke}"
-
-cleanup() {
-    rm -rf "$tmp"
-}
-trap cleanup EXIT INT TERM
-mkdir -p "$tmp"
 
 if [ -z "${FLUXHEIM_UPGRADE_CONTAINER_IMAGE:-}" ]; then
     podman build \
@@ -21,4 +13,4 @@ if [ -z "${FLUXHEIM_UPGRADE_CONTAINER_IMAGE:-}" ]; then
         .
 fi
 
-python3 "$ROOT_DIR/scripts/smoke_podman_blue_green.py" "$image" "$tmp"
+python3 "$ROOT_DIR/scripts/smoke_podman_blue_green.py" "$image"

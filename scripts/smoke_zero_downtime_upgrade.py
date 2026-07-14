@@ -4,22 +4,54 @@
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import socket
 import subprocess
-import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+FLUXHEIM_BINARY = ROOT / "target/debug/fluxheim"
+
+
+@dataclass
+class ChildProcess:
+    pid: int
+    returncode: int | None = None
+
+    def poll(self) -> int | None:
+        if self.returncode is not None:
+            return self.returncode
+        waited_pid, status = os.waitpid(self.pid, os.WNOHANG)
+        if waited_pid == 0:
+            return None
+        self.returncode = os.waitstatus_to_exitcode(status)
+        return self.returncode
+
+    def wait(self, timeout: float) -> int:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = self.poll()
+            if status is not None:
+                return status
+            time.sleep(0.01)
+        raise subprocess.TimeoutExpired(str(FLUXHEIM_BINARY), timeout)
+
+    def send_signal(self, requested_signal: int) -> None:
+        os.kill(self.pid, requested_signal)
+
+    def kill(self) -> None:
+        self.send_signal(signal.SIGKILL)
 
 
 @dataclass
 class Generation:
     name: str
-    process: subprocess.Popen[bytes]
+    process: ChildProcess
     notify: socket.socket
     log_handle: object
     log_path: Path
@@ -59,26 +91,37 @@ class Generation:
         self.notify.close()
 
 
-def child_main(binary: str, config: str) -> None:
-    source_fd = int(os.environ.pop("FLUXHEIM_SMOKE_LISTENER_FD"))
+def child_main(
+    config: Path,
+    listener_fd: int,
+    notify_name: str,
+    log_handle: object,
+) -> None:
+    source_fd = listener_fd
     if source_fd != 3:
         os.dup2(source_fd, 3, inheritable=True)
     else:
         os.set_inheritable(3, True)
-    os.environ["LISTEN_PID"] = str(os.getpid())
-    os.execve(binary, [binary, "--config", config], os.environ)
+    os.dup2(log_handle.fileno(), 1)
+    os.dup2(log_handle.fileno(), 2)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "LISTEN_PID": str(os.getpid()),
+            "LISTEN_FDS": "1",
+            "LISTEN_FDNAMES": "http",
+            "NOTIFY_SOCKET": "@" + notify_name,
+        }
+    )
+    binary = str(FLUXHEIM_BINARY)
+    os.execve(binary, [binary, "--config", str(config)], environment)
 
 
 def secure_smoke_root() -> Path:
-    result = subprocess.run(
-        ["sh", str(ROOT / "scripts/secure-smoke-tmp-root.sh")],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    root = Path(result.stdout.strip()) / f"fluxheim-upgrade-smoke-{os.getpid()}"
-    root.mkdir(mode=0o700)
-    return root
+    parent = ROOT / "target/fluxheim-smoke-tmp"
+    parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    parent.chmod(0o700)
+    return Path(tempfile.mkdtemp(prefix="fluxheim-upgrade-smoke-", dir=parent))
 
 
 def write_config(
@@ -157,7 +200,6 @@ snapshot_integrity_key_file = "{integrity_key}"
 
 
 def launch(
-    binary: Path,
     config: Path,
     listener: socket.socket,
     root: Path,
@@ -168,22 +210,19 @@ def launch(
     notify.bind("\0" + notify_name)
     log_path = root / f"{name}.log"
     log_handle = log_path.open("wb")
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "FLUXHEIM_SMOKE_LISTENER_FD": str(listener.fileno()),
-            "LISTEN_FDS": "1",
-            "LISTEN_FDNAMES": "http",
-            "NOTIFY_SOCKET": "@" + notify_name,
-        }
-    )
-    process = subprocess.Popen(
-        [sys.executable, __file__, "--child", str(binary), str(config)],
-        env=environment,
-        pass_fds=(listener.fileno(),),
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-    )
+    pid = os.fork()
+    if pid == 0:
+        notify.close()
+        try:
+            child_main(config, listener.fileno(), notify_name, log_handle)
+        except BaseException as error:
+            message = f"zero-downtime smoke child failed before exec: {error}\n".encode(
+                "utf-8", errors="replace"
+            )
+            os.write(2, message)
+        finally:
+            os._exit(127)
+    process = ChildProcess(pid)
     return Generation(name, process, notify, log_handle, log_path)
 
 
@@ -225,8 +264,9 @@ def assert_body(response: bytes, expected: bytes) -> None:
         raise RuntimeError(f"unexpected HTTP response: {response!r}")
 
 
-def parent_main(binary_text: str) -> None:
-    binary = Path(binary_text).resolve()
+def parent_main() -> None:
+    if not FLUXHEIM_BINARY.is_file():
+        raise RuntimeError(f"Fluxheim smoke binary is missing: {FLUXHEIM_BINARY}")
     root = secure_smoke_root()
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -255,7 +295,7 @@ def parent_main(binary_text: str) -> None:
             f"127.0.0.1:{blocked_admin.getsockname()[1]}",
         )
 
-        old = launch(binary, old_config, listener, root, "old")
+        old = launch(old_config, listener, root, "old")
         generations.append(old)
         assert b"STATUS=Fluxheim native runtime ready" in old.wait_for(b"READY=1")
         assert_body(request(port), b"generation-old")
@@ -265,13 +305,13 @@ def parent_main(binary_text: str) -> None:
         persistent.sendall(b"GET / HTTP/1.1\r\nHost: upgrade.test\r\n\r\n")
         assert_body(read_response(persistent), b"generation-old")
 
-        failed = launch(binary, failed_config, listener, root, "failed")
+        failed = launch(failed_config, listener, root, "failed")
         generations.append(failed)
         if failed.wait(timeout=5.0) == 0:
             raise RuntimeError("invalid replacement unexpectedly started")
         assert_body(request(port), b"generation-old")
 
-        late_failed = launch(binary, late_failed_config, listener, root, "late-failed")
+        late_failed = launch(late_failed_config, listener, root, "late-failed")
         generations.append(late_failed)
         deadline = time.monotonic() + 5.0
         while late_failed.process.poll() is None and time.monotonic() < deadline:
@@ -281,7 +321,7 @@ def parent_main(binary_text: str) -> None:
         for _ in range(20):
             assert_body(request(port), b"generation-old")
 
-        new = launch(binary, new_config, listener, root, "new")
+        new = launch(new_config, listener, root, "new")
         generations.append(new)
         assert b"STATUS=Fluxheim native runtime ready" in new.wait_for(b"READY=1")
 
@@ -320,13 +360,8 @@ def parent_main(binary_text: str) -> None:
             generation.cleanup()
         blocked_admin.close()
         listener.close()
-        subprocess.run(["rm", "-rf", "--", str(root)], check=False)
+        shutil.rmtree(root, ignore_errors=True)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 2 and sys.argv[1] == "--child":
-        child_main(sys.argv[2], sys.argv[3])
-    elif len(sys.argv) == 2:
-        parent_main(sys.argv[1])
-    else:
-        raise SystemExit(f"usage: {sys.argv[0]} FLUXHEIM_BINARY")
+    parent_main()

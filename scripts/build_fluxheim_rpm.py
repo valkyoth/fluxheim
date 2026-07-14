@@ -20,7 +20,6 @@ from pathlib import Path
 OS_CONTAINERS = {
     "fedora-44": "registry.fedoraproject.org/fedora:44",
     "opensuse-tumbleweed": "registry.opensuse.org/opensuse/tumbleweed:latest",
-    "opensuse-leap-15": "registry.opensuse.org/opensuse/leap:15.6",
     "opensuse-leap-16": "registry.opensuse.org/opensuse/leap:16.0",
     "ubi-9": "registry.access.redhat.com/ubi9/ubi:latest",
     "ubi-10": "registry.access.redhat.com/ubi10/ubi:latest",
@@ -53,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         "version_tag",
         nargs="?",
         default="latest",
-        help="Fluxheim tag version, for example 0.5.0, v0.5.0, or latest",
+        help="Fluxheim tag version, for example 1.7.11, v1.7.11, or latest",
     )
     parser.add_argument(
         "build_type",

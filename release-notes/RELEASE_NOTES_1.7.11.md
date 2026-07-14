@@ -5,6 +5,9 @@ stable 1.7 Wasm policy milestones. It combines bounded native drain, strict
 listener inheritance, readiness-gated handoff, and tested native and Podman
 deployment patterns.
 
+The release also completes the native HTTP/1 parser audit and tightens critical
+background-service ownership without changing operator configuration defaults.
+
 ## Added
 
 - Track accepted native HTTP, HTTPS, HTTP/2, and Unix-listener connections so
@@ -60,8 +63,14 @@ deployment patterns.
   absolute URIs now fail before request dispatch.
 - Reject every HTTP/1.0 `Transfer-Encoding` message before evaluating
   keep-alive. Chunked decoding now bounds encoded bytes, line length, extension
-  bytes, and chunk count, validates extension grammar, and preserves parser
-  state across fragmented reads.
+  bytes, and chunk count, validates extension grammar, streams decoded data into
+  caller-owned output, and preserves identical parser results across every
+  fragmented-read boundary, including a split terminal CRLF at the line limit.
+- Return only a semantically validated public HTTP/1 request-head type. Host and
+  authority agreement, request-target grammar, body framing, and persistence
+  are resolved before callers can inspect or route a request.
+- Enforce the RFC 3986 ASCII path/query grammar and reject malformed raw or
+  percent-encoded target characters before routing.
 - Reject origin response status codes outside `100..=599`, oversized PROXY v1
   lines, and PROXY v2 payloads that exceed policy or differ from the declared
   frame length.
@@ -78,3 +87,24 @@ deployment patterns.
   Fluxheim cannot decode completely.
 - Prevent oversized embedded HTTP/1 connection limits from reaching Tokio's
   panicking semaphore constructor.
+- Accept only ownership-checked critical task handles in the runtime watchdog.
+  Attempted noncritical registration returns the original live handle instead
+  of dropping it and cancelling cache, metrics, certificate, or maintenance
+  services.
+- Stop accepting caller-controlled executable and temporary-root paths in the
+  zero-downtime and Podman blue/green smoke helpers. Their executable and
+  secure workspace locations are now derived from fixed repository paths and
+  Python-managed mode-`0700` temporary directories, resolving the associated
+  CodeQL command/path alerts.
+- Poll the final SWR disk-cache assertion for a bounded interval so the smoke
+  observes the supported asynchronous memory-publish/disk-persistence order
+  without masking a disk-store failure.
+
+## Build And Packaging
+
+- Pin the source, container build images, and RPM build prerequisite to the
+  Rust 1.97 toolchain line.
+- Include the disabled-by-default `fluxheim.socket` systemd unit in the RPM
+  payload alongside the documented activation workflow.
+- Update the interactive RPM build menu to Fedora 44 and openSUSE Leap 16.0,
+  removing the end-of-life openSUSE Leap 15 target.

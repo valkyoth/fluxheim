@@ -30,7 +30,7 @@ machine class.
 Install:
 
 - Xcode Command Line Tools: `xcode-select --install`
-- Rust 1.96 through rustup
+- Rust 1.97.0 through rustup
 - CMake if selecting native C dependencies such as zstd/libz-ng/AWS-LC paths
 - Optional Homebrew PHP for managed PHP-FPM development tests
 

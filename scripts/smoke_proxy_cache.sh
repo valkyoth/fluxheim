@@ -9,6 +9,18 @@ CURL_MAX_TIME=${FLUXHEIM_SMOKE_CURL_MAX_TIME:-5}
 LAST_MODIFIED="Sun, 10 May 2026 00:00:00 GMT"
 REVALIDATED_LAST_MODIFIED="Mon, 11 May 2026 00:00:00 GMT"
 
+wait_for_cache_lookup() {
+    cache_lookup_attempt=1
+    while [ "$cache_lookup_attempt" -lt 20 ]; do
+        if "$@" >/dev/null 2>&1; then
+            return 0
+        fi
+        cache_lookup_attempt=$((cache_lookup_attempt + 1))
+        sleep 0.1
+    done
+    "$@"
+}
+
 ports=$(python3 - <<'PY'
 import socket
 
@@ -1801,7 +1813,8 @@ if [ "$(cat "$swr_body")" != "swr-new-body" ]; then
     exit 1
 fi
 
-"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+wait_for_cache_lookup \
+    "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
     --host cache.test \
     --path /swr.png \
     --require-object \

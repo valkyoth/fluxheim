@@ -4,14 +4,26 @@
 from __future__ import annotations
 
 import os
+import shutil
 import selectors
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def secure_smoke_root() -> Path:
+    parent = ROOT / "target/fluxheim-smoke-tmp"
+    parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    parent.chmod(0o700)
+    return Path(tempfile.mkdtemp(prefix="fluxheim-podman-upgrade-smoke-", dir=parent))
 
 
 def free_ports(count: int) -> list[int]:
@@ -218,8 +230,8 @@ class StableFront:
                     key.data.sendall(data)
 
 
-def main(image: str, root_text: str) -> None:
-    root = Path(root_text).resolve()
+def main(image: str) -> None:
+    root = secure_smoke_root()
     prefix = f"fluxheim-upgrade-{os.getpid()}"
     blue_name = prefix + "-blue"
     green_name = prefix + "-green"
@@ -288,9 +300,10 @@ def main(image: str, root_text: str) -> None:
             front.close()
         for container in containers:
             podman("rm", "--force", container, check=False)
+        shutil.rmtree(root, ignore_errors=True)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        raise SystemExit(f"usage: {sys.argv[0]} IMAGE TEMP_ROOT")
-    main(sys.argv[1], sys.argv[2])
+    if len(sys.argv) != 2:
+        raise SystemExit(f"usage: {sys.argv[0]} IMAGE")
+    main(sys.argv[1])

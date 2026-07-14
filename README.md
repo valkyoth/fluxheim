@@ -490,7 +490,10 @@ Podman blue/green pattern behind a stable fronting listener.
   established work during bounded drain, systemd can retain and pass public
   listeners across generations, and `READY=1` follows explicit readiness from
   every configured background service. A live Podman smoke proves the supported
-  blue/green pattern and the direct-published-port limitation.
+  blue/green pattern and the direct-published-port limitation. The release also
+  closes the native HTTP/1 parser audit with validated-only request heads,
+  bounded fragmentation-independent chunk decoding, strict request-target and
+  authority handling, and ownership-safe critical background supervision.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
