@@ -83,6 +83,9 @@ behavior when the change improves security or project direction.
   validated takeover paths.
 - Bound public HTTP/1 connection-limit builders and validate every listener
   semaphore construction instead of allowing oversized values to panic.
+- Restrict critical watchdog registration to ownership-checked critical task
+  handles, returning noncritical handles intact instead of dropping and
+  cancelling their running services.
 
 ## 1.7.10 - 2026-07-13
 

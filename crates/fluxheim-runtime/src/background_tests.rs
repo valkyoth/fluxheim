@@ -257,10 +257,42 @@ async fn native_background_supervisor_watchdog_shutdowns_on_critical_exit() {
         async {},
     );
 
+    let critical = CriticalBackgroundJoinHandle::try_from(critical)
+        .expect("critical task should be accepted by watchdog boundary");
     let watchdog = supervisor.spawn_critical_watchdog(vec![critical]);
 
     watchdog.join().await.unwrap();
     assert!(shutdown.is_shutdown());
+}
+
+#[tokio::test]
+async fn critical_watchdog_boundary_returns_noncritical_task_without_cancelling_it() {
+    let supervisor = NativeBackgroundSupervisor::new();
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let (release_tx, release_rx) = oneshot::channel();
+    let (finished_tx, finished_rx) = oneshot::channel();
+    let handle = supervisor.spawn_background(
+        BackgroundTaskSpec::new("noncritical-task", BackgroundTaskKind::CacheMetrics),
+        async move {
+            let _ = ready_tx.send(());
+            let _ = release_rx.await;
+            let _ = finished_tx.send(());
+        },
+    );
+    ready_rx.await.expect("noncritical task should start");
+
+    let handle = CriticalBackgroundJoinHandle::try_from(handle)
+        .expect_err("noncritical task must be rejected without consuming its handle");
+    tokio::task::yield_now().await;
+    assert!(!handle.is_finished());
+
+    release_tx
+        .send(())
+        .expect("release receiver should remain live");
+    finished_rx
+        .await
+        .expect("rejected noncritical task should finish normally");
+    handle.join().await.unwrap();
 }
 
 #[tokio::test]

@@ -338,9 +338,14 @@ async fn run_native_runtime_async(
     }
 
     background_readiness.wait(&supervisor).await?;
-    let (critical_handles, background_handles): (Vec<_>, Vec<_>) = background_handles
-        .into_iter()
-        .partition(fluxheim_runtime::NativeBackgroundJoinHandle::is_critical);
+    let mut critical_handles = Vec::new();
+    let mut noncritical_handles = Vec::new();
+    for handle in background_handles {
+        match fluxheim_runtime::CriticalBackgroundJoinHandle::try_from(handle) {
+            Ok(handle) => critical_handles.push(handle),
+            Err(handle) => noncritical_handles.push(handle),
+        }
+    }
     let watchdog = supervisor.spawn_critical_watchdog(critical_handles);
     let proxy_runtime = native_proxy_runtime.map(|runtime| runtime.start(&supervisor));
     let admin_tasks = admin_runtime
@@ -350,7 +355,7 @@ async fn run_native_runtime_async(
     let mut runtime_tasks = runtime_drain::NativeRuntimeTasks::new(
         proxy_runtime,
         admin_tasks,
-        background_handles,
+        noncritical_handles,
         watchdog,
     );
     let drain_timeout = native_runtime_shutdown_timeout(launch_plan.process());

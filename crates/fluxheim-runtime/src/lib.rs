@@ -8,10 +8,10 @@ mod background;
 pub mod policy;
 
 pub use background::{
-    BackgroundTaskKind, BackgroundTaskSpawner, BackgroundTaskSpec, FluxBackgroundReady,
-    FluxBackgroundService, FluxBackgroundTask, FluxShutdown, NativeBackgroundJoinHandle,
-    NativeBackgroundSupervisor, ShutdownReason, ShutdownState, ShutdownView, background_service,
-    background_service_with_kind,
+    BackgroundTaskKind, BackgroundTaskSpawner, BackgroundTaskSpec, CriticalBackgroundJoinHandle,
+    FluxBackgroundReady, FluxBackgroundService, FluxBackgroundTask, FluxShutdown,
+    NativeBackgroundJoinHandle, NativeBackgroundSupervisor, ShutdownReason, ShutdownState,
+    ShutdownView, background_service, background_service_with_kind,
 };
 pub use policy::{
     PolicyEpoch, PolicyProof, RuntimeDecision, RuntimeDecisionKind, RuntimeDecisionReason,

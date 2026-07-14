@@ -114,6 +114,22 @@ pub struct NativeBackgroundJoinHandle {
     handle: Option<JoinHandle<()>>,
 }
 
+/// An ownership-checked handle accepted by the critical-task watchdog.
+#[derive(Debug)]
+pub struct CriticalBackgroundJoinHandle(NativeBackgroundJoinHandle);
+
+impl TryFrom<NativeBackgroundJoinHandle> for CriticalBackgroundJoinHandle {
+    type Error = NativeBackgroundJoinHandle;
+
+    fn try_from(handle: NativeBackgroundJoinHandle) -> Result<Self, Self::Error> {
+        if handle.is_critical() {
+            Ok(Self(handle))
+        } else {
+            Err(handle)
+        }
+    }
+}
+
 impl NativeBackgroundJoinHandle {
     pub fn name(&self) -> &str {
         &self.name
@@ -270,12 +286,11 @@ impl NativeBackgroundSupervisor {
     /// running and still request supervisor shutdown if a critical task exits.
     pub fn spawn_critical_watchdog<I>(&self, handles: I) -> NativeBackgroundJoinHandle
     where
-        I: IntoIterator<Item = NativeBackgroundJoinHandle>,
+        I: IntoIterator<Item = CriticalBackgroundJoinHandle>,
     {
         let watchers = handles
             .into_iter()
-            .filter(|handle| handle.is_critical())
-            .map(|handle| {
+            .map(|CriticalBackgroundJoinHandle(handle)| {
                 let supervisor = self.clone();
                 tokio::spawn(async move {
                     let _ = handle.join().await;
