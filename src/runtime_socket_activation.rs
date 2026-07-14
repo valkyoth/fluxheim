@@ -5,6 +5,21 @@ use std::net::TcpListener;
 
 const MAX_SYSTEMD_LISTENERS: usize = 128;
 
+pub(super) async fn bind_native_proxy_runtime(
+    config: &crate::config::Config,
+    plan: &fluxheim_server::ServerPlan,
+) -> Result<fluxheim_server::NativeHttp1ProxyRuntime, Box<dyn Error + Send + Sync>> {
+    match take_systemd_tcp_listeners()? {
+        Some(listeners) => Ok(
+            fluxheim_server::NativeHttp1ProxyRuntime::bind_from_config_with_inherited_listeners(
+                config, plan, listeners,
+            )
+            .await?,
+        ),
+        None => Ok(fluxheim_server::NativeHttp1ProxyRuntime::bind_from_config(config, plan).await?),
+    }
+}
+
 #[derive(Debug)]
 pub(super) enum SocketActivationError {
     InvalidValue {

@@ -160,8 +160,9 @@ Do not add addresses that are absent from the Fluxheim config and do not omit
 configured public addresses. Fluxheim rejects partial activation, wrong-process
 descriptors, non-TCP descriptors, duplicate addresses, and address mismatches;
 it never silently binds a fallback public socket once activation was requested.
-The packaged service remains `Type=simple` until the readiness-signaling slice
-is complete. The complete rollout model and current limitation are documented in
+The packaged service uses `Type=notify` and considers startup successful only
+after Fluxheim reports that native startup completed. The complete rollout
+model and current limitation are documented in
 [Zero-Downtime Upgrades](zero-downtime-upgrades.md).
 
 ## ACME Timer

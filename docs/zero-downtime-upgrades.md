@@ -84,6 +84,13 @@ ready only after all startup-blocking work succeeds, including:
 - binding or adopting every required listener;
 - starting critical background services.
 
+On Unix, Fluxheim sends `READY=1` with status `Fluxheim native runtime ready`
+after those steps. If `NOTIFY_SOCKET` is configured but malformed or
+unreachable, startup fails instead of logging a false-ready state. On shutdown
+it sends `STOPPING=1` and a draining status before applying the optional grace
+period. Linux abstract notification sockets and filesystem sockets are both
+supported.
+
 If readiness fails, the old process must remain active and the replacement must
 exit without asking it to drain. A timeout or failed health probe is a failed
 upgrade, not permission to continue.

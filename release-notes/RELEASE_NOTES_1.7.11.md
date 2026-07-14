@@ -22,3 +22,6 @@ socket activation are enabled.
 - Add unit coverage for malformed activation metadata and real-socket adoption,
   plus a real-binary smoke that serves through an inherited listener and proves
   malformed activation fails closed.
+- Report systemd readiness only after native listener/background-service startup
+  completes, fail startup if a configured notification socket is unreachable,
+  and report bounded-drain status after a shutdown signal.

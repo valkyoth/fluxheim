@@ -17,6 +17,8 @@ behavior when the change improves security or project direction.
   established keep-alive connection completes within the shutdown bound.
 - Add strict systemd socket activation for public native HTTP/HTTPS listeners,
   with exact descriptor-count/address matching and a real inherited-FD smoke.
+- Add systemd `READY=1`, status, and stopping notifications after complete
+  native startup, including abstract notification-socket smoke coverage.
 
 ### Changed
 
