@@ -3193,13 +3193,22 @@ Stable scope:
   audit with a validated-only public request-head type, strict RFC 3986 target
   grammar, linear Connection/fragmented-chunk processing, and caller-owned
   bounded chunk output backed by live framing and pipelining regressions.
-- `v1.7.12`: standards-based response metadata after the zero-downtime slice.
-  Add opt-in RFC 9211 `Cache-Status` from real cache outcomes and low-cardinality
-  RFC 9209 `Proxy-Status` from generated proxy failures without exposing backend
-  addresses, certificate details, DNS names, or arbitrary error strings. Add
-  streaming RFC 9530 `Content-Digest`/`Repr-Digest` only after proving cache,
-  compression, conditional, HEAD, and range-response semantics with live tests;
-  do not emulate these fields with static response-header mutation.
+- `v1.7.12`: standards-based response metadata and reproducible FIPS-backend
+  evidence after the zero-downtime slice. Add opt-in RFC 9211 `Cache-Status`
+  from real cache outcomes and low-cardinality RFC 9209 `Proxy-Status` from
+  generated proxy failures without exposing backend addresses, certificate
+  details, DNS names, or arbitrary error strings. Add streaming RFC 9530
+  `Content-Digest`/`Repr-Digest` only after proving cache, compression,
+  conditional, HEAD, and range-response semantics with live tests; do not
+  emulate these fields with static response-header mutation. Add separate,
+  pinned CI-only build environments for `profile-fips-openssl` and
+  `profile-fips-rustls`. Each environment must run the exact binary it builds,
+  verify the expected OpenSSL FIPS or rustls/AWS-LC FIPS provider and dependency
+  boundary, exercise real downstream and upstream TLS, and prove incompatible
+  algorithms/configurations fail closed. Record provider, compiler, dependency,
+  binary, and image digests as release evidence. These are reproducible
+  FIPS-capable backend tests, not published "FIPS images" or a claim that
+  Fluxheim as a complete product is FIPS validated.
 - `v1.8.0`: cross-platform production baseline planning. Replace the old
   "macOS developer-only" posture with a concrete macOS and Windows production
   parity line now that Fluxheim no longer depends on Pingora for the normal
@@ -4843,11 +4852,17 @@ circular dependencies.
   without a fronting layer. Complete the HTTP/1 parser audit by making semantic
   validation part of the public parse boundary and proving linear, bounded
   request-target, Connection, and chunked-body handling.
-- `v1.7.12`: standards-based response metadata. Implement opt-in RFC 9211
-  `Cache-Status`, low-cardinality RFC 9209 `Proxy-Status`, and streaming RFC
-  9530 digest fields from real runtime state with live cache, proxy failure,
-  compression, conditional, HEAD, and range tests. Never expose backend
-  topology or synthesize these protocol fields as static decorative headers.
+- `v1.7.12`: standards-based response metadata plus reproducible FIPS-backend
+  evidence. Implement opt-in RFC 9211 `Cache-Status`, low-cardinality RFC 9209
+  `Proxy-Status`, and streaming RFC 9530 digest fields from real runtime state
+  with live cache, proxy failure, compression, conditional, HEAD, and range
+  tests. Never expose backend topology or synthesize these protocol fields as
+  static decorative headers. Add pinned CI-only environments that build and
+  execute the same `profile-fips-openssl` and `profile-fips-rustls` binaries,
+  verify the intended OpenSSL FIPS and rustls/AWS-LC FIPS provider/dependency
+  boundaries, run real downstream/upstream TLS, reject incompatible policy,
+  and retain toolchain/provider/binary/image evidence. Do not publish these as
+  FIPS images or present the tests as product-level FIPS validation.
 - `v1.8.0`: cross-platform production baseline planning. Make macOS and
   Windows first-class release targets where practical, with Linux as the
   reference baseline. Define the supported profile matrix, platform-specific
