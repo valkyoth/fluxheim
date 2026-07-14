@@ -236,6 +236,38 @@ async fn native_http1_proxy_runtime_rejects_wrong_or_duplicate_inherited_address
     assert!(error.to_string().contains("duplicate listener address"));
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn inherited_listener_check_rejects_connected_stream() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (_server, _) = listener.accept().unwrap();
+
+    assert!(!crate::native_runtime_http1_proxy::inherited_socket_is_listening(&client).unwrap());
+    assert!(crate::native_runtime_http1_proxy::inherited_socket_is_listening(&listener).unwrap());
+}
+
+#[tokio::test]
+async fn cancelling_runtime_join_aborts_public_listener() {
+    let mut config = fluxheim_config::Config::default();
+    config.server.listen = vec!["127.0.0.1:0".to_owned()];
+    config.proxy.upstreams = vec!["127.0.0.1:9".to_owned()];
+    let plan = ServerPlan::from_config(&config).unwrap();
+    let runtime = NativeHttp1ProxyRuntime::bind_from_config(&config, &plan)
+        .await
+        .unwrap();
+    let supervisor = NativeBackgroundSupervisor::new();
+    let handle = runtime.start(&supervisor);
+    let address = handle.local_addrs()[0];
+    let join = tokio::spawn(handle.join());
+
+    tokio::task::yield_now().await;
+    join.abort();
+    let _ = join.await;
+
+    assert!(TcpStream::connect(address).await.is_err());
+}
+
 #[tokio::test]
 async fn native_http1_proxy_runtime_matches_inherited_listeners_by_address_not_fd_order() {
     let first = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

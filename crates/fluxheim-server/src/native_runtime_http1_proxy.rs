@@ -28,11 +28,15 @@ use crate::{
 
 #[path = "native_runtime_http1_proxy_error.rs"]
 mod runtime_error;
+#[path = "native_runtime_http1_proxy_handle.rs"]
+mod runtime_handle;
 #[path = "native_runtime_http1_proxy_listener.rs"]
 mod runtime_listener;
 #[path = "native_runtime_http1_proxy_tls.rs"]
 mod runtime_tls;
 
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use runtime_listener::inherited_socket_is_listening;
 use runtime_listener::native_proxy_runtime_listeners;
 
 #[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
@@ -449,41 +453,6 @@ impl NativeHttp1ProxyRuntime {
             });
         }
         NativeHttp1ProxyRuntimeHandle { listeners: handles }
-    }
-}
-
-impl NativeHttp1ProxyRuntimeHandle {
-    pub fn local_addrs(&self) -> Vec<SocketAddr> {
-        self.listeners
-            .iter()
-            .map(|listener| listener.local_addr)
-            .collect()
-    }
-
-    pub async fn join(mut self) -> Vec<Result<(), NativeHttp1Error>> {
-        let listeners = std::mem::take(&mut self.listeners);
-        let mut results = Vec::with_capacity(listeners.len());
-        for mut listener in listeners {
-            let Some(handle) = listener.handle.take() else {
-                continue;
-            };
-            match handle.await {
-                Ok(result) => results.push(result),
-                Err(error) if error.is_cancelled() => {}
-                Err(error) => results.push(Err(NativeHttp1Error::Io(io::Error::other(error)))),
-            }
-        }
-        results
-    }
-}
-
-impl Drop for NativeHttp1ProxyRuntimeHandle {
-    fn drop(&mut self) {
-        for listener in &mut self.listeners {
-            if let Some(handle) = &listener.handle {
-                handle.abort();
-            }
-        }
     }
 }
 

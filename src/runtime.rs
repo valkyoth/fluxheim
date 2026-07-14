@@ -1,6 +1,4 @@
 use std::error::Error;
-#[cfg(feature = "proxy")]
-use std::sync::Arc;
 
 use crate::config::Config;
 
@@ -21,8 +19,14 @@ use runtime_background::certificate_reload_control_service;
 use runtime_background::{CacheRuntimeMetricsBackgroundService, record_cache_runtime_metrics};
 
 #[cfg(feature = "proxy")]
+#[path = "runtime_admin.rs"]
+mod runtime_admin;
+#[cfg(feature = "proxy")]
 #[path = "runtime_cutover.rs"]
 mod runtime_cutover;
+#[cfg(feature = "proxy")]
+#[path = "runtime_drain.rs"]
+mod runtime_drain;
 #[cfg(all(test, feature = "proxy"))]
 use runtime_cutover::native_runtime_manifest_preview;
 #[cfg(feature = "proxy")]
@@ -319,72 +323,18 @@ async fn run_native_runtime_async(
         );
     }
 
-    let mut listener_handles: Vec<
-        tokio::task::JoinHandle<Result<(), fluxheim_server::NativeHttp1Error>>,
-    > = Vec::new();
-    let proxy_runtime = native_proxy_runtime.map(|runtime| runtime.start(&supervisor));
-
-    if let Some(admin_service_spec) =
-        server_plan.service(fluxheim_server::ServiceKind::AdminControlPlane)
-        && let Some(admin_services) = crate::admin::native_admin_services_from_config(
-            &config,
-            &server_plan,
-            #[cfg(feature = "load-balancer")]
-            native_load_balancer_admin_pools,
-        )?
+    let mut admin_runtime = runtime_admin::PreparedAdminRuntime::prepare(
+        &config,
+        &server_plan,
+        #[cfg(feature = "load-balancer")]
+        native_load_balancer_admin_pools,
+    )
+    .await?;
+    if let Some(admin_runtime) = &mut admin_runtime
+        && let Some(watchdog) = admin_runtime.take_watchdog()
     {
-        let app = Arc::new(admin_services.control_plane);
-        for listener in
-            server_plan.service_listeners(fluxheim_server::ServiceKind::AdminControlPlane)
-        {
-            let tcp = tokio::net::TcpListener::bind(listener.addr()).await?;
-            let local_addr = tcp.local_addr()?;
-            log::info!("{} enabled on {}", admin_service_spec.name(), local_addr);
-            let policy = *server_plan.downstream_http1();
-            let app = app.clone();
-            let shutdown = supervisor.shutdown_view();
-            listener_handles.push(tokio::spawn(async move {
-                fluxheim_server::serve_native_http1_listener(
-                    tcp,
-                    policy,
-                    app,
-                    native_shutdown_wait(shutdown),
-                )
-                .await
-            }));
-        }
-
-        #[cfg(unix)]
-        if let Some(ops_socket) = admin_services.ops_socket {
-            let Some(ops_socket_plan) = server_plan.admin_ops_socket() else {
-                return Err("admin ops socket service missing from native launch plan".into());
-            };
-            let listener = fluxheim_server::replace_private_unix_listener(ops_socket_plan.path())?;
-            listener.set_nonblocking(true)?;
-            let listener = tokio::net::UnixListener::from_std(listener)?;
-            log::info!(
-                "Fluxheim Local Ops Socket enabled on {}",
-                ops_socket_plan.path().display()
-            );
-            let policy = *server_plan.downstream_http1();
-            let app = Arc::new(ops_socket);
-            let shutdown = supervisor.shutdown_view();
-            listener_handles.push(tokio::spawn(async move {
-                fluxheim_server::serve_native_http1_unix_listener(
-                    listener,
-                    policy,
-                    app,
-                    native_shutdown_wait(shutdown),
-                )
-                .await
-            }));
-        }
-
-        if let Some(watchdog) = admin_services.watchdog {
-            log::info!("admin self-healing watchdog enabled");
-            background_handles
-                .push(background_readiness.spawn(&supervisor, watchdog.into_native()));
-        }
+        log::info!("admin self-healing watchdog enabled");
+        background_handles.push(background_readiness.spawn(&supervisor, watchdog.into_native()));
     }
 
     background_readiness.wait(&supervisor).await?;
@@ -392,7 +342,27 @@ async fn run_native_runtime_async(
         .into_iter()
         .partition(fluxheim_runtime::NativeBackgroundJoinHandle::is_critical);
     let watchdog = supervisor.spawn_critical_watchdog(critical_handles);
-    runtime_readiness::notify_ready()?;
+    let proxy_runtime = native_proxy_runtime.map(|runtime| runtime.start(&supervisor));
+    let admin_tasks = admin_runtime
+        .map_or_else(runtime_admin::NativeAdminListenerTasks::new, |runtime| {
+            runtime.start(&supervisor)
+        });
+    let mut runtime_tasks = runtime_drain::NativeRuntimeTasks::new(
+        proxy_runtime,
+        admin_tasks,
+        background_handles,
+        watchdog,
+    );
+    let drain_timeout = native_runtime_shutdown_timeout(launch_plan.process());
+    if let Err(error) = runtime_readiness::notify_ready() {
+        log::error!(
+            target: "fluxheim::native_runtime",
+            "native runtime readiness notification failed after listener startup: {error}"
+        );
+        let _ = supervisor.shutdown();
+        runtime_tasks.drain(drain_timeout).await?;
+        return Err(error.into());
+    }
     log::info!("native runtime started");
     wait_native_runtime_shutdown_signal().await;
     runtime_readiness::notify_stopping();
@@ -406,42 +376,11 @@ async fn run_native_runtime_async(
     }
 
     let _ = supervisor.shutdown();
-    let drain_timeout = native_runtime_shutdown_timeout(launch_plan.process());
     log::info!(
         "native runtime draining established work; timeout={}s",
         drain_timeout.as_secs()
     );
-    let drain = async move {
-        if let Some(proxy_runtime) = proxy_runtime {
-            for result in proxy_runtime.join().await {
-                result?;
-            }
-        }
-        for handle in listener_handles {
-            match handle.await {
-                Ok(result) => result?,
-                Err(error) if error.is_cancelled() => {}
-                Err(error) => return Err(Box::<dyn Error + Send + Sync>::from(error)),
-            }
-        }
-        for handle in background_handles {
-            handle.join().await?;
-        }
-        Ok::<(), Box<dyn Error + Send + Sync>>(())
-    };
-    match tokio::time::timeout(drain_timeout, drain).await {
-        Ok(result) => result?,
-        Err(_) => {
-            log::warn!(
-                target: "fluxheim::native_runtime",
-                "native runtime graceful drain timed out after {}s; remaining work will be terminated",
-                drain_timeout.as_secs()
-            );
-        }
-    }
-    watchdog.abort();
-    let _ = watchdog.join().await;
-    Ok(())
+    runtime_tasks.drain(drain_timeout).await
 }
 
 #[cfg(feature = "proxy")]
@@ -466,11 +405,6 @@ fn reject_unsupported_native_background_tasks(
         }
     }
     Ok(())
-}
-
-#[cfg(feature = "proxy")]
-async fn native_shutdown_wait(mut shutdown: fluxheim_runtime::FluxShutdown) {
-    let _ = shutdown.wait_for_shutdown().await;
 }
 
 #[cfg(all(

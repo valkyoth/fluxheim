@@ -81,7 +81,13 @@ def secure_smoke_root() -> Path:
     return root
 
 
-def write_config(root: Path, name: str, listen: str, content: str) -> Path:
+def write_config(
+    root: Path,
+    name: str,
+    listen: str,
+    content: str,
+    blocked_admin_address: str | None = None,
+) -> Path:
     generation = root / name
     public = generation / "public"
     run = generation / "run"
@@ -89,8 +95,7 @@ def write_config(root: Path, name: str, listen: str, content: str) -> Path:
     run.mkdir()
     (public / "index.html").write_text(content + "\n", encoding="ascii")
     config = generation / "fluxheim.toml"
-    config.write_text(
-        f'''[server]
+    config_text = f'''[server]
 listen = ["{listen}"]
 default_vhost = "upgrade.test"
 
@@ -127,9 +132,27 @@ hosts = ["upgrade.test"]
 [vhosts.web]
 root = "{public}"
 index_files = ["index.html"]
-''',
-        encoding="ascii",
-    )
+'''
+    if blocked_admin_address is not None:
+        snapshots = generation / "snapshots"
+        snapshots.mkdir()
+        token = generation / "admin-token"
+        token.write_text("fluxheim-upgrade-smoke-token\n", encoding="ascii")
+        integrity_key = generation / "snapshot-integrity.key"
+        integrity_key.write_text(
+            "0123456789abcdef0123456789abcdef", encoding="ascii"
+        )
+        integrity_key.chmod(0o600)
+        config_text += f'''
+[admin]
+enabled = true
+listen = "{blocked_admin_address}"
+require_loopback = true
+token_file = "{token}"
+snapshot_store = "{snapshots}"
+snapshot_integrity_key_file = "{integrity_key}"
+'''
+    config.write_text(config_text, encoding="ascii")
     return config
 
 
@@ -213,6 +236,10 @@ def parent_main(binary_text: str) -> None:
     address = f"127.0.0.1:{port}"
     generations: list[Generation] = []
     persistent: socket.socket | None = None
+    blocked_admin = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    blocked_admin.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    blocked_admin.bind(("127.0.0.1", 0))
+    blocked_admin.listen(1)
     try:
         old_config = write_config(root, "old", address, "generation-old")
         new_config = write_config(root, "new", address, "generation-new")
@@ -220,6 +247,13 @@ def parent_main(binary_text: str) -> None:
             wrong_socket.bind(("127.0.0.1", 0))
             wrong_address = f"127.0.0.1:{wrong_socket.getsockname()[1]}"
         failed_config = write_config(root, "failed", wrong_address, "generation-failed")
+        late_failed_config = write_config(
+            root,
+            "late-failed",
+            address,
+            "generation-not-ready",
+            f"127.0.0.1:{blocked_admin.getsockname()[1]}",
+        )
 
         old = launch(binary, old_config, listener, root, "old")
         generations.append(old)
@@ -236,6 +270,16 @@ def parent_main(binary_text: str) -> None:
         if failed.wait(timeout=5.0) == 0:
             raise RuntimeError("invalid replacement unexpectedly started")
         assert_body(request(port), b"generation-old")
+
+        late_failed = launch(binary, late_failed_config, listener, root, "late-failed")
+        generations.append(late_failed)
+        deadline = time.monotonic() + 5.0
+        while late_failed.process.poll() is None and time.monotonic() < deadline:
+            assert_body(request(port), b"generation-old")
+        if late_failed.wait(timeout=5.0) == 0:
+            raise RuntimeError("late-failing replacement unexpectedly started")
+        for _ in range(20):
+            assert_body(request(port), b"generation-old")
 
         new = launch(binary, new_config, listener, root, "new")
         generations.append(new)
@@ -274,6 +318,7 @@ def parent_main(binary_text: str) -> None:
             persistent.close()
         for generation in generations:
             generation.cleanup()
+        blocked_admin.close()
         listener.close()
         subprocess.run(["rm", "-rf", "--", str(root)], check=False)
 

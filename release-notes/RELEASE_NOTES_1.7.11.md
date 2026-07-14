@@ -40,3 +40,8 @@ deployment patterns.
   replacement fail closed and leaves the old generation serving.
 - Reject inherited descriptors that are not listening TCP sockets, including a
   live regression using a connected stream bound to the expected address.
+- Defer public/admin accept loops until background readiness succeeds, and add
+  a live late-failure replacement test proving the old generation serves every
+  request while the replacement aborts.
+- Explicitly abort outstanding listener and background tasks at the drain
+  timeout instead of relying on whole-process teardown.

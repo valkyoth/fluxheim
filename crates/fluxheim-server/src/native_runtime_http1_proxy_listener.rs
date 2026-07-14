@@ -70,7 +70,7 @@ fn adopt_inherited_listeners(
             .local_addr()
             .map_err(|source| NativeHttp1ProxyRuntimeError::InheritedListenerInspect { source })?;
         #[cfg(target_os = "linux")]
-        if !rustix::net::sockopt::socket_acceptconn(&listener).map_err(|source| {
+        if !inherited_socket_is_listening(&listener).map_err(|source| {
             NativeHttp1ProxyRuntimeError::InheritedListenerInspect {
                 source: source.into(),
             }
@@ -100,6 +100,13 @@ fn adopt_inherited_listeners(
         return Err(NativeHttp1ProxyRuntimeError::UnexpectedInheritedListener { addr });
     }
     Ok(listeners)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn inherited_socket_is_listening(
+    socket: &impl std::os::fd::AsFd,
+) -> Result<bool, rustix::io::Errno> {
+    rustix::net::sockopt::socket_acceptconn(socket)
 }
 
 fn runtime_listener(

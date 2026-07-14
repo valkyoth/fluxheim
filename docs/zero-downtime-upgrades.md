@@ -23,7 +23,8 @@ Native shutdown behavior is explicit:
 5. The complete drain is bounded by
    `server.process.graceful_shutdown_timeout_seconds`. If the field is omitted,
    Fluxheim applies a 30-second effective timeout.
-6. Work still active at the timeout is terminated when the runtime exits.
+6. Work still active at the timeout is explicitly aborted, including when the
+   runtime is used through Fluxheim's library entry point.
 
 The service manager or container stop timeout must exceed the grace period plus
 the graceful drain timeout. Otherwise it can send `SIGKILL` before Fluxheim's
@@ -86,10 +87,13 @@ ready only after all startup-blocking work succeeds, including:
 
 On Linux, Fluxheim sends `READY=1` with status `Fluxheim native runtime ready`
 after those steps. A background service that exits before its ready signal
-fails startup. If `NOTIFY_SOCKET` is configured but malformed or unreachable,
-startup fails instead of logging a false-ready state. On shutdown it sends
-`STOPPING=1` and a draining status before applying the optional grace period.
-Linux abstract notification sockets and filesystem sockets are both supported.
+fails startup. Public HTTP/HTTPS, admin, and local-ops listeners are prepared
+but their accept loops do not start until background readiness succeeds. If
+`NOTIFY_SOCKET` is configured but malformed or unreachable, startup fails and
+any newly started accept loops are drained instead of logging a false-ready
+state. On shutdown it sends `STOPPING=1` and a draining status before applying
+the optional grace period. Linux abstract notification sockets and filesystem
+sockets are both supported.
 
 If readiness fails, the old process must remain active and the replacement must
 exit without asking it to drain. A timeout or failed health probe is a failed
