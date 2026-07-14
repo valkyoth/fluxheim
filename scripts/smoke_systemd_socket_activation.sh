@@ -2,6 +2,7 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+"$ROOT_DIR/scripts/validate-systemd-activation-policy.sh"
 SMOKE_TMP_ROOT=$(sh "$ROOT_DIR/scripts/secure-smoke-tmp-root.sh")
 tmp="$SMOKE_TMP_ROOT/fluxheim-systemd-socket-smoke-$$"
 config="$tmp/fluxheim.toml"

@@ -43,6 +43,10 @@ behavior when the change improves security or project direction.
   state, with a live connected-stream regression in the activation smoke.
 - Abort listener and background tasks explicitly when the graceful-drain bound
   expires, including when Fluxheim is embedded as a library.
+- Replace `listenfd` with the focused `fluxheim-systemd` descriptor-adoption
+  boundary. Systemd descriptors are received without mutating `LISTEN_*` after
+  Tokio starts, then validated and transferred through one audited unsafe
+  ownership conversion.
 
 ## 1.7.10 - 2026-07-13
 

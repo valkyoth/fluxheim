@@ -26,6 +26,9 @@ pub(super) enum SocketActivationError {
         variable: &'static str,
         value: String,
     },
+    EnvironmentChanged {
+        variable: &'static str,
+    },
     ListenerCount {
         expected: usize,
         actual: usize,
@@ -40,8 +43,7 @@ pub(super) enum SocketActivationError {
         expected: u32,
         actual: u32,
     },
-    TakeListener {
-        index: usize,
+    ReceiveListeners {
         source: std::io::Error,
     },
 }
@@ -49,6 +51,10 @@ pub(super) enum SocketActivationError {
 impl fmt::Display for SocketActivationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::EnvironmentChanged { variable } => write!(
+                formatter,
+                "systemd socket activation library mutated {variable} during descriptor receipt"
+            ),
             Self::InvalidValue { variable, value } => {
                 write!(
                     formatter,
@@ -71,9 +77,9 @@ impl fmt::Display for SocketActivationError {
                 formatter,
                 "systemd socket activation LISTEN_PID targets process {actual}, not current process {expected}"
             ),
-            Self::TakeListener { index, source } => write!(
+            Self::ReceiveListeners { source } => write!(
                 formatter,
-                "failed to adopt systemd TCP listener at descriptor index {index}: {source}"
+                "failed to receive systemd TCP listeners: {source}"
             ),
         }
     }
@@ -82,7 +88,7 @@ impl fmt::Display for SocketActivationError {
 impl Error for SocketActivationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::TakeListener { source, .. } => Some(source),
+            Self::ReceiveListeners { source } => Some(source),
             _ => None,
         }
     }
@@ -105,7 +111,22 @@ pub(super) fn take_systemd_tcp_listeners() -> Result<Option<Vec<TcpListener>>, S
         return Ok(None);
     };
 
-    take_validated_listeners(count).map(Some)
+    let listeners = take_validated_listeners(count)?;
+    ensure_environment_unchanged("LISTEN_FDS", listen_fds.as_deref())?;
+    ensure_environment_unchanged("LISTEN_PID", listen_pid.as_deref())?;
+    ensure_environment_unchanged("LISTEN_FDNAMES", listen_fdnames.as_deref())?;
+    ensure_environment_unchanged("LISTEN_FDS_FIRST_FD", first_fd.as_deref())?;
+    Ok(Some(listeners))
+}
+
+fn ensure_environment_unchanged(
+    variable: &'static str,
+    expected: Option<&str>,
+) -> Result<(), SocketActivationError> {
+    if environment_value(variable)?.as_deref() != expected {
+        return Err(SocketActivationError::EnvironmentChanged { variable });
+    }
+    Ok(())
 }
 
 fn environment_value(variable: &'static str) -> Result<Option<String>, SocketActivationError> {
@@ -193,25 +214,8 @@ fn parse_bounded_usize(
 
 #[cfg(target_os = "linux")]
 fn take_validated_listeners(count: usize) -> Result<Vec<TcpListener>, SocketActivationError> {
-    let mut listen_fd = listenfd::ListenFd::from_env();
-    if listen_fd.len() != count {
-        return Err(SocketActivationError::ListenerCount {
-            expected: count,
-            actual: listen_fd.len(),
-        });
-    }
-    let mut listeners = Vec::with_capacity(count);
-    for index in 0..count {
-        let listener = listen_fd
-            .take_tcp_listener(index)
-            .map_err(|source| SocketActivationError::TakeListener { index, source })?
-            .ok_or(SocketActivationError::ListenerCount {
-                expected: count,
-                actual: listeners.len(),
-            })?;
-        listeners.push(listener);
-    }
-    Ok(listeners)
+    fluxheim_systemd::receive_tcp_listeners(count)
+        .map_err(|source| SocketActivationError::ReceiveListeners { source })
 }
 
 #[cfg(not(target_os = "linux"))]

@@ -23,6 +23,7 @@ members = [
     "crates/fluxheim-runtime",
     "crates/fluxheim-server",
     "crates/fluxheim-stream",
+    "crates/fluxheim-systemd",
     "crates/fluxheim-tls",
     "crates/fluxheim-web",
     "crates/fluxheim-php-fpm",
@@ -49,7 +50,7 @@ proxy = [
     "ingress",
     "dep:async-trait",
     "dep:base64-ng",
-    "dep:listenfd",
+    "dep:fluxheim-systemd",
     "dep:libsystemd",
     "fluxheim-config/proxy",
     "dep:percent-encoding",
@@ -298,7 +299,7 @@ ureq = { version = "3.3.0", default-features = false, features = ["json", "rustl
 zeroize = { version = "1.9.0", features = ["derive"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-listenfd = { version = "1.0.2", optional = true }
+fluxheim-systemd = { path = "crates/fluxheim-systemd", optional = true }
 libsystemd = { version = "0.7.2", optional = true }
 
 [dev-dependencies]

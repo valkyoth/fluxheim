@@ -62,6 +62,12 @@ must be a TCP socket in listening state whose bound address exactly matches one
 planned public HTTP/HTTPS address; configured port `0` is therefore not valid
 for activated production listeners.
 
+Descriptor receipt never clears or changes `LISTEN_PID`, `LISTEN_FDS`, or
+`LISTEN_FDNAMES`. Mutating process environment storage after Tokio worker
+threads exist is not memory-safe on Unix. The focused `fluxheim-systemd` crate
+uses non-mutating libsystemd receipt and contains the single audited raw-FD
+ownership transfer required to construct owned Rust listeners.
+
 When any activation variable is present, validation failure is fatal. Fluxheim
 does not bind missing listeners as a fallback. This prevents a partially
 activated process from serving a different listener set than its supervisor

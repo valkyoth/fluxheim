@@ -45,3 +45,6 @@ deployment patterns.
   request while the replacement aborts.
 - Explicitly abort outstanding listener and background tasks at the drain
   timeout instead of relying on whole-process teardown.
+- Remove `listenfd` from socket activation and receive descriptors through a
+  focused Fluxheim crate with environment clearing disabled, preserving memory
+  safety for multithreaded and embedded runtimes.
