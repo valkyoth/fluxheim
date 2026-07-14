@@ -43,6 +43,7 @@ pub(super) enum SocketActivationError {
         expected: u32,
         actual: u32,
     },
+    #[cfg(target_os = "linux")]
     ReceiveListeners {
         source: std::io::Error,
     },
@@ -77,6 +78,7 @@ impl fmt::Display for SocketActivationError {
                 formatter,
                 "systemd socket activation LISTEN_PID targets process {actual}, not current process {expected}"
             ),
+            #[cfg(target_os = "linux")]
             Self::ReceiveListeners { source } => write!(
                 formatter,
                 "failed to receive systemd TCP listeners: {source}"
@@ -88,6 +90,7 @@ impl fmt::Display for SocketActivationError {
 impl Error for SocketActivationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            #[cfg(target_os = "linux")]
             Self::ReceiveListeners { source } => Some(source),
             _ => None,
         }
