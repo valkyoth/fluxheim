@@ -1,7 +1,7 @@
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -19,7 +19,7 @@ use crate::{
     WasmSandboxLimits, WasmWasiCapabilities,
 };
 
-const MAX_CONCURRENT_COMPILES: usize = 16;
+const MAX_CONCURRENT_COMPILES: usize = 2;
 const DEFAULT_RUNTIME_FEATURE_SET: &str = "fluxheim-policy-v1";
 const EPOCH_TICK_INTERVAL: Duration = Duration::from_millis(1);
 #[cfg(feature = "wasi")]
@@ -279,6 +279,8 @@ pub enum WasmExecutionError {
     CompileConcurrencyLimit,
     #[error("wasm module compile timed out after {timeout_ms}ms")]
     CompileTimeout { timeout_ms: u128 },
+    #[error("wasm compiled artifact is too large: max {max_bytes} bytes")]
+    CompiledArtifactOversized { max_bytes: usize },
     #[error("wasm execution timed out after {timeout_ms}ms")]
     ExecutionTimeout { timeout_ms: u128 },
     #[error("wasm module instantiation failed: {0}")]
@@ -677,36 +679,35 @@ impl FluxWasmRuntime {
         plugin: &WasmPluginFile,
         compile_permit: P,
         timeout: Duration,
-    ) -> Result<Module, WasmExecutionError>
-    where
-        P: Send + 'static,
-    {
-        let engine = self.engine.clone();
-        let bytes = plugin.bytes().to_vec();
-        let (result_sender, result_receiver) = mpsc::sync_channel(1);
-        let worker = thread::Builder::new()
-            .name("fluxheim-wasm-compile".to_owned())
-            .spawn(move || {
-                let result = Module::new(&engine, &bytes)
-                    .map_err(|error| WasmExecutionError::Compile(error.to_string()));
-                drop(compile_permit);
-                let _ = result_sender.send(result);
-            })
-            .map_err(|error| {
-                WasmExecutionError::RuntimeSetup(format!(
-                    "failed to spawn wasm compilation worker: {error}"
-                ))
-            })?;
-        drop(worker);
-
-        match result_receiver.recv_timeout(timeout) {
-            Ok(result) => result,
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(WasmExecutionError::CompileTimeout {
+    ) -> Result<Module, WasmExecutionError> {
+        if timeout.is_zero() {
+            return Err(WasmExecutionError::CompileTimeout {
                 timeout_ms: self.limits.compile_timeout.as_millis(),
-            }),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(WasmExecutionError::Compile(
-                "compile worker failed".to_owned(),
-            )),
+            });
+        }
+
+        let started = Instant::now();
+        let result = Module::new(&self.engine, plugin.bytes())
+            .map_err(|error| WasmExecutionError::Compile(error.to_string()))
+            .and_then(|module| {
+                let artifact = module
+                    .serialize()
+                    .map_err(|error| WasmExecutionError::Compile(error.to_string()))?;
+                if artifact.len() > self.limits.max_compiled_artifact_bytes {
+                    return Err(WasmExecutionError::CompiledArtifactOversized {
+                        max_bytes: self.limits.max_compiled_artifact_bytes,
+                    });
+                }
+                Ok(module)
+            });
+        drop(compile_permit);
+
+        if started.elapsed() > timeout {
+            Err(WasmExecutionError::CompileTimeout {
+                timeout_ms: self.limits.compile_timeout.as_millis(),
+            })
+        } else {
+            result
         }
     }
 }
@@ -1033,6 +1034,55 @@ mod tests {
         assert_eq!(outcome.result, 7);
         assert!(matches!(error, WasmExecutionError::CompileConcurrencyLimit));
         drop(permit);
+    }
+
+    #[test]
+    fn compile_timeout_returns_only_after_releasing_slot() {
+        let counter = Box::leak(Box::new(AtomicUsize::new(0)));
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"(module (func (export "decision") (result i32) i32.const 7))"#,
+        );
+        let limits = WasmSandboxLimits {
+            compile_timeout: Duration::from_nanos(1),
+            ..WasmSandboxLimits::default()
+        };
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+
+        let error = runtime
+            .compile_module_with_counter(&plugin, counter, 1)
+            .unwrap_err();
+
+        assert!(matches!(error, WasmExecutionError::CompileTimeout { .. }));
+        assert_eq!(counter.load(Ordering::Acquire), 0);
+        let permit = acquire_counter_permit(counter, 1).unwrap();
+        drop(permit);
+    }
+
+    #[test]
+    fn runtime_rejects_compiled_artifact_above_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_path = write_wat_plugin(
+            &directory,
+            r#"(module (func (export "decision") (result i32) i32.const 7))"#,
+        );
+        let limits = WasmSandboxLimits {
+            max_compiled_artifact_bytes: 1,
+            ..WasmSandboxLimits::default()
+        };
+        let plugin =
+            load_plugin_file(&plugin_path, &[directory.path().to_path_buf()], limits).unwrap();
+        let runtime = FluxWasmRuntime::new(limits).unwrap();
+
+        let error = runtime.compile_plugin_module(&plugin).unwrap_err();
+
+        assert!(matches!(
+            error,
+            WasmExecutionError::CompiledArtifactOversized { max_bytes: 1 }
+        ));
     }
 
     #[test]

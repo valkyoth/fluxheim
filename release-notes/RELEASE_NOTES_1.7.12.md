@@ -60,6 +60,24 @@ The native response model remains bounded and buffered. Digest generation
 hashes the final response buffer without another body copy; unbuffered digest
 trailers are not part of this release.
 
+## Wasm Loader Hardening
+
+- Require SHA-256 pins at the final public manifest and loader boundary for
+  access-decision, route-decision, and cache-store phases, matching the
+  existing configuration invariant.
+- Remove detached Wasmtime compilation workers. Compilation is synchronous,
+  limited to two process-wide startup/reload slots, and releases its permit
+  before an over-deadline result is returned.
+- Add `max_compiled_artifact_bytes`, defaulting to 32 MiB and capped at 256
+  MiB, and reject compiled modules above that ceiling before registry
+  admission.
+- Document `compile_timeout_ms` accurately as an in-process result deadline,
+  not native compiler preemption; hard cancellation requires future
+  process-isolated compilation and execution.
+- On Windows, open plugin files with reparse-point semantics and compare safe
+  handle identities between validation and reading, closing the final-file
+  replacement race without introducing unsafe code.
+
 ## Shared Cache Policy Hardening
 
 - Always bypass shared-cache lookup and storage for requests carrying

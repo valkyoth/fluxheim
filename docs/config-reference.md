@@ -636,10 +636,18 @@ admission values are bounded to `0..=256`, with active limits required to be
 non-zero. Runtime acquisition proceeds from attachment and plugin scopes toward
 the process-wide scope so a narrow backlog cannot consume global permits.
 Sandbox limits also have crate-enforced ceilings: `max_module_bytes` is at most
-16 MiB, `max_memory_bytes` at most 256 MiB, `max_table_elements` at most
-100000, `fuel` at most 100000000, `timeout_ms` at most 5000, and
-`compile_timeout_ms` at most 10000. These are hard safety ceilings, not
-recommended defaults.
+16 MiB, `max_compiled_artifact_bytes` at most 256 MiB, `max_memory_bytes` at
+most 256 MiB, `max_table_elements` at most 100000, `fuel` at most 100000000,
+`timeout_ms` at most 5000, and `compile_timeout_ms` at most 10000. These are
+configuration ceilings, not recommended defaults. The compiled-artifact limit
+is checked before a module enters the live registry. Native Wasmtime
+compilation cannot be preempted safely in-process, so `compile_timeout_ms` is a
+result deadline: an over-deadline compile completes synchronously, releases its
+global slot, and is then rejected. Fluxheim never leaves detached compiler
+threads running after returning a timeout. Deployments that require hard
+compiler cancellation must isolate the Fluxheim startup/reload process with OS
+CPU and memory limits; killable per-plugin workers require a future
+process-isolated Wasm execution architecture.
 `1.7.1` enables the first live
 native HTTP/1 request-path hook family: `access-decision`. The current preview
 ABI calls `fluxheim_access_decision() -> i32`, where `0` continues the chain,

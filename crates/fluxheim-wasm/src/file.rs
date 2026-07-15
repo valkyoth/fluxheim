@@ -28,6 +28,8 @@ const WASM_PLUGIN_O_NOFOLLOW: i32 = 0o400000;
     target_os = "dragonfly"
 ))]
 const WASM_PLUGIN_O_NOFOLLOW: i32 = 0x0100;
+#[cfg(windows)]
+const WASM_PLUGIN_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 #[cfg(all(
     unix,
     not(any(
@@ -94,6 +96,8 @@ struct ValidatedPluginPath {
     requested: PathBuf,
     canonical: PathBuf,
     metadata: fs::Metadata,
+    #[cfg(windows)]
+    identity: same_file::Handle,
 }
 
 impl ValidatedPluginPath {
@@ -163,6 +167,11 @@ fn open_verified_plugin_file(validated: &ValidatedPluginPath) -> Result<fs::File
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(WASM_PLUGIN_O_NOFOLLOW);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(WASM_PLUGIN_OPEN_REPARSE_POINT);
+    }
 
     let file = options
         .open(validated.canonical())
@@ -186,6 +195,24 @@ fn open_verified_plugin_file(validated: &ValidatedPluginPath) -> Result<fs::File
         if opened_metadata.dev() != validated.metadata().dev()
             || opened_metadata.ino() != validated.metadata().ino()
         {
+            return Err(WasmPluginError::UnsafePath {
+                path: validated.requested().to_path_buf(),
+                message: "plugin file identity changed before read",
+            });
+        }
+    }
+    #[cfg(windows)]
+    {
+        let identity_file = file.try_clone().map_err(|source| WasmPluginError::Io {
+            path: validated.requested().to_path_buf(),
+            source,
+        })?;
+        let opened_identity =
+            same_file::Handle::from_file(identity_file).map_err(|source| WasmPluginError::Io {
+                path: validated.requested().to_path_buf(),
+                source,
+            })?;
+        if opened_identity != validated.identity {
             return Err(WasmPluginError::UnsafePath {
                 path: validated.requested().to_path_buf(),
                 message: "plugin file identity changed before read",
@@ -244,16 +271,41 @@ fn validated_plugin_path(
                     path: plugin_canonical.clone(),
                     source,
                 })?;
+            #[cfg(windows)]
+            let identity = windows_plugin_identity(&plugin_canonical, path)?;
             return Ok(ValidatedPluginPath {
                 requested: path.to_path_buf(),
                 canonical: plugin_canonical,
                 metadata,
+                #[cfg(windows)]
+                identity,
             });
         }
     }
 
     Err(WasmPluginError::OutsideApprovedRoots {
         path: path.to_path_buf(),
+    })
+}
+
+#[cfg(windows)]
+fn windows_plugin_identity(
+    canonical: &Path,
+    requested: &Path,
+) -> Result<same_file::Handle, WasmPluginError> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(WASM_PLUGIN_OPEN_REPARSE_POINT)
+        .open(canonical)
+        .map_err(|source| WasmPluginError::Io {
+            path: requested.to_path_buf(),
+            source,
+        })?;
+    same_file::Handle::from_file(file).map_err(|source| WasmPluginError::Io {
+        path: requested.to_path_buf(),
+        source,
     })
 }
 

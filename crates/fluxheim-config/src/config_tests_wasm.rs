@@ -261,6 +261,10 @@ fn wasm_registry_builds_loader_manifests_with_defaults() {
         ]
     );
     assert_eq!(manifests[0].limits.max_module_bytes, 1_048_576);
+    assert_eq!(
+        manifests[0].limits.max_compiled_artifact_bytes,
+        32 * 1024 * 1024
+    );
     assert_eq!(manifests[0].limits.max_memory_bytes, 16 * 1024 * 1024);
     fluxheim_wasm::validate_plugin_manifest(manifests[0].clone(), false).unwrap();
 }
@@ -280,6 +284,7 @@ fn wasm_registry_builds_loader_manifest_with_plugin_overrides() {
 
         [wasm.default_limits]
         max_module_bytes = "2MiB"
+        max_compiled_artifact_bytes = "24MiB"
         max_memory_bytes = "32MiB"
         max_table_elements = 20000
         fuel = 6000000
@@ -294,6 +299,7 @@ fn wasm_registry_builds_loader_manifest_with_plugin_overrides() {
 
         [wasm.plugins.limits]
         max_module_bytes = "3MiB"
+        max_compiled_artifact_bytes = "48MiB"
         max_memory_bytes = "64MiB"
         max_table_elements = 30000
         fuel = 7000000
@@ -316,6 +322,10 @@ fn wasm_registry_builds_loader_manifest_with_plugin_overrides() {
         Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     );
     assert_eq!(manifests[0].limits.max_module_bytes, 3 * 1024 * 1024);
+    assert_eq!(
+        manifests[0].limits.max_compiled_artifact_bytes,
+        48 * 1024 * 1024
+    );
     assert_eq!(manifests[0].limits.max_memory_bytes, 64 * 1024 * 1024);
     assert_eq!(manifests[0].limits.max_table_elements, 30000);
     assert_eq!(manifests[0].limits.fuel, 7_000_000);
@@ -343,6 +353,11 @@ fn wasm_registry_rejects_limits_above_runtime_hard_ceiling() {
     config.wasm.default_limits.max_memory_bytes =
         super::ByteSize::from_bytes(256 * 1024 * 1024 + 1);
     cases.push(("max_memory_bytes", config));
+
+    let mut config = base_wasm_config("");
+    config.wasm.default_limits.max_compiled_artifact_bytes =
+        super::ByteSize::from_bytes(256 * 1024 * 1024 + 1);
+    cases.push(("max_compiled_artifact_bytes", config));
 
     let mut config = base_wasm_config("");
     config.wasm.default_limits.max_table_elements = 100_001;

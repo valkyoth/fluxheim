@@ -17,6 +17,7 @@ pub const MAX_WASM_MAX_TOTAL_PREVIEW_CONCURRENT_EXECUTIONS: u32 = 32;
 pub const MAX_WASM_QUEUE_LIMIT: u32 = 256;
 pub const MAX_WASM_ATTACHMENT_PRIORITY: u32 = 1_000_000;
 pub const MAX_WASM_MODULE_BYTES: u64 = 16 * 1024 * 1024;
+pub const MAX_WASM_COMPILED_ARTIFACT_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_WASM_MEMORY_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_WASM_TABLE_ELEMENTS: u32 = 100_000;
 pub const MAX_WASM_FUEL: u64 = 100_000_000;
@@ -26,6 +27,10 @@ pub const MAX_WASM_COMPILE_TIMEOUT_MS: u64 = 10_000;
 #[cfg(feature = "wasm")]
 const _: () = {
     assert!(MAX_WASM_MODULE_BYTES == fluxheim_wasm::HARD_MAX_MODULE_BYTES);
+    assert!(
+        MAX_WASM_COMPILED_ARTIFACT_BYTES as usize
+            == fluxheim_wasm::HARD_MAX_COMPILED_ARTIFACT_BYTES
+    );
     assert!(MAX_WASM_MEMORY_BYTES as usize == fluxheim_wasm::HARD_MAX_MEMORY_BYTES);
     assert!(MAX_WASM_TABLE_ELEMENTS as usize == fluxheim_wasm::HARD_MAX_TABLE_ELEMENTS);
     assert!(MAX_WASM_FUEL == fluxheim_wasm::HARD_MAX_FUEL);
@@ -36,6 +41,7 @@ const _: () = {
 };
 
 const DEFAULT_WASM_MAX_MODULE_BYTES: u64 = 1_048_576;
+const DEFAULT_WASM_MAX_COMPILED_ARTIFACT_BYTES: u64 = 32 * 1024 * 1024;
 const DEFAULT_WASM_MAX_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const DEFAULT_WASM_MAX_TABLE_ELEMENTS: u32 = 10_000;
 const DEFAULT_WASM_FUEL: u64 = 5_000_000;
@@ -624,6 +630,8 @@ impl WasmWasiCapabilitiesConfig {
 pub struct WasmSandboxLimitsConfig {
     #[serde(default = "default_wasm_max_module_bytes")]
     pub max_module_bytes: ByteSize,
+    #[serde(default = "default_wasm_max_compiled_artifact_bytes")]
+    pub max_compiled_artifact_bytes: ByteSize,
     #[serde(default = "default_wasm_max_memory_bytes")]
     pub max_memory_bytes: ByteSize,
     #[serde(default = "default_wasm_max_table_elements")]
@@ -640,6 +648,7 @@ impl Default for WasmSandboxLimitsConfig {
     fn default() -> Self {
         Self {
             max_module_bytes: default_wasm_max_module_bytes(),
+            max_compiled_artifact_bytes: default_wasm_max_compiled_artifact_bytes(),
             max_memory_bytes: default_wasm_max_memory_bytes(),
             max_table_elements: default_wasm_max_table_elements(),
             fuel: default_wasm_fuel(),
@@ -658,6 +667,15 @@ impl WasmSandboxLimitsConfig {
                 scope: field.to_owned(),
                 field: "max_module_bytes",
                 reason: "must be between 1 byte and 16 MiB",
+            });
+        }
+        if self.max_compiled_artifact_bytes.as_u64() == 0
+            || self.max_compiled_artifact_bytes.as_u64() > MAX_WASM_COMPILED_ARTIFACT_BYTES
+        {
+            return Err(ConfigError::InvalidWasmPolicy {
+                scope: field.to_owned(),
+                field: "max_compiled_artifact_bytes",
+                reason: "must be between 1 byte and 256 MiB",
             });
         }
         if self.max_memory_bytes.as_u64() == 0
@@ -702,6 +720,14 @@ impl WasmSandboxLimitsConfig {
 
     #[cfg(feature = "wasm")]
     fn to_wasm_limits(self) -> Result<fluxheim_wasm::WasmSandboxLimits, ConfigError> {
+        let max_compiled_artifact_bytes =
+            usize::try_from(self.max_compiled_artifact_bytes.as_u64()).map_err(|_| {
+                ConfigError::InvalidWasmPolicy {
+                    scope: "wasm sandbox limits".to_owned(),
+                    field: "max_compiled_artifact_bytes",
+                    reason: "value is too large for this platform",
+                }
+            })?;
         let max_memory_bytes = usize::try_from(self.max_memory_bytes.as_u64()).map_err(|_| {
             ConfigError::InvalidWasmPolicy {
                 scope: "wasm sandbox limits".to_owned(),
@@ -719,6 +745,7 @@ impl WasmSandboxLimitsConfig {
 
         Ok(fluxheim_wasm::WasmSandboxLimits {
             max_module_bytes: self.max_module_bytes.as_u64(),
+            max_compiled_artifact_bytes,
             max_memory_bytes,
             max_table_elements,
             fuel: self.fuel,
@@ -983,6 +1010,10 @@ fn validate_wasm_sha256(value: &str) -> Result<(), ConfigError> {
 
 const fn default_wasm_max_module_bytes() -> ByteSize {
     ByteSize::from_bytes(DEFAULT_WASM_MAX_MODULE_BYTES)
+}
+
+const fn default_wasm_max_compiled_artifact_bytes() -> ByteSize {
+    ByteSize::from_bytes(DEFAULT_WASM_MAX_COMPILED_ARTIFACT_BYTES)
 }
 
 const fn default_wasm_max_memory_bytes() -> ByteSize {

@@ -159,6 +159,8 @@ pub enum WasmManifestError {
     NonNormalPath { path: PathBuf },
     #[error("wasm plugin expected SHA-256 digest must be 64 lowercase hex characters")]
     InvalidExpectedSha256,
+    #[error("wasm security decision phases require an expected SHA-256 digest")]
+    MissingExpectedSha256,
     #[error("wasm plugin must declare at least one phase")]
     EmptyPhases,
     #[error("wasm plugin declares too many phases: max {max}")]
@@ -221,6 +223,9 @@ pub fn validate_plugin_manifest(
         return Err(WasmManifestError::WasiCapabilitiesWithoutWasiAbi { abi: manifest.abi });
     }
     validate_fail_mode(manifest.fail_mode, &manifest.phases)?;
+    if manifest.expected_sha256.is_none() && phases_require_digest(&manifest.phases) {
+        return Err(WasmManifestError::MissingExpectedSha256);
+    }
 
     Ok(ValidatedWasmPluginManifest {
         name: manifest.name,
@@ -389,6 +394,17 @@ fn validate_fail_mode(
     Ok(())
 }
 
+fn phases_require_digest(phases: &[WasmPluginPhase]) -> bool {
+    phases.iter().any(|phase| {
+        matches!(
+            phase,
+            WasmPluginPhase::AccessDecision
+                | WasmPluginPhase::RouteDecision
+                | WasmPluginPhase::CacheStore
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,6 +519,7 @@ mod tests {
         manifest.abi = WasmPluginAbi::ProxyWasmPreview;
         manifest.host_call_namespace = WasmHostCallNamespace::ProxyWasmPreview;
         manifest.phases = vec![WasmPluginPhase::AccessDecision];
+        manifest.expected_sha256 = Some("a".repeat(64));
 
         let validated = validate_plugin_manifest(manifest, true).unwrap();
 
@@ -519,6 +536,7 @@ mod tests {
         manifest.abi = WasmPluginAbi::WasiPreview;
         manifest.host_call_namespace = WasmHostCallNamespace::WasiPreview;
         manifest.phases = vec![WasmPluginPhase::AccessDecision];
+        manifest.expected_sha256 = Some("a".repeat(64));
         manifest.wasi_capabilities = WasmWasiCapabilities {
             clocks: true,
             randomness: true,
@@ -606,6 +624,38 @@ mod tests {
         let error = validate_plugin_manifest(manifest, false).unwrap_err();
 
         assert_eq!(error, WasmManifestError::UnsafeFailOpen);
+    }
+
+    #[test]
+    fn rejects_missing_digest_for_security_decision_phases() {
+        for phase in [
+            WasmPluginPhase::AccessDecision,
+            WasmPluginPhase::RouteDecision,
+            WasmPluginPhase::CacheStore,
+        ] {
+            let mut manifest = valid_manifest();
+            manifest.phases = vec![phase];
+
+            let error = validate_plugin_manifest(manifest, false).unwrap_err();
+
+            assert_eq!(error, WasmManifestError::MissingExpectedSha256);
+        }
+    }
+
+    #[test]
+    fn loader_rejects_missing_digest_for_security_decision_phase() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut manifest = valid_manifest();
+        manifest.path = write_plugin(&directory);
+        manifest.phases = vec![WasmPluginPhase::AccessDecision];
+
+        let error = load_plugin_from_manifest(manifest, &[directory.path().to_path_buf()], false)
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            WasmPluginLoadError::Manifest(WasmManifestError::MissingExpectedSha256)
+        ));
     }
 
     #[test]

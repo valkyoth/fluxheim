@@ -29,12 +29,14 @@ pub use runtime::{
 
 pub const FLUXHEIM_WASM_ABI_VERSION: u32 = 1;
 pub const DEFAULT_MAX_MODULE_BYTES: u64 = 1_048_576;
+pub const DEFAULT_MAX_COMPILED_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 pub const DEFAULT_MAX_MEMORY_BYTES: usize = 16 * 1024 * 1024;
 pub const DEFAULT_MAX_TABLE_ELEMENTS: usize = 10_000;
 pub const DEFAULT_FUEL: u64 = 5_000_000;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(50);
 pub const DEFAULT_COMPILE_TIMEOUT: Duration = Duration::from_millis(500);
 pub const HARD_MAX_MODULE_BYTES: u64 = 16 * 1024 * 1024;
+pub const HARD_MAX_COMPILED_ARTIFACT_BYTES: usize = 256 * 1024 * 1024;
 pub const HARD_MAX_MEMORY_BYTES: usize = 256 * 1024 * 1024;
 pub const HARD_MAX_TABLE_ELEMENTS: usize = 100_000;
 pub const HARD_MAX_FUEL: u64 = 100_000_000;
@@ -44,6 +46,7 @@ pub const HARD_MAX_COMPILE_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct WasmSandboxLimits {
     pub max_module_bytes: u64,
+    pub max_compiled_artifact_bytes: usize,
     pub max_memory_bytes: usize,
     pub max_table_elements: usize,
     pub fuel: u64,
@@ -55,6 +58,7 @@ impl Default for WasmSandboxLimits {
     fn default() -> Self {
         Self {
             max_module_bytes: DEFAULT_MAX_MODULE_BYTES,
+            max_compiled_artifact_bytes: DEFAULT_MAX_COMPILED_ARTIFACT_BYTES,
             max_memory_bytes: DEFAULT_MAX_MEMORY_BYTES,
             max_table_elements: DEFAULT_MAX_TABLE_ELEMENTS,
             fuel: DEFAULT_FUEL,
@@ -70,6 +74,14 @@ impl WasmSandboxLimits {
             return Err(WasmPluginError::InvalidLimit {
                 field: "max_module_bytes",
                 reason: "must be between 1 byte and 16 MiB",
+            });
+        }
+        if self.max_compiled_artifact_bytes == 0
+            || self.max_compiled_artifact_bytes > HARD_MAX_COMPILED_ARTIFACT_BYTES
+        {
+            return Err(WasmPluginError::InvalidLimit {
+                field: "max_compiled_artifact_bytes",
+                reason: "must be between 1 byte and 256 MiB",
             });
         }
         if self.max_memory_bytes == 0 || self.max_memory_bytes > HARD_MAX_MEMORY_BYTES {
@@ -146,6 +158,13 @@ mod tests {
                 },
             ),
             (
+                "max_compiled_artifact_bytes",
+                WasmSandboxLimits {
+                    max_compiled_artifact_bytes: HARD_MAX_COMPILED_ARTIFACT_BYTES + 1,
+                    ..WasmSandboxLimits::default()
+                },
+            ),
+            (
                 "max_table_elements",
                 WasmSandboxLimits {
                     max_table_elements: HARD_MAX_TABLE_ELEMENTS + 1,
@@ -191,6 +210,7 @@ mod tests {
         assert!(
             WasmSandboxLimits {
                 max_module_bytes: HARD_MAX_MODULE_BYTES,
+                max_compiled_artifact_bytes: HARD_MAX_COMPILED_ARTIFACT_BYTES,
                 max_memory_bytes: HARD_MAX_MEMORY_BYTES,
                 max_table_elements: HARD_MAX_TABLE_ELEMENTS,
                 fuel: HARD_MAX_FUEL,

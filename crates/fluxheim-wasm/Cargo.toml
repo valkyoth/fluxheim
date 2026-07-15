@@ -27,6 +27,9 @@ tokio = { version = "1.52.3", default-features = false, features = ["rt", "sync"
 wasmtime = { version = "46.0.1", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
 wasmtime-wasi = { version = "46.0.1", default-features = false, features = ["p1"], optional = true }
 
+[target.'cfg(windows)'.dependencies]
+same-file = "1.0.6"
+
 [dev-dependencies]
 tempfile = "3.27.0"
 wat = "1.253.0"

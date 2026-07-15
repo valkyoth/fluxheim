@@ -149,10 +149,13 @@ fn run_wasi_preview(
         "wasi-random-",
         include_str!("../../../examples/wasm/wasi-random-policy.wat"),
     )?;
+    let expected_sha256 = load_plugin_file(&plugin, &approved_roots, limits)?
+        .sha256_hex()
+        .to_owned();
     let manifest = WasmPluginManifest {
         name: "wasi-random".to_owned(),
         path: plugin.clone(),
-        expected_sha256: None,
+        expected_sha256: Some(expected_sha256.clone()),
         abi: WasmPluginAbi::WasiPreview,
         host_call_namespace: WasmHostCallNamespace::WasiPreview,
         wasi_capabilities: WasmWasiCapabilities {
@@ -178,7 +181,7 @@ fn run_wasi_preview(
     let denied_manifest = WasmPluginManifest {
         name: "wasi-random-denied".to_owned(),
         path: plugin,
-        expected_sha256: None,
+        expected_sha256: Some(expected_sha256),
         abi: WasmPluginAbi::WasiPreview,
         host_call_namespace: WasmHostCallNamespace::WasiPreview,
         wasi_capabilities: WasmWasiCapabilities::default(),

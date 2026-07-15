@@ -136,9 +136,9 @@ rules continue to apply.
 The first implementation slice is the sandbox foundation: `fluxheim-wasm`
 loads plugin files from approved roots, rejects symlinked plugin paths and
 oversized modules, records SHA-256 module hashes, and executes real Wasm under
-fuel, memory, table-element, table/instance, compile-timeout, and wall-time
-limits. It also defines a typed plugin manifest boundary for plugin name, path,
-ABI, phase, fail-mode, and per-plugin sandbox limits. The manifest-backed
+fuel, memory, table-element, table/instance, compiled-artifact, compile-deadline,
+and wall-time limits. It also defines a typed plugin manifest boundary for
+plugin name, path, ABI, phase, fail-mode, and per-plugin sandbox limits. The manifest-backed
 loader validates the manifest and then loads the exact approved plugin path
 with the validated limits; production hook execution still starts later in the
 `1.7` line.
@@ -408,6 +408,16 @@ request still receives a fresh Wasmtime store and instance for isolation.
 Future cross-generation module caches must remain isolated by module hash, ABI
 version, feature set, and Fluxheim version.
 
+Compilation occurs only while building a startup or staged-reload registry and
+is capped at two process-wide synchronous compilers. Wasmtime compilation is a
+native synchronous operation that cannot be safely terminated from another
+thread. Fluxheim therefore never detaches a compiler: an over-deadline compile
+must finish, release its slot, and is then rejected. `compile_timeout_ms` is a
+result deadline rather than hard preemption. The serialized artifact is also
+bounded before registry admission. Use service-level CPU and memory limits
+when compiling operator-supplied modules; strict hard cancellation requires
+moving both compilation and module execution into a supervised worker process.
+
 Per-plugin and per-attachment admission budgets are not enough by themselves.
 Fluxheim must also enforce a top-level admission ceiling such as
 `wasm.max_total_concurrent_executions` before any live hook release. Otherwise
@@ -476,6 +486,7 @@ fail_mode = "fail-closed"
 
 [wasm.plugins.limits]
 max_module_bytes = "1MiB"
+max_compiled_artifact_bytes = "32MiB"
 max_memory_bytes = "16MiB"
 max_table_elements = 10000
 fuel = 5000000
