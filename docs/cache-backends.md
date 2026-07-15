@@ -43,6 +43,12 @@ internal cache implementation.
   `vhosts.routes.cache.status_header` optionally emit a cache debug header such
   as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
   `REVALIDATED` for requests that participate in the proxy cache.
+- `[headers.response.metadata]`, `[vhosts.headers.response.metadata]`, and
+  `[vhosts.routes.headers.response.metadata]` can instead opt into the
+  standards-based RFC 9211 `Cache-Status` field. Fluxheim derives its member
+  from the same real cache outcome but intentionally omits cache keys, tiers,
+  policy reasons, and origin topology. A valid deployment `identifier` is
+  required. See the response-metadata section of the config reference.
 - `cache.hide_response_headers`, `vhosts.cache.hide_response_headers`, and
   `vhosts.routes.cache.hide_response_headers` remove explicitly configured
   upstream response headers before cache admission and downstream delivery.

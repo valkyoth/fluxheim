@@ -51,6 +51,8 @@ impl NativeHttp1Proxy {
                 apply_native_response_compression(compression_request, &mut response, compression);
             }
         }
+        self.response_headers
+            .apply_digests_for_method(&request.method, &mut response);
         if let Some(cache) = &self.cache
             && let Some(auth) = cache.peer_fill_auth.as_deref()
         {

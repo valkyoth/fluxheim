@@ -9,6 +9,7 @@ pub use crate::config_header_hardening::{
     PermittedCrossDomainPolicies, ResponseHardeningConfig, ResponseHardeningProfile,
     ResponsePermissionsPolicyConfig, ResponsePermissionsPolicyProfile,
 };
+pub use crate::config_header_metadata::{ResponseMetadataConfig, ResponseMetadataOverlayConfig};
 pub use crate::config_header_response::{
     ResponseHeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
     ResponseHeaderRewriteRuleConfig, ResponseHstsConfig,

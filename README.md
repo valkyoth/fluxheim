@@ -63,7 +63,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Regex path rewrite templates | ✅ | `1.4.1`; `rewrite_template` maps regex routes to safe upstream paths without nginx-style rewrite loops or `if`. |
 | Method-based routing | ✅ | `1.4.1`; optional route `methods = ["GET", "HEAD"]` filters. |
 | HTTPS redirects | ✅ | Optional global HTTP-to-HTTPS redirects with safe Host validation. |
-| Secure headers | ✅ | Request/response policy, opt-in hardening and cross-origin-isolation profiles, typed CSP reporting and modern browser controls, validated request-aware CORS, automatic `Vary`, and bounded `Retry-After`; origin `Server` headers are preserved by default and removed by the hardening profiles. |
+| Secure headers | ✅ | Request/response policy, opt-in hardening and cross-origin-isolation profiles, typed CSP reporting and modern browser controls, validated request-aware CORS, automatic `Vary`, bounded `Retry-After`, and opt-in RFC 9211/9209/9530 response metadata; origin `Server` headers are preserved by default and removed by the hardening profiles. |
 | PHP-FPM applications | ✅ | External php-fpm for existing pools. |
 | Managed PHP-FPM | ✅ | Fluxheim-supervised php-fpm pools for zero-admin WordPress-style deployments. |
 
@@ -352,8 +352,8 @@ Release tags use the same profile/OS suffixes on both registries. The first
 `1.7.x` image tags include `v1.7.0-wolfi`, `v1.7.0-cache-wolfi`,
 `v1.7.0-proxy-wolfi`, `v1.7.0-load-balancer-wolfi`, and `v1.7.0-php-wolfi`;
 follow-up `1.7.x` releases use the same suffix pattern, for example
-`v1.7.11-wolfi`, `v1.7.11-cache-wolfi`, `v1.7.11-proxy-wolfi`,
-`v1.7.11-load-balancer-wolfi`, and `v1.7.11-php-wolfi`.
+`v1.7.12-wolfi`, `v1.7.12-cache-wolfi`, `v1.7.12-proxy-wolfi`,
+`v1.7.12-load-balancer-wolfi`, and `v1.7.12-php-wolfi`.
 
 Release note for `1.5.15`: the signed git tag `v1.5.15` is the canonical code
 tag. The GitHub Release page is published under `v1.5.15-release` because the
@@ -424,13 +424,14 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Release: 1.7.11 Zero-Downtime Upgrades
+## Current Release: 1.7.12 Standards Metadata And FIPS Evidence
 
 Fluxheim does not treat every planned idea as stable. The current release line
-is `1.7.11`, the zero-downtime process-upgrade release after the stable
-`1.7.0` through `1.7.10` Wasm milestones. It adds bounded drain, strict
-systemd listener inheritance, readiness-gated native handoff, and a tested
-Podman blue/green pattern behind a stable fronting listener.
+is `1.7.12`, the standards-based response-metadata and reproducible
+FIPS-backend evidence release after the stable Wasm and zero-downtime
+milestones. It adds opt-in RFC 9211 `Cache-Status`, low-cardinality RFC 9209
+`Proxy-Status`, RFC 9530 response digests, and pinned proof environments that
+build and execute the OpenSSL-FIPS and rustls/AWS-LC-FIPS profiles.
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
   proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
@@ -494,6 +495,13 @@ Podman blue/green pattern behind a stable fronting listener.
   closes the native HTTP/1 parser audit with validated-only request heads,
   bounded fragmentation-independent chunk decoding, strict request-target and
   authority handling, and ownership-safe critical background supervision.
+- `1.7.12` adds response metadata generated from real runtime outcomes and
+  final response bytes. Cache and proxy status fields remain opt-in and avoid
+  backend topology or arbitrary error strings; digest behavior is live-tested
+  across cache, compression, conditional, `HEAD`, and range responses. Pinned
+  CI-only proof environments build and run both FIPS-capable TLS profiles and
+  capture provider, toolchain, dependency, binary, and image evidence. They are
+  not published FIPS images or a claim that Fluxheim itself is FIPS validated.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

@@ -7,6 +7,40 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.7.12 - Unreleased
+
+### Added
+
+- Add opt-in RFC 9211 `Cache-Status` generated from real cache outcomes and
+  low-cardinality RFC 9209 `Proxy-Status` for Fluxheim-generated proxy failures.
+- Add opt-in RFC 9530 SHA-256 `Content-Digest` and `Repr-Digest` generated from
+  final response bytes, with live cache, compression, conditional, `HEAD`, and
+  range-response coverage.
+- Add pinned CI-only OpenSSL-FIPS and rustls/AWS-LC-FIPS proof environments
+  that build and execute the exact profile binary, exercise downstream and
+  verified upstream TLS, reject incompatible policy, and capture provider,
+  compiler, dependency, binary, and image evidence.
+
+### Changed
+
+- Make standards-based response metadata inherit through global, vhost, and
+  route response policies while remaining disabled by default.
+- Strip origin digest fields whenever Fluxheim compression changes response
+  bytes; opt-in digest generation then recomputes fields from the final encoded
+  content.
+- Include the reproducible FIPS-backend image proof in the deep release gate
+  and expose it as a separate manual workflow and test-starter entry.
+
+### Security
+
+- Bound public response-metadata identifiers to Structured Fields token grammar
+  and prevent status output from exposing backend addresses, DNS names,
+  certificate details, cache keys, internal tiers, or arbitrary error text.
+- Suppress `Repr-Digest` instead of guessing when Fluxheim does not hold the
+  complete selected representation, including `HEAD`, `206`, and `304` paths.
+- Keep the FIPS proof containers separate from release images and document that
+  provider evidence is not product-level FIPS validation.
+
 ## 1.7.11 - 2026-07-14
 
 ### Added

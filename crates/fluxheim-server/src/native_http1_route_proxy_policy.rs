@@ -267,6 +267,7 @@ impl NativeHttp1RouteProxyRoute {
 
     pub(crate) async fn handle(&self, request: NativeHttp1Request) -> NativeHttp1Response {
         let cors_origin = self.response_headers.cors_response_origin(&request);
+        let response_metadata_method = request.method.clone();
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -292,6 +293,8 @@ impl NativeHttp1RouteProxyRoute {
         {
             apply_route_compression(compression_request, &mut response, compression);
         }
+        self.response_headers
+            .apply_digests_for_method(&response_metadata_method, &mut response);
         response
     }
 

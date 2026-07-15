@@ -18,7 +18,9 @@ async fn native_route_proxy_applies_gzip_route_compression() {
     let upstream = upstream_response(
         "HTTP/1.1 200 OK\r\n\
          content-type: text/plain\r\n\
-         etag: \"origin-tag\"\r\n\r\n\
+         etag: \"origin-tag\"\r\n\
+         content-digest: sha-256=:c3RhbGU=:\r\n\
+         repr-digest: sha-256=:c3RhbGU=:\r\n\r\n\
          hello native compression hello native compression hello native compression \
          hello native compression hello native compression hello native compression \
          hello native compression hello native compression hello native compression \
@@ -56,6 +58,8 @@ async fn native_route_proxy_applies_gzip_route_compression() {
     assert!(head.contains("\r\ncontent-encoding: gzip"));
     assert!(head.contains("\r\nvary: accept-encoding"));
     assert!(!head.contains("\r\netag:"));
+    assert!(!head.contains("\r\ncontent-digest:"));
+    assert!(!head.contains("\r\nrepr-digest:"));
     let mut decoded = String::new();
     GzDecoder::new(body).read_to_string(&mut decoded).unwrap();
     assert!(decoded.contains("hello native compression"));

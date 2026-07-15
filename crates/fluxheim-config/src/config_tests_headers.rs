@@ -1,5 +1,7 @@
 #[path = "config_tests_headers_generic.rs"]
 mod generic;
+#[path = "config_tests_headers_metadata.rs"]
+mod metadata;
 #[path = "config_tests_headers_request.rs"]
 mod request;
 #[path = "config_tests_headers_response.rs"]

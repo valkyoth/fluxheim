@@ -16,6 +16,7 @@ use crate::native_http1_proxy_memory_cache::{
     NativePeerFillDecision, NativeProxyCacheLookup, NativeProxyMemoryCache,
 };
 use crate::native_http1_proxy_request::native_proxy_error_is_timeout;
+use crate::native_http1_response_metadata::native_proxy_status_error;
 #[cfg(feature = "wasm")]
 use crate::native_http1_route_wasm::{
     NativeWasmCacheLookupContext, NativeWasmCacheLookupOutcome, NativeWasmCacheStoreContext,
@@ -546,7 +547,7 @@ impl NativeHttp1Proxy {
                 compression_request,
             );
         }
-        let error_response = native_error_page_response(
+        let mut error_response = native_error_page_response(
             &self.error_pages,
             self.response_write_policy,
             &request,
@@ -560,6 +561,10 @@ impl NativeHttp1Proxy {
                 NativeHttp1Response::new(502, "Bad Gateway", b"bad gateway\n").close_connection()
             }
         });
+        if let Some(error) = last_error.as_ref() {
+            error_response =
+                error_response.with_proxy_status_error(native_proxy_status_error(error));
+        }
         self.finish_response(
             &request,
             error_response,

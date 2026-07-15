@@ -31,6 +31,7 @@ pub mod config_geoip;
 pub mod config_header;
 pub mod config_header_cors;
 pub mod config_header_hardening;
+pub mod config_header_metadata;
 pub mod config_header_response;
 pub mod config_header_validation;
 pub mod config_http;

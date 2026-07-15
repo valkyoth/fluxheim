@@ -228,6 +228,8 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 {
                     return response;
                 }
+                #[cfg(feature = "wasm")]
+                let response_metadata_method = request.method.clone();
                 let response = route.handle(request).await;
                 #[cfg(feature = "wasm")]
                 let mut response = response;
@@ -241,6 +243,10 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 {
                     return failure;
                 }
+                #[cfg(feature = "wasm")]
+                route
+                    .response_headers
+                    .apply_digests_for_method(&response_metadata_method, &mut response);
                 return response;
             }
             #[cfg(feature = "php-fpm")]
@@ -262,6 +268,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 {
                     return response;
                 }
+                let response_metadata_method = request.method.clone();
                 let mut response = php.handle_resolved(request, path, resolved).await;
                 self.fallback_response_headers
                     .apply_with_cors_origin(cors_origin.as_deref(), &mut response);
@@ -275,6 +282,8 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 {
                     return failure;
                 }
+                self.fallback_response_headers
+                    .apply_digests_for_method(&response_metadata_method, &mut response);
                 return response;
             }
             if let Some(response) = self.fallback_web_response(&request, &path) {
@@ -297,6 +306,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 {
                     return response;
                 }
+                let response_metadata_method = request.method.clone();
                 let mut response = php.handle(request).await;
                 self.fallback_response_headers
                     .apply_with_cors_origin(cors_origin.as_deref(), &mut response);
@@ -310,6 +320,8 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                 {
                     return failure;
                 }
+                self.fallback_response_headers
+                    .apply_digests_for_method(&response_metadata_method, &mut response);
                 return response;
             }
             if let Some(proxy) = &self.fallback {
@@ -607,15 +619,19 @@ impl NativeHttp1RouteProxy {
         {
             return failure;
         }
+        self.fallback_response_headers
+            .apply_digests_for_method(&request.method, &mut response);
         response
     }
 
     #[cfg(not(feature = "wasm"))]
     async fn apply_wasm_response_headers(
         &self,
-        _request: NativeHttp1Request,
-        response: NativeHttp1Response,
+        request: NativeHttp1Request,
+        mut response: NativeHttp1Response,
     ) -> NativeHttp1Response {
+        self.fallback_response_headers
+            .apply_digests_for_method(&request.method, &mut response);
         response
     }
 }

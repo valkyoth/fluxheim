@@ -1,13 +1,16 @@
 use fluxheim_config::config_header_hardening::reporting_endpoints_header_value;
 use fluxheim_config::{
     HeaderPolicyConfig, HeaderValues, ResponseHardeningProfile, ResponseHeaderPolicyConfig,
-    ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
+    ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig, ResponseMetadataConfig,
 };
 use fluxheim_headers::{rewrite_header_prefix, rewrite_refresh_url, rewrite_set_cookie_value};
 
 use crate::NativeHttp1Request;
 use crate::NativeHttp1Response;
 use crate::native_http1_cors::NativeCorsPolicy;
+use crate::native_http1_response_metadata::{
+    apply_native_digest_metadata, apply_native_status_metadata,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct NativeRouteResponseHeaderPolicy {
@@ -17,6 +20,7 @@ pub(crate) struct NativeRouteResponseHeaderPolicy {
     append: Vec<(String, String)>,
     rewrite: ResponseHeaderRewriteConfig,
     cors: NativeCorsPolicy,
+    metadata: ResponseMetadataConfig,
 }
 
 impl NativeRouteResponseHeaderPolicy {
@@ -35,6 +39,7 @@ impl NativeRouteResponseHeaderPolicy {
             append: Vec::new(),
             rewrite: policy.rewrite.clone(),
             cors: NativeCorsPolicy::from_config(cors),
+            metadata: policy.metadata.clone(),
         };
         native.apply_hardening_profile(policy.hardening.profile);
         native.apply_standard_headers_from_policy(policy);
@@ -54,7 +59,9 @@ impl NativeRouteResponseHeaderPolicy {
             append: Vec::new(),
             rewrite: overlay.rewrite.clone(),
             cors: NativeCorsPolicy::default(),
+            metadata: ResponseMetadataConfig::default(),
         };
+        policy.metadata.apply_overlay(&overlay.metadata);
         if let Some(hardening) = &overlay.hardening {
             policy.apply_hardening_profile(hardening.profile);
         }
@@ -266,6 +273,7 @@ impl NativeRouteResponseHeaderPolicy {
         for (name, value) in &self.append {
             response.push_header(name.clone(), value.clone());
         }
+        apply_native_status_metadata(&self.metadata, response);
     }
 
     pub(crate) fn apply_for_request(
@@ -275,6 +283,16 @@ impl NativeRouteResponseHeaderPolicy {
     ) {
         self.apply(response);
         self.cors.apply_response(request, response);
+    }
+
+    pub(crate) fn apply_digests_for_method(
+        &self,
+        request_method: &str,
+        response: &mut NativeHttp1Response,
+    ) {
+        if self.enabled {
+            apply_native_digest_metadata(&self.metadata, request_method, response);
+        }
     }
 
     pub(crate) fn cors_response_origin(&self, request: &NativeHttp1Request) -> Option<String> {
@@ -306,6 +324,7 @@ impl NativeRouteResponseHeaderPolicy {
                     .close_connection(),
             );
         }
+        self.apply_digests_for_method(&request.method, &mut response);
         Some(response)
     }
 }

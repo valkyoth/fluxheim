@@ -1256,6 +1256,56 @@ clear-site-data = "\"cache\", \"cookies\", \"storage\""
 Fluxheim does not add obsolete `X-XSS-Protection`, `Expect-CT`, HPKP, or
 `Feature-Policy` headers. Use CSP, HSTS, and `Permissions-Policy` instead.
 
+### Standards-Based Response Metadata
+
+Standards-based cache, proxy, and digest fields are opt-in and disabled by
+default. They are generated from runtime outcomes and final response bytes;
+they are not aliases for static response-header mutation.
+
+```toml
+[headers.response.metadata]
+# Required when cache_status or proxy_status is enabled. This is a public
+# Structured Fields token identifying this Fluxheim deployment, not an origin.
+identifier = "edge-gateway"
+cache_status = true
+proxy_status = true
+content_digest = true
+repr_digest = true
+```
+
+The same table can be overlaid at `[vhosts.headers.response.metadata]` and
+`[vhosts.routes.headers.response.metadata]`. The identifier is limited to 64
+bytes and must use HTTP Structured Fields token grammar. Fluxheim rejects a
+policy that enables `cache_status` or `proxy_status` without a valid inherited
+identifier.
+
+`cache_status` appends an RFC 9211 `Cache-Status` member derived from the real
+cache result. The member reports only bounded outcomes such as hit, URI miss,
+stored, stale forwarding, or bypass. It does not expose cache keys, internal
+tiers, admission reasons, or origin topology. `proxy_status` appends an RFC
+9209 `Proxy-Status` member only for a Fluxheim-generated proxy failure, using a
+standard low-cardinality error token. Backend addresses, DNS names,
+certificate details, and raw error strings are never included. Existing
+origin members remain visible as separate list members, so enable these fields
+only when exposing cache/proxy behavior is acceptable for the route.
+
+`content_digest` emits RFC 9530 `Content-Digest` with SHA-256 over the final
+HTTP message content after any Fluxheim compression. `repr_digest` emits
+RFC 9530 `Repr-Digest` only when Fluxheim has the complete selected
+representation: currently a complete `GET` response with status `200`, no
+`Content-Range`, and a body consistent with the declared content length.
+Fluxheim deliberately suppresses `Repr-Digest` for `HEAD`, `206`, `304`, and
+other responses where the full representation is unavailable rather than
+guessing it. `Content-Digest` on bodyless `HEAD` and `304` responses covers the
+empty message content; on `206` it covers only the returned range. If Fluxheim
+compresses a response while digest generation is disabled, it removes any
+origin digest fields that would describe the pre-compression bytes.
+
+The current native response path is bounded and buffered. Digest generation
+hashes that final buffer without making a second body copy; unbuffered digest
+trailers are not currently supported. Digest fields provide transport
+integrity metadata, not authentication or authorization.
+
 ### CORS
 
 CORS is disabled by default and must use the dedicated request-aware policy.

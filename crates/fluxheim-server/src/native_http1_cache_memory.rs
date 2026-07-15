@@ -9,6 +9,7 @@ use fluxheim_config::CacheConfig;
 use tokio::sync::Notify;
 
 use crate::NativeHttp1Response;
+use crate::native_http1_response_metadata::NativeCacheStatus;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct NativeMemoryCacheEntry {
@@ -253,6 +254,7 @@ pub(crate) fn with_native_cache_status(
     reason: Option<&str>,
     age_secs: Option<u64>,
 ) -> NativeHttp1Response {
+    response.set_cache_status(NativeCacheStatus::new(status, reason));
     if let Some(header) = &cache.status_header {
         response.push_header(header.clone(), status.to_owned());
     }

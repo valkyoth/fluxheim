@@ -157,6 +157,14 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Wed Jul 15 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.12-1
+- Add opt-in RFC 9211 Cache-Status, RFC 9209 Proxy-Status, and RFC 9530 response
+  digests generated from native runtime outcomes and final response bytes.
+- Prove cache, compression, conditional, HEAD, range, and proxy-failure metadata
+  behavior with live native listener tests.
+- Add pinned OpenSSL-FIPS and rustls/AWS-LC-FIPS evidence environments with live
+  downstream/upstream TLS and fail-closed policy proof.
+
 * Tue Jul 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.7.11-1
 - Start bounded native listener draining as the first zero-downtime upgrade
   prerequisite.

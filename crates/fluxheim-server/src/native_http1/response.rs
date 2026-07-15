@@ -5,6 +5,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::time::timeout;
 
 use crate::NativeHttp1Error;
+use crate::native_http1_response_metadata::{NativeCacheStatus, NativeProxyStatusError};
 
 const WRITE_CHUNK_BYTES: usize = 8192;
 
@@ -16,6 +17,10 @@ pub struct NativeHttp1Response {
     content_length: Option<u64>,
     body: Vec<u8>,
     close: bool,
+    cache_status: Option<NativeCacheStatus>,
+    proxy_status_error: Option<NativeProxyStatusError>,
+    cache_status_metadata_emitted: bool,
+    proxy_status_metadata_emitted: bool,
     write_policy: NativeHttp1ResponseWritePolicy,
 }
 
@@ -35,6 +40,10 @@ impl NativeHttp1Response {
             content_length: None,
             body: body.into(),
             close: false,
+            cache_status: None,
+            proxy_status_error: None,
+            cache_status_metadata_emitted: false,
+            proxy_status_metadata_emitted: false,
             write_policy: NativeHttp1ResponseWritePolicy::default(),
         }
     }
@@ -82,6 +91,39 @@ impl NativeHttp1Response {
 
     pub(crate) fn push_header(&mut self, name: impl Into<String>, value: impl Into<String>) {
         self.headers.push((name.into(), value.into()));
+    }
+
+    pub(crate) fn set_cache_status(&mut self, cache_status: NativeCacheStatus) {
+        self.cache_status = Some(cache_status);
+    }
+
+    pub(crate) fn cache_status(&self) -> Option<&NativeCacheStatus> {
+        self.cache_status.as_ref()
+    }
+
+    pub(crate) const fn cache_status_metadata_emitted(&self) -> bool {
+        self.cache_status_metadata_emitted
+    }
+
+    pub(crate) const fn mark_cache_status_metadata_emitted(&mut self) {
+        self.cache_status_metadata_emitted = true;
+    }
+
+    pub(crate) const fn with_proxy_status_error(mut self, error: NativeProxyStatusError) -> Self {
+        self.proxy_status_error = Some(error);
+        self
+    }
+
+    pub(crate) const fn proxy_status_error(&self) -> Option<NativeProxyStatusError> {
+        self.proxy_status_error
+    }
+
+    pub(crate) const fn proxy_status_metadata_emitted(&self) -> bool {
+        self.proxy_status_metadata_emitted
+    }
+
+    pub(crate) const fn mark_proxy_status_metadata_emitted(&mut self) {
+        self.proxy_status_metadata_emitted = true;
     }
 
     pub const fn content_length(&self) -> Option<u64> {

@@ -51,7 +51,8 @@ pub use crate::config_header::{
     HeaderPolicyConfig, HeaderValues, PermittedCrossDomainPolicies, RequestHeaderPolicyConfig,
     RequestHeaderPolicyOverlayConfig, ResponseHardeningConfig, ResponseHardeningProfile,
     ResponseHeaderPolicyConfig, ResponseHeaderPolicyOverlayConfig, ResponseHeaderRewriteConfig,
-    ResponseHeaderRewriteRuleConfig, ResponseHstsConfig, ResponsePermissionsPolicyConfig,
+    ResponseHeaderRewriteRuleConfig, ResponseHstsConfig, ResponseMetadataConfig,
+    ResponseMetadataOverlayConfig, ResponsePermissionsPolicyConfig,
     ResponsePermissionsPolicyProfile, VhostHeaderPolicyConfig,
 };
 #[cfg(test)]

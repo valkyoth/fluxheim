@@ -48,6 +48,7 @@ pub(crate) fn https_redirect_response(
             .with_header("location", location)
             .with_header("content-length", "0");
     response_headers.apply_for_request(request, &mut response);
+    response_headers.apply_digests_for_method(&request.method, &mut response);
     Some(response)
 }
 

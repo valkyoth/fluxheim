@@ -9,6 +9,7 @@ use crate::config_header_hardening::{
     PermittedCrossDomainPolicies, ResponseHardeningConfig, ResponsePermissionsPolicyConfig,
     validate_reporting_endpoints,
 };
+use crate::config_header_metadata::{ResponseMetadataConfig, ResponseMetadataOverlayConfig};
 use crate::config_header_validation::{
     combined_header_set, combined_header_unset, merge_header_mutations,
     validate_cookie_domain_rewrite_rules, validate_cookie_path_rewrite_rules,
@@ -23,6 +24,8 @@ pub struct ResponseHeaderPolicyConfig {
     pub enabled: bool,
     #[serde(default)]
     pub hardening: ResponseHardeningConfig,
+    #[serde(default)]
+    pub metadata: ResponseMetadataConfig,
     #[serde(default)]
     pub strict_transport_security: Option<String>,
     #[serde(default)]
@@ -70,6 +73,7 @@ impl Default for ResponseHeaderPolicyConfig {
         Self {
             enabled: true,
             hardening: ResponseHardeningConfig::default(),
+            metadata: ResponseMetadataConfig::default(),
             strict_transport_security: None,
             hsts: None,
             content_security_policy: None,
@@ -96,6 +100,7 @@ impl Default for ResponseHeaderPolicyConfig {
 
 impl ResponseHeaderPolicyConfig {
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+        self.metadata.validate("headers.response.metadata")?;
         validate_optional_header_value(
             "headers.response.strict_transport_security",
             self.strict_transport_security.as_deref(),
@@ -161,6 +166,7 @@ impl ResponseHeaderPolicyConfig {
         if let Some(hardening) = &overlay.hardening {
             self.hardening = hardening.clone();
         }
+        self.metadata.apply_overlay(&overlay.metadata);
         if let Some(value) = &overlay.strict_transport_security {
             self.strict_transport_security = value.clone();
         }
@@ -304,6 +310,8 @@ pub struct ResponseHeaderPolicyOverlayConfig {
     #[serde(default)]
     pub hardening: Option<ResponseHardeningConfig>,
     #[serde(default)]
+    pub metadata: ResponseMetadataOverlayConfig,
+    #[serde(default)]
     pub strict_transport_security: Option<Option<String>>,
     #[serde(default)]
     pub hsts: Option<Option<ResponseHstsConfig>>,
@@ -347,6 +355,7 @@ pub struct ResponseHeaderPolicyOverlayConfig {
 
 impl ResponseHeaderPolicyOverlayConfig {
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+        self.metadata.validate("vhosts.headers.response.metadata")?;
         validate_optional_header_value(
             "vhosts.headers.response.strict_transport_security",
             self.strict_transport_security

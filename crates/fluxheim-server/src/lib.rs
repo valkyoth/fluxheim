@@ -52,6 +52,7 @@ mod native_http1_proxy_revalidation;
 mod native_http1_proxy_runtime;
 mod native_http1_proxy_static_dispatch;
 mod native_http1_proxy_websocket;
+mod native_http1_response_metadata;
 #[cfg(feature = "acme")]
 mod native_http1_route_acme;
 mod native_http1_route_action;

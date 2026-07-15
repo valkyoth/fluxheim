@@ -1,0 +1,82 @@
+# Fluxheim 1.7.12 Release Notes
+
+Fluxheim 1.7.12 adds standards-based response metadata generated from native
+runtime outcomes and final response bytes. It also adds reproducible,
+CI-only proof environments for both FIPS-capable TLS backend profiles.
+
+All new response metadata remains opt-in. Existing configurations and response
+headers are unchanged unless an operator enables the new metadata policy.
+
+## Standards-Based Response Metadata
+
+- Add RFC 9211 `Cache-Status` derived from actual cache results, including hit,
+  URI miss/store, stale forwarding, revalidation, expiry, and bypass outcomes.
+- Add RFC 9209 `Proxy-Status` for Fluxheim-generated proxy failures using only
+  standardized low-cardinality error tokens.
+- Require a bounded Structured Fields token as the public Fluxheim deployment
+  identifier when either status field is enabled.
+- Do not expose cache keys, internal storage tiers, policy reasons, backend
+  addresses, DNS names, certificate details, or raw error strings.
+- Preserve existing origin status members and append Fluxheim's member, making
+  multi-proxy status chains visible only when the operator explicitly opts in.
+
+Example:
+
+```toml
+[headers.response.metadata]
+identifier = "edge-gateway"
+cache_status = true
+proxy_status = true
+content_digest = true
+repr_digest = true
+```
+
+The metadata policy inherits through global, vhost, and route response-header
+configuration. Every field defaults to disabled.
+
+## Response Digests
+
+- Add RFC 9530 SHA-256 `Content-Digest` over final HTTP message content.
+- Add `Repr-Digest` only when Fluxheim holds a complete selected
+  representation: a complete `GET` response with status `200`, no range, and a
+  body consistent with its declared content length.
+- Compute digest fields after Fluxheim compression so they describe the bytes
+  actually delivered to the client.
+- Suppress `Repr-Digest` for `HEAD`, `206`, `304`, and other incomplete
+  representation paths instead of guessing an unseen full representation.
+- Cover bodyless `HEAD` and `304` content as empty message content and cover a
+  `206` response's returned range with `Content-Digest`.
+- Remove origin digest fields when Fluxheim compression changes the body and
+  digest generation is disabled, preventing stale integrity metadata.
+
+The native response model remains bounded and buffered. Digest generation
+hashes the final response buffer without another body copy; unbuffered digest
+trailers are not part of this release.
+
+## Reproducible FIPS-Backend Evidence
+
+- Add separately pinned OpenSSL-FIPS and rustls/AWS-LC-FIPS proof
+  Containerfiles under `containers/fips/`.
+- Build the exact `profile-fips-openssl` and `profile-fips-rustls` binaries
+  inside their corresponding proof environments.
+- Run the built binary, verify the selected provider and dependency boundary,
+  exercise real downstream TLS and certificate-verified upstream TLS, and
+  prove incompatible TLS policy fails closed.
+- Record compiler, provider, dependency, binary, and image identity evidence.
+- Add a manual GitHub workflow, a deep-gate entry, a static plan validator, and
+  an interactive test-starter entry for the proof.
+
+These proof containers are CI evidence environments, not Fluxheim release
+images. They do not claim that Fluxheim as a complete product or deployment is
+FIPS validated. Operators remain responsible for the validated module,
+platform, configuration, key handling, and required compliance evidence.
+
+## Testing
+
+- Live native listener tests cover complete-body digests, compressed wire-byte
+  digests, conditional `304`, `HEAD`, `206`, cache MISS/HIT, and refused-origin
+  proxy status.
+- Config tests cover opt-in parsing, identifier validation, missing-identifier
+  rejection, and inherited overlay behavior.
+- Status metadata application is idempotent when a response policy is applied
+  more than once.

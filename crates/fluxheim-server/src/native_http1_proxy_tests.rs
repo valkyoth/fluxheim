@@ -24,6 +24,8 @@ mod header_policy_tests;
 mod response_features_tests;
 #[path = "native_http1_proxy_tests/runtime_behavior.rs"]
 mod runtime_behavior_tests;
+#[path = "native_http1_proxy_tests/standards_metadata.rs"]
+mod standards_metadata_tests;
 #[path = "native_http1_proxy_tests/static_upstream.rs"]
 mod static_upstream_tests;
 #[path = "native_http1_proxy_tests/websocket.rs"]

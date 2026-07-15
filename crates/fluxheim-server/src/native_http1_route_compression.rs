@@ -27,6 +27,8 @@ pub(crate) fn apply_native_response_compression(
             response.remove_header("content-encoding");
             response.remove_header("content-length");
             response.remove_header("etag");
+            response.remove_header("content-digest");
+            response.remove_header("repr-digest");
             response.push_header("content-encoding", encoder.encoding);
             append_vary_accept_encoding(response);
             response.replace_body(encoded);
