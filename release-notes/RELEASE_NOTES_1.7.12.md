@@ -99,6 +99,11 @@ trailers are not part of this release.
 - Parse OpenSSL client-auth policy once per SNI store generation, share admitted
   CA objects across contexts, reject projected active-plus-reload policy input
   above 128 MiB, and divide a 4096-entry session cache budget across contexts.
+- Serialize OpenSSL SNI reload construction and attach generation leases to
+  selected SSL connections. A reload that would create a third live generation
+  now fails closed until older connections release their contexts, enforcing
+  the two-generation resource assumption rather than relying on arithmetic
+  alone.
 
 ## Shared Cache Policy Hardening
 

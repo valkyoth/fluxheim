@@ -156,4 +156,12 @@ pub enum OpenSslDownstreamCertificateStoreError {
     },
     #[error("OpenSSL SNI context count overflowed its resource budget")]
     ContextBudgetOverflow,
+    #[error("failed to allocate OpenSSL SSL generation-lease storage: {0}")]
+    CreateGenerationLeaseIndex(#[source] openssl::error::ErrorStack),
+    #[error("OpenSSL SNI reload generation state lock was poisoned")]
+    ReloadGenerationStatePoisoned,
+    #[error(
+        "OpenSSL SNI reload would exceed {maximum} live certificate generations; currently live: {count}"
+    )]
+    TooManyLiveGenerations { count: usize, maximum: usize },
 }

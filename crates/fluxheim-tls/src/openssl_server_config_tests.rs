@@ -159,7 +159,7 @@ fn sni_store_reload_rejects_mismatched_certificate_key_without_replacing_context
     };
     let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
     let store = OpenSslDownstreamCertificateStore::new(&selector, &config.tls, None).unwrap();
-    let original_public_key = store.certificates.load()[0]
+    let original_public_key = store.generation.load().certificates[0]
         .as_ref()
         .unwrap()
         .context
@@ -181,7 +181,7 @@ fn sni_store_reload_rejects_mismatched_certificate_key_without_replacing_context
         ))
     ));
 
-    let active_public_key = store.certificates.load()[0]
+    let active_public_key = store.generation.load().certificates[0]
         .as_ref()
         .unwrap()
         .context

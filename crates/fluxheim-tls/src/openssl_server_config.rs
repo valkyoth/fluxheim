@@ -10,6 +10,8 @@ use openssl::x509::X509;
 mod client_auth;
 #[path = "openssl_server_error.rs"]
 mod error;
+#[path = "openssl_server_generation.rs"]
+mod generation;
 
 use crate::tls_input::{
     MAX_CERT_CHAIN_BYTES, MAX_CHAIN_CERTIFICATES, MAX_PRIVATE_KEY_BYTES, read_bounded_file,
@@ -18,6 +20,7 @@ use crate::tls_input::{
 use crate::{DownstreamCertificateSelector, openssl_cipher_lists, openssl_curve_list};
 use client_auth::OpenSslClientAuthPolicy;
 pub use error::{OpenSslDownstreamAcceptorError, OpenSslDownstreamCertificateStoreError};
+use generation::{OpenSslGenerationLease, OpenSslReloadGenerationState};
 
 const ALPN_HTTP1: &[u8] = b"\x08http/1.1";
 const ALPN_HTTP2: &[u8] = b"\x02h2";
@@ -29,9 +32,15 @@ const OPENSSL_RELOAD_POLICY_GENERATIONS: usize = 2;
 pub struct OpenSslDownstreamCertificateStore {
     selector: DownstreamCertificateSelector,
     tls: TlsConfig,
-    certificates: ArcSwap<Vec<Option<OpenSslDownstreamCertificate>>>,
+    generation: ArcSwap<OpenSslCertificateGeneration>,
+    reload_generations: OpenSslReloadGenerationState,
     session_cache_entries_per_context: i32,
     pending_managed_certificate_recorder: Option<fn()>,
+}
+
+struct OpenSslCertificateGeneration {
+    certificates: Vec<Option<OpenSslDownstreamCertificate>>,
+    lease: Arc<OpenSslGenerationLease>,
 }
 
 impl OpenSslDownstreamCertificateStore {
@@ -52,16 +61,26 @@ impl OpenSslDownstreamCertificateStore {
             session_cache_entries_per_context,
             pending_managed_certificate_recorder,
         )?;
+        let lease = Arc::new(OpenSslGenerationLease);
+        let reload_generations = OpenSslReloadGenerationState::new(&lease)?;
+        let generation = Arc::new(OpenSslCertificateGeneration {
+            certificates,
+            lease: lease.clone(),
+        });
         Ok(Self {
             selector: selector.clone(),
             tls: tls.clone(),
-            certificates: ArcSwap::from_pointee(certificates),
+            generation: ArcSwap::from(generation),
+            reload_generations,
             session_cache_entries_per_context,
             pending_managed_certificate_recorder,
         })
     }
 
     pub fn reload(&self) -> Result<(), OpenSslDownstreamCertificateStoreError> {
+        let mut reload = self
+            .reload_generations
+            .lock(OPENSSL_RELOAD_POLICY_GENERATIONS)?;
         let client_auth = OpenSslClientAuthPolicy::load(&self.tls)?;
         validate_openssl_sni_context_budget(
             self.selector.certificates().len(),
@@ -74,17 +93,24 @@ impl OpenSslDownstreamCertificateStore {
             self.session_cache_entries_per_context,
             self.pending_managed_certificate_recorder,
         )?;
-        self.certificates.store(Arc::new(certificates));
+        let lease = Arc::new(OpenSslGenerationLease);
+        let generation = Arc::new(OpenSslCertificateGeneration {
+            certificates,
+            lease: lease.clone(),
+        });
+        reload.track(&lease);
+        self.generation.store(generation);
         Ok(())
     }
 
     pub fn certificate_slot_count(&self) -> usize {
-        self.certificates.load().len()
+        self.generation.load().certificates.len()
     }
 
     pub fn loaded_certificate_count(&self) -> usize {
-        self.certificates
+        self.generation
             .load()
+            .certificates
             .iter()
             .filter(|certificate| certificate.is_some())
             .count()
@@ -96,12 +122,14 @@ impl OpenSslDownstreamCertificateStore {
         ssl: &mut openssl::ssl::SslRef,
     ) -> Result<(), OpenSslDownstreamCertificateStoreError> {
         let index = self.selector.certificate_index_for_sni(sni);
-        let certificates = self.certificates.load();
-        let Some(certificate) = certificates
+        let generation = self.generation.load_full();
+        let Some(certificate) = generation
+            .certificates
             .get(index)
             .and_then(Option::as_ref)
             .or_else(|| {
-                certificates
+                generation
+                    .certificates
                     .get(self.selector.default_certificate_index())
                     .and_then(Option::as_ref)
             })
@@ -109,6 +137,8 @@ impl OpenSslDownstreamCertificateStore {
             return Err(OpenSslDownstreamCertificateStoreError::MissingLoadedCertificate { index });
         };
         certificate.apply_to_ssl(ssl)?;
+        self.reload_generations
+            .attach_to_ssl(ssl, generation.lease.clone());
         Ok(())
     }
 }
@@ -447,6 +477,9 @@ fn openssl_alpn_wire(policy: TlsAlpnPolicy) -> &'static [u8] {
     }
 }
 
+#[cfg(test)]
+#[path = "openssl_server_generation_tests.rs"]
+mod generation_tests;
 #[cfg(test)]
 #[path = "openssl_server_config_tests.rs"]
 mod tests;

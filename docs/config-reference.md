@@ -3048,7 +3048,13 @@ contexts. It rejects a configuration when the CA/CRL input size projected
 across the active and replacement SNI context generations exceeds 128 MiB.
 OpenSSL's internal server session-cache capacity is divided across all SNI
 contexts from a global 4096-entry budget, preventing the backend default from
-being multiplied by every configured certificate.
+being multiplied by every configured certificate. Reload construction and
+publication are serialized, and every SNI-selected SSL connection retains an
+explicit lease for its certificate generation. At most two generations may be
+live. If long-lived connections still retain the older generation, another
+reload fails closed without replacing the active certificates; close or drain
+those connections and retry the reload. This enforced lifetime cap makes the
+active-plus-replacement memory projection match actual retained generations.
 Verified client-certificate identity can be forwarded explicitly with
 request header templates such as `{tls.client_cert_sha256}`. Route decisions
 based on certificate identity remain future work; do not rely on client-cert
