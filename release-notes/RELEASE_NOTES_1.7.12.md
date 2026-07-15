@@ -67,6 +67,10 @@ trailers are not part of this release.
 - Parse response `Cache-Control` as a strict quoted-string-aware policy,
   prioritize `s-maxage` over `max-age`, and reject malformed or conflicting
   security/freshness directives instead of falling back to configured TTLs.
+- Parse response `Cache-Control` without a directive vector and reject more
+  than 16 KiB or 128 directives cumulatively.
+- Remove unused compatibility helpers that could collapse malformed freshness
+  into an absent policy or split quoted extension values at commas.
 - Preserve the first received `Age` list member when calculating peer-fill
   remaining freshness.
 - Persist mandatory-revalidation state with native disk-cache metadata and
@@ -114,3 +118,5 @@ platform, configuration, key handling, and required compliance evidence.
   freshness with an operator TTL, `s-maxage` precedence, mandatory
   revalidation, contradictory range metadata, zero-sized slice policy, and
   oversized/FIFO storage-bin manifests.
+- Cache-header tests cover cumulative byte/directive ceilings and quoted-comma
+  parsing.

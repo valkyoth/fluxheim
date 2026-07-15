@@ -42,6 +42,9 @@ pub(crate) struct ResponseCacheControlPolicy {
     pub(crate) shared_rejection: Option<&'static str>,
 }
 
+pub(crate) const MAX_RESPONSE_CACHE_CONTROL_BYTES: usize = 16 * 1024;
+pub(crate) const MAX_RESPONSE_CACHE_CONTROL_DIRECTIVES: usize = 128;
+
 pub(crate) fn parse_response_cache_control_values<'a>(
     values: impl IntoIterator<Item = &'a str>,
 ) -> Result<ResponseCacheControlPolicy, ()> {
@@ -53,9 +56,20 @@ pub(crate) fn parse_response_cache_control_values<'a>(
     let mut seen_no_cache = false;
     let mut seen_must_revalidate = false;
     let mut seen_proxy_revalidate = false;
+    let mut total_bytes = 0_usize;
+    let mut directive_count = 0_usize;
 
     for value in values {
-        for directive in split_cache_control_directives(value)? {
+        total_bytes = total_bytes.checked_add(value.len()).ok_or(())?;
+        if total_bytes > MAX_RESPONSE_CACHE_CONTROL_BYTES {
+            return Err(());
+        }
+
+        visit_cache_control_directives(value, &mut |directive| {
+            directive_count = directive_count.checked_add(1).ok_or(())?;
+            if directive_count > MAX_RESPONSE_CACHE_CONTROL_DIRECTIVES {
+                return Err(());
+            }
             let (name, value) = parse_cache_control_directive(directive)?;
             if name.eq_ignore_ascii_case("max-age") {
                 if max_age.is_some() {
@@ -90,7 +104,8 @@ pub(crate) fn parse_response_cache_control_values<'a>(
                 reject_duplicate_flag(value, &mut seen_proxy_revalidate)?;
                 policy.stale_reuse_forbidden = true;
             }
-        }
+            Ok(())
+        })?;
     }
 
     policy.freshness_secs = shared_max_age.or(max_age);
@@ -130,8 +145,10 @@ fn parse_cache_control_delta_seconds(value: Option<&str>) -> Result<u32, ()> {
     value.parse::<u32>().map_err(|_| ())
 }
 
-fn split_cache_control_directives(value: &str) -> Result<Vec<&str>, ()> {
-    let mut directives = Vec::new();
+fn visit_cache_control_directives(
+    value: &str,
+    visitor: &mut impl FnMut(&str) -> Result<(), ()>,
+) -> Result<(), ()> {
     let mut start = 0_usize;
     let mut quoted = false;
     let mut escaped = false;
@@ -149,7 +166,7 @@ fn split_cache_control_directives(value: &str) -> Result<Vec<&str>, ()> {
             if directive.is_empty() {
                 return Err(());
             }
-            directives.push(directive);
+            visitor(directive)?;
             start = index.saturating_add(1);
         }
     }
@@ -160,8 +177,7 @@ fn split_cache_control_directives(value: &str) -> Result<Vec<&str>, ()> {
     if directive.is_empty() {
         return Err(());
     }
-    directives.push(directive);
-    Ok(directives)
+    visitor(directive)
 }
 
 fn parse_cache_control_directive(directive: &str) -> Result<(&str, Option<&str>), ()> {

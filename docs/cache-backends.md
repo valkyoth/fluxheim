@@ -170,8 +170,10 @@ internal cache implementation.
 - Fluxheim parses response `Cache-Control` as one strict shared-cache policy.
   `s-maxage` takes precedence over `max-age`; malformed values, invalid quoted
   strings, and duplicate security or freshness directives reject admission
-  rather than falling back to an operator TTL. Peer-fill subtracts the first
-  received `Age` value from remaining freshness.
+  rather than falling back to an operator TTL. The combined response policy is
+  limited to 16 KiB and 128 directives and is parsed without a directive
+  allocation. Peer-fill subtracts the first received `Age` value from
+  remaining freshness.
 - `cache.content_types`, `vhosts.cache.content_types`, and
   `vhosts.routes.cache.content_types` allow exact media types and subtype
   wildcards such as `image/*`. The `extensions` key is accepted as the

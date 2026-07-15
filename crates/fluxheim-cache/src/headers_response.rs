@@ -60,34 +60,6 @@ pub fn cache_control_freshness_value(
     value
 }
 
-pub fn cache_control_with_directive<S: AsRef<str>>(
-    values: impl IntoIterator<Item = S>,
-    directive: &str,
-    directive_name: &str,
-) -> String {
-    let mut directives = Vec::new();
-    for value in values {
-        directives.extend(
-            value
-                .as_ref()
-                .split(',')
-                .map(str::trim)
-                .filter(|part| {
-                    !part.is_empty()
-                        && !part
-                            .split_once('=')
-                            .map(|(name, _)| name.trim())
-                            .unwrap_or(part)
-                            .eq_ignore_ascii_case(directive_name)
-                })
-                .map(str::to_owned),
-        );
-    }
-
-    directives.push(directive.to_owned());
-    directives.join(", ")
-}
-
 pub fn response_age_secs(headers: &http::HeaderMap) -> u64 {
     let Some(value) = headers.get_all("age").iter().next() else {
         return 0;
@@ -100,13 +72,6 @@ pub fn response_age_secs(headers: &http::HeaderMap) -> u64 {
         .next()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .unwrap_or(u64::MAX)
-}
-
-pub fn response_cache_control_max_age(headers: &http::HeaderMap) -> Option<u32> {
-    match response_cache_control_freshness(headers) {
-        ResponseFreshness::Seconds(seconds) => Some(seconds),
-        ResponseFreshness::Absent | ResponseFreshness::Invalid => None,
-    }
 }
 
 pub fn response_cache_control_freshness(headers: &http::HeaderMap) -> ResponseFreshness {

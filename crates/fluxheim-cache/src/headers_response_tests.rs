@@ -190,26 +190,6 @@ fn builds_cache_control_freshness_value() {
 }
 
 #[test]
-fn replaces_cache_control_directive_without_duplicate() {
-    assert_eq!(
-        super::cache_control_with_directive(
-            ["public, max-age=60", "stale-if-error=10"],
-            "stale-if-error=30",
-            "stale-if-error",
-        ),
-        "public, max-age=60, stale-if-error=30"
-    );
-    assert_eq!(
-        super::cache_control_with_directive(
-            ["max-age=60, stale-while-revalidate=5"],
-            "stale-while-revalidate=15",
-            "stale-while-revalidate",
-        ),
-        "max-age=60, stale-while-revalidate=15"
-    );
-}
-
-#[test]
 fn parses_response_age_and_max_age_headers() {
     let response = http::Response::builder()
         .header("age", "42")
@@ -219,8 +199,8 @@ fn parses_response_age_and_max_age_headers() {
 
     assert_eq!(super::response_age_secs(response.headers()), 42);
     assert_eq!(
-        super::response_cache_control_max_age(response.headers()),
-        Some(60)
+        super::response_cache_control_freshness(response.headers()),
+        super::ResponseFreshness::Seconds(60)
     );
 
     let response = http::Response::builder()
@@ -231,8 +211,49 @@ fn parses_response_age_and_max_age_headers() {
 
     assert_eq!(super::response_age_secs(response.headers()), u64::MAX);
     assert_eq!(
-        super::response_cache_control_max_age(response.headers()),
-        Some(120)
+        super::response_cache_control_freshness(response.headers()),
+        super::ResponseFreshness::Seconds(120)
+    );
+}
+
+#[test]
+fn response_cache_control_parser_enforces_resource_bounds() {
+    let at_directive_limit = std::iter::repeat_n("extension", 128)
+        .collect::<Vec<_>>()
+        .join(",");
+    let response = http::Response::builder()
+        .header("cache-control", at_directive_limit)
+        .body(())
+        .unwrap();
+    assert_eq!(
+        super::response_cache_control_freshness(response.headers()),
+        super::ResponseFreshness::Absent
+    );
+
+    let over_directive_limit = std::iter::repeat_n("extension", 129)
+        .collect::<Vec<_>>()
+        .join(",");
+    let response = http::Response::builder()
+        .header("cache-control", over_directive_limit)
+        .body(())
+        .unwrap();
+    assert_eq!(
+        super::response_cache_control_freshness(response.headers()),
+        super::ResponseFreshness::Invalid
+    );
+
+    let mut headers = http::HeaderMap::new();
+    headers.append(
+        "cache-control",
+        http::HeaderValue::from_str(&format!("extension={}", "a".repeat(9_000))).unwrap(),
+    );
+    headers.append(
+        "cache-control",
+        http::HeaderValue::from_str(&format!("other={}", "b".repeat(9_000))).unwrap(),
+    );
+    assert_eq!(
+        super::response_cache_control_freshness(&headers),
+        super::ResponseFreshness::Invalid
     );
 }
 
