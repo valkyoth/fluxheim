@@ -41,6 +41,10 @@ pub enum ConfigError {
     InvalidLimit {
         field: &'static str,
     },
+    InvalidLimitRelationship {
+        field: &'static str,
+        minimum_field: &'static str,
+    },
     InvalidAdminListenAddress {
         address: String,
     },

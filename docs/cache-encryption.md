@@ -51,9 +51,10 @@ per request, Fluxheim caps concurrent OpenBao encrypted commit heap usage and
 can refuse a large cache fill under pressure rather than buffering too many
 objects at once.
 
-Both providers bind the configured `key_id` and the combined cache key as
-authenticated data. A stored encrypted object cannot be silently moved to a
-different cache key.
+Both providers bind the configured `key_id` as authenticated data. The combined
+cache key remains inside the encrypted object and is checked after decryption,
+so a stored encrypted object cannot be silently moved to another cache key and
+cache URLs are not exposed in envelope metadata.
 
 ## Quick Start: Local Key
 
@@ -288,12 +289,13 @@ either purge the disk cache or move to a new `cache.disk.path`. Existing cache
 objects encrypted with the old local key are intentionally unreadable once
 Fluxheim starts with only the new key.
 
-The local provider uses random 96-bit AES-256-GCM nonces. Rotate the local
-cache encryption key before roughly `2^32` object-encryption invocations with
-one key. Fluxheim tracks local-provider invocations inside each process and
-logs a security warning when a process approaches that bound, but operators
-should still rotate long-lived cache keys on a schedule that fits their write
-volume because restarts reset the in-process counter.
+The local provider uses random 96-bit AES-256-GCM nonces. Fluxheim durably
+reserves each object-encryption invocation in a locked, cache-root-local counter
+before generating the nonce, warns as a key approaches `2^32` invocations, and
+fails closed at that bound. The counter survives restarts and coordinates
+processes sharing a cache root. Preserve hidden `.fluxheim-gcm-*.counter` files
+while a key remains active, and rotate long-lived cache keys on a schedule that
+fits their write volume.
 
 For OpenBao Transit, the usual rotation path is to keep the same Fluxheim
 `key_id`, `mount`, and `key_name`, then rotate the Transit key inside OpenBao.

@@ -22,9 +22,9 @@ use crate::serve_native_http1_openssl_listener;
 use crate::serve_native_http1_rustls_listener;
 use crate::{
     ListenerProtocol, NativeHttp1Error, NativeHttp1HostRouter, NativeHttp1HostRouterConfigError,
-    NativeHttp1ReloadableRouter, NativeHttp1RouterReloadHandle, NativeRuntimeLaunchPlan,
-    NativeRuntimeLaunchPlanError, ServerPlan, ServiceKind, serve_native_http1_listener,
-    serve_native_http1_listener_with_proxy_protocol,
+    NativeHttp1ReloadableRouter, NativeHttp1RouterReloadHandle, NativeRequestBodyBudget,
+    NativeRuntimeLaunchPlan, NativeRuntimeLaunchPlanError, ServerPlan, ServiceKind,
+    serve_native_http1_listener, serve_native_http1_listener_with_proxy_protocol,
 };
 
 #[path = "native_runtime_http1_proxy_error.rs"]
@@ -211,6 +211,13 @@ impl NativeHttp1ProxyRuntime {
             launch_plan.downstream_http1(),
             launch_plan.process().upstream_keepalive_pool_size(),
             background_load_balancer_services,
+            NativeRequestBodyBudget::new(
+                config
+                    .server
+                    .limits
+                    .max_buffered_request_body_bytes
+                    .as_usize(),
+            ),
         );
         let router = Arc::new(router);
         let has_https_listener = launch_plan.listeners().iter().any(|listener| {

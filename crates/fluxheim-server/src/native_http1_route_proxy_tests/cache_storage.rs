@@ -104,7 +104,7 @@ async fn native_route_proxy_caches_proxy_response_on_encrypted_disk() {
     assert!(
         encrypted_objects
             .iter()
-            .any(|bytes| bytes.starts_with(b"FLUXHEIM-CACHE-ENC-v1\n"))
+            .any(|bytes| bytes.starts_with(b"FLUXHEIM-CACHE-ENC-v2\n"))
     );
     assert!(encrypted_objects.iter().all(|bytes| {
         !bytes

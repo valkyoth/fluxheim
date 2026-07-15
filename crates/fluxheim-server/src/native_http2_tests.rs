@@ -12,6 +12,29 @@ struct TransportDropProbe<T> {
     dropped: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
+struct HoldingHttp2BodyBudgetHandler {
+    budget: NativeRequestBodyBudget,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl NativeHttp2Handler for HoldingHttp2BodyBudgetHandler {
+    fn request_body_budget(&self) -> Option<NativeRequestBodyBudget> {
+        Some(self.budget.clone())
+    }
+
+    fn handle<'a>(
+        &'a self,
+        _request: NativeHttp2Request,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = NativeHttp2Response> + Send + 'a>> {
+        Box::pin(async move {
+            self.entered.notify_one();
+            self.release.notified().await;
+            NativeHttp2Response::no_content()
+        })
+    }
+}
+
 impl<T> Drop for TransportDropProbe<T> {
     fn drop(&mut self) {
         if let Some(dropped) = self.dropped.take() {
@@ -164,6 +187,66 @@ async fn native_http2_connection_passes_request_trailers_to_handler() {
 }
 
 #[tokio::test]
+async fn native_http2_rejects_aggregate_request_body_overcommit() {
+    let (server_io, client_io) = tokio::io::duplex(16 * 1024);
+    let handler = Arc::new(HoldingHttp2BodyBudgetHandler {
+        budget: NativeRequestBodyBudget::new(16 * 1024 * 1024),
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let server = tokio::spawn(serve_native_http2_connection_until_idle(
+        server_io,
+        DownstreamHttp2Policy::default(),
+        handler.clone(),
+        Duration::from_secs(1),
+    ));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        let _ = connection.await;
+    });
+
+    let first = http::Request::builder()
+        .uri("/first")
+        .header(http::header::CONTENT_LENGTH, "1")
+        .body(())
+        .unwrap();
+    let (first_response, mut first_body) = client.send_request(first, false).unwrap();
+    first_body
+        .send_data(bytes::Bytes::from_static(b"a"), true)
+        .unwrap();
+    handler.entered.notified().await;
+
+    client = client.ready().await.unwrap();
+    let second = http::Request::builder()
+        .uri("/second")
+        .header(http::header::CONTENT_LENGTH, "1")
+        .body(())
+        .unwrap();
+    let (second_response, mut second_body) = client.send_request(second, false).unwrap();
+    second_body
+        .send_data(bytes::Bytes::from_static(b"b"), true)
+        .unwrap();
+    let second_response = second_response.await.unwrap();
+    assert_eq!(
+        second_response.status(),
+        http::StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(
+        second_response.headers().get(http::header::RETRY_AFTER),
+        Some(&http::HeaderValue::from_static("1"))
+    );
+
+    handler.release.notify_one();
+    assert_eq!(
+        first_response.await.unwrap().status(),
+        http::StatusCode::NO_CONTENT
+    );
+    drop(client);
+    server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
 async fn native_http2_connection_times_out_slow_handler() {
     let (server_io, client_io) = tokio::io::duplex(4096);
     let policy = DownstreamHttp2Policy::default().with_handler_timeout(Duration::from_millis(10));
@@ -247,6 +330,7 @@ async fn native_http2_stack_probe_rejects_too_many_decoded_headers() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
         max_request_headers: 1,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
     });
     let server = tokio::spawn(native_http2_stack_probe(server_io, policy));
     let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
@@ -279,6 +363,7 @@ async fn native_http2_stack_probe_rejects_oversized_uri() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(4),
         max_request_headers: 16,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
     });
     let server = tokio::spawn(native_http2_stack_probe(server_io, policy));
     let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
@@ -374,6 +459,7 @@ async fn native_http2_stack_probe_rejects_oversized_request_body() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
         max_request_headers: 16,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(1),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(1),
     });
     let server = tokio::spawn(native_http2_stack_probe(server_io, policy));
     let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
@@ -423,6 +509,7 @@ async fn native_http2_bad_stream_does_not_abort_sibling_stream() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
         max_request_headers: 16,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(1),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(1),
     });
     let server = tokio::spawn(native_http2_stack_probe(server_io, policy));
     let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();

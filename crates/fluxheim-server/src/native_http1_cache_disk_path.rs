@@ -194,6 +194,22 @@ impl NativeSafeDiskCachePath {
         Ok(fd.into())
     }
 
+    pub(super) fn open_or_create_read_write_file(&self) -> std::io::Result<std::fs::File> {
+        let (_, name) = self.parent_and_name()?;
+        let parent = self.open_parent_dir()?;
+        let fd = rustix::fs::openat(
+            &parent,
+            name,
+            rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::RDWR
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .map_err(native_rustix_to_io_error)?;
+        Ok(fd.into())
+    }
+
     fn open_existing_dir(&self) -> std::io::Result<std::fs::File> {
         let fd = rustix::fs::open(
             &self.path,
@@ -241,6 +257,10 @@ impl NativeSafeDiskCachePath {
             destination_name,
         )
         .map_err(native_rustix_to_io_error)
+    }
+
+    pub(super) fn sync_parent_dir(&self) -> std::io::Result<()> {
+        self.open_parent_dir()?.sync_all()
     }
 
     pub(super) fn remove_file(&self) -> std::io::Result<()> {

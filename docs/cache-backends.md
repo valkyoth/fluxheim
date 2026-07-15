@@ -235,10 +235,11 @@ internal cache implementation.
   selection are in place. The release gate includes a storage-bin smoke that
   verifies live proxy traffic populates the bin/index files and returns `MISS`
   followed by `HIT`.
-- A root-local `.fluxheim-storage-bin-index-v1` records each combined cache key
-  and its `(bin_id, offset, len)` location. On startup Fluxheim reads the index,
-  validates each referenced object by parsing the v5 cache object bytes, rebuilds
-  the purge index, and reconstructs free ranges from the occupied locations.
+- A root-local `.fluxheim-storage-bin-index-v1` records each combined cache key,
+  or its SHA-256 lookup identity when encryption is enabled, and its
+  `(bin_id, offset, len)` location. On startup Fluxheim reads the index, validates
+  each referenced object by parsing the v5 cache object bytes, rebuilds the purge
+  index, and reconstructs free ranges from the occupied locations.
 - Storage-bin index writes are coalesced by one fallibly-created process-wide
   persistence worker and limited to one flush per second per cache root during
   insert, eviction, and purge bursts. Cache policies register weak persistence
@@ -305,8 +306,9 @@ internal cache implementation.
   systemd/container credential. The OpenBao Transit provider keeps key material
   outside Fluxheim, calls Transit encrypt/decrypt over HTTPS or loopback HTTP,
   and stores only the returned Transit ciphertext in the cache backend.
-  Encrypted objects bind the configured key id and combined cache key as
-  authenticated data. `examples/podman-compose-openbao.yml` and
+  Encrypted objects bind the configured key id as authenticated data and keep
+  the combined cache key inside the encrypted payload for post-decryption
+  identity validation. `examples/podman-compose-openbao.yml` and
   `scripts/smoke_openbao_cache_encryption.sh` provide an optional local
   OpenBao Transit smoke path for this provider; the script starts a dev OpenBao
   container, enables Transit, creates a cache key, and verifies a Fluxheim

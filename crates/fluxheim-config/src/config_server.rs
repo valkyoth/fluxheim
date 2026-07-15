@@ -7,12 +7,13 @@ use crate::config::{ByteSize, ConfigError, validate_config_list_len};
 use crate::config_net::{trusted_proxy_ipv6_prefix_broader_than_32, valid_trusted_proxy};
 use crate::config_path::{validate_optional_process_path, validate_required_process_path};
 use crate::config_server_defaults::{
-    default_https_redirect_status, default_listen, default_max_request_body_bytes,
-    default_max_request_header_bytes, default_max_request_headers, default_max_uri_bytes,
-    default_process_certificate_reload_sock, default_process_listener_tasks_per_fd,
-    default_process_max_retries, default_process_pid_file, default_process_threads,
-    default_process_upgrade_sock, default_process_upstream_keepalive_pool_size, default_true,
-    validate_process_optional_duration, validate_process_usize,
+    default_https_redirect_status, default_listen, default_max_buffered_request_body_bytes,
+    default_max_request_body_bytes, default_max_request_header_bytes, default_max_request_headers,
+    default_max_uri_bytes, default_process_certificate_reload_sock,
+    default_process_listener_tasks_per_fd, default_process_max_retries, default_process_pid_file,
+    default_process_threads, default_process_upgrade_sock,
+    default_process_upstream_keepalive_pool_size, default_true, validate_process_optional_duration,
+    validate_process_usize,
 };
 
 pub const MAX_SERVER_LISTENERS: usize = 64;
@@ -370,6 +371,8 @@ pub struct ServerLimitsConfig {
     pub max_request_headers: usize,
     #[serde(default = "default_max_request_body_bytes")]
     pub max_request_body_bytes: ByteSize,
+    #[serde(default = "default_max_buffered_request_body_bytes")]
+    pub max_buffered_request_body_bytes: ByteSize,
 }
 
 impl Default for ServerLimitsConfig {
@@ -379,6 +382,7 @@ impl Default for ServerLimitsConfig {
             max_uri_bytes: default_max_uri_bytes(),
             max_request_headers: default_max_request_headers(),
             max_request_body_bytes: default_max_request_body_bytes(),
+            max_buffered_request_body_bytes: default_max_buffered_request_body_bytes(),
         }
     }
 }
@@ -403,6 +407,12 @@ impl ServerLimitsConfig {
         if self.max_request_body_bytes.as_u64() == 0 {
             return Err(ConfigError::InvalidLimit {
                 field: "server.limits.max_request_body_bytes",
+            });
+        }
+        if self.max_buffered_request_body_bytes.as_u64() < self.max_request_body_bytes.as_u64() {
+            return Err(ConfigError::InvalidLimitRelationship {
+                field: "server.limits.max_buffered_request_body_bytes",
+                minimum_field: "server.limits.max_request_body_bytes",
             });
         }
 

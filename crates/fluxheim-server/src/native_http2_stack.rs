@@ -15,6 +15,7 @@ use crate::native_http2_response::send_native_http2_response;
 pub(crate) use crate::native_http2_response::{
     prohibited_http2_response_header, send_data_bounded, validate_response_headers,
 };
+use crate::response_retention::NativeResponseRetention;
 
 const BODY_PREALLOC_HINT_BYTES: usize = 64 * 1024;
 const PROBE_IDLE_TIMEOUT: Duration = Duration::from_millis(50);
@@ -34,6 +35,7 @@ pub struct NativeHttp2Response {
     pub(crate) headers: HeaderMap,
     pub(crate) body: Bytes,
     pub(crate) trailers: Option<HeaderMap>,
+    pub(crate) retention: Option<NativeResponseRetention>,
 }
 
 impl NativeHttp2Response {
@@ -43,6 +45,7 @@ impl NativeHttp2Response {
             headers: HeaderMap::new(),
             body: body.into(),
             trailers: None,
+            retention: None,
         }
     }
 
@@ -67,6 +70,11 @@ impl NativeHttp2Response {
         self
     }
 
+    pub(crate) fn with_retention(mut self, retention: Option<NativeResponseRetention>) -> Self {
+        self.retention = retention;
+        self
+    }
+
     #[cfg(test)]
     pub(crate) fn headers(&self) -> &HeaderMap {
         &self.headers
@@ -74,6 +82,10 @@ impl NativeHttp2Response {
 }
 
 pub trait NativeHttp2Handler: Send + Sync + 'static {
+    fn request_body_budget(&self) -> Option<crate::NativeRequestBodyBudget> {
+        None
+    }
+
     fn handle<'a>(
         &'a self,
         request: NativeHttp2Request,
@@ -262,6 +274,30 @@ where
     let method = request.method().clone();
     let uri = request.uri().clone();
     let headers = request.headers().clone();
+    let reservation_bytes = if request.body().is_end_stream() {
+        0
+    } else {
+        policy.max_body_bytes()
+    };
+    let _request_body_permit = if let Some(budget) = handler.request_body_budget() {
+        match budget.reserve(reservation_bytes).await {
+            Ok(permit) => permit,
+            Err(_) => {
+                send_native_http2_response(
+                    respond,
+                    NativeHttp2Response::new(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Bytes::from_static(b"request body capacity unavailable\n"),
+                    )
+                    .with_header(header::RETRY_AFTER, HeaderValue::from_static("1")),
+                )
+                .await?;
+                return Ok(());
+            }
+        }
+    } else {
+        None
+    };
     let body_capacity_hint = request_body_capacity_hint(request.headers(), policy.max_body_bytes());
     let (body, trailers) = match tokio::time::timeout(
         policy.request_body_timeout(),
@@ -366,6 +402,17 @@ fn validate_request(
         return Err(NativeHttp2StackError::UriTooLarge {
             len: uri_len,
             limit: policy.max_uri_bytes(),
+        });
+    }
+    if request
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|length| length > policy.max_body_bytes() as u64)
+    {
+        return Err(NativeHttp2StackError::BodyTooLarge {
+            limit: policy.max_body_bytes(),
         });
     }
     Ok(())

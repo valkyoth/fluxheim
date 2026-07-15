@@ -12,6 +12,7 @@ use fluxheim_web::{
     configured_web_path_contains_symlink, plan_static_response, static_cache_identity,
 };
 
+use crate::blocking_work::{NativeBlockingWorkClass, try_acquire_request_blocking_work};
 use crate::native_http1_cache::{
     NativeMemoryCacheEntry, NativeMemoryCacheState, lock_native_memory_cache,
     native_cache_body_sha256, native_cache_entry_weight, native_cache_ttl,
@@ -19,6 +20,7 @@ use crate::native_http1_cache::{
 };
 #[cfg(feature = "php-fpm")]
 use crate::native_http1_php::{NativePhpScriptResolution, NativePhpScriptResolve};
+use crate::response_retention::acquire_static_response_retention;
 use crate::{NativeHttp1Request, NativeHttp1Response};
 
 #[path = "native_http1_static_web_resolve.rs"]
@@ -33,6 +35,16 @@ use response::{
 
 const MAX_DIRECTORY_LISTING_ENTRIES: usize = 4096;
 const MAX_NATIVE_STATIC_BODY_BYTES: u64 = 64 * 1024 * 1024;
+
+fn static_response_capacity_unavailable() -> NativeHttp1Response {
+    NativeHttp1Response::new(
+        503,
+        "Service Unavailable",
+        b"static response capacity unavailable\n",
+    )
+    .with_retry_after_secs(1)
+    .close_connection()
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeHttp1StaticWeb {
@@ -153,6 +165,40 @@ impl NativeHttp1StaticWeb {
             })
     }
 
+    pub async fn handle_async(
+        &self,
+        request: &NativeHttp1Request,
+        request_path: &str,
+    ) -> NativeHttp1Response {
+        let Ok(blocking_permit) =
+            try_acquire_request_blocking_work(NativeBlockingWorkClass::Static)
+        else {
+            return static_response_capacity_unavailable();
+        };
+        let web = self.clone();
+        let request = request.clone();
+        let request_path = request_path.to_owned();
+        match tokio::task::spawn_blocking(move || {
+            let _blocking_permit = blocking_permit;
+            web.handle(&request, &request_path)
+        })
+        .await
+        {
+            Ok(response) => {
+                let Ok(retention) = acquire_static_response_retention(response.body().len()).await
+                else {
+                    return static_response_capacity_unavailable();
+                };
+                response.with_retention(retention)
+            }
+            Err(error) => {
+                log::error!(target: "fluxheim::native_http1", "static response task failed: {error}");
+                NativeHttp1Response::new(500, "Internal Server Error", b"internal error\n")
+                    .close_connection()
+            }
+        }
+    }
+
     pub fn handle_optional(
         &self,
         request: &NativeHttp1Request,
@@ -162,6 +208,29 @@ impl NativeHttp1StaticWeb {
             return None;
         }
         self.handle_static_request(request, request_path)
+    }
+
+    pub async fn handle_optional_async(
+        &self,
+        request: &NativeHttp1Request,
+        request_path: &str,
+    ) -> Option<NativeHttp1Response> {
+        let blocking_permit =
+            try_acquire_request_blocking_work(NativeBlockingWorkClass::Static).ok()?;
+        let web = self.clone();
+        let request = request.clone();
+        let request_path = request_path.to_owned();
+        let response = tokio::task::spawn_blocking(move || {
+            let _blocking_permit = blocking_permit;
+            web.handle_optional(&request, &request_path)
+        })
+        .await
+        .ok()
+        .flatten()?;
+        let retention = acquire_static_response_retention(response.body().len())
+            .await
+            .ok()?;
+        Some(response.with_retention(retention))
     }
 
     fn handle_static_request(
@@ -226,6 +295,30 @@ impl NativeHttp1StaticWeb {
             StaticResponseConditions::default(),
             Some(status),
         )
+    }
+
+    pub async fn handle_error_page_async(
+        &self,
+        request: &NativeHttp1Request,
+        request_path: &str,
+        status: u16,
+    ) -> Option<NativeHttp1Response> {
+        let blocking_permit =
+            try_acquire_request_blocking_work(NativeBlockingWorkClass::Static).ok()?;
+        let web = self.clone();
+        let request = request.clone();
+        let request_path = request_path.to_owned();
+        let response = tokio::task::spawn_blocking(move || {
+            let _blocking_permit = blocking_permit;
+            web.handle_error_page(&request, &request_path, status)
+        })
+        .await
+        .ok()
+        .flatten()?;
+        let retention = acquire_static_response_retention(response.body().len())
+            .await
+            .ok()?;
+        Some(response.with_retention(retention))
     }
 
     #[cfg(feature = "php-fpm")]

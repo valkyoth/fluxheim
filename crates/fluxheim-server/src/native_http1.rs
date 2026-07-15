@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fluxheim_protocol::{
-    Http1ConnectionDirective, Http1HeadLimits, Http1Header, Http1ParseError,
+    Http1BodyFraming, Http1ConnectionDirective, Http1HeadLimits, Http1Header, Http1ParseError,
     parse_http1_request_head,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
@@ -93,6 +93,10 @@ pub type NativeHttp1ConnectionStream = Box<dyn NativeHttp1ConnectionIo>;
 
 pub trait NativeHttp1Handler: Send + Sync + 'static {
     fn pin_request_handler(&self) -> Option<Arc<dyn NativeHttp1Handler>> {
+        None
+    }
+
+    fn request_body_budget(&self) -> Option<crate::NativeRequestBodyBudget> {
         None
     }
 
@@ -214,6 +218,7 @@ where
                 owned_request_from_head(&head, peer_addr, &request_context),
             )
         };
+        let request_body_budget = handler.request_body_budget();
         let pinned_handler = handler.pin_request_handler();
         let request_handler = pinned_handler
             .as_deref()
@@ -221,6 +226,45 @@ where
         let request_body_timeout = request_handler
             .request_body_timeout(&request)
             .unwrap_or(policy.request_body_timeout());
+        let reservation_bytes = match body_framing {
+            Http1BodyFraming::NoBody => 0,
+            Http1BodyFraming::ContentLength(length) => {
+                let Ok(length) = usize::try_from(length) else {
+                    write_response(
+                        &mut stream,
+                        NativeHttp1Response::new(413, "Payload Too Large", b"payload too large\n")
+                            .close_connection(),
+                        true,
+                    )
+                    .await?;
+                    return Ok(());
+                };
+                length
+            }
+            Http1BodyFraming::Chunked => policy.max_body_bytes(),
+        };
+        let _request_body_permit = if let Some(budget) = request_body_budget {
+            match budget.reserve(reservation_bytes).await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    write_response(
+                        &mut stream,
+                        NativeHttp1Response::new(
+                            503,
+                            "Service Unavailable",
+                            b"request body capacity unavailable\n",
+                        )
+                        .with_retry_after_secs(1)
+                        .close_connection(),
+                        true,
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+        } else {
+            None
+        };
         let body = match read_body(
             policy,
             request_body_timeout,

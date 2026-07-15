@@ -27,16 +27,16 @@ pub(crate) fn native_error_pages_from_config(
     Ok(pages)
 }
 
-pub(crate) fn native_error_page_response(
+pub(crate) async fn native_error_page_response(
     pages: &[NativeHttp1ProxyErrorPage],
     response_write_policy: NativeHttp1ResponseWritePolicy,
     request: &NativeHttp1Request,
     status: u16,
 ) -> Option<NativeHttp1Response> {
-    pages
-        .iter()
-        .find(|page| page.status == status)
-        .and_then(|page| page.web.handle_error_page(request, &page.path, status))
+    let page = pages.iter().find(|page| page.status == status)?;
+    page.web
+        .handle_error_page_async(request, &page.path, status)
+        .await
         .map(|response| response.with_write_policy(response_write_policy))
         .map(NativeHttp1Response::close_connection)
 }

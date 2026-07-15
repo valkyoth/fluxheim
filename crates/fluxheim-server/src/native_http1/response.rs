@@ -7,6 +7,7 @@ use tokio::time::timeout;
 
 use crate::NativeHttp1Error;
 use crate::native_http1_response_metadata::{NativeCacheStatus, NativeProxyStatusError};
+use crate::response_retention::NativeResponseRetention;
 
 const WRITE_CHUNK_BYTES: usize = 8192;
 
@@ -24,13 +25,24 @@ pub struct NativeHttp1Response {
     cache_status_metadata_emitted: bool,
     proxy_status_metadata_emitted: bool,
     write_policy: NativeHttp1ResponseWritePolicy,
+    retention: Option<NativeResponseRetention>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeHttp1ResponseWritePolicy {
     write_timeout: Option<Duration>,
     total_response_timeout: Option<Duration>,
     min_send_rate_bytes_per_sec: Option<usize>,
+}
+
+impl Default for NativeHttp1ResponseWritePolicy {
+    fn default() -> Self {
+        Self {
+            write_timeout: Some(Duration::from_secs(30)),
+            total_response_timeout: Some(Duration::from_secs(300)),
+            min_send_rate_bytes_per_sec: Some(8 * 1024),
+        }
+    }
 }
 
 impl NativeHttp1Response {
@@ -48,6 +60,7 @@ impl NativeHttp1Response {
             cache_status_metadata_emitted: false,
             proxy_status_metadata_emitted: false,
             write_policy: NativeHttp1ResponseWritePolicy::default(),
+            retention: None,
         }
     }
 
@@ -73,6 +86,15 @@ impl NativeHttp1Response {
     pub const fn with_write_policy(mut self, policy: NativeHttp1ResponseWritePolicy) -> Self {
         self.write_policy = policy;
         self
+    }
+
+    pub(crate) fn with_retention(mut self, retention: NativeResponseRetention) -> Self {
+        self.retention = Some(retention);
+        self
+    }
+
+    pub(crate) fn retention(&self) -> Option<NativeResponseRetention> {
+        self.retention.clone()
     }
 
     pub const fn status(&self) -> u16 {
@@ -358,4 +380,80 @@ fn sanitize_reason_phrase(reason: &str) -> impl Iterator<Item = char> + '_ {
         .bytes()
         .filter(|byte| matches!(byte, 0x09 | 0x20..=0x7e))
         .map(char::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    use tokio::io::AsyncWrite;
+
+    use super::*;
+
+    struct StalledWriter;
+
+    impl AsyncWrite for StalledWriter {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+            _buffer: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            Poll::Pending
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Pending
+        }
+
+        fn poll_shutdown(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[test]
+    fn default_response_policy_is_bounded() {
+        let policy = NativeHttp1ResponseWritePolicy::default();
+        assert_eq!(policy.write_timeout(), Some(Duration::from_secs(30)));
+        assert_eq!(
+            policy.total_response_timeout(),
+            Some(Duration::from_secs(300))
+        );
+        assert_eq!(policy.min_send_rate_bytes_per_sec(), Some(8 * 1024));
+    }
+
+    #[tokio::test]
+    async fn stalled_response_writer_is_terminated_by_policy() {
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let retention =
+            crate::response_retention::acquire_static_response_retention_from(slots.clone(), 1)
+                .await
+                .unwrap();
+        let mut writer = StalledWriter;
+        let response = NativeHttp1Response::new(200, "OK", vec![0_u8; 1024])
+            .with_write_policy(NativeHttp1ResponseWritePolicy::new(
+                Some(Duration::from_millis(5)),
+                Some(Duration::from_millis(20)),
+                Some(1),
+            ))
+            .with_retention(retention);
+
+        let error = write_response(&mut writer, response, true)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, NativeHttp1Error::Io(error) if error.kind() == std::io::ErrorKind::TimedOut)
+        );
+        assert!(
+            crate::response_retention::acquire_static_response_retention_from(slots, 1)
+                .await
+                .is_ok()
+        );
+    }
 }

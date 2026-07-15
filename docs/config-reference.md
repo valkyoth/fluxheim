@@ -95,6 +95,7 @@ max_request_header_bytes = "64KiB"
 max_uri_bytes = "8KiB"
 max_request_headers = 100
 max_request_body_bytes = "16MiB"
+max_buffered_request_body_bytes = "1GiB"
 
 [server.process]
 daemon = false
@@ -121,6 +122,12 @@ strict = false
 
 Notes:
 
+- `max_request_body_bytes` limits one buffered downstream request body.
+  `max_buffered_request_body_bytes` is the process-wide admission budget shared
+  by HTTP/1 and HTTP/2; it defaults to `1GiB` and must be at least as large as
+  every configured server, vhost, and route body limit. Fluxheim reserves
+  capacity before reading and returns `503` with `Retry-After: 1` while the
+  aggregate budget remains occupied. Tune it to available service memory.
 - `listen` and `tls_listen` cannot both be empty unless `[stream].enabled =
   true` supplies dedicated TCP stream listeners.
 - `server.process.upstream_keepalive_pool_size` is a per-native-upstream idle
@@ -2490,16 +2497,20 @@ supported mechanism for sharing cache warmth between independent roots.
 before they are written to the filesystem or storage-bin backend. The local key
 must be a 64-character hex-encoded 256-bit key loaded from exactly one of
 `key_file` or `key_credential`; credential names are resolved through
-`$CREDENTIALS_DIRECTORY` when present or `/run/secrets` otherwise. `key_id`
-is stored with the encrypted object and is included with the combined cache key
-as authenticated data, so objects cannot be silently swapped between cache
-keys. Local cache encryption is intended for cache-at-rest protection; it does
-not encrypt memory cache contents.
-Because the local provider uses random AES-GCM nonces, rotate local cache keys
-before roughly `2^32` object-encryption invocations per key. Fluxheim logs a
-security warning when one process approaches that bound, but scheduled key
-rotation is still required for long-lived high-write deployments because the
-runtime counter resets on restart.
+`$CREDENTIALS_DIRECTORY` when present or `/run/secrets` otherwise. `key_id` is
+stored with the encrypted object as authenticated data. The combined cache key
+remains inside the encrypted payload, and encrypted storage-bin indexes persist
+only its SHA-256 lookup identity, so cache URLs and query values are not exposed
+by object or index metadata. Decrypted objects are validated against the
+requested cache identity before use. Local cache encryption is intended for
+cache-at-rest protection; it does not encrypt memory cache contents.
+Because the local provider uses random AES-GCM nonces, Fluxheim maintains a
+root-local, locked, durable invocation counter for each local key. Encryption
+fails closed at `2^32` object-encryption invocations per key and logs a security
+warning before that bound. The counter survives process restarts and is shared
+by processes using the same cache root. Preserve hidden
+`.fluxheim-gcm-*.counter` files while a key remains active and rotate keys on a
+schedule for long-lived high-write deployments.
 Filesystem disk-cache fills with the local provider encrypt streamed objects in
 bounded AEAD chunks, so enabling local encryption does not require Fluxheim to
 copy a complete streamed origin response back into heap before committing it to
@@ -2511,9 +2522,10 @@ that need centralized key custody and rotation. Fluxheim calls the Transit
 returned `vault:v...` ciphertext in the filesystem or storage-bin backend. The
 OpenBao endpoint must be HTTPS unless it is loopback HTTP, and the token must
 come from exactly one safe `token_file` or `token_credential` source. The
-configured key id plus combined cache key are passed as associated data, so a
-stored ciphertext is bound to the cache object identity. The default local-key
-provider does not require OpenBao. Transit calls do not follow HTTP redirects,
+configured key id is associated data; the combined cache identity is encrypted
+inside the object and checked after decryption, so substituted objects are
+discarded without exposing cache URLs in envelope metadata. The default
+local-key provider does not require OpenBao. Transit calls do not follow HTTP redirects,
 and Transit JSON responses are read with an explicit size limit before parsing.
 OpenBao Transit accepts a single plaintext value per `encrypt` request, so
 Fluxheim bounds concurrent OpenBao encrypted commit heap usage and may refuse a

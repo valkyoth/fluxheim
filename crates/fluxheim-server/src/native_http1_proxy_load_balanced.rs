@@ -386,6 +386,7 @@ impl NativeHttp1Proxy {
                         &request,
                         status,
                     )
+                    .await
                     .unwrap_or_else(|| {
                         NativeHttp1Response::new(
                             status,
@@ -646,6 +647,7 @@ impl NativeHttp1Proxy {
             &request,
             status,
         )
+        .await
         .unwrap_or_else(|| {
             if status == 504 {
                 NativeHttp1Response::new(504, "Gateway Timeout", b"gateway timeout\n")

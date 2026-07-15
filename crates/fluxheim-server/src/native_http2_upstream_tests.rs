@@ -105,6 +105,7 @@ async fn native_http2_upstream_rejects_oversized_response_body() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
         max_request_headers: 16,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(1),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(1),
     });
 
     let error = send_native_http2_upstream_on_io(client_io, policy, request)
@@ -214,6 +215,7 @@ async fn native_http2_upstream_rejects_too_many_response_headers() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
         max_request_headers: 1,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
     });
 
     let error = send_native_http2_upstream_on_io(client_io, policy, request)

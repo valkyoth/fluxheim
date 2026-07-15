@@ -220,6 +220,7 @@ impl NativePhpFpmRoute {
                 intercept_status: Some(status),
             }) => self
                 .error_page_response(&request, status)
+                .await
                 .unwrap_or(response),
             Err(error) => {
                 log::warn!(target: "fluxheim::native_http1", "native php-fpm request failed: {error}");
@@ -273,15 +274,15 @@ impl NativePhpFpmRoute {
             )
     }
 
-    fn error_page_response(
+    async fn error_page_response(
         &self,
         request: &NativeHttp1Request,
         status: u16,
     ) -> Option<NativeHttp1Response> {
-        self.error_pages
-            .iter()
-            .find(|page| page.status == status)
-            .and_then(|page| page.web.handle_error_page(request, &page.path, status))
+        let page = self.error_pages.iter().find(|page| page.status == status)?;
+        page.web
+            .handle_error_page_async(request, &page.path, status)
+            .await
             .map(NativeHttp1Response::close_connection)
     }
 }

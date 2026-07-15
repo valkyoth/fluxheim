@@ -9,6 +9,7 @@ use fluxheim_cache::{
     StorageBinFreeMap, StorageBinIndexEntry, StorageBinLayoutPlan, StorageBinObjectLocation,
     parse_disk_cache_object, read_storage_bin_index, write_storage_bin_index,
 };
+use sha2::{Digest as _, Sha256};
 
 use super::native_http1_cache_meta::{NativeDiskCacheMeta, native_memory_entry_from_disk_object};
 use super::{
@@ -39,12 +40,14 @@ struct NativeStorageBinIndexTask {
     state: Arc<Mutex<NativeDiskCacheState>>,
     dirty: AtomicBool,
     flush_lock: Mutex<()>,
+    encrypted: bool,
 }
 
 impl NativeStorageBinIndexFlush {
     pub(super) fn start(
         backend: &NativeDiskCacheBackend,
         state: &Arc<Mutex<NativeDiskCacheState>>,
+        encrypted: bool,
     ) -> std::io::Result<Option<Self>> {
         let NativeDiskCacheBackend::StorageBin(storage_bin) = backend else {
             return Ok(None);
@@ -55,6 +58,7 @@ impl NativeStorageBinIndexFlush {
             state: Arc::clone(state),
             dirty: AtomicBool::new(false),
             flush_lock: Mutex::new(()),
+            encrypted,
         });
         service.register(&task);
         Ok(Some(Self { task }))
@@ -117,7 +121,7 @@ impl NativeStorageBinIndexTask {
             return;
         }
         let entries = match self.state.lock() {
-            Ok(state) => native_storage_bin_index_entries(&state),
+            Ok(state) => native_storage_bin_index_entries(&state, self.encrypted),
             Err(error) => {
                 log::error!(
                     target: "fluxheim::security",
@@ -174,7 +178,10 @@ fn native_storage_bin_index_flush_worker(
     }
 }
 
-fn native_storage_bin_index_entries(state: &NativeDiskCacheState) -> Vec<StorageBinIndexEntry> {
+fn native_storage_bin_index_entries(
+    state: &NativeDiskCacheState,
+    encrypted: bool,
+) -> Vec<StorageBinIndexEntry> {
     state
         .objects
         .iter()
@@ -183,7 +190,11 @@ fn native_storage_bin_index_entries(state: &NativeDiskCacheState) -> Vec<Storage
                 return None;
             };
             Some(StorageBinIndexEntry {
-                combined_key: combined_key.clone(),
+                combined_key: if encrypted {
+                    native_storage_bin_confidential_index_key(combined_key)
+                } else {
+                    combined_key.clone()
+                },
                 location: *location,
                 accessed: record.accessed_at,
             })
@@ -236,7 +247,17 @@ impl NativeDiskCache {
                 Ok(parsed) => parsed,
                 Err(_) => continue,
             };
-            if parsed.combined_key.as_deref() != Some(entry.combined_key.as_str()) {
+            let Some(parsed_combined_key) = parsed.combined_key.as_deref() else {
+                continue;
+            };
+            let expected_index_key = if self.encryption.is_some() {
+                native_storage_bin_confidential_index_key(parsed_combined_key)
+            } else {
+                parsed_combined_key.to_owned()
+            };
+            if expected_index_key != entry.combined_key
+                && parsed_combined_key != entry.combined_key.as_str()
+            {
                 continue;
             }
             let Some(primary) = parsed.primary_key.clone() else {
@@ -248,7 +269,7 @@ impl NativeDiskCache {
             if native_memory_entry_from_disk_object(&parsed).is_none() {
                 continue;
             }
-            let combined = entry.combined_key.clone();
+            let combined = parsed_combined_key.to_owned();
             state.bytes = state.bytes.saturating_add(entry.location.len);
             state.insert_object(
                 combined.clone(),
@@ -317,5 +338,44 @@ impl NativeDiskCache {
         if let Some(index_flush) = &self.index_flush {
             index_flush.mark_dirty();
         }
+    }
+}
+
+fn native_storage_bin_confidential_index_key(combined_key: &str) -> String {
+    let digest = Sha256::digest(combined_key.as_bytes());
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(encoded, "{byte:02x}");
+    }
+    encoded
+}
+
+#[cfg(test)]
+mod confidential_index_tests {
+    use super::*;
+
+    #[test]
+    fn encrypted_index_entries_do_not_persist_combined_keys() {
+        let mut state = NativeDiskCacheState::default();
+        let combined_key = "private.example/account?token=secret";
+        state.insert_object(
+            combined_key.to_owned(),
+            NativeDiskCacheRecord {
+                location: NativeDiskCacheLocation::StorageBin(StorageBinObjectLocation {
+                    bin_id: 0,
+                    offset: 0,
+                    len: 128,
+                }),
+                weight: 128,
+                accessed_at: std::time::SystemTime::UNIX_EPOCH,
+            },
+        );
+
+        let entries = native_storage_bin_index_entries(&state, true);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].combined_key.len(), 64);
+        assert_ne!(entries[0].combined_key, combined_key);
     }
 }

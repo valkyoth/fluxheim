@@ -75,7 +75,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Memory cache | ✅ | Bounded in-memory cache tier. |
 | Disk cache | ✅ | Filesystem and storage-bin disk backends with ordered eviction, one process-wide persistence worker, pre-initialization advisory lease enforcement, live inspection, fail-closed lookup admission, and coalesced durable index writes. |
 | Tiered cache | ✅ | Memory plus disk storage plans. |
-| Encrypted disk cache | ✅ | Optional local-key and OpenBao transit encryption paths. |
+| Encrypted disk cache | ✅ | Optional local-key and OpenBao transit encryption paths; confidential v2 object/index metadata and durable fail-closed local AES-GCM invocation accounting. |
 | Static-file cache | ✅ | Optional local static-file caching. |
 | Range and slice cache | ✅ | Bounded range caching and fixed-slice composition for large objects. |
 | Peer fill | ✅ | Optional peer-assisted cache fill for cache-edge deployments. |

@@ -26,6 +26,10 @@ pub(crate) fn default_max_request_body_bytes() -> ByteSize {
     ByteSize::from_bytes(16 * 1024 * 1024)
 }
 
+pub(crate) fn default_max_buffered_request_body_bytes() -> ByteSize {
+    ByteSize::from_bytes(1024 * 1024 * 1024)
+}
+
 pub(crate) fn default_process_pid_file() -> PathBuf {
     default_process_runtime_path("fluxheim.pid")
 }

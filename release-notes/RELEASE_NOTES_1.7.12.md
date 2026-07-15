@@ -159,6 +159,26 @@ trailers are not part of this release.
 - Bound storage-bin manifests to 4 KiB and use no-follow, nonblocking regular
   file reads so oversized or special persistent files fail closed at startup.
 
+## Native Buffer and Cache-Encryption Hardening
+
+- Add `server.limits.max_buffered_request_body_bytes`, defaulting to `1GiB`, as
+  one weighted process-wide admission budget shared by HTTP/1 and HTTP/2.
+  Fluxheim reserves capacity before buffering and returns a bounded `503` with
+  retry guidance when concurrent bodies exhaust the budget.
+- Move static-file resolution and reads to the bounded blocking-work pool and
+  cap retained static response bodies with a weighted 256 MiB process-wide
+  budget. The permit follows an HTTP/1 response through HTTP/2 adaptation and
+  remains held until the downstream write completes.
+- Give generic native HTTP/1 responses bounded defaults: a 30-second write
+  timeout, a 300-second total response lifetime, and an 8 KiB/s minimum send
+  rate. Explicit proxy policies continue to override these defaults.
+- Write confidential disk-cache envelope v2 objects without plaintext combined
+  cache keys. Encrypted storage-bin indexes now store SHA-256 lookup identities,
+  while legacy v1 envelopes and legacy indexes remain readable for migration.
+- Replace advisory process-local AES-GCM invocation tracking with a locked,
+  durable per-key counter in the cache root. Local encryption warns before
+  and fails closed at the `2^32` random-nonce invocation bound across restarts.
+
 ## Socket-Activation Hardening
 
 - Bound `LISTEN_FDS` to 1 through 128 inside the focused systemd adoption crate

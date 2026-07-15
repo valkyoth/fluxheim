@@ -8,8 +8,32 @@ use fluxheim_protocol::Http1Version;
 
 use crate::{
     DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1GeoContext,
-    NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, serve_native_http1_connection,
+    NativeHttp1Handler, NativeHttp1Request, NativeHttp1Response, NativeRequestBodyBudget,
+    serve_native_http1_connection,
 };
+
+struct HoldingBodyBudgetHandler {
+    budget: NativeRequestBodyBudget,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl NativeHttp1Handler for HoldingBodyBudgetHandler {
+    fn request_body_budget(&self) -> Option<NativeRequestBodyBudget> {
+        Some(self.budget.clone())
+    }
+
+    fn handle<'a>(
+        &'a self,
+        _request: NativeHttp1Request,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = NativeHttp1Response> + Send + 'a>> {
+        Box::pin(async move {
+            self.entered.notify_one();
+            self.release.notified().await;
+            NativeHttp1Response::new(200, "OK", b"ok\n").close_connection()
+        })
+    }
+}
 
 pub(crate) async fn spawn_server(
     handler: impl Fn(NativeHttp1Request) -> NativeHttp1Response + Send + Sync + 'static,
@@ -454,6 +478,7 @@ async fn native_http1_returns_431_when_request_header_count_exceeds_limit() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(512),
         max_request_headers: 1,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(16),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(16),
     });
     let addr = spawn_server_with_policy(policy, |_| {
         NativeHttp1Response::new(200, "OK", b"unexpected")
@@ -471,4 +496,60 @@ async fn native_http1_returns_431_when_request_header_count_exceeds_limit() {
 
     assert!(response.starts_with("HTTP/1.1 431 Request Header Fields Too Large\r\n"));
     assert!(response.ends_with("request header fields too large\n"));
+}
+
+#[tokio::test]
+async fn native_http1_rejects_aggregate_request_body_overcommit() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let handler = Arc::new(HoldingBodyBudgetHandler {
+        budget: NativeRequestBodyBudget::new(64 * 1024),
+        entered: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let server_handler = handler.clone();
+    let server = tokio::spawn(async move {
+        let mut tasks = Vec::new();
+        for _ in 0..2 {
+            let (stream, peer) = listener.accept().await.unwrap();
+            let handler = server_handler.clone();
+            tasks.push(tokio::spawn(serve_native_http1_connection(
+                stream,
+                Some(peer),
+                DownstreamHttp1Policy::default(),
+                handler,
+            )));
+        }
+        for task in tasks {
+            task.await.unwrap().unwrap();
+        }
+    });
+
+    let mut first = TcpStream::connect(address).await.unwrap();
+    first
+        .write_all(
+            b"POST /first HTTP/1.1\r\nHost: local.test\r\nContent-Length: 1\r\nConnection: close\r\n\r\na",
+        )
+        .await
+        .unwrap();
+    handler.entered.notified().await;
+
+    let mut second = TcpStream::connect(address).await.unwrap();
+    second
+        .write_all(
+            b"POST /second HTTP/1.1\r\nHost: local.test\r\nContent-Length: 1\r\nConnection: close\r\n\r\nb",
+        )
+        .await
+        .unwrap();
+    let response = read_response(&mut second).await;
+    assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(response.contains("retry-after: 1\r\n"));
+
+    handler.release.notify_one();
+    assert!(
+        read_response(&mut first)
+            .await
+            .starts_with("HTTP/1.1 200 OK\r\n")
+    );
+    server.await.unwrap();
 }

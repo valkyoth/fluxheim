@@ -39,7 +39,8 @@ use native_http1_cache_disk_path::{
     native_cache_path_contains_symlink, native_disk_cache_read_limit, read_native_disk_cache_file,
 };
 use native_http1_cache_encryption::{
-    NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1, NativeDiskCacheEncryption,
+    NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1, NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V2,
+    NativeDiskCacheEncryption,
 };
 pub use native_http1_cache_inspect::inspect_native_disk_cache_object;
 pub(crate) use native_http1_cache_memory::{
@@ -126,17 +127,18 @@ impl NativeDiskCache {
                 return None;
             }
         };
-        let encryption = match NativeDiskCacheEncryption::from_config(&config.disk.encryption) {
-            Ok(encryption) => encryption,
-            Err(error) => {
-                log::error!(
-                    target: "fluxheim::native_http1",
-                    "native disk cache encryption {}: {error}",
-                    root.display()
-                );
-                return None;
-            }
-        };
+        let encryption =
+            match NativeDiskCacheEncryption::from_config(&config.disk.encryption, &root) {
+                Ok(encryption) => encryption,
+                Err(error) => {
+                    log::error!(
+                        target: "fluxheim::native_http1",
+                        "native disk cache encryption {}: {error}",
+                        root.display()
+                    );
+                    return None;
+                }
+            };
         let mut cache = Self {
             root,
             max_bytes: config.disk.max_size_bytes.as_u64(),
@@ -154,11 +156,15 @@ impl NativeDiskCache {
                 cache.root.display()
             );
         }
-        cache.index_flush = NativeStorageBinIndexFlush::start(&cache.backend, &cache.state)
-            .inspect_err(|error| {
-                log::error!(target: "fluxheim::native_http1", "cache index service: {error}");
-            })
-            .ok()?;
+        cache.index_flush = NativeStorageBinIndexFlush::start(
+            &cache.backend,
+            &cache.state,
+            cache.encryption.is_some(),
+        )
+        .inspect_err(|error| {
+            log::error!(target: "fluxheim::native_http1", "cache index service: {error}");
+        })
+        .ok()?;
         cache.persist_storage_bin_index();
         Some(cache)
     }
@@ -446,6 +452,8 @@ impl NativeDiskCache {
             None => {
                 if bytes.get(..NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1.len())
                     == Some(NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V1)
+                    || bytes.get(..NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V2.len())
+                        == Some(NATIVE_DISK_CACHE_ENCRYPTED_MAGIC_V2)
                 {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,

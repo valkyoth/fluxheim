@@ -122,6 +122,7 @@ async fn native_http1_enforces_configured_body_limit() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
         max_request_headers: 32,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(4),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(4),
     });
     let addr = spawn_server_with_policy(policy, |_| {
         NativeHttp1Response::new(200, "OK", b"unexpected")
@@ -148,6 +149,7 @@ async fn rejects_header_bytes_over_global_limit() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
         max_request_headers: 32,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(1024),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(1024),
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

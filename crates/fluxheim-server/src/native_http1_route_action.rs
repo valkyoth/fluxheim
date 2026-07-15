@@ -79,7 +79,7 @@ impl NativeHttp1RouteAction {
                     return NativeHttp1Response::new(400, "Bad Request", b"bad request\n")
                         .close_connection();
                 };
-                web.handle(&request, &path)
+                web.handle_async(&request, &path).await
             }
         }
     }

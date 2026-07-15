@@ -19,6 +19,7 @@ fn parses_server_limits() {
             max_uri_bytes = 4096
             max_request_headers = 32
             max_request_body_bytes = "2MiB"
+            max_buffered_request_body_bytes = "8MiB"
             "#,
     )
     .unwrap();
@@ -35,6 +36,10 @@ fn parses_server_limits() {
     assert_eq!(
         config.server.limits.max_request_body_bytes,
         ByteSize::from_bytes(2 * 1024 * 1024)
+    );
+    assert_eq!(
+        config.server.limits.max_buffered_request_body_bytes,
+        ByteSize::from_bytes(8 * 1024 * 1024)
     );
     assert_eq!(
         config.server.trusted_proxies,
@@ -121,6 +126,26 @@ fn rejects_zero_server_limits() {
         config.validate(),
         Err(ConfigError::InvalidLimit {
             field: "server.limits.max_uri_bytes"
+        })
+    );
+}
+
+#[test]
+fn rejects_aggregate_body_budget_below_per_request_limit() {
+    let config: Config = toml::from_str(
+        r#"
+            [server.limits]
+            max_request_body_bytes = "8MiB"
+            max_buffered_request_body_bytes = "4MiB"
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidLimitRelationship {
+            field: "server.limits.max_buffered_request_body_bytes",
+            minimum_field: "server.limits.max_request_body_bytes",
         })
     );
 }

@@ -11,6 +11,7 @@ const MAX_WASM_BLOCKING_WORK: usize = 96;
 #[cfg(any(test, feature = "wasm"))]
 const MAX_WASM_PREVIEW_BLOCKING_WORK: usize = 32;
 const MAX_DISK_CACHE_BLOCKING_WORK: usize = 32;
+const MAX_STATIC_BLOCKING_WORK: usize = 8;
 #[cfg(any(test, all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
 const MAX_MIRROR_BLOCKING_WORK: usize = 8;
 const MAX_CRITICAL_BLOCKING_WORK: usize = 32;
@@ -26,6 +27,7 @@ pub(crate) enum NativeBlockingWorkClass {
     #[cfg(any(test, feature = "wasm"))]
     WasmPreview,
     DiskCache,
+    Static,
     #[cfg(any(test, all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
     Mirror,
     Critical,
@@ -48,6 +50,7 @@ struct NativeRequestBlockingWorkBudgets {
     #[cfg(any(test, feature = "wasm"))]
     wasm_preview: Arc<Semaphore>,
     disk_cache: Arc<Semaphore>,
+    static_web: Arc<Semaphore>,
     #[cfg(any(test, all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
     mirror: Arc<Semaphore>,
     critical: Arc<Semaphore>,
@@ -65,6 +68,7 @@ impl NativeRequestBlockingWorkBudgets {
             #[cfg(any(test, feature = "wasm"))]
             wasm_preview: Arc::new(Semaphore::new(MAX_WASM_PREVIEW_BLOCKING_WORK)),
             disk_cache: Arc::new(Semaphore::new(MAX_DISK_CACHE_BLOCKING_WORK)),
+            static_web: Arc::new(Semaphore::new(MAX_STATIC_BLOCKING_WORK)),
             #[cfg(any(test, all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
             mirror: Arc::new(Semaphore::new(MAX_MIRROR_BLOCKING_WORK)),
             critical: Arc::new(Semaphore::new(MAX_CRITICAL_BLOCKING_WORK)),
@@ -80,6 +84,7 @@ impl NativeRequestBlockingWorkBudgets {
             #[cfg(any(test, feature = "wasm"))]
             NativeBlockingWorkClass::WasmPreview => &self.wasm_preview,
             NativeBlockingWorkClass::DiskCache => &self.disk_cache,
+            NativeBlockingWorkClass::Static => &self.static_web,
             #[cfg(any(test, all(feature = "traffic-mirror", not(feature = "privacy-mode"))))]
             NativeBlockingWorkClass::Mirror => &self.mirror,
             NativeBlockingWorkClass::Critical => &self.critical,
@@ -162,6 +167,7 @@ mod tests {
                 .try_acquire(NativeBlockingWorkClass::DiskCache)
                 .is_ok()
         );
+        assert!(budgets.try_acquire(NativeBlockingWorkClass::Static).is_ok());
         assert!(
             budgets
                 .try_acquire(NativeBlockingWorkClass::Critical)

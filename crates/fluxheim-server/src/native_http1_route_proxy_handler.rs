@@ -282,7 +282,7 @@ impl NativeHttp1Handler for NativeHttp1RouteProxy {
                     .apply_digests_for_method(&response_metadata_method, &mut response);
                 return response;
             }
-            if let Some(response) = self.fallback_web_response(&request, &path) {
+            if let Some(response) = self.fallback_web_response(&request, &path).await {
                 return self.apply_wasm_response_headers(request, response).await;
             }
             #[cfg(feature = "php-fpm")]
@@ -585,13 +585,13 @@ impl NativeHttp1RouteProxy {
         write_takeover_rejection(&mut stream, 404, "Not Found", b"not found\n").await
     }
 
-    fn fallback_web_response(
+    async fn fallback_web_response(
         &self,
         request: &NativeHttp1Request,
         path: &str,
     ) -> Option<NativeHttp1Response> {
         let web = self.fallback_web.as_ref()?;
-        let mut response = web.handle_optional(request, path)?;
+        let mut response = web.handle_optional_async(request, path).await?;
         self.fallback_response_headers
             .apply_for_request(request, &mut response);
         #[cfg(any(

@@ -8,7 +8,7 @@ use fluxheim_config::Config;
 use crate::{
     DownstreamHttp1Policy, NativeHttp1ConnectionStream, NativeHttp1Error, NativeHttp1Handler,
     NativeHttp1HostRouter, NativeHttp1HostRouterConfigError, NativeHttp1Request,
-    NativeHttp1Response,
+    NativeHttp1Response, NativeRequestBodyBudget,
 };
 
 struct NativeHttp1ReloadableRouterState {
@@ -16,6 +16,7 @@ struct NativeHttp1ReloadableRouterState {
     policy: DownstreamHttp1Policy,
     pool_max_idle: usize,
     background_load_balancer_services: bool,
+    request_body_budget: NativeRequestBodyBudget,
 }
 
 #[derive(Clone)]
@@ -53,12 +54,14 @@ impl NativeHttp1ReloadableRouter {
         policy: DownstreamHttp1Policy,
         pool_max_idle: usize,
         background_load_balancer_services: bool,
+        request_body_budget: NativeRequestBodyBudget,
     ) -> (Self, NativeHttp1RouterReloadHandle) {
         let state = Arc::new(NativeHttp1ReloadableRouterState {
             active: ArcSwap::from_pointee(router),
             policy,
             pool_max_idle,
             background_load_balancer_services,
+            request_body_budget,
         });
         (
             Self {
@@ -89,6 +92,10 @@ impl NativeHttp1RouterReloadHandle {
 impl NativeHttp1Handler for NativeHttp1ReloadableRouter {
     fn pin_request_handler(&self) -> Option<Arc<dyn NativeHttp1Handler>> {
         Some(self.active())
+    }
+
+    fn request_body_budget(&self) -> Option<NativeRequestBodyBudget> {
+        Some(self.state.request_body_budget.clone())
     }
 
     fn handle<'a>(
@@ -199,8 +206,13 @@ status = 308
         let router =
             NativeHttp1HostRouter::from_config(&baseline, DownstreamHttp1Policy::default(), 0)
                 .unwrap();
-        let (router, reloader) =
-            NativeHttp1ReloadableRouter::new(router, DownstreamHttp1Policy::default(), 0, false);
+        let (router, reloader) = NativeHttp1ReloadableRouter::new(
+            router,
+            DownstreamHttp1Policy::default(),
+            0,
+            false,
+            NativeRequestBodyBudget::new(256 * 1024 * 1024),
+        );
 
         assert_eq!(
             location(&router.handle(request()).await),
@@ -220,8 +232,13 @@ status = 308
         let router =
             NativeHttp1HostRouter::from_config(&baseline, DownstreamHttp1Policy::default(), 0)
                 .unwrap();
-        let (router, reloader) =
-            NativeHttp1ReloadableRouter::new(router, DownstreamHttp1Policy::default(), 0, false);
+        let (router, reloader) = NativeHttp1ReloadableRouter::new(
+            router,
+            DownstreamHttp1Policy::default(),
+            0,
+            false,
+            NativeRequestBodyBudget::new(256 * 1024 * 1024),
+        );
         let pinned = router.pin_request_handler().unwrap();
 
         reloader.reload_from_config(&candidate).unwrap();
@@ -246,8 +263,13 @@ status = 308
         let router =
             NativeHttp1HostRouter::from_config(&baseline, DownstreamHttp1Policy::default(), 0)
                 .unwrap();
-        let (router, reloader) =
-            NativeHttp1ReloadableRouter::new(router, DownstreamHttp1Policy::default(), 0, false);
+        let (router, reloader) = NativeHttp1ReloadableRouter::new(
+            router,
+            DownstreamHttp1Policy::default(),
+            0,
+            false,
+            NativeRequestBodyBudget::new(256 * 1024 * 1024),
+        );
 
         assert!(matches!(
             reloader.reload_from_config(&invalid),
@@ -265,8 +287,13 @@ status = 308
         let router =
             NativeHttp1HostRouter::from_config(&baseline, DownstreamHttp1Policy::default(), 0)
                 .unwrap();
-        let (_, reloader) =
-            NativeHttp1ReloadableRouter::new(router, DownstreamHttp1Policy::default(), 0, true);
+        let (_, reloader) = NativeHttp1ReloadableRouter::new(
+            router,
+            DownstreamHttp1Policy::default(),
+            0,
+            true,
+            NativeRequestBodyBudget::new(256 * 1024 * 1024),
+        );
 
         assert!(matches!(
             reloader.reload_from_config(&baseline),

@@ -35,6 +35,10 @@ impl<H> NativeHttp2Handler for NativeHttp2RouteAdapter<H>
 where
     H: NativeHttp1Handler,
 {
+    fn request_body_budget(&self) -> Option<crate::NativeRequestBodyBudget> {
+        self.handler.request_body_budget()
+    }
+
     fn handle<'a>(
         &'a self,
         request: NativeHttp2Request,
@@ -126,7 +130,9 @@ fn native_http1_response_to_http2(response: NativeHttp1Response) -> NativeHttp2R
         Ok(status) => status,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     };
-    let mut converted = NativeHttp2Response::new(status, Bytes::copy_from_slice(response.body()));
+    let retention = response.retention();
+    let mut converted = NativeHttp2Response::new(status, Bytes::copy_from_slice(response.body()))
+        .with_retention(retention);
     for (name, value) in response.headers() {
         let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {
             continue;

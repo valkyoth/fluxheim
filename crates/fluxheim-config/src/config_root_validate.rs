@@ -39,9 +39,31 @@ impl Config {
         self.udp.validate()?;
         self.wasm.validate()?;
         self.validate_vhosts()?;
+        self.validate_request_body_budget()?;
         self.validate_wasm_attachments()?;
         self.validate_geoip_policy()?;
         self.validate_compliance_internal_crypto()?;
+        Ok(())
+    }
+
+    fn validate_request_body_budget(&self) -> Result<(), ConfigError> {
+        let budget = self.server.limits.max_buffered_request_body_bytes.as_u64();
+        let exceeds_budget = self.vhosts.iter().any(|vhost| {
+            vhost
+                .max_request_body_bytes
+                .is_some_and(|limit| limit.as_u64() > budget)
+                || vhost.routes.iter().any(|route| {
+                    route
+                        .max_request_body_bytes
+                        .is_some_and(|limit| limit.as_u64() > budget)
+                })
+        });
+        if exceeds_budget {
+            return Err(ConfigError::InvalidLimitRelationship {
+                field: "server.limits.max_buffered_request_body_bytes",
+                minimum_field: "every vhost and route max_request_body_bytes",
+            });
+        }
         Ok(())
     }
 

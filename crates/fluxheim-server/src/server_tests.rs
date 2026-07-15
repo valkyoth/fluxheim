@@ -72,6 +72,7 @@ fn downstream_http2_policy_maps_server_header_limits() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
         max_request_headers: 7,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
     });
 
     assert_eq!(policy.max_header_list_size(), 4096);
@@ -138,6 +139,7 @@ fn downstream_http1_policy_preserves_tight_head_limit_invariant() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(8),
         max_request_headers: 4,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(16),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(16),
     });
 
     assert_eq!(policy.max_head_bytes(), 16);
@@ -175,6 +177,7 @@ fn server_plan_maps_configured_limits_to_downstream_http1_policy() {
         max_uri_bytes: fluxheim_config::ByteSize::from_bytes(1024),
         max_request_headers: 32,
         max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(2048),
     };
 
     let plan = ServerPlan::from_config(&config).expect("valid server plan");

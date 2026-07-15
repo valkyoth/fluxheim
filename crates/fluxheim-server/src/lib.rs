@@ -101,6 +101,8 @@ mod native_runtime_manifest;
 mod plan;
 mod process;
 mod proxy_protocol;
+mod request_body_budget;
+mod response_retention;
 mod service;
 #[cfg(unix)]
 mod unix_listener;
@@ -187,6 +189,7 @@ pub use plan::{
 };
 pub use process::ProcessSpec;
 pub use proxy_protocol::{ProxyProtocolPolicy, ProxyProtocolTrustedSource};
+pub use request_body_budget::NativeRequestBodyBudget;
 pub use service::{AdminOpsSocketPlan, ServiceKind, ServiceSpec};
 #[cfg(unix)]
 pub use unix_listener::replace_private_unix_listener;

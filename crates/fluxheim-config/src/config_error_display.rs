@@ -53,6 +53,10 @@ impl Display for ConfigError {
             }
             Self::EmptyProcessPath { field } => write!(formatter, "{field} cannot be empty"),
             Self::InvalidLimit { field } => write!(formatter, "{field} must be greater than zero"),
+            Self::InvalidLimitRelationship {
+                field,
+                minimum_field,
+            } => write!(formatter, "{field} must be at least {minimum_field}"),
             Self::InvalidAdminListenAddress { address } => write!(
                 formatter,
                 "admin.listen must be an ip:port listener address, got {address:?}"
