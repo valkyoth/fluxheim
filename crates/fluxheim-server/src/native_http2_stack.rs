@@ -199,6 +199,9 @@ where
         }
     }
 
+    // Release the transport before waiting for handlers that can no longer
+    // deliver responses. TLS generation draining depends on this prompt drop.
+    drop(connection);
     while let Some(completed) = streams.join_next().await {
         handle_completed_native_http2_stream(completed)?;
     }

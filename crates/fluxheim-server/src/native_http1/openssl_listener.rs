@@ -13,6 +13,10 @@ use super::{
 };
 use crate::DownstreamHttp1Policy;
 
+#[path = "openssl_generation_drain.rs"]
+mod generation_drain;
+use generation_drain::OpenSslGenerationDrainStream;
+
 pub async fn serve_native_http1_openssl_listener<H, F>(
     listener: TcpListener,
     policy: DownstreamHttp1Policy,
@@ -64,6 +68,7 @@ where
                         Ok(Ok(())) => {
                             let mut request_context = native_openssl_request_context(&stream);
                             request_context.local_addr = local_addr;
+                            let stream = OpenSslGenerationDrainStream::new(stream);
                             let _ = serve_native_http1_connection_with_context(stream, Some(peer_addr), request_context, policy, handler).await;
                         }
                         Ok(Err(error)) => {
@@ -142,7 +147,10 @@ where
                         Ok(Ok(())) => {
                             let mut request_context = native_openssl_request_context(&stream);
                             request_context.local_addr = local_addr;
-                            match stream.ssl().selected_alpn_protocol() {
+                            let selected_alpn =
+                                stream.ssl().selected_alpn_protocol().map(<[u8]>::to_vec);
+                            let stream = OpenSslGenerationDrainStream::new(stream);
+                            match selected_alpn.as_deref() {
                                 Some(b"h2") if h2_dispatch.http2_allowed => {
                                     let h2_handler = Arc::new(crate::NativeHttp2RouteAdapter::new(
                                         handler,

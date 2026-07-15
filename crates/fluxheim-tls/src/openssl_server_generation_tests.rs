@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::task::Poll;
 use std::thread;
 
 use openssl::ssl::Ssl;
@@ -14,8 +15,8 @@ fn retained_connection_blocks_third_generation_until_lease_is_released() {
     store
         .apply_certificate_for_sni(None, &mut retained_ssl)
         .unwrap();
-
     store.reload().unwrap();
+    assert!(poll_connection_drain_once(&retained_ssl).is_pending());
     assert!(matches!(
         store.reload(),
         Err(
@@ -25,9 +26,38 @@ fn retained_connection_blocks_third_generation_until_lease_is_released() {
             }
         )
     ));
+    assert!(poll_connection_drain_once(&retained_ssl).is_ready());
 
     drop(retained_ssl);
     store.reload().unwrap();
+}
+
+#[test]
+fn bounded_reload_retry_completes_after_drained_generation_is_released() {
+    let (config, selector, certificate) = openssl_sni_test_config();
+    let store =
+        Arc::new(OpenSslDownstreamCertificateStore::new(&selector, &config.tls, None).unwrap());
+    let acceptor = build_openssl_downstream_acceptor(&config.tls, &certificate).unwrap();
+    let mut retained_ssl = Ssl::new(acceptor.context()).unwrap();
+    store
+        .apply_certificate_for_sni(None, &mut retained_ssl)
+        .unwrap();
+    store.reload().unwrap();
+
+    let reload_store = store.clone();
+    let reload = thread::spawn(move || {
+        reload_store.reload_after_generation_drain(std::time::Duration::from_secs(2))
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while poll_connection_drain_once(&retained_ssl).is_pending()
+        && std::time::Instant::now() < deadline
+    {
+        thread::yield_now();
+    }
+    assert!(poll_connection_drain_once(&retained_ssl).is_ready());
+
+    drop(retained_ssl);
+    reload.join().unwrap().unwrap();
 }
 
 #[test]
@@ -95,4 +125,10 @@ fn openssl_sni_test_config() -> (
     };
     let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
     (config, selector, certificate)
+}
+
+fn poll_connection_drain_once(ssl: &openssl::ssl::SslRef) -> Poll<()> {
+    let wake = std::task::Waker::noop();
+    let mut context = std::task::Context::from_waker(wake);
+    poll_openssl_connection_drain(ssl, &mut context)
 }

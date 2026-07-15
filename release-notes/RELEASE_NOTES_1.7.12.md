@@ -101,9 +101,11 @@ trailers are not part of this release.
   above 128 MiB, and divide a 4096-entry session cache budget across contexts.
 - Serialize OpenSSL SNI reload construction and attach generation leases to
   selected SSL connections. A reload that would create a third live generation
-  now fails closed until older connections release their contexts, enforcing
-  the two-generation resource assumption rather than relying on arithmetic
-  alone.
+  now marks the oldest generation for drain; native OpenSSL HTTP/1, HTTP/2, and
+  takeover streams wake and close before a bounded automatic retry. Reloads
+  still fail closed if the generation cannot drain within 10 seconds. The lease
+  uses one process-global OpenSSL ex-data index, preventing index growth when
+  certificate stores are reconstructed in-process.
 
 ## Shared Cache Policy Hardening
 

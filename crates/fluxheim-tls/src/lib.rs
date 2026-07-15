@@ -26,7 +26,7 @@ pub use listener::{
 pub use openssl_server_config::{
     OpenSslDownstreamAcceptorError, OpenSslDownstreamCertificateStore,
     OpenSslDownstreamCertificateStoreError, build_openssl_downstream_acceptor,
-    build_openssl_downstream_acceptor_with_sni_store,
+    build_openssl_downstream_acceptor_with_sni_store, poll_openssl_connection_drain,
 };
 pub use policy::{openssl_cipher_lists, openssl_curve_list, rustls_alpn_protocols};
 #[cfg(feature = "tls-rustls-backend")]

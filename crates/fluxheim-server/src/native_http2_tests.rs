@@ -1,8 +1,64 @@
 use super::*;
 use crate::native_http2_stack::serve_native_http2_connection_until_idle;
 use std::future::poll_fn;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+
+struct TransportDropProbe<T> {
+    inner: T,
+    dropped: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl<T> Drop for TransportDropProbe<T> {
+    fn drop(&mut self) {
+        if let Some(dropped) = self.dropped.take() {
+            let _ = dropped.send(());
+        }
+    }
+}
+
+impl<T> AsyncRead for TransportDropProbe<T>
+where
+    T: AsyncRead + Unpin,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_read(context, buffer)
+    }
+}
+
+impl<T> AsyncWrite for TransportDropProbe<T>
+where
+    T: AsyncWrite + Unpin,
+{
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(context, buffer)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(context)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(context)
+    }
+}
 
 #[test]
 fn native_http2_preview_marks_downstream_dispatch_ready_after_alpn_wiring() {
@@ -135,6 +191,52 @@ async fn native_http2_connection_times_out_slow_handler() {
     drop(client);
     server.await.unwrap().unwrap();
     client_connection.await.unwrap();
+}
+
+#[tokio::test]
+async fn native_http2_releases_closed_transport_before_waiting_for_handler() {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let (transport_dropped, transport_drop) = tokio::sync::oneshot::channel();
+    let handler_started = Arc::new(tokio::sync::Notify::new());
+    let release_handler = Arc::new(tokio::sync::Notify::new());
+    let handler = {
+        let handler_started = handler_started.clone();
+        let release_handler = release_handler.clone();
+        Arc::new(move |_request: NativeHttp2Request| {
+            let handler_started = handler_started.clone();
+            let release_handler = release_handler.clone();
+            async move {
+                handler_started.notify_one();
+                release_handler.notified().await;
+                NativeHttp2Response::no_content()
+            }
+        })
+    };
+    let server = tokio::spawn(serve_native_http2_connection(
+        TransportDropProbe {
+            inner: server_io,
+            dropped: Some(transport_dropped),
+        },
+        DownstreamHttp2Policy::default(),
+        handler,
+    ));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(connection);
+    let request = http::Request::builder().uri("/held").body(()).unwrap();
+    let (response, _send_stream) = client.send_request(request, true).unwrap();
+    handler_started.notified().await;
+
+    drop(response);
+    drop(client);
+    client_connection.abort();
+    let _ = client_connection.await;
+    tokio::time::timeout(Duration::from_secs(1), transport_drop)
+        .await
+        .expect("closed HTTP/2 transport must be released")
+        .unwrap();
+
+    release_handler.notify_waiters();
+    server.await.unwrap().unwrap();
 }
 
 #[tokio::test]

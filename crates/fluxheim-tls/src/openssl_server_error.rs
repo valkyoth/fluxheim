@@ -158,8 +158,14 @@ pub enum OpenSslDownstreamCertificateStoreError {
     ContextBudgetOverflow,
     #[error("failed to allocate OpenSSL SSL generation-lease storage: {0}")]
     CreateGenerationLeaseIndex(#[source] openssl::error::ErrorStack),
+    #[error("OpenSSL SSL generation-lease index initialization lock was poisoned")]
+    GenerationLeaseIndexStatePoisoned,
+    #[error("OpenSSL SSL generation-lease index initialization did not publish its result")]
+    GenerationLeaseIndexInitialization,
     #[error("OpenSSL SNI reload generation state lock was poisoned")]
     ReloadGenerationStatePoisoned,
+    #[error("OpenSSL SNI reload operation lock was poisoned")]
+    ReloadOperationStatePoisoned,
     #[error(
         "OpenSSL SNI reload would exceed {maximum} live certificate generations; currently live: {count}"
     )]

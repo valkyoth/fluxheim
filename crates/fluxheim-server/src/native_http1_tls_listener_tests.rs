@@ -210,3 +210,116 @@ async fn native_http1_openssl_listener_serves_request() {
     shutdown_tx.send(()).unwrap();
     join.await.unwrap();
 }
+
+#[cfg(all(not(feature = "tls-rustls-backend"), feature = "tls-openssl-backend"))]
+#[tokio::test]
+async fn native_openssl_listener_drains_retained_certificate_generation() {
+    use std::io::Write as _;
+    use std::time::Duration;
+
+    use crate::serve_native_http1_openssl_listener;
+    use fluxheim_config::{Config, StaticCertificateConfig, TlsConfig};
+    use fluxheim_tls::{
+        DownstreamCertificateSelector, OpenSslDownstreamCertificateStore,
+        build_openssl_downstream_acceptor_with_sni_store,
+    };
+    use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
+    use openssl::x509::{X509, store::X509StoreBuilder};
+    use rcgen::{CertificateParams, KeyPair};
+    use tempfile::NamedTempFile;
+    use tokio_openssl::SslStream;
+
+    let key = KeyPair::generate().unwrap();
+    let certificate = CertificateParams::new(vec!["localhost".to_owned()])
+        .unwrap()
+        .self_signed(&key)
+        .unwrap();
+    let cert_pem = certificate.pem();
+    let key_pem = key.serialize_pem();
+    let mut cert_file = NamedTempFile::new().unwrap();
+    cert_file.write_all(cert_pem.as_bytes()).unwrap();
+    let mut key_file = NamedTempFile::new().unwrap();
+    key_file.write_all(key_pem.as_bytes()).unwrap();
+    let certificate_config = StaticCertificateConfig {
+        cert_path: cert_file.path().to_path_buf(),
+        key_path: key_file.path().to_path_buf(),
+    };
+    let config = Config {
+        tls: TlsConfig {
+            enabled: true,
+            certificates: vec![certificate_config.clone()],
+            ..TlsConfig::default()
+        },
+        ..Config::default()
+    };
+    let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
+    let store =
+        Arc::new(OpenSslDownstreamCertificateStore::new(&selector, &config.tls, None).unwrap());
+    let acceptor = Arc::new(
+        build_openssl_downstream_acceptor_with_sni_store(
+            &config.tls,
+            &certificate_config,
+            store.clone(),
+        )
+        .unwrap(),
+    );
+
+    let certs = X509::stack_from_pem(cert_pem.as_bytes()).unwrap();
+    let mut roots = X509StoreBuilder::new().unwrap();
+    roots.add_cert(certs[0].clone()).unwrap();
+    let mut connector = SslConnector::builder(SslMethod::tls_client()).unwrap();
+    connector.set_cert_store(roots.build());
+    connector.set_verify(SslVerifyMode::PEER);
+    let connector = connector.build();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let handler = Arc::new(|_request: NativeHttp1Request| async move {
+        NativeHttp1Response::new(200, "OK", b"generation one".as_slice())
+    });
+    let join = tokio::spawn(async move {
+        serve_native_http1_openssl_listener(
+            listener,
+            DownstreamHttp1Policy::default(),
+            acceptor,
+            handler,
+            async move {
+                let _ = shutdown_rx.await;
+            },
+        )
+        .await
+        .unwrap();
+    });
+
+    let tcp = TcpStream::connect(addr).await.unwrap();
+    let ssl = connector
+        .configure()
+        .unwrap()
+        .into_ssl("localhost")
+        .unwrap();
+    let mut stream = SslStream::new(ssl, tcp).unwrap();
+    std::pin::Pin::new(&mut stream).connect().await.unwrap();
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    assert!(read_response(&mut stream).await.ends_with("generation one"));
+
+    store.reload().unwrap();
+    let reload_store = store.clone();
+    tokio::task::spawn_blocking(move || {
+        reload_store.reload_after_generation_drain(Duration::from_secs(2))
+    })
+    .await
+    .unwrap()
+    .unwrap();
+
+    let mut byte = [0_u8; 1];
+    let closed = tokio::time::timeout(Duration::from_secs(1), stream.read(&mut byte))
+        .await
+        .expect("drained TLS connection must wake");
+    assert!(matches!(closed, Ok(0) | Err(_)));
+    shutdown_tx.send(()).unwrap();
+    join.await.unwrap();
+}

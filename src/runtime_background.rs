@@ -3,6 +3,10 @@ use std::error::Error;
 #[cfg(all(feature = "cache", feature = "metrics"))]
 const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
 
+#[cfg(feature = "tls-openssl")]
+const OPENSSL_CERTIFICATE_GENERATION_DRAIN_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(10);
+
 #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
 type RustlsSniCertificateResolver = fluxheim_tls::RustlsDownstreamCertificateResolver;
 
@@ -23,7 +27,8 @@ impl DownstreamCertificateReloader {
             #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
             Self::Rustls(resolver) => Ok(resolver.reload()?),
             #[cfg(feature = "tls-openssl")]
-            Self::Openssl(store) => Ok(store.reload()?),
+            Self::Openssl(store) => Ok(store
+                .reload_after_generation_drain(OPENSSL_CERTIFICATE_GENERATION_DRAIN_TIMEOUT)?),
             #[cfg(not(any(
                 all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
                 feature = "tls-openssl"
@@ -31,6 +36,14 @@ impl DownstreamCertificateReloader {
             _ => Ok(()),
         }
     }
+}
+
+#[cfg(feature = "acme-client")]
+async fn reload_downstream_certificates(
+    reloader: &DownstreamCertificateReloader,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let reloader = reloader.clone();
+    tokio::task::spawn_blocking(move || reloader.reload()).await?
 }
 
 #[cfg(all(feature = "acme-client", unix))]
@@ -424,7 +437,7 @@ async fn run_acme_renewal_tick(
             if renewed_count == 0 {
                 log::debug!("ACME renewal check completed without renewed certificates");
             } else if let Some(reloader) = reloader {
-                if let Err(error) = reloader.reload() {
+                if let Err(error) = reload_downstream_certificates(reloader).await {
                     #[cfg(feature = "metrics")]
                     crate::metrics::record_acme_event("reload_failed");
                     log::error!(

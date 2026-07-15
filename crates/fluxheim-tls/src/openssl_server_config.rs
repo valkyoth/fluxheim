@@ -12,6 +12,8 @@ mod client_auth;
 mod error;
 #[path = "openssl_server_generation.rs"]
 mod generation;
+#[path = "openssl_server_reload.rs"]
+mod reload;
 
 use crate::tls_input::{
     MAX_CERT_CHAIN_BYTES, MAX_CHAIN_CERTIFICATES, MAX_PRIVATE_KEY_BYTES, read_bounded_file,
@@ -34,6 +36,7 @@ pub struct OpenSslDownstreamCertificateStore {
     tls: TlsConfig,
     generation: ArcSwap<OpenSslCertificateGeneration>,
     reload_generations: OpenSslReloadGenerationState,
+    reload_operation: std::sync::Mutex<()>,
     session_cache_entries_per_context: i32,
     pending_managed_certificate_recorder: Option<fn()>,
 }
@@ -61,8 +64,7 @@ impl OpenSslDownstreamCertificateStore {
             session_cache_entries_per_context,
             pending_managed_certificate_recorder,
         )?;
-        let lease = Arc::new(OpenSslGenerationLease);
-        let reload_generations = OpenSslReloadGenerationState::new(&lease)?;
+        let (reload_generations, lease) = OpenSslReloadGenerationState::new()?;
         let generation = Arc::new(OpenSslCertificateGeneration {
             certificates,
             lease: lease.clone(),
@@ -72,35 +74,10 @@ impl OpenSslDownstreamCertificateStore {
             tls: tls.clone(),
             generation: ArcSwap::from(generation),
             reload_generations,
+            reload_operation: std::sync::Mutex::new(()),
             session_cache_entries_per_context,
             pending_managed_certificate_recorder,
         })
-    }
-
-    pub fn reload(&self) -> Result<(), OpenSslDownstreamCertificateStoreError> {
-        let mut reload = self
-            .reload_generations
-            .lock(OPENSSL_RELOAD_POLICY_GENERATIONS)?;
-        let client_auth = OpenSslClientAuthPolicy::load(&self.tls)?;
-        validate_openssl_sni_context_budget(
-            self.selector.certificates().len(),
-            client_auth.input_bytes(),
-        )?;
-        let certificates = load_openssl_downstream_certificates(
-            &self.selector,
-            &self.tls,
-            &client_auth,
-            self.session_cache_entries_per_context,
-            self.pending_managed_certificate_recorder,
-        )?;
-        let lease = Arc::new(OpenSslGenerationLease);
-        let generation = Arc::new(OpenSslCertificateGeneration {
-            certificates,
-            lease: lease.clone(),
-        });
-        reload.track(&lease);
-        self.generation.store(generation);
-        Ok(())
     }
 
     pub fn certificate_slot_count(&self) -> usize {
@@ -138,9 +115,16 @@ impl OpenSslDownstreamCertificateStore {
         };
         certificate.apply_to_ssl(ssl)?;
         self.reload_generations
-            .attach_to_ssl(ssl, generation.lease.clone());
+            .attach_to_ssl(ssl, generation.lease.clone())?;
         Ok(())
     }
+}
+
+pub fn poll_openssl_connection_drain(
+    ssl: &openssl::ssl::SslRef,
+    context: &mut std::task::Context<'_>,
+) -> std::task::Poll<()> {
+    generation::poll_connection_drain(ssl, context)
 }
 
 struct OpenSslDownstreamCertificate {
