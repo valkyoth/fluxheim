@@ -25,6 +25,8 @@ pub struct NativeHttp1Request {
 pub struct NativeHttp1RequestBody {
     bytes: Vec<u8>,
     admission: Option<NativeRequestBodyReservation>,
+    #[cfg(test)]
+    capacity_replacements: usize,
 }
 
 impl NativeHttp1RequestBody {
@@ -33,6 +35,8 @@ impl NativeHttp1RequestBody {
         Self {
             bytes: Vec::new(),
             admission: None,
+            #[cfg(test)]
+            capacity_replacements: 0,
         }
     }
 
@@ -41,6 +45,8 @@ impl NativeHttp1RequestBody {
         Self {
             bytes: body,
             admission: None,
+            #[cfg(test)]
+            capacity_replacements: 0,
         }
     }
 
@@ -83,6 +89,10 @@ impl NativeHttp1RequestBody {
         replacement.extend_from_slice(&self.bytes);
         sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.bytes);
         self.bytes = replacement;
+        #[cfg(test)]
+        {
+            self.capacity_replacements += 1;
+        }
         Ok(())
     }
 
@@ -97,11 +107,20 @@ impl NativeHttp1RequestBody {
         replacement.extend_from_slice(&self.bytes);
         sanitization::unsafe_wipe::volatile_sanitize_vec(&mut self.bytes);
         self.bytes = replacement;
+        #[cfg(test)]
+        {
+            self.capacity_replacements += 1;
+        }
         Ok(())
     }
 
     pub(crate) fn capacity(&self) -> usize {
         self.bytes.capacity()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn capacity_replacements(&self) -> usize {
+        self.capacity_replacements
     }
 }
 

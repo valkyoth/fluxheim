@@ -468,20 +468,31 @@ async fn drain_request_body(
             .ok_or(NativeHttp2StackError::BodyTooLarge {
                 limit: max_body_bytes,
             })?;
-        reservation
-            .grow_to(total)
-            .await
-            .map_err(|_| NativeHttp2StackError::BodyCapacityUnavailable)?;
         let overlap = if total > buffered.capacity() {
-            let overlap_bytes = total.checked_add(buffered.capacity()).ok_or(
+            let geometric = buffered.capacity().saturating_mul(2);
+            let admitted_capacity = total
+                .max(BODY_PREALLOC_HINT_BYTES)
+                .max(geometric)
+                .min(max_body_bytes);
+            reservation
+                .grow_to(admitted_capacity)
+                .await
+                .map_err(|_| NativeHttp2StackError::BodyCapacityUnavailable)?;
+            let overlap_bytes = admitted_capacity.checked_add(buffered.capacity()).ok_or(
                 NativeHttp2StackError::BodyTooLarge {
                     limit: max_body_bytes,
                 },
             )?;
-            reservation
+            let overlap = reservation
                 .reserve_overlap(overlap_bytes)
                 .await
-                .map_err(|_| NativeHttp2StackError::BodyCapacityUnavailable)?
+                .map_err(|_| NativeHttp2StackError::BodyCapacityUnavailable)?;
+            buffered.reserve_capacity(admitted_capacity).map_err(|_| {
+                NativeHttp2StackError::BodyTooLarge {
+                    limit: max_body_bytes,
+                }
+            })?;
+            overlap
         } else {
             None
         };

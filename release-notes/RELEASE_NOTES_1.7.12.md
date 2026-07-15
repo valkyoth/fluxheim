@@ -182,8 +182,10 @@ trailers are not part of this release.
   and every queued H2 slice, so handler completion cannot admit replacement
   memory before the transport releases the original allocation. H2C
   negotiation retains the body until fallback is decided, secure HTTP/1 and
-  HTTP/2 growth admits old-plus-new allocation overlap, and fragmented final
-  chunks preserve pipelined request bytes before clearing the read buffer.
+  HTTP/2 growth admits old-plus-new allocation overlap, unknown-length HTTP/2
+  bodies use budgeted geometric growth instead of repeated exact-size copies,
+  and fragmented final chunks preserve pipelined request bytes before clearing
+  the read buffer.
 - Move static-file resolution and reads to the bounded blocking-work pool and
   cap retained static response bodies with a weighted 256 MiB process-wide
   budget. Fluxheim resolves metadata first, admits the planned response bytes
@@ -280,9 +282,10 @@ platform, configuration, key handling, and required compliance evidence.
   oversized/FIFO storage-bin manifests.
 - Body-admission tests cover process-shared defaults, pinned HTTP/1 handlers,
   exact HTTP/2 declared lengths, incremental unknown-length growth, aggregate
-  exhaustion, owner-backed H2 DATA retention, post-handler body retention, and
-  permit recovery. Static error-page and cache tests preserve fallback behavior
-  while admission precedes body materialization.
+  exhaustion, logarithmic growth under highly fragmented HTTP/2 DATA frames,
+  owner-backed H2 DATA retention, post-handler body retention, and permit
+  recovery. Static error-page and cache tests preserve fallback behavior while
+  admission precedes body materialization.
 - Cache-encryption tests cover cross-root key separation, opaque HMAC lookup
   identities, restart continuity, missing-counter failure, local-key rotation,
   v1 rejection, and cold removal of legacy encrypted filesystem objects.

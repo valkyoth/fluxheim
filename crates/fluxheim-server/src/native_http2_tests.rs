@@ -316,6 +316,59 @@ async fn native_http2_grows_unknown_body_reservations_before_buffering() {
 }
 
 #[tokio::test]
+async fn native_http2_fragmented_unknown_body_grows_buffer_logarithmically() {
+    let (server_io, client_io) = tokio::io::duplex(256 * 1024);
+    let observed = Arc::new(Mutex::new(None));
+    let observed_for_handler = observed.clone();
+    let handler = Arc::new(move |request: NativeHttp2Request| {
+        let observed_for_handler = observed_for_handler.clone();
+        async move {
+            *observed_for_handler.lock().unwrap() =
+                Some((request.body.len(), request.body.capacity_replacements()));
+            NativeHttp2Response::no_content()
+        }
+    });
+    let limits = fluxheim_config::ServerLimitsConfig {
+        max_request_header_bytes: fluxheim_config::ByteSize::from_bytes(64 * 1024),
+        max_uri_bytes: fluxheim_config::ByteSize::from_bytes(8 * 1024),
+        max_request_headers: 100,
+        max_request_body_bytes: fluxheim_config::ByteSize::from_bytes(512 * 1024),
+        max_buffered_request_body_bytes: fluxheim_config::ByteSize::from_bytes(1024 * 1024),
+    };
+    let policy = DownstreamHttp2Policy::from_server_limits(limits)
+        .with_request_body_timeout(Duration::from_secs(3));
+    let server = tokio::spawn(serve_native_http2_connection_until_idle(
+        server_io,
+        policy,
+        handler,
+        Duration::from_secs(1),
+    ));
+    let (mut client, connection) = h2::client::handshake(client_io).await.unwrap();
+    let client_connection = tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    let request = http::Request::builder()
+        .uri("/fragmented")
+        .body(())
+        .unwrap();
+    let (response, mut body) = client.send_request(request, false).unwrap();
+
+    send_body_respecting_flow_control(&mut body, 512 * 1024, 1024).await;
+
+    assert_eq!(
+        response.await.unwrap().status(),
+        http::StatusCode::NO_CONTENT
+    );
+    let (body_len, capacity_replacements) = observed.lock().unwrap().unwrap();
+    assert_eq!(body_len, 512 * 1024);
+    assert!(capacity_replacements > 0);
+    assert!(capacity_replacements <= 4);
+    drop(client);
+    server.await.unwrap().unwrap();
+    client_connection.await.unwrap();
+}
+
+#[tokio::test]
 async fn native_http2_body_retains_admission_after_handler_returns() {
     let (server_io, client_io) = tokio::io::duplex(16 * 1024);
     let budget = NativeRequestBodyBudget::new(64 * 1024);
