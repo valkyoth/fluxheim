@@ -12,7 +12,7 @@ use crate::native_http1_proxy_cache_policy::{
 };
 use crate::native_http1_proxy_request::native_request_header;
 use fluxheim_cache::{
-    CacheRequest, CacheRequestView, CacheStaleEvent, append_cache_key_component,
+    CacheRequest, CacheRequestView, CacheStaleEvent, StoredCachePolicy, append_cache_key_component,
     cache_key_with_component, cache_method_temporarily_bypassed, cache_should_serve_stale,
     image_cache_key, request_cache_bypass_reason, request_cache_revalidation_requested,
     selected_cache_range_request,
@@ -32,9 +32,6 @@ impl NativeProxyMemoryCache {
         }
         if let Some(reason) = request_cache_bypass_reason(request, &self.config) {
             return NativeProxyCacheLookup::Bypass(reason);
-        }
-        if request.contains_header("authorization") {
-            return NativeProxyCacheLookup::Bypass("request-authorization");
         }
         let Some(key) = self.key_with_components(request, key_components) else {
             return NativeProxyCacheLookup::Bypass("proxy-ineligible");
@@ -229,7 +226,7 @@ impl NativeProxyMemoryCache {
         request: &NativeHttp1Request,
         event: CacheStaleEvent,
     ) -> Option<NativeMemoryCacheEntry> {
-        if !cache_should_serve_stale(&self.config, event) {
+        if !cache_should_serve_stale(&self.config, event, StoredCachePolicy::default()) {
             return None;
         }
 
@@ -247,7 +244,13 @@ impl NativeProxyMemoryCache {
                     }
                     match state.objects.get(&variant.key) {
                         Some(entry)
-                            if entry.expires_at <= now
+                            if cache_should_serve_stale(
+                                &self.config,
+                                event,
+                                StoredCachePolicy {
+                                    stale_reuse_forbidden: entry.stale_reuse_forbidden,
+                                },
+                            ) && entry.expires_at <= now
                                 && entry.stale_if_error_until.is_some_and(|until| until > now) =>
                         {
                             return Some(entry.clone());
@@ -268,7 +271,13 @@ impl NativeProxyMemoryCache {
             if !state.variants.contains_key(key) {
                 match state.objects.get(key) {
                     Some(entry)
-                        if entry.expires_at <= now
+                        if cache_should_serve_stale(
+                            &self.config,
+                            event,
+                            StoredCachePolicy {
+                                stale_reuse_forbidden: entry.stale_reuse_forbidden,
+                            },
+                        ) && entry.expires_at <= now
                             && entry.stale_if_error_until.is_some_and(|until| until > now) =>
                     {
                         return Some(entry.clone());

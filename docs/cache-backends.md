@@ -65,8 +65,10 @@ internal cache implementation.
 - `cache.bypass_request_headers`, `vhosts.cache.bypass_request_headers`, and
   `vhosts.routes.cache.bypass_request_headers` bypass cache lookup and storage
   when any listed request header is present. Use this for route policies where
-  headers such as `Cookie` or `Authorization` make the upstream response
-  request-specific.
+  headers such as `Cookie` make the upstream response request-specific.
+  Fluxheim always bypasses shared-cache lookup and storage for requests with
+  `Authorization` or `Proxy-Authorization`; that credential boundary cannot be
+  disabled by an empty configured bypass list.
 - `bypass_request_header_values`, `bypass_cookie_names`,
   `bypass_cookie_values`, `bypass_query_params`, and `bypass_query_values`
   provide narrower bypass controls for preview flags, session cookies, and
@@ -162,6 +164,14 @@ internal cache implementation.
   `vhosts.routes.cache.stale_while_revalidate_secs` add an explicit
   stale-while-revalidate window to cache-participating responses. Fluxheim can
   then serve an expired stored object while revalidating it with the upstream.
+  Origin `must-revalidate`, `proxy-revalidate`, and `s-maxage` directives are
+  persisted with each object and prohibit both stale-while-revalidate and
+  stale-if-error reuse even when operator stale windows are configured.
+- Fluxheim parses response `Cache-Control` as one strict shared-cache policy.
+  `s-maxage` takes precedence over `max-age`; malformed values, invalid quoted
+  strings, and duplicate security or freshness directives reject admission
+  rather than falling back to an operator TTL. Peer-fill subtracts the first
+  received `Age` value from remaining freshness.
 - `cache.content_types`, `vhosts.cache.content_types`, and
   `vhosts.routes.cache.content_types` allow exact media types and subtype
   wildcards such as `image/*`. The `extensions` key is accepted as the

@@ -43,6 +43,52 @@ fn storage_bin_manifest_round_trips() {
 }
 
 #[test]
+fn storage_bin_manifest_rejects_oversized_persistent_file() {
+    let root = tempfile::tempdir().unwrap();
+    let mut plan = storage_bin_plan();
+    plan.path = root.path().join("cache");
+    let layout = StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+    prepare_storage_bin_layout(&layout).unwrap();
+    let manifest = layout.root.join(STORAGE_BIN_MANIFEST_FILENAME);
+    let file = std::fs::File::create(manifest).unwrap();
+    file.set_len(4097).unwrap();
+
+    let error = prepare_storage_bin_layout(&layout).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[cfg(unix)]
+#[test]
+fn storage_bin_manifest_rejects_special_file_without_blocking() {
+    use std::os::unix::fs::FileTypeExt as _;
+
+    let root = tempfile::tempdir().unwrap();
+    let mut plan = storage_bin_plan();
+    plan.path = root.path().join("cache");
+    let layout = StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+    prepare_storage_bin_layout(&layout).unwrap();
+    let manifest = layout.root.join(STORAGE_BIN_MANIFEST_FILENAME);
+    std::fs::remove_file(&manifest).unwrap();
+    rustix::fs::mknodat(
+        rustix::fs::CWD,
+        &manifest,
+        rustix::fs::FileType::Fifo,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        0,
+    )
+    .unwrap();
+    assert!(
+        std::fs::symlink_metadata(&manifest)
+            .unwrap()
+            .file_type()
+            .is_fifo()
+    );
+
+    let error = prepare_storage_bin_layout(&layout).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[test]
 fn storage_bin_free_map_allocates_and_reuses_ranges() {
     let layout = StorageBinLayoutPlan::from_disk_plan(&storage_bin_plan()).unwrap();
     let mut free_map = StorageBinFreeMap::new(&layout);

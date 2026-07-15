@@ -35,27 +35,193 @@ pub(crate) fn cache_control_directive_parts(directive: &str) -> (&str, Option<&s
         })
 }
 
-pub(crate) fn response_cache_control_shared_rejection(value: &str) -> Option<&'static str> {
-    value.split(',').find_map(|directive| {
-        let directive = directive.trim();
-        let (name, value) = directive
-            .split_once('=')
-            .map_or((directive, None), |(name, value)| {
-                (name.trim(), Some(value.trim().trim_matches('"')))
-            });
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ResponseCacheControlPolicy {
+    pub(crate) freshness_secs: Option<u32>,
+    pub(crate) stale_reuse_forbidden: bool,
+    pub(crate) shared_rejection: Option<&'static str>,
+}
 
-        if name.eq_ignore_ascii_case("no-store") {
-            Some("cache-control-no-store")
-        } else if name.eq_ignore_ascii_case("private") {
-            Some("cache-control-private")
-        } else if name.eq_ignore_ascii_case("no-cache") {
-            Some("cache-control-no-cache")
-        } else if (name.eq_ignore_ascii_case("max-age") || name.eq_ignore_ascii_case("s-maxage"))
-            && value == Some("0")
-        {
-            Some("cache-control-zero-freshness")
-        } else {
-            None
+pub(crate) fn parse_response_cache_control_values<'a>(
+    values: impl IntoIterator<Item = &'a str>,
+) -> Result<ResponseCacheControlPolicy, ()> {
+    let mut policy = ResponseCacheControlPolicy::default();
+    let mut max_age = None;
+    let mut shared_max_age = None;
+    let mut seen_no_store = false;
+    let mut seen_private = false;
+    let mut seen_no_cache = false;
+    let mut seen_must_revalidate = false;
+    let mut seen_proxy_revalidate = false;
+
+    for value in values {
+        for directive in split_cache_control_directives(value)? {
+            let (name, value) = parse_cache_control_directive(directive)?;
+            if name.eq_ignore_ascii_case("max-age") {
+                if max_age.is_some() {
+                    return Err(());
+                }
+                max_age = Some(parse_cache_control_delta_seconds(value)?);
+            } else if name.eq_ignore_ascii_case("s-maxage") {
+                if shared_max_age.is_some() {
+                    return Err(());
+                }
+                shared_max_age = Some(parse_cache_control_delta_seconds(value)?);
+                policy.stale_reuse_forbidden = true;
+            } else if name.eq_ignore_ascii_case("no-store") {
+                reject_duplicate_flag(value, &mut seen_no_store)?;
+                policy
+                    .shared_rejection
+                    .get_or_insert("cache-control-no-store");
+            } else if name.eq_ignore_ascii_case("private") {
+                reject_duplicate_directive(&mut seen_private)?;
+                policy
+                    .shared_rejection
+                    .get_or_insert("cache-control-private");
+            } else if name.eq_ignore_ascii_case("no-cache") {
+                reject_duplicate_directive(&mut seen_no_cache)?;
+                policy
+                    .shared_rejection
+                    .get_or_insert("cache-control-no-cache");
+            } else if name.eq_ignore_ascii_case("must-revalidate") {
+                reject_duplicate_flag(value, &mut seen_must_revalidate)?;
+                policy.stale_reuse_forbidden = true;
+            } else if name.eq_ignore_ascii_case("proxy-revalidate") {
+                reject_duplicate_flag(value, &mut seen_proxy_revalidate)?;
+                policy.stale_reuse_forbidden = true;
+            }
         }
-    })
+    }
+
+    policy.freshness_secs = shared_max_age.or(max_age);
+    if policy.freshness_secs == Some(0) {
+        policy
+            .shared_rejection
+            .get_or_insert("cache-control-zero-freshness");
+    }
+    Ok(policy)
+}
+
+fn reject_duplicate_directive(seen: &mut bool) -> Result<(), ()> {
+    if *seen {
+        return Err(());
+    }
+    *seen = true;
+    Ok(())
+}
+
+fn reject_duplicate_flag(value: Option<&str>, seen: &mut bool) -> Result<(), ()> {
+    if value.is_some() || *seen {
+        return Err(());
+    }
+    *seen = true;
+    Ok(())
+}
+
+fn parse_cache_control_delta_seconds(value: Option<&str>) -> Result<u32, ()> {
+    let value = value.ok_or(())?;
+    let value = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(value);
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(());
+    }
+    value.parse::<u32>().map_err(|_| ())
+}
+
+fn split_cache_control_directives(value: &str) -> Result<Vec<&str>, ()> {
+    let mut directives = Vec::new();
+    let mut start = 0_usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, byte) in value.bytes().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quoted && byte == b'\\' {
+            escaped = true;
+        } else if byte == b'"' {
+            quoted = !quoted;
+        } else if byte == b',' && !quoted {
+            let directive = value.get(start..index).ok_or(())?.trim();
+            if directive.is_empty() {
+                return Err(());
+            }
+            directives.push(directive);
+            start = index.saturating_add(1);
+        }
+    }
+    if quoted || escaped {
+        return Err(());
+    }
+    let directive = value.get(start..).ok_or(())?.trim();
+    if directive.is_empty() {
+        return Err(());
+    }
+    directives.push(directive);
+    Ok(directives)
+}
+
+fn parse_cache_control_directive(directive: &str) -> Result<(&str, Option<&str>), ()> {
+    let (name, value) = directive
+        .split_once('=')
+        .map_or((directive.trim(), None), |(name, value)| {
+            (name.trim(), Some(value.trim()))
+        });
+    if !http_token_valid(name) {
+        return Err(());
+    }
+    if let Some(value) = value
+        && (value.is_empty() || !cache_control_value_valid(value))
+    {
+        return Err(());
+    }
+    Ok((name, value))
+}
+
+fn cache_control_value_valid(value: &str) -> bool {
+    if let Some(inner) = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        let mut escaped = false;
+        for byte in inner.bytes() {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' || byte == b'\r' || byte == b'\n' {
+                return false;
+            }
+        }
+        !escaped
+    } else {
+        http_token_valid(value)
+    }
+}
+
+fn http_token_valid(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
 }

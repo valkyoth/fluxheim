@@ -96,7 +96,8 @@ fn stale_policy_respects_error_and_status_controls() {
     };
     assert!(!super::cache_should_serve_stale(
         &cache,
-        super::CacheStaleEvent::UpstreamError(fluxheim_config::CacheStaleErrorKind::Connect)
+        super::CacheStaleEvent::UpstreamError(fluxheim_config::CacheStaleErrorKind::Connect),
+        super::StoredCachePolicy::default()
     ));
 
     let cache = fluxheim_config::CacheConfig {
@@ -106,11 +107,13 @@ fn stale_policy_respects_error_and_status_controls() {
     };
     assert!(super::cache_should_serve_stale(
         &cache,
-        super::CacheStaleEvent::UpstreamError(fluxheim_config::CacheStaleErrorKind::Connect)
+        super::CacheStaleEvent::UpstreamError(fluxheim_config::CacheStaleErrorKind::Connect),
+        super::StoredCachePolicy::default()
     ));
     assert!(!super::cache_should_serve_stale(
         &cache,
-        super::CacheStaleEvent::OtherError
+        super::CacheStaleEvent::OtherError,
+        super::StoredCachePolicy::default()
     ));
 
     let cache = fluxheim_config::CacheConfig {
@@ -120,11 +123,13 @@ fn stale_policy_respects_error_and_status_controls() {
     };
     assert!(super::cache_should_serve_stale(
         &cache,
-        super::CacheStaleEvent::UpstreamHttpStatus(500)
+        super::CacheStaleEvent::UpstreamHttpStatus(500),
+        super::StoredCachePolicy::default()
     ));
     assert!(!super::cache_should_serve_stale(
         &cache,
-        super::CacheStaleEvent::UpstreamHttpStatus(404)
+        super::CacheStaleEvent::UpstreamHttpStatus(404),
+        super::StoredCachePolicy::default()
     ));
 
     let narrowed = fluxheim_config::CacheConfig {
@@ -142,7 +147,8 @@ fn stale_policy_respects_revalidation_controls() {
     let cache = fluxheim_config::CacheConfig::default();
     assert!(!super::cache_should_serve_stale(
         &cache,
-        super::CacheStaleEvent::Updating
+        super::CacheStaleEvent::Updating,
+        super::StoredCachePolicy::default()
     ));
 
     let cache = fluxheim_config::CacheConfig {
@@ -151,7 +157,15 @@ fn stale_policy_respects_revalidation_controls() {
     };
     assert!(super::cache_should_serve_stale(
         &cache,
-        super::CacheStaleEvent::Updating
+        super::CacheStaleEvent::Updating,
+        super::StoredCachePolicy::default()
+    ));
+    assert!(!super::cache_should_serve_stale(
+        &cache,
+        super::CacheStaleEvent::Updating,
+        super::StoredCachePolicy {
+            stale_reuse_forbidden: true,
+        }
     ));
 }
 
@@ -215,11 +229,91 @@ fn parses_response_age_and_max_age_headers() {
         .body(())
         .unwrap();
 
-    assert_eq!(super::response_age_secs(response.headers()), 0);
+    assert_eq!(super::response_age_secs(response.headers()), u64::MAX);
     assert_eq!(
         super::response_cache_control_max_age(response.headers()),
         Some(120)
     );
+}
+
+#[test]
+fn strict_response_freshness_prefers_shared_age_and_rejects_ambiguity() {
+    let response = http::Response::builder()
+        .header("age", "500, 0")
+        .header(
+            "cache-control",
+            "max-age=60, extension=\"a,b\", s-maxage=120",
+        )
+        .body(())
+        .unwrap();
+    assert_eq!(super::response_age_secs(response.headers()), 500);
+    assert_eq!(
+        super::response_cache_control_freshness(response.headers()),
+        super::ResponseFreshness::Seconds(120)
+    );
+
+    for value in [
+        "max-age=60, max-age=120",
+        "s-maxage=60, s-maxage=120",
+        "private, private",
+        "max-age=60, extension=\"unterminated",
+        "max-age=sixty",
+    ] {
+        let response = http::Response::builder()
+            .header("content-type", "image/png")
+            .header("cache-control", value)
+            .body(())
+            .unwrap();
+        assert_eq!(
+            super::response_cache_control_freshness(response.headers()),
+            super::ResponseFreshness::Invalid,
+            "cache-control: {value}"
+        );
+        assert_eq!(
+            super::response_cache_admission_rejection(
+                200,
+                response.headers(),
+                &fluxheim_config::CacheConfig::default()
+            ),
+            Some("cache-control-invalid"),
+            "cache-control: {value}"
+        );
+    }
+
+    let mut headers = http::HeaderMap::new();
+    headers.insert("content-type", http::HeaderValue::from_static("image/png"));
+    headers.insert(
+        "cache-control",
+        http::HeaderValue::from_bytes(b"no-store, \xff").unwrap(),
+    );
+    assert_eq!(
+        super::response_cache_admission_rejection(
+            200,
+            &headers,
+            &fluxheim_config::CacheConfig::default()
+        ),
+        Some("cache-control-invalid")
+    );
+}
+
+#[test]
+fn response_policy_forbids_stale_reuse_when_revalidation_is_mandatory() {
+    for value in ["must-revalidate", "proxy-revalidate", "s-maxage=60"] {
+        let response = http::Response::builder()
+            .header("cache-control", value)
+            .body(())
+            .unwrap();
+        assert!(super::response_cache_control_stale_reuse_forbidden(
+            response.headers()
+        ));
+    }
+    let response = http::Response::builder()
+        .header("cache-control", "public, max-age=60")
+        .body(())
+        .unwrap();
+    assert!(!super::response_cache_control_stale_reuse_forbidden(
+        response.headers()
+    ));
 }
 
 #[test]

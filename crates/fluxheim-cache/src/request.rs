@@ -276,12 +276,8 @@ pub fn parse_bounded_single_range(range: &str) -> Option<CacheRangeRequest> {
 pub fn parse_cache_content_range(value: &str) -> Option<CacheContentRange> {
     let value = value.trim();
     let rest = value.strip_prefix("bytes ")?;
-    if let Some(total) = rest.strip_prefix("*/") {
-        return Some(CacheContentRange {
-            start: 0,
-            end: 0,
-            total: total.parse::<u64>().ok(),
-        });
+    if rest.starts_with("*/") {
+        return None;
     }
     let (range, complete_len) = rest.split_once('/')?;
     let (start, end) = range.split_once('-')?;
@@ -295,6 +291,9 @@ pub fn parse_cache_content_range(value: &str) -> Option<CacheContentRange> {
     } else {
         Some(complete_len.parse::<u64>().ok()?)
     };
+    if total.is_some_and(|total| total <= end) {
+        return None;
+    }
     Some(CacheContentRange { start, end, total })
 }
 
@@ -337,25 +336,35 @@ pub fn response_content_range_matches(
     headers: &http::HeaderMap,
     expected: CacheRangeRequest,
 ) -> bool {
-    headers
-        .get_all("content-range")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .any(|value| {
-            parse_cache_content_range(value)
-                .is_some_and(|range| range.start == expected.start && range.end == expected.end)
-        })
+    let mut values = headers.get_all("content-range").iter();
+    let Some(value) = values.next() else {
+        return false;
+    };
+    if values.next().is_some() {
+        return false;
+    }
+    value.to_str().ok().is_some_and(|value| {
+        parse_cache_content_range(value)
+            .is_some_and(|range| range.start == expected.start && range.end == expected.end)
+    })
 }
 
 pub fn response_content_length_matches_range(
     headers: &http::HeaderMap,
     expected: CacheRangeRequest,
 ) -> bool {
-    headers
-        .get_all("content-length")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .any(|value| value.trim().parse::<u64>().ok() == Some(expected.len()))
+    let mut values = headers.get_all("content-length").iter();
+    let Some(value) = values.next() else {
+        return false;
+    };
+    if values.next().is_some() {
+        return false;
+    }
+    value
+        .to_str()
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        == Some(expected.len())
 }
 
 pub fn resolve_client_slice_ranges(
@@ -403,6 +412,9 @@ pub fn required_slice_bounds(
     slice_size: u64,
     total: u64,
 ) -> Vec<CacheSliceBounds> {
+    if slice_size == 0 || total == 0 {
+        return Vec::new();
+    }
     let mut slices = Vec::new();
     let last = total.saturating_sub(1);
     for range in ranges {

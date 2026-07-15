@@ -49,6 +49,12 @@ pub fn request_cache_bypass_reason(
     request: &impl CacheRequestView,
     cache: &fluxheim_config::CacheConfig,
 ) -> Option<&'static str> {
+    if request.contains_header("authorization") {
+        return Some("request-authorization");
+    }
+    if request.contains_header("proxy-authorization") {
+        return Some("request-proxy-authorization");
+    }
     let path = request.path();
     if cache
         .bypass_path_exact

@@ -66,11 +66,10 @@ impl NativeProxyMemoryCache {
             return Ok(None);
         };
         let now = std::time::Instant::now();
-        Ok(
-            (entry.expires_at <= now
-                && entry.stale_if_error_until.is_some_and(|until| until > now))
-            .then_some(entry),
-        )
+        Ok((!entry.stale_reuse_forbidden
+            && entry.expires_at <= now
+            && entry.stale_if_error_until.is_some_and(|until| until > now))
+        .then_some(entry))
     }
 
     pub(super) async fn get_disk_revalidatable(

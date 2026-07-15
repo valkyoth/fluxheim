@@ -52,13 +52,33 @@ configuration. Every field defaults to disabled.
   SHA-256 computation when both digest fields describe the same bytes.
 - Compute immutable cache-body digests once when objects are stored and reuse
   them for memory and disk hits. New disk metadata is versioned and existing
-  v1 cache objects remain readable.
+  v1 and v2 cache objects remain readable.
 - Invalidate a precomputed cache digest whenever compression replaces the body,
   then hash the final encoded bytes before emission.
 
 The native response model remains bounded and buffered. Digest generation
 hashes the final response buffer without another body copy; unbuffered digest
 trailers are not part of this release.
+
+## Shared Cache Policy Hardening
+
+- Always bypass shared-cache lookup and storage for requests carrying
+  `Authorization` or `Proxy-Authorization`.
+- Parse response `Cache-Control` as a strict quoted-string-aware policy,
+  prioritize `s-maxage` over `max-age`, and reject malformed or conflicting
+  security/freshness directives instead of falling back to configured TTLs.
+- Preserve the first received `Age` list member when calculating peer-fill
+  remaining freshness.
+- Persist mandatory-revalidation state with native disk-cache metadata and
+  prohibit stale reuse for `must-revalidate`, `proxy-revalidate`, and
+  `s-maxage`; v1 and v2 metadata remain readable and derive the restriction
+  from stored response headers.
+- Require one consistent satisfied `Content-Range` and `Content-Length` before
+  range admission, reject impossible totals and duplicate metadata, and make
+  zero-sized public slice planning return no slices instead of dividing by
+  zero.
+- Bound storage-bin manifests to 4 KiB and use no-follow, nonblocking regular
+  file reads so oversized or special persistent files fail closed at startup.
 
 ## Reproducible FIPS-Backend Evidence
 
@@ -90,3 +110,7 @@ platform, configuration, key handling, and required compliance evidence.
   rejection, and inherited overlay behavior.
 - Status metadata application is idempotent when a response policy is applied
   more than once.
+- Shared-cache unit and live-listener tests cover credential bypass, malformed
+  freshness with an operator TTL, `s-maxage` precedence, mandatory
+  revalidation, contradictory range metadata, zero-sized slice policy, and
+  oversized/FIFO storage-bin manifests.

@@ -3208,7 +3208,11 @@ Stable scope:
   algorithms/configurations fail closed. Record provider, compiler, dependency,
   binary, and image digests as release evidence. These are reproducible
   FIPS-capable backend tests, not published "FIPS images" or a claim that
-  Fluxheim as a complete product is FIPS validated.
+  Fluxheim as a complete product is FIPS validated. Close the shared-cache
+  policy audit by making credential-bearing requests unconditional bypasses,
+  parsing freshness metadata fail-closed, persisting mandatory-revalidation
+  restrictions across cache tiers, validating range metadata strictly, and
+  bounding storage-bin manifest reads.
 - `v1.8.0`: cross-platform production baseline planning. Replace the old
   "macOS developer-only" posture with a concrete macOS and Windows production
   parity line now that Fluxheim no longer depends on Pingora for the normal
@@ -4862,7 +4866,10 @@ circular dependencies.
   verify the intended OpenSSL FIPS and rustls/AWS-LC FIPS provider/dependency
   boundaries, run real downstream/upstream TLS, reject incompatible policy,
   and retain toolchain/provider/binary/image evidence. Do not publish these as
-  FIPS images or present the tests as product-level FIPS validation.
+  FIPS images or present the tests as product-level FIPS validation. Also
+  close the shared-cache policy audit with unconditional credential bypass,
+  fail-closed freshness parsing, persisted mandatory-revalidation state,
+  strict range admission, and bounded storage-bin manifest reads.
 - `v1.8.0`: cross-platform production baseline planning. Make macOS and
   Windows first-class release targets where practical, with Linux as the
   reference baseline. Define the supported profile matrix, platform-specific

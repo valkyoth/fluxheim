@@ -2727,9 +2727,11 @@ storage for matching request paths. Prefixes are useful for app admin areas;
 exact paths are useful for login, XML-RPC, cron, sitemap, or legacy WordPress endpoints.
 `bypass_request_headers` disables both cache lookup and cache storage when any
 listed request header is present. Use it on routes where a header such as
-`Cookie` or `Authorization` changes the upstream response but should not become
-part of the shared cache identity. The default is empty so explicit static
-asset routes can still cache browser requests that carry unrelated cookies.
+`Cookie` changes the upstream response but should not become part of the shared
+cache identity. Requests containing `Authorization` or `Proxy-Authorization`
+always bypass shared-cache lookup and storage, independently of this list. The
+configured default is empty so explicit static asset routes can still cache
+browser requests that carry unrelated cookies.
 `bypass_request_header_values` disables lookup and storage only when a listed
 request header has the exact configured value. Use it for bounded flags such as
 `x-preview-mode = "1"` when header presence alone is too broad.
@@ -2805,7 +2807,10 @@ Non-200 origin responses are admitted only when their status appears in
 `status_ttls`, or when `default_status_ttl_secs` is set as a fallback for any
 status. Use `default_status_ttl_secs` carefully: it can make unusual or error
 statuses cacheable on the matched route unless another admission rule rejects
-the response. `stale_while_revalidate_secs` and `stale_if_error_secs` are
+the response. Malformed response `Cache-Control`, duplicate security or
+freshness directives, and invalid quoted values fail admission rather than
+falling back to these TTLs. For valid policy, `s-maxage` takes precedence over
+`max-age`. `stale_while_revalidate_secs` and `stale_if_error_secs` are
 optional and must be greater than zero when set.
 `stale_while_revalidate_secs` permits serving an already-stored stale object
 while Fluxheim revalidates it in the background, and `stale_if_error_secs`
@@ -2817,7 +2822,10 @@ values are `connect`, `timeout`, `read`, `write`, `connection-closed`,
 `http-status`, `protocol`, `tls`, and `other`. The default includes all
 classes. `stale_if_error_statuses` optionally narrows HTTP-status stale serving
 to selected 5xx origin statuses; when it is empty, any upstream 5xx status that
-Fluxheim marks stale-if-error eligible is allowed. `content_types` is the
+Fluxheim marks stale-if-error eligible is allowed. Stored responses carrying
+`must-revalidate`, `proxy-revalidate`, or `s-maxage` are never reused stale;
+that origin restriction is persisted across memory and disk cache tiers and
+overrides configured stale windows. `content_types` is the
 allow-list for `200 OK` origin
 response media types. Entries may be exact media types such as `text/css` or
 subtype wildcards such as `image/*`. `extensions` is the user-facing alias for

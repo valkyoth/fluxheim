@@ -8,7 +8,8 @@ use super::{
     downstream_get, downstream_request, native_proxy_memory_cache_config, proxy_for,
     response_header, response_header_values, route_proxy_listener,
     upstream_cacheable_once_with_hop_header, upstream_cacheable_sequence,
-    upstream_delayed_cacheable_once, upstream_response, upstream_vary_sequence,
+    upstream_delayed_cacheable_once, upstream_raw_response_sequence, upstream_response,
+    upstream_vary_sequence,
 };
 
 #[tokio::test]
@@ -129,6 +130,77 @@ async fn native_route_proxy_does_not_cache_authorized_proxy_response() {
     assert!(public.ends_with("public-origin"));
     assert_eq!(
         response_header(&public, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_does_not_cache_proxy_authorized_response() {
+    let upstream = upstream_cacheable_sequence(&[
+        ("/tenant.png", "proxy-authorized-origin"),
+        ("/tenant.png", "public-origin"),
+    ])
+    .await;
+    let cache = native_proxy_memory_cache_config();
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let authorized = downstream_request(
+        listener,
+        "GET /tenant.png HTTP/1.1\r\nHost: route.test\r\nProxy-Authorization: Basic secret\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let public = downstream_get(listener, "/tenant.png").await;
+
+    assert!(authorized.ends_with("proxy-authorized-origin"));
+    assert_eq!(
+        response_header(&authorized, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&authorized, "x-cache-reason").as_deref(),
+        Some("request-proxy-authorization")
+    );
+    assert!(public.ends_with("public-origin"));
+    assert_eq!(
+        response_header(&public, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+}
+
+#[tokio::test]
+async fn native_route_proxy_does_not_cache_malformed_freshness() {
+    let upstream = upstream_raw_response_sequence(&[
+        (
+            "/asset.png",
+            "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60, max-age=120\r\ncontent-length: 9\r\n\r\nambiguous",
+        ),
+        (
+            "/asset.png",
+            "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=60\r\ncontent-length: 12\r\n\r\nvalid-origin",
+        ),
+    ])
+    .await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.default_status_ttl_secs = Some(300);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let malformed = downstream_get(listener, "/asset.png").await;
+    let valid = downstream_get(listener, "/asset.png").await;
+
+    assert!(malformed.ends_with("ambiguous"));
+    assert_eq!(
+        response_header(&malformed, "x-cache-status").as_deref(),
+        Some("BYPASS")
+    );
+    assert_eq!(
+        response_header(&malformed, "x-cache-reason").as_deref(),
+        Some("cache-control-invalid")
+    );
+    assert!(valid.ends_with("valid-origin"));
+    assert_eq!(
+        response_header(&valid, "x-cache-status").as_deref(),
         Some("MISS")
     );
 }

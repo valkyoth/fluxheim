@@ -61,6 +61,7 @@ fn disk_cache_entry(body: &'static [u8]) -> NativeMemoryCacheEntry {
         expires_at: now + Duration::from_secs(60),
         stale_while_revalidate_until: None,
         stale_if_error_until: None,
+        stale_reuse_forbidden: false,
         stored_at: now,
         weight: 64,
     }
@@ -286,6 +287,7 @@ fn disk_cache_rejects_record_whose_embedded_key_does_not_match_lookup() {
         expires_at: now + Duration::from_secs(60),
         stale_while_revalidate_until: None,
         stale_if_error_until: None,
+        stale_reuse_forbidden: false,
         stored_at: now,
         weight: 64,
     };

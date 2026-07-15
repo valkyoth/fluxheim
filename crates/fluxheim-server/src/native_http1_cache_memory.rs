@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fluxheim_cache::{
-    CachePurgeIndex, remaining_fresh_ttl_secs, response_age_secs, response_cache_control_max_age,
+    CachePurgeIndex, ResponseFreshness, remaining_fresh_ttl_secs, response_age_secs,
+    response_cache_control_freshness,
 };
 use fluxheim_config::CacheConfig;
 use tokio::sync::Notify;
@@ -22,6 +23,7 @@ pub(crate) struct NativeMemoryCacheEntry {
     pub(crate) expires_at: Instant,
     pub(crate) stale_while_revalidate_until: Option<Instant>,
     pub(crate) stale_if_error_until: Option<Instant>,
+    pub(crate) stale_reuse_forbidden: bool,
     pub(crate) stored_at: Instant,
     pub(crate) weight: u64,
 }
@@ -121,14 +123,18 @@ pub(crate) fn native_cache_ttl(
     headers: &http::HeaderMap,
     cache: &CacheConfig,
 ) -> Option<Duration> {
-    cache
+    let configured = cache
         .status_ttls
         .get(&status)
         .copied()
-        .or(cache.default_status_ttl_secs)
-        .or_else(|| response_cache_control_max_age(headers))
-        .map(u64::from)
-        .map(Duration::from_secs)
+        .or(cache.default_status_ttl_secs);
+    match response_cache_control_freshness(headers) {
+        ResponseFreshness::Invalid => None,
+        ResponseFreshness::Seconds(seconds) => configured.or(Some(seconds)),
+        ResponseFreshness::Absent => configured,
+    }
+    .map(u64::from)
+    .map(Duration::from_secs)
 }
 
 pub(crate) fn native_peer_fill_cache_ttl(
@@ -136,12 +142,16 @@ pub(crate) fn native_peer_fill_cache_ttl(
     headers: &http::HeaderMap,
     cache: &CacheConfig,
 ) -> Option<Duration> {
-    let ttl_secs = cache
+    let configured = cache
         .status_ttls
         .get(&status)
         .copied()
-        .or(cache.default_status_ttl_secs)
-        .or_else(|| response_cache_control_max_age(headers))?;
+        .or(cache.default_status_ttl_secs);
+    let ttl_secs = match response_cache_control_freshness(headers) {
+        ResponseFreshness::Invalid => return None,
+        ResponseFreshness::Seconds(seconds) => configured.or(Some(seconds)),
+        ResponseFreshness::Absent => configured,
+    }?;
     remaining_fresh_ttl_secs(ttl_secs, response_age_secs(headers))
         .map(u64::from)
         .map(Duration::from_secs)

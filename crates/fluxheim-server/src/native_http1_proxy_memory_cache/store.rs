@@ -17,8 +17,8 @@ use crate::{NativeHttp1Request, NativeHttp1Response};
 use fluxheim_cache::{
     CacheRequestView, VaryCachePolicy, cache_vary_policy, collect_cache_tags,
     range_response_cache_admission_rejection, response_age_secs,
-    response_cache_admission_rejection, response_range_cache_admission_rejection,
-    selected_cache_range_request,
+    response_cache_admission_rejection, response_cache_control_stale_reuse_forbidden,
+    response_range_cache_admission_rejection, selected_cache_range_request,
 };
 
 use super::{NativeProxyCacheStoreMetadata, NativeProxyMemoryCache};
@@ -119,22 +119,7 @@ impl NativeProxyMemoryCache {
         if response.status() != 304 {
             return Err("not-modified-status");
         }
-        let headers = native_response_header_map(response);
-        let ttl = native_cache_ttl(response.status(), &headers, &self.config)
-            .or_else(|| native_cache_ttl(entry.status, &headers, &self.config))
-            .ok_or("ttl-missing")?;
-        if ttl.is_zero() {
-            return Err("ttl-zero");
-        }
         let now = std::time::Instant::now();
-        let (expires_at, stale_while_revalidate_until, stale_if_error_until) =
-            native_cache_expiry_times(
-                now,
-                ttl,
-                self.config.stale_while_revalidate_secs,
-                self.config.stale_if_error_secs,
-            )
-            .ok_or("ttl-overflow")?;
         let mut refreshed = entry.to_response();
         for (name, value) in cached_proxy_headers(response, &self.config) {
             if native_not_modified_refresh_header_skipped(&name) {
@@ -143,6 +128,28 @@ impl NativeProxyMemoryCache {
             refreshed.remove_header(&name);
             refreshed.push_header(name, value);
         }
+        let refreshed_headers = native_response_header_map(&refreshed);
+        if let Some(reason) =
+            response_cache_admission_rejection(entry.status, &refreshed_headers, &self.config)
+        {
+            return Err(reason);
+        }
+        let ttl = native_cache_ttl(entry.status, &refreshed_headers, &self.config)
+            .ok_or("ttl-missing")?;
+        if ttl.is_zero() {
+            return Err("ttl-zero");
+        }
+        let stale_reuse_forbidden =
+            response_cache_control_stale_reuse_forbidden(&refreshed_headers);
+        let stale_while_revalidate_secs = (!stale_reuse_forbidden)
+            .then_some(self.config.stale_while_revalidate_secs)
+            .flatten();
+        let stale_if_error_secs = (!stale_reuse_forbidden)
+            .then_some(self.config.stale_if_error_secs)
+            .flatten();
+        let (expires_at, stale_while_revalidate_until, stale_if_error_until) =
+            native_cache_expiry_times(now, ttl, stale_while_revalidate_secs, stale_if_error_secs)
+                .ok_or("ttl-overflow")?;
         let mut refreshed_entry = NativeMemoryCacheEntry {
             status: entry.status,
             reason: entry.reason.clone(),
@@ -153,6 +160,7 @@ impl NativeProxyMemoryCache {
             expires_at,
             stale_while_revalidate_until,
             stale_if_error_until,
+            stale_reuse_forbidden,
             stored_at: now,
             weight: native_cache_entry_weight(key, &refreshed, entry.body.len() as u64),
         };
@@ -273,13 +281,15 @@ impl NativeProxyMemoryCache {
         } else {
             now
         };
+        let stale_reuse_forbidden = response_cache_control_stale_reuse_forbidden(&headers);
+        let stale_while_revalidate_secs = (!stale_reuse_forbidden)
+            .then_some(self.config.stale_while_revalidate_secs)
+            .flatten();
+        let stale_if_error_secs = (!stale_reuse_forbidden)
+            .then_some(self.config.stale_if_error_secs)
+            .flatten();
         let Some((expires_at, stale_while_revalidate_until, stale_if_error_until)) =
-            native_cache_expiry_times(
-                now,
-                ttl,
-                self.config.stale_while_revalidate_secs,
-                self.config.stale_if_error_secs,
-            )
+            native_cache_expiry_times(now, ttl, stale_while_revalidate_secs, stale_if_error_secs)
         else {
             return Err("ttl-overflow");
         };
@@ -297,6 +307,7 @@ impl NativeProxyMemoryCache {
             expires_at,
             stale_while_revalidate_until,
             stale_if_error_until,
+            stale_reuse_forbidden,
             stored_at,
             weight,
         };

@@ -42,17 +42,19 @@ pub(crate) fn native_cache_entry_has_stale_window(
     entry: &NativeMemoryCacheEntry,
     now: Instant,
 ) -> bool {
-    entry
-        .stale_while_revalidate_until
-        .is_some_and(|until| until > now)
-        || entry.stale_if_error_until.is_some_and(|until| until > now)
+    !entry.stale_reuse_forbidden
+        && (entry
+            .stale_while_revalidate_until
+            .is_some_and(|until| until > now)
+            || entry.stale_if_error_until.is_some_and(|until| until > now))
 }
 
 pub(crate) fn native_cache_entry_serve_stale_while_revalidate(
     entry: &NativeMemoryCacheEntry,
     now: Instant,
 ) -> bool {
-    entry.expires_at <= now
+    !entry.stale_reuse_forbidden
+        && entry.expires_at <= now
         && entry
             .stale_while_revalidate_until
             .is_some_and(|until| until > now)

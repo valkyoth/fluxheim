@@ -20,6 +20,7 @@ pub(super) struct NativeDiskCacheMeta {
     pub(super) stale_if_error_until_unix_secs: Option<u64>,
     pub(super) stored_at_unix_secs: u64,
     pub(super) body_sha256: Option<[u8; 32]>,
+    pub(super) stale_reuse_forbidden: Option<bool>,
     pub(super) vary_fields: Vec<String>,
 }
 
@@ -38,13 +39,14 @@ impl NativeDiskCacheMeta {
                 .map(native_instant_to_unix_secs),
             stored_at_unix_secs: native_instant_to_unix_secs(entry.stored_at),
             body_sha256: Some(*entry.body_sha256),
+            stale_reuse_forbidden: Some(entry.stale_reuse_forbidden),
             vary_fields,
         }
     }
 
     pub(super) fn encode(&self) -> Vec<u8> {
         let mut encoded = Vec::new();
-        let _ = writeln!(&mut encoded, "FLUXHEIM-NATIVE-PROXY-CACHE-v2");
+        let _ = writeln!(&mut encoded, "FLUXHEIM-NATIVE-PROXY-CACHE-v3");
         let _ = writeln!(&mut encoded, "{}", self.status);
         let _ = writeln!(&mut encoded, "{}", self.reason.len());
         let _ = writeln!(
@@ -78,6 +80,13 @@ impl NativeDiskCacheMeta {
                 .map(native_sha256_hex)
                 .unwrap_or_else(|| "-".to_owned())
         );
+        let _ = writeln!(
+            &mut encoded,
+            "{}",
+            self.stale_reuse_forbidden
+                .map(|value| if value { "1" } else { "0" })
+                .unwrap_or("-")
+        );
         let _ = writeln!(&mut encoded, "{}", self.vary_fields.len());
         for field in &self.vary_fields {
             let _ = writeln!(&mut encoded, "{}", field.len());
@@ -98,6 +107,7 @@ impl NativeDiskCacheMeta {
         let version = match magic {
             "FLUXHEIM-NATIVE-PROXY-CACHE-v1" => 1,
             "FLUXHEIM-NATIVE-PROXY-CACHE-v2" => 2,
+            "FLUXHEIM-NATIVE-PROXY-CACHE-v3" => 3,
             _ => return None,
         };
         let status = native_disk_meta_line(bytes, &mut offset)?
@@ -121,8 +131,18 @@ impl NativeDiskCacheMeta {
         let stored_at_unix_secs = native_disk_meta_line(bytes, &mut offset)?
             .parse::<u64>()
             .ok()?;
-        let body_sha256 = if version == 2 {
+        let body_sha256 = if version >= 2 {
             native_disk_meta_optional_sha256(native_disk_meta_line(bytes, &mut offset)?)?
+        } else {
+            None
+        };
+        let stale_reuse_forbidden = if version >= 3 {
+            match native_disk_meta_line(bytes, &mut offset)? {
+                "1" => Some(true),
+                "0" => Some(false),
+                "-" => None,
+                _ => return None,
+            }
         } else {
             None
         };
@@ -168,6 +188,7 @@ impl NativeDiskCacheMeta {
             stale_if_error_until_unix_secs,
             stored_at_unix_secs,
             body_sha256,
+            stale_reuse_forbidden,
             vary_fields,
         })
     }
@@ -288,10 +309,24 @@ pub(super) fn native_memory_entry_from_disk_object(
     let body_sha256 = meta
         .body_sha256
         .unwrap_or_else(|| super::native_cache_body_sha256(&object.body));
+    let headers = native_disk_response_headers(&object.response_header)?;
+    let stale_reuse_forbidden = meta.stale_reuse_forbidden.unwrap_or_else(|| {
+        let mut header_map = http::HeaderMap::new();
+        for (name, value) in &headers {
+            let Ok(name) = http::HeaderName::from_bytes(name.as_bytes()) else {
+                return true;
+            };
+            let Ok(value) = http::HeaderValue::from_str(value) else {
+                return true;
+            };
+            header_map.append(name, value);
+        }
+        fluxheim_cache::response_cache_control_stale_reuse_forbidden(&header_map)
+    });
     let entry = NativeMemoryCacheEntry {
         status: meta.status,
         reason: meta.reason,
-        headers: native_disk_response_headers(&object.response_header)?,
+        headers,
         content_length: meta.content_length,
         body: object.body.clone(),
         body_sha256: std::sync::Arc::new(body_sha256),
@@ -302,6 +337,7 @@ pub(super) fn native_memory_entry_from_disk_object(
         stale_if_error_until: meta
             .stale_if_error_until_unix_secs
             .map(|secs| native_unix_secs_to_instant(secs, now_system, now_instant)),
+        stale_reuse_forbidden,
         stored_at: native_unix_secs_to_instant(meta.stored_at_unix_secs, now_system, now_instant),
         weight: object.weight as u64,
     };
@@ -316,10 +352,11 @@ fn native_cache_entry_has_stale_window_for_disk(
     entry: &NativeMemoryCacheEntry,
     now: Instant,
 ) -> bool {
-    entry
-        .stale_while_revalidate_until
-        .is_some_and(|until| until > now)
-        || entry.stale_if_error_until.is_some_and(|until| until > now)
+    !entry.stale_reuse_forbidden
+        && (entry
+            .stale_while_revalidate_until
+            .is_some_and(|until| until > now)
+            || entry.stale_if_error_until.is_some_and(|until| until > now))
 }
 
 pub(super) fn native_instant_to_unix_secs(instant: Instant) -> u64 {
@@ -372,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn disk_cache_metadata_v2_preserves_precomputed_body_digest() {
+    fn disk_cache_metadata_v3_preserves_digest_and_stale_policy() {
         let metadata = NativeDiskCacheMeta {
             status: 200,
             reason: "OK".to_owned(),
@@ -382,6 +419,7 @@ mod tests {
             stale_if_error_until_unix_secs: Some(12),
             stored_at_unix_secs: 1,
             body_sha256: Some(native_body_sha256(b"cached")),
+            stale_reuse_forbidden: Some(true),
             vary_fields: vec!["accept-encoding".to_owned()],
         };
 
@@ -399,6 +437,15 @@ mod tests {
         assert_eq!(decoded.status, 200);
         assert_eq!(decoded.content_length, Some(6));
         assert_eq!(decoded.body_sha256, None);
+        assert_eq!(decoded.stale_reuse_forbidden, None);
         assert!(decoded.vary_fields.is_empty());
+    }
+
+    #[test]
+    fn disk_cache_metadata_v2_remains_readable_without_stale_policy() {
+        let metadata = b"FLUXHEIM-NATIVE-PROXY-CACHE-v2\n200\n2\n6\n10\n11\n12\n1\n-\n0\nOK";
+        let decoded = NativeDiskCacheMeta::decode(metadata).unwrap();
+
+        assert_eq!(decoded.stale_reuse_forbidden, None);
     }
 }

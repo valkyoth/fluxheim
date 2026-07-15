@@ -16,6 +16,8 @@ pub use crate::storage_bin_manifest::{
     StorageBinObjectLocation,
 };
 
+const MAX_STORAGE_BIN_MANIFEST_BYTES: u64 = 4096;
+
 #[derive(Debug, Clone)]
 pub struct StorageBinFileSet {
     layout: StorageBinLayoutPlan,
@@ -187,9 +189,23 @@ fn read_storage_bin_manifest(
         ));
     }
 
-    let mut file = StorageBinSafePath::from_path(canonical).open_existing_file()?;
+    let file = StorageBinSafePath::from_path(canonical).open_existing_file()?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_STORAGE_BIN_MANIFEST_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "storage-bin manifest must be a bounded regular file",
+        ));
+    }
     let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
+    file.take(MAX_STORAGE_BIN_MANIFEST_BYTES.saturating_add(1))
+        .read_to_string(&mut contents)?;
+    if contents.len() as u64 > MAX_STORAGE_BIN_MANIFEST_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "storage-bin manifest exceeds the supported file-size limit",
+        ));
+    }
     StorageBinManifest::decode(&contents).map(Some)
 }
 

@@ -140,6 +140,39 @@ async fn native_route_proxy_serves_stale_while_revalidating_memory_cache() {
 }
 
 #[tokio::test]
+async fn native_route_proxy_does_not_serve_mandatory_revalidation_response_stale() {
+    let upstream = upstream_raw_response_sequence(&[(
+        "/asset.png",
+        "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncache-control: max-age=1, must-revalidate\r\ncontent-length: 10\r\n\r\nmust-check",
+    )])
+    .await;
+    let mut cache = native_proxy_memory_cache_config();
+    cache.stale_while_revalidate_secs = Some(60);
+    cache.stale_if_error_secs = Some(60);
+    let proxy = proxy_for(upstream).with_proxy_cache_config(&cache);
+    let listener = route_proxy_listener(NativeHttp1RouteProxy::new(Vec::new(), Some(proxy))).await;
+
+    let first = downstream_get(listener, "/asset.png").await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let expired = downstream_get(listener, "/asset.png").await;
+
+    assert!(first.ends_with("must-check"));
+    assert_eq!(
+        response_header(&first, "x-cache-status").as_deref(),
+        Some("MISS")
+    );
+    assert!(expired.starts_with("HTTP/1.1 502 Bad Gateway\r\n"));
+    assert_ne!(
+        response_header(&expired, "x-cache-status").as_deref(),
+        Some("STALE")
+    );
+    assert_ne!(
+        response_header(&expired, "x-cache-status").as_deref(),
+        Some("STALE-UPDATING")
+    );
+}
+
+#[tokio::test]
 async fn native_route_proxy_serves_stale_proxy_response_on_upstream_error() {
     let upstream = upstream_cacheable_once_with_max_age("stale-origin", 1).await;
     let mut cache = native_proxy_memory_cache_config();

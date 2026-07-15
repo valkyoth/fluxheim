@@ -247,7 +247,10 @@ impl StorageBinSafePath {
         let fd = rustix::fs::openat(
             &parent,
             name,
-            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::NONBLOCK,
             rustix::fs::Mode::empty(),
         )
         .map_err(storage_bin_rustix_to_io_error)?;

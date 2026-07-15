@@ -251,6 +251,20 @@ fn request_view_reports_cache_bypass_reasons() {
         ),
         Some("request-no-store")
     );
+    assert_eq!(
+        super::request_cache_bypass_reason(
+            &TestRequest::new("/").with_header("authorization", "Bearer secret"),
+            &cache
+        ),
+        Some("request-authorization")
+    );
+    assert_eq!(
+        super::request_cache_bypass_reason(
+            &TestRequest::new("/").with_header("proxy-authorization", "Basic secret"),
+            &cache
+        ),
+        Some("request-proxy-authorization")
+    );
 }
 
 #[test]

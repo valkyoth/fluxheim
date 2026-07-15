@@ -6,10 +6,19 @@ pub enum CacheStaleEvent {
     OtherError,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StoredCachePolicy {
+    pub stale_reuse_forbidden: bool,
+}
+
 pub fn cache_should_serve_stale(
     cache: &fluxheim_config::CacheConfig,
     event: CacheStaleEvent,
+    policy: StoredCachePolicy,
 ) -> bool {
+    if policy.stale_reuse_forbidden {
+        return false;
+    }
     match event {
         CacheStaleEvent::UpstreamError(kind) => {
             cache.stale_if_error_secs.is_some() && cache.stale_if_error_on.contains(&kind)

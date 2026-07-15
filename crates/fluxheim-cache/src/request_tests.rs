@@ -137,15 +137,9 @@ fn parses_content_range() {
             total: None,
         })
     );
-    assert_eq!(
-        parse_cache_content_range("bytes */100"),
-        Some(CacheContentRange {
-            start: 0,
-            end: 0,
-            total: Some(100),
-        })
-    );
+    assert_eq!(parse_cache_content_range("bytes */100"), None);
     assert_eq!(parse_cache_content_range("bytes 19-10/100"), None);
+    assert_eq!(parse_cache_content_range("bytes 10-19/19"), None);
     assert_eq!(parse_cache_content_range("items 10-19/100"), None);
 }
 
@@ -169,6 +163,32 @@ fn validates_response_range_headers_against_request() {
     assert!(response_content_length_matches_range(
         response.headers(),
         wrong
+    ));
+
+    let duplicate = http::Response::builder()
+        .header("content-range", "bytes 10-19/100")
+        .header("content-range", "bytes 20-29/100")
+        .header("content-length", "10")
+        .header("content-length", "10")
+        .body(())
+        .unwrap();
+    assert!(!response_content_range_matches(
+        duplicate.headers(),
+        expected
+    ));
+    assert!(!response_content_length_matches_range(
+        duplicate.headers(),
+        expected
+    ));
+
+    let unsatisfied = http::Response::builder()
+        .header("content-range", "bytes */100")
+        .header("content-length", "10")
+        .body(())
+        .unwrap();
+    assert!(!response_content_range_matches(
+        unsatisfied.headers(),
+        CacheRangeRequest { start: 0, end: 0 }
     ));
 }
 
@@ -227,6 +247,8 @@ fn computes_required_slice_bounds() {
             },
         ]
     );
+    assert!(required_slice_bounds(&ranges, 0, 200).is_empty());
+    assert!(required_slice_bounds(&ranges, 64, 0).is_empty());
 }
 
 #[test]

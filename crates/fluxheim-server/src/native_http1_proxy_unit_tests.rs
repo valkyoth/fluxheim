@@ -274,6 +274,7 @@ fn native_storage_bin_disk_purge_uses_live_cache_instance() {
         expires_at: now + Duration::from_secs(60),
         stale_while_revalidate_until: None,
         stale_if_error_until: None,
+        stale_reuse_forbidden: false,
         stored_at: now,
         weight: 128,
     };

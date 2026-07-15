@@ -402,6 +402,7 @@ impl NativeStaticMemoryCache {
             expires_at,
             stale_while_revalidate_until: None,
             stale_if_error_until: None,
+            stale_reuse_forbidden: false,
             stored_at: now,
             weight,
         };

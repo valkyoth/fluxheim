@@ -1,13 +1,20 @@
-use crate::headers_directives::response_cache_control_shared_rejection;
+use crate::headers_directives::parse_response_cache_control_values;
 use crate::headers_vary::{VaryCachePolicy, cache_vary_policy};
 use crate::request::{response_content_length_matches_range, response_content_range_matches};
 
 pub fn response_values_forbid_shared_cache<'a>(
     cache_control: impl IntoIterator<Item = &'a str>,
 ) -> Option<&'static str> {
-    cache_control
-        .into_iter()
-        .find_map(response_cache_control_shared_rejection)
+    parse_response_cache_control_values(cache_control)
+        .map(|policy| policy.shared_rejection)
+        .unwrap_or(Some("cache-control-invalid"))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResponseFreshness {
+    Absent,
+    Seconds(u32),
+    Invalid,
 }
 
 pub fn sanitize_multipart_content_type(value: &str) -> String {
@@ -82,30 +89,60 @@ pub fn cache_control_with_directive<S: AsRef<str>>(
 }
 
 pub fn response_age_secs(headers: &http::HeaderMap) -> u64 {
-    headers
-        .get_all("age")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .find_map(|value| value.trim().parse::<u64>().ok())
-        .unwrap_or(0)
+    let Some(value) = headers.get_all("age").iter().next() else {
+        return 0;
+    };
+    let Ok(value) = value.to_str() else {
+        return u64::MAX;
+    };
+    value
+        .split(',')
+        .next()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(u64::MAX)
 }
 
 pub fn response_cache_control_max_age(headers: &http::HeaderMap) -> Option<u32> {
-    headers
-        .get_all("cache-control")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .find_map(|directive| {
-            let (name, value) = directive.trim().split_once('=')?;
-            if name.trim().eq_ignore_ascii_case("s-maxage")
-                || name.trim().eq_ignore_ascii_case("max-age")
-            {
-                value.trim().trim_matches('"').parse::<u32>().ok()
-            } else {
-                None
-            }
-        })
+    match response_cache_control_freshness(headers) {
+        ResponseFreshness::Seconds(seconds) => Some(seconds),
+        ResponseFreshness::Absent | ResponseFreshness::Invalid => None,
+    }
+}
+
+pub fn response_cache_control_freshness(headers: &http::HeaderMap) -> ResponseFreshness {
+    if !headers.contains_key("cache-control") {
+        return ResponseFreshness::Absent;
+    }
+    let mut values = Vec::new();
+    for value in headers.get_all("cache-control") {
+        let Ok(value) = value.to_str() else {
+            return ResponseFreshness::Invalid;
+        };
+        values.push(value);
+    }
+    match parse_response_cache_control_values(values) {
+        Ok(policy) => policy
+            .freshness_secs
+            .map(ResponseFreshness::Seconds)
+            .unwrap_or(ResponseFreshness::Absent),
+        Err(()) => ResponseFreshness::Invalid,
+    }
+}
+
+pub fn response_cache_control_stale_reuse_forbidden(headers: &http::HeaderMap) -> bool {
+    if !headers.contains_key("cache-control") {
+        return false;
+    }
+    let mut values = Vec::new();
+    for value in headers.get_all("cache-control") {
+        let Ok(value) = value.to_str() else {
+            return true;
+        };
+        values.push(value);
+    }
+    parse_response_cache_control_values(values)
+        .map(|policy| policy.stale_reuse_forbidden)
+        .unwrap_or(true)
 }
 
 pub fn response_content_type_is_cacheable(
@@ -204,12 +241,14 @@ pub fn response_cache_header_policy_rejection(
     {
         return Some("configured-no-store-response-header-value");
     }
-    if let Some(reason) = response_values_forbid_shared_cache(
-        headers
-            .get_all("cache-control")
-            .iter()
-            .filter_map(|value| value.to_str().ok()),
-    ) {
+    let mut cache_control = Vec::new();
+    for value in headers.get_all("cache-control") {
+        let Ok(value) = value.to_str() else {
+            return Some("cache-control-invalid");
+        };
+        cache_control.push(value);
+    }
+    if let Some(reason) = response_values_forbid_shared_cache(cache_control) {
         return Some(reason);
     }
     match cache_vary_policy(headers, cache) {

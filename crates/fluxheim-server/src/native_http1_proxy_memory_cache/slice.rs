@@ -17,7 +17,8 @@ use crate::native_http1_proxy_cache_slice::{
 use crate::{NativeHttp1Request, NativeHttp1Response};
 use fluxheim_cache::{
     CacheRequestView, CacheSliceBounds, request_cache_bypass_reason, resolve_client_slice_ranges,
-    response_range_cache_admission_rejection, selected_cache_slice_range_request,
+    response_cache_control_stale_reuse_forbidden, response_range_cache_admission_rejection,
+    selected_cache_slice_range_request,
 };
 
 use super::NativeProxyMemoryCache;
@@ -177,13 +178,15 @@ impl NativeProxyMemoryCache {
             return None;
         }
         let now = std::time::Instant::now();
+        let stale_reuse_forbidden = response_cache_control_stale_reuse_forbidden(&headers);
+        let stale_while_revalidate_secs = (!stale_reuse_forbidden)
+            .then_some(self.config.stale_while_revalidate_secs)
+            .flatten();
+        let stale_if_error_secs = (!stale_reuse_forbidden)
+            .then_some(self.config.stale_if_error_secs)
+            .flatten();
         let (expires_at, stale_while_revalidate_until, stale_if_error_until) =
-            native_cache_expiry_times(
-                now,
-                ttl,
-                self.config.stale_while_revalidate_secs,
-                self.config.stale_if_error_secs,
-            )?;
+            native_cache_expiry_times(now, ttl, stale_while_revalidate_secs, stale_if_error_secs)?;
         let body_len = response.body().len() as u64;
         if body_len > self.config.range.slice.size_bytes.as_u64() || body_len > self.max_bytes {
             return None;
@@ -200,6 +203,7 @@ impl NativeProxyMemoryCache {
             expires_at,
             stale_while_revalidate_until,
             stale_if_error_until,
+            stale_reuse_forbidden,
             stored_at: now,
             weight: native_cache_entry_weight(key, response, body_len),
         };

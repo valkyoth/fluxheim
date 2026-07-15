@@ -6,15 +6,16 @@ pub use crate::headers_request::{
     selected_cache_range_request, selected_cache_slice_range_request,
 };
 pub use crate::headers_response::{
-    cache_control_freshness_value, cache_control_with_directive, first_header_value,
-    range_response_cache_admission_rejection, remaining_fresh_ttl_secs, response_age_secs,
-    response_cache_admission_rejection, response_cache_control_max_age,
+    ResponseFreshness, cache_control_freshness_value, cache_control_with_directive,
+    first_header_value, range_response_cache_admission_rejection, remaining_fresh_ttl_secs,
+    response_age_secs, response_cache_admission_rejection, response_cache_control_freshness,
+    response_cache_control_max_age, response_cache_control_stale_reuse_forbidden,
     response_cache_header_policy_rejection, response_content_type_is_cacheable,
     response_range_cache_admission_rejection, response_values_forbid_shared_cache,
     sanitize_multipart_content_type,
 };
 pub use crate::headers_stale::{
-    CacheStaleEvent, cache_should_serve_stale, cache_stale_status_allows,
+    CacheStaleEvent, StoredCachePolicy, cache_should_serve_stale, cache_stale_status_allows,
 };
 pub use crate::headers_vary::{
     MAX_VARY_FIELDS, VaryCachePolicy, VaryRequestHashField, cache_vary_policy, vary_cache_policy,
