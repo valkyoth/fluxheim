@@ -52,6 +52,7 @@ mod native_http1_proxy_revalidation;
 mod native_http1_proxy_runtime;
 mod native_http1_proxy_static_dispatch;
 mod native_http1_proxy_websocket;
+mod native_http1_reloadable_router;
 mod native_http1_response_metadata;
 #[cfg(feature = "acme")]
 mod native_http1_route_acme;
@@ -149,6 +150,9 @@ pub use native_http1_proxy_runtime::{
     purge_native_memory_cache_path_pattern, purge_native_memory_cache_path_prefix,
     purge_native_memory_cache_primary, purge_native_memory_cache_stale,
     purge_native_memory_cache_tag, purge_native_memory_cache_user_tag,
+};
+pub use native_http1_reloadable_router::{
+    NativeHttp1ReloadableRouter, NativeHttp1RouterReloadError, NativeHttp1RouterReloadHandle,
 };
 pub use native_http1_route_proxy::{
     NativeHttp1RouteProxy, NativeHttp1RouteProxyConfigError, NativeHttp1RouteProxyRoute,

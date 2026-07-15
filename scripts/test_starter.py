@@ -102,6 +102,13 @@ TESTS: tuple[TestEntry, ...] = (
         "Proves failed replacement rollback, ready-generation handoff, and old connection drain.",
     ),
     TestEntry(
+        "snapshot-lifecycle",
+        "Live snapshot reload and rollback smoke",
+        "operations",
+        ("scripts/smoke_snapshot_lifecycle.sh",),
+        "Snapshots a running baseline, applies a candidate live, rolls back, and verifies restart persistence.",
+    ),
+    TestEntry(
         "podman-blue-green",
         "Podman blue/green upgrade smoke",
         "containers",

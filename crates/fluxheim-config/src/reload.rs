@@ -200,7 +200,10 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
     }
 
     #[cfg(feature = "load-balancer")]
-    if load_balancer_service_signature(old) != load_balancer_service_signature(new) {
+    if load_balancer_service_signature(old) != load_balancer_service_signature(new)
+        || has_background_load_balancer_services(old)
+        || has_background_load_balancer_services(new)
+    {
         reasons.push(ReloadReason::LoadBalancerServicesChanged);
     }
 
@@ -353,6 +356,21 @@ fn load_balancer_service_signature(config: &Config) -> Vec<LoadBalancerServiceSi
         .iter()
         .flat_map(vhost_load_balancer_signatures)
         .collect()
+}
+
+#[cfg(feature = "load-balancer")]
+fn has_background_load_balancer_services(config: &Config) -> bool {
+    load_balancer_service_signature(config)
+        .iter()
+        .any(LoadBalancerServiceSignature::requires_background_service)
+}
+
+#[cfg(feature = "load-balancer")]
+impl LoadBalancerServiceSignature {
+    fn requires_background_service(&self) -> bool {
+        self.health_check_enabled
+            || !matches!(self.source, LoadBalancerServiceSource::Static { .. })
+    }
 }
 
 #[cfg(feature = "load-balancer")]

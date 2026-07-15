@@ -40,6 +40,10 @@ where
         request: NativeHttp2Request,
     ) -> Pin<Box<dyn Future<Output = NativeHttp2Response> + Send + 'a>> {
         Box::pin(async move {
+            let pinned_handler = self.handler.pin_request_handler();
+            let request_handler = pinned_handler
+                .as_deref()
+                .unwrap_or_else(|| self.handler.as_ref());
             let Some(mut request) =
                 native_http2_request_to_http1(request, self.peer_addr, &self.context)
             else {
@@ -49,15 +53,15 @@ where
                     b"invalid HTTP/2 request header value\n",
                 ));
             };
-            self.handler.prepare_request_context(&mut request);
-            if self.handler.handles_connection_takeover(&request) {
+            request_handler.prepare_request_context(&mut request);
+            if request_handler.handles_connection_takeover(&request) {
                 return native_http1_response_to_http2(NativeHttp1Response::new(
                     501,
                     "Not Implemented",
                     b"HTTP/2 connection takeover is not supported\n",
                 ));
             }
-            native_http1_response_to_http2(self.handler.handle(request).await)
+            native_http1_response_to_http2(request_handler.handle(request).await)
         })
     }
 }

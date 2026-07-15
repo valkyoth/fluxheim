@@ -246,7 +246,7 @@ pub(crate) fn ensure_real_directory(path: &Path) -> Result<(), SnapshotError> {
         None => {}
     }
 
-    let created = match fs::create_dir(path) {
+    let created = match create_private_directory(path) {
         Ok(()) => true,
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
         Err(error) => return Err(SnapshotError::Io(error)),
@@ -264,6 +264,20 @@ pub(crate) fn ensure_real_directory(path: &Path) -> Result<(), SnapshotError> {
         });
     }
     require_private_path_metadata(path, &metadata)
+}
+
+#[cfg(unix)]
+pub(crate) fn create_private_directory(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt as _;
+
+    let mut builder = fs::DirBuilder::new();
+    builder.mode(SNAPSHOT_DIR_MODE);
+    builder.create(path)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn create_private_directory(path: &Path) -> io::Result<()> {
+    fs::create_dir(path)
 }
 
 pub(crate) fn canonical_directory(path: &Path) -> Result<PathBuf, SnapshotError> {

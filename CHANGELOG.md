@@ -20,6 +20,9 @@ behavior when the change improves security or project direction.
   that build and execute the exact profile binary, exercise downstream and
   verified upstream TLS, reject incompatible policy, and capture provider,
   compiler, dependency, binary, and image evidence.
+- Add a real-binary authenticated snapshot lifecycle smoke proving baseline
+  capture, candidate live reload, live rollback, integrity health, and current
+  pointer persistence across restart.
 
 ### Changed
 
@@ -57,8 +60,19 @@ behavior when the change improves security or project direction.
 - Reject filesystem roots and pre-existing non-private snapshot directories
   without changing their permissions; only newly created dedicated snapshot
   directories are initialized as `0700`.
-- Reject serialized snapshots above the reader's 16 MiB limit before store
-  locking, generation allocation, or publication.
+- Serialize snapshot candidates behind a clone-shared admission lock and reject
+  output above the reader's 16 MiB limit before filesystem layout, generation
+  allocation, or publication.
+- Create new snapshot directories with mode `0700` in the creation syscall,
+  independent of process umask, before publishing any state.
+- Replace the active native host router through `ArcSwap` during snapshot-safe
+  reload and rollback; a fully validated candidate is now visible to real data
+  plane requests instead of updating only the admin configuration facade. Each
+  HTTP/1 and HTTP/2 request pins one router generation across policy selection,
+  request preparation, connection takeover, and response handling.
+- Fail live router reload closed while background load-balancer services are
+  active rather than detaching replacement traffic selection from health and
+  discovery state.
 - Bound persisted self-healing state to 64 KiB and its variable diagnostics to
   4 KiB without control characters, using the same limit for reads and writes.
 

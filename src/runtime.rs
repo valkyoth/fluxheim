@@ -163,6 +163,9 @@ async fn run_native_runtime_async(
         all(feature = "tls-openssl", not(feature = "tls-rustls-backend"))
     )))]
     let native_certificate_reloader: Option<DownstreamCertificateReloader> = None;
+    let native_router_reloader = native_proxy_runtime
+        .as_ref()
+        .map(fluxheim_server::NativeHttp1ProxyRuntime::router_reloader);
     reject_unsupported_native_background_tasks(
         &launch_plan,
         native_certificate_reloader.is_some(),
@@ -326,6 +329,7 @@ async fn run_native_runtime_async(
     let mut admin_runtime = runtime_admin::PreparedAdminRuntime::prepare(
         &config,
         &server_plan,
+        native_router_reloader,
         #[cfg(feature = "load-balancer")]
         native_load_balancer_admin_pools,
     )

@@ -7,6 +7,25 @@ CI-only proof environments for both FIPS-capable TLS backend profiles.
 All new response metadata remains opt-in. Existing configurations and response
 headers are unchanged unless an operator enables the new metadata policy.
 
+## Snapshot Lifecycle Proof and Hardening
+
+- Add a dedicated real-binary smoke that captures a running baseline through
+  the authenticated admin API, publishes and live-applies a candidate config,
+  verifies changed serving behavior, performs a live rollback, runs snapshot
+  integrity doctor, and proves the rolled-back current pointer survives restart.
+- Serialize snapshot candidates behind one clone-shared admission lock, bounding
+  concurrent near-limit serialization buffers without creating store state for
+  rejected oversized candidates.
+- Create snapshot directories as `0700` at the operating-system creation call,
+  closing the permissive-umask interval before any follow-up mode enforcement.
+- Build a complete replacement host router before atomically swapping it into
+  the native listener. Snapshot-safe reload and rollback now affect real data
+  plane requests while each in-flight HTTP/1 or HTTP/2 request retains one
+  router generation across all handler phases.
+- Reject live router replacement while background load-balancer health or
+  discovery services are active, avoiding a router/service state split; use a
+  zero-downtime process upgrade for those deployments.
+
 ## Standards-Based Response Metadata
 
 - Add RFC 9211 `Cache-Status` derived from actual cache results, including hit,

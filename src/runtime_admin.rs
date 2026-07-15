@@ -16,6 +16,7 @@ impl PreparedAdminRuntime {
     pub(super) async fn prepare(
         config: &crate::config::Config,
         server_plan: &fluxheim_server::ServerPlan,
+        router_reloader: Option<fluxheim_server::NativeHttp1RouterReloadHandle>,
         #[cfg(feature = "load-balancer")] load_balancer_admin_pools: Vec<
             fluxheim_server::NativeLoadBalancerAdminPool,
         >,
@@ -27,6 +28,7 @@ impl PreparedAdminRuntime {
         let Some(admin) = crate::admin::native_admin_services_from_config(
             config,
             server_plan,
+            router_reloader,
             #[cfg(feature = "load-balancer")]
             load_balancer_admin_pools,
         )?

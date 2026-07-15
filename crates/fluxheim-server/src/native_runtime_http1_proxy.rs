@@ -22,8 +22,9 @@ use crate::serve_native_http1_openssl_listener;
 use crate::serve_native_http1_rustls_listener;
 use crate::{
     ListenerProtocol, NativeHttp1Error, NativeHttp1HostRouter, NativeHttp1HostRouterConfigError,
-    NativeRuntimeLaunchPlan, NativeRuntimeLaunchPlanError, ServerPlan, ServiceKind,
-    serve_native_http1_listener, serve_native_http1_listener_with_proxy_protocol,
+    NativeHttp1ReloadableRouter, NativeHttp1RouterReloadHandle, NativeRuntimeLaunchPlan,
+    NativeRuntimeLaunchPlanError, ServerPlan, ServiceKind, serve_native_http1_listener,
+    serve_native_http1_listener_with_proxy_protocol,
 };
 
 #[path = "native_runtime_http1_proxy_error.rs"]
@@ -57,7 +58,8 @@ pub struct NativeHttp1ProxyRuntime {
     ))]
     http2_policy: DownstreamHttp2Policy,
     proxy_protocol: crate::ProxyProtocolPolicy,
-    router: Arc<NativeHttp1HostRouter>,
+    router: Arc<NativeHttp1ReloadableRouter>,
+    router_reloader: NativeHttp1RouterReloadHandle,
     listeners: Vec<NativeHttp1ProxyRuntimeListener>,
     #[cfg(feature = "load-balancer")]
     load_balancer_services: Vec<fluxheim_load_balancer::UpstreamLoadBalancerService>,
@@ -200,6 +202,16 @@ impl NativeHttp1ProxyRuntime {
             launch_plan.process().upstream_keepalive_pool_size(),
         )
         .map_err(NativeHttp1ProxyRuntimeError::Router)?;
+        #[cfg(feature = "load-balancer")]
+        let background_load_balancer_services = !load_balancer_services.is_empty();
+        #[cfg(not(feature = "load-balancer"))]
+        let background_load_balancer_services = false;
+        let (router, router_reloader) = NativeHttp1ReloadableRouter::new(
+            router,
+            launch_plan.downstream_http1(),
+            launch_plan.process().upstream_keepalive_pool_size(),
+            background_load_balancer_services,
+        );
         let router = Arc::new(router);
         let has_https_listener = launch_plan.listeners().iter().any(|listener| {
             listener.service_kind() == ServiceKind::ProxyHttp
@@ -247,6 +259,7 @@ impl NativeHttp1ProxyRuntime {
             http2_policy: launch_plan.downstream_http2(),
             proxy_protocol: launch_plan.proxy_protocol().clone(),
             router,
+            router_reloader,
             listeners,
             #[cfg(feature = "load-balancer")]
             load_balancer_services,
@@ -280,6 +293,10 @@ impl NativeHttp1ProxyRuntime {
             .iter()
             .map(|listener| listener.planned_addr)
             .collect()
+    }
+
+    pub fn router_reloader(&self) -> NativeHttp1RouterReloadHandle {
+        self.router_reloader.clone()
     }
 
     #[cfg(feature = "load-balancer")]

@@ -99,6 +99,7 @@ pub(crate) struct NativeAdminServices {
 pub(crate) fn native_admin_services_from_config(
     config: &Config,
     server_plan: &fluxheim_server::ServerPlan,
+    router_reloader: Option<fluxheim_server::NativeHttp1RouterReloadHandle>,
     #[cfg(feature = "load-balancer")] load_balancer_admin_pools: Vec<
         fluxheim_server::NativeLoadBalancerAdminPool,
     >,
@@ -119,7 +120,8 @@ pub(crate) fn native_admin_services_from_config(
             config,
             #[cfg(feature = "load-balancer")]
             load_balancer_admin_pools,
-        )?,
+        )?
+        .with_router_reloader(router_reloader),
     )?;
     let watchdog = if app.self_healing_enabled {
         let Some(task) =

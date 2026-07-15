@@ -33,6 +33,7 @@ wasm-proxy-abi = ["wasm", "fluxheim-config/wasm-proxy-abi", "fluxheim-wasm/proxy
 wasm-wasi = ["wasm", "fluxheim-config/wasm-wasi", "fluxheim-wasm/wasi"]
 
 [dependencies]
+arc-swap = "1.9.2"
 bytes = "1.12.1"
 fastcgi-client = { version = "0.11.1", default-features = false, features = ["runtime-tokio"], optional = true }
 fluxheim-common = { path = "../fluxheim-common" }

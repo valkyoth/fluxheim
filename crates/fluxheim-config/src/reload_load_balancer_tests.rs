@@ -178,3 +178,63 @@ fn route_load_balancer_service_change_requires_process_upgrade() {
         }
     );
 }
+
+#[test]
+fn snapshot_change_with_background_health_service_requires_process_upgrade() {
+    let mut old = Config {
+        proxy: ProxyConfig {
+            upstream: None,
+            upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
+            ..ProxyConfig::default()
+        },
+        ..Config::default()
+    };
+    old.proxy.load_balance.health_check.enabled = true;
+    let mut new = old.clone();
+    new.web.index_files = vec!["home.html".to_owned()];
+
+    assert_eq!(
+        classify_reload(&old, &new),
+        ReloadImpact::ProcessUpgrade {
+            reasons: vec![ReloadReason::LoadBalancerServicesChanged]
+        }
+    );
+}
+
+#[test]
+fn snapshot_change_with_dynamic_discovery_requires_process_upgrade() {
+    let old = Config {
+        proxy: ProxyConfig {
+            upstream: None,
+            upstreams_file: Some("/run/fluxheim/backends.txt".into()),
+            ..ProxyConfig::default()
+        },
+        ..Config::default()
+    };
+    let mut new = old.clone();
+    new.web.index_files = vec!["home.html".to_owned()];
+
+    assert_eq!(
+        classify_reload(&old, &new),
+        ReloadImpact::ProcessUpgrade {
+            reasons: vec![ReloadReason::LoadBalancerServicesChanged]
+        }
+    );
+}
+
+#[test]
+fn snapshot_change_with_static_load_balancer_remains_live_reloadable() {
+    let mut old = Config {
+        proxy: ProxyConfig {
+            upstream: None,
+            upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
+            ..ProxyConfig::default()
+        },
+        ..Config::default()
+    };
+    old.proxy.load_balance.health_check.enabled = false;
+    let mut new = old.clone();
+    new.web.index_files = vec!["home.html".to_owned()];
+
+    assert_eq!(classify_reload(&old, &new), ReloadImpact::Snapshot);
+}

@@ -1373,6 +1373,7 @@ dependencies = [
 name = "fluxheim-server"
 version = "1.7.12"
 dependencies = [
+ "arc-swap",
  "base64-ng",
  "bytes",
  "fastcgi-client",

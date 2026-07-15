@@ -23,6 +23,7 @@ use fluxheim_cache::{CacheActivityResetResult, CacheRuntimeStats};
 #[derive(Clone)]
 pub struct FluxProxy {
     config: Arc<Mutex<crate::config::Config>>,
+    router_reloader: Option<fluxheim_server::NativeHttp1RouterReloadHandle>,
     #[cfg(feature = "load-balancer")]
     load_balancer_admin_pools: Vec<fluxheim_server::NativeLoadBalancerAdminPool>,
 }
@@ -31,6 +32,7 @@ impl FluxProxy {
     pub fn from_config(_config: &crate::config::Config) -> io::Result<Self> {
         Ok(Self {
             config: Arc::new(Mutex::new(_config.clone())),
+            router_reloader: None,
             #[cfg(feature = "load-balancer")]
             load_balancer_admin_pools: Vec::new(),
         })
@@ -44,13 +46,27 @@ impl FluxProxy {
     ) -> io::Result<Self> {
         Ok(Self {
             config: Arc::new(Mutex::new(_config.clone())),
+            router_reloader: None,
             #[cfg(feature = "load-balancer")]
             load_balancer_admin_pools,
         })
     }
 
+    pub fn with_router_reloader(
+        mut self,
+        router_reloader: Option<fluxheim_server::NativeHttp1RouterReloadHandle>,
+    ) -> Self {
+        self.router_reloader = router_reloader;
+        self
+    }
+
     pub fn reload_from_config(&self, _config: &crate::config::Config) -> io::Result<()> {
         let mut config = self.lock_config("reload")?;
+        if let Some(router_reloader) = &self.router_reloader {
+            router_reloader
+                .reload_from_config(_config)
+                .map_err(|error| io::Error::other(error.to_string()))?;
+        }
         *config = _config.clone();
         Ok(())
     }

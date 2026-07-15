@@ -207,7 +207,11 @@ fluxheim --reload-from "/var/lib/fluxheim/snapshots/configs/${CURRENT_ID}.toml" 
 ```
 
 The admin reload endpoint performs this classification before it swaps runtime
-proxy state.
+proxy state. It builds the complete candidate host router first, then replaces
+the active `ArcSwap` pointer in one operation. Existing requests retain the old
+router across request timeout, context, takeover, and response handling while
+requests pinned after the swap use the candidate. A candidate construction
+failure leaves the active router and current pointer unchanged.
 
 ## Admin API Shape
 
@@ -322,6 +326,26 @@ changing static pool members, file/DNS/HTTP discovery sources, discovery refresh
 intervals, or HTTP discovery bearer-token files. These refresh loops are
 registered at process startup, so use the normal supervisor/process-upgrade path
 for those changes.
+
+Live router replacement also fails closed when an unchanged background
+load-balancer health or discovery service is active, because replacing its
+router without replacing the associated service would detach health state from
+traffic selection. Use a zero-downtime process upgrade for snapshots in that
+configuration.
+
+## Live Lifecycle Smoke
+
+Run the complete real-binary lifecycle proof with:
+
+```bash
+scripts/smoke_snapshot_lifecycle.sh
+```
+
+The smoke starts Fluxheim, captures an authenticated baseline through the admin
+HTTP API, publishes a second validated config through the CLI, live-applies it,
+verifies changed data-plane content without a PID change, performs a live
+rollback, runs snapshot doctor, restarts Fluxheim, and verifies both baseline
+serving behavior and the persisted current snapshot pointer.
 
 ## Self-Healing Guard
 

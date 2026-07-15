@@ -15,6 +15,11 @@ mod tests {
     use fluxheim_common::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
     use fluxheim_config::{Config, ProxyConfig};
 
+    #[cfg(unix)]
+    const PRIVATE_DIRECTORY_UMASK_CHILD: &str = "FLUXHEIM_SNAPSHOT_PRIVATE_DIR_UMASK_CHILD";
+    #[cfg(unix)]
+    const PRIVATE_DIRECTORY_UMASK_ROOT: &str = "FLUXHEIM_SNAPSHOT_PRIVATE_DIR_UMASK_ROOT";
+
     #[test]
     fn runtime_state_records_reload_pending_validation() {
         let mut state = SnapshotRuntimeState {
@@ -246,6 +251,71 @@ mod tests {
 
         assert!(store.snapshot_serialized_config(oversized, None).is_err());
         assert!(!store.root().exists());
+    }
+
+    #[test]
+    fn cloned_store_shares_snapshot_admission_lock() {
+        let dir = TestDir::new("snapshot-shared-admission");
+        let store = SnapshotStore::new(dir.child("store"));
+        let clone = store.clone();
+        let _guard = store.snapshot_admission.lock().unwrap();
+
+        assert!(clone.snapshot_admission.try_lock().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_directory_mode_child_process() {
+        let Some(root) = std::env::var_os(PRIVATE_DIRECTORY_UMASK_ROOT) else {
+            return;
+        };
+        if std::env::var_os(PRIVATE_DIRECTORY_UMASK_CHILD).is_none() {
+            return;
+        }
+
+        let previous = rustix::process::umask(rustix::fs::Mode::empty());
+        let result = crate::store_fs::create_private_directory(std::path::Path::new(&root));
+        rustix::process::umask(previous);
+        result.unwrap();
+
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::symlink_metadata(root)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, super::SNAPSHOT_DIR_MODE);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_directory_creation_is_not_weakened_by_process_umask() {
+        let dir = TestDir::new("snapshot-private-dir-umask");
+        let root = dir.child("store");
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("store::store_tests::tests::private_directory_mode_child_process")
+            .arg("--nocapture")
+            .env(PRIVATE_DIRECTORY_UMASK_CHILD, "1")
+            .env(PRIVATE_DIRECTORY_UMASK_ROOT, &root)
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "child stdout: {}\nchild stderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(
+            std::fs::symlink_metadata(root)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            super::SNAPSHOT_DIR_MODE
+        );
     }
 
     #[cfg(unix)]

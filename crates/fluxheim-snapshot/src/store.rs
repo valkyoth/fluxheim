@@ -1,7 +1,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use fluxheim_config::{Config, ConfigLoadError};
 
@@ -34,6 +34,7 @@ pub(crate) const MAX_SNAPSHOT_STORE_ENTRIES: usize = 1024;
 pub struct SnapshotStore {
     pub(crate) root: PathBuf,
     pub(crate) integrity: Option<Arc<SnapshotIntegrityKey>>,
+    pub(crate) snapshot_admission: Arc<Mutex<()>>,
 }
 
 impl SnapshotStore {
@@ -41,6 +42,7 @@ impl SnapshotStore {
         Self {
             root: root.into(),
             integrity: None,
+            snapshot_admission: Arc::new(Mutex::new(())),
         }
     }
 
@@ -60,6 +62,7 @@ impl SnapshotStore {
         Ok(Self {
             root,
             integrity: Some(Arc::new(SnapshotIntegrityKey::load(key_file, provider)?)),
+            snapshot_admission: Arc::new(Mutex::new(())),
         })
     }
 
@@ -76,11 +79,24 @@ impl SnapshotStore {
             .validate()
             .map_err(|error| SnapshotError::Config(ConfigLoadError::Validate(error)))?;
         let message = snapshot_message(message)?;
-        let raw_config = toml::to_string_pretty(config).map_err(SnapshotError::Encode)?;
-        self.snapshot_serialized_config(raw_config, message)
+        self.with_snapshot_admission(|| {
+            let raw_config = toml::to_string_pretty(config).map_err(SnapshotError::Encode)?;
+            self.snapshot_serialized_config_admitted(raw_config, message)
+        })
     }
 
+    #[cfg(test)]
     fn snapshot_serialized_config(
+        &self,
+        raw_config: String,
+        message: Option<String>,
+    ) -> Result<ConfigSnapshot, SnapshotError> {
+        self.with_snapshot_admission(|| {
+            self.snapshot_serialized_config_admitted(raw_config, message)
+        })
+    }
+
+    fn snapshot_serialized_config_admitted(
         &self,
         raw_config: String,
         message: Option<String>,
@@ -138,6 +154,17 @@ impl SnapshotStore {
                 integrity,
             })
         })
+    }
+
+    fn with_snapshot_admission<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, SnapshotError>,
+    ) -> Result<T, SnapshotError> {
+        let _admission = self
+            .snapshot_admission
+            .lock()
+            .map_err(|_| SnapshotError::Io(io::Error::other("snapshot admission lock poisoned")))?;
+        operation()
     }
 
     pub fn list(&self) -> Result<Vec<ConfigSnapshot>, SnapshotError> {

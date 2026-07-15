@@ -92,6 +92,10 @@ impl<T> NativeHttp1ConnectionIo for T where T: AsyncRead + AsyncWrite + Unpin + 
 pub type NativeHttp1ConnectionStream = Box<dyn NativeHttp1ConnectionIo>;
 
 pub trait NativeHttp1Handler: Send + Sync + 'static {
+    fn pin_request_handler(&self) -> Option<Arc<dyn NativeHttp1Handler>> {
+        None
+    }
+
     fn handle<'a>(
         &'a self,
         request: NativeHttp1Request,
@@ -210,7 +214,11 @@ where
                 owned_request_from_head(&head, peer_addr, &request_context),
             )
         };
-        let request_body_timeout = handler
+        let pinned_handler = handler.pin_request_handler();
+        let request_handler = pinned_handler
+            .as_deref()
+            .unwrap_or_else(|| handler.as_ref());
+        let request_body_timeout = request_handler
             .request_body_timeout(&request)
             .unwrap_or(policy.request_body_timeout());
         let body = match read_body(
@@ -258,16 +266,16 @@ where
         };
         let mut request = request;
         request.body = Zeroizing::new(body);
-        handler.prepare_request_context(&mut request);
-        if handler.handles_connection_takeover(&request) {
+        request_handler.prepare_request_context(&mut request);
+        if request_handler.handles_connection_takeover(&request) {
             let prebuffered = std::mem::take(&mut buffer);
             let stream = Box::new(stream);
-            return handler
+            return request_handler
                 .handle_connection_takeover(request, prebuffered, stream)
                 .await;
         }
 
-        let response = handler.handle(request).await;
+        let response = request_handler.handle(request).await;
         let should_close = close_after_response || response.close_requested();
         write_response(&mut stream, response, should_close).await?;
         if should_close {
