@@ -40,6 +40,26 @@ async fn native_route_proxy_redirect_rejects_unsafe_uri_expansion() {
 }
 
 #[tokio::test]
+async fn native_route_proxy_redirect_rejects_ambiguous_encoded_path() {
+    let route = NativeHttp1RouteProxyRoute::prefix_redirect(
+        "/old",
+        Vec::new(),
+        "https://new.example{uri}",
+        308,
+    );
+    let proxy = route_proxy_listener(NativeHttp1RouteProxy::new(vec![route], None)).await;
+
+    for target in ["/old/%c0%afadmin", "/old/%ff", "/old/%c2%85admin"] {
+        let response = downstream_get(proxy, target).await;
+        assert!(
+            response.starts_with("HTTP/1.1 400 Bad Request\r\n"),
+            "target: {target}"
+        );
+        assert!(response.ends_with("invalid redirect target\n"));
+    }
+}
+
+#[tokio::test]
 async fn native_route_proxy_redirect_rejects_query_path_traversal_expansion() {
     let route = NativeHttp1RouteProxyRoute::exact_redirect(
         "/file",

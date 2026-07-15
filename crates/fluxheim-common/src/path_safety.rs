@@ -32,13 +32,17 @@ fn safe_forward_path_segment(segment: &str) -> bool {
         if unsafe_decoded_forward_path_segment(&decoded) {
             return false;
         }
-        match std::str::from_utf8(&decoded) {
-            Ok(decoded_text) if decoded_text.contains('%') => {
-                current.clear();
-                current.push_str(decoded_text);
-            }
-            _ => return true,
+        let Ok(decoded_text) = std::str::from_utf8(&decoded) else {
+            return false;
+        };
+        if decoded_text.chars().any(char::is_control) {
+            return false;
         }
+        if !decoded_text.contains('%') {
+            return true;
+        }
+        current.clear();
+        current.push_str(decoded_text);
     }
 
     if current.contains('%') {
@@ -115,5 +119,14 @@ mod tests {
     #[test]
     fn accepts_safe_percent_encoded_path_and_query() {
         assert!(safe_forward_path_and_query("/assets/%66ile.css?v=%252e"));
+        assert!(safe_forward_path("/caf%C3%A9/menu"));
+    }
+
+    #[test]
+    fn rejects_invalid_utf8_and_encoded_unicode_controls() {
+        assert!(!safe_forward_path("/%c0%afadmin"));
+        assert!(!safe_forward_path("/%ff"));
+        assert!(!safe_forward_path("/%c2%85admin"));
+        assert!(!safe_forward_path("/%25c2%2585admin"));
     }
 }

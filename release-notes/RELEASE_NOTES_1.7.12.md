@@ -81,6 +81,9 @@ trailers are not part of this release.
   range admission, reject impossible totals and duplicate metadata, and make
   zero-sized public slice planning return no slices instead of dividing by
   zero.
+- Reject percent-decoded forward-path segments that are not canonical UTF-8 or
+  contain encoded Unicode control characters, preventing disagreement with
+  permissive upstream decoders.
 - Bound storage-bin manifests to 4 KiB and use no-follow, nonblocking regular
   file reads so oversized or special persistent files fail closed at startup.
 
@@ -120,3 +123,5 @@ platform, configuration, key handling, and required compliance evidence.
   oversized/FIFO storage-bin manifests.
 - Cache-header tests cover cumulative byte/directive ceilings and quoted-comma
   parsing.
+- Shared path-safety and live redirect tests cover invalid UTF-8, overlong
+  slash encodings, encoded Unicode controls, and valid encoded Unicode.
