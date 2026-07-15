@@ -195,7 +195,11 @@ impl OpenSslReloadGenerationState {
         lease: Arc<OpenSslGenerationLease>,
     ) -> Result<(), OpenSslDownstreamCertificateStoreError> {
         let connection = Arc::new(lease.new_connection());
-        ssl.set_ex_data(generation_lease_index()?, connection);
+        let index = generation_lease_index()?;
+        ssl.set_ex_data(index, connection);
+        if ssl.ex_data(index).is_none() {
+            abort_generation_lease_attachment_failure();
+        }
         Ok(())
     }
 }
@@ -247,6 +251,11 @@ fn abort_generation_waker_poison() -> ! {
 
 fn abort_generation_connection_id_exhausted() -> ! {
     log::error!(target: "fluxheim::tls", "OpenSSL generation connection ID space exhausted");
+    std::process::abort()
+}
+
+fn abort_generation_lease_attachment_failure() -> ! {
+    log::error!(target: "fluxheim::tls", "OpenSSL connection generation lease attachment failed");
     std::process::abort()
 }
 

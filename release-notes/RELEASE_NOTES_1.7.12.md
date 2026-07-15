@@ -106,7 +106,9 @@ trailers are not part of this release.
   connection closes before a bounded automatic retry. Reloads still fail closed
   if the generation cannot drain within 10 seconds. The connection lease uses
   one process-global OpenSSL ex-data index, preventing index growth when
-  certificate stores are reconstructed in-process.
+  certificate stores are reconstructed in-process. Every attachment is read
+  back immediately, and Fluxheim terminates if OpenSSL cannot preserve the
+  lease.
 
 ## Shared Cache Policy Hardening
 

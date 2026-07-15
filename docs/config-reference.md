@@ -3059,7 +3059,9 @@ release within that bound, the reload fails closed without replacing the active
 certificates. This enforced lifetime cap makes the active-plus-replacement
 memory projection match actual retained generations. OpenSSL SSL ex-data uses
 one process-global connection-lease slot, including when listeners or
-certificate stores are reconstructed in-process.
+certificate stores are reconstructed in-process. Fluxheim verifies every lease
+attachment by reading that slot back and terminates if OpenSSL cannot preserve
+the connection-generation lifetime invariant under extreme allocation failure.
 Verified client-certificate identity can be forwarded explicitly with
 request header templates such as `{tls.client_cert_sha256}`. Route decisions
 based on certificate identity remain future work; do not rely on client-cert
